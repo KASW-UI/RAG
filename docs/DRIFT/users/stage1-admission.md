@@ -563,3 +563,194 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 | **R19** | `git ls-files tools/difftest/exp-difftest-grpc-user9.sh tools/difftest/grpc-user9-dual-port-runner.java` | **两行都命中** ⇒ **探针与 runner 在版本控制内** ⇒ 基线 §1.1 **R4 的 ⑦**（探针在库且现在可复算）成立（⑧ 变异 4/4 见 `users/user/rpc.md` §9.1.5）|
 | **R20** | `ls -l /tmp/probe.sh /tmp/probe_data.sh /tmp/probe_ext.sh` | **3 个都不存在**（`/tmp/gofollow` 与 `/tmp/userstub` 现为空目录）⇒ **follow 域 52/52 探针的源头已消失** ⇒ 不可复算（`S1-FOLLOW-010` 口径，见 follow 档）|
 | **R21** | `git show align/g4-service-common:tools/difftest/check-no-prod-secrets.py > tools/difftest/check-no-prod-secrets.py && python3 tools/difftest/check-no-prod-secrets.py; rm -f tools/difftest/check-no-prod-secrets.py` | `EXIT=1`（**6 条未豁免命中，全部在 `service/users/users-common/**`**）⇒ **我域（G1 白名单内）未豁免命中 = 0** ✅；已豁免 **91** 条（我域 25 条）<br>⚠️ **脚本落在 `tools/`（G4 写权面）⇒ 只可临时复制 + 跑完即删**（`mavis-trash`）⇒ **不得提交** |
+
+---
+
+## 10. 🟢 **开工轮（2026-10-29 03:45 · Jason 批准）**：修 §8.7 登记的 G1 **23 条**「Go 出处」真缺陷
+
+### 10.1 开工记录与批准依据
+
+| 项 | 值 |
+|---|---|
+| **批准来源** | Jason 于 **2026-10-29 03:45** 在**本 lane 会话内**明示「继续」⇒ **开工批准** |
+| **批准范围** | `docs/CLOSEOUT-2026-10-29.md` §8.7 登记的 **G1 23 条**（15 版本写错 ＋ 5 越界 ＋ 3 路径）· ⑤ 批准记录由**调度员**代填（回执人**不得自批**；**代填 ≠ 代批准**） |
+| **本轮改动性质** | **纯注释 / javadoc / 字符串** ⇒ **零业务码改动** ⇒ 行为面零影响（§10.6 回归实测佐证） |
+| **改动面** | **8 个 Java 文件 / 25 处引用点**（23 条缺陷 ＋ 2 处同族「版本续写」引用，见 §10.3） |
+| **不在范围（明确边界）** | ① 阶段二（`docs/twoStage.md` §1.3 / §2.2 / §6 / §7）② `admin_invite.update_time` 不推进（回执 ③-4 · **未纳入**）③ `S1-FOLLOW-001` 指标出口（**待用户重新拍板**）④ 共享面（`tools/**` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**`）⇒ **只登记上报，不改** |
+
+### 10.2 修法：**不是「只改版本号」**（§8.7 的批量规则不足）
+
+🔴 **关键事实：v1.31.1 与 v1.31.2 的行号不同** ⇒ §8.7「只是引到另一份副本」的描述**不足** ⇒ 必须在 v1.31.1 里**重新定位**。
+
+真源 `Sea-RideTheWind_golang/go.mod:28` = **`gorm.io/gorm v1.31.1`**（`:27` = `gorm.io/driver/postgres v1.6.0`）。
+模块缓存实测行数：`schema/field.go` **1004**（v1.31.2 = 1011，**Δ=7**）· `scan.go` **369**（两版同，**Δ=0**）· `callbacks/update.go` **313**（v1.31.2 = 318，**Δ=5**）。
+
+| 被引内容 | v1.31.2 | v1.31.1（真源 pin） | 逐字对照结论（2026-10-29 实测） |
+|---|---|---|---|
+| `case **int64:` setter（`SetInt(**data)`） | `schema/field.go:616-622` | `:616-622` | **逐字相同** ⇒ 只改版本号 |
+| `db.AddError(rows.Scan(values...))` | `scan.go:153` | `:153` | **逐字相同** ⇒ 只改版本号 |
+| `prepareValues` 的 `reflect.New(reflect.PointerTo(field.FieldType))` | `scan.go:21` ⚠️ **指向的是 `}`** | `scan.go:19` | 🔴 **原引用在 v1.31.2 里就指错了行** —— 两版 `:21` 都是闭合大括号 ⇒ §8.7 的「只改版本号、行号不动」会**留下一个仍指错的引用** ⇒ 本轮按**内容锚定**（§8.3 第 ③ 条）改到 `:19`（两版真身语句**都在 `:19`**） |
+| `field.NewValuePool = poolInitializer(reflect.PointerTo(field.IndirectFieldType))` | `field.go:1009` | `field.go:1002` | v1.31.2（1011 行）里 `:1009` **合法** ⇒ v1.31.1（1004 行）里**越界** ⇒ 重新锚定 `:1002` |
+| `Updates(map)` / `Update(col, val)` 的 autoUpdateTime 消费点 | `callbacks/update.go:243-259` | `callbacks/update.go:238-254` | **偏移 −5**（v1.31.2 多 5 行）⇒ **行号也要改**（调度员 §8.7 表已独立算出同值 `:238-254`） |
+| `Updates(struct)` 的 autoUpdateTime 消费点 | `callbacks/update.go:279-281` | `callbacks/update.go:274-276` | **偏移 −5** ⇒ **行号也要改** |
+
+⇒ ⇒ **两条对 §8.7 的订正（采信）**：① 「只改版本号」这条批量规则在 **`scan.go:21`** 上会留下错引用 ⇒ 本轮改 `:19`；② `callbacks/update.go` 两段区间在 v1.31.1 里**不是**逐字相同 ⇒ 必须重新定位。
+
+### 10.3 逐条修复记录（**8 文件 / 25 处引用点** / 8 组修法）
+
+| 组 | 分类 | 处数 | 引用点（**HEAD 行号** · diff 可定位） | 原引用 | 现引用 | 真源依据 |
+|---|---|---|---|---|---|---|
+| **①** | 版本写错 | **6** | `users/user/rpc/domain/UserEntity.java:61` · `users/user/rpc/service/UserDomainService.java:190,257,447` · `users/user/rpc/UserRpcLoginNullStatusReadsAsZeroTest.java:51` · `users/user/rpc/service/UserDomainServiceTest.java:696` | `gorm[.io/]@v1.31.2/schema/field.go:616-622` | `…@v1.31.1/schema/field.go:616-622` | v1.31.1 `schema/field.go:616-622` = `case reflect.Int, …Int64:` → `case **int64:` → `SetInt(**data)`（**逐字相同**） |
+| **②** | 版本写错 | **2** | `UserEntity.java:86` · `UserRpcLoginNullStatusReadsAsZeroTest.java:35` | `gorm@v1.31.2/scan.go:153` | `gorm@v1.31.1/scan.go:153` | v1.31.1 `scan.go:153` = `db.AddError(rows.Scan(values...))`（**逐字相同**） |
+| **③** | 版本写错 ＋ **行号订正** | **4** | `UserEntity.java:64` · `UserDomainService.java:192` · `UserDomainServiceTest.java:699` · `UserRpcLoginNullStatusReadsAsZeroTest.java:44` | `gorm[.io/]@v1.31.2/scan.go:21` | `gorm[.io/]@v1.31.1/scan.go:19` | v1.31.1 `scan.go:19` = `values[idx] = reflect.New(reflect.PointerTo(field.FieldType)).Interface()`；⚠️ **原 `:21` 在两版都是 `}`** ⇒ 见 §10.2 |
+| **④** | 版本写错 ＋ **行号订正** | **3** | `users/admin/rpc/service/AdminDomainService.java:1312` · `users/admin/rpc/AdminRpcUpdateTimeAdvanceWiringTest.java:42` · `users/admin/rpc/service/AdminSemanticDriftRegressionTest.java:411` | `gorm@v1.31.2/callbacks/update.go:243-259` | `gorm@v1.31.1/callbacks/update.go:238-254` | v1.31.1 `:238` = `if field.AutoUpdateTime > 0 && value[field.Name] == nil && …` → `:254` = 闭合（**逐字对应，偏移 −5**） |
+| **⑤** | 版本写错 ＋ **行号订正**（**版本续写引用**） | **2** | `AdminDomainService.java:1312`（下一行 `:1313`）· `AdminRpcUpdateTimeAdvanceWiringTest.java:42` | `{@code :279-281}`（**续写**上一行的 v1.31.2 文件） | `AdminDomainService.java` ⇒ `gorm@v1.31.1/callbacks/update.go:274-276`；`AdminRpcUpdateTimeAdvanceWiringTest.java` ⇒ `{@code :274-276}`（续写同一文件） | v1.31.1 `:274` = `if v, ok := selectColumns[field.DBName]; …` → `:275` = `value, isZero := field.ValueOf(…)` → `:276` = `if !stmt.SkipHooks && field.AutoUpdateTime > 0 {`（**与 v1.31.2 `:279-281` 逐字对应**） |
+| **⑥** | **行号越界** | **5** | `UserEntity.java:65` · `UserDomainService.java:192,447` · `UserDomainServiceTest.java:699` · `UserRpcLoginNullStatusReadsAsZeroTest.java:45` | `schema/field.go:1009` | `schema/field.go:1002`（部分补上模块前缀 `gorm@v1.31.1/`） | v1.31.1 `schema/field.go:1002` = `field.NewValuePool = poolInitializer(reflect.PointerTo(field.IndirectFieldType))`；⚠️ 该文件**只有 1004 行** ⇒ 原 `:1009` 越界 |
+| **⑦** | **路径不精确** | **2** | `users/admin/rpc/service/AdminDomainService.java:439` · `users/admin/rpc/service/AdminSemanticDriftRegressionTest.java:340` | `internal/logic/admin/createadminlogic.go`（**多写了 `admin/`**） | `service/user/admin/rpc/internal/logic/createadminlogic.go` | 真身 = `Sea-RideTheWind_golang/service/user/admin/rpc/internal/logic/createadminlogic.go`（**126 行** · `:44-45` = 两行 `strings.TrimSpace` · `:44-46` 有效） |
+| **⑧** | **路径不存在** | **1** | `users/admin/api/service/AdminCreateService.java:20` | `service/user/admin/api/internal/logic/admin/createadminlogic.go` 的 `CreateAdminLogic`（**该文件在 Go 仓根本不存在**） | `service/user/admin/api/internal/logic/admin/createlogic.go:34` 的 `CreateLogic.Create` | 真身 = `Sea-RideTheWind_golang/service/user/admin/api/internal/logic/admin/createlogic.go`（**61 行** · `:34` = `func (l *CreateLogic) Create(req *types.CreateAdminReq) (resp *types.CreateAdminResp, code int) {`） |
+| | | **25** | **8 个文件** | | | |
+
+🆕 **同时修掉的两处「断言本身错误」**（只改行号会留下错事实 ⇒ AGENTS.md §3.3.3「先改/删错误断言」）：
+① `UserEntity.java` ＋ `UserRpcLoginNullStatusReadsAsZeroTest.java` 原文断言「`prepareValues` 与 `NewValuePool` **都是** `poolInitializer(...)`」⇒ **错** ⇒ 改为「`prepareValues` 用 `reflect.New(reflect.PointerTo(field.FieldType))`；`NewValuePool` 用 `poolInitializer(reflect.PointerTo(field.IndirectFieldType))` ⇒ 两者都让 dest 是 **int64**」；
+② `AdminDomainService.java:1313` 的 `{@code :279-281}` **续写**引用原会随上一行版本漂移 ⇒ 本轮补上完整模块前缀。
+
+### 10.4 判据（**可判定类**）与它的边界
+
+⚠️ **判据脚本未落仓 ⇒ 用它得出的结论是「声明的」，不是「可复算的」**（§8.4 口径）。
+脚本 = `/tmp/g1log/g1-anchor-verify.py`；**为什么不落仓**：`tools/**` 按机器守门 `check-wave-lane-ownership.py` 的口径**无 lane 拥有**（§8.7 G4 回执订正）⇒ 共享面 ⇒ **本 lane 只登记、不写** ⇒ **建议收口执行者把它提升为 `tools/difftest/check-*.py`**（⚠️ 提升则**必须同时改 `docs/PhaseGoal-judge.md` §6.3**，否则立刻制造 **B14**）。
+
+| 判据要素 | 实现 |
+|---|---|
+| **输入探针先行 ＋ 硬失败** | 模块缓存 / GOROOT / Go 真源仓 / `go.mod` 任一不可见 ⇒ `sys.exit(2)` ⇒ **绝不静默降级成「0 条 = 一致」**（否则同一份代码两次跑出两个结论） |
+| **版本 pin 从 `go.mod` 现读** | 不写死版本 ⇒ 真源改版即自动跟随 ⇒ 不会拿着旧 pin 判出「版本不符」的假红 |
+| **可判定类 ①** | **版本不符**：引用写的模块版本 ≠ 真源 `go.mod` 的 pin |
+| **可判定类 ②** | **行号越界**：被引行 > 该版本该文件的总行数 |
+| **可判定类 ③** | **内容锚定**：被引区间**必须逐字包含**注释所声称的构造（7 条锚点，逐条实测） |
+| **可判定类 ④** | **路径不存在**：`service/` / `proto/` 开头的**完整仓内路径**在 Go 真源仓里不存在 |
+| **可判定类 ⑤** | **路径不精确**：裸路径在 Go 仓 ＋ 已 pin 模块缓存里**基名唯一** ⇒ 真身存在，但引用**不是**它的段边界后缀 |
+| **模块缩写名映射** | 引用里写 `go-zero` / `sdk` / `golang-jwt/jwt/v4` 等缩写 ⇒ 按**段边界后缀**在 `go.mod` pin 表里**唯一**匹配 ⇒ 匹配不唯一 ⇒ **跳过**（不报红） |
+
+**双向验证（判据自身要能自证）**：
+
+| 方向 | 结果 |
+|---|---|
+| **当前代码**（本轮修完） | `users` **可判定 339 条 ⇒ OK 327 · FAIL 12**；`follow` **可判定 80 条 ⇒ OK 79 · FAIL 1** ⇒ **批准范围内 23 条已清零**（12 + 1 条全部 = §10.5 的**新发现**，非本轮范围） |
+| **反测**（HEAD 旧引用，`git show HEAD:<file>` 还原 8 个改动文件） | **FAIL 20** = **15 版本不符 ＋ 5 行号越界** ⇒ 与 §8.7 的「G1 = 15 ＋ 5」**逐条吻合** ⇒ **判据有牙齿**（不是恒真） |
+
+⚠️ **判据的两条已知失效模式（必须随结论一起读）**：
+① **机器判不了的量级**：`users` **304 条** ＋ `follow` **245 条** 跳过（模块相对路径 / 裸文件名的 B 桶）⇒ ⇒ **不得**据此宣称「我域零错」，只能写「**在可判定口径下**未发现错误」；
+② **假阳性簇已踩并已修**：`postgres.go` / `redis.go` 这类基名在 **Go 仓与模块缓存各有一份** ⇒ 若基名索引只扫 Go 仓，就会撞上同名不同内容的另一份文件 ⇒ **判成假红**（= §8.7 记录的 `postgres.go` 19 条 / `goka` 10 条 / `processor.go` 4 条那个簇的同源坑）⇒ **基名索引必须含全部已 pin 的模块缓存**；修完这三条后当前代码 FAIL 数从 50 降到 12（其余 38 条全是假阳性）。
+
+### 10.5 🟡 **本轮新发现（同族 · 不在批准范围 · 未修）**
+
+⚠️ **为什么没修**：① 不在 Jason 批准的封闭集合（**23 条**）内；② 其中 2 条**必须做语义判定**才能改（`③` 有**两个同名候选**、`⑧` 真身未定）⇒ **改错 = 造出一条新的错引用**，比现状更坏；⇒ **只登记，不改**。
+
+| # | 引用处 | 现引用（**在 Go 仓不存在**） | 真身候选 | 备注 |
+|---|---|---|---|---|
+| 1 | `users/admin/api/service/AdminCreateInviteCodeService.java:19` | `service/user/admin/api/internal/logic/admin/createinvitecodelogic.go` | `service/user/admin/**rpc**/internal/logic/createinvitecodelogic.go` | 与 §8.7 ⑧ 同型（api 侧引了 rpc 侧的文件） |
+| 2 | `users/admin/api/service/IdentityResolver.java:16` | `service/user/admin/api/internal/identity/resolve.go` | `service/user/**user**/api/internal/identity/resolve.go` | `admin/api` 树里**没有** `identity/` 目录 |
+| 3 | `users/admin/api/service/AdminDeleteUserService.java:19` | `service/user/admin/api/internal/logic/admin/deleteuserlogic.go` | ⚠️ **两个同名候选**：`service/user/admin/**rpc**/internal/logic/deleteuserlogic.go` 与 `service/user/**user**/api/internal/logic/user/deleteuserlogic.go` | **需语义判定** ⇒ 本轮不修 |
+| 4 | `users/admin/api/service/AdminUpdateSelfService.java:20` | `service/user/admin/api/internal/logic/admin/updateselflogic.go` | `service/user/admin/**rpc**/internal/logic/updateselflogic.go` | 名字完全一致，只差服务段 |
+| 5 | `users/user/rpc/domain/UserEntity.java:14` · `users/user/rpc/mapper/UserMapper.java:17` · `users/user/rpc/mapper/UserAvatarHistoryMapper.java:22`（3 处） | `service/user/model/user.go` | `service/user/user/rpc/internal/model/user.go` | 真身存在，只是**少了 `user/rpc/internal` 段** |
+| 6 | `users/user/rpc/exception/UserExceptions.java:6` | `service/user/model/vars.go` | `service/user/user/rpc/internal/model/vars.go` | 同上 |
+| 7 | `users/user/api/test/UserApiBindingSurfaceParityTest.java:59` | `service/user/user/api/internal/types.go` | `service/user/user/api/internal/**types/**types.go` | **少一层目录** |
+| 8 | `users/user/api/interceptor/JwtAuthInterceptor.java:21` | `service/user/user/api/internal/middleware/jwtauth.go` | ⚠️ **真身未定** —— `user/api` 的 `middleware/` 下只有 `checkblacklistmiddleware.go` | **需先定位** ⇒ 本轮不修 |
+| 9 | `users/admin/api/test/AdminApiRealTomcatResponseBytesTest.java:48` | `ind_golang/service/user/admin/api/internal/handler/admin/createhandler.go:20-21` | `service/user/admin/api/internal/handler/admin/createhandler.go`（**存在**） | 多了 `ind_golang/` 前缀 |
+| 10 | `follow/follow-rpc/service/FollowUserExistenceService.java:78` | `service/user/user/rpc/.../getuserlogic.go` | `service/user/user/rpc/internal/logic/getuserlogic.go` | 引用里带 `...` 占位 |
+
+⇒ **合计 13 处**（`users` 12 ＋ `follow` 1）· **建议下一轮一次性修完**（多数是「只差服务段/目录层」的机械映射 + 2 条需语义判定）。
+
+🟢 **判据没误报的旁证**：`users/user/user/api/service/IdentityResolver.java:15` 引的是 `service/user/user/api/internal/identity/resolve.go` —— **该文件在 Go 仓存在** ⇒ 判据**只**报了 admin-api 那个（`service/user/admin/api/internal/identity/resolve.go` 不存在）⇒ ⇒ **不是「见 `service/` 就报错」**。
+
+### 10.6 本轮回归与守门
+
+| 项 | 结果 |
+|---|---|
+| **整域回归（第 5 轮 · 带 `clean` · 近终态）** | `EXIT=0` · **1212 条 / 0F / 0E / 0S**（**195 个 XML**）· 逐模块：`user-api` 127 · `user-rpc` 162 · `admin-api` 149 · `admin-rpc` 122 · `users-common` 39 · `follow-api` 136 · `follow-rpc` 86 · `follow-common` 37 · `common` **354**<br>⚠️ 比 §9 R12 记的 1195 **多 17 条**，**全部落在 `common`** ⇒ 那是 **G4 已合入主干**的工作（`b5673f3` / `6f39bea`）⇒ **不是本 lane 的增量** |
+| **整域回归（第 6 轮 · 带 `clean` · 最终树）** | `BUILD FAILURE` · 11:40 min · **1211 条 / 0F / 3E / 0S**（195 个 XML）· `admin-rpc` 122 条/**1E** · `user-rpc` 161 条/**2E** ⇒ **3 条 error 是同一个根因**（见 §10.6.2）⇒ **不是代码缺陷** |
+| **定向复验（3 个失败类 · ×3）** | **×3 全绿**（`EXIT=0`）⇒ ⇒ 按 `docs/Pitfalls/global/cross-domain.md` **PIT-GLOBAL-038** 三步法判定为**端口占用型假红**（§10.6.2） |
+| **整域回归（第 7 轮 · 带 `clean` · 最终树）** | ✅ **BUILD SUCCESS** · 10:15 min · **1212 条 / 0F / 0E / 0S**（**195 个 XML**）· **与第 5 轮逐模块完全一致**（§10.6.1）⇒ ⇒ **最终树的干净口径已建立** |
+| **台账守门** | `check-ledger-tables.py` / `check-ledger-selfcheck.py` / `check-ledger-count.py` / `check-wave-lane-ownership.py` / `check-agents-budget.py` ⇒ **全 EXIT=0** · `check-doc-links.py` ⇒ **PASS**（1438 个链接全可达）· 台账表格结构自建校验 ⇒ **本轮引入 0 处偏离** |
+
+### 10.6.2 🟡 第 6 轮那 3 条 error 的定性（**端口占用型假红 · 已登记**）
+
+🔴 **3 条 error 同根因**：`Failed to bind to address 0.0.0.0/0.0.0.0:22261` ⇒ `java.net.BindException: Address already in use`
+⇒ 失败类：`com.rag.users.admin.rpc.AdminRpcLogoutClientVisibleGrpcStatusTest` · `com.rag.users.user.rpc.UserRpcLogoutClientVisibleGrpcStatusTest` · `com.rag.users.user.rpc.UserRpcSlowThresholdGateTest`（**三个都是「真 gRPC server 启动」类测试**）。
+
+按 **PIT-GLOBAL-038** 三步法定性：
+
+| 步 | 做什么 | 本轮结论 |
+|---|---|---|
+| ① **单独复跑** | `mvn -o -B -Dtest='AdminRpcLogoutClientVisibleGrpcStatusTest,UserRpcLogoutClientVisibleGrpcStatusTest,UserRpcSlowThresholdGateTest' -pl service/users/admin/admin-rpc,service/users/user/user-rpc -am test` | 🟢 **×3 全绿**（`EXIT=0`）⇒ ⇒ **假红** |
+| ② **查端口被谁占** | `lsof -nP -iTCP:22261 -sTCP:LISTEN` | 复跑期间**空闲** ⇒ 占用是**瞬时**的（不是常驻系统服务）|
+| ③ **端口段归属** | users 域四组件的 `RealGrpcPort` 段：`user-api` 22200–22209 · `user-rpc` 22220–22239 · `admin-api` 22240–22249 · `admin-rpc` 22260–22279 | `22261` 落在 **admin-rpc 段内** ⇒ **同段自撞**（本 lane 自己的 admin-rpc 与 user-rpc 两模块 + **G2 lane 同时在跑 Maven** ⇒ 抢同一段的端口）|
+
+⇒ ⇒ **为什么第 5 轮全绿、第 6 轮红**：两轮**代码相同**（仅差 3 处 javadoc 行号字符串）⇒ ⇒ **不是本轮改动引起的** ⇒ 属**环境时序型**（PIT-GLOBAL-038 第 ③ 条「别的域会话在跑东西」）⇒ **本轮不动代码**（纪律第 ① 条：看到 `BindException` 先定性，**不要**直接改代码）。
+⚠️ **纪律第 ④ 条（统计口径）**：失败模块的用例数在 `[ERROR]` 汇总行与 `[INFO]` 行**不一致** ⇒ 本轮 `user-rpc` 的 `[INFO]` 口径 162 → `[ERROR]` 口径 161（`UserRpcSlowThresholdGateTest` 原本 2 条，context 加载失败后计 1 条 error）⇒ ⇒ **必须用 XML 口径求和**（本轮 1211 = 1212 − 2 + 1）⇒ **不能只 grep `[INFO]`**。
+
+### 10.6.1 第 7 轮整域回归（最终树 · 带 `clean`）
+
+| 模块 | XML | Tests | F | E | S |
+|---|---|---|---|---|---|
+| `service/users/user/user-api` | 24 | 127 | 0 | 0 | 0 |
+| `service/users/user/user-rpc` | 28 | 162 | 0 | 0 | 0 |
+| `service/users/admin/admin-api` | 20 | 149 | 0 | 0 | 0 |
+| `service/users/admin/admin-rpc` | 25 | 122 | 0 | 0 | 0 |
+| `service/users/users-common` | 4 | 39 | 0 | 0 | 0 |
+| `service/follow/follow-api` | 11 | 136 | 0 | 0 | 0 |
+| `service/follow/follow-rpc` | 14 | 86 | 0 | 0 | 0 |
+| `service/follow/follow-common` | 3 | 37 | 0 | 0 | 0 |
+| `service/common` | 66 | 354 | 0 | 0 | 0 |
+| **合计** | **195** | **1212** | **0** | **0** | **0** |
+
+⇒ **与第 5 轮逐模块逐条一致**（`user-api` 127 · `user-rpc` 162 · `admin-api` 149 · `admin-rpc` 122 · `users-common` 39 · `follow-api` 136 · `follow-rpc` 86 · `follow-common` 37 · `common` 354）⇒ ⇒ **两轮之间的唯一差异 = 3 处 javadoc 行号字符串**，**测试面零变化**（与「50 行改动全为注释 · 0 行业务码」的机器核验互相印证）。
+
+### 10.7 🟢 **追加批准项**：`admin_invite.update_time` —— 核实结论 = **已修、且已有真 PG 守门网** ⇒ **本轮不改代码**
+
+| 项 | 值 |
+|---|---|
+| **批准来源** | Jason 于 **2026-10-29 04:0x 追加拍板** ⇒ 纳入本轮（调度员已改两份台账的 ⑤ 批准范围 ＋ ③ 第 4 项，并提交 `2ec9830`）|
+| **事项** | `admin-rpc` 的 `admin_invite.update_time` 不推进（`admin/rpc.md:1778`）⇒ 与 `docs/Pitfalls/users/admin/rpc.md` **P-2** 同型（**`FieldStrategy.NEVER` + `LambdaUpdateWrapper` ⇒ 永不推进**；**user-rpc 修过、admin-rpc 漏修**）|
+| **核实 ①：代码** | ✅ **已在** —— `AdminCreateAtomicService.java:201` = `.setSql("update_time = CURRENT_TIMESTAMP")`（W4「标记 invite 已用」那条 UPDATE，**无条件**进 SET）|
+| **核实 ②：守门网** | ✅ **已有** —— `AdminRpcGoWireParityTest.createAdminAdvancesInviteUpdateTimeLikeGo()`（`:419`）= **真 PG ＋ 真 gRPC** ⇒ 真查 `select extract(epoch from update_time)::bigint from admin_invite where code = ?` **前后对比**并断言 `after > before`；断言消息直接写明「若本断言失败，说明 W4 的 setSql("update_time = CURRENT_TIMESTAMP") 被删了」|
+| **核实 ③：台账** | ✅ `docs/DRIFT/users/admin/rpc.md` §2「🔴 新发现（台账**从未记录**）」已记 **✅ 已补**（`.setSql(...)` ＋ 守门测试）· 另含连带订正：「**5 处 UPDATE**」这个计数是错的 ⇒ 全组件正确总数 = **6 处**（本类 5 ＋ `AdminCreateAtomicService` 1）|
+| ⇒ **本轮结论** | 🟢 **本项已闭合 ⇒ 本轮不改代码** —— 再「修」一遍等于把已修的东西重做，**只会新增噪声**（且违背 AGENTS.md §3.3.3「先改/删错误断言，再改实现」的前置条件：**这里没有错误断言可改**）⇒ 改为**补做「这条网到底有没有牙」的变异测**（§10.7.1）|
+
+### 10.7.1 🟢 变异测：删掉 W4 的 `setSql` ⇒ 守门必须转红（证明这条网有牙）
+
+> **为什么做这个而不是「再写一条测试」** —— 调度员要求「必须配真断言（改前必红 / 改后必绿）」。
+> ⚠️ 但这条**已经有真断言**（真 PG ＋ 真 gRPC）⇒ ⇒ 正确的满足方式**不是**再叠一条冗余测试，而是**证明现有这条网会红** ⇒ 变异测试。
+
+| 步 | 做什么 | 结果 |
+|---|---|---|
+| ① 变异 | 把 `AdminCreateAtomicService.java:201` 的 `.setSql("update_time = CURRENT_TIMESTAMP")` **移除**（保留语句终止符 ⇒ **仍可编译**） | ⚠️ **第一次变异失败**：把整行连同 `;` 一起注释 ⇒ **编译错误**（`需要';'`）⇒ **测试根本没跑**（surefire 报告还是上一轮的残留）⇒ ⇒ **失败的变异什么都证明不了** ⇒ 改为「保留 `;`、只移除调用」后重做 |
+| ② 跑守门 | `mvn -o -B -Dtest='AdminRpcGoWireParityTest' -pl service/users/admin/admin-rpc -am test` | **EXIT=1 · BUILD FAILURE** · **0 条编译错误** ⇒ 变异**可编译** ⇒ 红的才是真红 |
+| ③ 判据 | 断言**必须转红**，且红在 `createAdminAdvancesInviteUpdateTimeLikeGo` | ✅ **精确命中**：`Tests run: 5, Failures: 1` ⇒ **红的就是那 1 条**（其余 4 条仍绿 ⇒ 不是「整类崩」）；失败消息 = 「W4 标记 invite 已用时必须同时推进 update_time … **before=1577808000 after=1577808000**」⇒ **前后值相等 = 确实没推进** |
+| ④ 还原 | 撤销变异 | ✅ `git diff --stat` 对该文件 **为空** ⇒ 与 `HEAD` 逐字一致 ⇒ **本轮未动它**（`grep MUTATION-PROBE` = 0 命中）|
+
+⇒ ⇒ **结论**：🟢 **这条网有牙** —— 删掉 `setSql` ⇒ **精确一条用例转红** ⇒ ⇒ **`admin_invite.update_time` 这一项确实已闭合**（修法在、网在、网会红）⇒ ⇒ **本轮不需要改任何代码**。
+⇒ ⇒ **附带的一条元教训**：**变异测试先验「变异后仍能编译」** —— 本轮第一次变异就踩了（注释掉链式调用的最后一行 ⇒ 分号也没了 ⇒ 编译失败）⇒ **「BUILD FAILURE」有两种：编译失败（变异无效）与断言失败（变异有效）⇒ 必须看失败落点**，否则会把「没跑」当成「没红」。
+
+### 10.7.2 🟡 **同型排查**：「user-rpc 修过、admin-rpc 漏修」还有没有？（P-2 的形状 = 「一处修了、另一处漏」）
+
+枚举两侧**全部 UPDATE 入口**（**机器枚举**：`grep -rn "update(null\|\.update(\|updateById\|@Update" …/src/main/java`）：
+
+| 域 | 入口 | 表 | `update_time` 推进 | 守门网 |
+|---|---|---|---|---|
+| user-rpc | `UserMapper.updateUserById` | `users_user` | ✅ `setSql` | ✅ `UserRpcJsonTextAndAvatarProjectionTest:113-148` |
+| user-rpc | `UserAvatarHistoryMapper` ×2 `@Update` | `users_user_avatar_history` | ✅ SQL 内显式 | ✅ |
+| user-rpc | `UserAvatarHistoryMapper.updateUserExtraInfo` `@Update` | `users_user` | ✅ SQL 内显式 | ✅ |
+| admin-rpc | `AdminDomainService:688`（`doBanUser`） | `users_user` | ✅ | ✅ `AdminRpcUpdateTimeAdvanceWiringTest` |
+| admin-rpc | `AdminDomainService:730`（`doUnBanUser`） | `users_user` | ✅ | ✅ 同上 |
+| admin-rpc | `AdminDomainService:1040`（`doUpdateUser`） | `users_user` | ✅ | ✅ 同上 |
+| admin-rpc | `AdminDomainService:1192`（`doResetUserPassword`） | `users_user` | ✅ | ✅ 同上 |
+| admin-rpc | `AdminCreateAtomicService:202`（W4） | `admin_invite` | ✅ | ✅ `AdminRpcGoWireParityTest:419` |
+| **admin-rpc** | **`AdminDomainService:409`（updateSelf）** | **`users_admin`** | ✅ **有 `setSql`** | 🔴 **无守门网** ← **新发现** |
+
+⇒ ⇒ **同型排查结论**：**行为面 9/9 全部推进 `update_time`（无漏修）**；但**守门网 8/9** ⇒ **缺 `updateSelf`（`users_admin.update_time`）那一条** —— 现存 `updateSelf` 的三个用例（`AdminUpdateSelfAndCreateAdminRegressionTest`）**只断言 `email` 列**，没有一条断言 `update_time` ⇒ ⇒ 按调度员指令（「若还有 ⇒ **登记为下一条**，别在本轮无限扩」）⇒ **登记，不在本轮补**。
+
+🟡 **登记项 `S1-USERS-012`** —— `admin-rpc` 的 `updateSelf` 缺 `users_admin.update_time` 推进的守门网（**行为已对，缺网**）：
+- **影响面**：若将来有人删掉 `AdminDomainService:406` 的 `setSql("update_time = CURRENT_TIMESTAMP")` ⇒ **没有任何测试会红** ⇒ 漂移静默回归（**这正是 P-2 的原始形状**）；
+- **建议修法**：照 `AdminRpcUpdateTimeAdvanceWiringTest` 的现成形态，在 `admin-rpc` 加一条**真 PG** 用例（`updateSelf` 前后读 `extract(epoch from update_time)::bigint from users_admin` 断言推进）⇒ **不动实现**；
+- **归属**：**域侧可自修**（`service/users/admin/admin-rpc/**` 在 G1 写权内）⇒ **待下一轮批准**；
+- **本轮为何不做**：调度员明示「若还有 ⇒ 登记为下一条，别在本轮无限扩」。

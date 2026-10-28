@@ -58,13 +58,14 @@ public class UserEntity {
      * {@code Status int64 `gorm:"column:status;default:0"`}（<b>无 not null</b>，值类型非指针）。
      * <p><b>消费点</b>（三段，逐段都要看，缺一段就会得出相反结论）：
      * <ol>
-     *   <li>{@code gorm.io/gorm@v1.31.2/schema/field.go:616-622} 给 int64 字段装的 setter：
+     *   <li>{@code gorm.io/gorm@v1.31.1/schema/field.go:616-622} 给 int64 字段装的 setter：
      *       {@code case **int64: if data != nil && *data != nil { …SetInt(**data) }}
      *       —— <b>{@code *data == nil} 时什么都不做</b>，字段保持<b>零值 0</b>；</li>
-     *   <li>{@code gorm@v1.31.2/scan.go:21} {@code prepareValues} 与
-     *       {@code schema/field.go:1009} {@code NewValuePool} 都是
+     *   <li>{@code gorm@v1.31.1/scan.go:19} 的 {@code prepareValues} 用
+     *       {@code reflect.New(reflect.PointerTo(field.FieldType))}；
+     *       {@code gorm@v1.31.1/schema/field.go:1002} 的 {@code NewValuePool} 用
      *       {@code poolInitializer(reflect.PointerTo(field.IndirectFieldType))}
-     *       ⇒ 传给 {@code rows.Scan} 的 dest 是 <b>{@code **int64}</b>，不是 {@code int64}；</li>
+     *       ⇒ 两者都让传给 {@code rows.Scan} 的 dest 是 <b>{@code **int64}</b>，不是 {@code int64}；</li>
      *   <li>因此 {@code database/sql/convert.go:431-435} 走的是
      *       {@code case reflect.Pointer: if src == nil { dv.SetZero(); return nil }}
      *       ⇒ <b>不报错</b>。
@@ -83,7 +84,7 @@ public class UserEntity {
      * 2026-10-23 上午，本类被删掉 {@code = 0L}，并在
      * {@code UserDomainService#login} / {@code #getUser} 加了
      * 「status 为 null ⇒ 抛 INTERNAL」的守卫，理由写的是
-     * 「{@code gorm@v1.31.2/scan.go:153 rows.Scan} 对 NULL → int64 直接返回错误」。
+     * 「{@code gorm@v1.31.1/scan.go:153 rows.Scan} 对 NULL → int64 直接返回错误」。
      * <b>该理由已被上面第 2/3 段与双侧活体对拍同时证伪</b>：
      * <pre>
      *   status IS NULL 打 Login ：Go 200 + token   RAG（误修后）5001「系统内部错误」

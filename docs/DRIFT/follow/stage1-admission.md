@@ -465,3 +465,40 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 | **R14** | `mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false -Dtest='FollowApiFailurePathMatrixTest' -pl service/follow/follow-api -am test` | `EXIT=0` · **Tests run: 62, Failures: 0, Errors: 0, Skipped: 0**<br>⇒ **8 端点 × 4 类失败**的矩阵全绿（§4.2 / §5.2.1）|
 | **R15** | `grep -n "public static final int FIRST\|public static final int LAST" service/follow/follow-api/src/test/java/com/rag/follow/follow/api/support/RealTomcatPort.java` | **22340 / 22359** ⇒ 落在 follow 域预分配段 **22300–22399** 内、且**不与** `follow-api` 的 `RealGrpcPort`（22300–22319）/ `follow-rpc` 的（22320–22339）重叠 |
 | **R16** | `printf '404 page not found\n' \| wc -c` | **19**（**不是 20**）⇒ `S1-FOLLOW-010`（共享层 javadoc）/ `S1-FOLLOW-011`（like 域 DisplayName）的**错数来源** |
+
+---
+
+## 10. 🟡 **开工轮（2026-10-29 03:45 · Jason 批准）**：同族「Go 出处」缺陷 —— **本域 0 处批准范围命中 ＋ 1 处新发现未修**
+
+> ⚠️ **本域在批准范围内没有可改项** —— §8.7 登记的 G1 23 条**全部落在 `users` 域**（`user` + `admin`）⇒ 本节只登记 follow 域侧的**实测结论与 1 条新发现** ⇒ **follow 域本轮零代码改动**。
+
+### 10.1 开工记录与批准依据
+
+| 项 | 值 |
+|---|---|
+| **批准来源** | Jason 于 **2026-10-29 03:45** 在**本 lane 会话内**明示「继续」⇒ 开工批准（⑤ 由**调度员**代填；**代填 ≠ 代批准**） |
+| **批准范围** | §8.7 登记的 **G1 23 条**（15 版本 ＋ 5 越界 ＋ 3 路径）⇒ **分布：users 域 23 / follow 域 0** |
+| **本域实际改动** | **0 个文件**（follow 域代码零改动）⇒ §8.7 的 23 条**无一条命中本域** |
+| **判据在 follow 域的结论** | 可判定 **80 条 ⇒ OK 79 · FAIL 1**；**机器判不了 245 条**（模块相对路径 / 裸文件名）⇒ ⚠️ **不得**据此宣称「follow 域零错」 |
+
+### 10.2 🟡 本轮新发现（**1 条 · 不在批准范围 · 未修**）
+
+| 引用处 | 现引用（**在 Go 仓不存在**） | 真身候选 | 备注 |
+|---|---|---|---|
+| `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/service/FollowUserExistenceService.java:78` | `service/user/user/rpc/.../getuserlogic.go` | `service/user/user/rpc/internal/logic/getuserlogic.go` | 引用里带 `...` **占位** ⇒ 不是可解析路径 |
+
+⚠️ **为什么没修**：不在 Jason 批准的封闭集合（23 条）内；且本条真身虽可判定（基名唯一），但**所属域是 `users`** ⇒ 与 §10.5 的 10 条合并处理更省事（**建议下一轮一次修完 11 条**）。
+⚠️ **本条与本域既有登记的关系**：`docs/Pitfalls/users/user/rpc.md` 里有 `getuserlogic.go:48-54`（`UserInfo.score` 永远不填）⇒ **那是 Go 侧的文件引用，不是「RAG 引了不存在的路径」的登记** ⇒ **本条是新的、未登记**。
+
+### 10.3 本域回归（第 6 轮 · 带 `clean` · 与 users 域同一轮）
+
+| 模块 | XML | Tests | F | E | S |
+|---|---|---|---|---|---|
+| `service/follow/follow-api` | 11 | 136 | 0 | 0 | 0 |
+| `service/follow/follow-rpc` | 14 | 86 | 0 | 0 | 0 |
+| `service/follow/follow-common` | 3 | 37 | 0 | 0 | 0 |
+| **本域小计** | **28** | **259** | **0** | **0** | **0** |
+
+⚠️ **第 6 轮那 3 条 error 全在 `users` 域**（`admin-rpc` 1 条 + `user-rpc` 2 条）⇒ **follow 域三个模块全绿** ⇒ 该 error 与本域无关（定性见 users 档 §10.6.2 · **PIT-GLOBAL-038** 端口占用型假红）。
+⚠️ **第 5 轮（同批 · 带 `clean`）**：全域 **1212 条 / 0F / 0E / 0S**（195 个 XML）⇒ 本域 `follow-api` 136 ＋ `follow-rpc` 86 ＋ `follow-common` 37 = **259**（与 §9 R13 记的 259 **一致** ⇒ 本域**零增量**）。
+⚠️ **全域 1195 → 1212 的 +17 全部落在 `service/common`** ⇒ 是 **G4 已合入主干**的工作，**不是本域增量**。

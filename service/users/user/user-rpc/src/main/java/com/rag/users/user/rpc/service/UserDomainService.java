@@ -187,9 +187,9 @@ public class UserDomainService {
                 // 理由写的是「Go 的 rows.Scan 对 NULL → int64 直接报错」。**该理由已被证伪并撤销。**
                 //
                 // Go 出处（消费点，三段缺一不可）：
-                //   gorm@v1.31.2/schema/field.go:616-622   `case **int64: if data != nil && *data != nil`
+                //   gorm@v1.31.1/schema/field.go:616-622   `case **int64: if data != nil && *data != nil`
                 //                                            ⇒ *data == nil 时不 SetInt，字段保持零值 0
-                //   gorm@v1.31.2/scan.go:21 + schema/field.go:1009
+                //   gorm@v1.31.1/scan.go:19 + schema/field.go:1002
                 //                                            ⇒ 传给 rows.Scan 的 dest 是 **int64
                 //   database/sql/convert.go:431-435        ⇒ `case reflect.Pointer: src == nil → SetZero()`
                 //                                            ⇒ **不报错**（convert.go:438 的 "unsupported" 走不到）
@@ -254,7 +254,7 @@ public class UserDomainService {
             //
             // 🔴 不要再把这行读成「status 为 NULL 就当没封禁」的 fail-open 缺陷：
             // Go 走的**正是**「NULL ⇒ 0 ⇒ status==1 判 false ⇒ 放行」这条路径
-            // （gorm@v1.31.2/schema/field.go:616-622 + database/sql/convert.go:431-435），
+            // （gorm@v1.31.1/schema/field.go:616-622 + database/sql/convert.go:431-435），
             // 双侧活体对拍实测 Go 对 status IS NULL 的行返回 200 + token。
             // ⇒ 这里的 `== 1L` 判定与 Go 逐字一致，**NULL 行在两侧都放行**。
             if (user.getStatus() != null && user.getStatus() == 1L) {
@@ -444,7 +444,7 @@ public class UserDomainService {
         // 🔴 DRIFT-USERRPC-V-012（2026-10-23 当天修正上一轮的误判）：本处曾有一道
         // 「status 为 null ⇒ ErrorDbSelect + INTERNAL」的守卫，理由同为
         // 「GORM 把 NULL 扫进 int64 会直接报错」。该理由**已被证伪并撤销**：
-        //   gorm@v1.31.2/schema/field.go:616-622 + scan.go:21 + schema/field.go:1009
+        //   gorm@v1.31.1/schema/field.go:616-622 + scan.go:21 + schema/field.go:1002
         //       ⇒ dest 是 **int64，*data == nil 时 setter 不动作，字段留零值 0
         //   database/sql/convert.go:431-435 ⇒ Pointer + src==nil 走 SetZero()，**不报错**
         // 双侧活体对拍（2026-10-23 21:41）：status IS NULL 打 GetUser，
