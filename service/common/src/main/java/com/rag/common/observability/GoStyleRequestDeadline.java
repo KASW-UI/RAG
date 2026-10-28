@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit;
  * <h2>为什么需要它（Go 侧的机制，逐句对齐）</h2>
  *
  * <pre>
- *   rest/handler/timeouthandler.go:67-68
+ *   rest/handler/timeouthandler.go:68-71
  *       ctx, cancelCtx := context.WithTimeout(r.Context(), h.dt)
  *       r = r.WithContext(ctx)                 // ← 关键：deadline 被**传进业务**
  *   rest/handler/timeouthandler.go:79-89

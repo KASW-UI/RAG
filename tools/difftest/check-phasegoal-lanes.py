@@ -168,7 +168,14 @@ X_MAP = {
 LANE_COMMANDS = {
     "G1": [
         "# ── 契约面 / DDL / proto ─────────────────────────────────────",
-        "python3 tools/difftest/check-surface-parity.py --domain users",
+        # 🔴 2026-10-29 订正：原写 `--domain users` ⇒ **错名**（真名是 `user` / `admin`）
+        #    ⇒ check-surface-parity.py 的 `--domain` 旧实现是「未知名 ⇒ 一个域都不跑 ⇒ EXIT=0」
+        #    ⇒ ⇒ **假绿**（G1 报作 `S1-FOLLOW-008`②）。
+        #    ⇒ 现该脚本已加域名白名单校验（未知名 ⇒ 退出码 2）⇒ 这条错名会**当场报错** ⇒
+        #    ⇒ 命令必须写对，否则收口时会炸。
+        #    ⚠️ 注意：`check-ddl-static.py` 的域名**恰好就是** `users`（另一个脚本、另一套命名）⇒ 下面那行**不用改**。
+        "python3 tools/difftest/check-surface-parity.py --domain user",
+        "python3 tools/difftest/check-surface-parity.py --domain admin",
         "python3 tools/difftest/check-surface-parity.py --domain follow",
         "python3 tools/difftest/check-ddl-static.py --domain users --indexes",
         "python3 tools/difftest/check-ddl-static.py --domain follow --indexes",

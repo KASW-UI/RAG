@@ -38,13 +38,13 @@ import org.springframework.boot.context.properties.NestedConfigurationProperty;
  *   </tr>
  *   <tr>
  *     <td>CPU 自适应降载</td>
- *     <td>{@code rest/handler/sheddinghandler.go:20-52} + {@code core/load/adaptiveshedder.go}</td>
+ *     <td>{@code rest/handler/sheddinghandler.go:22-56} + {@code core/load/adaptiveshedder.go}</td>
  *     <td><b>503 空 body</b></td>
  *     <td>{@link CpuShedding}</td>
  *   </tr>
  *   <tr>
  *     <td>熔断</td>
- *     <td>{@code rest/handler/breakerhandler.go:19-44} + {@code core/breaker/googlebreaker.go:52-79}</td>
+ *     <td>{@code rest/handler/breakerhandler.go:18-42} + {@code core/breaker/googlebreaker.go:52-79}</td>
  *     <td><b>503 空 body</b></td>
  *     <td>{@link #breaker}</td>
  *   </tr>

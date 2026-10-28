@@ -53,10 +53,19 @@ check-surface-parity.py —— **对外契约面**的 Go ↔ RAG 双侧对照（
 【用法】
 ═══════════════════════════════════════════════════════════════════════
   python3 tools/difftest/check-surface-parity.py
-  GO_REPO=/path/to/Sea-RideTheWind_golang python3 tools/difftest/check-surface-parity.py
   python3 tools/difftest/check-surface-parity.py --domain article     # 只查某域
+  GO_REPO=/path/to/Sea-RideTheWind_golang python3 tools/difftest/check-surface-parity.py
 
-退出码：0 = 范围内契约面逐条相等（已签字偏离域单列）；1 = 存在非签字差异或解析异常。
+退出码：0 = 范围内契约面逐条相等（已签字偏离域单列）；1 = 存在非签字差异或解析异常；
+        2 = **用法/环境错误**（未知域名 · 找不到 Go 真源仓 · 一个域都没对照）。
+
+🆕 2026-10-29 三处「静默跳过 = 假绿/假红」的修复：
+  ① Go 真源定位：环境变量优先（**校验**）→ 否则**逐级向上搜索**
+     （worktree 与主仓都命中同一份真源）→ 都找不到 ⇒ **退出码 2 + 显式报错**。
+     旧默认路径在 worktree 里恒指错 ⇒ 「找不到 Go 仓」被当成「Go 侧 0 个端点」。
+  ② `--domain` 域名白名单：**未知域名 ⇒ 退出码 2**（旧行为是「一个域都不跑 ⇒ EXIT=0」）。
+     ⚠️ users 域的真名是 **`user` / `admin`**（不是 `users`）。
+  ③ Go proto 缺失 ⇒ **报红**（旧行为是静默 `continue` ⇒ 该域 gRPC 面**没查**）。
 """
 
 import argparse
@@ -66,8 +75,54 @@ import re
 import sys
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-GO_REPO = os.environ.get(
-    "GO_REPO", os.path.join(os.path.dirname(REPO), "Sea-RideTheWind_golang"))
+
+# ── Go 真源定位 ────────────────────────────────────────────────────────────
+# 🔴 2026-10-29 修复（同一根因被 G1 报作 `S1-FOLLOW-008`②、G3 报作 `G4-10`）：
+#   原默认值 = `os.path.join(os.path.dirname(REPO), "Sea-RideTheWind_golang")`
+#   ⇒ 在 **worktree** 里 `REPO` = `.../RAG.worktrees/<lane>` ⇒ 拼出
+#      `.../RAG.worktrees/Sea-RideTheWind_golang` ⇒ **不存在**
+#   ⇒ ⇒ 脚本把「找不到 Go 仓」当成「Go 侧 0 个端点」⇒ **hot 域假红**，
+#      且 `--domain <错名>` 时**一个域都不跑**却 EXIT=0 ⇒ **假绿**。
+# ⇒ ⇒ 现在：环境变量优先（**校验**）→ 否则**逐级向上搜索** → 都找不到 ⇒ **显式报错退出**。
+# 🔴 2026-10-29 修复（同一根因被 G1 报作 `S1-FOLLOW-008`②、G2 报作「工作树假红」、G3 报作 `G4-10`）：
+#   原默认值 = `os.path.join(os.path.dirname(REPO), "Sea-RideTheWind_golang")`
+#   ⇒ 在 **worktree** 里 `REPO` = `.../RAG.worktrees/<lane>` ⇒ 拼出
+#      `.../RAG.worktrees/Sea-RideTheWind_golang` ⇒ **不存在**
+#   ⇒ ⇒ 脚本把「找不到 Go 仓」当成「Go 侧 0 个端点」⇒ **hot 域假红**，
+#      且 `--domain <错名>` 时**一个域都不跑**却 EXIT=0 ⇒ **假绿**。
+# ⇒ ⇒ 现在：**共用共享实现** `tools/difftest/go_repo.py`
+#      （环境变量优先**且校验** → 逐级向上搜索 → 都找不到 ⇒ 抛错退出码 2）。
+#
+# 🔴🔴 **为什么改成「共享实现」而不是在本脚本里就地修**（2026-10-29 · G4 lane）：
+#   **同一个根因被三个 lane 独立报出**（G1 / G2 / G3），
+#   且 **G3 本轮新写的探针初版也踩了同一个坑** ⇒ ⇒ **就地修 = 下一个新脚本还会重犯**
+#   ⇒ ⇒ 修法必须落在**共享解析函数**上 ⇒ 本脚本与 `tools/difftest/lib/go-repo.sh`
+#   （shell 版，判据**逐条一致**）共用同一套口径。
+#
+# ⚠️ **判定标志必须是「与域无关」的结构性文件**（`go.mod` / `proto/` / `service/`）
+#    ⇒ 本脚本**旧版**用的是**域专属**标志（`service/article/api/internal/handler/routes.go`）
+#    ⇒ ⇒ 「只跑 favorite 域的脚本」与「只跑 article 域的脚本」判据不同
+#    ⇒ ⇒ 又变成「同一个仓、两个结论」（同族陷阱）⇒ 已一并改正。
+
+try:
+    # 同目录导入（`tools/difftest/`）
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from go_repo import resolve_go_repo as _shared_resolve_go_repo
+except ImportError as _imp:  # pragma: no cover - 只在共享模块缺失时触发
+    raise SystemExit(
+        "❌ 找不到共享模块 `tools/difftest/go_repo.py`（Go 真源定位的唯一实现）\n"
+        f"   原因：{_imp}\n"
+        "   ⇒ 本脚本**不再自带**一份解析逻辑（那会与共享实现漂移 ⇒ 下一个新脚本还会踩同一个坑）")
+
+
+def _resolve_go_repo():
+    """定位 Go 真源仓 ⇒ 返回 (路径, 来源说明)。
+
+    🔴 找不到 ⇒ **抛 FileNotFoundError**（由 main 显式报错退出）。
+       **绝不允许**退化成「Go 侧 0 个端点」⇒ 那会把「没查」读成「一致」。
+    """
+    return _shared_resolve_go_repo(repo_root=REPO)
+
 
 # ── 域定义：Go 原件 ↔ RAG 模块 ────────────────────────────────────────────
 # go_rpc  : Go proto 文件名（users 域的 user.proto 在 RAG 侧改名 users.proto）
@@ -201,9 +256,28 @@ def main():
     args = ap.parse_args()
     want = set(args.domain or [])
 
+    # 🔴 2026-10-29：域名白名单校验 —— 未知名**必须**报错退出。
+    #    旧行为：`want` 与任何域名都不匹配 ⇒ 循环体一次都不跑 ⇒ failures 为空
+    #    ⇒ EXIT=0 ⇒ **假绿**（G1 报作「--domain users 用了错名，真名是 user/admin」）。
+    known = {d[0] for d in DOMAINS}
+    unknown = sorted(want - known)
+    if unknown:
+        print(f"✗ 未知域名：{unknown}", file=sys.stderr)
+        print(f"  可用域名：{sorted(known)}", file=sys.stderr)
+        print("  ⚠️ **静默跳过 = 假绿** ⇒ 查了 0 个域却 EXIT=0 ⇒ 必须报错退出。",
+              file=sys.stderr)
+        return 2
+
+    # 🔴 2026-10-29：Go 真源定位 —— 找不到 ⇒ 显式报错退出（不得当成「0 个端点」）
+    try:
+        go_repo, go_repo_src = _resolve_go_repo()
+    except FileNotFoundError as e:
+        print(f"✗ {e}", file=sys.stderr)
+        return 2
+
     print("=" * 78)
     print("对外契约面 Go ↔ RAG 对照（静态 · 只读 · 无构建）")
-    print(f"  Go 真源: {GO_REPO}")
+    print(f"  Go 真源: {go_repo}   ← {go_repo_src}")
     print(f"  RAG     : {REPO}")
     print("=" * 78)
 
@@ -211,13 +285,15 @@ def main():
     api_tot_go = api_tot_rag = 0
     rpc_tot_go = rpc_tot_rag = 0
     signed_rows = []
+    checked_domains = []
 
     for name, go_routes_rel, go_proto, rag_api, rag_rpc, signed in DOMAINS:
         if want and name not in want:
             continue
+        checked_domains.append(name)
 
         # ── ① HTTP 契约面 ──
-        go_rp = os.path.join(GO_REPO, go_routes_rel)
+        go_rp = os.path.join(go_repo, go_routes_rel)
         if not os.path.isfile(go_rp):
             print(f"\n[{name}] 🔴 Go routes.go 不存在: {go_rp}")
             failures.append(f"{name}: Go routes.go 缺失")
@@ -272,9 +348,13 @@ def main():
                   f"Go 侧 JWT 保护 {jwt_n} 条）")
 
         # ── ② gRPC 契约面 ──
-        gp = os.path.join(GO_REPO, "proto", go_proto + ".proto")
+        gp = os.path.join(go_repo, "proto", go_proto + ".proto")
         if not os.path.isfile(gp):
-            print(f"    ⚠️ Go proto 缺失，跳过 gRPC 面: {gp}")
+            # 🔴 2026-10-29：旧行为是 `continue`（静默跳过 gRPC 面）⇒ 该域的 gRPC 面
+            #    **根本没查**，却因为 HTTP 面已红而看不出来 ⇒ 属于「跳过被读成通过」。
+            #    现在：**报红**，并明写「不是差异，是没查」。
+            print(f"    🔴 Go proto 缺失 ⇒ **gRPC 面没查**（不是「相等」）：{gp}")
+            failures.append(f"{name}: Go proto 缺失 ⇒ gRPC 契约面未对照")
             continue
         svc, go_rpc = parse_go_proto_rpc(gp)
         rag_rpc_set = parse_rag_impl_methods(os.path.join(REPO, rag_rpc))
@@ -295,8 +375,13 @@ def main():
             print(f"    ✅ gRPC 方法集合逐条相等（Go {svc}={len(gn)}）")
 
     print("\n" + "=" * 78)
+    print(f"实际对照的域（{len(checked_domains)} 个）：{checked_domains}")
     print(f"合计：HTTP 端点 Go={api_tot_go} / RAG={api_tot_rag}  ·  "
           f"gRPC 方法 Go={rpc_tot_go} / RAG={rpc_tot_rag}")
+    # 🔴 2026-10-29：查了 0 个域 ⇒ **不得**给绿灯（「没查」≠「一致」）
+    if not checked_domains:
+        print("\n✗ 一个域都没对照 ⇒ **不得**读作「契约面相等」", file=sys.stderr)
+        return 2
     if signed_rows:
         print("已签字偏离域（单列，不计失败）：")
         for n, g, r, a, b in signed_rows:

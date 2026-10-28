@@ -119,8 +119,10 @@ class JwtUtilParityTest {
     @Test
     @DisplayName("RFC 2104：短密钥补零后与原密钥的 HMAC 逐字节相同 —— 这是与 Go 能互验的唯一理由")
     void zeroPaddingPreservesHmacForShortKeys() throws Exception {
-        // 选 admin 真实使用的 15 字节密钥（Go admincenter.yaml:11 / RAG application.yml:82 同值）
-        String secret = "yU-hCm)2*?NQmWG";
+        // 选 admin 侧默认密钥形状的【等长夹具】（15 字节）
+        // 真源出处：Go service/user/admin/api/etc/admincenter.yaml:11（AdminAuth.AccessSecret，15 字节）
+        // ⚠️ 只记形状、不记明文：生产密钥不得进仓（2026-10-28 起本类不再含真值）
+        String secret = "fixture-admin15";
         byte[] raw = secret.getBytes(StandardCharsets.UTF_8);
         byte[] padded = JwtUtil.padToHmacKeySize(secret);
 
@@ -156,7 +158,12 @@ class JwtUtilParityTest {
     @Test
     @DisplayName("签出的 token 能用同一份 key 验签通过，且 userId/exp 正确")
     void tokenRoundTrips() {
-        String secret = "ae0536f9-6450-4606-8e13-5a19ed505da0";   // user 域真实配置，36 字节
+        // user 域默认密钥形状的【等长夹具】（36 字节）
+        // 真源出处：Go service/user/user/api/etc/usercenter.yaml:11（UserAuth.AccessSecret，36 字节 UUID）
+        String secret = "fixture-user-36-uuid-000000000000000";
+        // 🔴 显式钉住「形状」：36 字节（字面量，不是自反断言）
+        assertEquals(36, secret.getBytes(StandardCharsets.UTF_8).length,
+                "user 侧默认密钥形状必须是 36 字节（真源 usercenter.yaml:11）");
         long iat = nowEpochSecond();
         String token = JwtUtil.getToken(secret, iat, SECONDS, USER_ID);
 

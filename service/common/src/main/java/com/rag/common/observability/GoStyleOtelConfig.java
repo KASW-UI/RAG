@@ -105,7 +105,7 @@ public final class GoStyleOtelConfig {
 
     /**
      * Go 的 {@code Batcher} <b>合法集合</b> ——
-     * {@code core/trace/config.go:12}
+     * {@code core/trace/config.go:11}
      * {@code Batcher string `json:",default=otlpgrpc,options=zipkin|otlpgrpc|otlphttp|file"`}。
      *
      * <p>⚠️ Go 侧的 yaml 解析器（go-zero 的 config loader）会按 {@code options} tag <b>先校验</b>
@@ -142,7 +142,7 @@ public final class GoStyleOtelConfig {
      * 🔴 校验 batcher —— 对齐 Go 的两条路径：
      *
      * <ul>
-     *   <li><b>端点为空 ⇒ 根本不看 batcher</b>：Go 的 {@code core/trace/agent.go:114-121}
+     *   <li><b>端点为空 ⇒ 根本不看 batcher</b>：Go 的 {@code core/trace/agent.go:115-124}
      *       只在 {@code len(c.Endpoint) > 0} 时才调 {@code createExporter(c)}
      *       ⇒ {@code Batcher} 写错也<b>不报错</b>（只是不装 exporter）⇒ RAG 侧同款。</li>
      *   <li><b>端点非空 + 不认识的协议 ⇒ 整个 agent 装不上</b>：Go 的 {@code createExporter} 的
@@ -174,7 +174,7 @@ public final class GoStyleOtelConfig {
      * 而本仓 yaml 里写的是 Boot 风格的<b>采样器名字</b> ⇒ 这里做一次映射。
      *
      * <p>⚠️ <b>无论哪种名字，最终都要包在 {@code ParentBased} 里</b> ——
-     * Go 的 {@code core/trace/agent.go:111} 是
+     * Go 的 {@code core/trace/agent.go:110} 是
      * {@code sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(c.Sampler)))}
      * ⇒ <b>永远</b>是 ParentBased ⇒ 「入向 parent 不采样 ⇒ 子 span 也不采样」。
      */
@@ -201,7 +201,7 @@ public final class GoStyleOtelConfig {
     /**
      * 端点归一：<b>裸 {@code host:port} 补成 {@code http://host:port}</b>。
      *
-     * <p>Go 出处：{@code core/trace/agent.go:70-71}
+     * <p>Go 出处：{@code core/trace/agent.go:71-72}
      * {@code otlptracegrpc.WithEndpoint(c.Endpoint)} + {@code otlptracegrpc.WithInsecure()}
      * ⇒ Go 的端点<b>不带</b> scheme，传输<b>明文</b>。
      * ⇒ Java 侧 {@code OtlpGrpcSpanExporter} 需要 scheme ⇒ {@code http://} 即明文 h2c（等价于 WithInsecure）。

@@ -50,8 +50,28 @@ import java.time.Duration;
  * </pre>
  * （另有范围外的 {@code service/security/rpc/security.go:43}。）
  * ⚠️ 「RAG 侧有 {@code GrpcServerConfigurer}」只说明<b>注册动作发生</b>，
- * 不代表拦截器<b>带着配置的 timeout</b> —— 后者要断言运行时后果，见
- * {@code ObservabilityWiringTest} 的说明。
+ * 不代表拦截器<b>带着配置的 timeout</b> —— 后者要断言运行时后果，
+ * <b>由域侧的接线守门锁住</b>：
+ * {@code service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/GrpcInterceptorWiringTest.java}
+ * （它用 {@code verify(builder).intercept(captor.capture())} 断言
+ * 「本模块的 {@code GrpcServerConfigurer} 真的把 interceptor 交给了 {@code ServerBuilder}」，
+ * 并进一步断言链里<b>真的调得到</b>那个 interceptor）。
+ * <p>⚠️ <b>🔴 2026-10-28 订正（此前本段指向 {@code ObservabilityWiringTest} ⇒ 失效指针）</b>：
+ * 旧注释把「要断言运行时后果」指向 {@code ObservabilityWiringTest}，
+ * 而那个类里只有一条 <b>弱断言</b>（{@code ctx.getBean(ServerInterceptor.class)} 非 null）
+ * ⇒ ⇒ <b>只证「Bean 存在」，不证「进了 ServerBuilder」</b>
+ * ⇒ ⇒ 下一个 agent 读到旧指针会误以为共享层已锁住超时链路。
+ * ⇒ ⇒ 现在指向<b>真实存在</b>的域侧锁。
+ * <p>⚠️ <b>为什么这条锁不能（也不该）搬到共享层</b>：
+ * <ul>
+ *   <li><b>类型不在共享层的 classpath 上</b>：{@code GrpcServerConfigurer} 只存在于
+ *       {@code net.devh:grpc-server-spring-boot-starter}，而 {@code service/common} 依赖的是
+ *       <b>client</b> starter ⇒ 共享层引用不到该类型（且 {@code service/common/pom.xml} 不在共享层写权面内）；</li>
+ *   <li><b>共享层没有那个 Bean</b>：{@code @Bean GrpcServerConfigurer} 是<b>各 rpc 模块</b>自己声明的
+ *       （{@code *RpcApplication}）⇒ 共享层要「测」它，只能自己造一个 ⇒ ⇒ 那测的是测试自己，
+ *       <b>不是生产装配</b> ⇒ ⇒ 那是<b>另一种假绿</b>（AGENTS.md §3.3）。</li>
+ * </ul>
+ * ⇒ ⇒ <b>域侧写权，共享层不重复造</b>（写权边界见 AGENTS.md §5.3f）。
  *
  * <p><b>timeout（H1 修复）</b>：从 {@link ObservabilityProperties#getRpcTimeout()} 读取，
  * 为 null 时回退 {@link Duration#ZERO}（不限时）。此前硬编码 {@code Duration.ZERO}，
@@ -70,7 +90,23 @@ public class RpcServerInterceptorFactory {
      *
      * <p>⚠️ <b>产出本 Bean 不足以让它生效</b> —— starter 不会自动注册（见类注释的 javap 证据）。
      * 消费方必须再提供 {@code @Bean GrpcServerConfigurer}，否则它是容器里一个没人用的 Bean。
-     * 锁死用例：各 rpc 模块的 {@code *GrpcInterceptorWiringTest}（断言 {@code server.intercept(...)} 真被调用）。
+     *
+     * <p><b>🔴 2026-10-28 订正</b>：本段原文只写「锁死用例：各 rpc 模块的 {@code *GrpcInterceptorWiringTest}」，
+     * <b>没有指名道姓</b> ⇒ ⇒ 下一个 agent 未必找得到 ⇒ ⇒ 现在给出真实路径：
+     * <ul>
+     *   <li><b>users 域</b>：{@code service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/GrpcInterceptorWiringTest.java}
+     *       ⇒ 断言 {@code verify(builder).intercept(captor.capture())}
+     *       （<b>本模块的 Configurer 真的把 interceptor 交给了 ServerBuilder</b>）；</li>
+     *   <li>其余 rpc 模块同款：{@code *RpcGrpcInterceptorWiringTest} / {@code *ProtectionChainWiringTest}
+     *       （各自域内 ⇒ <b>域侧写权</b>）。</li>
+     * </ul>
+     * ⇒ ⇒ <b>共享层不重复造</b>：共享层既没有 {@code GrpcServerConfigurer} 这个 Bean，
+     * 它的类型也不在 {@code service/common} 的 classpath 上
+     * （只在 {@code net.devh:grpc-server-spring-boot-starter} 里，而本模块依赖的是 client starter）
+     * ⇒ ⇒ 在本层造这条守门只能自己造一个假 Configurer ⇒ ⇒ <b>测的是测试自己 = 另一种假绿</b>
+     * ⇒ ⇒ 故<b>不在共享层造</b>（AGENTS.md §3.3）。
+     * <p>⚠️ 共享层自己那条 {@code ObservabilityWiringTest#grpcInterceptorBeanExists} 是
+     * <b>弱断言</b>（只证 Bean 存在）⇒ ⇒ <b>别把它当成「超时链路已锁」的证据</b>。
      */
     @Bean
     public ServerInterceptor rpcUnaryServerInterceptor(ObservabilityProperties props) {

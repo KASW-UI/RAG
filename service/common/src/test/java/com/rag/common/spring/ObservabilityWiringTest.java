@@ -31,6 +31,19 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>本测试用 {@code @SpringBootTest} + 真实的 {@code @ConfigurationProperties} 绑定，
  * 把这两类缺陷重新变成可回归的失败。
+ *
+ * <h2>🔴 2026-10-28：本类<b>验不到什么</b>（避免被当成「超时链路已锁」的证据）</h2>
+ * <p>本类<b>只证「Bean 在容器里存在」</b> ⇒ ⇒ 它<b>证不了</b>「那个 interceptor 真的被挂到了
+ * gRPC {@code ServerBuilder} 上」⇒ ⇒ 因为 devh starter 的三个工厂方法
+ * （{@code shadedNettyGrpcServerFactory} / {@code nettyGrpcServerFactory} /
+ * {@code inProcessGrpcServerFactory}）<b>全都只注入 {@code List<GrpcServerConfigurer>}</b>，
+ * <b>从不</b>挂 {@code ServerInterceptor}（{@code javap} 证据见
+ * {@link RpcServerInterceptorFactory} 的类注释）
+ * ⇒ ⇒ <b>Bean 存在 + Configurer 缺失 = 静默失效</b>（不报错、不告警）。
+ * <p>⇒ ⇒ 真正的「进了 {@code ServerBuilder}」由<b>域侧</b>的接线守门锁住
+ * （<b>域侧写权，共享层不重复造</b>）：
+ * {@code service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/GrpcInterceptorWiringTest.java}
+ * ⇒ ⇒ <b>本类里那条 {@code grpcInterceptorBeanExists} 是弱断言</b>，已就地标注。
  */
 @SpringBootTest(classes = ObservabilityWiringTest.TestApp.class,
         properties = {
@@ -60,12 +73,34 @@ class ObservabilityWiringTest {
     }
 
     @Test
-    @DisplayName("H2：RpcServerInterceptorFactory 产出的 ServerInterceptor 必须是容器里的真 Bean")
+    @DisplayName("H2（🔴 弱断言）：RpcServerInterceptorFactory 产出的 ServerInterceptor 必须是容器里的真 Bean"
+            + " —— 但这只证「Bean 存在」，**不证**它进了 ServerBuilder")
     void grpcInterceptorBeanExists() {
         ServerInterceptor interceptor = ctx.getBean(ServerInterceptor.class);
         assertThat(interceptor)
                 .as("ServerInterceptor 未注册 = user-rpc/admin-rpc 无 gRPC span、无 deadline 传播、无 gRPC 超时")
                 .isNotNull();
+        // 🔴 2026-10-28：本断言的**边界**（此前本类被 RpcServerInterceptorFactory 的 javadoc
+        //    当成「运行时后果」的证据引用 ⇒ 那是个**失效指针** ⇒ 已订正）。
+        //
+        //    ⚠️ **弱断言**：它只证「容器里有一个 ServerInterceptor Bean」，
+        //       **零判别力**地回答不了「这个 Bean 有没有被交给 ServerBuilder」。
+        //       ⇒ 因为 starter 三个工厂方法都只注入 List<GrpcServerConfigurer>，
+        //         **从不**挂 ServerInterceptor（见 RpcServerInterceptorFactory 类注释的 javap 证据）
+        //       ⇒ ⇒ Bean 存在 + Configurer 缺失 = **静默失效**（不报错）。
+        //    ⇒ ⇒ 真正的「进了 ServerBuilder」由**域侧**接线守门锁住（域侧写权，共享层不重复造）：
+        //         service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/GrpcInterceptorWiringTest.java
+        //         （verify(builder).intercept(captor.capture()) + 链里真调得到）
+        //    ⇒ ⇒ **别把本条当成「超时链路已锁」的证据**（AGENTS.md §3.3.3：
+        //         断言「Bean 存在」≠ 断言机制生效）。
+        //
+        //    ⚠️ 为什么共享层**不**自己造这条装配级守门：
+        //       ① GrpcServerConfigurer 的类型只在 net.devh:grpc-server-spring-boot-starter 里，
+        //          而 service/common 依赖的是 **client** starter ⇒ 共享层引用不到该类型
+        //          （且 service/common/pom.xml 不在共享层写权面内）；
+        //       ② 共享层**没有** GrpcServerConfigurer 这个 Bean —— 它由各 rpc 模块的
+        //          *RpcApplication 自己声明 ⇒ 共享层要测它只能自己造一个假 Configurer
+        //          ⇒ ⇒ 那测的是**测试自己**，不是生产装配 ⇒ ⇒ 那是**另一种假绿**。
     }
 
     @Test

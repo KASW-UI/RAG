@@ -39,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <h2>本类要证明的那一件事</h2>
  *
- * <p>Go 侧 {@code rest/handler/timeouthandler.go:67-68} 用
+ * <p>Go 侧 {@code rest/handler/timeouthandler.go:68-71} 用
  * {@code ctx, cancel := context.WithTimeout(r.Context(), h.dt)} + {@code r = r.WithContext(ctx)}
  * 把 deadline <b>传进业务</b> ⇒ 超时下下游 I/O 立即中止。
  * <p>而 RAG 侧原来的超时处理只能 {@code Future.cancel(true)}，

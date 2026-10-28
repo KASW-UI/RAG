@@ -16,7 +16,7 @@ import java.io.IOException;
 /**
  * L4 idiomatization：CPU 自适应降载，对齐 Go {@code handler.SheddingHandler}。
  *
- * <p><b>Go 出处</b>：{@code rest/handler/sheddinghandler.go:20-52}
+ * <p><b>Go 出处</b>：{@code rest/handler/sheddinghandler.go:22-56}
  * <pre>
  * promise, err := shedder.Allow()
  * if err != nil {

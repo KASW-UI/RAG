@@ -288,12 +288,9 @@ public final class RpcInterceptor {
                 //   Go 侧 timeout<=0 直接 `handler(ctx, req)`，业务靠 ctx.Done() 感知；
                 //   RAG 侧此刻**不注册超时调度器** ⇒ 若把 DeadlineState 设成客户端 deadline，
                 //   会让业务在「服务端根本没超时」时误判为超时 ⇒ 超出本条修复范围。
-                long serverBudgetMs = (timeout != null && timeout.compareTo(Duration.ZERO) > 0)
-                        ? timeout.toMillis() : Long.MAX_VALUE;
-                long effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs());
-                long deadlineEpochMs = effectiveTimeoutMs == Long.MAX_VALUE
-                        ? Long.MAX_VALUE
-                        : System.currentTimeMillis() + effectiveTimeoutMs;
+                long serverBudgetNanos = (timeout != null && timeout.compareTo(Duration.ZERO) > 0)
+                        ? toNanosSaturated(timeout) : Long.MAX_VALUE;
+                long effectiveTimeoutNanos = Math.min(serverBudgetNanos, clientDeadlineRemainingNanos());
                 AtomicReference<Throwable> timeoutErrRef = new AtomicReference<>();
                 AtomicReference<Boolean> timedOutRef = new AtomicReference<>(Boolean.FALSE);
                 // M6 修复：close() 可能被调用两次 —— 超时调度线程先 close(DEADLINE_EXCEEDED)，
@@ -319,7 +316,7 @@ public final class RpcInterceptor {
                     //   而不再是「服务端自己的 timeout」⇒ 与 Go 的 context.WithTimeout(ctx, timeout) 同语义。
                     //   ⚠️ 若客户端 deadline 已过期 ⇒ effective=0 ⇒ 调度器**立即** fire
                     //      （Go 侧：timeoutCtx.Done() 已就绪 ⇒ select 立即走超时分支 ⇒ 同款）
-                    long timeoutMs = effectiveTimeoutMs;
+                    long timeoutNanos = effectiveTimeoutNanos;
                     timeoutFutureHolder[0] = timeoutScheduler().schedule(() -> {
                         // Go 真源 rpc.go:69-71 —— 超时这一路有**两个**可观察面，本实现必须同时对齐：
                         //   ① wire：client 收到的 status description = timeoutCtx.Err().Error()
@@ -343,7 +340,7 @@ public final class RpcInterceptor {
                         } catch (Throwable ignored) {
                             // call 可能已经被业务关闭
                         }
-                    }, timeoutMs, TimeUnit.MILLISECONDS);
+                    }, timeoutNanos, TimeUnit.NANOSECONDS);
                 }
 
                 // 包装 ServerCall：拦截 close 做 span 属性标注
@@ -471,11 +468,12 @@ public final class RpcInterceptor {
                         // 🔴 A9（FB-04）：scope 必须**包住整个 handler 执行期**
                         //    ⇒ 业务代码 Span.current() 拿到的就是 server span
                         try (Scope ignored = otelCtx.makeCurrent()) {
-                            if (deadlineEpochMs == Long.MAX_VALUE) {
+                            if (effectiveTimeoutNanos == Long.MAX_VALUE) {
                                 super.onHalfClose();
                                 return;
                             }
-                            try (DeadlineState.Scope ignoredScope = DeadlineState.bindToCurrent(deadlineEpochMs)) {
+                            try (DeadlineState.Scope ignoredScope =
+                                         DeadlineState.bindRemainingNanos(effectiveTimeoutNanos)) {
                                 super.onHalfClose();
                             }
                         }
@@ -538,9 +536,9 @@ public final class RpcInterceptor {
                 .spanBuilder(method).setSpanKind(SpanKind.INTERNAL).startSpan();
         // DRIFT-018 修复（Java 化）：用 ThreadLocal DeadlineState 让 handle() 路径下的 worker
         // 线程感知超时，对应 Go 版 context.WithTimeout(ctx, timeout) 的 ctx.Done() 语义。
-        long deadlineEpochMs = (timeout == null || timeout.compareTo(Duration.ZERO) <= 0)
+        long deadlineNanos = (timeout == null || timeout.compareTo(Duration.ZERO) <= 0)
                 ? Long.MAX_VALUE
-                : System.currentTimeMillis() + timeout.toMillis();
+                : toNanosSaturated(timeout);
         try (Scope ignored = span.makeCurrent()) {
             Context otelCtx = Context.current();
             if (timeout == null || timeout.compareTo(Duration.ZERO) <= 0) {
@@ -567,17 +565,19 @@ public final class RpcInterceptor {
             Future<?> workerFuture = handleExecutor().submit(() -> {
                 // DRIFT-018 修复：把 deadline bind 到当前 worker 线程，
                 // 业务 catch InterruptedException 后通过 DeadlineState.isExpired() 感知
-                try (DeadlineState.Scope scope = DeadlineState.bindToCurrent(deadlineEpochMs)) {
+                try (DeadlineState.Scope scope = DeadlineState.bindRemainingNanos(deadlineNanos)) {
                     respHolder[0] = handler.handle(req);
                 } catch (Throwable e) {
                     errHolder[0] = e;
                 }
             });
 
-            long timeoutMs = timeout.toMillis();
+            long timeoutNanos = deadlineNanos;
             try {
                 // Future.get 直接阻塞到 worker 完成或超时——比原来 10ms 轮询更精确，CPU 占用更低。
-                workerFuture.get(timeoutMs, TimeUnit.MILLISECONDS);
+                // 🔴 DRIFT-COMMON-005：用**纳秒** ⇒ 亚毫秒的 timeout 不会被截成 0ms
+                //    （旧实现 timeout.toMillis() == 0 ⇒ get(0) 立即返回 ⇒ 请求被秒判超时）。
+                workerFuture.get(timeoutNanos, TimeUnit.NANOSECONDS);
                 Duration duration = Duration.between(start, Instant.now());
                 if (errHolder[0] != null) {
                     markRpcResult(otelCtx, method, errHolder[0], duration, slowThreshold);
@@ -704,16 +704,31 @@ public final class RpcInterceptor {
      * {@code ServerCall#close()} <b>不取消业务线程</b> ⇒ 框架限制，与 T-14 同根）
      * ⇒ **该层属 E38 的第 ② 层，Jason 2026-10-26 已拍板「另立项」** ⇒ 本轮不碰。
      */
-    private static long clientDeadlineRemainingMs() {
+    private static long clientDeadlineRemainingNanos() {
         try {
             // ⚠️ 必须用全限定名：本类 import 的是 OTel 的 io.opentelemetry.context.Context
             io.grpc.Deadline deadline = io.grpc.Context.current().getDeadline();
             if (deadline == null) {
                 return Long.MAX_VALUE;
             }
-            long remaining = deadline.timeRemaining(TimeUnit.MILLISECONDS);
+            // 🔴 DRIFT-COMMON-005：**必须取纳秒**。
+            //    旧实现取 MILLISECONDS ⇒ grpc-java 内部的纳秒精度被**截到毫秒**
+            //    ⇒ 客户端 deadline 的亚毫秒部分被丢弃（Go 侧 ctx 是纳秒精度）。
+            long remaining = deadline.timeRemaining(TimeUnit.NANOSECONDS);
             return remaining > 0 ? remaining : 0L;
         } catch (RuntimeException e) {
+            return Long.MAX_VALUE;
+        }
+    }
+
+    /**
+     * {@link Duration} → 纳秒的<b>饱和</b>换算（{@link Duration#toNanos()} 在溢出时抛
+     * {@link ArithmeticException} ⇒ 那种配置值应当视为「几乎无限」而不是让请求启动失败）。
+     */
+    private static long toNanosSaturated(Duration duration) {
+        try {
+            return duration.toNanos();
+        } catch (ArithmeticException overflow) {
             return Long.MAX_VALUE;
         }
     }
@@ -833,8 +848,56 @@ public final class RpcInterceptor {
     public static final class DeadlineState {
         private DeadlineState() {}
 
-        /** 当前线程的 deadline 过期时刻（epoch 毫秒）；未设置时 {@link #isExpired()} 返回 false。 */
-        private static final ThreadLocal<Long> DEADLINE = new ThreadLocal<>();
+        /**
+         * 当前线程的 deadline 过期时刻（<b>单调钟</b>纳秒，{@link System#nanoTime()} 域）；
+         * 未设置时 {@link #isExpired()} 返回 false。
+         *
+         * <p>🔴 <b>为什么存「单调钟纳秒」而不是「墙钟 epoch 毫秒」</b>（DRIFT-COMMON-005 修复）：
+         * <ul>
+         *   <li><b>Go 出处（逐条可核）</b>：标准库 {@code context.WithDeadline}
+         *       （{@code $GOROOT/src/context/context.go:625} · {@code :632}）把 deadline 存成
+         *       {@code time.Time}（字段见 {@code context.go:666}）⇒ <b>纳秒精度</b>；
+         *       而 {@code time.Time} <b>自带单调时钟读数</b>（{@code $GOROOT/src/time/time.go:152}
+         *       的 {@code ext int64} + {@code :164} 的 {@code hasMonotonic} 标志位）；
+         *       {@code time.Until(t)}（{@code time.go:1233}）在有单调读数时走
+         *       {@code subMono(t.ext, runtimeNano()-startNano)} ⇒ <b>纯单调</b>
+         *       ⇒ <b>NTP 校正 / {@code setSystemTime} / 虚拟机快照恢复都影响不到它</b>。</li>
+         *   <li><b>旧实现（已修）的两个问题</b>：
+         *       <ul>
+         *         <li><b>时基</b>：存的是 {@code System.currentTimeMillis()} 的 epoch 毫秒 ⇒ 墙钟
+         *             可被 NTP 校正 / 改系统时间 / 快照恢复<b>向前或向后跳</b>
+         *             ⇒ <b>倒跳</b>时 {@link #isExpired()} 长时间为 false（<b>超时不触发</b>）、
+         *             <b>前跳</b>时提前判过期；</li>
+         *         <li><b>精度</b>：毫秒粒度，且是在<b>创建时</b>就截断（{@code timeout.toMillis()}）
+         *             ⇒ 有效 deadline 时刻本身最多差 &lt; 1ms。</li>
+         *       </ul></li>
+         *   <li><b>本实现</b>：把「剩余预算」在<b>绑定瞬间</b>换算成单调钟纳秒存下
+         *       ⇒ ① 绑定之后<b>不受任何墙钟跳变影响</b>；② <b>纳秒精度</b>（不再截到毫秒）。</li>
+         * </ul>
+         *
+         * <p>⚠️ <b>与 {@code GoStyleRequestDeadline} 的关系</b>：那是<b>另一个载体</b>
+         * （出向 stub / api 线程的 HTTP 预算），它本来就用 {@code System.nanoTime()} + 纳秒
+         * ⇒ ⇒ <b>「出向已对齐」推不出「入向也对齐」</b> —— 本条就是<b>入向</b>那一侧。
+         */
+        private static final ThreadLocal<Long> DEADLINE_NANOS = new ThreadLocal<>();
+
+        /**
+         * 墙钟读数（<b>仅用于兼容入口</b> {@link #bindToCurrent(long)} 把 epoch 毫秒换算成预算）。
+         *
+         * <p>⚠️ <b>为什么是包级可见的可变字段</b>：本条修复的<b>唯一可观察行为</b>是
+         * 「墙钟跳变后 deadline 判定不受影响」⇒ ⇒ 而墙钟<b>改不了</b>（改系统时间要 root、
+         * 且会污染整台机器）⇒ ⇒ 只能<b>注入</b> ⇒ ⇒ 守门用它模拟一次 NTP 前跳/后跳。
+         *
+         * <p>🔴 <b>只允许测试改</b>：<b>包级私有</b> ⇒ 外部模块（16 个消费方）碰不到；
+         * 守门用 {@code try/finally} 复原 ⇒ ⇒ 不给生产留后门。
+         */
+        static java.util.function.LongSupplier wallClockMillis = System::currentTimeMillis;
+
+        /**
+         * 单调钟读数 —— 与 {@link #wallClockMillis} 同款（<b>包级私有 · 只允许测试改</b>），
+         * 用途是让守门<b>确定性地推进时间</b>（不必 {@code sleep}，也不受 CI 负载影响）。
+         */
+        static java.util.function.LongSupplier monotonicNanos = System::nanoTime;
 
         /*
          * ⚠️ 2026-10-25（{@code align/global} 收口提交）：原 {@code markExpired(long)}
@@ -865,15 +928,19 @@ public final class RpcInterceptor {
 
         /** 当前线程是否已过 deadline；false 包括"未设置"和"还有时间"。 */
         public static boolean isExpired() {
-            Long d = DEADLINE.get();
-            return d != null && System.currentTimeMillis() >= d;
+            Long d = DEADLINE_NANOS.get();
+            // ⚠️ 用**减法**而不是 `now >= d`：单调钟会回绕（292 年）⇒ 差值法仍正确
+            return d != null && monotonicNanos.getAsLong() - d >= 0;
         }
 
         /** 还剩多少毫秒到 deadline；未设置时返回 Long.MAX_VALUE。 */
         public static long remainingMillis() {
-            Long d = DEADLINE.get();
+            Long d = DEADLINE_NANOS.get();
             if (d == null) return Long.MAX_VALUE;
-            return Math.max(0L, d - System.currentTimeMillis());
+            long remainNanos = d - monotonicNanos.getAsLong();
+            if (remainNanos <= 0) return 0L;
+            // 🔴 **下取整**（对齐 Go：time.Until 返回 Duration，转毫秒即截断）
+            return remainNanos / 1_000_000L;
         }
 
         /**
@@ -891,10 +958,55 @@ public final class RpcInterceptor {
          * }</pre>
          *
          * <p>对应 Go 版 handler 在循环里 {@code select { case <-ctx.Done(): ... }}。
+         *
+         * <p>🔴 <b>兼容入口（DRIFT-COMMON-005 修复后的形态）</b>：入参仍是<b>墙钟 epoch 毫秒</b>
+         * （既有跨域调用方都这么传：{@code favorite-rpc/.../FavoriteAuthorityEndpointConfig.java:276}
+         * ＋ comment-rpc / favorite-rpc 的测试）⇒ ⇒ <b>签名与语义都不变</b>。
+         * <p>本方法在<b>绑定瞬间</b>把「墙钟 epoch 毫秒」换算成「剩余预算」，
+         * 再以<b>单调钟纳秒</b>存下 ⇒ ⇒
+         * <ul>
+         *   <li><b>到期时刻</b>仍是调用方给的那个墙钟时刻（语义不变）；</li>
+         *   <li>但<b>到期判定</b>不再受绑定之后的墙钟跳变影响（这才是修复点）。</li>
+         * </ul>
+         * <p>⚠️ <b>新代码请用 {@link #bindRemainingNanos(long)}</b> —— 它是<b>纳秒精度</b>、
+         * 且完全不依赖墙钟（生产路径已全部改用它）。
          */
         public static Scope bindToCurrent(long epochMillis) {
-            DEADLINE.set(epochMillis);
-            return () -> DEADLINE.remove();
+            long remainingMillis = epochMillis - wallClockMillis.getAsLong();
+            return bindRemainingNanos(saturatingToNanos(remainingMillis));
+        }
+
+        /**
+         * 绑定「从现在起还剩 N 纳秒」的预算（<b>单调钟 + 纳秒精度</b>）—— <b>生产路径用这个</b>。
+         *
+         * <p>⚠️ 与 {@link #bindToCurrent(long)} 的差别：① <b>纳秒</b>（不再被截到毫秒）；
+         * ② <b>完全不读墙钟</b> ⇒ ⇒ 预算来源由调用方给（客户端 deadline / 服务端 timeout），
+         * 载体内部不做任何墙钟换算。
+         *
+         * @param remainingNanos 剩余预算（纳秒）；{@link Long#MAX_VALUE} 表示「无期限」
+         *                       （与既有 {@code Long.MAX_VALUE} 哨兵同形）
+         */
+        public static Scope bindRemainingNanos(long remainingNanos) {
+            long now = monotonicNanos.getAsLong();
+            // 🔴 饱和加法：now + remainingNanos 溢出 ⇒ 会变成「负数」⇒ 误判为已过期
+            DEADLINE_NANOS.set(
+                    (remainingNanos == Long.MAX_VALUE || remainingNanos > Long.MAX_VALUE - now)
+                            ? Long.MAX_VALUE
+                            : now + remainingNanos);
+            return () -> DEADLINE_NANOS.remove();
+        }
+
+        /**
+         * 毫秒 → 纳秒的<b>饱和</b>换算（负数原样保留 ⇒ 仍表示「已过期」）。
+         */
+        private static long saturatingToNanos(long millis) {
+            if (millis <= 0) {
+                return millis;
+            }
+            if (millis > Long.MAX_VALUE / 1_000_000L) {
+                return Long.MAX_VALUE;
+            }
+            return millis * 1_000_000L;
         }
 
         /** try-with-resources 析构接口；业务方通常不直接调用。 */

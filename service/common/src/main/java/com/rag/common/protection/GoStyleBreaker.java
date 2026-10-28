@@ -6,7 +6,7 @@ import java.util.function.DoubleSupplier;
 /**
  * Go {@code core/breaker/googlebreaker.go} 的逐行 Java 复刻 —— <b>每个路由一个实例</b>。
  *
- * <p><b>Go 出处</b>：{@code rest/handler/breakerhandler.go:21}
+ * <p><b>Go 出处</b>：{@code rest/handler/breakerhandler.go:19}
  * {@code brk := breaker.NewBreaker(breaker.WithName(strings.Join([]string{method, path}, "://")))}
  * ⇒ <b>breaker 的隔离单位是 {@code METHOD://path}，不是全局</b>。
  *

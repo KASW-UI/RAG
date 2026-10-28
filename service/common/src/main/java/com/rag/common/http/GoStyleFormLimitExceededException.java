@@ -6,7 +6,7 @@ package com.rag.common.http;
  *
  * <h2>🔴 为什么它是「普通」RuntimeException，而不是 {@code BusinessException}</h2>
  * <pre>
- * go-zero@v1.10.2/rest/httpx/responses.go:141-172  doHandleError
+ * go-zero@v1.10.2/rest/httpx/responses.go:142-173  doHandleError
  *   code, body := handler(err)
  *   // handler = SetErrorHandler 注册的那个：
  *   //   code = ErrorServerCommon(5001)（因为 err 不是 *CodeError，取不到 code）
