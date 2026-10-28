@@ -138,7 +138,7 @@ public class LikeTaskProgressPublisher {
             if (userTotalError != null) {
                 // Go: logger.LogBusinessErr(l.ctx, errmsg.ErrorRedisSelect,
                 //          fmt.Errorf("sync task user progress failed: %w", err))
-                // ⇒ 记业务错误 5011（Go like/common/errmsg.go:51 ErrorRedisSelect = 5011），
+                // ⇒ 记业务错误 5011（Go service/like/common/errmsg/errmsg.go:51 ErrorRedisSelect = 5011），
                 //   **不推送**（Go 的 if/else-if 结构：err 分支下 totalLikesGiven 不参与推送）。
                 // ⚠️ 用 IllegalStateException 包装是为了复刻 Go 的 %w 包裹语义
                 //   ⇒ error_reason 字段形态与 Go 一致（"sync task user progress failed: …"）。

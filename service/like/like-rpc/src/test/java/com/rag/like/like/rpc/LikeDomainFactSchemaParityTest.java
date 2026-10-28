@@ -35,7 +35,7 @@ import com.rag.like.like.rpc.support.GrpcTestPort;
  * <h2>逐项 Go 依据（全部给到消费点）</h2>
  * <ol>
  *   <li><b>列类型 integer 而非 bigint</b>：
- *       {@code gorm@v1.31.2/schema/field.go:330-341} 给 int32 算 {@code Size = 32}
+ *       {@code gorm.io/gorm@v1.31.1/schema/field.go:330-341} 给 int32 算 {@code Size = 32}
  *       → {@code gorm.io/driver/postgres@v1.6.0/postgres.go:231-234}
  *       {@code case size <= 32: return "integer"}；</li>
  *   <li>{@code like_new_fact_has_dc_wire} CHECK：Go {@code migrations/002_like_dc_wire.sql}（NOT VALID）；</li>
