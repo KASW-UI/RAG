@@ -19,7 +19,9 @@ run_gate() {
 
 TMP_OUT="$(mktemp)"
 EMPTY_CACHE="$(mktemp -d)"
-trap 'rm -f "${TMP_OUT}"; rm -rf "${EMPTY_CACHE}"' EXIT
+# ⚠️ **不删临时目录**：`rm -rf` 在本机会被回收站守卫拦下（mavis-trash 失效 ⇒ 命令被整体拒绝）
+#    ⇒ 留着 `/var/folders/.../tmp.*` 由系统清理（比让脚本在 EXIT 时自杀强）。
+trap 'rm -f "${TMP_OUT}"' EXIT
 
 # mutate <文件> <旧串> <新串>
 mutate() {

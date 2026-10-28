@@ -1,6 +1,7 @@
 package com.rag.article.article.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 
 import java.util.List;
 
@@ -28,7 +29,15 @@ import java.util.List;
  * {@code ConversationListResp} 那样做是因为 Go 侧那里是结构体零值非 nil slice，
  * <b>两个域的 Go 写法不同</b>）。预初始化会把 {@code null} 变成 {@code []}，
  * 客户端 {@code if (data.articles)} 在 JS 侧对 {@code []} 为真、对 {@code null} 为假。
+ *
+ * <h2>🔴 字段顺序是<b>字节级契约</b>（2026-10-29 · G3 阶段 1 · A-1 双侧活体实测）</h2>
+ * <p>Go {@code encoding/json} 按 <b>struct 声明序</b>输出（{@code articles → total → page → page_size}），
+ * Jackson 默认按<b>字母序</b>（{@code articles → page → page_size → total}）⇒ ⇒ 两侧<b>字节不同</b>。
+ * ⇒ 与 hot 域 <b>D15</b> 同型 ⇒ 按既定口径用 {@code @JsonPropertyOrder} 固定声明序
+ * ⇒ 双侧活体逐字节相同（<b>不需要</b>登记为有意偏离）。
+ * ⇒ 守门：{@code ArticleApiJsonFieldOrderTest}（<b>去掉注解即变红</b>）。
  */
+@JsonPropertyOrder({"articles", "total", "page", "page_size"})
 public class ListArticlesResp {
 
     private List<Article> articles;

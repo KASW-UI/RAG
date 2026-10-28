@@ -49,7 +49,9 @@ SRC_PB="service/hot/rpc/pb/hot.pb.go"
 MODULE="service/hot/hot-rpc"
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "${TMP}"' EXIT
+# ⚠️ **不删临时目录**：`rm -rf` 在本机会被回收站守卫拦下（mavis-trash 失效 ⇒ 命令被整体拒绝）
+#    ⇒ 留着 `/var/folders/.../tmp.*` 由系统清理（比让脚本在 EXIT 时自杀强）。
+trap ':' EXIT
 
 [ -f "${GO_REPO}/${SRC_PB}" ] || die "找不到 Go 真源：${GO_REPO}/${SRC_PB}（用 GO_REPO=... 指定）"
 [ -f "${GO_REPO}/go.mod" ] || die "找不到 Go 真源 go.mod：${GO_REPO}/go.mod"
