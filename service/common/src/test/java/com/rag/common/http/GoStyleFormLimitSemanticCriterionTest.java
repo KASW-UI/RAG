@@ -5,8 +5,13 @@ import com.rag.common.http.GoStyleFormLimitMode.Mode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -65,29 +70,42 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("🔴 form 闸门的开关判据 = 语义可达性（FB-02 + G3 轴② · 逐域取证表）")
 class GoStyleFormLimitSemanticCriterionTest {
 
-    /** 10 个 api 域的模块路径（新增 / 删除 api 域 ⇒ 本表必须同步 ⇒ 守门会红）。 */
-    private static final List<String> ALL_API_MODULES = List.of(
-            "service/article/article-api",
-            "service/comment/comment-api",
-            "service/favorite/favorite-api",
-            "service/follow/follow-api",
-            "service/hot/hot-api",
-            "service/like/like-api",
-            "service/message/message-api",
-            "service/task/task-api",
-            "service/users/user/user-api",
-            "service/users/admin/admin-api");
+    /**
+     * 🔴 2026-10-28：<b>本类不再持有「api 域清单」的字面量</b> —— 清单的真源改成
+     * <b>磁盘上真实存在的 {@code *-api} 模块目录</b>。
+     *
+     * <p><b>为什么必须改</b>：旧版是一条
+     * {@code assertEquals(Set.copyOf(ALL_API_MODULES), covered, …)}，
+     * 而 {@code ALL_API_MODULES} 是<b>测试里手抄的 10 个路径字面量</b>
+     * ⇒ ⇒ 全类<b>没有任何一条断言去扫文件系统</b>
+     * ⇒ ⇒ <b>新增第 11 个 api 域时，只要没人记得同步那份 {@code List.of(...)}，守门照绿</b>
+     * ⇒ ⇒ 与本类自己的 DisplayName「新增域 ⇒ 必须补取证」<b>直接矛盾</b>
+     * （AGENTS.md §3.3.3：「跑绿」≠「对」；判据必须能被人为破坏而变红）。
+     *
+     * <p><b>判据的形状</b>：<b>磁盘上的 api 模块目录集合</b> == <b>语义可达性表的覆盖集</b>
+     * ⇒ ⇒ 增删任一 api 域 ⇒ 两边必有一边对不上 ⇒ ⇒ <b>守门变红</b>。
+     *
+     * <p>⚠️ <b>只按目录名判定，不要求里面有 {@code pom.xml}</b>：
+     * 「新增一个空目录」是<b>最弱</b>的变异 ⇒ 判据必须连它都能抓住
+     * ⇒ ⇒ 目录名即判据（与 {@code GoStyleRedisClientShadowingGateTest} 的同款纪律一致）。
+     */
+    private static final String API_MODULE_DIR_SUFFIX = "-api";
 
     @Test
     @DisplayName("① 表覆盖**全部** api 域，且不多不少（新增域 ⇒ 必须补取证）")
     void tableCoversEveryApiModule() {
         Set<String> covered = GoStyleFormLimitMode.SEMANTIC_REACHABILITY.stream()
                 .map(DomainReachability::module)
-                .collect(java.util.stream.Collectors.toSet());
+                .collect(Collectors.toSet());
 
-        assertEquals(Set.copyOf(ALL_API_MODULES), covered,
-                "语义可达性表必须与 api 域清单**逐条一致**"
-                        + "（新增/删除 api 域 ⇒ 必须同步补/删取证行，否则下一个域会没有判据）");
+        Set<String> actual = actualApiModules(repoRoot());
+
+        assertEquals(actual, covered,
+                "语义可达性表必须与**磁盘上真实存在的 api 模块目录**逐条一致"
+                        + "（新增/删除 api 域 ⇒ 必须同步补/删取证行，否则下一个域会没有判据）"
+                        + "\n磁盘上实际存在的 api 模块（" + actual.size() + " 个）：" + actual
+                        + "\n表里登记的（" + covered.size() + " 个）：" + covered
+                        + "\n只在一侧出现的模块 ⇒ " + symmetricDifference(actual, covered));
     }
 
     @Test
@@ -163,7 +181,8 @@ class GoStyleFormLimitSemanticCriterionTest {
     }
 
     @Test
-    @DisplayName("⑥ 查询入口：按模块路径查语义模式 / 查是否登记偏离 / 未知域返回 null（不许瞎猜）")
+    @DisplayName("⑥ 查询入口：按模块路径查语义模式 / 查是否登记偏离 / 未知域返回 null（不许瞎猜）"
+            + " + 索引与磁盘上的 api 域一一对应（不锁死数字）")
     void lookupApiBehaves() {
         assertEquals(Mode.OFF, GoStyleFormLimitMode.semanticModeOf("service/task/task-api"));
         assertEquals(Mode.ENVELOPE, GoStyleFormLimitMode.semanticModeOf("service/like/like-api"));
@@ -176,6 +195,116 @@ class GoStyleFormLimitSemanticCriterionTest {
         assertNull(GoStyleFormLimitMode.reachabilityOf("service/does/not-exist"));
         assertFalse(GoStyleFormLimitMode.hasRegisteredDeviation("service/does/not-exist"));
 
-        assertEquals(10, GoStyleFormLimitMode.reachabilityIndex().size());
+        // 🔴 2026-10-28：旧版这里是 assertEquals(10, reachabilityIndex().size())
+        //    ⇒ 那是**硬编码的数字**：域一增减，它要么变成假绿、要么变成无谓的红
+        //    ⇒ ⇒ 改成不变量式：「索引条数 == 磁盘上真实存在的 api 域数」
+        //    （索引按 module 去重 ⇒ 这一条同时钉住「不重」与「不漏」）。
+        Set<String> actual = actualApiModules(repoRoot());
+        assertEquals(actual.size(), GoStyleFormLimitMode.reachabilityIndex().size(),
+                "查询索引必须**每个真实存在的 api 域恰好一条**（不重不漏）"
+                        + " ⇒ ⇒ 判据取自磁盘，不锁死数字（域一增减，这条自动跟着变）"
+                        + "\n磁盘上实际存在的 api 模块（" + actual.size() + " 个）：" + actual);
+    }
+
+    // ==================================================================
+    // ⑦ 判据自检：扫描器不是空转（否则①可能是「什么都没扫到」的假绿）
+    // ==================================================================
+
+    @Test
+    @DisplayName("⑦ 判据自检：临时目录里造一个假 api 域目录 ⇒ 扫描器**必须**报出它")
+    void scannerActuallyReportsAnApiModule() throws IOException {
+        Path fakeRoot = Files.createTempDirectory("g4-formlimit-selftest");
+        try {
+            Path fake = fakeRoot.resolve("service/fake-domain/fake-domain-api");
+            Files.createDirectories(fake);
+
+            Set<String> found = actualApiModules(fakeRoot);
+
+            assertEquals(Set.of("service/fake-domain/fake-domain-api"), found,
+                    "扫描器必须在临时目录里报出那个假 api 域目录（**哪怕它是空目录**）"
+                            + " ⇒ ⇒ 否则断言① 可能是「什么都没扫到」的**假绿**"
+                            + " ⇒ ⇒ 实际扫到：" + found);
+        } finally {
+            deleteRecursively(fakeRoot);
+        }
+    }
+
+    // ==================================================================
+    // helpers
+    // ==================================================================
+
+    /**
+     * 扫出<b>真实存在</b>的 api 模块目录（相对仓库根，{@code service/…} 形式）。
+     *
+     * <p>⚠️ <b>只按目录名判定</b>（名字以 {@code -api} 结尾），<b>不要求</b>里面有 {@code pom.xml}
+     * ⇒ ⇒ 连「新增一个空目录」这种最弱变异都抓得住。
+     *
+     * @param root 仓库根（或自检用的临时目录）
+     * @return 相对路径集合（已排除构建产物目录 {@code target}）
+     */
+    private static Set<String> actualApiModules(Path root) {
+        Set<String> out = new TreeSet<>();
+        Path serviceDir = root.resolve("service");
+        if (!Files.isDirectory(serviceDir)) {
+            throw new IllegalStateException("找不到 service 目录：" + serviceDir
+                    + " ⇒ ⇒ 扫描器无法工作 ⇒ 不能当成「没有多余模块」⇒ 直接炸");
+        }
+        try (Stream<Path> stream = Files.walk(serviceDir, 10)) {
+            for (Path p : (Iterable<Path>) stream.filter(Files::isDirectory)::iterator) {
+                Path name = p.getFileName();
+                if (name == null || !name.toString().endsWith(API_MODULE_DIR_SUFFIX)) {
+                    continue;
+                }
+                String rel = root.relativize(p).toString().replace('\\', '/');
+                if (rel.contains("/target/")) {
+                    // 构建产物目录，不是模块
+                    continue;
+                }
+                out.add(rel);
+            }
+        } catch (IOException e) {
+            // 扫不动 ⇒ 不能当成「干净」⇒ 直接炸（AGENTS.md §3.3：不报错的失效）
+            throw new IllegalStateException("扫 api 模块目录失败：" + e.getMessage(), e);
+        }
+        return out;
+    }
+
+    /** 两个集合的对称差（只在一侧出现的元素）⇒ 用于把差异直接印在断言消息里。 */
+    private static Set<String> symmetricDifference(Set<String> a, Set<String> b) {
+        Set<String> out = new TreeSet<>(a);
+        out.removeAll(b);
+        Set<String> onlyInB = new TreeSet<>(b);
+        onlyInB.removeAll(a);
+        out.addAll(onlyInB);
+        return out;
+    }
+
+    /**
+     * 仓库根目录 —— <b>从本类的 code source 向上找</b>（不依赖工作目录）。
+     *
+     * <p>⚠️ 不能用 {@code user.dir}：surefire 的工作目录是<b>模块目录</b>（{@code service/common}），
+     * 而从 IDE 跑时又是仓库根 ⇒ ⇒ 两种布局都对 ⇒ ⇒ 必须走 code source
+     * （与 {@code GoStyleRedisClientShadowingGateTest#repoRoot()} 同款纪律）。
+     */
+    private static Path repoRoot() {
+        Path here = Path.of(GoStyleFormLimitSemanticCriterionTest.class.getProtectionDomain()
+                .getCodeSource().getLocation().getPath());
+        for (Path p = here; p != null; p = p.getParent()) {
+            if (Files.isDirectory(p.resolve("service")) && Files.isRegularFile(p.resolve("pom.xml"))) {
+                return p;
+            }
+        }
+        throw new IllegalStateException("找不到仓库根（从 " + here + " 向上没有同时含 service/ 与 pom.xml 的目录）");
+    }
+
+    private static void deleteRecursively(Path root) throws IOException {
+        if (!Files.exists(root)) {
+            return;
+        }
+        try (Stream<Path> stream = Files.walk(root)) {
+            for (Path p : (Iterable<Path>) stream.sorted((a, b) -> b.getNameCount() - a.getNameCount())::iterator) {
+                Files.deleteIfExists(p);
+            }
+        }
     }
 }

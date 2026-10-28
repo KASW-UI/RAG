@@ -33,7 +33,10 @@ public final class JwtUtil {
      * 把 secret 字符串补齐到 ≥32 字节（HS256 要求 key ≥256 bits），供签发/验签共用。
      *
      * <p><b>为什么是 public</b>：jjwt 0.12 强制要求 key ≥ 256 bit，而 admin 侧的默认密钥
-     * {@code yU-hCm)2*?NQmWG} 只有 15 字节。任一调用方（{@code JwtUtil.getToken} 签发、
+     * <b>只有 15 字节</b>（真源出处：Go {@code service/user/admin/api/etc/admincenter.yaml:11}
+     * 的 {@code AdminAuth.AccessSecret}；<b>此处只记「形状/长度」，不记明文</b> ——
+     * 生产密钥不得进仓 ⇒ 2026-10-28 起本 javadoc 不再写出密钥值本身）。
+     * 任一调用方（{@code JwtUtil.getToken} 签发、
      * 各 api 模块的 JWT 拦截器/过滤器验签）<b>必须共用同一份补齐过的 key</b>，否则：
      * <ul>
      *   <li>签发端用未补齐的 key → {@code WeakKeyException}</li>
@@ -45,11 +48,16 @@ public final class JwtUtil {
      * <p>按密码学常识，15 字节密钥与「15 字节 + 17 个 0」的 32 字节密钥
      * <b>应当</b>算出不同的 HMAC。但实测<b>逐字节相同</b>：
      * <pre>
-     *   raw  len=15 hex=79552d68436d29322a3f4e516d5747
-     *   pad  len=32 hex=79552d68436d29322a3f4e516d57470000000000000000000000000000000000
-     *   sig(rawKey)    = 19a0e1d0ee5bbc1cf0043765f462f5d9f51a19502a4fae899f06c6792f94a2a6
-     *   sig(paddedKey) = 19a0e1d0ee5bbc1cf0043765f462f5d9f51a19502a4fae899f06c6792f94a2a6
+     *   raw  len=15 hex=666978747572652d61646d696e3135
+     *   pad  len=32 hex=666978747572652d61646d696e31350000000000000000000000000000000000
+     *   sig(rawKey)    = 859b1e02f51e3287295c5b2f22b9effa3802c5f30759dc16fccaeb4096713472
+     *   sig(paddedKey) = 859b1e02f51e3287295c5b2f22b9effa3802c5f30759dc16fccaeb4096713472
      * </pre>
+     * <p>⚠️ 上面这组 hex/sig 是<b>等长夹具</b>（15 字节，形状与真源 admin 默认密钥一致）的实测值，
+     * <b>不是</b>真源密钥本身 —— hex 编码可逆 ⇒ 把真值写进本文件等于二次泄露
+     * ⇒ 2026-10-28 起本 javadoc 只保留「形状 + 结论」，不保留真值或其可逆编码。
+     * sig 的被签消息为空串（{@code HMAC-SHA256(key, "")}），可自行复算。
+     * 该等价性<b>与密钥取值无关</b>（任意短密钥都成立 ⇒ 夹具的实测结果同样成立）。
      * 原因是 <b>HMAC 自身就会把短于分组尺寸（64 字节）的密钥零填充</b>（RFC 2104 §2 第 2 步：
      * 密钥短于 B 时末尾补 0 到 B 字节）。两种写法补到 64 字节后<b>得到完全相同的 K′</b>。
      * <p>Go 侧 {@code service/user/common/jwt/jwt.go:14} {@code token.SignedString([]byte(secretKey))}
