@@ -114,7 +114,7 @@
 
 | 项 | 值 |
 |---|---|
-| **全域坑位条目** | **315 条** / **23 份编号式台账**（另 **14 份散文式台账**用散文标题、不计入条数 · **11 份 0 字节**坑位待填）⇒ **口径由 `tools/check-ledger-count.py` 写死**（标题文本以 `PIT-`/`PF-`/`P-` 开头且以 `-<数字>` 结尾）⇒ **数字是机器生成的，不是手抄的** |
+| **全域坑位条目** | **335 条** / **23 份编号式台账**（另 **14 份散文式台账**用散文标题、不计入条数 · **11 份 0 字节**坑位待填）⇒ **口径由 `tools/check-ledger-count.py` 写死**（标题文本以 `PIT-`/`PF-`/`P-` 开头且以 `-<数字>` 结尾）⇒ **数字是机器生成的，不是手抄的** |
 | **编号前缀族** | **18 个具体前缀**（实测 2026-10-27 · 口径同上）：`P-` · `P-ADMINAPI-` · `P-HOTAPI-` · `P-HOTRPC-` · `P-MSGAPI-` · `PF-ARTICLE-RPC-` · `PIT-COMMENT-API-` · `PIT-COMMENT-RPC-` · `PIT-FAV-API-` · `PIT-FAV-COMMON-` · `PIT-FAV-PROTO-` · `PIT-FAV-RPC-` · `PIT-GLOBAL-` · `PIT-LANE-` · `PIT-LIKE-RPC-` · `PIT-LIKEAPI-` · `PIT-USERS-SHARED-` · `PIT-USERSCOMMON-` |
 | **编号撞号** | **22 处** —— 见下方「编号撞号」 |
 

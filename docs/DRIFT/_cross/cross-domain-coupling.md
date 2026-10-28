@@ -401,6 +401,14 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
       "message",
       "task"
     ],
+    "GoStyleFormLimitMode": [
+      "message",
+      "task"
+    ],
+    "GoStyleFormValueLimitInterceptor": [
+      "message",
+      "task"
+    ],
     "GoStyleFormValues": [
       "article"
     ],
@@ -409,6 +417,7 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
       "favorite",
       "follow",
       "hot",
+      "like",
       "message",
       "users"
     ],
@@ -429,6 +438,11 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
     "GoStyleMaxConnsFilter": [
       "article",
       "favorite",
+      "message",
+      "task"
+    ],
+    "GoStylePathNormalizingFilter": [
+      "like",
       "message",
       "task"
     ],
@@ -455,6 +469,9 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
     "GoStyleRecoverInterceptor": [
       "message"
     ],
+    "GoStyleRedisClientAutoConfiguration": [
+      "users"
+    ],
     "GoStyleRequestDeadline": [
       "article",
       "comment",
@@ -472,14 +489,23 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
       "message",
       "task"
     ],
+    "GoStyleRpcBreakerInterceptor": [
+      "message",
+      "task"
+    ],
     "GoStyleRpcProtectionChain": [
       "comment",
       "favorite",
       "follow",
       "hot",
       "like",
+      "message",
       "task",
       "users"
+    ],
+    "GoStyleRpcSheddingInterceptor": [
+      "message",
+      "task"
     ],
     "HttpMiddlewareFilter": [
       "article",
@@ -503,8 +529,10 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
       "users"
     ],
     "MqConsumer": [
+      "article",
       "comment",
       "hot",
+      "like",
       "task"
     ],
     "ObservabilityLifecycle": [
@@ -538,6 +566,9 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
       "like",
       "message",
       "users"
+    ],
+    "RpcInterceptor": [
+      "like"
     ],
     "RpcServerInterceptorFactory": [
       "comment",
