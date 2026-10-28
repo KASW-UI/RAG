@@ -447,6 +447,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 | `S1-FOLLOW-010` | 共享层 404 body 字节数注释写成「20」（实测 19） | **P3** | **B**（文档面） | 🔴 OPEN · 上报 G4 |
 | `S1-FOLLOW-011` | like 域真 Tomcat 测试沿用同一错数（「20」） | **P3** | **B**（文档面） | 🔴 OPEN · 上报 G2 |
 | 🆕 `S1-FOLLOW-012` | **follow 域无独立失败路径矩阵** · 基线 §九 `G-13` | **P1**（P0#2 的证据面） | **D**（已实现） | ✅ **本轮闭合**（`T11` · 8 端点 × 4 类失败 × **真 Tomcat** = **62 条**全绿）⇒ ⚠️ **P0#2 本身仍受其余 3 域未补的制约 ⇒ 不因此判成 ✅** |
+| 🆕 `S1-USERS-010` | **`admin-api` 的注释把 503 body 的字节数写成 15，断言用的是 16** —— `AdminApiRealTomcatResponseBytesTest.java:266` 写「线上是 Content-Length: **15**」，而紧邻的断言用 `GO_TIMEOUT_CONTENT_LENGTH = "Request Timeout".length() + 1` = **16** ⇒ 注释**漏算了 `fmt.Fprintln` 补的那个 `\n`** ⇒ 与 follow 域的「20 vs 19」**同族**（字节数少算尾随换行） | **P3**（**仅注释**，断言本身正确 ⇒ 一直绿） | **D**（已实现） | ✅ **本轮自修并复跑**（`AdminApiRealTomcatResponseBytesTest` **3/3 绿**）|
 
 ---
 

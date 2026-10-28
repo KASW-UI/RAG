@@ -4747,3 +4747,41 @@ mvn -B -o -DargLine=-Xmx2g -am -pl service/users/user/user-api,service/users/use
 ⇒ 段归属仍落在共享层预分配的 **follow 域段 22300–22399** 内 ⇒ ② 段其余判据（**不落 OS 临时段 49152–65535**、**不撞 Testcontainers 段 22700–22999**、子段互不重叠）**全部满足** ⇒ ② 段**实跑通过**。
 
 ⇒ 详细矩阵与证据 ⇒ [`docs/DRIFT/follow/vs-common.md` §13](../follow/vs-common.md) ＋ [`docs/DRIFT/follow/stage1-admission.md` §4.2](../follow/stage1-admission.md)。
+
+---
+
+## 68. 🟢 **「注释里的字节数漏算尾随换行」族** —— 三域三处 · G2 已修 like · **G1 自捕并修 admin**（2026-10-29 · G1 lane）
+
+### 68.1 起因（G2 来信 ⇒ 我域自查 ⇒ 自捕第三处）
+
+| # | 位置 | 注释写的 | 真实 / 断言用的 | 状态 |
+|---|---|---|---|---|
+| ① | 共享层 `service/common/.../GoStyleRouterErrorResponses.java:83` | 「全长 **20** 字节」 | **19**（`"404 page not found\n"` = 18 + 1） | 🔴 **G4 写权** ⇒ 已登记 `S1-FOLLOW-010`，**G1 不碰** |
+| ② | like 域 `LikeApiRouterErrorRealTomcatTest.java:46` / `:187` | 「全长 **20** 字节」/「一致（**20**）」 | **19** | ✅ **G2 已修**（commit `aee9b0c`）· G2 独立复算过才改 |
+| ③ | **admin 域** `AdminApiRealTomcatResponseBytesTest.java:266` | 「线上是 Content-Length: **15**」 | **16**（`"Request Timeout".length() + 1`） | ✅ **G1 本轮自捕并修**（`S1-USERS-010`） |
+
+### 68.2 ③ 的成因（**与 ①② 不是同一个 body，但同一族的错法**）
+
+③ 写的是 **503 超时 body**，不是 404 body ⇒ 但错法同源：
+- Go 的 `http.Error(w, httpTimeoutBody, 503)` ⇒ `fmt.Fprintln` **补一个尾随 `\n`** ⇒ body = `"Request Timeout\n"` = 15 + 1 = **16** 字节
+- 该文件的**常量与断言都是对的**（`GO_TIMEOUT_CONTENT_LENGTH = GO_TIMEOUT_BODY.length() + 1` = 16；断言消息也写「15 字节 + 尾随换行 1 字节」）
+- ⇒ **只有紧邻断言上方那一行注释**写成了 15 ⇒ **注释与它下面两行的代码自相矛盾**
+
+⇒ 📌 **判定式（可复用）**：凡注释里出现「N 字节」而 body 来自 Go 的 `http.Error` / `fmt.Fprintln` ⇒ **N 必须含那个尾随 `\n`**；
+⇒ 只数**正文**（`len`）是这族错误的**唯一成因** ⇒ ⇒ 复核时**先看断言用的那个数**，别只读注释。
+
+### 68.3 本轮处置
+
+- **域侧能自修的域侧修**（AGENTS.md §5.3c）⇒ ③ 在 **G1 写权内**（`service/users/admin/**`）⇒ **已修**
+- ① 在 **G4 写权** ⇒ **只登记上报**，不动（`S1-FOLLOW-010`）
+- ② 在 **G2 写权** ⇒ G2 **已自行修好**（`aee9b0c`）⇒ G1 **不重复派单**
+- ⚠️ **本轮我域自查命令**（G2 来信建议，各 lane 自查用）：
+  ```
+  grep -rn "404 page not found" service/<你的域> --include='*.java' | grep -v "/target/"
+  ```
+  ⇒ **我域（users + follow）命中仅 3 处，全部在 G1 本轮新增的 `FollowApiFailurePathMatrixTest.java` 内，且已写 19（正确）** ⇒ **零残留**；
+  ⇒ 另扫了「Content-Length」的全部出现处 ⇒ 其余命中都是**别的 body**（400 / 503 / 空 body）或 **curl 观测原文**（`AdminApiPlainText400HeaderProbeTest.java:30` 的「Content-Length: 95」是 2026-10-22 逐字抄的 Go 侧响应，**不是计算值** ⇒ 无需改）
+
+### 68.4 复验
+
+`AdminApiRealTomcatResponseBytesTest` **3/3 绿** · `BUILD SUCCESS`（日志 `/tmp/g1log/g1-adminbytes.log`）⇒ **注释订正零行为变化**（断言一个字没动）。

@@ -263,7 +263,12 @@ class AdminApiRealTomcatResponseBytesTest {
                 "Go: http.Error 写 body + 尾随换行 ⇒ 必须是 \"Request Timeout\\n\"。实际=["
                         + (resp.body() == null ? "null" : resp.body().replace("\n", "\\n")) + "]");
 
-        // Go 的 net/http 收尾时按缓冲内容算长度 ⇒ 线上是 Content-Length: 15。
+        // Go 的 net/http 收尾时按缓冲内容算长度 ⇒ 线上是 Content-Length: 16。
+        // ⚠️ **2026-10-29 订正**：本行原写「Content-Length: 15」⇒ **与紧邻的断言矛盾**
+        //   （断言用的是 GO_TIMEOUT_CONTENT_LENGTH = "Request Timeout".length() + 1 = **16**）
+        //   ⇒ 15 是「只有正文、不含尾随换行」的长度 ⇒ **漏了 fmt.Fprintln 补的那个 \n**。
+        //   同源事件：follow 域的 404 body 被写成「20」（真实 19）⇒ G2 已在 like 域订正为 19
+        //   ⇒ 三个域各有一处「**注释里的字节数少/多算了尾随换行**」⇒ 同一族的注释漂移。
         // RAG 侧靠共享层 writeTimeoutResponse 里那句显式 setContentLength 对齐。
         String cl = resp.headers().firstValue("content-length").orElse(null);
         assertEquals(String.valueOf(GO_TIMEOUT_CONTENT_LENGTH), cl,
