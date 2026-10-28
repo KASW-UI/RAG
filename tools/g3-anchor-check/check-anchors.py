@@ -22,6 +22,11 @@
       按真源 `go.mod` pin 的版本 ⇒ 与真源实际编译的那一份一致）
     · **RAG 自己的** 文件（`application.yml` / `db/migration/*.sql`）—— 有些注释指的是 RAG 侧文件
 
+🔴 **输入根探针（`probe_roots()`）—— 头尾各跑一次**：
+    · 头探针不过 ⇒ **exit 2**（**绝不**静默降级成「少查了几个根 ⇒ 数字看着更干净」）
+    · 尾探针与头探针不一致 ⇒ **exit 2**（module cache 可见性**会间歇** ⇒ 本次报数不可复算）
+    · 探针结果**随数字一起报出** ⇒ 同一指标在两种输入状态下是两个数
+
 ⚠️ 解析器必须**够宽**，否则会把「我解析不了」伪装成「引用是错的」：
     · 模块路径是**多段**的（`gorm.io/gorm` / `github.com/golang-jwt/jwt/v4`）
     · 引用里常**省掉 host 段**（`golang-jwt/jwt/v4` / `prometheus/client_golang`）
@@ -35,7 +40,8 @@
     python3 tools/g3-anchor-check/check-anchors.py --domains article    # 扫指定域
     python3 tools/g3-anchor-check/check-anchors.py --all                # 扫全部 10 域
 
-退出码：0 = 无漂移；1 = 有待查项（行号越界 / 空行 / 文件找不到 / 版本写错）；2 = 自身故障。
+退出码：0 = 无漂移；1 = 有待查项（行号越界 / 空行 / 文件找不到 / 版本写错）；
+        2 = **输入不可见 / 自身故障**（探针不过 ⇒ 本次报数不可信 ⇒ 不出结论）。
 """
 import argparse
 import os
@@ -66,6 +72,15 @@ PINNED = {
     "github.com/golang-jwt/jwt/v4": "v4.5.2",
     "github.com/jackc/pgx/v5": "v5.10.0",
     "github.com/prometheus/client_golang": "v1.23.2",
+    # 🆕 这两行是**假阳性簇的根因**（G4 反馈单 1 张 · 2026-10-29）：
+    #    真源 `go.mod:27` / `:11` 明明 pin 着，但缺了它们 ⇒ 带版本前缀的路径解析不到
+    #    ⇒ 回退**裸文件名匹配** ⇒ 撞上**同名但行数完全不同的另一个文件**
+    #    ⇒ 报「行号越界 / 文件找不到」⇒ 实测 29/56 = 52% 是假阳性。
+    #    ⚠️ 版本必须取真源 `go.mod` 的 pin —— module cache 里同一模块可能躺着多个版本
+    #       （go-zero 就同时有 v1.10.0 / v1.10.2 / v1.10.3）⇒ 读错版本**同样是漂移**
+    #       （同 `docs/Pitfalls/global/common-tails.md` PIT-GLOBAL-001）。
+    "gorm.io/driver/postgres": "v1.6.0",   # 真源 go.mod:27
+    "github.com/lovoo/goka": "v1.1.16",    # 真源 go.mod:11
 }
 
 EXTS = (".go", ".sql", ".yaml", ".yml")
@@ -286,12 +301,64 @@ def resolve(rel: str, idx, alias, modver):
     return cands, kind, ver_note
 
 
+def probe_roots():
+    """🔴 **输入根探针** —— 每个真源根取一个已知文件，探不到就**硬失败**。
+
+    为什么必须硬失败（而不是「跳过这个根继续跑」）：
+        `build_index` 里 `module_root(mod)` 返回 `None` 时该模块被**静默跳过**
+        ⇒ 带版本前缀的路径解析不到 ⇒ 回退裸文件名匹配
+        ⇒ **撞上同名但行数完全不同的另一个文件** ⇒ 报「行号越界 / 文件找不到」
+        ⇒ **假阳性**（实测 29/56 = 52%）⇒ ⇒ **「我解析不了」被伪装成「引用是错的」**。
+        ⚠️ 本函数**曾经只写在 docstring 里**（= 「注解写了 ≠ 机制生效」）
+           ⇒ 现补上实现：探针不过 ⇒ **exit 2**，**绝不静默降级成「少查了几个根」**。
+
+    为什么探针要跑**两次**（头 + 尾）：
+        module cache 的可见性**会间歇**（同一路径 5 分钟内反复「可读 → 不可读 → 可读」）
+        ⇒ 只探一次 ⇒ **同一份代码两次跑出两个结论** ⇒ 数字不可复算
+        ⇒ 尾探针发现「扫描期间可见性变了」⇒ 同样 **exit 2**（本次报数不可信）。
+
+    ⇒ **探针结果随数字一起报出** —— 同一指标在两种输入状态下是两个数。
+    """
+    probe = []
+
+    def add(name, ok, detail):
+        probe.append((name, bool(ok), detail))
+
+    add(f"Go 真源仓 {GO_REPO}", (GO_REPO / "go.mod").is_file(), "go.mod")
+    src = GOROOT / "src"
+    add(f"Go 标准库 {src}", src.is_dir(), "src/")
+    for mod in sorted(PINNED):
+        root = module_root(mod)
+        if root is None:
+            add(f"module {mod}@{PINNED[mod]}", False, f"目录不可见：{MODCACHE}/{mod}@{PINNED[mod]}")
+            continue
+        n = sum(1 for _ in root.rglob("*.go"))
+        add(f"module {mod}@{PINNED[mod]}", n > 0, f"{n} 个 .go")
+    return probe
+
+
+def print_probe(probe):
+    print("输入根探针（不可见 ⇒ 本次报数不可信 ⇒ exit 2）：")
+    for name, ok, detail in probe:
+        print(f"  {'✅' if ok else '❌'} {name}  {detail}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--domains", nargs="*", default=["article", "comment", "favorite", "hot"])
     ap.add_argument("--all", action="store_true")
     args = ap.parse_args()
     domains = ALL_DOMAINS if args.all else args.domains
+
+    probe = probe_roots()
+    print_probe(probe)
+    bad = [p for p in probe if not p[1]]
+    if bad:
+        print(f"\n❌ 输入根探针失败 {len(bad)} 项 ⇒ **输入不可见 ⇒ 本次报数不可信** ⇒ 停（exit 2）")
+        for name, _, detail in bad:
+            print(f"   · {name}  {detail}")
+        return 2
+    print()
 
     rfiles = []
     for d in domains:
@@ -360,6 +427,18 @@ def main():
     print(f"  OK={stats['OK']}  AMBIGUOUS={stats['AMBIGUOUS']}（同名多文件，机器判不了，需人读）"
           f"  LINE_OOB={stats['LINE_OOB']}  FILE_MISSING={stats['FILE_MISSING']}"
           f"  EMPTY_LINE={stats['EMPTY_LINE']}  VERSION_MISMATCH={stats['VERSION_MISMATCH']}")
+
+    # 🔴 尾探针：扫描期间输入可见性变了 ⇒ **本次报数不可复算** ⇒ 与头探针不一致 ⇒ exit 2
+    probe2 = probe_roots()
+    drift = [(a[0], a[1], b[1]) for a, b in zip(probe, probe2) if a[1] != b[1]]
+    if drift:
+        print()
+        print("❌ **扫描期间输入根可见性发生变化** ⇒ 本次报数不可信（不可复算）⇒ 停（exit 2）：")
+        for name, was, now in drift:
+            print(f"   · {name}  头探针={'可见' if was else '不可见'} → 尾探针={'可见' if now else '不可见'}")
+        return 2
+    print("  尾探针：与头探针一致 ✅（输入在扫描期间未变 ⇒ 本次报数可复算）")
+
     if problems:
         print()
         for kind in ("LINE_OOB", "EMPTY_LINE", "VERSION_MISMATCH", "FILE_MISSING"):
