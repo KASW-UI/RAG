@@ -1544,7 +1544,7 @@ favorite-api **7/7 handler** 都调 `httpx.Parse` ⇒ ⇒ **7/7 端点都该在�
 
 ## 24. 🔴 P0 #8 **域侧部分**：yaml 里的**明文默认验签密钥** ⇒ 已修（**域侧自修** · 2026-10-29 · G3 阶段 1）
 
-> **阶段归属（`twoStage.md` §10）**：**A 类**（P0 #8「关键配置和敏感信息没有明显的不安全处理方式」）⇒ **域侧已修**（fail-closed）⇒ **共享面半边（compose 的 `:?`）已转派 G4** ⇒ ⇒ **不阻断阶段 1**。
+> **阶段归属（`twoStage.md` §10）**：**A 类**（P0 #8「关键配置和敏感信息没有明显的不安全处理方式」）⇒ **域侧已修**（fail-closed）⇒ **根级**半边（compose 的 `:?` ＋ 根 README 的 `.env.example`）归「**合并收口执行者**」（🔴 2026-10-29 归属订正：原写「已转派 G4」**归属错了** —— 根级文件**无人拥有** ⇒ **非 G4 写权面** ⇒ 根因并入 G1 的 `S1-USERS-001`）⇒ ⇒ **不阻断阶段 1**。
 > **产出归属**：`align/g3-article-comment-favorite-hot` 工作树 · 基线 commit `29a0bce` · 核对日期 **2026-10-29**。
 
 ### 24.1 §5.3 差异与暂缓项（**11 项**）
@@ -1556,12 +1556,12 @@ favorite-api **7/7 handler** 都调 `httpx.Parse` ⇒ ⇒ **7/7 端点都该在�
 | **3** | **原始行为** | Go：**字面量** ⇒ 部署时不改也能起 ⇒ 但**任何拿到仓库的人都能用它签出合法 JWT** ⇒ ⇒ 该域的**鉴权等于没有**（除非运维记得改） |
 | **4** | **阶段 1 当前行为（修前）** | 同上（yaml 默认值 = 仓里的公开 UUID）⇒ ⇒ ① 不设环境变量 ⇒ **用公开密钥正常起来** ⇒ 🔴 **token 可伪造**；② 设成空串 ⇒ Spring 把空串当合法值 ⇒ **空签名密钥正常起来** ⇒ 🔴 **token 可伪造**（HMAC 空密钥谁都能算） |
 | **5** | **具体差异** | 修前：**两条路径都会「静默地不安全地起来」**。<br>修后：① **不设变量 ⇒ 启动失败**（Spring placeholder 不可解析 ⇒ 绑定期炸）② **设成空串 ⇒ 启动失败**（`@PostConstruct` 校验）⇒ ⇒ **两条路都 fail-closed** |
-| **6** | **暂缓或简化理由** | **不适用 —— 已修**。⚠️ **但有一处不能域侧单做**：根级 `docker-compose.yaml:146`/`:193` 的 `USER_JWT_SECRET: ${USER_JWT_SECRET}` **缺 `:?`** ⇒ ⇒ 不设变量时 compose 会把**空串**注入容器 ⇒ ⇒ 修后容器会**启动失败**（安全上是 fail-closed ✔）⇒ ⇒ 但运维会看到 crash-loop 而不是 compose 级的清晰报错 ⇒ ⇒ **该半边属共享面 ⇒ 已转派 G4**（反馈单 `G4-14`） |
-| **7** | **对业务正确性 / 安全性 / 数据一致性 / 可靠性的影响** | **安全性**：**正面**（核心）—— 从「可静默用公开密钥起来」变成「起不来」⇒ ⇒ 消除「token 可伪造」。<br>**业务正确性**：**无影响**（密钥不变时行为完全一致）。<br>**数据一致性 / 可靠性**：**无影响**。⚠️ **运维**：**缺变量 ⇒ 起不来** ⇒ ⇒ 部署说明必须同步（⇒ 根 README 无 `.env.example` 属 **P0 #5**，**共享面**，不在本域） |
+| **6** | **暂缓或简化理由** | **不适用 —— 已修**。⚠️ **但有一处不能域侧单做**：根级 `docker-compose.yaml:146`/`:193` 的 `USER_JWT_SECRET: ${USER_JWT_SECRET}` **缺 `:?`** ⇒ ⇒ 不设变量时 compose 会把**空串**注入容器 ⇒ ⇒ 修后容器会**启动失败**（安全上是 fail-closed ✔）⇒ ⇒ 但运维会看到 crash-loop 而不是 compose 级的清晰报错 ⇒ ⇒ **该半边属【根级文件】⇒ 归「合并收口执行者」**（🔴 **2026-10-29 归属订正**：原写「已转派 G4」**归属错了** —— 根级文件**无人拥有**：既不在任何 lane 白名单，也不在 `tools/difftest/check-wave-lane-ownership.py` 的 `SHARED` 13 条里 ⇒ ⇒ 按该守门**自己的口径**（`:372`「N 个共享文件无人拥有 ⇒ 归合并收口执行者」）⇒ ⇒ **非 G4 写权面**；且该守门的断言**全是声明侧**（只校验「白名单声明了什么」，**不校验「实际改了哪个文件」）⇒ ⇒ 派给 G4 去改根级文件**没有任何守门会拦** ⇒ ⇒ 根因**并入 G1 的 `S1-USERS-001`**（根 README 实测 **21 字节** · 缺 `.env.example` · `Infrastructure.md` 描述旧架构 ⇒ P0#5 项目级缺口 ⇒ 该单已把根级文件判为「**不在 G1 写权面 ⇒ 交合并收口执行者**」）⇒ ⇒ **不另开编号**） |
+| **7** | **对业务正确性 / 安全性 / 数据一致性 / 可靠性的影响** | **安全性**：**正面**（核心）—— 从「可静默用公开密钥起来」变成「起不来」⇒ ⇒ 消除「token 可伪造」。<br>**业务正确性**：**无影响**（密钥不变时行为完全一致）。<br>**数据一致性 / 可靠性**：**无影响**。⚠️ **运维**：**缺变量 ⇒ 起不来** ⇒ ⇒ 部署说明必须同步（⇒ 根 README 无 `.env.example` 属 **P0 #5** · **根级 ⇒ 归「合并收口执行者」**，不在本域 ⇒ ⇒ 根因**并入 G1 的 `S1-USERS-001`**，见第 6 项） |
 | **8** | **是否阻断阶段 1** | **否**（域侧已修 ⇒ P0 #8 的**域侧部分**闭合）。⚠️ 共享面半边（compose `:?` ＋ 根 README `.env.example`）**仍开** ⇒ ⇒ P0 #8 **整体**仍不能判 ✅ ⇒ ⇒ **收口执行者的事** |
 | **9** | **阶段 2 的恢复或替换方案** | **不需要恢复**（这是「更严」的一侧，不是简化）。阶段 2 要做的是**把密钥管理做完整**：① 根级 `.env.example`（列出**全部**必填变量）② 密钥轮换 ③ 部署期校验清单 ⇒ ⇒ **共享面 ⇒ 阶段 2 / 收口** |
 | **10** | **阶段 2 的测试场景和通过标准** | ① **compose 侧**：`docker compose config` 在**不设** `USER_JWT_SECRET` 时**必须报错**（`:?` 生效）⇒ **通过标准：非零退出 + 明确报错**。② **空变量起栈实测**：`USER_JWT_SECRET= docker compose up` ⇒ 容器**必须起不来**（fail-closed）⇒ **通过标准：日志里出现本域的 `IllegalStateException`**。③ **域侧回归**：三个 api 模块的 `@SpringBootTest` 全绿（密钥由 test scope 提供） |
-| **11** | **当前证据及剩余证据缺口** | **已有**：**L4**（域内守门 `FavoriteApiPropertiesSecretGuardTest`：**真 ApplicationContextRunner** ⇒ 空串 / 未设 ⇒ **上下文起不来**（`hasFailed()`）＋ 正常密钥 ⇒ 上下文正常起（对照组）＋ 判据边界 3 例 ⇒ **3/3 绿**）＋ 三域 api 模块全量回归 **BUILD SUCCESS**。<br>**剩余缺口**：① **compose 侧**未验证（**共享面 ⇒ 已转派**）② **根 README 无 `.env.example`** ⇒ 部署方**不知道要设哪些变量** ⇒ ⇒ **P0 #5 的共享面半边**（已登记） |
+| **11** | **当前证据及剩余证据缺口** | **已有**：**L4**（域内守门 `FavoriteApiPropertiesSecretGuardTest`：**真 ApplicationContextRunner** ⇒ 空串 / 未设 ⇒ **上下文起不来**（`hasFailed()`）＋ 正常密钥 ⇒ 上下文正常起（对照组）＋ 判据边界 3 例 ⇒ **3/3 绿**）＋ 三域 api 模块全量回归 **BUILD SUCCESS**。<br>**剩余缺口**：① **compose 侧**未验证（**根级 ⇒ 归「合并收口执行者」** ⇒ 归属订正见第 6 项）② **根 README 无 `.env.example`** ⇒ 部署方**不知道要设哪些变量** ⇒ ⇒ **P0 #5 的根级半边**（已登记 ⇒ **并入 G1 的 `S1-USERS-001`**） |
 
 ### 24.2 §5.4 实际改造记录（**8 项**）
 
@@ -1574,6 +1574,6 @@ favorite-api **7/7 handler** 都调 `httpx.Parse` ⇒ ⇒ **7/7 端点都该在�
 | **5** | **实际变更文件** | ① 改 `service/favorite/favorite-api/src/main/resources/application.yml`（+注释）<br>② 改 `…/config/FavoriteApiProperties.java`（+`@PostConstruct` 校验）<br>③ **新增** `…/src/test/resources/application.properties`<br>④ **新增** `…/src/test/java/com/rag/favorite/favorite/api/config/FavoriteApiPropertiesSecretGuardTest.java`（3 例）<br>⑤ **同款改动复制到** `service/article/article-api` ＋ `service/comment/comment-api`（yaml ＋ 属性类 ＋ test properties ＋ 守门测试） |
 | **6** | **测试场景和断言** | ① **空串 / 未设 ⇒ 上下文起不来**（`ApplicationContextRunner` ＋ `hasFailed()`）② **正常密钥 ⇒ 上下文正常起**（对照组 ⇒ 证明不是「无脑拒绝启动」）③ **判据边界**：`null` / `""` / `"   "` ⇒ 抛；正常值 ⇒ 不抛 |
 | **7** | **实际执行结果** | `mvn -o -B -pl service/favorite/favorite-api test -Dtest=FavoriteApiPropertiesSecretGuardTest` ⇒ **3/3 绿**<br>`mvn -o -B -pl service/article/article-api,service/comment/comment-api,service/favorite/favorite-api clean test` ⇒ **BUILD SUCCESS**（三域 api 模块全量） |
-| **8** | **尚未解决的问题 / 对阶段 2 的影响** | ① **compose 侧 `:?`**（共享面 ⇒ 反馈单 `G4-14`）② **根 README 的 `.env.example`**（P0 #5 共享面）③ **rpc 域**的其它明文默认值（`${POSTGRES_PASSWORD:password}` / `${MINIO_SECRET_KEY:minioadmin}` / `${*_AUTHORITY_TOKEN:}`）⇒ **本轮未动** ⇒ ⇒ **登记**（不在本轮范围：它们的落点是**部署凭据**而非 JWT 签名密钥，且 compose 已用 `:?` 强制 `POSTGRES_PASSWORD` ⇒ 实际不可达）④ **阶段 2**：完整的密钥管理（轮换 ＋ `.env.example` ＋ 部署清单） |
+| **8** | **尚未解决的问题 / 对阶段 2 的影响** | ① **compose 侧 `:?`**（**根级 ⇒ 归「合并收口执行者」** ⇒ 归属订正见第 6 项）② **根 README 的 `.env.example`**（P0 #5 · **根级 ⇒ 合并收口执行者** ⇒ 并入 G1 的 `S1-USERS-001`）③ **rpc 域**的其它明文默认值（`${POSTGRES_PASSWORD:password}` / `${MINIO_SECRET_KEY:minioadmin}` / `${*_AUTHORITY_TOKEN:}`）⇒ **本轮未动** ⇒ ⇒ **登记**（不在本轮范围：它们的落点是**部署凭据**而非 JWT 签名密钥，且 compose 已用 `:?` 强制 `POSTGRES_PASSWORD` ⇒ 实际不可达）④ **阶段 2**：完整的密钥管理（轮换 ＋ `.env.example` ＋ 部署清单） |
 
 > ⚠️ **本条的跨域性**：同一类改动落在 **favorite / article / comment 三个域的 api 组件** ⇒ ⇒ 按 AGENTS.md「一条问题只在一个档里落笔」的纪律 ⇒ **完整记录在本节**（favorite 域）⇒ ⇒ **article / comment 两域只留指针**（见各自台账）。

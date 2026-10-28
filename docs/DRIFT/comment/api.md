@@ -383,7 +383,7 @@
 
 ## 📌 指针 · 🔴 P0 #8 域侧：**yaml 明文默认验签密钥**已去掉 ⇒ 缺变量/空串 ⇒ **启动失败**（2026-10-29 · G3 阶段 1）
 
-> **阶段归属（`twoStage.md` §10）**：**A 类**（P0 #8）⇒ **域侧已修** ⇒ 不阻断阶段 1（共享面半边已转派 G4）。
+> **阶段归属（`twoStage.md` §10）**：**A 类**（P0 #8）⇒ **域侧已修** ⇒ 不阻断阶段 1（**根级**半边归「**合并收口执行者**」⇒ 根因并入 G1 的 `S1-USERS-001` ⇒ **非 G4 写权面**，见下表「根级半边」行）。
 > **完整记录在** [`docs/DRIFT/favorite/api.md` §24](../../DRIFT/favorite/api.md) —— **按 AGENTS.md「一条问题只在一个档里落笔」的纪律**，本域只留指针。
 
 | 项 | 本域情况 |
@@ -393,4 +393,4 @@
 | **为什么必须代码校验** | 同上：Spring 把**空串**当合法值 ⇒ 「去默认值」挡不住「变量是空串」⇒ ⇒ 必须 `@PostConstruct` 显式抛 ⇒ **两条路都 fail-closed** |
 | **守门** | **新增** `service/comment/comment-api/src/test/java/com/rag/comment/comment/api/config/CommentApiPropertiesSecretGuardTest.java`（**3 例** · **真 `ApplicationContextRunner`**） |
 | **证据强度** | **L4**（真容器装配 ⇒ 上下文起不来/起得来） |
-| **共享面半边（已转派 G4）** | 根级 compose 的 `USER_JWT_SECRET` 缺 `:?` ＋ 根 README 无 `.env.example`（P0 #5 共享面）⇒ 见 `docs/DRIFT/favorite/api.md` §24.2 第 8 项 |
+| **根级半边（归「合并收口执行者」）** | 根级 compose 的 `USER_JWT_SECRET` 缺 `:?` ＋ 根 README 无 `.env.example`（P0 #5 · 根级）⇒ 🔴 **2026-10-29 归属订正**：原写「已转派 G4」**归属错了** —— 根级文件**无人拥有**（既不在任何 lane 白名单，也不在 `check-wave-lane-ownership.py` 的 `SHARED` 13 条 ⇒ 该守门口径：「无人拥有 ⇒ 归合并收口执行者」）⇒ ⇒ **非 G4 写权面** ⇒ ⇒ 根因**并入 G1 的 `S1-USERS-001`**（**不另开编号**）⇒ 详见 [`favorite/api.md` §24](../favorite/api.md) 第 6 项 |

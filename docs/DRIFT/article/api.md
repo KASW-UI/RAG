@@ -2462,7 +2462,7 @@ a < 中 < U+E000 < **U+FFFD** < 😀（U+1F600，非 BMP 代理对）
 
 ## 📌 指针 · 🔴 P0 #8 域侧：**yaml 明文默认验签密钥**已去掉 ⇒ 缺变量/空串 ⇒ **启动失败**（2026-10-29 · G3 阶段 1）
 
-> **阶段归属（`twoStage.md` §10）**：**A 类**（P0 #8）⇒ **域侧已修** ⇒ 不阻断阶段 1（共享面半边已转派 G4）。
+> **阶段归属（`twoStage.md` §10）**：**A 类**（P0 #8）⇒ **域侧已修** ⇒ 不阻断阶段 1（**根级**半边归「**合并收口执行者**」⇒ 根因并入 G1 的 `S1-USERS-001` ⇒ **非 G4 写权面**，见下表「根级半边」行）。
 > **完整记录在** [`docs/DRIFT/favorite/api.md` §24](../../DRIFT/favorite/api.md) —— **按 AGENTS.md「一条问题只在一个档里落笔」的纪律**，本域只留指针。
 
 | 项 | 本域情况 |
@@ -2472,7 +2472,7 @@ a < 中 < U+E000 < **U+FFFD** < 😀（U+1F600，非 BMP 代理对）
 | **为什么必须代码校验（不能只去默认值）** | Spring 的 `PropertyPlaceholderHelper`：**属性存在但为空串 ⇒ 解析为空串、不走默认值、也不报错** ⇒ ⇒ 「变量没设」被 placeholder 挡住，**「变量是空串」挡不住** ⇒ ⇒ 必须由 `@PostConstruct` 显式抛 `IllegalStateException` ⇒ ⇒ **两条路都 fail-closed** |
 | **守门** | **新增** `service/article/article-api/src/test/java/com/rag/article/article/api/config/ArticleApiPropertiesSecretGuardTest.java`（**3 例** · **真 `ApplicationContextRunner`**）：① 空串 ⇒ **上下文起不来**（`hasFailed()`）② 未设 ⇒ **上下文起不来** ③ 正常密钥 ⇒ **上下文正常起**（对照组）＋ 判据边界（`null`/`""`/`"   "` ⇒ 抛） |
 | **证据强度** | **L4**（真容器装配 ⇒ 上下文起不来/起得来，**不是**「方法存在」的源码断言） |
-| **共享面半边（已转派 G4）** | 根级 `docker-compose.yaml` 的 `USER_JWT_SECRET` 缺 `:?` ⇒ ⇒ 修后容器会 **crash-loop**（安全上 fail-closed ✔）⇒ ⇒ 运维侧要 compose 级清晰报错 ⇒ **共享面 ⇒ G4 落码**（反馈单 `G4-14`）＋ 根 README **无 `.env.example`**（P0 #5 共享面） |
+| **根级半边（归「合并收口执行者」）** | 根级 `docker-compose.yaml` 的 `USER_JWT_SECRET` 缺 `:?` ⇒ ⇒ 修后容器会 **crash-loop**（安全上 fail-closed ✔）⇒ ⇒ 运维侧要 compose 级清晰报错 ⇒ 🔴 **2026-10-29 归属订正**：原写「已转派 G4」**归属错了** —— 根级文件**无人拥有**（既不在任何 lane 白名单，也不在 `check-wave-lane-ownership.py` 的 `SHARED` 13 条 ⇒ 该守门**自己的口径**：「N 个共享文件无人拥有 ⇒ 归合并收口执行者」）⇒ ⇒ **非 G4 写权面**（且该守门断言**全是声明侧**、不校验「实际改了哪个文件」⇒ ⇒ 派给 G4 改根级文件**没有任何守门会拦**）⇒ ⇒ 根因**并入 G1 的 `S1-USERS-001`**（**不另开编号**）＋ 根 README **无 `.env.example`**（P0 #5 · 同属该根因） |
 
 ---
 
