@@ -1705,7 +1705,7 @@ public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryS
 | gRPC 拦截器是否真挂上 server | ❌ **根本没挂**（H2） | ✅ **已挂**，且有**行为级**守门 + 两档变异 |
 | gRPC deadline 传播 | ❌ **恒不生效**（`DeadlineState` 从未设置） | ✅ **已生效**，行为级断言钉住 |
 | SQL `queryTimeout` 注入 | ❌ 因拿不到 `DeadlineState` 而**不注入** | ✅ 随之恢复 |
-| 组件判定 | `NOT EQUIVALENT`（域外三条 D21/D22/D23 + D14/D25/D27） | 🟥 **2026-10-26 订正**：这句**已过期** —— **D21/D22/D23 第十三轮已落地 10/10** · **D14 已实现**（`HttpMiddleware.java:692` 的 nosniff）· **D25 已闭合**（T-13）· **D27 已签字为有意偏离**（`SD-2026-10-25-01`）⇒ **这 6 条不再是「域外未闭合项」** ⇒ 本条**不是**域内漂移，是**装配缺口** |
+| 组件判定 | `NOT EQUIVALENT`（域外三条 D21/D22/D23 + D14/D25/D27） | 🟥 **2026-10-26 订正**：这句**已过期** —— **D21/D22/D23 第十三轮已落地 10/10** · **D14 已实现**（共享层 `HttpMiddleware.java` 的 `resp.setHeader("X-Content-Type-Options", "nosniff")` ⇒ **锚点 = 调用形态**，**行号以合并后的树为准** —— G1/G3/G4 三树当前均为 **728**）· **D25 已闭合**（T-13）· **D27 已签字为有意偏离**（`SD-2026-10-25-01`）⇒ **这 6 条不再是「域外未闭合项」** ⇒ 本条**不是**域内漂移，是**装配缺口** |
 ---
 
 ## 九、🔴 Redis **TCP 连接超时**漂移（Go `DialTimeout` **5s** vs Lettuce 默认 **10s**）—— 2026-10-27 已修

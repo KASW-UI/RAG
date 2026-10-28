@@ -177,7 +177,7 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 
 | 条目 | 原状态 | **核对结果（2026-10-26）** | 证据 |
 |---|---|---|---|
-| **D14** nosniff | 🔁 跨域移交 common 域 | ✅ **已实现**（不是「待移交」） | `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:692` `resp.setHeader("X-Content-Type-Options", "nosniff")` |
+| **D14** nosniff | 🔁 跨域移交 common 域 | ✅ **已实现**（不是「待移交」） | 共享层 `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java` 的 `resp.setHeader("X-Content-Type-Options", "nosniff")`（**锚点 = 这行调用形态**；**行号以合并后的树为准** —— G1/G3/G4 三树当前均为 **728**）|
 | **D25** 499 | 🔁 跨域移交 common 域 | ✅ **已闭合**（与 T-13 一并解决） | `docs/DRIFT/global/cross-domain.md` §二·十（T-13 响应撕裂/状态码被抢） |
 | **D27** MaxConns 作用域 | 🔁 跨域移交 common 域 | 🏷 **已签字为有意偏离**（**不是待办**） | `SD-2026-10-25-01`（global 台账 T-2 / T-5）⇒ `docs/Intentional_Deviations/global/common-tails.md` |
 | **D21** relaxed-query-chars | ⏸ 待拍板 | ✅ **第十三轮已落地 10/10** | `server.tomcat.relaxed-query-chars: ["[", "]"]` |
@@ -186,6 +186,18 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | **DRIFT-HOTAPI-024** Content-Type charset | — | ✅ **第二十五轮已修**（global T-6） | 共享层 `GoStyleJsonContentTypeAdvice` ⇒ 10 个 api 全生效 |
 
 ⇒ **hot-api 域内已无可修的语义漂移**（`DRIFT-HOTAPI-014` 亦为跨域移交，且 nosniff 已实现）。
+
+### 📌 D14 的**证据强度** = 已是 **wire 级 L4**（2026-10-28 10:3x · G3 补记）
+
+⇒ **G1 通报 admin 域落了一个「真 Tomcat + 真 `java.net.http.HttpClient`」的字节级 nosniff 探针 ⇒ 问我域要不要照落同款**
+⇒ ⇒ **我域【早就有】** —— `service/hot/hot-api/src/test/java/com/rag/hot/hot/api/HotApiRealTomcatGateTest.java`
+（**真 Tomcat · `RANDOM_PORT` · 真 HTTP 客户端**）⇒ **`:229-230` 直接断言 `X-Content-Type-Options == "nosniff"`**
+（用例名「🔴 U6 —— 404 在真 Tomcat 下是裸响应 + text/plain + nosniff」，`:221`）⇒ ⇒ **D14 不是「静态对照」，是 wire 级实测** ✅
+⇒ ⇒ **Go 侧出处**：Go 全仓 `grep -rn "X-Content-Type-Options" service/ --include=*.go` ⇒ **零命中**
+⇒ ⇒ **nosniff 是 Go `net/http` 标准库 `http.Error` 自动加的**（不是显式代码）⇒ ⇒ 故断言写的是「**Go 的 `http.Error` 会加 nosniff**」
+⇒ ⇒ ⇒ **本域不需要再落同款探针**（已闭合）⇒ ⇒ 已回函 G1 说明，避免它重复落码。
+⇒ ⇒ 📌 **与 G1 的 admin 域那条的关系**：admin 域探针覆盖的是 **400 缺必填字段** 形态；我域覆盖的是 **404 `http.NotFound`** 形态
+⇒ ⇒ **两域形态不同、但结论同源**（都落到 `net/http` 的自动加头）⇒ ⇒ 共享机制这一条**已有两个域的独立 wire 级证据**。
 
 ## 尚未处理
 
