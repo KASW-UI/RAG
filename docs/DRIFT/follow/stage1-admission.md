@@ -133,7 +133,7 @@ follow-api (HTTP :8891)  ──gRPC plaintext──▶  follow-rpc (:8082)  ─�
 | # | 项 | 内容 |
 |---|---|---|
 | 1 | 唯一编号 | `S1-FOLLOW-004` |
-| 2 | 原始项目中的文件 / 方法 / 业务契约 | Go 侧 `manage.sh` 有 **16 个服务**的端口分配与启动编排（`get_service_port()`）⇒ 每个域都有 `service/<域>/<api|rpc>` 两个可启动进程 |
+| 2 | 原始项目中的文件 / 方法 / 业务契约 | Go 侧 `manage.sh` 有 **16 个服务**的端口分配与启动编排（`get_service_port()`）⇒ 每个域都有 `service/<域>/<api\|rpc>` 两个可启动进程 |
 | 3 | 原始行为 | Go 侧 `follow/api`（:8891）与 `follow/rpc`（:16065）都是**可独立启动的进程** |
 | 4 | 阶段 1 当前行为 | RAG 侧 `docker-compose.yaml` 只编排 `user-rpc` + `user-api`（外加 6 个基础设施容器）⇒ **`follow-rpc` / `follow-api` / `admin-rpc` / `admin-api` 都没有 compose 入口** ⇒ 只能裸 jar 起（可行，但**无一条命令可复制**） |
 | 5 | 具体差异 | ① 编排覆盖 **2/6** 个业务组件；② 项目说明缺失（`S1-USERS-001`）⇒ 「怎么把 follow 跑起来」**没有任何文档答案**；③ 验证只能靠手写 env + 裸 jar |

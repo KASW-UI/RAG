@@ -1998,7 +1998,7 @@ G2 第九轮回信写：「你域的 `RedisDisconnectedBehaviorConfig.java:103` 
 |---|---|---|
 | **12 个遗留对拍进程** | `ps` 逐条读 ⇒ **13 个 PID 全部在**（`22:59:xx` / `02-16:xx`）⇒ 其中我域 4 个 = `user-rpc` / `admin-rpc` / `user-api` / `admin-api` | ✅ **进程层面全在** |
 | **Redis 容器** | `docker ps` ⇒ `difftest5k-redis Up 23 hours (healthy) 127.0.0.1:**61379**->6379/tcp` | ✅ healthy |
-| **Redis 连通 ＋ PING** | `nc -z 127.0.0.1 61379` ⇒ **OK**；`(printf 'PING\r\n') | nc` ⇒ **`+PONG`** | ✅ **能用** |
+| **Redis 连通 ＋ PING** | `nc -z 127.0.0.1 61379` ⇒ **OK**；`(printf 'PING\r\n') \| nc` ⇒ **`+PONG`** | ✅ **能用** |
 | **PG 容器** | `difftest5k-postgres Up 23 hours (healthy) 127.0.0.1:**60432**->5432/tcp`；`nc -z 60432` ⇒ **OK** | ✅ healthy |
 | **我域 `user-api`（64900）活体** | `GET /user/v1/user/info` ⇒ **HTTP 401** ＋ 业务信封 `{"code":1006,"msg":"TOKEN已过期","data":null}` | ✅ **服务在跑、鉴权链在跑** |
 | **我域 `admin-api`（63889）活体** | `GET /admin/v1/admin/info` ⇒ **HTTP 401** ＋ 同款信封 | ✅ 同上 |
@@ -4075,7 +4075,7 @@ mvn -B -o -DargLine=-Xmx1g -am -pl service/users/user/user-rpc,service/users/adm
 | 该提交所在树 | **仅 `align/g1-users-follow`**（G4 / G2 / G3 **均 ∉** —— `is-ancestor` 实测）|
 | 我树域内 `LettuceClientOptionsBuilderCustomizer` **主源码声明数** | **0**（`service/users` ＋ `service/follow` 全扫）⇒ 它的守门在我树**绿**（网② 3 条绿，已实跑）|
 | G4 / G2 / G3 树 | 那份文件**还在** ⇒ **现在清白名单会让它们自己假红** |
-| `312a09b` 触及路径 | `service/users/**` ＋ `service/follow/**` ＋ `docs/DRIFT/users|follow/**`（17 文件）⇒ **零共享层路径 ⇒ cherry-pick 零冲突** |
+| `312a09b` 触及路径 | `service/users/**` ＋ `service/follow/**` ＋ `docs/DRIFT/users\|follow/**`（17 文件）⇒ **零共享层路径 ⇒ cherry-pick 零冲突** |
 
 ⇒ ⇒ **正确顺序 = 先把 `312a09b` 并进 G4 树（或等四 lane 合主干），再由 G4 / 合并收口执行者清白名单**
 ⇒ ⇒ **我域零落码**（清白名单那一步不在我写权面）。
