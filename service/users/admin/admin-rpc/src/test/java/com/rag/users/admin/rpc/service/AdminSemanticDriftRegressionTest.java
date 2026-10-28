@@ -337,7 +337,7 @@ class AdminSemanticDriftRegressionTest {
     // ==================================================================
 
     /**
-     * Go 出处：internal/logic/admin/createadminlogic.go:44-46 只做 {@code strings.TrimSpace}，
+     * Go 出处：service/user/admin/rpc/internal/logic/createadminlogic.go:44-46 只做 {@code strings.TrimSpace}，
      * <b>没有</b>空值判断；空 username 会照常进事务、查重并 INSERT。
      * 本实现此前抛 {@code INVALID_ARGUMENT}，而 AdminCreateService 无该 case ⇒ 被报成 1015。
      *
@@ -408,7 +408,7 @@ class AdminSemanticDriftRegressionTest {
         // ⚠️ 本断言原先写死 `"password=#{ew.paramNameValuePairs.MPGENVAL1}"`，
         // 那是一条**把缺陷锁死**的绿测试：它断言 UPDATE 的 SET 子句**不含** update_time，
         // 而 Go 侧 `gorm:"autoUpdateTime"`（data_model.go:13，消费点
-        // gorm@v1.31.2/callbacks/update.go:243-259）每次 Updates 都会推进它。
+        // gorm@v1.31.1/callbacks/update.go:238-254）每次 Updates 都会推进它。
         // ⇒ 修复 DRIFT-ADMIN-RPC-003 时**必须先改这条断言**（AGENTS.md §3.3.2：
         // 「修复漂移时先改/删错误断言，再改实现」），否则会先撞上「测试红了」而误以为改错了方向。
         // 这里改成包含 update_time 的正确形状，并保留「只改密码时也推进时间戳」这层含义。

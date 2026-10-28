@@ -17,7 +17,7 @@ import java.util.HashMap;
 /**
  * admin createAdmin 用例 —— 3 状态机。
  *
- * 对应 Go: service/user/admin/api/internal/logic/admin/createadminlogic.go 的 CreateAdminLogic。
+ * 对应 Go: service/user/admin/api/internal/logic/admin/createlogic.go:34 的 CreateLogic.Create。
  *
  * <p>L2 业务语义：
  * <ol>

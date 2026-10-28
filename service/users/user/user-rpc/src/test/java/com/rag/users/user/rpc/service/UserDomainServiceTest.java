@@ -693,10 +693,10 @@ class UserDomainServiceTest {
      * <p><b>Go 的真实语义</b>：{@code status IS NULL} 被<b>读成 0</b>、<b>不报错</b>。
      * 消费点三段（缺一段就会得出相反结论）：
      * <ol>
-     *   <li>{@code gorm@v1.31.2/schema/field.go:616-622} 给 int64 装的 setter 是
+     *   <li>{@code gorm@v1.31.1/schema/field.go:616-622} 给 int64 装的 setter 是
      *       {@code case **int64: if data != nil && *data != nil { …SetInt(**data) }}
      *       ⇒ {@code *data == nil} 时<b>不动作</b>，字段留零值 0；</li>
-     *   <li>{@code gorm@v1.31.2/scan.go:21} 与 {@code schema/field.go:1009} 传给
+     *   <li>{@code gorm@v1.31.1/scan.go:19} 与 {@code schema/field.go:1002} 传给
      *       {@code rows.Scan} 的 dest 是 <b>{@code **int64}</b>；</li>
      *   <li>{@code database/sql/convert.go:431-435}
      *       {@code case reflect.Pointer: if src == nil { dv.SetZero(); return nil }}

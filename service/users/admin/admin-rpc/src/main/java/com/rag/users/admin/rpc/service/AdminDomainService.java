@@ -436,7 +436,7 @@ public class AdminDomainService {
     // ============== 5. CreateAdmin ==============
 
     /**
-     * 对应 Go 端 internal/logic/admin/createadminlogic.go 的 CreateAdminLogic.CreateAdmin。
+     * 对应 Go 端 service/user/admin/rpc/internal/logic/createadminlogic.go 的 CreateAdminLogic.CreateAdmin。
      *
      * <p>L2 业务语义（5 状态机）：
      * <ol>
@@ -1309,8 +1309,8 @@ public class AdminDomainService {
      *       （Admin）与 {@code :27-28}、{@code :44-45}（User）：
      *       {@code CreateTime time.Time `gorm:"column:create_time;autoCreateTime"`} /
      *       {@code UpdateTime time.Time `gorm:"column:update_time;autoUpdateTime"`}；</li>
-     *   <li><b>消费点</b>：{@code gorm@v1.31.2/callbacks/update.go:243-259}
-     *       （{@code Updates(map)} / {@code Update(col, val)} 路径）与 {@code :279-281}
+     *   <li><b>消费点</b>：{@code gorm@v1.31.1/callbacks/update.go:238-254}
+     *       （{@code Updates(map)} / {@code Update(col, val)} 路径）与 {@code gorm@v1.31.1/callbacks/update.go:274-276}
      *       （{@code Updates(struct)} 路径）。</li>
      * </ul>
      *

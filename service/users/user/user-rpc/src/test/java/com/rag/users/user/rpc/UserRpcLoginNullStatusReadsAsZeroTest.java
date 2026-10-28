@@ -32,7 +32,7 @@ import com.rag.users.user.rpc.support.RealGrpcPort;
  * <h2>⚠️ 本类是被<b>推翻</b>的上一版守门测试的替代品，不是新增的第三种说法</h2>
  * 上一版类名 {@code UserRpcLoginNullStatusFailClosedTest} 断言「status IS NULL ⇒ Login 抛
  * {@code codes.Internal "DB查询失败"}」，理由写的是
- * 「{@code gorm@v1.31.2/scan.go:153 rows.Scan} 对 NULL → int64 直接返回错误」。
+ * 「{@code gorm@v1.31.1/scan.go:153 rows.Scan} 对 NULL → int64 直接返回错误」。
  * <b>该理由已被证伪</b>，上一版连同它锁的期望值一并作废（AGENTS.md §3.3.3：
  * 先改/删错误断言，再改实现）。保留本类的意义在于**把正确的那一侧钉死**，
  * 免得下一个 agent 再按同一句错的 Go 出处把它改回去。
@@ -41,14 +41,15 @@ import com.rag.users.user.rpc.support.RealGrpcPort;
  * <ol>
  *   <li>{@code service/user/user/rpc/internal/model/data_model.go:11}（声明点）
  *       {@code Status int64 `gorm:"column:status;default:0"`} —— <b>无 not null</b>、值类型非指针；</li>
- *   <li>{@code gorm.io/gorm@v1.31.2/scan.go:21} {@code prepareValues} 与
- *       {@code schema/field.go:1009} {@code NewValuePool}
- *       就是 {@code poolInitializer(reflect.PointerTo(field.IndirectFieldType))}
- *       ⇒ 传给 {@code rows.Scan} 的 dest 是 <b>{@code **int64}</b>；</li>
+ *   <li>{@code gorm.io/gorm@v1.31.1/scan.go:19} 的 {@code prepareValues} 用
+ *       {@code reflect.New(reflect.PointerTo(field.FieldType))}；
+ *       {@code gorm.io/gorm@v1.31.1/schema/field.go:1002} 的 {@code NewValuePool} 用
+ *       {@code poolInitializer(reflect.PointerTo(field.IndirectFieldType))}
+ *       ⇒ 两者都让传给 {@code rows.Scan} 的 dest 是 <b>{@code **int64}</b>；</li>
  *   <li>{@code database/sql/convert.go:431-435}
  *       {@code case reflect.Pointer: if src == nil { dv.SetZero(); return nil }}
  *       ⇒ <b>不报错</b>；随后
- *       {@code gorm@v1.31.2/schema/field.go:616-622} 的
+ *       {@code gorm@v1.31.1/schema/field.go:616-622} 的
  *       {@code case **int64: if data != nil && *data != nil { …SetInt(**data) }}
  *       在 {@code *data == nil} 时<b>不动作</b> ⇒ 字段留在<b>零值 0</b>。</li>
  * </ol>

@@ -39,7 +39,7 @@ import com.rag.users.admin.rpc.support.RealGrpcPort;
  *   <li><b>声明点</b>：{@code service/user/admin/rpc/internal/model/data_model.go:12-13}
  *       （Admin）、{@code :27-28}、{@code :44-45}（User）：
  *       {@code UpdateTime time.Time `gorm:"column:update_time;autoUpdateTime"`}；</li>
- *   <li><b>消费点</b>：{@code gorm@v1.31.2/callbacks/update.go:243-259} 与 {@code :279-281}。</li>
+ *   <li><b>消费点</b>：{@code gorm@v1.31.1/callbacks/update.go:238-254} 与 {@code :274-276}。</li>
  * </ul>
  *
  * <h2>为什么用 {@code setSql} 而不是 {@code MetaObjectHandler}</h2>
