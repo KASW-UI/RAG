@@ -1364,3 +1364,37 @@ mvn -o -B -DargLine=-Xmx2g -pl service/like/like-api -am \
 grep -rn "全长 20\|长度一致（20）" service/message service/like service/task --include=*.java | grep -v "/target/"
 # 期望：**0 命中**
 ```
+
+#### ⑥ 🟢 **同族扫描结果：G2 三域零残留**（用 G1 给的判定式扫过一遍）
+
+> 📌 **判定式（G1 提出，G2 采纳）**：**凡注释里出现「N 字节」而 body 来自 Go 的 `http.Error` / `fmt.Fprintln` ⇒ N 必须含那个尾随 `\n`**；复核时**先看断言用的那个数**，别只读注释。
+> ⚠️ **这个族有两种反向漂移**：**多算**（like-api 的 20 vs 19）· **少算**（admin 域的 15 vs 16，G1 已修）⇒ ⇒ **只看注释永远判不出方向**。
+
+**扫描口径**（`service/{message,like,task}/**` 全量，排除 `/target/`）：① 数字 + 「字节 / 字节数」的全部注释与 `@DisplayName`；② `http.Error` / `Fprintln` 的全部出现处。
+
+| 域 | 命中 | 结论 |
+|---|---|---|
+| **like-api** | `:46` javadoc + `:187` `@DisplayName` 的「20」 | ✅ **本轮已修**（⇒ 19）· 见上 |
+| **message-api** | `MessageAdminJwtAuthInterceptor.java:27/30/37`（admin secret **15** 字节 · zero-pad 到 **32**）· `MessageJwtAuthInterceptor.java:35/37`（user secret **36** 字节 UUID） | ✅ **正确，零漂移** —— 回 Go 真源**逐字节复算**：`service/message/api/etc/messagecenter.yaml:11` `UserAuth.AccessSecret` = `ae0536f9-…505da0` ⇒ **36 字节**；`:15` `AdminAuth.AccessSecret` = `yU-hCm)2*?NQmWG` ⇒ **15 字节** ⇒ 与注释**逐位吻合**<br>⇒ 且 `MessageJwtSignatureVerifier.java:103-106` **确实**调用 `JwtUtil.padToHmacKeySize(...)` ⇒ javadoc 的引用**成立**（不是假出处） |
+| **message-api**（超时 body） | `MessageApiTimeoutRealTomcatTest.java:41/91/176`（`"Request Timeout\n"`） | ✅ **零错数** —— 该文件**通篇未写字节数** ⇒ 与 G1 在 admin 域抓到的那条（写「15」）**不同族面** ⇒ 无需改 |
+| **task-rpc** | `LikeFactDispatchSchedulerStartupTest` / `LikeFactDispatchScheduler` 的「dc-token < 32 字节」 | ✅ **正确** —— 与 Go `service/like/rpc/cmd/fact-authority/main.go:54` `len(token) < 32` **一致** |
+| **task-api** | `GlobalExceptionHandler.java:48`（`fmt.Fprintln(w, error) // ← 尾随一个 "\n"`） | ✅ **正确** —— 只说明「有尾随换行」，**未写数字** ⇒ 无可漂移的数 |
+
+⇒ **G2 三域本族零残留**（唯一的一处已在 `aee9b0c` 修掉）。
+
+#### ⑦ 🔴 本轮自己踩的一个坑（**与「零命中是假信号」同族，但形态不同** ⇒ 值得写死）
+
+**现象**：第一次查「`message-api` 有没有用 `JwtUtil.padToHmacKeySize`」时，命令是
+
+```bash
+grep -rn "padToHmacKeySize" service/ --include=*.java | grep -v "/target/" | head -5
+```
+
+⇒ 输出里只有 **like-api / comment-api** 的命中，**没有 message-api** ⇒ 我据此得出「**message-api 没用它 ⇒ 那条 javadoc 引用了个不存在的函数 ⇒ 假出处**」⇒ **并准备当成真发现上报**。
+
+⇒ **真相**：`head -5` 把输出**截断**了 —— `message-api` 的命中排在第 6 行之后 ⇒ 实测 `MessageJwtSignatureVerifier.java:103-106` **确实在用**。
+
+⇒ **判定式**：**凡「零命中 / 没有该域的命中」类结论，必须先确认命令没被 `head` / `tail` / 分页截断** ⇒
+① 优先用 `grep -c` 计数、或**按目录分别 grep**（`service/message` / `service/like` / `service/task` 各跑一次）⇒ 计数不受截断影响；
+② 截断存在时 ⇒ 「没出现」只能读作「**没出现在前 N 行**」，**不能**读作「不存在」；
+③ ⇒ 与「零命中是假信号」「定位失败伪装成内容不一致」「管道把失败伪装成成功」**同族** —— 都是「**你以为你量的是 A，实际量的是 B**」，本条补的是第四个 B：**「你以为你没量到，实际是你只看了前几行」**。
