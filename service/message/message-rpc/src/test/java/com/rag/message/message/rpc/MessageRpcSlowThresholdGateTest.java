@@ -324,7 +324,13 @@ class MessageRpcSlowThresholdGateTest {
     private void warmUp() throws Exception {
         GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
         assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        // 🔴 不能用 forPort(0)：那是【OS 盲选口】⇒ 可能正好选到【Docker 发布口】
+        //    （本机实测：Sea-redis 发布 0.0.0.0:49380->6379，而 macOS 临时段是 49152–65535 ⇒ 同池）
+        //    ⇒ ⇒ gRPC server 在 IPv6 空间绑上了、而客户端走 IPv4 连到 Docker 代理 ⇒
+        //    ⇒ 客户端收到 Redis 的 "-ERR " ⇒ ⇒ http2 首帧不是 SETTINGS ⇒
+        //    ⇒ 报成「http2 exception」，看起来像 gRPC 坏了，实为【被测环境撞口】。
+        // ⇒ 改成探测式：GrpcTestPort 取候选后会【显式再绑一次】确认 ⇒ 绑不上（被 Docker 占着）就换下一个。
+        ServerBuilder<?> builder = ServerBuilder.forPort(GrpcTestPort.freePort());
         configurer.accept(builder);
         SlowHandlerProbe warm = new SlowHandlerProbe();
         warm.release.countDown();                 // 闸门直接开 ⇒ 立即返回
@@ -347,7 +353,13 @@ class MessageRpcSlowThresholdGateTest {
         GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
         assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
 
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        // 🔴 不能用 forPort(0)：那是【OS 盲选口】⇒ 可能正好选到【Docker 发布口】
+        //    （本机实测：Sea-redis 发布 0.0.0.0:49380->6379，而 macOS 临时段是 49152–65535 ⇒ 同池）
+        //    ⇒ ⇒ gRPC server 在 IPv6 空间绑上了、而客户端走 IPv4 连到 Docker 代理 ⇒
+        //    ⇒ 客户端收到 Redis 的 "-ERR " ⇒ ⇒ http2 首帧不是 SETTINGS ⇒
+        //    ⇒ 报成「http2 exception」，看起来像 gRPC 坏了，实为【被测环境撞口】。
+        // ⇒ 改成探测式：GrpcTestPort 取候选后会【显式再绑一次】确认 ⇒ 绑不上（被 Docker 占着）就换下一个。
+        ServerBuilder<?> builder = ServerBuilder.forPort(GrpcTestPort.freePort());
         configurer.accept(builder);                  // ← 整条链（recover→breaker→shedding→业务拦截器）
         SlowHandlerProbe probe = new SlowHandlerProbe();
         Server server = builder.addService(slowMessageService(probe, holdMillis)).build().start();

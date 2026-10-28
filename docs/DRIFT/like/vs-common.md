@@ -1279,3 +1279,72 @@ mvn -o -B -DargLine=-Xmx2g -am -pl service/common,service/message/message-api,se
 
 **⑤ 原值保留不改写**
 第二十三轮的 **1022 / 689 / 333** 等**全部原样保留**；**1030 / 697 / 333** 为**当前权威值**。
+
+### 🟢 第二十五轮附 · **变异 M-B：`isStale` 的共享层输入到底承不承重？（四腿红绿对照 · 已闭合）**
+
+**① 为什么要做这个变异**
+第二十四轮给 `LikeRpcArtifactClasspathGateTest#isStale` 加了**共享层输入**（`service/common/pom.xml` ＋ `service/common/src/main` 全量）
+⇒ ⇒ 那是一条**行为改动**（不是断言增量）⇒ ⇒ 它**必须被证明是 load-bearing 的**，否则就是一条「看起来更严、其实没生效」的装饰。
+
+**② 变异目标与还原纪律**
+- 变异对象 = **共享层写权面**的文件：
+  `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`
+  ⇒ ⇒ **只做临时变异** ⇒ ⇒ **md5 双向还原**（**不用 `git checkout`**）。
+- 变异内容 = 删掉那一行 `com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration`（= 模拟「共享层把排序桥删了」）。
+- md5 账：变异前 `b6b36234d4d0bcf69ebb17fa6a925356` → 变异后 `14b90f10b5ee988aec48cfdf94bedea3` → 还原后**回到 `b6b36234…`** ✔
+- 守门文件（临时加了个开关用于切腿）备份 md5 = `a0aace823f4f7f9e77884f0a7f086b56` ⇒ ⇒ 还原后**逐字一致** ✔ ⇒ ⇒ **开关零残留**。
+
+**③ 四腿观测（同一份守门、同一个变异，唯一变量 = 「共享层输入在不在」）**
+
+| 腿 | 共享层内容 | 共享层输入 | fat jar | 实测 | 含义 |
+|---|---|---|---|---|---|
+| **Leg 0（M-B1）** | **去桥** | **开** | 被重建 | `Tests run: 3, Failures: 1` ⇒ **红在 `fatJarCarriesSharedLayerOrderingBridge:147`** | 守门**看得见**共享层变化 ⇒ **不是假绿** |
+| **Leg A（基线）** | 原样(有桥) | 关 | 先 `mvn clean` 掉 ⇒ 重建（10:17:02） | `Tests run: 3, Failures: 0` ⇒ **全绿** | 基线正常 |
+| **Leg B（假绿）** | **去桥** | **关** | **未重建**（mtime 仍 10:17:02） | `Tests run: 3, Failures: 0` ⇒ **仍绿** | 🔴 **守门对共享层变更全盲** |
+| **Leg C** | **去桥** | **开** | **被重建**（10:21:26） | `Tests run: 3, Failures: 1` ⇒ **红在同一条目标断言** | 共享层输入**承重** |
+
+**④ 结论**
+- **Leg B 与 Leg C 的唯一变量 = 「共享层输入在不在」** ⇒ ⇒ 输出从**绿**变**红** ⇒ ⇒
+  **该输入确实是 load-bearing 的** ⇒ ⇒ 撤掉它 ⇒ 守门就会对「共享层改了」**完全失明**（读陈旧内嵌 jar ⇒ 假绿/假红）。
+- ✅ **每条腿都恰好 1 条红，且红在【目标断言】**（另两条 `runtimeClasspathContainsGrpcInprocess` /
+  `fatJarContainsGrpcInprocess` 始终绿）⇒ ⇒ 判据**有判别力**，不是「一堆断言里碰巧红一条」。
+- ⚠️ 注意 **Leg B 里 jar 没被重建**（mtime 停在 Leg A 的 10:17:02）⇒ ⇒ 这正是缺陷的**机制本体**，不是环境噪音。
+
+**⑤ 🔴 顺带留档：我自己的一次【假阳性】（差点误报跨 lane 缺陷）**
+- 我先用**字面量 grep** 判「G1 / G3 / G4 树里的 `comment-rpc` / `article-rpc` 产物层守门**缺共享层输入**」
+  ⇒ ⇒ **结论是错的**：实读那三棵树 ⇒ **`comment-rpc` 与 `article-rpc` 两处【都已有】共享层输入**
+  （写法是 `repoRoot().resolve("service/common")`，与我用的 `resolve("service").resolve("common")` **语义等价但字面量不同**）
+  ⇒ ⇒ **跨 lane 无缺陷 ⇒ 不必通报** ⇒ ⇒ **我差点把一条不存在的缺陷发给 G3**。
+- ⇒ ⇒ **教训（可复用）**：判「某个机制在不在」**不能靠字面量 grep** ⇒ ⇒ 必须**读到消费点**（§3.3.1 同款纪律）。
+  ⇒ ⇒ 同族形态：「共享层输入」在 G1/G3/G4 树里的 `like-rpc` 守门中确实**没有** ⇒ 但那是**我的文件**（`83d691a` 已修）
+  ⇒ ⇒ **合并我域分支后自动带上** ⇒ ⇒ **不是缺陷，不必通报**。
+
+**⑥ 还原后的复跑（绿腿）**
+两文件 md5 还原 + 工作树干净 + 开关零残留 ⇒ ⇒ 随后一次**完整 9 模块 `clean test` 复跑** ⇒ ⇒ 见下文「第二十五轮附二」。
+
+**⑦ 写权**
+变异对象属**共享层写权面** ⇒ ⇒ 本次**只做临时变异 ＋ md5 还原**，**零交付** ⇒ ⇒ 不越权、不落码。
+
+### 🔴 第二十五轮附三 · **本域 4 处 `ServerBuilder.forPort(0)`（程序内起 server · OS 盲选口）⇒ 已修**（完整机制见 `message/vs-common.md` 第二十五轮附二）
+
+**① 现象（波级 · 本域侧）**
+r30 复跑在 `message-rpc` 段报 `http2 exception` ⇒ `Http2Exception: First received frame was not SETTINGS. Hex dump: 2d45525220`
+⇒ ⇒ **`2d45525220` = ASCII `-ERR ` = Redis 的错误前缀** ⇒ ⇒ 客户端连上了 **`Sea-redis`**（发布口 **49380**）
+⇒ ⇒ macOS 临时段 `49152–65535` ⇒ ⇒ **49380 就在临时段里** ⇒ ⇒ 与 Docker published 段**同池**。
+
+**② 本域受影响面（实测 · 只算真实代码）**
+`service/like/like-rpc` 的 `forPort(0)` = **4 处 / 2 个类**：`LikeRpcGrpcInterceptorWiringTest`（2）· `LikeRpcSlowThresholdGateTest`（2）。
+
+**③ 修法（已落码）**
+4 处 ⇒ `ServerBuilder.forPort(GrpcTestPort.freePort())`（每处带【为什么不能盲选】的注释留痕）。
+⇒ 🔴 **为什么探测式能挡住**：探测用 `new ServerSocket().bind(new InetSocketAddress(port))` ⇒ **绑 wildcard（0.0.0.0）**
+⇒ ⇒ Docker 代理占着 wildcard ⇒ ⇒ **EADDRINUSE** ⇒ ⇒ 探测拒绝该口；而 Netty 那个 server 只绑了 IPv6 ⇒ ⇒ 盲选会穿过去。
+
+**④ 波级面**
+全仓 `forPort(0)` 真实代码处 = **34**（含我域 9）⇒ ⇒ **我域 9 处已修 ⇒ 剩 25**：
+G4 共享层 **5** · G3 **11**（article 3 · comment 4 · hot 4）· G1 **9**（follow 2 · admin-rpc 3 · user-rpc 3 · admin-api 1）。
+⇒ 📌 **共享层那 5 处属 G4 写权** ⇒ ⇒ **本 lane 只通报、不落码**。
+
+**⑤ ⇒ ⇒ 与本域第二十五轮那条 `grpc.server.port=0` 的关系**
+两者是**同一族隐患的两个形态**：① `grpc.server.port=0` ⇒ `BindException`（bind 直接失败）；
+② `forPort(0)` ⇒ **协议错**（bind 成功但连到隔壁）⇒ ⇒ **② 更隐蔽** ⇒ ⇒ 两个都要修，缺一不可。

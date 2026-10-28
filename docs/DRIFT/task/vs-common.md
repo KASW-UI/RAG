@@ -1365,3 +1365,25 @@ mvn -o -B -DargLine=-Xmx2g -am -pl service/common,service/message/message-api,se
   ⇒ ⇒ **差 39 = `service/users/users-common`**（`-am` 带出的**非目标**模块，不属收口口径）⇒ ⇒ **1030 + 39 = 1069 逐字相等** ✔
 - ✅ **含 IT / 不含 IT 两口径都是 1030** ⇒ ⇒ **我域已无 `*IT` 类** ⇒ ⇒ `test` 与 `verify` 两口径**重合** ✔
   （全仓 `TEST-*IT.xml` 实测 = **0 个** ⇒ ⇒ 第二十四轮 ① 那条「我域 9 模块现在没有任何 `*IT` 类」**已被实测确认**）
+
+### 🔴 第二十五轮附二 · **本域 2 处 `ServerBuilder.forPort(0)`（程序内起 server · OS 盲选口）⇒ 已修**（完整机制见 `message/vs-common.md` 第二十五轮附二）
+
+**① 现象（波级 · 本域侧）**
+r30 复跑在 `message-rpc` 段报 `http2 exception` ⇒ `Http2Exception: First received frame was not SETTINGS. Hex dump: 2d45525220`
+⇒ ⇒ **`2d45525220` = ASCII `-ERR ` = Redis 的错误前缀** ⇒ ⇒ 客户端连上了 **`Sea-redis`**（发布口 **49380**）
+⇒ ⇒ macOS 临时段 `49152–65535` ⇒ ⇒ **49380 就在临时段里** ⇒ ⇒ 与 Docker published 段**同池**。
+⇒ ⇒ ⚠️ **与本域那条 `grpc.server.port=0` 是同一族、两个形态**：① 那条是 `BindException`（bind 直接失败）；
+② 这条是**协议错**（bind 成功但连到隔壁）⇒ ⇒ **② 更隐蔽**。
+
+**② 本域受影响面（实测 · 只算真实代码）**
+`service/task/task-rpc` 的 `forPort(0)` = **2 处 / 2 个类**：`TaskRpcSlowThresholdGateTest`（1）· `TaskGrpcInterceptorWiringTest`（1）。
+
+**③ 修法（已落码）**
+2 处 ⇒ `ServerBuilder.forPort(GrpcTestPort.freePort())`（每处带【为什么不能盲选】的注释留痕）。
+⇒ 🔴 **为什么探测式能挡住**：探测用 `new ServerSocket().bind(new InetSocketAddress(port))` ⇒ **绑 wildcard（0.0.0.0）**
+⇒ ⇒ Docker 代理占着 wildcard ⇒ ⇒ **EADDRINUSE** ⇒ ⇒ 探测拒绝该口；而 Netty 那个 server 只绑了 IPv6 ⇒ ⇒ 盲选会穿过去。
+
+**④ 波级面**
+全仓 `forPort(0)` 真实代码处 = **34**（含我域 9）⇒ ⇒ **我域 9 处已修 ⇒ 剩 25**：
+G4 共享层 **5** · G3 **11**（article 3 · comment 4 · hot 4）· G1 **9**（follow 2 · admin-rpc 3 · user-rpc 3 · admin-api 1）。
+⇒ 📌 **共享层那 5 处属 G4 写权** ⇒ ⇒ **本 lane 只通报、不落码**。

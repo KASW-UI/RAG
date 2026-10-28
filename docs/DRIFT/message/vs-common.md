@@ -1046,3 +1046,104 @@ mvn -o -B -DargLine=-Xmx2g -am -pl service/common,service/message/message-api,se
 **⑦ 判绿红只看两项**
 本轮日志里同样满屏 `nacos register FAILED` / `kafka NetworkClient` / `otel exporter 装配失败` / `logger-test-fatal` 等 **ERROR 级日志行**
 ⇒ ⇒ **那些不是失败** ⇒ ⇒ **唯一判据 = surefire 的 `Failures`/`Errors`/`Skipped`（0/0/0）＋ `MVN_EXIT=0` ＋ `BUILD SUCCESS`** ✔
+
+### 🔴 第二十五轮附二 · **同一族隐患的【第二形态】：`ServerBuilder.forPort(0)`（程序内起 server · OS 盲选口）** —— r30 实测复现
+
+**① 现象（r30 实测 · BUILD FAILURE · `MVN_EXIT=1`）**
+r30（= M-B 还原后的复跑）在 `message-rpc` 段报：
+`MessageRpcSlowThresholdGateTest.slowCallMustBeMarkedSlow` → 1 error
+→ `io.grpc.StatusRuntimeException: INTERNAL: http2 exception`
+→ `Caused by: Http2Exception: First received frame was not SETTINGS. Hex dump for first 5 bytes: 2d45525220`
+
+**② 🔴 破案关键：那 5 个字节是 ASCII「`-ERR `」⇒ ⇒ 客户端连到了【不是 gRPC server 的东西】**
+- `2d 45 52 52 20` = `-` `E` `R` `R` `空格` ⇒ ⇒ **`-ERR ` 是 Redis 的错误前缀** ⇒ ⇒
+  客户端连上的是一个 **Redis**（⇒ 拿到的是「协议对不上」⇒ ⇒ http2 首帧不是 SETTINGS）。
+- 那个 Redis 是谁？⇒ **`Sea-redis` 发布 `0.0.0.0:49380->6379`**（`docker ps` 实测，Up 7 天）。
+- 而 macOS 的临时段是 **`49152–65535`** ⇒ ⇒ **49380 就在临时段里** ⇒ ⇒ 与 Docker published 段**同池**（同 §① 的池）。
+
+**③ 机制（为什么「bind 没报错」却「连错了服务」）**
+- 该测试的 `warmUp()` 用的是 **`ServerBuilder.forPort(0)`** ⇒ ⇒ **OS 盲选口** ⇒ ⇒ 这次选到了 **49380**。
+- Netty 的 gRPC server 在 **IPv6 空间**绑上了这个口（§① 已实测这族用双栈 IPv6 socket），
+  而 Docker 代理占着**同一个口的 IPv4 那一半** ⇒ ⇒ **两个 socket 可以共存** ⇒ ⇒ **bind 不报错**。
+- 客户端按 `dns:///127.0.0.1:<port>` 走 **IPv4** ⇒ ⇒ 命中 **Docker 代理** ⇒ ⇒ 收到 Redis 的 `-ERR `。
+- ⇒ ⇒ ⚠️ **与 §① 的 `BindException` 是同一族，但形态不同**：
+  `grpc.server.port=0` 那次是 **bind 直接失败**（连不上）；
+  这次是 **bind 成功但连到了隔壁**（协议错）⇒ ⇒ **更隐蔽**。
+
+**④ ⇒ ⇒ 为什么 §① 的修法没挡住它**
+`GrpcTestPort` 只覆盖了 **Spring 上下文那个 `grpc.server.port`**（21 个类的 `@DynamicPropertySource` 注入），
+**没覆盖「程序内用 `ServerBuilder.forPort(0)` 起的 server」** ⇒ ⇒ 这就是 r30 把它逼出来的原因。
+
+**⑤ 修法（已落码 · 我域 9 处 / 6 个类）**
+`forPort(0)` ⇒ `forPort(GrpcTestPort.freePort())`（每个站点都带【为什么不能盲选】的注释留痕）。
+- 🔴 **为什么探测式能挡住而盲选挡不住**：探测用的是
+  `new ServerSocket().bind(new InetSocketAddress(port))` ⇒ **绑 wildcard（0.0.0.0）**
+  ⇒ ⇒ Docker 代理占着 wildcard ⇒ ⇒ **EADDRINUSE** ⇒ ⇒ 探测**拒绝**该口、换下一个
+  ⇒ ⇒ 而 Netty 那个 server 只绑了 IPv6 ⇒ ⇒ 盲选就穿过去了。
+- 我域落码清单：`MessageRpcTimeoutGateTest`（1）· `MessageRpcSlowThresholdGateTest`（2）·
+  `LikeRpcGrpcInterceptorWiringTest`（2）· `LikeRpcSlowThresholdGateTest`（2）·
+  `TaskRpcSlowThresholdGateTest`（1）· `TaskGrpcInterceptorWiringTest`（1）= **9 处**。
+- ✅ 修完后代码里 **0 处** `ServerBuilder.forPort(0)`（剩下 9 个 grep 命中全是**注释里引用的反面写法**）。
+
+**⑥ 波级面（全仓实测 · 只算真实代码、不含注释）**
+
+| 归属 | 模块 | 处数 |
+|---|---|---|
+| **G2（我域）** | message / like / task 三 rpc | **9 ⇒ 已修** |
+| **G4（共享层）** | `service/common` | **5** ⇒ **属 G4 写权** |
+| **G3** | article 3 · comment 4 · hot 4 | **11** |
+| **G1** | follow 2 · admin-rpc 3 · user-rpc 3 · admin-api 1 | **9** |
+| **合计（修后）** | | **25** |
+
+⇒ 📌 共享层那 5 处（`RpcInterceptorTimeoutDescriptionGateTest` · `RpcInterceptorClientDeadlineGateTest`×2 ·
+`RpcServerSpanCurrentGateTest` · `FakeOtlpCollector`）**属 G4 写权** ⇒ ⇒ **本 lane 只通报、不落码**。
+
+**⑦ ⇒ ⇒ 三条形态归到一张表（同一族 · 同一个池）**
+
+| 形态 | 写法 | 撞口时的表现 | 我域处置 |
+|---|---|---|---|
+| ① Spring 上下文 | `grpc.server.port=0` | `BindException: Address already in use` ⇒ **context 起不来** | ✅ 已修（21 个类） |
+| ② 程序内 server | `ServerBuilder.forPort(0)` | **`http2 exception` / 首帧不是 SETTINGS** ⇒ **协议错** | ✅ 已修（9 处） |
+| ③ Testcontainers 宿主口 | 固定端口（`22760–22849` 段） | `port is already allocated` | ✅ 段表**零重叠**（各域不重号） |
+
+⚠️ **三者的误读形态都是同一句**：「**看起来像被测行为坏了，实为被测环境撞口/撞了隔壁服务**」。
+
+**⑧ ⚠️ 与 §⑧（r28 自伤）的关系**
+r28 的失败 = **自伤**（kill maven ⇒ 泄漏容器 ⇒ 占住 22768）；
+r30 的失败 = **本节这一形态**（OS 盲选口 ⇒ 选到 Sea-redis 的 49380）。
+⇒ ⇒ **两个是不同的失败，别混记** ⇒ ⇒ 二者都已在台账留档。
+
+### 🟢 第二十五轮附三 · **修完 `forPort(0)` 后的复跑：9 模块 = 1030（第二次独立实测 · 与 r29 逐字相等）**（2026-10-28 10:39）
+
+**① 实测**
+`mvn -o -B -DargLine=-Xmx2g -am -pl <9 个目标模块> clean test`
+⇒ **`BUILD SUCCESS` · `MVN_EXIT=0` · 9:09 min · 10:30:18 → 10:39:29** · 日志 `/tmp/g2-r31-regression.log`
+⇒ **0 次** `Address already in use` / **0 次** `port is already allocated` / **0 次** `http2 exception` ✔
+
+**② 逐模块（与 r29 逐条相同）**
+common **333** · message-api **103** · message-rpc **96** · message-common **21** ·
+like-api **94** · like-rpc **129** · like-common **18** · task-api **102** · task-rpc **134**
+⇒ ⇒ **域侧 697 · 9 模块合计 1030 · F/E/S 全 0**
+
+**③ 交叉核对（同 r29）**
+XML 侧 9 个目标模块求和 = **1030**；maven 侧模块级汇总行 = **1069**（排除 172 条每类用例行，取 10 条模块级汇总行）
+⇒ ⇒ **差 39 = `service/users/users-common`** ⇒ ⇒ **1030 + 39 = 1069 逐字相等** ✔
+
+**④ ⇒ ⇒ 这个数现在是【可复跑】的（两次独立实测）**
+| 轮次 | 时刻 | HEAD | 结果 |
+|---|---|---|---|
+| r29 | 09:53:24 → 10:04:03 | `b5910dc` | **1030** · 全绿 |
+| r31 | 10:30:18 → 10:39:29 | `forPort(0)` 修好后的树 | **1030** · 全绿 |
+
+⇒ ⇒ **两次独立 `clean test`、逐模块逐条相同** ⇒ ⇒ 这个数**不是一次侥幸** ✔
+⇒ ⇒ 且 **两轮的端口修法/改动都没有动过任何断言** ⇒ ⇒ **条数不变是【预期且实测】的** ✔
+
+**⑤ 三轮失败的性质对照（留档 · 三个不同的东西，别混记）**
+
+| 轮次 | 失败现象 | 根因 | 性质 | 处置 |
+|---|---|---|---|---|
+| **r28** | `port is already allocated`（22768） | **自伤**：kill maven ⇒ 泄漏容器 ⇒ 占住固定宿主口 | 环境 + 自伤 | 删自己的孤儿容器 + 加起跑前体检 |
+| **r30** | `http2 exception` / 首帧非 SETTINGS | **隐患第二形态**：`forPort(0)` OS 盲选 ⇒ 选到 Sea-redis 的 49380 | **真实缺陷**（我域） | ✅ 已修 9 处（探测式） |
+| **r31** | — | — | — | ✅ **全绿 · 1030** |
+
+⚠️ **共同点**：三个里有两个长得像「被测行为坏了」，**实为环境** ⇒ ⇒ 这就是为什么台账要求「判绿红只看 surefire 三项 + 退出码」。
