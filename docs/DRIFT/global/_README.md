@@ -209,6 +209,14 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
    `service/common/**` + `service/users/users-common/**` 的**代码**归 **G4**（§1d）。
    ⇒ ⚠️ **「整合者」不是一个存在的角色** —— 2026-10-27 已从两个写权守门的 SHARED 注释里删除
    （原措辞诱导 lane 去向上升级找一个不存在的人）⇒ **不要按那个词去找人**。
+8. 🆕 **波次收口执行记录（2026-10-28）** —— **G1~G4 四波已全部合入主干**
+   （`02259ee` / `503a978` / `a2f2c2a` ＋ 收口修正 `061bfff`）⇒ **四条 lane 分支已 `--ff-only` 推进到 `061bfff`**（基线 = 合并后主干）。
+   ⇒ **合并后主干的第一次全量收口回归** = `mvn -o -B -DargLine=-Xmx2g clean test`（全仓 **52 模块**）⇒
+   **`BUILD SUCCESS` · `MVN_EXIT=0`** · 42:41 min ⇒ 权威条数（surefire XML 逐 `testsuite` 求和，442 份 XML）
+   = **2860 条 · 0 failures · 0 errors · 4 skipped** ⇒ **共享层 `service/common` = 337**（⚠️ 旧台账的 333 已过期）。
+   ⇒ 剩余红**仅 1 条**（`check-ddl-static`）⇒ 与合并前主干基线**输出逐字相同** ⇒ 合并未引入新 DDL 漂移。
+   ⇒ **完整记录（含 3 条合并引入守门回归的修法 + 「G2 必须先合」那条旧结论的订正）**
+   ⇒ [`docs/DRIFT/_cross/cross-domain-coupling.md` §2.2.1](../_cross/cross-domain-coupling.md)。
    ⇒ 📌 **完整角色表 + lane 遇到共享面 / 跨 lane 问题的正确动作 ⇒ `docs/Worktree.md` §1e**。
 
 ---

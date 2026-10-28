@@ -190,6 +190,63 @@ task     →                            （Kafka ← like）
 `tools/difftest/check-wave-lane-ownership.py` ⇒ `EXIT=0`。
 ⇒ 旧的 **10 条 `<域>-common` lane 工作树已全部撤掉**（2026-10-27 01:44）⇒ 粒度从「一个域一棵」改成「**一个波次一棵**」。
 
+### 2.2.1 ✅ **波次收口执行记录（2026-10-28）** —— 四波全部合入主干（**合并收口执行者**）
+
+> **本节由合并收口执行者写**（共享面 = §1e 表里「合并收口执行者」那一行）⇒ **域侧结论不改**（各域台账仍由各域 owner 写）。
+> **核对日期 2026-10-28** · 合并前主干 `c9cf2c1` → 合并后主干 **`061bfff`**。
+
+#### ① 合入的四个提交
+
+| 提交 | 内容 |
+|---|---|
+| `02259ee` | `merge(align/g1-users-follow)` —— `users`（不含 `users-common`）+ `follow` **＋ G4 共享层波次**（G4 是 G1 的祖先 ⇒ 随其进；单独 `merge align/g4-service-common` 实测 = **Already up to date**） |
+| `503a978` | `merge(align/g2-message-like-task)` —— `message` + `like` + `task` |
+| `a2f2c2a` | `merge(align/g3-article-comment-favorite-hot)` —— `article` + `comment` + `favorite` + `hot` |
+| `061bfff` | `docs(收口)` —— **合并引入的 3 条守门回归**订正（见 ③） |
+
+#### ② 合并前的三项预演证据（**都是实测，不是推算**）
+
+- **冲突面**：三种**合并**顺序（`G1→G2→G3` / **`G1→G2→G3` 之后再显式合一次 `G4`** / `G2→G1→G3`）**全部零冲突**，且**最终树逐字相同**（`342951b0c85f`）
+  ⇒ ⇒ **合并顺序不影响结果**
+  ⇒ ⇒ ⚠️ **注意**：上面那第二种顺序**不是**域波顺序（**域波顺序里没有 G4**，见 §2.2）⇒ 它**只是**我实测过的一种**合并顺序**。
+  ⇒ ⇒ 📌 **订正一条旧结论**：曾记「**G2 需与（或先于）G1/G3/G4 合入**，否则主干会拿到『新守门 + 旧 yml』」
+  ⇒ ⇒ **该约束只对【单树中间态】成立，对【最终合并树】不成立** ⇒ 合并树上 `check-tomcat-limits` 实测 **EXIT=0（绿）**。
+- **内容面**：`check-merge-tree-content.py`（逐步验「**每步合并结果 = 两侧改动都在**」，而不只是零冲突）**PASS**
+  ⇒ 0 问题 / 0 不可信 / **无含真 NUL 的多方修改文件**（排除「零冲突但二进制揉坏」那类静默丢失）
+  ⇒ 重建出的合并树与主干 HEAD 树**逐字一致**（`19542fb7b076`）。
+- **守卫面**：**合并引入 3 条新红**（主干基线上这 3 条原本都是绿 ⇒ 是合并引入，不是主干原有）⇒ 已修（③）。
+
+#### ③ 合并引入的 3 条守门回归 ⇒ 已在 `061bfff` 修完
+
+| 守卫 | 现象 | 修法 |
+|---|---|---|
+| `check-wave-coupling.py` | `common_radiation` 快照 **10 项漂移** | 按**合并树实况**重算快照（**44 条**）⇒ 绿 |
+| `check-ledger-count.py` | 索引称 **315**、实测 **335**（+20） | 机器生成计数订正 ⇒ 绿 |
+| `check-doc-links.py` | **4 处**相对链接层级写错 | `docs/DRIFT/{like,task}/vs-common.md` 里 `message/vs-common.md` ⇒ **`../message/vs-common.md`** ⇒ 绿 |
+
+#### ④ 收口回归（**合并后主干的第一次全量**）
+
+- 命令：`mvn -o -B -DargLine=-Xmx2g clean test`（**全仓 52 模块** · `clean` = 口径对齐，**清掉旧 surefire 报告**）
+- 结果：**`BUILD SUCCESS` · `MVN_EXIT=0`** · **42:41 min** · 13:05:50 → 13:48:33 · HEAD `061bfff`
+- **权威条数**（surefire XML **逐 `testsuite` 求和**；**442 份 XML / 28 个含测试模块**）：
+  **2860 条 · 0 failures · 0 errors · 4 skipped**（skip = `favorite-rpc` 3 + `favorite-api` 1）
+- **共享层 `service/common` = 337** ⇒ ⚠️ **旧台账的 333 已过期**，以本轮实测为准
+- **`task-rpc` = 134** ⇒ 与台账声称值**逐字相等**
+  ⇒ ⇒ 📌 **订正一条踩坑结论**：合并后 `check-ledger-selfcheck.py` 一度报「台账 134 / **实测 114**」
+  ⇒ ⇒ **根因 = 主工作树里 `service/task/*/target/surefire-reports` 是 10-26 的 stale 报告**（`mvn test` 读不到新报告 ⇒ 读到旧的）
+  ⇒ ⇒ **不是台账错、也不是回归** ⇒ **`clean` 跑完后该守门即转绿**（实测 ✅「台账 134 / 实测 134」）。
+
+#### ⑤ 新基线
+
+- 四条 lane 分支已 `--ff-only` 推进到 **`061bfff`** ⇒ **只推进指针，不重写历史、不产生新提交**
+- lane 原尖端 `173a591` / `18c6a36` / `51afbe8` / `299a9fd` **仍是主干祖先** ⇒ 一笔历史都没丢
+- 四棵工作树与主干的**文件差异 = 0** ⇒ **基线 = 合并后主干** ⇒ 下一轮按 §1d「主干再前进就 `merge do-my-own-gh` 一次」继续。
+
+#### ⑥ 剩余红：**1 条，且是主干原有**
+
+- `check-ddl-static.py` ⇒ 与**合并前**主干基线**输出逐字相同** ⇒ **合并未引入任何新 DDL 漂移**
+  （users 域 **9 处** = 1 处可空性 `users_user.status` + 8 处 `DEFAULT CURRENT_TIMESTAMP` 残留 ⇒ **已登记项**，非本波引入）。
+
 ### 2.3 备选（**未采纳**）：按层级拆 5 波
 
 若日后要压总工期，可按 §1.3 的层级再切（W1 `users` / W2 `follow`+`message` / W3 `like`+`article` /

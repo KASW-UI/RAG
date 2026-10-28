@@ -67,7 +67,7 @@ RAG.worktrees/          ← 11 个工作树（在 RAG 外面，不进版本库�
 它是请求保护层。它不依赖任何其他域 ⇒ 并发自由度最高，值得先跑。
 但反过来：**若 common 挖出新漂移，那 16 个组件的 api 全要复查。**
 
-### ✅ **波次版：G1~G4（2026-10-27 01:44 用户定，当前在跑的那一套）**
+### ✅ **波次版：G1~G4（2026-10-27 01:44 用户定 · 2026-10-28 已全部合入主干）**
 
 ```bash
 cd "/Users/pr/Documents/java&golang/RAG"
@@ -248,7 +248,7 @@ docs/DRIFT/_cross/                    ← 跨模块档案（跨域不变量：�
 | 规则 | 内容 |
 |---|---|
 | **切法** | **4 棵** = G1（`users` 不含 `users-common` + `follow`）· G2（`message`+`like`+`task`）· G3（`article`+`comment`+`favorite`+`hot`）· G4（**共享层**）；分支 `align/g<N>-<slug>` ＋ 目录 `../RAG.worktrees/g<N>-<slug>` |
-| **基线** | `do-my-own-gh`（主干再前进就 `merge do-my-own-gh` 一次，**文件级不重叠 ⇒ 零冲突**） |
+| **基线** | `do-my-own-gh`（主干再前进就 `merge do-my-own-gh` 一次，**文件级不重叠 ⇒ 零冲突**）⇒ 📌 **2026-10-28：四波已全部合入主干**（`02259ee` / `503a978` / `a2f2c2a` ＋ 收口修正 `061bfff`）⇒ **四条分支已 `--ff-only` 推进到 `061bfff`**（只推进指针、不重写历史）⇒ **基线 = 合并后主干** ⇒ 收口记录 ⇒ [`docs/DRIFT/_cross/cross-domain-coupling.md` §2.2.1](DRIFT/_cross/cross-domain-coupling.md) |
 | **写权** | ✅ 各自表里那个面；🔴 **`service/common/**` + `service/users/users-common/**` 只读** —— 只有 `align/g4-service-common` 能写 |
 | **顺序** | **域波 G1 → G2 → G3**（契约 DAG 定序）；**G4 不在域波顺序里** —— 它是**常设的共享层执行者**，**随时**接收反馈单并落码，**并行、不阻塞** |
 | **lane 台账** | **`docs/DRIFT/<域>/vs-common.md`**（**按域各一份** ⇒ 跨树**文件级零重叠**，不必抢同一个大文件） |
