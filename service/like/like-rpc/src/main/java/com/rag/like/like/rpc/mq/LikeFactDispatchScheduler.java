@@ -14,7 +14,7 @@ import org.springframework.stereotype.Component;
 import java.net.http.HttpClient;
 
 /**
- * 事实流派发调度 —— 对应 Go 端 {@code service/like/rpc/cmd/fact-dispatch/main.go:54-77}
+ * 事实流派发调度 —— 对应 Go 端 {@code service/like/rpc/cmd/fact-dispatch/main.go:51-77}
  * 的 {@code run(once, logger)}（{@code communityfact.RunDispatcher} 的调用点）。
  *
  * <h2>⚠️ 默认关闭，这是刻意的</h2>
@@ -30,10 +30,10 @@ import java.net.http.HttpClient;
  *
  * <h2>🔴 批次 / 节奏 / 超时 / 失败即 break —— <b>四项都在共享层，本类不重复实现</b></h2>
  * <pre>
- *   批次 16（Dispatcher.java:178）        ← Go main.go:74  for i := 0; i &lt; 16; i++
- *   节奏 1s（Dispatcher.java:199）        ← Go main.go:67  time.NewTicker(time.Second)
- *   单次 10s（Dispatcher.java:122）       ← Go main.go:71  context.WithTimeout(ctx, 10*time.Second)
- *   单条失败即 break（Dispatcher.java:190）← Go main.go:75-79
+ *   批次 16（Dispatcher.java:178）        ← Go communityfact/process.go:44  for i := 0; i &lt; 16; i++
+ *   节奏 1s（Dispatcher.java:199）        ← Go communityfact/process.go:41  time.NewTicker(time.Second)
+ *   单次 10s（Dispatcher.java:122）       ← Go communityfact/process.go:28  context.WithTimeout(attempt, 10*time.Second)
+ *   单条失败即 break（Dispatcher.java:190）← Go communityfact/process.go:46-51
  * </pre>
  * ⇒ 共享层的 {@link Dispatcher} 已按 Go 的形状实现（2026-10-25 第十九轮实测确认）
  * ⇒ 本类<b>只负责装配 + 生命周期</b>，不复制那四项 ⇒ 杜绝「两份实现漂移」。
@@ -75,20 +75,20 @@ public class LikeFactDispatchScheduler {
                     + "，Go 侧为独立进程，此处默认关闭以免 DC 未配置时拖垮 like-rpc");
             return;
         }
-        // Go: cmd/fact-dispatch/main.go:58 `if dsn == "" || endpoint == "" || len(token) < 32`
+        // Go: cmd/fact-dispatch/main.go:55 `if dsn == "" || endpoint == "" || len(token) < 32`
         //     ⇒ Java 侧不检查 dsn（DB 就是本进程自己的连接），其余两条逐条照抄。
         if (fact.getDcEndpoint() == null || fact.getDcEndpoint().isEmpty()
                 || fact.getDcToken() == null || fact.getDcToken().length() < 32) {
-            // Go: 同一处是 `return errors.New("like fact dispatcher configuration incomplete")` → 进程退出。
+            // Go: 同一处是 main.go:56 `return errors.New("like fact dispatcher configuration incomplete")` → 进程退出。
             // Java 侧不能退出（会带走 gRPC 与 Kafka 消费），因此告警后不启动。
             LOG.error("LikeFactDispatchScheduler: 配置不完整（dc-endpoint 非空 + dc-token ≥32 字节），"
-                    + "事实流派发不启动。对应 Go cmd/fact-dispatch/main.go:58 的进程退出条件");
+                    + "事实流派发不启动。对应 Go cmd/fact-dispatch/main.go:55-56 的进程退出条件");
             return;
         }
 
         try {
             HttpClient httpClient = HttpClient.newBuilder()
-                    // 对应 Go cmd/fact-dispatch/main.go:74 的 &http.Client{Timeout: 8 * time.Second}
+                    // 对应 Go cmd/fact-dispatch/main.go:72 的 &http.Client{Timeout: 8 * time.Second}
                     .connectTimeout(fact.getDcTimeout())
                     .build();
             Wire.Sender sender = Wire.DCEventSender.create(
@@ -117,7 +117,7 @@ public class LikeFactDispatchScheduler {
 
     /**
      * 容器关闭时停掉循环 —— 对应 Go 的 {@code ctx.Done()} 分支
-     * （{@code cmd/fact-dispatch/main.go:76-79}）。
+     * （{@code service/common/communityfact/process.go:56-60}）。
      *
      * <p>⚠️ Go 的 fact-dispatch 是 {@code return nil} 直接退出 ⇒ <b>不</b>等待在途投递完成
      * ⇒ 本类也<b>不</b>等待。

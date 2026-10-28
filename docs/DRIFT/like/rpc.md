@@ -2009,3 +2009,92 @@ done
 | **环境前置** | 需要 **Docker**（like-rpc / task-rpc / message-rpc 的若干真 PG 容器 + 固定宿主口）⇒ 无 Docker 时**不是**「代码有问题」，而是**环境未满足** |
 | **日志** | `/tmp/g2run/g2-regress.log`（**仓外**，不可复算 ⇒ 只作当次实跑的原始记录，**结论以台账 + 复算命令为准**） |
 
+
+---
+
+### §10 🔴→✅ **Go 出处行号订正**（**新的一族**：「数字与真源对不上」，与「字节数错」同族但落点不同）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `46ae663` · **核对日期** 2026-10-29
+> **证据强度**：**E3**（Go 真源**逐行核验** + 改后**逐条回验**）
+> **性质**：**P2 · B 类**（**不阻断**阶段 1 准入）
+> **发现路径**：G1 lane 的「同族注释漂移」排查 → G2 用**更宽口径**重扫 → 顺手扫到**行号族**
+
+#### ① 现象
+
+`service/like/like-rpc` 里 **21 处 `main.go:` 出处引用**（`cmd/fact-dispatch/main.go` 侧）⇒
+**其中 14 处的行号或文件指错**，且其中 **4 处引用的代码根本不在 `main.go` 里**。
+
+| # | RAG 原文（位置） | 原文标的 | **真源实况** | 性质 |
+|---|---|---|---|---|
+| 1 | `LikeFactDispatchScheduler.java:78` | `cmd/fact-dispatch/main.go:58` `if dsn == "" \|\| endpoint == "" \|\| len(token) < 32` | **`main.go:55`** | 行号错 3 |
+| 2 | `LikeFactDispatchScheduler.java:82` | 「同一处是 `return errors.New(...)`」 | **`main.go:56`** | 行号错 2 |
+| 3 | `LikeFactDispatchScheduler.java:85` | 「对应 Go …main.go:58 的进程退出条件」 | **`main.go:55-56`** | 行号错 |
+| 4 | `LikeFactDispatchScheduler.java:91` | `main.go:74` 的 `&http.Client{Timeout: 8 * time.Second}` | **`main.go:72`** | 行号错 2 |
+| 5 | `LikeFactDispatchScheduler.java:17` | `main.go:54-77` | **`main.go:51-77`**（`func run` 起点是 51） | 起点错 |
+| 6 | `LikeFactDispatchScheduler.java:33` | 「Go main.go:74 `for i := 0; i < 16; i++`」 | 🔴 **该代码不在 `main.go`** ⇒ 在 **`service/common/communityfact/process.go:44`** | **文件指错 + 行号错** |
+| 7 | `LikeFactDispatchScheduler.java:34` | 「Go main.go:67 `time.NewTicker(time.Second)`」 | 🔴 ⇒ **`communityfact/process.go:41`** | 同上 |
+| 8 | `LikeFactDispatchScheduler.java:35` | 「Go main.go:71 `context.WithTimeout(ctx, 10*time.Second)`」 | 🔴 ⇒ **`communityfact/process.go:28`**（且变量名是 **`attempt`** 不是 `ctx`） | 同上 + 代码文本也不精确 |
+| 9 | `LikeFactDispatchScheduler.java:36` | 「Go main.go:75-79（单条失败即 break）」 | 🔴 ⇒ **`communityfact/process.go:46-51`** | 同上 |
+| 10 | `LikeFactDispatchScheduler.java:120` | 「`cmd/fact-dispatch/main.go:76-79`（`ctx.Done()` 分支）」 | 🔴 ⇒ **`communityfact/process.go:56-60`** | 同上 |
+| 11 | `LikeFactDispatchContractGateTest.java:58` | `main.go:67-79` | **`main.go:51-77`** | 范围错 |
+| 12 | `LikeFactDispatchContractGateTest.java:71` | `cmd/fact-dispatch/main.go:56`（`DC_PLATFORM_EVENT_URL`） | **`main.go:53`** | 行号错 3 |
+| 13 | `LikeFactDispatchContractGateTest.java:74/77/80/235/252/255/265`（7 处） | `main.go:67` / `:74` / `:75-79` | ⇒ **`communityfact/process.go:41` / `:44` / `:46-51`** | **文件指错 + 行号错** |
+| 14 | `LikeFactDispatchContractGateTest.java:127` | `main.go:58`（`len(token) >= 32`） | **`main.go:55`** | 行号错 3 |
+| 15 | `LikeRpcProperties.java:130` | `cmd/fact-dispatch/main.go:24` 的 `-once` flag | **`main.go:25`** | 行号错 1 |
+
+#### ② 🔴 根因（**为什么这族特别危险**）
+
+| 事实 | 证据 |
+|---|---|
+| **两个 `main.go` 结构几乎一样** | `cmd/fact-dispatch/main.go` 与 `cmd/fact-authority/main.go` 都有 `dsn/token/env` 检查块 ⇒ **`gorm.Open` 在 fact-dispatch 是 `:58`、在 fact-authority 也是 `:58`** ⇒ ⇒ **行号从另一个文件串过来，肉眼看不出** |
+| **「文件指错」最难自查** | 标 `main.go:67` 的 `time.NewTicker` **确实存在于某个 main.go 附近** ⇒ 但它**不在 `main.go` 里** ⇒ 读 RAG 注释的人**按图索骥会找不到**，却**不会怀疑出处本身** ⇒ ⇒ **出处不可核 = AGENTS.md §3.3「每个 Go 事实必须带 `文件:行号`」失效** |
+| **断言照常绿** | 这 14 处全在**注释 / `@DisplayName` / 断言消息**里 ⇒ **不改任何断言 ⇒ 一行红都不会有** ⇒ ⇒ 与「字节数错」完全同族（**绿测试守着一个错的事实**） |
+
+#### ③ §5.4「执行实际改造」九项（浓缩）
+
+| # | 项 | 内容 |
+|---|---|---|
+| 1 | **修改前的实现和行为** | 14 处 Go 出处引用**行号或文件指错**；**产品行为零影响**（全是注释） |
+| 2 | **具体问题** | 违反 AGENTS.md §3.1（逐字对照）/ §3.3（**每个 Go 事实必须带 `文件:行号`**，且 §3.3.2 要求「以『Go: …』措辞出现的断言」必须可核）⇒ **出处不可核** |
+| 3 | **修改后的实现** | 15 处引用**逐条改成真源实况**（文件 + 行号）；`:8` 那条的**代码文本**也从 `context.WithTimeout(ctx, …)` 订正为 `context.WithTimeout(attempt, …)` |
+| 4 | **修改理由** | 出处是「行为层对照」的唯一凭据 ⇒ **出处错 ⇒ 对照链条断** ⇒ 阶段一要求「逐条有证据」⇒ 必须修 |
+| 5 | **实际变更文件** | `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/mq/LikeFactDispatchScheduler.java` · `.../config/LikeRpcProperties.java` · `.../src/test/java/com/rag/like/like/rpc/LikeFactDispatchContractGateTest.java` · `.../src/test/java/com/rag/like/like/rpc/LikeFactDispatchSchedulerStartupTest.java` · `.../mq/LikeAuthorityEndpointConfig.java`（**骨架注释补指路**，见 §11）<br>⚠️ **全部落在 G2 写权面**（`service/like/like-rpc/**`）⇒ **共享层 `service/common` 一个字没改**（只**引用**它的行号） |
+| 6 | **测试场景和断言** | **断言未改一字** ⇒ 相关守门须仍全绿（见 ⑦） |
+| 7 | **实际执行结果** | `mvn -o -B -pl service/like/like-rpc -am -Dtest='LikeFactDispatchContractGateTest,LikeFactDispatchSchedulerStartupTest,LikeAuthorityLookupServiceGateTest' test` ⇒ **`Tests run: 19, Failures: 0, Errors: 0, Skipped: 0`** · **BUILD SUCCESS**（日志 `/tmp/g2run/g2-cite.log`） |
+| 8 | **尚未解决的问题** | ① **本轮只扫了 `main.go:` 这一族**（G2 三域共 21 处）⇒ **其它形式的 Go 出处引用**（`xxx.go:NN` 泛指）**未全量核** ⇒ 阶段 2 可做一次「全仓 `\.go:[0-9]` 出处抽验」；② **`service/common/**` 内部的注释**（G4 面）**未核** ⇒ 不在我写权内 |
+| 9 | **对阶段 2 的影响** | **无回退需求**（纯注释）⇒ 阶段 2 只需**补「出处自动校验」**（见 §10.④） |
+
+#### ④ 📌 可复用的判定式（**这一族比字节数那族更值钱**）
+
+> **凡 RAG 注释里以「Go: …」措辞断言一个行为，⇒ 该出处的 `文件:行号` 必须能指向真源里**「那一行内容」**，而不是「某个看起来差不多的行」。**
+> **复核动作（一行命令）**：把 `文件:行号` 拿回 Go 文件 `sed -n 'NNp' 文件` ⇒ **看打印出来的那行是不是它声称的那件事**。
+> ⚠️ **「结构相似的两个文件」是这族的高发区** ⇒ 本例 `fact-dispatch/main.go` 与 `fact-authority/main.go` 的 `gorm.Open` **都在 `:58`** ⇒ 行号串了**肉眼不可见**。
+> ⇒ ⇒ **建议阶段 2 建一个「出处抽验」脚本**：抽出 RAG 注释里的 `文件:行号` 引用 ⇒ 回 Go 文件读那一行 ⇒ **不要求内容匹配**（太严），**只要求「那一行存在且非空」** ⇒ 就能挡住「文件指错 + 行号越界」这两类。
+
+#### ⑤ 复算命令（可复算）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/g2-message-like-task"
+
+# ① 逐条回验（把 RAG 现在引用的行号拿回 Go 文件看那一行是什么）
+G="/Users/pr/Documents/java&golang/Sea-RideTheWind_golang"
+sed -n '55p;56p' "$G/service/like/rpc/cmd/fact-dispatch/main.go"     # ⇒ len(token) < 32 / errors.New
+sed -n '41p;44p;46p;50p' "$G/service/common/communityfact/process.go" # ⇒ NewTicker / for i<16 / break
+
+# ② 相关守门（19 条）
+mvn -o -B -DargLine=-Xmx2g -pl service/like/like-rpc -am \
+  -Dtest='LikeFactDispatchContractGateTest,LikeFactDispatchSchedulerStartupTest,LikeAuthorityLookupServiceGateTest' \
+  -Dsurefire.failIfNoSpecifiedTests=false test
+# 期望：Tests run: 19, Failures: 0, Errors: 0 · BUILD SUCCESS
+```
+
+---
+
+### §11 🟢 `LikeAuthorityEndpointConfig` 骨架**补指路**（语义层已实现，别再重做一遍）
+
+| 项 | 内容 |
+|---|---|
+| **改前** | 4 行骨架：`// [骨架占位 · 未实现] AuthorityHandlerFactory.register("rtw.like-mq", …)；…（wire 面变更，待拍板）` ⇒ 读起来像「**权威读整个都没做**」 |
+| **改后** | 仍是骨架（**形态那一半本就不该预支**）⇒ 但**明确写出**：① **语义层已实现**于 `LikeAuthorityLookupService`（Go `fact_authority.go:12-146` 的 12 道校验逐字翻译 · 零 servlet 依赖 · 守门 11 条全绿）；② 为什么**本文件仍然不做**（三条硬约束：共享层 `AuthorityHandler`/`AuthorityHandlerFactory` 依赖 servlet ⇒ like-rpc 无 servlet-api ⇒ implements 会让上下文起不来 ／ 加 web starter 会让 4 个未声明 `webEnvironment` 的 `@SpringBootTest` 默认起 Tomcat ／ Go 形态是独立进程 ⇒ 选「同进程独立端口」= wire 面变更）；③ **形态决策待用户/收口执行者拍板**（`DRIFT-LIKE-003-C`） |
+| **为什么值得改** | ⚠️ **「骨架」这个词会误导**：它让人以为**语义层也没做** ⇒ **可能有人重做一遍**（而那 407 行已经写好且有守门）⇒ ⇒ 骨架注释的首要职责是**指路**，不是描述「没做」 |
+| **验证** | 编译通过（`LikeAuthorityLookupServiceGateTest` 11/11 仍绿） |
