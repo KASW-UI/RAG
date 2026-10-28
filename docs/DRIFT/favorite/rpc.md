@@ -3951,3 +3951,67 @@ G4 通报（2026-10-28）：`service/favorite/favorite-rpc/src/test/java/com/rag
 | DDL 逐列 | `tools/ddl-parity-probe/favorite/run.sh`（**真 PG · 两侧同时建库 · 逐行 dump 比对 · MAIN 指纹 + OBS 段**） | **L4** |
 | 静态对照 | `tools/difftest/check-ddl-static.py --domain favorite --indexes` | ⚠️ **L3**（比活库 ⇒ 陈旧即假红） |
 | 域内 | `FavoriteSchemaParityTest`（13 例真 PG） | L3 |
+
+---
+
+## 📌 指针 · 🟢 **共享层 deadline 时基改为单调钟（DRIFT-COMMON-005）⇒ favorite 域零改动**（2026-10-29 · G3 阶段 1）
+
+**归属**：`align/g3-article-comment-favorite-hot` 工作树产出；基线 = `do-my-own-gh` @ `50bb5f3`。
+**核对日期**：2026-10-29
+**来源**：G4（`align/g4-service-common`）反馈单 —— **知会型，不要求 G3 改任何代码**。
+**本域结论**：✅ **零代码改动**（已独立复核，非转述）· ✅ **域内既有结论行一条都不用改**（逐条核过）· 🟢 **新增一条「RAG 更准」的记录**。
+
+### ① 现象（共享层改动）
+
+`RpcInterceptor.DeadlineState` 的 deadline **时基**从「墙钟 epoch 毫秒」改为「**单调钟纳秒**」、**精度**从毫秒改为纳秒（共享层 `DRIFT-COMMON-005` 结案）⇒ ⇒ 落在本域的生产调用点**只有一个**：
+
+`service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/fact/FavoriteAuthorityEndpointConfig.java:275-276`
+```java
+try (DeadlineState.Scope ignored =
+         DeadlineState.bindToCurrent(System.currentTimeMillis() + GO_LOOKUP_TIMEOUT_MILLIS)) {
+```
+
+### ② ✅ 独立复核：域侧**确实一行都不用改**（三条依据）
+
+| # | 核查项 | 实测 | 结论 |
+|---|---|---|---|
+| 1 | `bindToCurrent` 的**签名与语义**是否变了 | 读 `align/g4-service-common` 分支的 `RpcInterceptor.java:848-975`：`bindToCurrent(long epochMillis)` **签名未变**、仍收**墙钟 epoch 毫秒**（javadoc 明写「**兼容入口** … 既有跨域调用方都这么传」并点名本行 `FavoriteAuthorityEndpointConfig.java:276`）⇒ 内部在**绑定瞬间**把墙钟毫秒换算成「剩余预算」，以**单调钟纳秒**存下 ⇒ ⇒ **本域调用点传的正是墙钟 epoch 毫秒 ⇒ 形状完全匹配** | ✅ 零改动 |
+| 2 | `isExpired()` / `remainingMillis()` 的**可观察语义** | `isExpired()` 改为 `monotonicNanos - d >= 0`（**减法**⇒ 单调钟回绕也正确）；`remainingMillis()` = `remainNanos / 1_000_000`（**下取整**）⇒ ⇒ 与旧实现（墙钟毫秒差）相比**最多差 1ms** | ✅ 语义未变（**到期时刻不变**，只是判定不再受绑定后的墙钟跳变影响） |
+| 3 | 域内守门 `FavoriteSqlTimeoutProductionPathTest`（4 例）会不会转红 | 逐条读断言：`:195` `assertEquals(raw/1000, seconds)` = **驱动自身两个读数的一致性**（与时基无关）；`:218` 窗口断言 `assertTrue(raw >= lo - 1L && raw <= hi + 1L)` ⇒ **自带 ±1ms 容差** ⇒ ⇒ 吸收第 2 条那 ≤1ms 的下取整差；`:248` 阳性对照（硬编码 1700，**不涉及** `DeadlineState`）；`:262-263` 无 deadline 分支 | ✅ **不会转红** |
+
+⇒ ⇒ **结论：域侧零改动、既有结论行一条都不用改** —— 与 G4 单据的说法**逐条一致**（但这是**本域自己核出来的**，不是转述）。
+
+### ③ 🟢 本域**新增**一条事实（「RAG 更准」的一侧 ⇒ 不是偏离）
+
+本域权威读面的 **3s 预算**（`GO_LOOKUP_TIMEOUT_MILLIS = 3_000L`，`:135`）的**到期判定**，现在由**单调钟**驱动 ⇒ ⇒
+
+- **到期时刻不变**（仍是调用方给的那个墙钟时刻）⇒ ⇒ **与 Go `context.WithTimeout(3s)` 的语义一致**；
+- 但**墙钟跳变**（NTP 校正 / `setSystemTime` / 虚拟机快照恢复）**不再能让这个 3s 预算提前失效或一直不失效** ⇒ ⇒ 对本域是**更准**，**不是更松**；
+- Go 侧同向依据：`$GOROOT/src/context/context.go:625` `WithDeadline` 把 deadline 存成 `time.Time`（**纳秒精度** · `:666`）⇒ `$GOROOT/src/time/time.go:1233` `Until` 在有单调读数时走 `subMono(...)` ⇒ **纯单调** ⇒ 与 RAG 改后**同款**。
+
+⇒ ⇒ 登记为「**RAG 更严/更准**」的一侧（与本域 §10-D1 修 U4 时「不是抄错 Go」的登记口径一致）。
+
+### ④ ⚠️ 两条**约束**（G4 单据里带的 ⇒ 本域登记备查）
+
+| # | 约束 | 本域遵守情况 |
+|---|---|---|
+| 1 | **`tools/difftest/conf/go/**` 与 `tools/api-full-parity-probe/**` 里的真源 JWT 密钥明文 =「永久豁免」**（对拍要用同一把钥匙才有意义）⇒ **不许动** | ✅ **已确认未触碰**（本轮 4 个 commit 的落点里没有这两个路径；本域新写的 `tools/errmsg-probe/hot/` **不含任何密钥**） |
+| 2 | 域侧 `application.yml` / main 源码 / 测试夹具里的明文 ⇒ **由各域自修**（改默认值 = 改行为 ⇒ 不该由共享层擅改） | 🟡 **api 半边本轮已做**（`45e0af4`：article / comment / favorite 三域 api 的 `access-secret` 去默认值 + `@PostConstruct` fail-closed + test scope 夹具）；**rpc 半边**（`${POSTGRES_PASSWORD:password}` / `${MINIO_SECRET_KEY:minioadmin}` / `${*_AUTHORITY_TOKEN:}`）**仍待 G4 的单独单据**（本单**不含**该项 ⇒ 不预支） |
+
+### ⑤ 关于 G4 建议的「可选台账订正」—— **本域不适用**（不硬凑）
+
+G4 建议：「若 `docs/DRIFT/favorite/**` 里若有『deadline 用墙钟毫秒』的历史描述，请更新**结论行**」。
+
+⇒ **实测（2026-10-29）**：在 `docs/DRIFT/favorite/**` 全文搜 `墙钟` / `墙式` / `系统时钟` / `时钟跳变` / `NTP` / `单调` / `monotonic` / `时基` / `epoch` / `currentTimeMillis` ⇒ **与 deadline 时基相关的命中 = 0 条**。
+
+⇒ 且本档现有的**全部** deadline 措辞逐条核过，**改后仍然成立**（**没有一条需要改**）：
+
+| 出处 | 原文 | 改后是否仍成立 |
+|---|---|---|
+| `rpc.md:330` | 「本域只需在**调用点**用 `DeadlineState.bindToCurrent(...)` 绑 3s」 | ✅ 仍成立 |
+| `rpc.md:333` | 「调用点包 `DeadlineState.bindToCurrent(now + 3_000)`」 | ✅ 仍成立 |
+| `rpc.md:2390` | 「调用点**紧贴**绑定 `bindToCurrent(now + GO_LOOKUP_TIMEOUT_MILLIS)`」 | ✅ 仍成立 |
+| `rpc.md:2420` | 「`bindToCurrent(now + 3_000)` ⇒ `R = 3000 − δ`」 | ✅ 仍成立（`R` 的定义未变，只是取值来源从墙钟差改成单调差） |
+| `rpc.md:2442` / `:3051` | 「`DeadlineState.bindToCurrent(deadlineEpochMs)`」 | ✅ 仍成立 |
+
+⇒ ⇒ **结论：本域不做那条订正**（没有对应的历史描述可改）⇒ ⇒ **只新增**上面 ③ 那条「更准」的事实记录 ⇒ ⇒ **历史各轮记录一条未删**（本层台账约定）。
