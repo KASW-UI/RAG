@@ -1,23 +1,16 @@
 package com.rag.like.like.api.interceptor;
 
 import com.rag.common.exception.AuthenticationException;
-import com.rag.like.like.api.config.LikeApiProperties;
+import com.rag.like.like.api.auth.LikeJwtAuthFilter;
+import com.rag.like.like.api.auth.LikeJwtSignatureVerifier;
 import com.rag.like.like.common.errmsg.LikeErrorCode;
 import com.rag.like.like.common.errmsg.LikeErrorMessages;
-import com.rag.users.common.jwt.BearerTokenExtractor;
-import com.rag.users.common.jwt.JwtUtil;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jws;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
-
-import javax.crypto.SecretKey;
 
 /**
  * like-api 的 JWT 鉴权拦截器 —— Go 端 {@code rest.WithJwt(secret)} 的等价物。
@@ -33,7 +26,7 @@ import javax.crypto.SecretKey;
  *   <li>Authorization 头缺失 / 为空 → <b>HTTP 401</b></li>
  *   <li>Bearer 前缀剥离失败 / token 为空 → 401
  *       （Go: {@code golang-jwt/jwt/v4@v4.5.2/request/oauth2.go} 的
- *       {@code stripBearerPrefixFromTokenString}，三条规则见 {@link BearerTokenExtractor}）</li>
+ *       {@code stripBearerPrefixFromTokenString}，三条规则见 {@code BearerTokenExtractor}）</li>
  *   <li>签名错 / 过期 / 格式错 → 401。<b>Go 不区分原因</b>，
  *       三种失败都只走到同一个 {@code unauthorized()}</li>
  *   <li>验签成功后：把 claim {@code userId} 的<b>原始对象</b>写进 request attribute</li>
@@ -54,11 +47,19 @@ import javax.crypto.SecretKey;
  * </ul>
  * 身份解析的落点见 {@code LikeApiSupport#userId(HttpServletRequest)}。
  *
- * <h3>⚠️ 为什么 claim 存<b>原始对象</b>而不是 long</h3>
- * <p>Go 侧 {@code userId} 是 {@code json.Number}（{@code type Number string}），
- * 业务层做的是<b>类型断言</b>：不是 {@code json.Number} 就直接落 {@code !ok} 分支。
- * 若这里提前转成 {@code long}，{@code {"userId":"abc"}} 会在鉴权层就抛异常变成 401，
- * 而 Go 是走到业务层才判 1006。存原始对象是为了让「非法 claim」这条判定留在业务层。
+ * <h3>🔴 DRIFT-LIKEAPI-009②：验签跑在<b>哪一层</b></h3>
+ * <p>Go 侧链序（真源）：原生中间件 → <b>Authorize(验签)</b> → <b>observability(3s 计时)</b> → handler
+ * ⇒ <b>验签耗时不计入 3s 预算</b>（详见 {@link LikeJwtAuthFilter} 的类注释，含 Go 行号）。
+ * <p>而 Servlet 的 {@code HandlerInterceptor} 在 {@code DispatcherServlet} <b>里面</b>，
+ * 而 3s 预算在 {@code HttpMiddlewareFilter}(+7) 起算、整条下游都在预算内
+ * ⇒ 若验签留在本类，就等于<b>验签耗时会吃掉 3s 预算</b> ⇒ 与 Go 不一致。
+ * <p>⇒ 验签已搬到 {@link LikeJwtAuthFilter}（{@code @Order(+6)}，在预算 Filter **之外**）；
+ * 本类只负责：
+ * <ul>
+ *   <li><b>消费</b> Filter 的验签结果（成功 ⇒ 落 claim；失败 ⇒ 抛 401）；</li>
+ *   <li>Filter <b>未生效</b>时（未被组件扫描 / 未注册）<b>兜底就地验签</b>
+ *       ⇒ 仍然 401（安全不倒退），但此时验签落在预算内 ⇒ 守门会红。</li>
+ * </ul>
  */
 @Component
 public class LikeJwtAuthInterceptor implements HandlerInterceptor {
@@ -71,16 +72,14 @@ public class LikeJwtAuthInterceptor implements HandlerInterceptor {
      */
     public static final String CLAIM_ATTRIBUTE = "userId";
 
-    private final SecretKey key;
+    private final LikeJwtSignatureVerifier verifier;
 
-    public LikeJwtAuthInterceptor(LikeApiProperties properties) {
-        this.key = Keys.hmacShaKeyFor(
-                JwtUtil.padToHmacKeySize(properties.getUserAuth().getAccessSecret()));
+    public LikeJwtAuthInterceptor(LikeJwtSignatureVerifier verifier) {
+        this.verifier = verifier;
     }
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        String authHeader = request.getHeader("Authorization");
         // ── Go 的「路由匹配先于鉴权」：未注册路径**不经 auth** ──
         // 证据：rest/engine.go:104-118 的 bindRoute 只把 chain（native + auth + 用户中间件）
         //       挂到 router.Handle(method, path, handle) 上，即**只对匹配上的路由生效**；
@@ -99,39 +98,30 @@ public class LikeJwtAuthInterceptor implements HandlerInterceptor {
             return true;
         }
 
-        // Go: rest/token/tokenparser.go:80-84 doParseToken → request.ParseFromRequest(r,
-        //     request.AuthorizationHeaderExtractor, ...)。头缺失时 extractor 返回 errNoAuthParam
-        //     → ParseToken 返回 err → authhandler.go:56 unauthorized()。
-        if (authHeader == null || authHeader.isEmpty()) {
-            log.warn("path {} with missing Authorization header", request.getRequestURI());
-            throw unauthorized();
+        // ── 路径 1（正常）：消费 Filter 的验签结果（验签在 3s 预算**之外**）──
+        Object attr = request.getAttribute(LikeJwtAuthFilter.VERIFICATION_ATTRIBUTE);
+        if (attr instanceof LikeJwtSignatureVerifier.VerificationResult result) {
+            if (result.failed()) {
+                throw unauthorized();
+            }
+            request.setAttribute(CLAIM_ATTRIBUTE, result.claim());
+            return true;
         }
 
-        // Go: golang-jwt/v4 request/oauth2.go stripBearerPrefixFromTokenString
-        //     —— 大小写不敏感、不匹配时原样返回整串。三条规则都在 BearerTokenExtractor 里。
-        String token = BearerTokenExtractor.tokenForSignatureVerification(authHeader);
-        if (token.isEmpty()) {
-            log.warn("path {} with empty Bearer token", request.getRequestURI());
+        // ── 路径 2（兜底）：Filter 未生效 ⇒ 就地验签（验签在 3s 预算**之内**）──
+        // ⚠️ 这条分支**不是**正常路径：它意味着 DRIFT-LIKEAPI-009② 未闭环
+        //    （验签重新落回预算内）⇒ 守门 {@code LikeApiJwtVerificationScopeTest} 会红。
+        //    保留它是为了「Filter 万一没装配上也不至于变成放行所有请求」——
+        //    安全不倒退，只是漂移没修好。
+        LikeJwtSignatureVerifier.VerificationResult inline = verifier.verify(
+                request.getHeader("Authorization"), request.getRequestURI());
+        if (inline.failed()) {
             throw unauthorized();
         }
-
-        Claims claims;
-        try {
-            Jws<Claims> jws = Jwts.parser()
-                    .verifyWith(key)
-                    .build()
-                    .parseSignedClaims(token);
-            claims = jws.getPayload();
-        } catch (Throwable t) {
-            // 签名错 / 过期 / 格式错 —— Go 侧同样只走到 unauthorized()，不区分原因
-            log.warn("JWT verify failed on {} : {}", request.getRequestURI(), t.getMessage());
-            throw unauthorized();
-        }
-
-        // Go: authhandler.go:71-79 遍历 claims，把非标准 claim（aud/exp/jti/iat/iss/nbf/sub 除外）
-        //     逐个塞进 ctx。like api 侧只有 4 个 logic 的 ctx.Value("userId") 读它，
-        //     其余 claim 无消费者，故这里只落这一个。
-        request.setAttribute(CLAIM_ATTRIBUTE, claims.get(CLAIM_ATTRIBUTE));
+        request.setAttribute(CLAIM_ATTRIBUTE, inline.claim());
+        request.setAttribute(LikeJwtAuthFilter.VERIFICATION_SOURCE_ATTRIBUTE,
+                LikeJwtAuthFilter.SOURCE_INLINE);
+        log.warn("like JWT verification fell back to the interceptor (filter result absent)");
         return true;
     }
 

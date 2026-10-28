@@ -1,6 +1,7 @@
 package com.rag.like.like.rpc;
 
 import com.rag.common.protection.GoStyleProtectionProperties;
+import com.rag.common.protection.GoStyleRpcProtectionChain;
 import io.grpc.Metadata;
 import io.grpc.MethodDescriptor;
 import io.grpc.ServerBuilder;
@@ -80,16 +81,7 @@ class LikeProtectionChainWiringTest {
         GoStyleProtectionProperties props = new GoStyleProtectionProperties();
         props.getCpuShedding().setEnabled(false);
 
-        GrpcServerConfigurer configurer =
-                new LikeRpcApplication().rpcInterceptorConfigurer(interceptor, props);
-
-        ServerBuilder<?> builder = mock(ServerBuilder.class);
-        ArgumentCaptor<ServerInterceptor> captor = ArgumentCaptor.forClass(ServerInterceptor.class);
-
-        configurer.accept(builder);
-
-        verify(builder).intercept(captor.capture());
-        ServerInterceptor chained = captor.getValue();
+        ServerInterceptor chained = captureChainedInterceptor(interceptor, props);
 
         // 真跑一遍被交给 builder 的那个拦截器。
         ServerCall<Object, Object> call = mock(ServerCall.class);
@@ -117,6 +109,72 @@ class LikeProtectionChainWiringTest {
                 .as("链上有 breaker/shedding ⇒ 业务 interceptor 拿到的必须是包装过的 call。"
                         + "若拿到的是原始 call，说明包装层没挂上 —— 即 breaker/shedding 形同虚设。")
                 .isNotSameAs(call);
+    }
+
+    @Test
+    @DisplayName("🔴 链的层名列表必须是 [recover, breaker, shedding]（共享层原生判据 · 一次钉住两层 + 层序）")
+    void chainLayerNamesMatchComposedChain() {
+        ServerInterceptor interceptor = mock(ServerInterceptor.class);
+
+        GoStyleProtectionProperties props = new GoStyleProtectionProperties();
+        props.getCpuShedding().setEnabled(true);
+        // ⚠️ 阈值抬到 999（Go 的 tag 声明域 [0:1000) 的上界）⇒ 即使整机 CPU 打满也不触发降载
+        //    ⇒ 本用例只依赖「层在不在链上 + 顺序」，**不依赖跑测试那一刻的机器负载**（确定性）。
+        props.getCpuShedding().setCpuThreshold(999L);
+
+        ServerInterceptor chained = captureChainedInterceptor(interceptor, props);
+
+        assertThat(GoStyleRpcProtectionChain.layerNames(chained))
+                .as("本组件交给 gRPC server 的链必须含 recover → breaker → shedding 三层"
+                        + "（Go: zrpc/server.go:144-167 的注册序 ⇒ 本仓的链 = recover → breaker → shedding"
+                        + " → 业务观测拦截器）。若少了 breaker 或 shedding ⇒ 该组件的熔断 / 降载形同虚设，"
+                        + "且**不报任何错**。")
+                .containsExactly("recover", "breaker", "shedding");
+
+        assertThat(GoStyleRpcProtectionChain.layerNames(chained))
+                .as("**实际装到 server 上的链**必须与**配置推出的构成**逐项一致"
+                        + "（compose() 是构成的唯一计算点 ⇒ 这条断言能抓住"
+                        + "「配置说三层、实际只装两层」这类装配与配置脱节的漂移）。")
+                .isEqualTo(GoStyleRpcProtectionChain.compose(props).layerNames());
+    }
+
+    @Test
+    @DisplayName("🔴 关掉降载 ⇒ 层名列表必须变成 [recover, breaker]（证明降载层是**条件装的**，不是恒在）")
+    void sheddingLayerIsConditional() {
+        ServerInterceptor interceptor = mock(ServerInterceptor.class);
+
+        GoStyleProtectionProperties props = new GoStyleProtectionProperties();
+        props.getCpuShedding().setEnabled(false);
+
+        ServerInterceptor chained = captureChainedInterceptor(interceptor, props);
+
+        assertThat(GoStyleRpcProtectionChain.layerNames(chained))
+                .as("降载关掉后，链上必须**只剩** recover → breaker 两层"
+                        + "（Go: zrpc/server.go:160-163 CpuThreshold > 0 才挂 Shedding）。"
+                        + "若降载层仍在 ⇒ 说明它被写成了恒在 ⇒ 与 Go 的条件挂载不一致。")
+                .containsExactly("recover", "breaker");
+    }
+
+    /**
+     * 只把本组件<b>真的交给 {@code ServerBuilder}</b> 的那条拦截器<b>抓出来</b>（不跑调用）。
+     *
+     * <p>⇒ 这是「层名观测」的入口：共享层的 {@code layerNames(chain)} 需要一个<b>已构造出的链</b>，
+     * 而本组件的链是在 {@code rpcInterceptorConfigurer} 里造的 ⇒ ⇒ 必须经由
+     * {@code GrpcServerConfigurer} 这条真实路径取 ⇒ ⇒ **不能自己 new 一条链**（否则验的不是本组件的装配）。
+     */
+    private static ServerInterceptor captureChainedInterceptor(
+            ServerInterceptor business, GoStyleProtectionProperties props) {
+
+        GrpcServerConfigurer configurer =
+                new LikeRpcApplication().rpcInterceptorConfigurer(business, props);
+
+        ServerBuilder<?> builder = mock(ServerBuilder.class);
+        ArgumentCaptor<ServerInterceptor> captor = ArgumentCaptor.forClass(ServerInterceptor.class);
+
+        configurer.accept(builder);
+
+        verify(builder).intercept(captor.capture());
+        return captor.getValue();
     }
 
     /** 最小可用的 marshaller（测试不真的序列化）。 */

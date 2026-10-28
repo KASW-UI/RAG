@@ -92,6 +92,70 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       database: 0        # 对应 Go LikeRedis.DB: 0
+      # ⚠️ Go 侧 yaml 写的 `ReadTimeoutMs: 1000` **不生效** ⇒ 真正生效的是 go-redis 库默认 **3s**。
+      #    证据（Go 侧活体实测，2026-10-27 G2）：
+      #      ① `service/task/rpc/internal/config/config.go:32-37` 的 LikeRedis struct
+      #         **只有** Addr / Pass / DB / ConsumerName —— 没有 ReadTimeoutMs 字段；
+      #      ② go-zero 的 `conf.Load` **非严格模式**（`core/conf/config.go` 无 strict/ErrorUnused）
+      #         ⇒ yaml 里有、struct 里没有的字段被**静默忽略**（Go 探针实测：`LOAD OK`，
+      #         `ReadTimeoutMs: 1000` 未进 struct）；
+      #      ③ 真正生效的是 go-redis v9.20.0 的库默认：`options.go:370` `ReadTimeout = 3s`。
+      #    ⇒ 本项对齐 Go 的 **3s**（不是 yaml 里的 1000ms）。
+      #    ⚠️ 不配会落 Boot 的默认 **60s**（实测 `LettuceClientConfiguration.getCommandTimeout()`
+      #    = PT1M）⇒ Redis 断连时命令挂 60s，远超本组件的 rpc-timeout（2s）
+      #    ⇒ 与 Go 的「快速失败 ⇒ 域侧 lenient 包装 catch ⇒ 回源 DB」不同形。
+      #    ⇒ 同 like-rpc（`timeout: 3s`）保持同族一致。
+      timeout: 3s
+      # ⚠️ 连接超时 = 5s，对齐 Go 的 go-redis v9.20.0 默认 `DialTimeout`：
+      #    `options.go:338-340` `if opt.DialTimeout == 0 { opt.DialTimeout = 5 * time.Second }`
+      #    （真源 go.mod:15 锁的就是 v9.20.0；真源自己的 `redis.Options` 只设 Addr/Password/DB
+      #    ⇒ 不设 DialTimeout ⇒ 走库默认 5s）。
+      #    ⚠️ 不配会落 Lettuce 的默认 **10s**（`SocketOptions.DEFAULT_CONNECT_TIMEOUT = 10` 秒）
+      #    ⇒ 与 Go 差 2 倍。属性名 = `spring.data.redis.connect-timeout`
+      #    （Boot 4 `DataRedisProperties#getConnectTimeout` ⇒
+      #    `LettuceConnectionConfiguration:212-215` 写进 `SocketOptions.connectTimeout`）。
+      connect-timeout: 5s
+      # ⚠️ 连接池 = 与 Go 侧**形态**对齐（2026-10-27 G2 · `DRIFT-TASK-RPC-008` 已修）：
+      #    Go 侧 `service/task/rpc/internal/svc/service_context.go:25-29`
+      #    `redis.NewClient(&redis.Options{Addr, Password, DB})` ⇒ 只设 3 个字段
+      #    ⇒ `PoolSize` / `MinIdleConns` **未设** ⇒ 落 go-redis v9.20.0 库默认
+      #    （`go-redis@v9.20.0/options.go:350-351` `PoolSize = 10 * runtime.GOMAXPROCS(0)`）⇒ **Go 侧是有池的**。
+      #    ⚠️ 而本模块原先**无 pool 段 + pom 无 commons-pool2** ⇒ Boot 4 的判据
+      #    `DataRedisConnectionConfiguration#isPoolEnabled`（`:195-198`）：
+      #    `Boolean enabled = pool.getEnabled(); return (enabled != null) ? enabled : COMMONS_POOL2_AVAILABLE;`
+      #    ⇒ enabled 为 null + classpath 里**没有** commons-pool2 ⇒ **池不启用**
+      #    ⇒ Lettuce 走**共享单连接** ⇒ 并发下命令互相串行排队 ⇒ 可能撞 3s 命令超时
+      #    ⇒ ⇒ 原状是**形态漂移**（Go 有池 / RAG 无池）⇒ 本项对齐「有池」这个形态。
+      #    ⚠️ 池大小**无法逐值对齐**（Go 是 10 × 核数，**机器相关**：本机 10 核 ⇒ Go = 100）⇒ 按**数量级**对齐：
+      #      · `max-active: 64` ↔ Go 的 `PoolSize`（本机 100）⇒ **性能面**数值差异（已登记）
+      #      · `min-idle: 0` ↔ Go 的 `MinIdleConns`（`go-redis@v9.20.0/options.go:218-222`
+      #        **无 default 赋值** ⇒ 保持 0）⇒ **精确对齐**
+      #      · `max-idle: 16` ↔ Go 的 `MaxIdleConns`（`go-redis@v9.20.0/options.go:224-228`
+      #        **有对应项**、注释写明 `default: 0` ⇒ 消费点 `internal/pool/pool.go:1257`
+      #        `if p.cfg.MaxIdleConns == 0 || p.idleConnsLen.Load() < p.cfg.MaxIdleConns`
+      #        ⇒ ⇒ **Go 取值 = 0 = 无上限**）⇒ ⇒ 本项 16 ⇒ **比 Go 更严**
+      #        （只影响空闲连接的回收时机，**不影响命令结果**）⇒ 属**可登记残留**
+      #        ⇒ ⚠️ 原写「Go 侧**无对应项** ⇒ 纯表达层取值」**不准确** ⇒ 2026-10-27 第十八轮订正
+      #      · `max-wait: 4s` ↔ Go 的 `PoolTimeout`（`go-redis@v9.20.0/options.go:380-386`
+      #        `if opt.PoolTimeout == 0 { if opt.ReadTimeout > 0 { opt.PoolTimeout = opt.ReadTimeout + time.Second } else { opt.PoolTimeout = 30 * time.Second } }`
+      #        ⇒ 本域 `redis.NewClient` **未设 ReadTimeout** ⇒ 落库默认 **3s**
+      #        （`options.go` `case 0: opt.ReadTimeout = 3 * time.Second`）⇒ ⇒ **Go 侧池耗尽 ⇒ 4s 后失败**
+      #        （消费点 `internal/pool/pool.go:1113` `p.semaphore.Acquire(ctx, p.cfg.PoolTimeout, ErrPoolTimeout)`）
+      #        ⇒ ⚠️ **不配的后果**：commons-pool2 2.12.1 `BaseObjectPoolConfig:DEFAULT_MAX_WAIT_MILLIS = -1`
+      #        ⇒ 消费点 `GenericObjectPool.borrowObject` 的**负值分支走 `takeFirst()`（无参 = 永久阻塞）**
+      #        ⇒ ⇒ **无限等** ⇒ 且 Lettuce 的 3s 命令超时**救不了场**（计时器在 `CommandExpiryWriter.write` 才起算，
+      #        而**借连接发生在写命令之前**）⇒ ⇒ **比 Go 更糟**（Go 4s 失败 / RAG 无限挂起）
+      #        ⇒ 2026-10-27 第十八轮修（守门 = `TaskRedisCommandTimeoutGateTest` 断言 ⑦）
+      #    ⚠️ **不要拿 like-rpc 的 64/16/4 当基准**（AGENTS.md §3.1：不得拿「现有 RAG 代码」当对照基准）：
+      #    like 域的 Go 走 **go-zero 的 redis**（`go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:14`
+      #    `idleConns = 8` ⇒ `MinIdleConns = 8`），本域的 Go 走 **go-redis 直连** ⇒ 两个域的 Go 客户端本就不同。
+      lettuce:
+        pool:
+          enabled: true
+          max-active: 64
+          max-idle: 16
+          min-idle: 0
+          max-wait: 4s
 
   # ============== Kafka ==============
   # 对应 Go Kafka.Brokers

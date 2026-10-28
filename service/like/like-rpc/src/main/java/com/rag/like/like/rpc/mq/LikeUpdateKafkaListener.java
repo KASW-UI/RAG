@@ -1,6 +1,8 @@
 package com.rag.like.like.rpc.mq;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rag.common.observability.MqConsumer;
+import io.opentelemetry.context.Context;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,6 +14,7 @@ import org.springframework.util.backoff.FixedBackOff;
 
 import com.rag.like.like.rpc.metrics.LikeMqMetrics;
 import com.rag.like.like.rpc.service.LikeMessageIngestService;
+import com.rag.like.like.rpc.service.LikeSpans;
 
 import java.util.List;
 
@@ -122,7 +125,56 @@ public class LikeUpdateKafkaListener {
             topics = "${like.kafka.like-topic}",
             groupId = "${spring.kafka.consumer.group-id}",
             containerFactory = "kafkaListenerContainerFactory")
+    /**
+     * 消费一条点赞事件 —— <b>Go {@code likemq.go:83-84} 的 {@code observability.TraceConsumer} 包装</b>。
+     *
+     * <p>Go 出处（逐字）：
+     * <pre>
+     *   func (l *LikeUpdateService) Consume(ctx context.Context, key, val string) error {
+     *       return observability.TraceConsumer(ctx, "like-mq", "LikeUpdateService.Consume",
+     *           likeMessageAttrs("like-topic", key), func(ctx context.Context) error { … })
+     *   }
+     * </pre>
+     * ⇒ Go 侧整个消费体被包在一个 <b>CONSUMER 类型的 span</b> 里，span 上带 {@code messaging.*} 4 个属性
+     * （{@code likemq.go:137-143}）。RAG 侧此前是<b>裸 listener</b> ⇒ 没有任何 consumer span
+     * ⇒ {@code messaging.*} 无处可落。
+     *
+     * <p>⚠️ <b>错误契约的方向差异（本次改动的关键点）</b>：
+     * <ul>
+     *   <li>Go：回调<b>返回 error</b> ⇒ {@code TraceConsumer}（{@code mq.go:32-39}）把它标成
+     *       {@code MarkSystemError} ⇒ span 上留 {@code sea.error} / {@code sea.error_kind} 等标记；</li>
+     *   <li>Java：listener <b>抛异常</b>（Spring Kafka：抛异常 ⇒ 不提交位点）。</li>
+     * </ul>
+     * ⇒ 本方法把消费体改成<b>返回 Throwable</b>（让 {@code TraceConsumer} 完成 Go 侧那一步「标成
+     * system error」），再在 <b>span 之外</b>把<b>同一个异常实例</b>抛出去
+     * ⇒ <b>Java 契约（抛异常 ⇒ 不提交位点）一字未改</b>，同时 span 的错误标记与 Go 一致。
+     */
     public void onMessage(ConsumerRecord<String, String> record, String value) {
+        Throwable failure = MqConsumer.traceConsumer(
+                Context.current(),
+                LikeSpans.MQ_TRACER_NAME,
+                LikeSpans.MQ_SPAN_NAME,
+                LikeSpans.messagingAttributes(record.key()),
+                ctx -> consume(value));
+        if (failure == null) {
+            return;
+        }
+        // ⚠️ 必须是**同一个异常实例**：Spring Kafka 的错误处理器靠它做日志与「丢弃 + 继续」判定。
+        if (failure instanceof RuntimeException re) {
+            throw re;
+        }
+        if (failure instanceof Error err) {
+            throw err;
+        }
+        throw new IllegalStateException(failure);
+    }
+
+    /**
+     * 消费体 —— 对应 Go {@code TraceConsumer} 的回调体。
+     *
+     * @return {@code null} = 正常（含 Go 侧的两条 drop 分支）；非 null = 失败（Go 侧对应 {@code return err}）
+     */
+    private Throwable consume(String value) {
         // ---------- 分支 1：JSON 解析失败 ⇒ 丢弃（正常返回 ⇒ 提交位点）----------
         LikeEventContracts.KafkaLikeMsg msg;
         try {
@@ -130,7 +182,7 @@ public class LikeUpdateKafkaListener {
         } catch (Exception e) {
             metrics.consume("receive", "json_error");
             LOG.warn("drop like message with invalid json: err={}", e.getMessage());
-            return;
+            return null;
         }
 
         // ---------- 分支 2：字段校验失败 ⇒ 丢弃 ----------
@@ -138,7 +190,7 @@ public class LikeUpdateKafkaListener {
             metrics.consume("receive", "empty_msg_id");
             LOG.warn("drop like message with invalid fields: msgId={} userId={} state={}",
                     msg.msgId, msg.userId, msg.state);
-            return;
+            return null;
         }
 
         LikeMessageIngestService.LikeProcessPayload payload = new LikeMessageIngestService.LikeProcessPayload();
@@ -151,18 +203,18 @@ public class LikeUpdateKafkaListener {
         payload.occurredAt = msg.createdAt;
         payload.isFirst = msg.isFirst;
 
-        // ---------- 分支 3：构造 outbox 失败 ⇒ 抛异常（Go 侧对应分支也是 return err）----------
+        // ---------- 分支 3：构造 outbox 失败 ⇒ 失败（Go 侧对应分支也是 return err）----------
         // ⚠️ Go 侧这一条**不是重投**：ForceCommit=true ⇒ 位点照样推进 ⇒ 消息丢弃。
-        //    抛异常只是让本条**不计入 committed 指标**，语义上仍走 recoverer 后丢弃。
+        //    失败只是让本条**不计入 committed 指标**，语义上仍走 recoverer 后丢弃。
         try {
             payload.firstLikeOutbox = ingestService.buildFirstLikeOutbox(payload);
         } catch (Exception e) {
             metrics.consume("receive", "outbox_error");
             LOG.warn("build first-like outbox failed, will be dropped: msgId={} err={}", msg.msgId, e.getMessage());
-            throw e;
+            return e;
         }
 
-        // ---------- 分支 4：DB 事务失败 ⇒ 抛异常（同上，Go 侧亦为丢弃）----------
+        // ---------- 分支 4：DB 事务失败 ⇒ 失败（同上，Go 侧亦为丢弃）----------
         // Go 注释写得很清楚：
         //   "Kafka can acknowledge only after inbox, record and domain fact commit."
         try {
@@ -170,10 +222,11 @@ public class LikeUpdateKafkaListener {
         } catch (Exception e) {
             metrics.consume("receive", "tx_error");
             LOG.warn("commit like message failed, will be dropped: msgId={} err={}", msg.msgId, e.getMessage());
-            throw e;
+            return e;
         }
 
         metrics.consume("receive", "committed");
+        return null;
     }
 
     /**

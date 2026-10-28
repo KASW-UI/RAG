@@ -57,15 +57,40 @@ import org.springframework.stereotype.Component;
  * {@code InvalidArgument / NotFound / PermissionDenied} 三个 code，
  * <b>全都不在失败名单里</b> ⇒ 业务错误在 Go 侧被记为 Accept，不参与熔断。
  *
- * <p><b>⇒ 当前 RAG 的实际偏差（DRIFT-MSGAPI-004，已登记未修）</b>：
- * 本类<b>没有任何 client 拦截器</b>，所以
- * <b>「下游返回 Internal / Unavailable / 超时」时，Go 会熔断并对客户端回 1015，
- * RAG 则把每次调用都透传给已经故障的下游</b>。
- * 业务错误路径两侧一致（都不熔断），所以这个偏差<b>只在基础设施故障时显现</b>，
- * 压测与正常流量下完全测不出来 —— 这也是它至今没被发现的原因。
- * <p>要修的话：加一个 gRPC {@code ClientInterceptor}，
- * <b>acceptable 判据必须逐条对齐 {@code codes.Acceptable} 那六个 code</b>，
- * 否则会把业务错误也算成失败，那是新增行为、更糟。
+ * <p><b>⇒ 当前 RAG 的实际状态（DRIFT-MSGAPI-004，<b>已修</b>）</b>：
+ * 客户端熔断<b>已经接入</b>，但<b>不在本类里</b> ——
+ * 由共享层 {@code com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor} 承担
+ * （{@code GoStyleGrpcClientBreakerInterceptor.java:103-105} = {@code @Component} +
+ * {@code @GrpcGlobalClientInterceptor}）
+ * ⇒ 本域的 {@code MessageApiApplication.java:63-66}（{@code scanBasePackages} 含
+ * {@code com.rag.common}）<b>扫到即注册</b> ⇒ <b>本类的每一次下游调用都在熔断链上</b>。
+ * <ul>
+ *   <li><b>acceptable 判据</b>：共享层 {@code GoStyleGrpcClientBreakerInterceptor.java:336-345}
+ *       逐条对齐 Go {@code zrpc/internal/codes/accept.go:9-17} 的那<b>六个</b>失败 code
+ *       （DeadlineExceeded / Internal / Unavailable / DataLoss / Unimplemented / ResourceExhausted）
+ *       ⇒ <b>业务错误不参与熔断</b>：message-rpc 的业务错误只用
+ *       InvalidArgument / NotFound / PermissionDenied，<b>三个都不在失败名单里</b>
+ *       ⇒ 与 Go 侧一致（Go 的 {@code codes.Acceptable} 默认分支就是「算成功」）。</li>
+ *   <li><b>隔离单位</b>：共享层 {@code :286} = {@code 服务身份 + 方法名}
+ *       ⇒ 对齐 Go {@code zrpc/internal/clientinterceptors/breakerinterceptor.go:14}
+ *       的 {@code path.Join(cc.Target(), method)}（每个下游服务一份独立熔断器）。</li>
+ *   <li><b>熔断打开时的可观察面</b>：共享层 {@code :299} 抛
+ *       {@link com.rag.common.protection.GoStyleCircuitOpenException}
+ *       ⇒ 本域 {@code GlobalExceptionHandler.java:275-279} 把它映成
+ *       <b>1015 / "service busy"</b> ⇒ 与 Go 的 {@code CodeServerBusy=1015} <b>同码同文案</b>
+ *       （Go 侧 {@code breaker.ErrServiceUnavailable} 是普通 error ⇒ 被
+ *       {@code RPCError → BizCodeFromError} 转成同一个码）。</li>
+ * </ul>
+ *
+ * <p>⚠️ <b>运行证据（不是「注解在不在」）</b>：本域守门
+ * {@code GoStyleGrpcClientBreakerE2ETest}（真 in-process gRPC server + 真 channel + 真拦截器）
+ * 断言「下游恒返 INTERNAL ⇒ 业务码<b>先 5001、跨桶后变 1015</b>，且 msg = {@code "service busy"}」
+ * ⇒ 证明熔断<b>真的落在调用链上</b>（§3.3：注解存在 ≠ 机制生效）。
+ *
+ * <p>⚠️ <b>若将来要改本类</b>：<b>不要</b>在这里再加一个 {@code ClientInterceptor}。
+ * 判据若写成「非 OK 即失败」，{@code NOT_FOUND}（会话不存在 5202）、
+ * {@code PERMISSION_DENIED}（无权限 5205）这类<b>日常运营天天发生</b>的业务错误
+ * 会被大量计成失败 ⇒ 熔断误开 ⇒ 打掉正常流量 —— 那是<b>新增行为且比现状更糟</b>。
  */
 @Component
 public class MessageRpcClient {

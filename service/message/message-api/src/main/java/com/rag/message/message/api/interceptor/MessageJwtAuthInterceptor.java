@@ -1,11 +1,7 @@
 package com.rag.message.message.api.interceptor;
 
-import com.rag.message.message.api.config.MessageApiProperties;
-import com.rag.users.common.jwt.JwtUtil;
-import io.jsonwebtoken.security.Keys;
+import com.rag.message.message.api.auth.MessageJwtSignatureVerifier;
 import org.springframework.stereotype.Component;
-
-import javax.crypto.SecretKey;
 
 /**
  * 用户侧 JWT 鉴权拦截器 —— 挂 {@code /message/v1/**}（不含 {@code /admin/**}）。
@@ -37,15 +33,17 @@ import javax.crypto.SecretKey;
  * </ol>
  *
  * <p><b>密钥补齐</b>：Go 侧 user secret 是 36 字节 UUID（≥32），jjwt 也要求 ≥32 字节，
- * 因此 {@link JwtUtil#padToHmacKeySize} 对它其实是 no-op；统一调用是为了与 admin 侧共用同一份
+ * 因此 {@code JwtUtil.padToHmacKeySize} 对它其实是 no-op；统一调用是为了与 admin 侧共用同一份
  * 逻辑（admin secret 只有 15 字节，必须补齐）。详见 N-5 留档。
+ *
+ * <p><b>🔴 DRIFT-MESSAGEAPI-009②</b>：本类现在只负责<b>消费</b>验签结果与抛 401；
+ * 验签本身在 {@link com.rag.message.message.api.auth.MessageJwtAuthFilter}
+ * （{@code @Order(+6)}）里完成 ⇒ 验签在 3s 预算**之外**。
  */
 @Component
 public class MessageJwtAuthInterceptor extends AbstractMessageJwtAuthInterceptor {
 
-    public MessageJwtAuthInterceptor(MessageApiProperties properties) {
-        super("user",
-                Keys.hmacShaKeyFor(
-                        JwtUtil.padToHmacKeySize(properties.getUserAuth().getAccessSecret())));
+    public MessageJwtAuthInterceptor(MessageJwtSignatureVerifier verifier) {
+        super(MessageJwtSignatureVerifier.RouteGroup.USER, verifier);
     }
 }

@@ -5,10 +5,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import com.rag.task.task.api.support.RealTomcatPort;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.core.env.Environment;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.JsonNode;
@@ -29,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * <b>DRIFT-TASK-API-003 的守门测试</b>：{@code @RequestBody} 必须<b>无视 Content-Type</b>按 JSON 读原始 body。
  *
- * <h2>为什么必须用真 Tomcat（RANDOM_PORT）而不是 MockMvc</h2>
+ * <h2>为什么必须用真 Tomcat（DEFINED_PORT + 本域专用端口段）而不是 MockMvc</h2>
  * 本条漂移的根因在<b>容器层</b>与 <b>Spring 的 message-input 层</b>：
  * <ul>
  *   <li>Spring 的 {@code ServletServerHttpRequest#getBody()} 对 form POST 会走
@@ -59,12 +62,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 @SpringBootTest(
         classes = TaskApiApplication.class,
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT,
         properties = {
                 "grpc.client.task-rpc.address=static://127.0.0.1:65535",
                 "grpc.client.task-rpc.negotiation-type=plaintext",
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
-                // ⚠️ RANDOM_PORT 下 WebServerStartStopLifecycle 会触发 Nacos 注册，
+                // ⚠️ DEFINED_PORT 下 WebServerStartStopLifecycle 同样会触发 Nacos 注册，
                 //    而 Nacos 客户端连不上 ⇒ 抛 "Client not connected" ⇒ **web server 起不来**。
                 //    （MOCK 环境下没有 web server，所以 MockMvc 的测试碰不到这一步。）
                 "spring.cloud.nacos.discovery.register-enabled=false",
@@ -73,10 +76,45 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         })
 class TaskApiContentTypeTest {
 
+    /**
+     * <b>为什么不用 {@code RANDOM_PORT}</b>（2026-10-25 favorite 域实测踩出来的，
+     * 见 {@link com.rag.task.task.api.support.RealTomcatPort} 的类注释）：
+     * {@code RANDOM_PORT} 挑的是 OS <b>临时端口段</b>，而<b>别的会话的 Docker 容器正好在那一段
+     * 发布端口</b>；macOS 上 {@code 127.0.0.1:P} 会<b>抢占</b> Tomcat 绑的 {@code 0.0.0.0:P}
+     * ⇒ 客户端把请求打到了别的服务（实测那次打到了 PostgreSQL）⇒ <b>零字节即关</b>
+     * ⇒ 报 {@code HTTP/1.1 header parser received no bytes} ⇒ <b>看着像被测代码炸了，
+     * 其实压根没打到</b>。
+     *
+     * <p>⇒ 改成 <b>自己挑一个确定归我们的端口</b>（本域专用端口段 + 双绑定自检）。
+     */
+    @DynamicPropertySource
+    static void serverPort(DynamicPropertyRegistry registry) {
+        registry.add("server.port", RealTomcatPort::pick);
+    }
+
     private static final String PATH = "/taskcenter/v1/task/get";
 
     @LocalServerPort
     int port;
+        /**
+     * <b>本类必须绑到本域专用端口段</b>（而不是 Spring 的 {{@code RANDOM_PORT}}）。
+     *
+     * <p>⚠️ <b>为什么这条断言不能省</b>：{{@code RANDOM_PORT}} 挑的是 OS <b>临时端口段</b>
+     * （macOS：49152–65535），而<b>别的会话的 Docker 容器正好在那一段发布端口</b>
+     * ⇒ 客户端可能把请求打到别人的服务（实测那次打到了 PostgreSQL）⇒ <b>零字节即关</b>
+     * ⇒ <b>看着像被测代码炸了，其实压根没打到</b> ⇒ 而且<b>所有用例照样绿</b>
+     * （§3.3 的「静默失效」形态）。
+     * ⇒ 这条断言的作用就是：<b>有人把 {{@code webEnvironment}} 改回 {{@code RANDOM_PORT}}
+     * 时，这里立刻红</b>。
+     */
+    @Test
+    @DisplayName("真容器必须绑到本域专用端口段（RANDOM_PORT 会落进 OS 临时段 ⇒ 与 Docker 发布端口同段）")
+    void bindsToDedicatedPortSegment() {{
+        assertTrue(port >= RealTomcatPort.FIRST && port <= RealTomcatPort.LAST,
+                "Tomcat 实际绑定的端口必须在 " + RealTomcatPort.FIRST + "-" + RealTomcatPort.LAST
+                        + " 内，实际=" + port
+                        + "（若落在 49152-65535，说明 webEnvironment 被改回 RANDOM_PORT 了）");
+    }}
 
     @Autowired
     Environment environment;

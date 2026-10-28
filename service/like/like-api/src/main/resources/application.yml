@@ -121,7 +121,7 @@ rag:
     #    （favorite 不在 global 的写权范围内，AGENTS.md §5.3c）
     go-form-limit:
       # Go 侧 like/api/likecenter.go:48 **注册了** httpx.SetErrorHandler ⇒ **200 + 业务信封**
-     #    ⇒ 该域 5001 的文案是「系统内部错误」（不是 "internal server error"）⇒ mode: envelope
+      #    ⇒ 该域 5001 的文案是「系统内部错误」（不是 "internal server error"）⇒ mode: envelope
       mode: envelope
   protection:
     # Go rest/config.go:52

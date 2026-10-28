@@ -120,6 +120,34 @@
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
 
+        <!--
+            ⚠️ commons-pool2 **不可省**（2026-10-27 G2 · Redis 连接池维度对齐）：
+               本模块的 application.yml 配了
+               `spring.data.redis.lettuce.pool.enabled: true`
+               ⇒ Boot 4 的 `DataRedisConnectionConfiguration#isPoolEnabled`（`:195-198`）判据是
+                  `Boolean enabled = pool.getEnabled(); return (enabled != null) ? enabled : COMMONS_POOL2_AVAILABLE;`
+               ⇒ 显式配了 true 就走 `LettuceConnectionConfiguration#createBuilder:162-165` 的 `PoolBuilderFactory`
+               ⇒ **该分支会构造 `org.apache.commons.pool2.impl.GenericObjectPoolConfig`**
+                  （`LettuceConnectionConfiguration:32` 的 import + `:267-271` `getPoolConfig`）
+               ⇒ 而 **Boot 4 的 starter 不再传递 commons-pool2** ⇒ 缺它 ⇒ **启动期直接失败**。
+               ⚠️ 实测（本轮 · 2026-10-27）：`spring-boot-starter-data-redis:4.0.8` 的 pom 里
+                  只有 `spring-boot-starter` + `spring-boot-data-redis` 两个依赖，
+                  `spring-boot-data-redis:4.0.8` 的 pom 里也**没有** commons-pool2（只有 `lettuce-core`）
+                  ⇒ ⇒ commons-pool2 **只能由应用自己声明**，无任何传递来源。
+               ⚠️ 同款事故已有本仓实证：like-rpc 2026-10-23 缺它时启动报
+                  `NoClassDefFoundError: org/apache/commons/pool2/impl/GenericObjectPoolConfig`。
+               ⇒ Go 出处（形态对齐的依据）：真源 `service/task/rpc/internal/svc/service_context.go:25-29`
+                  `redis.NewClient(&redis.Options{Addr, Password, DB})` ⇒ 只设 3 个字段
+                  ⇒ `PoolSize` 未设 ⇒ 落 go-redis v9.20.0 库默认
+                     （`go-redis@v9.20.0/options.go:350-351` `PoolSize = 10 * runtime.GOMAXPROCS(0)`）⇒ **Go 侧是有池的**
+                  ⇒ RAG 侧若无池 ⇒ Lettuce 走**共享单连接** ⇒ 并发下命令互相串行排队
+                  ⇒ **形态漂移**（不是数值漂移）⇒ 池大小按数量级对齐（Go 是 10×核数，机器相关 ⇒ 无法逐值对齐）。
+        -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-pool2</artifactId>
+        </dependency>
+
         <!-- ============== 6. 数据访问：Postgres + MyBatis-Plus + Flyway ============== -->
         <dependency>
             <groupId>com.baomidou</groupId>
@@ -313,38 +341,37 @@
                 </configuration>
                 <executions>
                     <!--
-                        🔴 **产物层守门必须跑在 package 之后**（2026-10-26 实测）。
+                        🔴🔴 **2026-10-28：原来的「artifact-gate」execution 已撤除**（留痕）
 
-                        缺陷形态：surefire 的**默认执行**绑在 `test` 阶段，
-                        而 fat jar 是 `package` 阶段（maven-jar-plugin:jar +
-                        spring-boot:repackage）才生成的
-                        ⇒ `test` 阶段 jar **还不存在** ⇒ 产物守门**根本没法在默认执行里跑**。
+                        原形态（2026-10-26）：surefire 的默认执行绑在 {@code test} 阶段，
+                        而 fat jar 是 {@code package} 阶段（maven-jar-plugin:jar +
+                        spring-boot:repackage）才生成的 ⇒ {@code test} 阶段 jar **还不存在**
+                        ⇒ ⇒ 于是把产物层守门单独命名成 {@code *IT}，由这里**第二个 surefire
+                        execution**（绑在 {@code verify} 阶段，{@code <include>**/*IT.java</include>}）
+                        挑出来跑 ⇒ 产物必然是本次构建刚打出来的。
 
-                        ⇒ 这里加**第二个 surefire execution**，绑在 `verify` 阶段
-                        （`verify` 在 `package` 之后 ⇒ 产物已经是本次构建刚打出来的，
-                        **不是**上一轮的旧副本 ⇒ 避开 PIT-GLOBAL-019「构建进行中改源码 ⇒ 绿的是旧字节码」）。
-                        ⇒ 只挑 `**/*IT.java` 挑出来跑（`*IT` **不**匹配 surefire 默认 include
-                        `**/Test*.java` / `**/*Test.java` / `**/*Tests.java` / `**/*TestCase.java`
-                        ⇒ 默认执行**不会**重复跑它）。
+                        撤除理由：{@code *IT} **不**匹配 surefire 的默认 include
+                        （{@code **/Test*.java} / {@code **/*Test.java} / …）
+                        ⇒ ⇒ **收口回归（{@code mvn clean test}）跑不到它**
+                        ⇒ ⇒ 本域的产物层守门在**收口口径里是缺失的**
+                        （实测：task-rpc 的 {@code clean test} 条数不含那 5 条
+                        ⇒ ⇒ 「产物层已被验证」这句话在收口口径下**不成立**）。
 
-                        ⚠️ **为什么不用 maven-failsafe-plugin**：
-                        本仓**没有任何模块**用它（实测全仓 0 处 `<artifactId>maven-failsafe-plugin</artifactId>`），
-                        且本地 ~/.m2 只有 failsafe 3.5.4（parent 管的是 3.5.6）⇒ 离线构建会缺件。
-                        ⇒ 用 surefire 的第二个 execution，**判定仍落在 surefire 的 XML**
-                        （PIT-GLOBAL-021：判定只认 surefire XML，不认 stdout 的输出行）。
+                        改法（照 like-rpc 的**已验证**形状）：{@code TaskRpcFatJarArtifactGateIT}
+                        ⇒ 改名为 {@code TaskRpcFatJarArtifactGateTest}（回默认执行 ⇒ 进收口口径）
+                        ⇒ 且把「test 阶段没有 jar」这个前提**消掉** —— 由**测试自己构建** fat jar
+                        （构建命令带 {@code -am}）⇒ ⇒ 断言的产物是**当轮源码**打出来的
+                        ⇒ ⇒ 既进了收口口径，又比原形状**更严**。
+
+                        ⚠️ 若将来在本模块新增别的 {@code *IT} 类，**必须把下面这个 execution 加回来**
+                        （否则那些类不会在任何阶段被跑到）：
+                        <execution>
+                            <id>artifact-gate</id>
+                            <phase>verify</phase>
+                            <goals><goal>test</goal></goals>
+                            <configuration><includes><include>**/*IT.java</include></includes></configuration>
+                        </execution>
                     -->
-                    <execution>
-                        <id>artifact-gate</id>
-                        <phase>verify</phase>
-                        <goals>
-                            <goal>test</goal>
-                        </goals>
-                        <configuration>
-                            <includes>
-                                <include>**/*IT.java</include>
-                            </includes>
-                        </configuration>
-                    </execution>
                 </executions>
             </plugin>
         </plugins>

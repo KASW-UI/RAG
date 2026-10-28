@@ -554,6 +554,91 @@ payload 与冻结信封**用同一份原文**；`aggregate_version` / `target_re
 
 ⇒ **结论：Redis 的错误语义整体 EQUIVALENT**，唯一差异是**指标口径**（首轮 DRIFT-LIKE-009）。
 
+#### 🔴 DRIFT-LIKE-RPC-REDIS-TIMEOUT · Redis **连接超时**未配 ⇒ 落 Lettuce 默认 10s（Go 是 5s）
+
+**性质**：SEMANTIC MISMATCH（配置层 · 但**行为可观察** ⇒ 不是洁癖）
+
+**发现时间**：2026-10-27（G2 lane · 复核 G4 共享层落码知会时，按 G1「同族横向对比」查出的**同族口径差**）
+
+| 项 | Go（真源） | RAG（修前） | RAG（修后） |
+|---|---|---|---|
+| `redis.Options` | `redis.MustNewRedis(c.Storage.Redis.RedisConf)`（`service/like/rpc/internal/svc/servicecontext.go:27`）⇒ go-zero 的 `RedisConf`（`go-zero@v1.10.2/core/stores/redis/conf.go:19-27`，⚠️ **库内文件 · 真源仓没有 `core/` 目录**）**没有 timeout 字段** ⇒ 不设 Dial/ReadTimeout | 由 Boot 自动装配 | 同 |
+| 真正生效的值 | go-redis **v9.20.0**（真源 `go.mod:15` 锁的就是它）库默认：**`ReadTimeout = 3s`**（`options.go:370`）· **`DialTimeout = 5s`**（`options.go:338-340`） | `timeout: 3s` ✓（命令超时已对齐）· **连接超时未配 ⇒ Lettuce 默认 10s**（`SocketOptions.DEFAULT_CONNECT_TIMEOUT = 10` 秒） | `timeout: 3s` ✓ ＋ **`connect-timeout: 5s`** ✓ |
+| 可观察后果 | 拒连 5s ⇒ 快速失败 | 连接超时 10s（Go 的 2 倍） | 5s ⇒ 与 Go 一致 |
+
+⚠️ **真源 yaml 里没有任何 timeout 字段可抄**（`RedisConf` 根本不收）⇒ 依据是**库默认**，不是配置。
+
+**双侧活体实测（L4 · 2026-10-27 · 真 Redis 容器 + 探针 · 同一操作 GET · 同一故障注入）**：
+
+| 侧 / 口径 | 断连后行为 | 实测耗时 |
+|---|---|---|
+| **Go**（go-redis，与真源同款 `Options`） | 拒连快速失败 | **1694 ms** |
+| RAG · 命令超时未配 | 命令**排队等重连** ⇒ `RedisCommandTimeoutException` | **60021 ms** |
+| RAG · 命令超时 3s | 快速失败 | **3 ms**（复跑 2 次：3ms / 2ms） |
+| RAG · 3s + `REJECT_COMMANDS`（G4 共享层落码后） | `RedisException: Commands are rejected.` | **1 ms** |
+
+⇒ 本组件的 `timeout: 3s` **本身是对的**（3ms 快速失败，与 Go 的 1.7s 同形）⇒
+本条只针对**连接超时**这一项（10s vs 5s）。
+
+#### 🆕 断连时的「失败耗时」在我域 rpc 侧同样成立（2026-10-27 · G1 在 users 域查到同款形态后我域自查）
+
+- **机制**：我域两个 rpc 组件**合并前都没有任何 `disconnectedBehavior` 设置**
+  （`grep 'disconnectedBehavior|REJECT_COMMANDS'` 于 `service/{like,task,message}/*-rpc/src/main` ⇒ **0 命中**）
+  ⇒ 走 Lettuce 默认 `DisconnectedBehavior.DEFAULT` ⇒ 断连期间命令**排队等重连** ⇒ 挂到 `commandTimeout`（我已配 **3s**）
+  ⇒ **3s ≫ 本组件 `rpc-timeout: 2s`** ⇒ ⇒ **RPC 先超时**（客户端看到超时态），
+  而 Go 是「**快速失败**（go-redis `MaxRetries=3` ⇒ 实测 ≈1.7s，仍在 2s 预算内）⇒ 进业务层 ⇒ 返回**业务错误码**」。
+- **两侧的失败语义本身是同形的**（漂移**只在耗时**）：
+  - like-rpc：Go `likeactionlogic.go:193-200` Lua 出错 ⇒ **致命**（`ErrorRedisUpdate`「Redis更新失败」）
+    ⇔ RAG `LikeDomainService.java:706-713` Lua 出错 ⇒ **致命**（5012）⇒ 一致；
+  - task-rpc：Go `get_task_logic.go:51` `rerr != nil` ⇒ **回源查库**（fail-open）
+    ⇔ RAG `TaskDomainService.java:161-162` 吞异常回源 ⇒ 一致。
+- ⇒ **修法在共享层**（G4 的 `GoStyleRedisClientAutoConfiguration` ⇒ `REJECT_COMMANDS`）
+  ⇒ **合并后**我域断连即拒单（实测 **1 ms**）⇒ 不再撞 rpc-timeout ⇒ **与 Go 同形**
+  ⇒ ⇒ **域侧零改动**；⚠️ 但**合并前**这条漂移**在本域成立**（只是后果比「未配 timeout」时轻：3s 而非 60s）。
+- ⚠️ **证据强度 = L1**（源码对照 + 我域已有的 3s 排队实测）⇒ **未做「组件本体」双侧活体对拍**
+  ⇒ 按 AGENTS.md §0 记「**在该证据强度下一致**」，**不写 L4**。
+
+**修法**：本域 `application.yml` 补 `connect-timeout: 5s`（属性名 = `spring.data.redis.connect-timeout`
+⇒ Boot 4 `DataRedisProperties#getConnectTimeout` ⇒ `LettuceConnectionConfiguration:212-215` 写进
+`SocketOptions.connectTimeout`）。
+
+**守门**：[`LikeRpcRedisTimeoutsGateTest`](../../../service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeRpcRedisTimeoutsGateTest.java)（4 条）
+—— 起真 Spring 上下文（用真应用类 ⇒ 加载真实 yml）、读真的 `ClientOptions`、断言**消费点**
+（命令超时 ⇒ `getCommandTimeout()` ⇒ `RedisURI.timeout`；连接超时 ⇒ `getSocketOptions().getConnectTimeout()`）
+＋ 机制启用断言 ＋ **阳性对照**（`RedisURI.create(...).getTimeout() == 60s`）。
+✅ **变异测试已做**：删 `connect-timeout: 5s` ⇒ **1 条红**（`expected: 5S but was: 10S`）⇒ 非假绿。
+
+⚠️ **判据踩过的坑（留给下一任）** —— 🔴 **G1 补充的更精确一层（2026-10-27，我已 javap 独立复核，成立）**：
+- **命令超时压根不挂在 `ClientOptions` 上** —— `io.lettuce.core.ClientOptions`（lettuce 6.8.2）
+  **没有** `getCommandTimeout()`（`javap` 实测：该类只有 `getTimeoutOptions()` / `getSocketOptions()` /
+  `getDisconnectedBehavior()` …；`getCommandTimeout` 命中数 = **0**）
+  ⇒ 正确判据 = **`LettuceClientConfiguration.getCommandTimeout()`**，取值路径
+  **`cf.getClientConfiguration().getCommandTimeout()`**（本守门用的正是这条 ✅）
+- `ClientOptions.getTimeoutOptions()` 的 source **恒为** `DefaultTimeoutSource`
+  （Boot `LettuceConnectionConfiguration:229` 只写 `TimeoutOptions.enabled()`
+  ⇒ 启用机制但不给固定时长；真正的时长由 `CommandExpiryWriter:174` 的 `applyConnectionTimeout` 分支
+  从**连接级** timeout 取）⇒ **断言 source 类型是错的判据**（本轮守门先红了，但根因是判据写错 ⇒ 已订正）
+- ⇒ 由此，本守门里的 `getTimeoutOptions().isTimeoutCommands()` 一条**不是「超时值」的判据**，
+  而是守「**Boot 有没有打开命令超时机制**」⇒ **该条有独立价值，但读台账的人别把它当值的判据**。
+
+⚠️ **与 G4 共享层落码的关系**：G4 的 `REJECT_COMMANDS` 在本域**会真命中**（`mvn dependency:list` 实测
+本组件自带 `spring-boot-starter-data-redis` ⇒ `lettuce-core:6.8.2` + `spring-boot-data-redis:4.0.8`
+在 classpath 上 ⇒ `@ConditionalOnClass` 命中；且本域**无自建 `LettuceConnectionFactory`** ⇒ 走 Boot 自动装配）
+⇒ **对本域是净收益**（断连 1ms 拒单）⇒ **不需要域侧任何动作**。
+
+- 🆕 **遮蔽契约（本域**不得**新建域内副本）—— G4 `2f12236` 实测订正后补记（2026-10-27）**：
+  - G4 订正了自己的两处事实错误：域内副本与共享层那份**并存时是「遮蔽」不是「叠加」** ——
+    `@ConditionalOnMissingBean` ⇒ **域内一旦已定义 `LettuceClientOptionsBuilderCustomizer`，共享层那份 Bean 根本不会被创建**
+    ⇒ 容器里恒为**恰好一份** ⇒ 不存在「后者覆盖前者」的顺序问题。
+  - ⇒ 断连行为仍是 `REJECT_COMMANDS`（两侧逐字同值）⇒ **对外行为零变化**；
+    ⚠️ **但代价是「遮蔽」**：**共享层的任何后续改动（例如 E66 的 `timeoutOptions`）在仍有域内副本的域会静默不生效**。
+  - ⇒ **本域的位置（实测）**：全仓三份真实域内副本**全在 users / follow 域**
+    （`service/users/user/user-api` · `service/users/admin/admin-api` · `service/follow/follow-api` · G1 写权面）
+    ⇒ **本域零副本** ⇒ **共享层那份在本域生效** ⇒ **本域不需要任何域内副本**。
+  - ⇒ ⚠️ **本域的硬约束**：**不要在本域新建 `RedisDisconnectedBehaviorConfig` 之类的域内副本** ——
+    那会**遮蔽**共享层（⇒ E66 等共享层后续修正在本域**静默失效**）
+    ⇒ **修 Redis 断连行为一律走共享层**（G4 写权）⇒ 域侧**只登记、不落码**。
+
 ### 5.2 PostgreSQL
 
 | | Go | Java |
@@ -663,7 +748,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 | `TaskUserPusherConf` / `TaskArticlePusherConf` | 两个独立可选 pusher（`svc:50-56`） | 合并为单个 `task-pushers-enabled` | **OBSERVABLE DIFFERENCE**（首轮 DRIFT-LIKE-012） |
 | `Kafka.Group/Offset/Consumers` | `like-update-group` / `first` / **8** | `like-update-group` / `earliest` / **1** | **OBSERVABLE DIFFERENCE**（DRIFT-LIKE-018） |
 | `MessageRpc.Etcd.Key` | `message.rpc` | `grpc.client.message-rpc.address` | **SEMANTIC MISMATCH**（DRIFT-LIKE-013：格式错，启不来） |
-| RPC 超时 | 2000ms（`zrpc/config.go:31`） | `observability.rpc-timeout: 2s` | EQUIVALENT（运行期 UNKNOWN） |
+| RPC 超时 | 2000ms（`go-zero@v1.10.2/zrpc/config.go:31`） | `observability.rpc-timeout: 2s` | EQUIVALENT（运行期 UNKNOWN） |
 | Flyway 账本 | 无 | `flyway_schema_history_like` | UNKNOWN（跨组件不变量，U13） |
 
 ### 6.10 Lifecycle Semantic Equivalence（§21）
@@ -684,7 +769,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 > 历史条目 **DRIFT-LIKE-001 ~ 012** 全部保留在文件首节（原样未改）。本节只列 **2026-10-23 新增**。
 
 ### DRIFT-LIKE-013 — gRPC 客户端寻址 URI 格式错误 ⇒ 上下文启动失败
-> 🔴 **状态：仍未修**（第四轮只修了 014/015/016 三条启动阻塞，013 **是唯一剩余的启动阻塞**）—— ⚠️ 生产配置 `application.yml:139` 仍是 `discovery://message-rpc`（**两斜杠**）；而测试用 `static://` 绕过 ⇒ **这个后果没有任何测试覆盖**。
+> ✅ **状态：已修**（**2026-10-27 订正** —— 上一版写「仍未修 / 第四轮只修了 014/015/016，013 是唯一剩余的启动阻塞」）⇒ 生产配置 `service/like/like-rpc/src/main/resources/application.yml:183` 已是 **`discovery:///message-rpc`**（**三斜杠**；2026-10-26 真启动实测修正，`:170-176` 留了形态说明注释：`discovery://message-rpc` ⇒ authority 非空 / path 为空 ⇒ 直接抛 `expected: 'discovery:[//]/<service-name>'`）⇒ 域侧守门 `LikeRpcProductionAddressTest.java:104-114` 覆盖 ⇒ **本条不再是启动阻塞**。
 
 | 项 | 内容 |
 |---|---|
@@ -701,7 +786,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 | **Evidence** | E-Boot（`/tmp/like-boot-nokafka.log:59,67`）；同仓正确写法：`service/users/admin/admin-api/src/main/resources/application.yml:56,65,71`、`service/like/like-api/src/main/resources/application.yml:104`、`service/hot/hot-api/…:53,59`、`service/message/message-api/…:52`（均三斜杠）；`MessageRpcClient.java:52` 的 `@GrpcClient("message-rpc")` |
 
 ### DRIFT-LIKE-014 — MyBatis-Plus（Boot 3 starter）在 Boot 4 下自动配置被静默跳过 ⇒ 无 `SqlSessionFactory` ⇒ 启动失败
-> ✅ **状态：已修（2026-10-23 第三轮 / 2026-10-24 修复轮）** —— 修法：新增 `config/MybatisPlusOrderingBridgeAutoConfiguration.java`（排序桥接）+ `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` 注册它 ⇒ 绕过 Boot 3/4 的 `@AutoConfigureAfter` 旧包名悬空。**下表是修复前的描述。**
+> ✅ **状态：已修（2026-10-23 第三轮 / 2026-10-24 修复轮）** —— 修法：新增 `config/MybatisPlusOrderingBridgeAutoConfiguration.java`（排序桥接）+ `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` 注册它 ⇒ 绕过 Boot 3/4 的 `@AutoConfigureAfter` 旧包名悬空。**下表是修复前的描述。** ⚠️ **2026-10-27 第十七轮订正**：**该修法本身仍有效**（问题同源）⇒ 但**承载者已换** ⇒ ⇒ 本轮已把域侧的 `config/MybatisPlusOrderingBridgeAutoConfiguration.java` + 本模块的 `META-INF/spring/…AutoConfiguration.imports` **整份删除**（该 `imports` 原本**只含这一行** ⇒ 整份随类一起删）⇒ ⇒ 排序边改由**共享层**那份承担 ⇒ ⇒ **下面那张「修复前的描述」表指域侧实现 ⇒ 已过期** |
 
 | 项 | 内容 |
 |---|---|
@@ -913,7 +998,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 
 ## 2026-10-23 第三轮：DRIFT-LIKE-017 已修
 
-> like-rpc 当前：**54 tests / 0 failures / 0 errors**（含新类 `LikeDomainFactSchemaParityTest` 8 条），BUILD SUCCESS。
+> like-rpc 当前：**54 tests / 0 failures / 0 errors**（含新类 `LikeDomainFactSchemaParityTest` 8 条），BUILD SUCCESS。<br>🆕 **2026-10-28 订正（**原值保留不改写**）**：上面那个 **54** 是**历史值**（早已过期）⇒ ⇒ **当前权威值 = 129**（第二十轮 Redis 池探针 +3 ⇒ 125 · 第二十一轮 Testcontainers 固定口守门 +4 ⇒ **129**）⇒ ⇒ 依据 = **模块级 `clean test` 实测**（带 `-am` · BUILD SUCCESS · 7:41 min · 逐模块 surefire XML 求和 == maven 汇总行）。
 > 🔴 **2026-10-24 审计更正：原文写「64 tests」—— 与任何时点都不自洽**（31 → 46 → 55 → 57 四个数各自可复算，只有 64 无对应状态）⇒ 按本章节时点应为 **54**（46 + 8）。
 > **本文件最终条数 = 57**（第三轮 55 + 第五轮 2）。
 > 全部在**真 PG** 上验证（Testcontainers `postgres:16-alpine`）。
@@ -1434,7 +1519,7 @@ Java 侧 `DefaultErrorHandler(recoverer, new FixedBackOff(0, 0))` ⇒ 失败**�
 | `spring-boot-flyway` 依赖 | 同上 `:224-227` | Boot 4 拆模块后必需 —— 缺它**启动日志里连一行 Flyway 都没有** |
 | `commons-pool2` 依赖 | 同上 `:124-127` | Lettuce 连接池 |
 | `grpc-inprocess` 显式版本 | 同上 `:265-270` | 测试用 |
-| `MybatisPlusOrderingBridgeAutoConfiguration` + `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` | `config/` + `resources/META-INF/` | **DRIFT-LIKE-014 的修法**（台账原正文只写了「怎么坏」，没写「怎么修」） |
+| `MybatisPlusOrderingBridgeAutoConfiguration` + `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` | `config/` + `resources/META-INF/` | **DRIFT-LIKE-014 的修法**（台账原正文只写了「怎么坏」，没写「怎么修」） | ⚠️ **2026-10-27 第十七轮订正**：**这两项已于本轮删除**（域侧收编到共享层）⇒ ⇒ **DRIFT-LIKE-014 的修法本身仍成立**（问题同源）⇒ ⇒ **但「怎么修」的落点已换**：现在由**共享层** `com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration` + 共享层的 `AutoConfiguration.imports` 承担 ⇒ ⇒ **本行的文件清单已过期** ⇒ ⇒ ⚠️ **形态差异（合并清单要点名）**：本域那份 `imports` **只含排序桥一行** ⇒ ⇒ **整份文件随类一起删**；而 G3 的 `article-rpc` 那份**有 2 行** ⇒ ⇒ **只删第 1 行、文件保留** ⇒ ⇒ **两种形态不同，合并时不能一刀切** |
 | `Jackson2ObjectMapperConfiguration` | `config/Jackson2ObjectMapperConfiguration.java` | **DRIFT-LIKE-016 的修法**（含 number→string / number→boolean 一律 `Fail` 的强转策略） |
 | `LikeSchemaGate` | `bootstrap/LikeSchemaGate.java`（`@Component`） | Flyway 之后的第二道防线（启动自检）—— 台账此前只在说「测试类 `LikeSchemaGateTest` 不存在」时提过它 |
 | `like.redis.list-ttl`（7d） | `application.yml:166-170` + `config/LikeRpcProperties.java:80` | Go 出处已写在 yaml 注释里（`getuserlikelistlogic.go:120` / `gettargetlikerlistlogic.go:128`，两处都是 7 天） |
@@ -1485,3 +1570,92 @@ global 第三十三轮的 **E47 原定性已被第三十六轮全面订正**：*
 ### 状态
 
 🟡 **待 like 域 owner 接手**（本域无 owner 会话 ⇒ 主会话转达）⇒ **主会话不改代码、不下结论**，只留指针。
+
+---
+
+# 2026-10-27 · G2 · 启动守门 flake（同款形态）已在本域落码 ＋ U+FFFD 跨树复核
+
+## 🔴 A. `LikeRpcRuntimeBootGateTest` 偶发红 —— 同款形态，本域已落修法
+
+| 项 | 内容 |
+|---|---|
+| 症状 | `LikeRpcRuntimeBootGateTest#realFatJarProcessBootsAndListens` **偶发红**（G4 在全量回归里抓到同款 1 failure；G3 已在 comment-rpc / article-rpc 落同款修法，commit `8b2c6e9`） |
+| 根因 | **不是启动失败**：真进程 fat jar 起来 → `tcpProbe` 端口一连上就**立刻** `destroyForcibly()` ⇒ **drain 线程还没读到**「gRPC Server started」⇒ 断言与日志读取**竞态**（gRPC 端口 **bind 成功早于** devh 把那行写进 stdout） |
+| 辨识度 | 同一用例里「gRPC 端口已在监听」与「无 `NoClassDefFoundError`」两条**都通过** ⇒ 进程**真的起来了** ⇒ 红的只是竞态 |
+| 修法（三步） | ① 收摊前**先等日志标志行出现**（上限 30s、间隔 200ms）—— **不是**加长整体启动超时 ② sink `StringBuilder` → **`StringBuffer`**（drain 线程写 / 测试线程读 ⇒ 原来不是线程安全的）③ `drain.join(10s)` ⇒ 建立 happens-before，否则测试线程读到的 sink 是**残缺的** |
+| **本域实现的一处增强** | 同款修法在**两处各写字面量** `"gRPC Server started"`（等待循环 + 断言）⇒ **任一处被改 ⇒ 等待与断言就不再配套**（等 A、查 B）⇒ 本域**提为常量 `GRPC_STARTED_MARKER`** ⇒ **同源不可漂移** + 变异验证只需改一处 ⇒ **行为与同款修法等价**（不偏离 G3 的修法） |
+| 落码 | `service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeRpcRuntimeBootGateTest.java`（`StringBuffer` ＋ 等日志行 ＋ `drain.join`） |
+| 证据强度 | ✅ **代码级已落 · 回归已跑 · 变异已验证**（见下方「验证」两行） |
+| **验证 ①（回归）** | `mvn -o -pl service/like/like-rpc,service/task/task-rpc test` ⇒ **like-rpc 111 / task-rpc 115**（`Failures: 0, Errors: 0, Skipped: 0`）· `BUILD SUCCESS`（10:22:51 → 10:29:10 · 两批）<br>⇒ **目标类真跑没被 skip**：`LikeRpcRuntimeBootGateTest` **Tests run: 1, Skipped: 0**（4.641 s）⇒ 真进程真起来并读到日志行 ✔<br>🆕 **2026-10-27 第三轮补充（不改上一行原值）**：上行的 task-rpc **115** 是**当时**的数 ⇒ 本轮 task-rpc 落码 Redis **连接池**（守门 +2 条：⑤⑥）⇒ **115 + 2 = 117**；本轮 8 模块全量 `mvn -o -pl <8 模块> test` = **BUILD SUCCESS · 6:06 min** · `message-common` 21 · `message-rpc` 84 · `message-api` 98 · `like-common` 18 · `like-api` 89 · `like-rpc` **111**（未变 ✔）· `task-api` 97 · `task-rpc` **117** ⇒ ⇒ **六模块 596 / 八模块 635** · **0 failures / 0 errors / 0 skipped**（maven 汇总行 = surefire XML **双口径相等**） |
+| **验证 ②（变异）** | 把常量 `GRPC_STARTED_MARKER` 改成假串（**只改这一处**）⇒ **红在目标断言**：`LikeRpcRuntimeBootGateTest.java:155`「日志里没有 devh 的「gRPC Server started」」⇒ `Tests run: 1, Failures: 1, Errors: 0`（36.11 s ≈ 等满 30s 上限后失败）⇒ 失败消息里带**真实日志尾部** ⇒ 证明「进程确实起来了、红的是标志串不匹配」⇒ **非假绿**。<br>⇒ 改回后**复跑单类**：**1 条绿**（5.784 s）· `BUILD SUCCESS` ✔ |
+
+### ⚠️ 我域「同款」排查范围（**不只这一处**，逐个核过）
+
+| 我域候选 | 结论 | 判据 |
+|---|---|---|
+| `LikeRpcRuntimeBootGateTest` | ✅ **同款** ⇒ 本节已修 | 起真进程 ＋ `tcpProbe` 端口探活 ＋ 立刻 `destroyForcibly` ＋ 断言日志含「gRPC Server started」 |
+| `TaskRpcFatJarArtifactGateTest` | ❌ **不是同款** | **产物层**判定（读 MANIFEST 的 `Main-Class`/`Start-Class`、jar 大小比、classpath 条目）⇒ **不起进程**（无 `ProcessBuilder` / 无 `destroyForcibly`） |
+| `message-rpc` | ❌ **无此类** | 全我域 `grep -rn "destroyForcibly" service/{like,task,message} --include=*.java` = **1 命中**（就是本节这处） |
+
+⇒ 判据一句话：**同款 = 「起真进程 ＋ 端口探活 ＋ 立刻收摊 ＋ 断言日志内容」四要素同时成立**。
+
+## 🟢 B. U+FFFD 跨树复核：G3 报的「我域 3 条」**在我树已不存在**（**主树仍坏**）
+
+> G3 回执报了 3 条落在我域的 U+FFFD。**我域逐条字节级复核**（不采信转述）：
+
+| G3 报的 | 我域实测（字节级） | 结论 |
+|---|---|---|
+| `LikeOutboxEventEntity.java:17` `事实流那张表才U+FFFD×3。` | **FFFD = 0**；真实内容 `事实流那张表才有。`（`:17`） | 🟢 **已干净** |
+| `MessageRpcProductionAddressTest.java:96` `地址都必须U+FFFD×3 discovery:///` | **FFFD = 0**；真实内容 `地址都必须是 discovery:///（三斜杠）`（`:96`） | 🟢 **已干净** |
+| `GoStyleGrpcClientBreakerE2ETest.java:43` `响应码先U+FFFD×3 5001` | **FFFD = 0**；真实内容 `断言 HTTP 响应码先是 5001、`（**`:46`**，不是 `:43` ⇒ G3 的行号是**它那棵树**的） | 🟢 **已干净** |
+
+⚠️ **判据本身的坑（本轮实测 ⇒ 值得留档）**：
+
+> 📌 **本表引述里的坏字符已统一改写为 ASCII 标记 `U+FFFD×3`**（3 个替换字符 = 1 个 UTF-8 汉字的 3 字节全丢）
+> ⇒ **台账自身不再植入坏字节** ⇒ 本仓复扫（`docs` + 我域源码，排除 `target/`）可保持 **0 命中**
+> ⇒ 需要原样比对时，按「`文件:行号` + `U+FFFD×3`」去主树/G1/G3/G4 树取原件即可。
+
+- **`read` 工具的输出不能作为「文件含 U+FFFD」的证据** —— 本轮 `read` 把「事实流那张表**才**」渲染成「才U+FFFD×3」⇒ **纯渲染假象**，字节里根本没有。
+- ⚠️ `grep -rn $'\xef\xbf\xbd'` 在本机 shell 下**也会 0 命中**（转义未生效）⇒ **同样不能当判据**。
+- ⇒ **唯一可信判据 = 字节级扫描**：`b'\xef\xbf\xbd' in path.read_bytes()`（本轮用它复核了 4 棵树）。
+
+### 🔴 但：**主树 + G1/G3/G4 三棵树**这 3 处**仍然坏着**
+
+| 树 | 三处状态 |
+|---|---|
+| `RAG`（主树） | 🔴 FFFD×3 @ `:17` / `:96` / `:43` |
+| `g1-users-follow` | 🔴 同上 |
+| `g3-article-comment-favorite-hot` | 🔴 同上 |
+| `g4-service-common` | 🔴 同上 |
+| **`g2-message-like-task`（本树）** | 🟢 **三处全干净** |
+
+⇒ **根因**：本树 `ce81c5f`（阶段 2 · JWT 验签搬出 3s 预算）重写了那三个文件的对应区域 ⇒ **顺带把坏字符写对了**。
+⇒ **合并影响**：这 3 个文件在**我域写权面** ⇒ 合并时**以本树版本为准** ⇒ 合并后自动干净；**若合并时取主树侧版本 ⇒ 坏字符会被带回去**。
+⇒ ⇒ **登记为合并后必查项**。
+
+### 🟡 本节**未验证**项（**不写成已闭环**）
+
+- ✅ **A 节修复已验证完毕**（回归 111 绿 + 变异红在目标断言 + 改回复跑绿）⇒ **本节无遗留**。
+- ⚠️ **仍待合并后补的只有一件事**：`like-rpc` 的 **A9 端到端 E2E**（真 server span 上真带 `query.*`/`cache.*`/`like.*`）—— 依赖 G4 的 FB-04（`853767b` / 最终回执 HEAD `23d1c2a`）合入本树 ⇒ 见 [`like/vs-common.md` §4·六](vs-common.md) 与 §6 第 4 条。
+- ⚠️ **「等日志行」这一段的可见效果是消除偶发红** ⇒ **无法用单次稳定断言证明** ⇒ 辅以**重复跑 N 次全绿**统计（与 G3 同口径）—— 本轮该类跑了 **2 次**（回归 1 次 + 改回复验 1 次）均绿，**样本仍偏小** ⇒ 收口回归时再补几轮。
+
+---
+
+## 🟡 `DRIFT-LIKE-RPC-REDIS-POOL`（新登记 · 2026-10-27）**Redis 连接池数值未对齐**（形态已对齐，仅数值不同）🆕 **数值轴已修（`min-idle` 4 ⇒ **8** = Go 确切值）· 残留 = `max-active`（性能面）**
+
+> ⚠️ 与 [`task/rpc.md` 的 `DRIFT-TASK-RPC-008`](../task/rpc.md#🔴-drift-task-rpc-008新登记--2026-10-27redis-连接池维度未对齐--形态漂移rag-无池-vs-go-有池) **同源**（同一轮取证挖出）⇒ **详细取证在 task 域那份**，此处只记本域的差异与差异级别。
+
+| 项 | 事实 |
+|---|---|
+| **① Go 侧（真源 · 本域走 go-zero 那条路）** | `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-40`（⚠️ **库内文件 · 真源仓没有 `core/` 目录** —— `ls $GO/core` = `No such file or directory`）构造 `red.NewClient(&red.Options{Addr, Username, Password, DB, MaxRetries: maxRetries, MinIdleConns: idleConns, TLSConfig})` ⇒ 常量 `:14-15` `maxRetries = 3` · **`idleConns = 8`** ⇒ ⚠️ **未设 `PoolSize`** ⇒ 落 go-redis v9.20.0 库默认 **`PoolSize = 10 × GOMAXPROCS`**（`go-redis@v9.20.0/options.go:350-351`）⇒ ⇒ **池大小 = 10 × 核数（机器相关）** · `MinIdleConns = 8`<br>⚠️ go-zero 的 `:21 nodePoolSize` / `:52 poolSize: nodePoolSize` 只是**统计上报**那侧（`statGetter`）的值，**不参与 client 构造** ⇒ 数值上同为 `10 × 核数`，但**依据是 go-redis 的库默认** |
+| **② RAG 侧现状（修前）** | `service/like/like-rpc/src/main/resources/application.yml:106-111` ⇒ `lettuce.pool.enabled: true` / `max-active: 64` / `max-idle: 16` / **`min-idle: 4`**；且 `pom.xml:124-127` **显式**声明 `commons-pool2`（注释已写明：Boot 4 的 starter **不再传递** 它）⇒ ⇒ **形态对齐**（都是池化）<br>🆕 **修后（本轮 · 见 ⑤）**：`min-idle: 4` ⇒ **`8`**（= Go 的 `MinIdleConns`）＋ **新增池守门 2 条**（`LikeRpcRedisTimeoutsGateTest` ⑤⑥ ⇒ 该类 4 ⇒ **6 条**）⇒ ⇒ **本域从此有池守门**（此前**零覆盖** ⇒ 池配置任何改动都**无人拦**） |
+| **③ 差异定性**（修前） | 🟡 **仅数值漂移**（形态相同）：`max-active` **64** vs Go 的 **10×核数**（**本机 10 核 ⇒ Go = 100**；`sysctl -n hw.ncpu` = 10）· `min-idle` **4** vs Go 的 **8** ⇒ ⇒ **性能面**（池大小影响并发下的排队），**非形态问题** ⇒ 与 task 域那条（**无池 vs 有池**）级别不同<br>🆕 **修后**：`min-idle` **8 = 8** ⇒ **该轴已精确对齐**（按「Go 侧有确切值的轴 ⇒ 取 Go 确切值」这条规则）⇒ ⇒ **残留只剩 `max-active`（64 vs 100）** ⇒ **性能面**（机器相关 ⇒ 无法逐值对齐）⇒ 仍属**有界残留** |
+| **④ 证据强度** | **L1 ＋ 装配级**（两侧配置逐条对照 + go-zero 常量 + go-redis 库默认行号）＋ 🆕 **守门读真装配（⑤⑥）+ 三条变异验证**（见 ⑤）⇒ ⚠️ **未做并发活体对拍** ⇒ **不写 L4** |
+| **⑤ 归属与处置**（原为「🟡 只登记，不落码」）| **⑥ 🆕 第十八轮（2026-10-27）：池耗尽的等待上限 —— 补 `max-wait: 4s`** | 🔴 **真缺陷（比 Go 更糟）**：池耗尽时**借连接没有任何等待上限** ⇒ ⇒ **无限挂起**。<br>· **Go 侧**：本域走 **go-zero 的 redis** ⇒ `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-40` 的 `red.Options` 只传 `Addr/Username/Password/DB/MaxRetries/MinIdleConns/TLSConfig` ⇒ ⇒ **同样不设 `ReadTimeout`/`PoolTimeout`** ⇒ ⇒ 同样落 go-redis v9.20.0 库默认（`ReadTimeout = 3s`）⇒ ⇒ **`PoolTimeout = 4s`** ⇒ 消费点 `internal/pool/pool.go:1113` ⇒ ⇒ **Go 侧池耗尽 ⇒ 4s 后失败**。<br>· **RAG 侧为何更糟（字节级实测）**：commons-pool2 2.12.1 `DEFAULT_MAX_WAIT_MILLIS = -1l` ⇒ 消费点 `GenericObjectPool.borrowObject` 的**负值分支走 `takeFirst()`（无参 = 永久阻塞）** ⇒ ⇒ **无限等**；且 ⚠️ **Lettuce 的 3s 命令超时救不了场**（计时器在 `CommandExpiryWriter.write` 才起算，而**借连接在写命令之前**）。<br>· **落码**：`service/like/like-rpc/src/main/resources/application.yml` 的 `spring.data.redis.lettuce.pool` 加 **`max-wait: 4s`**。<br>· **守门**：🆕 `LikeRpcRedisTimeoutsGateTest.redisPoolMaxWaitMatchesGoPoolTimeout`（新增断言 ⑦）⇒ 本类 **6 ⇒ 7 条**。<br>· **变异验证**：抽掉 `max-wait: 4s` ⇒ **7 条恰红 1 条**（红在 `:258`）⇒ 另 6 条仍绿 ⇒ **非假绿** ⇒ 还原后 **sha256 与变异前逐字节一致**（`9b406dca745a5906ab40a522`）⇒ 复跑 **7 / 0f 0e 0s**。<br>· **不动 `min-idle`**：本域早就是 **8**（= go-zero 的 `idleConns = 8` ⇒ 精确对齐）⇒ ⇒ ⚠️ **G3 消息里的「like `min-idle: 4`」与我树不符** ⇒ ⇒ **未改**。<br>· **附带订正两处我域自己写错的引用**：① **`MaxIdleConns` 不是「无对应项」**（`options.go:224-228` `default: 0` ＋ 消费点 `internal/pool/pool.go:1257` ⇒ **0 = 无上限**）⇒ ⇒ `max-idle: 16` 重新归类 = **「比 Go 更严」的可登记残留**（不影响命令结果）；② **Boot 4.0.8 外层类没有 `getPoolConfig`**（`javap`）⇒ ⇒ 真实消费点是内部类 **`LettuceConnectionConfiguration$PoolBuilderFactory.getPoolConfig`** ⇒ ⇒ 原引「`:267-271`」是 **Boot 2/3 旧路径**，已改按**类名 + 方法名**。 |
+ | ✅ **已落码 + 已守门 + 已变异验证**（2026-10-27 · 本轮 = 登记后的**下一轮**即执行）——<br>· **落码**：`service/like/like-rpc/src/main/resources/application.yml` 的 `min-idle: 4` ⇒ **`8`**（**仅此一行**；`enabled: true` / `max-active: 64` / `max-idle: 16` **不动**）＋ `LikeRpcRedisTimeoutsGateTest` **新增 ⑤⑥ 两条**（该类 4 ⇒ **6 条**）⇒ ⇒ **本域从此有池守门**（此前**零覆盖**）；<br>· **取值依据**：`MinIdleConns` 在 Go 侧**有确切值** = go-zero 的 `idleConns = 8` ⇒ ⇒ **精确对齐**（**不是**「沿用 like 自己的旧值 4」，也**不是**「照抄 task 域的 0」—— task 域 Go 走 **go-redis 直连** ⇒ `MinIdleConns = 0`，like 域 Go 走 **go-zero** ⇒ `= 8` ⇒ **两域 Go 客户端不同 ⇒ 数值不必同族**）；<br>· **守门（读消费点，不读 yml）**：⑤ `redisPoolIsEnabled`（`getClientConfiguration()` **是** `LettucePoolingClientConfiguration`）· ⑥ `redisPoolParametersMatchGoBaseline`（`getPoolConfig()` 的 `getMaxTotal/getMaxIdle/getMinIdle` = **64/16/8**）⇒ 判据是 **Boot 装配出来的那份配置**（`LettuceConnectionConfiguration:267-271` ⇒ `:269 setMaxTotal` / `:270 setMaxIdle` / `:271 setMinIdle`）；<br>· **变异验证（三条，红在目标断言）**：① `enabled: false` ⇒ **红在 ⑤**（失败信息：实际是 `DefaultLettuceClientConfiguration`）＋连带 ⑥ 的前置断言 ⇒ **2 failures** ② `min-idle: 9` ⇒ **红在 ⑥ 的 min-idle**（`expected: 8 but was: 9`）⇒ **1 failure** ③ `max-active: 65` ⇒ **红在 ⑥ 的 max-total** ⇒ **1 failure** ⇒ 每次变异后 `sha256sum -c` **还原校验通过** ＋ 复跑 **6/6 绿**；<br>· **残留（有界 · 性能面）**：`max-active` **64** vs Go 本机 **100**（机器相关 ⇒ 无法逐值对齐）· `max-idle` 16 在 Go 侧无对应项（**纯表达层**）⇒ ⇒ 与 task 域那条**残留同型**（那边是「形态已修 + 数值残留」）<br>· 🟢 **上一轮（登记轮）已落的两笔**：`core/stores/redis/…` 的**误导性引用路径**已改成模块限定路径（**库内文件 · 真源仓无 `core/` 目录**） ||
+
+| **⑦ 🆕 第二十轮（2026-10-27）：池维度的**双侧活体对拍** —— 本域定性**降级**（修前漂移在生产路径上几乎不可达）** | 🟡 **本域的 `max-wait: 4s`（第十八轮）保留不动**（它是对的）⇒ ⇒ **变的是本条对它的定性**：⑨ 那条写的「🔴 真缺陷（比 Go 更糟）」**在本域要降级**。<br>**① 降级依据（域内源码级实测 · 不是外推）**：本域主代码（`service/like/like-rpc/src/main/java/**`）里 `openPipeline` / `executePipelined` / `SessionCallback` / `.multi()` **命中数 = 0** ⇒ ⇒ 本域 Redis 只有**普通命令**路径（`LikeDomainService.java:104` 的 `StringRedisTemplate` · `LikeActionScript.java` 的 Lua `execute(RedisScript, …)`）⇒ ⇒ 而**普通命令走共享 native 连接、池不参与**（本域活体实测：50 条普通命令 ⇒ 服务端 `connected_clients` **delta = 0**）⇒ ⇒ ⇒ **修前那个「池耗尽 ⇒ 无限挂起」的漂移，在本域生产路径上几乎不可达** ⇒ ⇒ 原定性**降级为「形态上已对齐的防御性配置」**（**不是可达缺陷**）⇒ ⇒ **原值保留不改写**，以本条为准。<br>**② 为什么本域要单独建探针（不抄 task 域那条的读数）**：两个模块的 `application.yml` 是**各自**生效的 ⇒ ⇒ 「task 域量到 4.005s」**推不出**「like 域也是 4.005s」⇒ ⇒ 本域自建 `service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeRedisPoolExhaustionP99GateTest.java`（**3 条** · 真 Redis 容器 ＋ 真 `LikeRpcApplication` 上下文 ＋ 真装配的 `LettuceConnectionFactory`）。<br>**③ 三条活体读数（like 域实测）**：① **普通命令绕池** ⇒ `connected_clients` **before=8 / after=8 / delta=0**；② **pipeline 走池** ⇒ 占位 63 条 ⇒ **before=8 / after=64 / delta=56**；③ **池耗尽 ⇒ 等连接上限** ⇒ **`wait_elapsed_ms = 4003`** ⇒ 异常链 `RedisConnectionFailureException → PoolException → NoSuchElementException: Timeout waiting for idle object, borrowMaxWaitDuration=PT3.999992S` ⇒ ⇒ **单次池等待上限 = 4s（真行为读数）**。<br>**④ 🆕 顺带把本域 `min-idle: 8` 从「配置层」升级到「活体」**：探针里**借任何连接之前**，服务端就已经有 **8 条**连接（task 域同款探针 = **1** 条 ⇒ 差值 = 本域的 `min-idle`）⇒ ⇒ **受控实验归因**（把本域 yml 的 `min-idle: 8` 翻成 `0` 再跑 ⇒ 借前基线 **8 ⇒ 1** ⇒ 净增量 **56 ⇒ 63** ⇒ 回滚后 sha256 = `9b406dca745a5906ab40a522` 与变异前**逐字节一致**）⇒ ⇒ **「`min-idle: 8` = Go 的 `MinIdleConns = 8`」这条对齐结论，现在是 L4 活体证据**（此前只是 L1 配置层 + 装配层读数）⇒ ⇒ 也顺带**证实 G3 消息里那句「like `min-idle: 4`」的前提过期**（本域早就是 8）。<br>**⑤ Go 腿活体读数（与 task 域同一支探针 · 同款结论）**：`PoolTimeout = 4s` ⇒ 并发 80 ⇒ **16 个等待者全部 `ErrPoolTimeout`** ⇒ **p50=16086ms / p99=16135ms** ⇒ ⇒ ⚠️ **Go 的 4s 是「单次池等待」**（go-redis v9.20.0 `error.go` 的 `shouldRetry` 对 `ErrPoolTimeout` **无条件重试** ⇒ `MaxRetries=3` ⇒ 共 4 次）⇒ ⇒ **命令整体 ≈16.1s** ⇒ ⇒ 原「Go 4s / RAG ∞」的**参照量级要改**（**漂移方向不变**）。<br>**⑥ 变异验证**：抽掉本域 yml 的 `max-wait: 4s` ⇒ 同一探针 ⇒ **`wait_elapsed_ms = 8004` / `timedOut = true`** ⇒ ⇒ **3 条恰红 1 条**（红在 `timedOut` 断言，失败信息「Expecting value to be false but was true」）⇒ ⇒ 另 2 条仍绿 ⇒ ⇒ **非假绿** ⇒ ⇒ 回滚后 sha256 与变异前**逐字节一致** ⇒ `git status` 对该 yml **为空**。<br>**⑦ 修后定性**：单次池等待 Go **4s** / RAG **4.003s** ⇒ **对齐**；命令整体 RAG 更短（一次就失败）⇒ ⇒ **「比 Go 更严」** ⇒ ⇒ 本域这条**可登记为「有界残留 · 刻意不改」**（**不是缺陷**）。<br>**⑧ 本轮对本域的**生产代码**改动 = 零** ⇒ ⇒ **只新增 1 个测试类（3 条）**。 |
+> ⚠️ **两条通用教训（与 task 域那份同源，详见该处）**：
+> ① **Boot 4 的 Lettuce 池「开不开」不由 yml 决定，而由 `commons-pool2` 在不在 classpath 决定**（`Pool.enabled` 未配时为 `null` ⇒ Boot 自动判定）⇒ ⇒ **加/减一个依赖 ⇒ 池形态静默变化** ⇒ **池形态必须同时查 pom 依赖，不能只断言 yml**；
+> ② **Boot 4 没有独立的 `LettuceProperties`**（已并入 `DataRedisProperties$Lettuce`）且 Redis 自动配置**已拆到 `spring-boot-data-redis` 模块** ⇒ 查 Boot 4 源码别在老 jar 里找。
+

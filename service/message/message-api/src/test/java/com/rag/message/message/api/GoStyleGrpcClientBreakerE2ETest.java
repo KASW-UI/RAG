@@ -12,12 +12,15 @@ import io.grpc.inprocess.InProcessServerBuilder;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import com.rag.message.message.api.support.RealTomcatPort;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Bean;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -40,7 +43,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * </ul>
  * 但本项目其余测试全部把 {@code MessageRpcClient} 用 {@code @MockitoBean} 顶掉，
  * ⇒ <b>熔断拦截器在那条路径上根本没被执行过</b>。
- * 本类把它们连起来：server 恒返回 {@code INTERNAL}，断言 HTTP 响应码先��� 5001、
+ * 本类把它们连起来：server 恒返回 {@code INTERNAL}，断言 HTTP 响应码先是 5001、
  * 后变<b>1015</b> —— 这个「5001 → 1015」的转变<b>只有在熔断真的生效时才会出现</b>。
  *
  * <p><b>为什么必须靠 1015 来判定</b>：
@@ -53,7 +56,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(
         classes = {MessageApiApplication.class,
                 GoStyleGrpcClientBreakerE2ETest.FaultyRpcServer.class},
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT,
         properties = {
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "spring.cloud.nacos.discovery.enabled=false",
@@ -66,6 +69,22 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         })
 @AutoConfigureMockMvc
 class GoStyleGrpcClientBreakerE2ETest {
+
+    /**
+     * <b>为什么不用 {@code RANDOM_PORT}</b>（2026-10-25 favorite 域实测踩出来的，
+     * 见 {@link com.rag.message.message.api.support.RealTomcatPort} 的类注释）：
+     * {@code RANDOM_PORT} 挑的是 OS <b>临时端口段</b>，而<b>别的会话的 Docker 容器正好在那一段
+     * 发布端口</b>；macOS 上 {@code 127.0.0.1:P} 会<b>抢占</b> Tomcat 绑的 {@code 0.0.0.0:P}
+     * ⇒ 客户端把请求打到了别的服务（实测那次打到了 PostgreSQL）⇒ <b>零字节即关</b>
+     * ⇒ 报 {@code HTTP/1.1 header parser received no bytes} ⇒ <b>看着像被测代码炸了，
+     * 其实压根没打到</b>。
+     *
+     * <p>⇒ 改成 <b>自己挑一个确定归我们的端口</b>（本域专用端口段 + 双绑定自检）。
+     */
+    @DynamicPropertySource
+    static void serverPort(DynamicPropertyRegistry registry) {
+        registry.add("server.port", RealTomcatPort::pick);
+    }
 
     private static final String USER_SECRET = "ae0536f9-6450-4606-8e13-5a19ed505da0";
     private static final long EXPIRE_SEC = 3600L;
@@ -82,6 +101,25 @@ class GoStyleGrpcClientBreakerE2ETest {
 
     @LocalServerPort
     private int port;
+        /**
+     * <b>本类必须绑到本域专用端口段</b>（而不是 Spring 的 {{@code RANDOM_PORT}}）。
+     *
+     * <p>⚠️ <b>为什么这条断言不能省</b>：{{@code RANDOM_PORT}} 挑的是 OS <b>临时端口段</b>
+     * （macOS：49152–65535），而<b>别的会话的 Docker 容器正好在那一段发布端口</b>
+     * ⇒ 客户端可能把请求打到别人的服务（实测那次打到了 PostgreSQL）⇒ <b>零字节即关</b>
+     * ⇒ <b>看着像被测代码炸了，其实压根没打到</b> ⇒ 而且<b>所有用例照样绿</b>
+     * （§3.3 的「静默失效」形态）。
+     * ⇒ 这条断言的作用就是：<b>有人把 {{@code webEnvironment}} 改回 {{@code RANDOM_PORT}}
+     * 时，这里立刻红</b>。
+     */
+    @Test
+    @DisplayName("真容器必须绑到本域专用端口段（RANDOM_PORT 会落进 OS 临时段 ⇒ 与 Docker 发布端口同段）")
+    void bindsToDedicatedPortSegment() {{
+        assertTrue(port >= RealTomcatPort.FIRST && port <= RealTomcatPort.LAST,
+                "Tomcat 实际绑定的端口必须在 " + RealTomcatPort.FIRST + "-" + RealTomcatPort.LAST
+                        + " 内，实际=" + port
+                        + "（若落在 49152-65535，说明 webEnvironment 被改回 RANDOM_PORT 了）");
+    }}
 
     @AfterAll
     static void shutdownServer() throws InterruptedException {

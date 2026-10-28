@@ -19,6 +19,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import com.rag.like.like.rpc.support.RealContainerPort;
 
 /**
  * 🔴 <b>真启动守门（进程级）</b> —— 用<b>真 fat jar</b> 起本模块的<b>真 {@code *RpcApplication}</b> 进程，
@@ -64,12 +65,37 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Testcontainers(disabledWithoutDocker = true)
 class LikeRpcRuntimeBootGateTest {
 
+    /**
+     * devh 打印「gRPC server 真的起来了」那行的标志串。
+     *
+     * <p>⚠️ <b>为什么提为常量</b>（而不是像同款修法那样在两处各写一个字面量）：
+     * 本类有<b>两处</b>要用它 —— ① 「收摊前等这行出现」的等待循环 ② 「日志里必须有这行」的断言。
+     * ⇒ 两处各写字面量 ⇒ <b>任一处被改动 ⇒ 等待与断言就不再配套</b>（等待等的是 A、断言查的是 B）
+     * ⇒ 提为常量 ⇒ **同源、不可漂移**；变异验证也只需改这一处。
+     */
+    private static final String GRPC_STARTED_MARKER = "gRPC Server started";
+
     @Container
     @SuppressWarnings("resource")
     static final PostgreSQLContainer<?> PG = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("first_db")
             .withUsername("admin")
             .withPassword("password");
+/**
+     * 本类的真容器**固定宿主口**（like 域段 22790–22819 内 · 全局段表 §4.10.19.3 / §4.10.39.2 分配）。
+     *
+     * <p>🔴 为什么不用 Testcontainers 的默认随机口：随机宿主口落在 **OS 临时段 49152–65535**
+     * （= Docker published 段）⇒ ⇒ 与 {@code tools/difftest/ddl-parity.sh} 的固定口 {@code 55560–55569}
+     * 同属一个池子 ⇒ ⇒ 全局段表把该段标为**禁占**。
+     *
+     * <p>🔴 为什么端口写死在本类里、而不是轮询分配：Testcontainers 的 surefire **每个 fork 一个独立 JVM**
+     * ⇒ ⇒ 静态计数器在每个 fork 里都从头开始 ⇒ ⇒ 两个并发 fork 会拿到同一个端口 ⇒ ⇒ 撞车。
+     */
+    private static final int FIXED_HOST_PORT = 22793;
+    static {
+        RealContainerPort.withFixedHostPort(PG, FIXED_HOST_PORT,
+                RealContainerPort.PG_CONTAINER_PORT);
+    }
 
     @Test
     @DisplayName("真 fat jar 起真 LikeRpcApplication：gRPC 端口真的在监听（生产 classpath + 生产 yaml）")
@@ -99,7 +125,9 @@ class LikeRpcRuntimeBootGateTest {
         env.put("REDIS_PORT", "6379");
 
         Process process = builder.start();
-        StringBuilder log = new StringBuilder();
+        // ⚠️ 用 StringBuffer（同步）而不是 StringBuilder：本类的 sink 会被
+        //    「drain 线程」写、被「测试线程」读 ⇒ StringBuilder 不是线程安全的。
+        StringBuffer log = new StringBuffer();
         Thread drain = new Thread(() -> drain(process.getInputStream(), log));
         drain.setDaemon(true);
         drain.start();
@@ -116,13 +144,31 @@ class LikeRpcRuntimeBootGateTest {
             }
             Thread.sleep(500);
         }
+        // 🔴 **收摊前先等日志行出现**（2026-10-27 · G4 在全量回归里抓到同款偶发红，G3 在
+        //   comment-rpc / article-rpc 已落同款修法，本域 like-rpc 属同一形态 ⇒ 照同款修）：
+        //   gRPC 端口 **bind 成功** 早于 devh 把「gRPC Server started」写进 stdout
+        //   ⇒ 探活一成功就 `destroyForcibly()` ⇒ drain 线程**可能还没读到**那一行
+        //   ⇒ 「日志里没有 gRPC Server started」这条断言**偶发红**。
+        // ⚠️ 注意症状的辨识度：同一用例里「gRPC 端口已在监听」与「无 NoClassDefFoundError」
+        //   两条**都通过** ⇒ 进程**真的起来了** ⇒ 是**断言与日志读取的竞态**，不是启动失败。
+        // ⇒ 故这里**等日志行出现（带上限）再收摊**，而不是加长整体启动超时。
+        long logDeadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(30);
+        while (System.currentTimeMillis() < logDeadline
+                && process.isAlive()
+                && !log.toString().contains(GRPC_STARTED_MARKER)) {
+            Thread.sleep(200);
+        }
+
         process.destroyForcibly();
         process.waitFor(30, TimeUnit.SECONDS);
+        // ⚠️ 必须 join drain 线程：它可能还没把最后一段 stdout 读完
+        //    ⇒ join 同时建立 happens-before（否则测试线程读到的 sink 是**残缺的**）。
+        drain.join(TimeUnit.SECONDS.toMillis(10));
         String output = log.toString();
 
         assertTrue(listening,
                 "真 fat jar 起不来（gRPC 端口 " + port + " 没有在监听）—— 进程日志尾部：\n" + tail(output));
-        assertTrue(output.contains("gRPC Server started"),
+        assertTrue(output.contains(GRPC_STARTED_MARKER),
                 "日志里没有 devh 的「gRPC Server started」⇒ 不能算真 gRPC server 起来了。日志尾部：\n"
                         + tail(output));
         assertFalse(output.contains("NoClassDefFoundError"),
@@ -154,7 +200,7 @@ class LikeRpcRuntimeBootGateTest {
         }
     }
 
-    private static void drain(InputStream in, StringBuilder sink) {
+    private static void drain(InputStream in, StringBuffer sink) {
         try (InputStream stream = in) {
             byte[] buffer = new byte[8192];
             int read;

@@ -217,7 +217,7 @@ Java: ConversationMessageEntity.conversationId 是 primitive long（未设置 �
 **分类：`SEMANTIC MISMATCH`　业务可接受性：`UNACCEPTABLE`　风险：HIGH**
 
 ```
-Go:  zrpc RpcServerConf.Timeout 未配 → go-zero 默认 2000ms（zrpc/config.go:46）→ 服务端强制 deadline
+Go:  zrpc RpcServerConf.Timeout 未配 → go-zero 默认 2000ms（go-zero@v1.10.2/zrpc/config.go:46）→ 服务端强制 deadline
 Java: application.yml:208  observability.rpc-timeout: 2s          ← 配了
       → ObservabilityProperties（common/spring，@Component + @ConfigurationProperties("observability")）  ← 绑得上
       → RpcServerInterceptorFactory 产出 ServerInterceptor Bean
@@ -473,12 +473,12 @@ Failure:     Go 裸 error 透传（grpc Unknown(2)）；RAG 非 StatusRuntimeExc
 
 | Go 事实 | 证据（消费点） | 生效条件 |
 |---|---|---|
-| `RpcServerConf.Timeout` 默认 **2000ms** | `go-zero@v1.10.2/zrpc/config.go:46` `json:",default=2000"`；`etc/message.yaml` 未配该键 ⇒ 消费点在 `core/mapping/unmarshaler.go` 的默认值填充 | ✅ 生效 |
-| **但原生 timeout 拦截器被显式关掉** | `service/message/rpc/message.go:34` `DisableNativeRpcTimeout(&c.RpcServerConf)` 把 `conf.Timeout = 0`（`common/observability/rpc.go:19-23`）⇒ `zrpc/server.go:164-167` 的 `if c.Timeout > 0` **不成立**，`UnaryTimeoutInterceptor` 不挂 | ✅ 已确证 |
+| `RpcServerConf.Timeout` 默认 **2000ms** | `go-zero@v1.10.2/zrpc/config.go:46` `json:",default=2000"`；`etc/message.yaml` 未配该键 ⇒ 消费点在 `go-zero@v1.10.2/core/mapping/unmarshaler.go` 的默认值填充 | ✅ 生效 |
+| **但原生 timeout 拦截器被显式关掉** | `service/message/rpc/message.go:34` `DisableNativeRpcTimeout(&c.RpcServerConf)` 把 `conf.Timeout = 0`（`common/observability/rpc.go:19-23`）⇒ `go-zero@v1.10.2/zrpc/server.go:164-167` 的 `if c.Timeout > 0` **不成立**，`UnaryTimeoutInterceptor` 不挂 | ✅ 已确证 |
 | 超时由观测拦截器接管 | `message.go:44` `s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(2000ms, slowThreshold))`；`rpc.go:38` `context.WithTimeout` → 到点返回 `codes.DeadlineExceeded`（`rpc.go:68-71`） | ✅ |
-| **panic 恢复拦截器默认开启** | `zrpc/server.go:131-133` `if c.Middlewares.Recover` ⇒ `UnaryRecoverInterceptor`；默认值 `true` 见 `zrpc/internal/config.go:21` `json:",default=true"`；panic → `codes.Internal` + `"panic: %v"`（`recoverinterceptor.go:39-42`） | ✅ 生效 |
-| **服务端熔断默认开启** | `zrpc/server.go:157-159` + `zrpc/internal/config.go:25` `default=true` ⇒ `UnaryBreakerInterceptor`；熔断打开 → `codes.Unavailable`（`breakerinterceptor.go:46-48`） | ✅ 生效 |
-| **自适应限流（CPU 阈值）默认开启** | `zrpc/server.go:160-162` `if c.CpuThreshold > 0`；阈值默认 **900** 见 `zrpc/config.go:47` ⇒ `UnarySheddingInterceptor`；拒绝时 `codes.ResourceExhausted`（`sheddinginterceptor.go:30-35`） | ✅ 生效 |
+| **panic 恢复拦截器默认开启** | `go-zero@v1.10.2/zrpc/server.go:131-133` `if c.Middlewares.Recover` ⇒ `UnaryRecoverInterceptor`；默认值 `true` 见 `go-zero@v1.10.2/zrpc/internal/config.go:21` `json:",default=true"`；panic → `codes.Internal` + `"panic: %v"`（`recoverinterceptor.go:39-42`） | ✅ 生效 |
+| **服务端熔断默认开启** | `go-zero@v1.10.2/zrpc/server.go:157-159` + `go-zero@v1.10.2/zrpc/internal/config.go:25` `default=true` ⇒ `UnaryBreakerInterceptor`；熔断打开 → `codes.Unavailable`（`breakerinterceptor.go:46-48`） | ✅ 生效 |
+| **自适应限流（CPU 阈值）默认开启** | `go-zero@v1.10.2/zrpc/server.go:160-162` `if c.CpuThreshold > 0`；阈值默认 **900** 见 `go-zero@v1.10.2/zrpc/config.go:47` ⇒ `UnarySheddingInterceptor`；拒绝时 `codes.ResourceExhausted`（`sheddinginterceptor.go:30-35`） | ✅ 生效 |
 | **gRPC reflection 默认不注册** | `message.go:40-42` `if c.Mode == DevMode \|\| c.Mode == TestMode`；`ServiceConf.Mode` 默认 `"pro"`（`go-zero@v1.10.2/core/service/serviceconf.go:35` `json:",default=pro,..."`），`etc/message.yaml` **未配 Mode** ⇒ 分支不成立 | ✅ 已确证（§3.3.1：读到消费点，不是 struct 定义行） |
 | DB 显式关 TLS | `internal/model/db.go:22-29` DSN 拼 `sslmode=%s`，`etc/message.yaml:34` `Mode: "disable"` ⇒ 消费点收到 `disable` | ✅ |
 
@@ -505,7 +505,7 @@ Failure:     Go 裸 error 透传（grpc Unknown(2)）；RAG 非 StatusRuntimeExc
 | Spring 上下文 | `@SpringBootApplication`（**无** `scanBasePackages`）+ `@ConfigurationPropertiesScan` + `@MapperScan` + **`@Import` 显式引入 8 个 common Bean** | `MessageRpcApplication.java:64-87` |
 | gRPC server | `@GrpcService` + devh starter 自动注册；**唯一 `ServerInterceptor`（观测三件套）经 `GrpcServerConfigurer` 显式挂上** | `MessageRpcApplication.java:115-117` |
 | 超时 | `observability.rpc-timeout: 2s`（`application.yml:207-208`）→ `ObservabilityProperties` → `RpcServerInterceptorFactory` → `RpcInterceptor`，到点 `close(DEADLINE_EXCEEDED)` | `application.yml:143-144`；`RpcServerInterceptorFactory.java:41-47`；`RpcInterceptor.java:148-190` |
-| MyBatis-Plus 自动配置排序 | Boot 4 把 `DataSourceAutoConfiguration` 挪包 ⇒ MP 的 `@AutoConfigureAfter` 悬空；已用**空类桥**修复并在 imports 文件登记 | `MybatisPlusOrderingBridgeAutoConfiguration.java:49-52`；`META-INF/spring/…AutoConfiguration.imports:1` |
+| MyBatis-Plus 自动配置排序 | Boot 4 把 `DataSourceAutoConfiguration` 挪包 ⇒ MP 的 `@AutoConfigureAfter` 悬空；已用**空类桥**修复并在 imports 文件登记 | `MybatisPlusOrderingBridgeAutoConfiguration.java:49-52`；`META-INF/spring/…AutoConfiguration.imports:1` | ⚠️ **2026-10-27 第十七轮订正**：**该空类桥与本模块的 `imports` 文件已于本轮删除**（域侧收编到共享层）⇒ ⇒ **本行的「已用空类桥修复并在 imports 文件登记」已不是本模块的实现** ⇒ ⇒ 现在由**共享层**那份（`service/common/src/main/java/com/rag/common/persistence/MybatisPlusOrderingBridgeAutoConfiguration.java` + 共享层 `META-INF/spring/…AutoConfiguration.imports`）承担 ⇒ ⇒ **问题与修法同源，承载者已换** ⇒ ⇒ **原引用行号 `MybatisPlusOrderingBridgeAutoConfiguration.java:49-52` / `…imports:1` 已失效（文件已不存在）⇒ 引用前须重新定位到共享层那份** |
 | Flyway | `spring-boot-flyway:4.0.8` 在 classpath（Boot 4 拆模块后必需）；`spring.flyway.table: flyway_schema_history_message` | `pom.xml:166-169`；`application.yml:64-105`（`flyway:` 段：`baseline-version: 0` / `locations` / `table`） |
 | Web 容器 | **无** tomcat-embed-core / jetty / undertow / starter-web（仅 `tomcat-embed-el` 表达式库）⇒ **不会起 servlet 容器** | `mvn -pl service/message/message-rpc dependency:tree`（2026-10-23 隔离跑） |
 
@@ -681,7 +681,7 @@ Go 返回 **SUCCESS + 第一页**；RAG 抛 `BadSqlGrammarException` ⇒ `Messag
 ```
 Go  message.go:40-42
       if c.Mode == service.DevMode || c.Mode == service.TestMode { reflection.Register(grpcServer) }
-    Mode 默认值来自 go-zero@v1.10.2 core/service/serviceconf.go:35
+    Mode 默认值来自 go-zero@v1.10.2/core/service/serviceconf.go:35
       Mode string `json:",default=pro,options=dev|test|rt|pre|pro"`
     etc/message.yaml **未配 Mode** ⇒ Mode="pro" ⇒ 分支不成立 ⇒ **真源不暴露 reflection**
 
@@ -723,9 +723,9 @@ Go 侧同一命令连不上。**同时**：注释给了错误的安全感（§3.
 
 | 拦截器 | Go 侧装配点（消费点） | 默认值来源 | 拒绝/异常时的可观察行为 | RAG 侧（2026-10-24 后） |
 |---|---|---|---|---|
-| panic 恢复 | `zrpc/server.go:131-133` | `zrpc/internal/config.go:21` `Recover json:",default=true"` | `INTERNAL` + `"panic: %v"`（`recoverinterceptor.go:39-42`），**进程存活** | ✅ **已修**（`GoStyleRecoverInterceptor`；5 例真触发 + 3 轮变异验证） |
-| 服务端熔断 | `zrpc/server.go:157-159` | `config.go:25` `Breaker json:",default=true"` | `UNAVAILABLE` + `"circuit breaker is open"`（`breakerinterceptor.go:46-48`、`core/breaker/breaker.go:19`） | ✅ **已修**（`GoStyleRpcBreakerInterceptor`；含 message-rpc 真 gRPC 端到端 2 例） |
-| CPU 自适应限流 | `zrpc/server.go:160-162` | `zrpc/config.go:47` `CpuThreshold json:",default=900"` | `RESOURCE_EXHAUSTED` + `"service overloaded"`（`sheddinginterceptor.go:30-35`、`core/load/adaptiveshedder.go:34`） | ✅ **已修**（`GoStyleRpcSheddingInterceptor`；阈值沿用 Go 默认 900，CPU 采样 fail-open 已签字 `SD-2026-10-23-08`） |
+| panic 恢复 | `go-zero@v1.10.2/zrpc/server.go:131-133` | `go-zero@v1.10.2/zrpc/internal/config.go:21` `Recover json:",default=true"` | `INTERNAL` + `"panic: %v"`（`recoverinterceptor.go:39-42`），**进程存活** | ✅ **已修**（`GoStyleRecoverInterceptor`；5 例真触发 + 3 轮变异验证） |
+| 服务端熔断 | `go-zero@v1.10.2/zrpc/server.go:157-159` | `config.go:25` `Breaker json:",default=true"` | `UNAVAILABLE` + `"circuit breaker is open"`（`breakerinterceptor.go:46-48`、`go-zero@v1.10.2/core/breaker/breaker.go:19`） | ✅ **已修**（`GoStyleRpcBreakerInterceptor`；含 message-rpc 真 gRPC 端到端 2 例） |
+| CPU 自适应限流 | `go-zero@v1.10.2/zrpc/server.go:160-162` | `go-zero@v1.10.2/zrpc/config.go:47` `CpuThreshold json:",default=900"` | `RESOURCE_EXHAUSTED` + `"service overloaded"`（`sheddinginterceptor.go:30-35`、`go-zero@v1.10.2/core/load/adaptiveshedder.go:34`） | ✅ **已修**（`GoStyleRpcSheddingInterceptor`；阈值沿用 Go 默认 900，CPU 采样 fail-open 已签字 `SD-2026-10-23-08`） |
 
 **⚠️ 特别值得记的一点**：`message.go:34` 的 `DisableNativeRpcTimeout` 只把 `Timeout` 清零，
 **`CpuThreshold` / `Middlewares.*` 全部原样保留** ⇒ 这三个拦截器在真源上是**生效**的。
@@ -780,7 +780,7 @@ Go 侧同一命令连不上。**同时**：注释给了错误的安全感（§3.
 `[CODE]` grpc-java `ServerCalls.java:394`（`onCompleted()` 才 `call.close(Status.OK)`）；
 `[CODE]` `grpc-api-1.63.0` `Status.withCause` 保留 code。
 **Counterfactual = YES**：`recover` 挂在**内层**同样能兜住业务 handler 的 panic，
-但兜不住**业务观测拦截器自己**的 panic —— Go 侧 recover 在最外层（`zrpc/internal/server.go:58`）。
+但兜不住**业务观测拦截器自己**的 panic —— Go 侧 recover 在最外层（`go-zero@v1.10.2/zrpc/internal/server.go:58`）。
 
 ---
 
@@ -844,7 +844,7 @@ RAG 会对**任何**非业务异常熔断）。
 
 | 侧 | 有哪些量 |
 |---|---|
-| **Go** | `zrpc/internal/serverinterceptors/sheddinginterceptor.go`：`sheddingStat.IncrementTotal()` / `IncrementDrop()` / `IncrementPass()`（`core/load/sheddingstat.go`）+ `metrics.AddDrop()`；熔断侧 `core/breaker` 的 `markDrop()` / `markFailure()` 各自带 stat 计数 |
+| **Go** | `go-zero@v1.10.2/zrpc/internal/serverinterceptors/sheddinginterceptor.go`：`sheddingStat.IncrementTotal()` / `IncrementDrop()` / `IncrementPass()`（`go-zero@v1.10.2/core/load/sheddingstat.go`）+ `metrics.AddDrop()`；熔断侧 `core/breaker` 的 `markDrop()` / `markFailure()` 各自带 stat 计数 |
 | **RAG** | `GoStyleAdaptiveShedder`（复刻自 `adaptiveshedder.go`）**只复刻了判据**（`allow()` / `pass()` / `fail()`），**没有那三个计数**；`GoStyleBreaker` 的 `markDrop()` / `markFailure()` 也**只更新桶计数，不对外暴露 stat** |
 
 **⇒ 后果**：Go 侧可以在 `/metrics` 里看到「这个 rpc 降载丢了多少」「熔断拒了多少」，
@@ -854,8 +854,8 @@ RAG 侧**看不到** ⇒ 熔断/降载**上线后无法确认它在工作**（�
 补它要决定「往哪暴露」（Micrometer？沿用本仓已有的 `metrics` 包？），
 与 Go 的 `prometheus` 客户端**不是同一套** ⇒ 属于产品能力，不是「对齐 Go」。
 
-**Evidence**: `[CODE]` Go `core/load/sheddingstat.go:37/42/47`（三个计数）；
-`[CODE]` Go `zrpc/internal/serverinterceptors/sheddinginterceptor.go:24/28/29/41`（四处调用）；
+**Evidence**: `[CODE]` Go `go-zero@v1.10.2/core/load/sheddingstat.go:37/42/47`（三个计数）；
+`[CODE]` Go `go-zero@v1.10.2/zrpc/internal/serverinterceptors/sheddinginterceptor.go:24/28/29/41`（四处调用）；
 `[CODE]` RAG `GoStyleAdaptiveShedder.java` 无任何计数字段（实测 grep）。
 **Counterfactual = NO**（不影响任何请求的行为）—— 但**影响可运维性**。
 
@@ -1131,7 +1131,7 @@ RAG application.yml:27
 | `UNRESOLVED-MSG-003`：`tools/difftest` 的 12 档**从未实际执行** | ✅ **复核为仍然成立**。`tools/difftest/` 下只有 `exp-difftest-grpc-errors-message.sh` 与 `grpc-message-dual-port-runner.java`（均 2026-10-22 12:17），**没有任何结果产物目录** |
 | `UNRESOLVED-MSG-005`：`AutoMigrate`（每次启动校验表结构）vs `Flyway`（一次性迁移） | ✅ 仍成立，且本轮**部分加重**：`V2__create_message_conversation.sql:27-29` 用的是**裸 `ALTER TABLE … ADD CONSTRAINT`**，**没有 `IF NOT EXISTS`**。在一个「已被 GORM `AutoMigrate` 建过 `message_conversation`」的库上，这条迁移**会失败**。这条在本轮实测里没暴露，是因为 Testcontainers 每次都是**全新空库** |
 | `DRIFT-MSG-012`（部署面：无 servlet 容器 vs 引了 web starter） | 🟡 **本轮可降级**。`mvn -pl service/message/message-rpc dependency:tree` 实测：无 `tomcat-embed-core` / `jetty` / `undertow` / `spring-boot-starter-web`，只有 `tomcat-embed-el`（纯表达式库）⇒ **不会起 servlet 容器**。剩余差异仅为 classpath 上多一个 `spring-boot-web-server`（为满足 nacos-discovery 对 `WebServerInitializedEvent` 的反射引用而必需）。**建议把 `UNKNOWN` 改为「已确证无行为影响」** |
-| `MybatisPlusOrderingBridgeAutoConfiguration`（Boot 4 自动配置排序桥） | 🆕 **此前两轮台账均未提及**，但代码已存在且已生效。核实 imports 文件存在且只有这一行 ⇒ 排序边成立。**登记为已确认的基础设施事实，不计漂移** |
+| `MybatisPlusOrderingBridgeAutoConfiguration`（Boot 4 自动配置排序桥） | 🆕 **此前两轮台账均未提及**，但代码已存在且已生效。核实 imports 文件存在且只有这一行 ⇒ 排序边成立。**登记为已确认的基础设施事实，不计漂移** | ⚠️ **2026-10-27 第十七轮订正**：**本类已于本轮删除**（域侧收编到共享层）⇒ ⇒ 「代码已存在且已生效」这句**只在本轮之前成立** ⇒ ⇒ 现在**本组件不再持有该类** ⇒ ⇒ 排序边由**共享层**那份（`com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration` + 共享层 `META-INF/spring/…AutoConfiguration.imports`）承担 ⇒ ⇒ **本行应读作「已移出本组件」** |
 | go-zero 版本 | 台账多处写 `v1.10.2`；`go.mod:17` 确为 `v1.10.2`，本轮取证用的是 `~/go/pkg/mod/.../go-zero@v1.10.2` ✅ 一致 |
 
 ---
@@ -1150,7 +1150,7 @@ RAG application.yml:27
 | **CASE-R06** | `mvn -pl service/message/message-rpc dependency:tree` | 无任何 servlet 容器 jar | ✅ **DRIFT-MSG-012 可降级** |
 | **CASE-R07** | proto 归一化 diff（剥 option / 注释 / 空白） | 输出为空；`msg+enum` 双侧 22=22、`rpc` 双侧 9=9 | ✅ |
 | **CASE-R08** | 错误码/文案表双侧对读 | 20 码 + 20 文案逐条 1:1，含 `1015 "service busy"` 与未知码 fallback `"FAIL"` | ✅ |
-| **CASE-R09** | `go-zero@v1.10.2` 源码读到**消费点** | `zrpc/config.go:46` 默认 2000ms；`serviceconf.go:35` 默认 `pro`；`zrpc/server.go:131-167` 三拦截器装配条件 | ✅ **满足 §3.3.1「必须读到消费 tag 的控制流」** |
+| **CASE-R09** | `go-zero@v1.10.2` 源码读到**消费点** | `go-zero@v1.10.2/zrpc/config.go:46` 默认 2000ms；`serviceconf.go:35` 默认 `pro`；`go-zero@v1.10.2/zrpc/server.go:131-167` 三拦截器装配条件 | ✅ **满足 §3.3.1「必须读到消费 tag 的控制流」** |
 
 ### 8.2 关键用例的覆盖判定（哪些路径**仍然零覆盖**）
 
@@ -1271,7 +1271,7 @@ RAG application.yml:27
 
 ## 2026-10-23 第二轮：DRIFT-MSG-V-014 / -017 已修
 
-> message-rpc 当前：**49 tests / 0 failures / 0 errors**，BUILD SUCCESS（原 39 + 分页 7 + isRead 3）。
+> message-rpc 当前：**49 tests / 0 failures / 0 errors**，BUILD SUCCESS（原 39 + 分页 7 + isRead 3）。<br>🆕 **2026-10-28 订正（**原值保留不改写**）**：上面那个 **49** 是**历史值**（早已过期）⇒ ⇒ **当前权威值 = 93**（第二十一轮 Testcontainers 固定口守门 +4 ⇒ **93**；上轮为 89）⇒ ⇒ 依据 = **模块级 `clean test` 实测**（带 `-am` · BUILD SUCCESS · 7:41 min · 逐模块 surefire XML 求和 == maven 汇总行）。
 
 ### ✅ FIX-MSG-014 —— 负 `offset` 不再变成 `OFFSET must not be negative`
 
@@ -1389,7 +1389,7 @@ struct 与 `data_model.go` 逐字段逐 tag 一致，对真 PG 跑一次 AutoMig
 | | Go | RAG（修复前） |
 |---|---|---|
 | 判定点 | `message.go:40-42`：`if c.Mode == service.DevMode \|\| c.Mode == service.TestMode` | 无判定，直接用 starter 默认 |
-| 取值来源 | `zrpc.RpcServerConf.Mode` 的 tag `json:",default=pro,…"`（go-zero@v1.10.2 `core/service/serviceconf.go:35`） | `GrpcServerProperties.reflectionServiceEnabled` |
+| 取值来源 | `zrpc.RpcServerConf.Mode` 的 tag `json:",default=pro,…"`（`go-zero@v1.10.2/core/service/serviceconf.go:35`） | `GrpcServerProperties.reflectionServiceEnabled` |
 | 实际值 | `etc/message.yaml` **未配 Mode** ⇒ `pro` ⇒ **不注册** | starter metadata `defaultValue=True` ⇒ **注册** |
 
 ⇒ `application.yml` 显式加 `grpc.server.reflection-service-enabled: false`，
@@ -1722,7 +1722,7 @@ message-rpc：54 tests（原 52 + 新增 2 条真 PG 列级守门）/ 0 failures
 ### 现状（两侧事实，均已读到消费点）
 
 ```
-Go  zrpc/server.go:144-163 setupUnaryInterceptors —— 按配置逐个挂：
+Go  go-zero@v1.10.2/zrpc/server.go:144-163 setupUnaryInterceptors —— 按配置逐个挂：
       c.Middlewares.Trace      default=true   → UnaryTracingInterceptor
       c.Middlewares.Recover    default=true   → UnaryRecoverInterceptor
       c.Middlewares.Stat       default=true
@@ -1730,8 +1730,8 @@ Go  zrpc/server.go:144-163 setupUnaryInterceptors —— 按配置逐个挂：
       c.Middlewares.Breaker    default=true   → UnaryBreakerInterceptor
       c.CpuThreshold > 0       default=900    → UnarySheddingInterceptor
       c.Timeout > 0            default=2000   → UnaryTimeoutInterceptor  ← 被 Disable 清零
-    默认值出处：zrpc/internal/config.go:19-26（Middlewares 五个都是 default=true）
-                zrpc/config.go:46-47（Timeout 2000 / CpuThreshold 900, range=[0:1000)）
+    默认值出处：go-zero@v1.10.2/zrpc/internal/config.go:19-26（Middlewares 五个都是 default=true）
+                go-zero@v1.10.2/zrpc/config.go:46-47（Timeout 2000 / CpuThreshold 900, range=[0:1000)）
     etc/message.yaml 一个都没配 ⇒ 全取默认
     ⚠️ service/common/observability/rpc.go:19-23 的 DisableNativeRpcTimeout **只清 Timeout 一个字段**
        ⇒ recover / breaker / shedding 在真源上是**生效**的
@@ -1754,7 +1754,7 @@ RAG message-rpc 只有一个自研的观测拦截器（超时 + trace），由
 
 ### 拆解二：breaker —— **建议签字挂起，不建议现在补**
 
-**核心理由：go-zero 的服务端 breaker 不是经典熔断器。** `core/breaker/googlebreaker.go`：
+**核心理由：go-zero 的服务端 breaker 不是经典熔断器。** `go-zero@v1.10.2/core/breaker/googlebreaker.go`：
 
 ```go
 window  = time.Second * 10
@@ -1777,7 +1777,7 @@ minK    = 1.1
 > | 上一版的说法 | 实测事实 | 证据 |
 > |---|---|---|
 > | 「本仓零熔断依赖 ⇒ 没有等价实现，只能引 resilience4j」 | **仓里已有一份 go-zero `googlebreaker.go` 的逐行 Java 复刻**，且**带 8 例测试** | `service/common/.../protection/GoStyleBreaker.java`（278 行）+ `GoStyleBreakerTest`（8 例，**实测绿**）。类注释逐字列了 `window=10s / buckets=40 / k=1.5 / minK=1.1 / protection=5 / forcePassDuration=1s`（`googlebreaker.go:12-21`）与 `accept()` 的**同构运算顺序**，还专门标出「**最容易被顺手改好的三处语义**」（概率性拒绝 / force-pass 保底 / 只算已完成桶）全部保持 Go 原样 |
-> | 「算法不同、参数不可能逐字对齐」 | **算法就是同一套**（自适应概率丢弃），参数也逐个照抄 | 同上；`GoStyleAdaptiveShedder.java`（373 行）同理复刻了 `core/load/adaptiveshedder.go` 的**判据部分**（`shouldDrop()` 的三条件、flying β=0.9、cool-off 1s、cpuMax 1000 等），并带 10 例测试 |
+> | 「算法不同、参数不可能逐字对齐」 | **算法就是同一套**（自适应概率丢弃），参数也逐个照抄 | 同上；`GoStyleAdaptiveShedder.java`（373 行）同理复刻了 `go-zero@v1.10.2/core/load/adaptiveshedder.go` 的**判据部分**（`shouldDrop()` 的三条件、flying β=0.9、cool-off 1s、cpuMax 1000 等），并带 10 例测试 |
 >
 > ⇒ **真实成本不是「引新依赖 + 算法不等价」，而是「各包一层 `ServerInterceptor` 薄壳」**。
 > ⚠️ **教训**（值得单独立一条 Pitfall）：**grep 依赖清单 ≠ grep 实现**。
@@ -1789,9 +1789,9 @@ minK    = 1.1
 
 | 项 | Go 侧事实 | 仓里现成的部分 | 还差什么 |
 |---|---|---|---|
-| **隔离单位** | `breakerinterceptor.go:34` `breakerName := info.FullMethod` ⇒ **按 gRPC 全方法名** | `GoStyleBreaker(String name)` 本身与 key 无关；`GoStyleBreakerFilter`（REST 侧）用 `METHOD://path`（`rest/handler/breakerhandler.go:21`） | 薄壳要自己维护 `Map<String, GoStyleBreaker>`，key 换成 `call.getMethodDescriptor().getFullMethodName()` |
+| **隔离单位** | `breakerinterceptor.go:34` `breakerName := info.FullMethod` ⇒ **按 gRPC 全方法名** | `GoStyleBreaker(String name)` 本身与 key 无关；`GoStyleBreakerFilter`（REST 侧）用 `METHOD://path`（`go-zero@v1.10.2/rest/handler/breakerhandler.go:21`） | 薄壳要自己维护 `Map<String, GoStyleBreaker>`，key 换成 `call.getMethodDescriptor().getFullMethodName()` |
 | **失败判据** | `breakerinterceptor.go:53-58` `serverSideAcceptable`：`DeadlineExceeded` 与 `ErrServiceUnavailable` ⇒ **不算失败**；其余交给 `codes.Acceptable(err)`（只有 5xx 才算） | `GoStyleBreaker` 只提供 `accept()`/`markSuccess()`/`markFailure()`，**判据在调用方** | 薄壳要实现 `serverSideAcceptable` |
-| **拒绝时的 wire 契约** | `breakerinterceptor.go:45-48` + `core/breaker/breaker.go:19` ⇒ `UNAVAILABLE` + description **`"circuit breaker is open"`** | — | 薄壳要映射 |
+| **拒绝时的 wire 契约** | `breakerinterceptor.go:45-48` + `go-zero@v1.10.2/core/breaker/breaker.go:19` ⇒ `UNAVAILABLE` + description **`"circuit breaker is open"`** | — | 薄壳要映射 |
 | **类可见性** | — | `GoStyleBreaker` 是 **`final class`（包私有）** | 薄壳**必须放在 `com.rag.common.protection` 包内**，否则要改可见性（改可见性 = 动共享模块的公共面，风险更高） |
 | **⚠️ 连锁风险（仍然成立，且比上一版说得更具体）** | — | `DRIFT-MSGAPI-004` 已给 api 侧加了**客户端**熔断（`GoStyleGrpcClientBreakerInterceptor`） | 服务端一旦开始吐 `UNAVAILABLE`，api 侧客户端熔断可能被打开 ⇒ **两条必须一起设计**；单独补服务端会引入一条**没人设计过的新失效模式**（客户端刚因熔断拒流、服务端也拒流 ⇒ 双侧重试放大） |
 
@@ -1804,9 +1804,9 @@ minK    = 1.1
 
 | 项 | 内容 |
 |---|---|
-| **Go 行为** | `load.AdaptiveShedder`（CPU 采样 + BBR 式判定），阈值 `CpuThreshold default=900`（千分比，`range=[0:1000)`）⇒ 拒绝时 `sheddinginterceptor.go:33` 返回 `RESOURCE_EXHAUSTED` + description **`"service overloaded"`**（`core/load/adaptiveshedder.go:34`） |
+| **Go 行为** | `load.AdaptiveShedder`（CPU 采样 + BBR 式判定），阈值 `CpuThreshold default=900`（千分比，`range=[0:1000)`）⇒ 拒绝时 `sheddinginterceptor.go:33` 返回 `RESOURCE_EXHAUSTED` + description **`"service overloaded"`**（`go-zero@v1.10.2/core/load/adaptiveshedder.go:34`） |
 | **⚠️ 上一版说「grpc-java 没有 CPU 自适应限流 ⇒ 难」—— 也要更正一半** | **仓里已复刻了判据**：`GoStyleAdaptiveShedder`（373 行，`allow()`/`pass(rtMs)`/`fail()`），且**刻意保留**了 Go 的三条件语义（`systemOverloaded() \|\| stillHot()` **且** `highThru()`）—— 单看 CPU 的简化移植会在「CPU 高但在途很少」时误丢请求 |
-| **仍然难在哪** | **不是算法**，而是**装配语义**：① zrpc 侧是**每 server 一个全局 shedder**（`zrpc/server.go:161` `load.NewAdaptiveShedder(...)`），与 REST 侧一致；② 但 **zrpc 侧 `promise.Fail()` 的判据是 `context.DeadlineExceeded`**（`sheddinginterceptor.go:38-42`），而 **REST 侧是「响应码 == 503」**（`rest/handler/sheddinghandler.go:45`）—— **两者刻意不同**，不能照抄 Filter 的判据 |
+| **仍然难在哪** | **不是算法**，而是**装配语义**：① zrpc 侧是**每 server 一个全局 shedder**（`go-zero@v1.10.2/zrpc/server.go:161` `load.NewAdaptiveShedder(...)`），与 REST 侧一致；② 但 **zrpc 侧 `promise.Fail()` 的判据是 `context.DeadlineExceeded`**（`sheddinginterceptor.go:38-42`），而 **REST 侧是「响应码 == 503」**（`go-zero@v1.10.2/rest/handler/sheddinghandler.go:45`）—— **两者刻意不同**，不能照抄 Filter 的判据 |
 | **风险** | 阈值配错会**主动丢真实流量**，而且这类误判在生产上极难归因 |
 | **判断** | 这属于**运维策略**（要多严的降载），不该由「对齐 Go」顺手带进来 ⇒ 若要补，单独一轮 + 阈值由用户定 |
 
@@ -1953,7 +1953,7 @@ minK    = 1.1
    RAG 用 `call.getMethodDescriptor().getFullMethodName()`（**不是** REST 侧那套 `METHOD://path`）。
 
 3. **拒绝时的 wire 契约逐字对齐** —— breaker ⇒ `UNAVAILABLE` + description `"circuit breaker is open"`；
-   shedding ⇒ `RESOURCE_EXHAUSTED` + description `"service overloaded"`（Go `core/load/adaptiveshedder.go:34`）。
+   shedding ⇒ `RESOURCE_EXHAUSTED` + description `"service overloaded"`（Go `go-zero@v1.10.2/core/load/adaptiveshedder.go:34`）。
 
 4. **shedding 的 promise 判据** —— Go `sheddinginterceptor.go:38-42` 用 **`context.DeadlineExceeded`** 判 `promise.Fail()`；
    RAG 用 `DEADLINE_EXCEEDED` status 判 `fail()`。**message-rpc 业务代码从未显式造 `DEADLINE_EXCEEDED`**
@@ -1962,8 +1962,8 @@ minK    = 1.1
 5. **拒绝必须关「本层包装过的 call」** —— 链序 Breaker→Shedding 要求错误冒泡到外层，
    所以 shedding 拒绝时关的是**自己包过的那层 call**，不是原始 call ⇒ `PITFALL-MSG-R-015`。
 
-6. **默认开关对齐 Go 的 `default=true`** —— Go `zrpc/internal/config.go:21/25` `Middlewares.Breaker default=true`；
-   `zrpc/config.go:47` `CpuThreshold default=900` ⇒ RAG `GoStyleProtectionProperties` 同默认 ⇒ **默认开启**。
+6. **默认开关对齐 Go 的 `default=true`** —— Go `go-zero@v1.10.2/zrpc/internal/config.go:21/25` `Middlewares.Breaker default=true`；
+   `go-zero@v1.10.2/zrpc/config.go:47` `CpuThreshold default=900` ⇒ RAG `GoStyleProtectionProperties` 同默认 ⇒ **默认开启**。
 
 ### 4. 双侧对拍探针（新增 `tools/breaker-probe/`）
 
@@ -1973,7 +1973,7 @@ minK    = 1.1
 | **B** | **冷启动保护前缀**（`forcePass` 保底） | ✅ **逐字一致**（`prefix=AAAAA`） |
 | **C** | **拒绝率**统计比对 | ✅ go=0.2500 / rag=0.2000（差 0.05 ≤ 容差 0.15） |
 
-> ⚠️ **脚本第 2 步会从 module cache 抽取真源 `zrpc/internal/codes/accept.go` 逐字比对副本**，不一致即 `exit 1`
+> ⚠️ **脚本第 2 步会从 module cache 抽取真源 `go-zero@v1.10.2/zrpc/internal/codes/accept.go` 逐字比对副本**，不一致即 `exit 1`
 > ⇒ 探针**不能用改过的 Go 源码自证**（已实测通过）。
 >
 > ⚠️ **C 组是「健全性检查」而非「等价性证明」**：Go 的随机源 `mathx.NewProba()` =
@@ -2306,8 +2306,8 @@ func buildConversationItem(ctx, svcCtx, conv, operatorRole, operatorID) (*pb.Con
 
 | Go 侧的东西 | 实际暴露方式 | 出处 |
 |---|---|---|
-| 降载的 `total` / `pass` / `drop` | **每分钟一行的日志**（`logx.Statf`）⇒ **不在 Prometheus 里** | `core/load/sheddingstat.go:52-70` |
-| 熔断的 `markDrop` / `markFailure` | 写进 `b.stat`（`collection.RollingWindow`）⇒ **熔断算法自己的状态**，**根本没有对外暴露** | `core/breaker/googlebreaker.go:121-130` |
+| 降载的 `total` / `pass` / `drop` | **每分钟一行的日志**（`logx.Statf`）⇒ **不在 Prometheus 里** | `go-zero@v1.10.2/core/load/sheddingstat.go:52-70` |
+| 熔断的 `markDrop` / `markFailure` | 写进 `b.stat`（`collection.RollingWindow`）⇒ **熔断算法自己的状态**，**根本没有对外暴露** | `go-zero@v1.10.2/core/breaker/googlebreaker.go:121-130` |
 
 ⇒ 所以本条的**真实缺口**不是「RAG 少了 Prometheus 指标」，而是：
 **RAG 侧连 Go 有的那行日志都没有** ⇒ 降载在不在工作、丢了多少，**从任何地方都看不出来**。
@@ -2349,7 +2349,7 @@ func buildConversationItem(ctx, svcCtx, conv, operatorRole, operatorID) (*pb.Con
 
 #### 🔴 关键发现：**挂 breaker 有一个逐组件的前置条件**（差点就做错了）
 
-breaker 的「失败判据」是 **status code**（Go `zrpc/internal/codes/accept.go:9-17` 的 6 码白名单）。
+breaker 的「失败判据」是 **status code**（Go `go-zero@v1.10.2/zrpc/internal/codes/accept.go:9-17` 的 6 码白名单）。
 ⇒ **组件的兜底码若与 Go 不一致，挂上 breaker 反而会把既有漂移激活成新回归**。
 
 ⇒ 因此本轮**逐组件核了两侧**（Go 出处 = 消费点）：
@@ -2731,3 +2731,50 @@ RAG: message_notification.created_at | timestamptz | 可空 | DEFAULT CURRENT_TI
 ### 状态
 
 🔴 **待 message 域 owner 接手**（本域无 owner 会话 ⇒ 主会话转达）⇒ **主会话不改代码、不下结论**，只留指针。
+
+---
+
+### 🟡 `DRIFT-MSG-V-032` 🟡 **登记（不改）**：`MessageRpcSlowThresholdGateTest` 在**全量并发回归**里偶发 `UNAVAILABLE: Network closed for unknown reason`
+
+| 字段 | 内容 |
+|---|---|
+| **Component** | message-rpc |
+| **Operation** | `MessageRpcSlowThresholdGateTest.slowCallMustBeMarkedSlow` |
+| **Category** | **测试稳定性**（非生产缺陷） |
+| **现象** | 2026-10-27 三域全量回归（`-am` 23 模块）里，该用例报 `StatusRuntime UNAVAILABLE: Network closed for unknown reason`（栈：`callAndGetSpan:349` → `warmUp:318`）⇒ 该模块 `Tests run: 84, Failures: 0, Errors: 1` ⇒ BUILD FAILURE（停在 `:message-rpc`，后续模块未跑到） |
+| **定性** | **flaky，不是回归**：① **单独复跑该类 2/2 全绿**（8.158 s）；② 该模块**不在**本轮改动范围（本轮只改 like-api / message-api 两个 **api** 组件 + 台账；**message-rpc 不依赖 message-api**）；③ 症状是 gRPC 客户端在服务端拆除/连接关闭时读到 `Network closed`，属**建连/拆除时序**，不是行为语义 |
+| **Evidence** | 全量日志 `/tmp/g2-full-reg2.log:15549-15552`；单独复跑 `Tests run: 2, Failures: 0, Errors: 0` |
+| **Difference** | 与 Go 无对应关系（Go 侧无此测试）⇒ **不是语义漂移**，是**测试自身的时序脆弱性** |
+| **Disposition** | **登记不改**（域侧无法单独消除：涉及其它模块的 gRPC 建连时序）；⚠️ **不因此判 message-rpc 回归**；⇒ 后续遇到同一症状，按「先单独复跑定性」处理，不直接当回归修 |
+
+---
+
+## 2026-10-27 · G2 · U+FFFD 跨树复核：G3 报的「message-rpc 那条」**在本树已干净**（主树仍坏）
+
+| G3 报的 | 本树实测（**字节级**） | 结论 |
+|---|---|---|
+| `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcProductionAddressTest.java:96`：`地址都必须U+FFFD×3 discovery:///` | **FFFD = 0**；真实内容 = `@DisplayName("生产 application.yml 的两个 grpc client 地址都必须是 discovery:///（三斜杠）")` | 🟢 **已干净** |
+
+⚠️ **判据本身的坑（本轮实测 ⇒ 留档）**：
+
+> 📌 **本节引述里的坏字符已改写为 ASCII 标记 `U+FFFD×3`**（3 个替换字符 = 1 个 UTF-8 汉字的 3 字节全丢）
+> ⇒ **台账自身不再植入坏字节** ⇒ 复扫可保持 **0 命中**；需原样比对时按「`文件:行号` + `U+FFFD×3`」去主树/G1/G3/G4 树取原件。
+
+- **`read` 工具的输出不能作为「含 U+FFFD」的证据** —— 本轮 `read` 把正常的「是」渲染成 `U+FFFD×3` ⇒ **纯渲染假象**，字节里没有。
+- ⚠️ `grep -rn $'\xef\xbf\xbd'` 在本机 shell 下**也会 0 命中**（转义未生效）⇒ 同样**不能**当判据。
+- ⇒ **唯一可信判据 = 字节级扫描**：`b'\xef\xbf\xbd' in path.read_bytes()`。
+
+### 🔴 但：主树 / G1 树 / G3 树 / G4 树 **仍各坏 1 处**（同一句，FFFD×3）
+
+⇒ **因果已坐实**（`git show` 逐版本字节计数）：`ce81c5f^` ⇒ FFFD=**3** ⇒ `ce81c5f` ⇒ FFFD=**0**
+⇒ 即 **本树阶段 2 那个 commit（JWT 验签搬出 3s 预算）重写该文件区域时顺带写对了中文**。
+⇒ **合并影响**：该文件在**我域写权面** ⇒ 合并时**以本树版本为准** ⇒ 合并后自动干净；
+**若取主树侧版本 ⇒ 坏字符被带回去** ⇒ **登记为合并后必查项**。
+
+### ✅ 附带：message-rpc **无**同款启动守门 flake
+
+| 判据 | 结果 |
+|---|---|
+| 全我域 `grep -rn "destroyForcibly" service/{like,task,message} --include=*.java` | **1 命中**（`LikeRpcRuntimeBootGateTest`）⇒ **message-rpc 不命中** |
+| `message-rpc` 有无 `*RuntimeBootGate*` 类 | **无** ⇒ 真进程层守门形态在本模块**不存在** ⇒ G3 报的 flake **不适用本域** |
+

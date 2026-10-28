@@ -49,6 +49,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import com.rag.task.task.rpc.support.RealContainerPort;
+import com.rag.task.task.rpc.support.GrpcTestPort;
 
 /**
  * 🔴 <b>slow threshold 分支的独立守门</b>（global L9 · task-rpc / follow-rpc 的 X-5 之外的另一半）。
@@ -156,9 +158,25 @@ class TaskRpcSlowThresholdGateTest {
                     .withDatabaseName("task_rpc_slow_threshold_it")
                     .withUsername("rag")
                     .withPassword("rag");
+/**
+     * 本类的真容器**固定宿主口**（task 域段 22820–22849 内 · 全局段表 §4.10.19.3 / §4.10.39.2 分配）。
+     *
+     * <p>🔴 为什么不用 Testcontainers 的默认随机口：随机宿主口落在 **OS 临时段 49152–65535**
+     * （= Docker published 段）⇒ ⇒ 与 {@code tools/difftest/ddl-parity.sh} 的固定口 {@code 55560–55569}
+     * 同属一个池子 ⇒ ⇒ 全局段表把该段标为**禁占**。
+     *
+     * <p>🔴 为什么端口写死在本类里、而不是轮询分配：Testcontainers 的 surefire **每个 fork 一个独立 JVM**
+     * ⇒ ⇒ 静态计数器在每个 fork 里都从头开始 ⇒ ⇒ 两个并发 fork 会拿到同一个端口 ⇒ ⇒ 撞车。
+     */
+    private static final int FIXED_HOST_PORT = 22821;
+    static {
+        RealContainerPort.withFixedHostPort(POSTGRES, FIXED_HOST_PORT,
+                RealContainerPort.PG_CONTAINER_PORT);
+    }
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
+        r.add("grpc.server.port", GrpcTestPort::freePort);
         r.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         r.add("spring.datasource.username", POSTGRES::getUsername);
         r.add("spring.datasource.password", POSTGRES::getPassword);
@@ -267,7 +285,13 @@ class TaskRpcSlowThresholdGateTest {
         GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
         assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
 
-        ServerBuilder<?> builder = ServerBuilder.forPort(0);
+        // 🔴 不能用 forPort(0)：那是【OS 盲选口】⇒ 可能正好选到【Docker 发布口】
+        //    （本机实测：Sea-redis 发布 0.0.0.0:49380->6379，而 macOS 临时段是 49152–65535 ⇒ 同池）
+        //    ⇒ ⇒ gRPC server 在 IPv6 空间绑上了、而客户端走 IPv4 连到 Docker 代理 ⇒
+        //    ⇒ 客户端收到 Redis 的 "-ERR " ⇒ ⇒ http2 首帧不是 SETTINGS ⇒
+        //    ⇒ 报成「http2 exception」，看起来像 gRPC 坏了，实为【被测环境撞口】。
+        // ⇒ 改成探测式：GrpcTestPort 取候选后会【显式再绑一次】确认 ⇒ 绑不上（被 Docker 占着）就换下一个。
+        ServerBuilder<?> builder = ServerBuilder.forPort(GrpcTestPort.freePort());
         configurer.accept(builder);                  // ← 整条链（recover→breaker→shedding→业务拦截器）
         ProbeHolder holder = new ProbeHolder();
         SlowHandlerProbe probe = new SlowHandlerProbe();

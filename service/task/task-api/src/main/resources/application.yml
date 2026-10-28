@@ -160,11 +160,23 @@ rag:
     #   · envelope ⇒ Go 注册了 SetErrorHandler ⇒ 走业务信封
     #                ⇒ **200 + {"code":5001,"msg":"<该域自己的错误码表文案>","data":null}**
     #
-    # ⚠️ 本属性**同时**决定两件事（缺一不可）：
+    # ⚠️ 本属性决定两件事，**但只在 mode ≠ OFF 时**（共享层
+    #    GoStyleTomcatParameterLimitCustomizer#customize 的 OFF 分支**直接 return**）：
     #   ① service/common 的 GoStyleTomcatParameterLimitCustomizer 把 Tomcat 的
     #      maxParameterCount 抬到 10001（= Go 段数上限 +1）⇒ 否则 Tomcat 会先于应用层拒绝，
     #      且拒绝形状是 400 + HTML 错误页（与 Go 不同）；
     #   ② service/common 的 GoStyleFormValueLimitInterceptor 按 Go 的语义判定。
+    #
+    # 🔴 **本域 mode = "off" ⇒ ① 不发生 ⇒ 运行期容器上限停在 yaml 的 2048**
+    #    （而不是别的域的 10001）⇒ 即「**比 Go 更严**」—— 但**当前不可达**：
+    #    · Go 侧本域 handler 走 `json.NewDecoder(r.Body)`（gettaskhandler.go:19）⇒
+    #      `httpx.Parse` / `r.Form` **从不求值** ⇒ Go 的 2048 **应用层**判据不生效，
+    #      Go 实际只有 `net/url` 的 `defaultMaxParams = 10000`（Go 1.25 net/url/url.go:1001）；
+    #    · RAG 侧本域**从不调 `request.getParameter*`**（`@RequestParam` / `@RequestPart` 命中 = 0）
+    #      ⇒ Tomcat **永不解析 query** ⇒ 2048 **够不着** ⇒ ⇒ **两侧都不可达 ⇒ 无可观察差异**。
+    #    ✅ 守门已钉住这条不可达性：`TaskApiFormLimitReachabilityTest` 的
+    #       「>2048 个非空 query 值 ⇒ 200」（真 Tomcat）⇒ **若哪天本域开始读 query 参数**，
+    #       该守门会红 ⇒ ⇒ 届时须把容器上限提到 10001（对齐 Go 的 net/url 段数上限）。
     #
     # ⚠️ 各域 5001 的文案**不一样**（like/comment =「系统内部错误」，
     #    hot/follow/message = "internal server error"）⇒ 共享层**不硬编码文案**：
@@ -174,8 +186,60 @@ rag:
     #    既不改它的容器上限、也不装闸门 ⇒ 行为逐字节不变。
     #    （favorite 不在 global 的写权范围内，AGENTS.md §5.3c）
     go-form-limit:
-      # Go 侧 task/api **没有** httpx.SetErrorHandler ⇒ 同 article ⇒ **400 + Go 原文** ⇒ mode: raw
-      mode: raw
+      # 🔴 2026-10-27 订正（阶段 2 · D-1）：本域改 **off**，理由**不是**「错误形状」，
+      #    而是**语义可达性** —— Go 侧这个上限在本域**根本走不到**：
+      #
+      #    Go 出处：service/task/api/internal/handler/task/gettaskhandler.go:19
+      #        decoder := json.NewDecoder(r.Body)      ← **裸 JSON 解码器**
+      #    ⇒ 它**从不调 httpx.Parse / ParseForm / GetFormValues**
+      #      （全仓 grep：task 域的 httpx.Parse/ParseForm/GetFormValues 命中数 = **0**）
+      #    ⇒ **query / form 从不被解析** ⇒ go-zero 的 maxFormParamCount=2048
+      #      （rest/httpx/util.go:15）在本域**不可达**
+      #    ⇒ Go 侧：带 3000 个 query 参数的请求**正常处理（200）**
+      #
+      #    ⇒ RAG 侧若开闸门 ⇒ 会多出一道 Go 没有的拒绝 ⇒ **行为漂移** ⇒ 必须 off。
+      #
+      # ⚠️ off 的两个前提（已逐条核实）：
+      #    ① GoStyleFormValueLimitInterceptor.preHandle 的 OFF 分支**直接 return true**
+      #       （不判定、不拒绝）
+      #    ② GoStyleTomcatParameterLimitCustomizer.customize 的 OFF 分支
+      #       —— ⚠️ **两版本语义不同（容器上限的抬升与闸门的有无「解耦」了）**：
+      #       · **本树现状**（共享层仍含 `if (mode == OFF) return;`）⇒ **不动**容器上限
+      #         ⇒ Tomcat 保留 yaml 的 2048
+      #       · **合并 G4 `cd893d1`（「容器上限抬升」与「闸门有无」解耦）之后** ⇒ OFF
+      #         **只关应用层判定** ⇒ 容器上限**无条件**抬到 10001
+      #         （`setMaxParameterCount(MAX_PARAMETER_COUNT)`）
+      #       ⇒ ⇒ **两种状态下本域都不可达 ⇒ 行为无差异**：
+      #         本域**从不调 getParameter***（控制器只有 @RequestBody，没有 @RequestParam）
+      #         ⇒ Tomcat 的参数解析是**惰性**的 ⇒ 上限既不被触发、也不被越过
+      #         ⇒ ⚠️ **反向残留**（不是「RAG 更严」，而是「若本域将来开始读 query 参数」）：
+      #           RAG 会放行到 **10001**，而 Go 侧 `net/url` 在 **10000** 就拒 ⇒ 差 1
+      #           ⇒ 届时才需处理 ⇒ 当前**不可达**
+      #         ⇒ 守门 `TaskApiFormLimitReachabilityTest`（下面）负责钉住「当前不可达」
+      #    ⇒ ⚠️ **合并清单**：本段的 ② 描述**依赖共享层版本** ⇒ 合并 G4 后请按上面对照一次
+      #
+      # ⇒ 守门：service/task/task-api/src/test/java/com/rag/task/task/api/
+      #        TaskApiFormLimitReachabilityTest.java（真 Tomcat）
+      #        ① >2048 个非空 query 值 ⇒ 200
+      #        ② ?a=%zz（畸形转义）⇒ 200
+      #        ③ ?a=1;b=2（分号）⇒ 200
+      # ⚠️⚠️ **必须加引号**：YAML 1.1（SnakeYAML）把**未加引号的** `off` 解析成
+      #    **布尔 false** ⇒ `@Value("${rag.http.go-form-limit.mode}")` 拿到的是
+      #    字符串 **"false"**。
+      #    📌 **订正（2026-10-28 · G4 告知 + 我域独立复核）**：**这段警告的后半段已过期**
+      #    —— 共享层 `GoStyleFormLimitMode.parse` 现在**接受 `"false"`**
+      #    （`service/common/src/main/java/com/rag/common/http/GoStyleFormLimitMode.java:342-345`
+      #    ⇒ `case "false": return Mode.OFF;` ⇒ 该分支的注释明写「G2 反馈单 FB-05 的 L4 实测」）
+      #    ⇒ ⇒ **未加引号的 `off` 现在取到 `"false"` ⇒ 语义仍是 OFF ⇒ 不会再抛异常**
+      #    ⇒ ⇒ **原实测记录保留（2026-10-27 当时形态）：未加引号时 task-api 上下文直接起不来，
+      #      报错 `非法的 rag.http.go-form-limit.mode 值：false`）** —— 那是 `parse` 尚不认
+      #    `"false"` 时的行为 ⇒ **历史事实，不改写**。
+      #    ⇒ **域内写法不变、且仍推荐显式写法**：`mode: "off"`（带引号 ⇒ 保持字符串）
+      #    ⇒ ⇒ 理由从「不加引号会炸」换成「**显式更稳、不受 YAML 版本/解析器差异影响**」。
+      #    ⚠️ 全仓此前**没有任何域**写字面量 `off` ⇒ favorite 域是靠
+      #    **「整段不写」** 拿到 OFF（`@Value` 默认值 `:off`）⇒ 别把它的注释
+      #    「故意没有这一项（= off）」误读成「写 off 也行」。
+      mode: "off"
   protection:
     max-conns: 10000
     max-bytes: 1048576

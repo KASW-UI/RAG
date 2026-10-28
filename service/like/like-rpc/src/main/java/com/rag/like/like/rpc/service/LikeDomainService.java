@@ -143,6 +143,11 @@ public class LikeDomainService {
     public GetLikeCountResp getLikeCount(GetLikeCountReq request) {
         GetLikeCountResp.Builder resp = GetLikeCountResp.newBuilder();
 
+        // Go: getlikecountlogic.go:37-41 —— span.SetAttributes(query.target_type, query.batch_size)
+        //     ⚠️ 位置在「空 ID」校验**之前** ⇒ 非法请求也带这两个属性（顺序是行为的一部分）。
+        LikeSpans.queryTargetType(request.getTargetType());
+        LikeSpans.queryBatchSize(request.getTargetIdsCount());
+
         // Go: if len(in.TargetIds) == 0 { return nil, NewGrpcErr(ErrorInputWrong, "输入需要查询的ID为空") }
         if (request.getTargetIdsCount() == 0) {
             throw LikeExceptions.inputWrong("输入需要查询的ID为空");
@@ -181,6 +186,10 @@ public class LikeDomainService {
 
         int hits = ids.size() - missingIds.size();
         int misses = missingIds.size();
+        // Go: getlikecountlogic.go:90-93 —— span.SetAttributes(cache.hits, cache.misses)
+        //     ⚠️ 位置在「DB 回源」**之前** ⇒ 回源失败时这两个属性也已落到 span 上。
+        LikeSpans.cacheHits(hits);
+        LikeSpans.cacheMisses(misses);
         if (hits > 0) {
             metrics.cache(request.getTargetType(), "hit", hits);
         }
@@ -249,6 +258,12 @@ public class LikeDomainService {
     public GetLikeStateResp getLikeState(GetLikeStateReq request) {
         GetLikeStateResp.Builder resp = GetLikeStateResp.newBuilder();
 
+        // Go: getlikestatelogic.go:37-42 —— span.SetAttributes(query.user_id, query.target_type, query.batch_size)
+        //     ⚠️ 位置在「空 ID」校验**之前** ⇒ 非法请求也带这三个属性。
+        LikeSpans.queryUserId(request.getUserId());
+        LikeSpans.queryTargetType(request.getTargetType());
+        LikeSpans.queryBatchSize(request.getTargetIdsCount());
+
         // Go: if len(in.TargetIds) == 0 { ... "输入需要查询的ID为空" }
         if (request.getTargetIdsCount() == 0) {
             throw LikeExceptions.inputWrong("输入需要查询的ID为空");
@@ -278,6 +293,11 @@ public class LikeDomainService {
         }
 
         int hits = ids.size() - missingIds.size();
+        int misses = missingIds.size();
+        // Go: getlikestatelogic.go:69-72 —— span.SetAttributes(cache.hits, cache.misses)
+        //     ⚠️ 位置在「DB 回源」**之前** ⇒ 回源失败时这两个属性也已落到 span 上。
+        LikeSpans.cacheHits(hits);
+        LikeSpans.cacheMisses(misses);
         if (hits > 0) {
             metrics.cache(request.getTargetType(), "hit", hits);
         }
@@ -334,6 +354,9 @@ public class LikeDomainService {
      */
     public GetUserTotalLikeResp getUserTotalLike(GetUserTotalLikeReq request) {
         long userId = request.getUserId();
+        // Go: getusertotallikelogic.go:34-37 —— span.SetAttributes(query.user_id)
+        //     ⚠️ 位置在「userId <= 0」校验**之前** ⇒ 非法请求也带这个属性。
+        LikeSpans.queryUserId(userId);
         // Go: if in.UserId <= 0 { ... "非法的用户ID" }
         if (userId <= 0) {
             throw LikeExceptions.illegalUserId("非法的用户ID");
@@ -343,6 +366,8 @@ public class LikeDomainService {
         String cached = getLenient(key);
 
         if (!cached.isEmpty()) {
+            // Go: getusertotallikelogic.go:52 —— span.SetAttributes(cache.status, "hit")
+            LikeSpans.cacheStatusHit();
             metrics.cache("user_total", "hit");
             long count = parseLongOrZero(cached);
             // Go: _ = ExpireCtx(ctx, redisKey, int(ttl)) —— 续期，失败也忽略
@@ -350,6 +375,9 @@ public class LikeDomainService {
             return GetUserTotalLikeResp.newBuilder().setTotalLikeCount(count).build();
         }
 
+        // Go: getusertotallikelogic.go:64 —— span.SetAttributes(cache.status, "miss")
+        //     ⚠️ Go 的结构是「Redis 出错 ⇒ 落到 miss 分支」⇒ 本处与 Go 同形。
+        LikeSpans.cacheStatusMiss();
         metrics.cache("user_total", "miss");
 
         final long totalCount;
@@ -398,6 +426,13 @@ public class LikeDomainService {
      * <b>没有</b>签字「Java 应当沿用 Go 那条死路径的秒刻度」。
      */
     public GetUserLikeListResp getUserLikeList(GetUserLikeListReq request) {
+        // Go: getuserlikelistlogic.go:34-40 —— span.SetAttributes(query.user_id, query.target_type,
+        //     query.cursor, query.page_size)
+        //     ⚠️ query.page_size 取的是**原始入参** in.PageSize（不是归一化后的 limit）⇒ 这里用 getPageSize() 原值。
+        LikeSpans.queryUserId(request.getUserId());
+        LikeSpans.queryTargetType(request.getTargetType());
+        LikeSpans.queryCursor(request.getCursor());
+        LikeSpans.queryPageSize(request.getPageSize());
         int limit = normalizePageSize(request.getPageSize());
         int fetchLimit = limit + 1;
 
@@ -431,10 +466,16 @@ public class LikeDomainService {
         }
 
         if (!list.isEmpty()) {
+            // Go: getuserlikelistlogic.go:80 / gettargetlikerlistlogic.go:86
+            //     —— span.SetAttributes(cache.status, "hit")
+            LikeSpans.cacheStatusHit();
             metrics.cache(request.getTargetType(), "hit");
         }
 
         if (list.isEmpty()) {
+            // Go: getuserlikelistlogic.go:84 / gettargetlikerlistlogic.go:90
+            //     —— span.SetAttributes(cache.status, "miss")
+            LikeSpans.cacheStatusMiss();
             metrics.cache(request.getTargetType(), "miss");
 
             final List<LikeRecordMapper.UserLikeRow> dbResults;
@@ -508,6 +549,13 @@ public class LikeDomainService {
      * 返回类型是 {@link LikeItem}（无 target_type 字段）。同样的「秒/毫秒刻度不一致」见该方法注释。
      */
     public GetTargetLikerListResp getTargetLikerList(GetTargetLikerListReq request) {
+        // Go: gettargetlikerlistlogic.go:35-42 —— span.SetAttributes(query.target_type, query.target_id,
+        //     query.cursor, query.page_size)
+        //     ⚠️ query.page_size 取的是**原始入参** in.PageSize（不是归一化后的 limit）⇒ 这里用 getPageSize() 原值。
+        LikeSpans.queryTargetType(request.getTargetType());
+        LikeSpans.queryTargetId(request.getTargetId());
+        LikeSpans.queryCursor(request.getCursor());
+        LikeSpans.queryPageSize(request.getPageSize());
         int limit = normalizePageSize(request.getPageSize());
         int fetchLimit = limit + 1;
 
@@ -538,10 +586,16 @@ public class LikeDomainService {
         }
 
         if (!list.isEmpty()) {
+            // Go: getuserlikelistlogic.go:80 / gettargetlikerlistlogic.go:86
+            //     —— span.SetAttributes(cache.status, "hit")
+            LikeSpans.cacheStatusHit();
             metrics.cache(request.getTargetType(), "hit");
         }
 
         if (list.isEmpty()) {
+            // Go: getuserlikelistlogic.go:84 / gettargetlikerlistlogic.go:90
+            //     —— span.SetAttributes(cache.status, "miss")
+            LikeSpans.cacheStatusMiss();
             metrics.cache(request.getTargetType(), "miss");
 
             final List<LikeRecordMapper.TargetLikerRow> dbResults;
@@ -619,6 +673,15 @@ public class LikeDomainService {
      */
     public LikeActionResp likeAction(LikeActionReq request) {
         String actionStr = actionName(request.getActionTypeValue());
+
+        // Go: likeactionlogic.go:161-167 —— span.SetAttributes(like.user_id, like.target_type,
+        //     like.target_id, like.action_type)
+        //     ⚠️ 位置在「参数异常」校验**之前** ⇒ 非法请求也带这四个属性。
+        //     ⚠️ like.action_type 取 Go getActionString 的同一套字面量（like/unlike/dislike/undislike/unknown）。
+        LikeSpans.likeUserId(request.getUserId());
+        LikeSpans.likeTargetType(request.getTargetType());
+        LikeSpans.likeTargetId(request.getTargetId());
+        LikeSpans.likeActionType(actionStr);
 
         // Go: if in.TargetId == "" || in.TargetType == "" || in.UserId <= 0 { ... "参数异常" }
         if (request.getTargetId().isEmpty()

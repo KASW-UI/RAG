@@ -40,23 +40,39 @@ import java.util.concurrent.TimeUnit;
  * 加 retry 会让「一次失败 → 业务码 X」变成「重试 N 次后仍失败」，
  * 可观察的<b>调用次数与延迟</b>都变了。
  *
- * <p><b>⚠️ client 熔断：Go 侧有且默认开，Java 侧尚未接入（已登记的已知偏离）</b>。
+ * <p><b>⚠️ client 熔断：Go 侧有且默认开，Java 侧<b>已接入</b>（共享层扫到即生效）</b>。
  * 证据：{@code zrpc/internal/config.go:14} 的
  * {@code ClientMiddlewaresConf.Breaker bool json:",default=true"}
  * + {@code zrpc/internal/client.go:112-113} 在 {@code c.middlewares.Breaker} 时
  * append {@code clientinterceptors.BreakerInterceptor}
  * + {@code zrpc/internal/clientinterceptors/breakerinterceptor.go:13-18}
- * 的 {@code breaker.DoWithAcceptableCtx(...)}（每个 RPC 方法一个 breaker）。
+ * 的 {@code breaker.DoWithAcceptableCtx(...)}（每个 (下游服务, 方法) 一个 breaker）。
  * {@code etc/likecenter.yaml} 未配 {@code Middlewares} ⇒ 走 {@code default=true} ⇒ <b>是开的</b>。
- * <p>为什么现在补它风险大于收益：本模块下游 like-rpc 在 RAG 侧尚未实现，
- * 没有可熔断的对象；而 message 域已有的实现（{@code GoStyleBreaker} 等）位于
- * message-api 模块内，跨域复用需要先下沉到公共模块 —— 那是超出 like/api 迁移范围的改动。
- * <b>登记为已知偏离，等 like-rpc 落地后与 message 域一起收敛</b>。
- * <p>补它时<b>必须</b>逐条对齐 {@code zrpc/internal/codes/accept.go:9-17} 的
+ *
+ * <p><b>⚠️ 2026-10-27 订正：本段此前写「Java 侧尚未接入（已登记的已知偏离）」⇒ 那是<b>过期断言</b>。</b>
+ * 共享层 {@code com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor}
+ * （{@code @Component} + {@code @GrpcGlobalClientInterceptor}）随本模块
+ * {@code scanBasePackages}（含 {@code com.rag.common}）<b>扫到即生效</b>
+ * ⇒ 失败判据逐条对齐 {@code zrpc/internal/codes/accept.go:9-17} 的
  * {@code codes.Acceptable}（只把 {@code DeadlineExceeded / Internal / Unavailable /
  * DataLoss / Unimplemented / ResourceExhausted} 记为失败）。
  * 本域 {@link com.rag.like.like.common.errmsg.LikeGrpcError} 刻意把业务码映到
  * {@code INVALID_ARGUMENT} / {@code UNKNOWN}（都在名单外）正是为此预留的前提。
+ *
+ * <p><b>运行期证据</b>（§3.3.3：「Bean 存在」≠「机制生效」）：
+ * {@code LikeApiGrpcClientBreakerE2ETest} —— 真 in-process gRPC server ＋ 真 channel ＋ 真拦截器
+ * ⇒ 断言「下游连续返 INTERNAL ⇒ 熔断打开 ⇒ <b>调用不再触达下游</b>」
+ * ⇒ 证明的是<b>机制真在链上</b>。
+ * ⚠️ 该守门<b>不用业务码做判别</b>：本域 {@code INTERNAL} 与「熔断打开」<b>都</b>映到 1015
+ * ⇒ 码没有判别力 ⇒ 改用「下游有没有真被调用」。
+ *
+ * <p><b>⚠️ 已登记的 A4 差异（别把 1015 当成「两侧一致」）</b>：
+ * 熔断打开时抛的 {@code GoStyleCircuitOpenException} 不是 gRPC status
+ * ⇒ 落进 {@code LikeGrpcError#bizCodeFromError} 的兜底 ⇒ <b>业务码 1015</b>；
+ * 而 Go 侧此时是 {@code status.FromError(err)} 返回 {@code ok=false} ⇒
+ * {@code errmsg.NewErrCode(errmsg.ErrorServerCommon)} ⇒ <b>5001</b>。
+ * ⇒ 两侧在<b>熔断打开</b>这一条路径上的业务码不同，已登记（见
+ * {@code docs/DRIFT/like/vs-common.md} 的 A4 行）⇒ <b>不要在别处拿 1015 当「已对齐」来引用</b>。
  */
 @Component
 public class LikeRpcClient {
