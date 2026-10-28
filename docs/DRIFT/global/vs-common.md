@@ -566,7 +566,9 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 ⇒ ⇒ ⚠️ **⑤⑥ 与 E66 无关** ⇒ ⇒ **若 ⑤⑥ 也红 ⇒ 那是另一件事，不是 E66 引起** ⇒ ⇒ **不拿 ⑤⑥ 的红去否 E66**（也不拿 ⑤⑥ 的绿当 E66 的证据）
 
 **另两处待定（立项时要一起答）**：
-1. **载体不统一**：rpc 路径用 `RpcInterceptor.DeadlineState`（epoch 毫秒，静态 `remainingMillis()`）· api 路径用 `GoStyleRequestDeadline`（`nanoTime` 纳秒）⇒ ⇒ 要么统一，要么 source 两处都读。
+1. **载体不统一**：rpc 路径用 `RpcInterceptor.DeadlineState` · api 路径用 `GoStyleRequestDeadline` ⇒ ⇒ 要么统一，要么 source 两处都读。
+   🟢 **2026-10-29 订正（DRIFT-COMMON-005 已修 ⇒ 本行的前提已变）** —— 本行原写「`DeadlineState`（**epoch 毫秒**，静态 `remainingMillis()`）」⇒ ⇒ **该括号里的描述已失效**：
+   `DeadlineState` 现在存的是「**单调钟纳秒**」（`DEADLINE_NANOS`）⇒ ⇒ **两个载体现在都是单调钟 + 纳秒**（详见 §4.12）⇒ ⇒ **「载体不统一」在「时基 + 精度」这一维度上已消除** ⇒ ⇒ 剩下的「不统一」只剩**载体形态**（ThreadLocal 静态方法 vs 另一个 ThreadLocal）⇒ ⇒ **该项待答的部分收窄为「要不要把两个载体合并成同一个」**（⚠️ **合并是重构，不是对齐** ⇒ ⇒ 属阶段二候选 ⇒ 本层**只登记，不预支**）。
 2. ~~**无 deadline 时的回落值**：Go 侧无 ctx deadline 的 Redis 调用由 go-zero 自己的 `Timeout` 决定；RAG 侧今天靠 `spring.data.redis.timeout` ⇒ ⇒ 回落值必须**等于现状**，否则又是新漂移。~~ ⇒ ⇒ 🟢 **已答（G2 核实 · 本层采纳）**：回落值 = **`getClientConfiguration().getCommandTimeout()`**（＝ `spring.data.redis.timeout` 的值，**不是** `TimeoutOptions.enabled()` 的默认值）⇒ ⇒ **与现状同值** ⇒ ⇒ **不构成新漂移** ⇒ ⇒ ⚠️ **但必须显式回落** —— customizer 的 source 是**整体替换** default source 的 ⇒ ⇒ 不回落 = **命令失去 3s 上限** ⇒ ⇒ 断连时从「3s 快速失败」退化成「无限等待」。
 
 **为什么本轮不硬落**：E66 在 global 台账里本来的定性就是「**落点跨域 ⇒ 只记账 + 提请立项，实施需各域 owner 参与**」
@@ -3904,3 +3906,80 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | **communityfact 15 / logger 7 / snowflake 3 的逐条定级与落码** | 26 条是**独立工作量**（每条都要 Go ↔ RAG line-by-line + 回归测试 + 变异证据）⇒ ⇒ **本节只交证据层的复核**，不假装已修 |
 | **`docs/PhaseGoal-judge.md` / `docs/PhaseGoal/g4.md` 的判定更新** | 这两份是**四棵 lane 共用的基线**（机器生成）⇒ ⇒ **不是 G4 单方面能改的** ⇒ ⇒ **留给合并收口执行者**，本层只把**证据**备齐（§4.11.1~§4.11.7） |
 | **`docs/DRIFT/_INDEX.md` / `AGENTS.md` / `_MANIFEST.json`** | **共享索引** ⇒ 合并收口执行者的（AGENTS.md §5.3d） |
+
+---
+
+#### 4.12 🟢 **DRIFT-COMMON-005 结案**：`DeadlineState` 的**时基**（墙钟 → 单调钟）+ **精度**（毫秒 → 纳秒）⇒ **跨域零破坏**（2026-10-29 · 本层 HEAD `19b2edf` → 本节提交）
+
+> **核对日期**：2026-10-29 02:0x · **本层基线 commit**：`29a0bce` · **本层 HEAD**：`19b2edf`（§4.11 批次）→ 本节提交
+> **落点**：`service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`（`DeadlineState` + 两条预算计算路径）
+> **新增守门**：`service/common/src/test/java/com/rag/common/observability/DeadlineStateMonotonicClockGateTest.java`（**7 条**）
+> **台账同步**：`docs/DRIFT/common/alignment-2026-10-23.md` §一·五（该条改为 ✅）＋ §八 决策 2（**阻塞已解除**）＋ §十二·一（`DRIFT-COMMON` 族未修 **2 → 0** ⇒ 全域 **27 → 25**）
+
+**§4.12.0 一句话结论**
+
+`service/common` 的**唯一硬阻塞**（`DRIFT-COMMON-005`）已闭合 ⇒ ⇒ **修法不动公共 API 签名** ⇒ ⇒
+`admin-rpc` / `user-rpc` / `favorite-rpc` / `comment-rpc` 的既有调用方**一行不改** ⇒ ⇒
+**当初「跨域破坏性变更 ⇒ 不得单域决定」的关闭条件已被绕过** ⇒ ⇒ 本层（共享层波次）**自行落码**。
+
+**§4.12.1 为什么当初的阻塞条件已不成立（**这是本条能单域落码的前提**）**
+
+| 项 | 当初（2026-10-24 · §八 决策 2） | 现在（2026-10-29） |
+|---|---|---|
+| 关闭条件 | 「需要一个**同时动 `service/common` + `admin-rpc` + `user-rpc`** 的决策（谁主导？API 兼容还是允许破坏？）」⇒ **不属于单域可决** | **前提消失** —— 关闭条件假定「**只有改签名这一条路**」⇒ ⇒ 找到了**第二条路**：**签名与语义都不动**，只改**内部存储与读取** ⇒ ⇒ **跨域零破坏** ⇒ ⇒ 「不属于单域可决」的前提不成立 |
+| 当初的处置理由 | 「改法要动公共 API 签名（`bindToCurrent(long epochMillis)` → 纳秒版），而 `admin-rpc` / `user-rpc` 的**测试**直接调它 ⇒ **跨域破坏性变更，不得单域决定**」 | **签名保留** `bindToCurrent(long epochMillis)`（**语义也不变**：到期时刻仍是调用方给的那个墙钟时刻）⇒ ⇒ **既有跨域调用方零改动** |
+| 本层的落码 | —— | **①** `DeadlineState` 存储：墙钟 epoch 毫秒 → **单调钟纳秒**（`DEADLINE_NANOS`）<br>**②** `isExpired()` → `monotonicNanos - d >= 0`（**差值法** ⇒ 单调钟回绕也正确）<br>**③** `remainingMillis()` → **纳秒差下取整**（对齐 Go 的 `time.Until` 转毫秒即截断）<br>**④** **新增** `bindRemainingNanos(long)`（纳秒精度入口）⇒ **生产路径全部改用它**<br>**⑤** 服务端预算 `timeout.toMillis()` → `toNanos()`（**饱和换算**）<br>**⑥** 客户端 deadline `timeRemaining(MILLISECONDS)` → `timeRemaining(NANOSECONDS)` ⇒ **客户端 deadline 的亚毫秒部分不再被丢弃**<br>**⑦** 超时调度器延时 + `Future.get` 等待 → **纳秒** ⇒ **亚毫秒 timeout 不再被截成 0ms**（旧实现 `get(0)` ⇒ 请求被**秒判超时**） |
+
+**§4.12.2 Go 出处（逐条可核 · 本仓 pin 住的 Go 1.25.11 标准库）**
+
+| Go 出处 | 内容 |
+|---|---|
+| `$GOROOT/src/context/context.go:625` | `func WithDeadline(parent Context, d time.Time) (Context, CancelFunc)` · `:632` `WithDeadlineCause`；deadline 存成 `time.Time`（字段 `context.go:666`）⇒ **纳秒精度** |
+| `$GOROOT/src/time/time.go:152` · `:164` | `time.Time` 的 `ext int64`（**单调读数**）+ `hasMonotonic` 标志位 |
+| `$GOROOT/src/time/time.go:1233` | `func Until(t Time) Duration` —— 有单调读数时走 `subMono(t.ext, runtimeNano()-startNano)` ⇒ **纯单调** ⇒ NTP 校正 / `setSystemTime` / 虚拟机快照恢复**都影响不到它** |
+
+⇒ ⇒ **「出向已对齐」现在可以推出「入向也对齐」了**（两个载体**都是**单调钟 + 纳秒）—— 这一句在 2026-10-29 之前**不成立**。
+
+**§4.12.3 跨域影响面（**全仓 4 个生产消费点，逐条核过**）**
+
+| # | 消费点 | 用法 | 语义是否受影响 |
+|---|---|---|---|
+| 1 | `service/common/src/main/java/com/rag/common/persistence/DeadlineQueryTimeoutInjector.java:165` | `remainingMillis()` ⇒ 注入 SQL `statement_timeout` | ❌ 不受影响（只依赖「剩余毫秒」）· ⚠️ 取整差异 ≤ 1ms ⇒ 对 `MAX_TIMEOUT_MS` 判定无影响 |
+| 2 | `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/service/UserDomainService.java:154` | `isExpired()` | ❌ 不受影响（只依赖「是否过期」） |
+| 3 | `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminDomainService.java:178` | `isExpired()` | ❌ 不受影响 |
+| 4 | `service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/fact/FavoriteAuthorityEndpointConfig.java:276` | `bindToCurrent(System.currentTimeMillis() + GO_LOOKUP_TIMEOUT_MILLIS)` | 🟡 **到期时刻不变，但到期判定不再受墙钟跳变影响** ⇒ 对它是**更准**不是更松 ⇒ ⇒ **已按 AGENTS.md §5.3e 出反馈单 7 项给 G3**（**不要求 G3 改代码**） |
+
+**§4.12.4 回归网（7 条）＋ 变异验证（**证明不是假绿**）**
+
+| 断言 | 判什么 | **旧实现跑上去** |
+|---|---|---|
+| ① **存储域** | 反射读 `DeadlineState` 私有 `ThreadLocal` ⇒ 存的值必须落在**单调钟纳秒域** | 🔴 **红**（旧实现存 epoch 毫秒 ⇒ 差值 ≈ 1.7e12 ≠ 预算纳秒） |
+| ② **墙钟前跳 1 小时** | 剩余预算必须**仍是 2000ms**、**不得**判过期 | 🔴 **红**（旧实现算出 0 并判过期 ⇒ **超时提前触发**） |
+| ③ **墙钟后跳 1 小时** | 剩余预算必须**仍是 2000ms** | 🔴 **红**（旧实现算出 ≈ 3 602 000ms ⇒ **超时永不触发**） |
+| ④ **兼容入口语义不变** | 未来 deadline ⇒ 未过期 + 剩余 = 预算；过去 deadline ⇒ 已过期 + 剩余 = 0；作用域结束 ⇒ 回到未设置 | ✅ 绿（**这条是「别把跨域改坏」的守卫**） |
+| ⑤ **纳秒预算 + 饱和** | 亚毫秒预算（0.5ms）可表达；`Long.MAX_VALUE` 不溢出成「已过期」 | 🔴 **红**（旧实现把预算截到毫秒 ⇒ 亚毫秒根本表达不出来） |
+| ⑥ **守恒** | 生产代码里不得再出现「拿墙钟和 deadline 比」的写法 | 🔴 **红**（源码回退即红） |
+| ⑥-b **注入点可见性** | 两个注入点必须**包级私有**（外部模块改不了）· `DeadlineState` 上不得有 public 的改时钟入口 | ✅ 绿（**预期绿** —— 它守的是可见性，与实现无关） |
+
+⇒ ⇒ **变异 M1**（把实现改回旧形态：`bindToCurrent` 存墙钟 epoch 毫秒 + `isExpired`/`remainingMillis` 改回墙钟比较）
+⇒ ⇒ **7 条里精确 6 条红**（唯一绿的 ⑥-b 如上所述是预期绿）⇒ ⇒ **守门有判别力，不是假绿** ⇒ ⇒ 还原后 **7/7 绿**。
+
+⚠️ **为什么需要「注入点」**：本条修的是**时基** ⇒ ⇒ 它**不产生异常、不产生日志** ⇒ ⇒ 且**墙钟改不了**（改系统时间要 root、且会污染整台机器）⇒ ⇒ 只能**注入** ⇒ ⇒ 注入点做成**包级私有 static**（`wallClockMillis` / `monotonicNanos`）⇒ ⇒ **外部 16 个消费模块碰不到**；⑥-b 守门断言它**不是 public/protected** ⇒ ⇒ **不给生产留后门**。
+
+**§4.12.5 实测结果（**带 `clean`**）**
+
+| 项 | 结果 |
+|---|---|
+| **共享层 + 跨域回归** | `mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end -pl service/common,service/users/users-common,service/comment/comment-rpc,service/favorite/favorite-rpc,service/like/like-rpc -am clean test` ⇒ **BUILD SUCCESS** |
+| **权威条数（surefire `TEST-*.xml` 逐 `testsuite` 求和 · **收工后采样**）** | `service/common` = **65 XML · 346 tests · 0f 0e 0s**（339 → **+7** = 本轮新增守门的 7 条）· `service/users/users-common` = **4 XML · 39 · 0f 0e 0s** · `service/comment/comment-rpc` = **25 XML · 138 · 0f 0e 0s** · `service/favorite/favorite-rpc` = **23 XML · 131 · 0f 0e 0s · 3 skipped**（**skipped 是既有跳过**，非本轮引入）· `service/like/like-rpc` = **24 XML · 129 · 0f 0e 0s**<br>**第二段（users 域两个 rpc · 等 G1 让出 222xx 端口段后跑）**：`service/users/user/user-rpc` = **28 XML · 162 · 0f 0e 0s** · `service/users/admin/admin-rpc` = **25 XML · 122 · 0f 0e 0s** ⇒ ⇒ **4 个跨域消费方（comment / favorite / like / users×2）全部零失败** |
+| **变异 M1** | 精确 **6/7 红** ⇒ 还原后 **7/7 绿** |
+
+**§4.12.6 本轮明确没做的事（**边界**）**
+
+| 没做 | 为什么 |
+|---|---|
+| **合并两个 deadline 载体**（`DeadlineState` ↔ `GoStyleRequestDeadline`） | 那是**重构**，不是**对齐** ⇒ ⇒ **阶段二候选** ⇒ 本层**只登记，不预支**（§4.9.4 的「载体不统一」待答项已收窄） |
+| **`docs/DRIFT/global/common-tails.md:551` 的陈旧断言** | 那句「真正只有毫秒的是 `DeadlineState` ⇒ 成立 —— 它用 `System.currentTimeMillis()` 存」**本轮已失效** ⇒ ⇒ 但该文件是**共享文件**（`check-wave-lane-ownership.py` 的 `SHARED` 清单）⇒ ⇒ **本层不写** ⇒ ⇒ **登记 + 上报给合并收口执行者** |
+| **`docs/DRIFT/users/admin/rpc.md:2767` 提到的 `deadlineEpochMs`** | 该变量名本轮已从生产代码移除（改成 `effectiveTimeoutNanos` / `deadlineNanos`）⇒ ⇒ 但那是 **G1（users 域）的文件** ⇒ ⇒ **本层不写** ⇒ ⇒ 已并入给 G3 的反馈单同款口径知会 G1 |
+| **`align/like` 的 `SD-2026-10-23-09`（同一现象的签字）** | 现象已不复存在 ⇒ ⇒ 但它在 `docs/Intentional_Deviations/like/` ⇒ ⇒ **不是本层能单方面改的** ⇒ ⇒ **登记 + 上报给合并收口执行者** |
+| **E65 统一载体**（21 类 / 30 处零 deadline） | Jason 已拍板走 global 统一载体 `applyTo(stub)` ⇒ ⇒ **本轮只重算覆盖面并登记，不改**（§4.11.5） |

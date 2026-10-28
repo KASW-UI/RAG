@@ -144,27 +144,34 @@ Go 这样做是对的——它的 span 生命周期归 otel 插桩所有，拦�
 
 ---
 
-### DRIFT-COMMON-005 —— `DeadlineState` 用**墙钟**，Go 用**单调钟**；且精度被截到毫秒（`SEMANTIC MISMATCH`）
+### ✅ DRIFT-COMMON-005 —— `DeadlineState` 用**墙钟**，Go 用**单调钟**；且精度被截到毫秒（`SEMANTIC MISMATCH`）—— **2026-10-29 已修**
 
 > **2026-10-24 二次复验时补记。** 这是 `service/common` 自己的东西，但**此前没被任何域记录** ——
 > 连已被别的域签字的同一限制，common 域的台账里也是空白（见 §六·五·6）。
+>
+> 🟢 **2026-10-29 结案**（`align/g4-service-common` · 共享层波次）—— **修法不动公共 API 签名** ⇒
+> ⇒ 当初「跨域破坏性变更 ⇒ 不得单域决定」的**阻塞条件已不成立**（见 §八 决策 2 的解除记录）。
 
 | | |
 |---|---|
-| **Go 出处** | 标准库 `context.WithDeadline`（`context.go:625` / `:632`）把 deadline 存成 `time.Time` ⇒ **纳秒精度**，且 `time.Now()` 带**单调时钟读数**、`Add` 会保留它；`time.Until(d)` 走单调读数。Go 侧业务层就是用 `ctx.Deadline()` / `time.Until()` 读预算（实例：`service/knowledge/api/internal/logic/product/search_tools_client.go:184`） |
-| **RAG 落点** | `RpcInterceptor.java:589` `DeadlineState.DEADLINE = ThreadLocal<Long>`，存 **epoch 毫秒**；`:170-172` `deadlineEpochMs = System.currentTimeMillis() + timeout.toMillis()`；`:602-605` `isExpired()` 与 `:608-612` `remainingMillis()` 都用 `System.currentTimeMillis()` |
-| **差异 ①（时基）** | Go **单调钟** vs RAG **墙钟**。`System.currentTimeMillis()` 受 NTP 校正 / `setSystemTime` / 虚拟机快照恢复影响 ⇒ 可能**倒退**（则 `isExpired()` 长时间为 false ⇒ 超时不触发）或**前跳**（则提前判过期） |
+| **Go 出处** | 标准库 `context.WithDeadline`（`$GOROOT/src/context/context.go:625` · `:632`）把 deadline 存成 `time.Time`（字段 `context.go:666`）⇒ **纳秒精度**；且 `time.Time` **自带单调时钟读数**（`$GOROOT/src/time/time.go:152` 的 `ext int64` + `:164` 的 `hasMonotonic` 标志位）；`time.Until(t)`（`time.go:1233`）在有单调读数时走 `subMono(t.ext, runtimeNano()-startNano)` ⇒ **纯单调** ⇒ NTP 校正 / `setSystemTime` / 虚拟机快照恢复**都影响不到它**。Go 侧业务层就是用 `ctx.Deadline()` / `time.Until()` 读预算（实例：`service/knowledge/api/internal/logic/product/search_tools_client.go:184`） |
+| **RAG 落点（修前）** | `RpcInterceptor.java` 的 `DeadlineState.DEADLINE = ThreadLocal<Long>`，存 **epoch 毫秒**；`deadlineEpochMs = System.currentTimeMillis() + timeout.toMillis()`；`isExpired()` 与 `remainingMillis()` 都用 `System.currentTimeMillis()` |
+| **差异 ①（时基）** | Go **单调钟** vs RAG **墙钟**。`System.currentTimeMillis()` 受 NTP 校正 / `setSystemTime` / 虚拟机快照恢复影响 ⇒ 可能**倒退**（则 `isExpired()` 长时间为 false ⇒ **超时不触发**）或**前跳**（则提前判过期） |
 | **差异 ②（精度）** | Go **纳秒** vs RAG **毫秒** —— 且是在**创建时**就截断（`timeout.toMillis()`），不是读取时 ⇒ 有效 deadline 时刻本身最多差 < 1ms |
-| **🔴 同组件内不一致** | 同一组件的**另一个** deadline 载体 `GoStyleRequestDeadline`（`observability/GoStyleRequestDeadline.java:64`）用的是 `System.nanoTime()`（**单调钟**）+ 纳秒存储 + `withDeadlineAfter(remainingNanos, NANOSECONDS)`（`:115-119`）<br>⇒ **两个载体时基不同**：**出向（HTTP→gRPC）单调钟、入向（gRPC 服务端）墙钟** |
+| **🔴 同组件内不一致** | 同一组件的**另一个** deadline 载体 `GoStyleRequestDeadline`（`observability/GoStyleRequestDeadline.java:64`）用的是 `System.nanoTime()`（**单调钟**）+ 纳秒存储 + `withDeadlineAfter(remainingNanos, NANOSECONDS)`<br>⇒ **两个载体时基不同**：**出向（HTTP→gRPC）单调钟、入向（gRPC 服务端）墙钟** |
 | **可观察面** | gRPC 服务端超时判定时刻、SQL `queryTimeout` 注入值、业务层 `checkDeadline()` 判定 |
-| **处置** | 🔴 **未修** —— 改法要动公共 API 签名（`bindToCurrent(long epochMillis)` → 纳秒版），而 `admin-rpc` / `user-rpc` 的**测试**直接调它（`AdminDeadlinePassthroughTest.java:150`、`DeadlinePassthroughTest.java:144`）⇒ **跨域破坏性变更，不得单域决定** |
+| **✅ 处置（2026-10-29 已落码）** | **不动 `bindToCurrent(long epochMillis)` 的签名与语义** ⇒ ⇒ **跨域零破坏**（`admin-rpc` / `user-rpc` / `favorite-rpc` / `comment-rpc` 的既有调用方**一行不改**）：<br>① `DeadlineState` 的存储从「墙钟 epoch 毫秒」改为「**单调钟纳秒**」（`DEADLINE_NANOS`）⇒ 绑定之后**不受任何墙钟跳变影响**；<br>② `isExpired()` 改用 `monotonicNanos - d >= 0`（差值法 ⇒ 单调钟回绕也正确）；③ `remainingMillis()` 改用**纳秒差下取整**（对齐 Go 的 `time.Until` 转毫秒即截断）；<br>④ **新增** `bindRemainingNanos(long)`（纳秒精度入口，**生产路径全部改用它**）⇒ `RpcInterceptor` 的服务端预算由 `timeout.toMillis()` 改为 `toNanos()`（饱和换算）、客户端 deadline 由 `timeRemaining(MILLISECONDS)` 改为 `timeRemaining(NANOSECONDS)` ⇒ **客户端 deadline 的亚毫秒部分不再被丢弃**；<br>⑤ 超时调度器与 `Future.get` 的等待也改用纳秒 ⇒ **亚毫秒 timeout 不再被截成 0ms**（旧实现 `get(0)` ⇒ 请求被秒判超时） |
+| **✅ 回归网** | **新增** `service/common/src/test/java/com/rag/common/observability/DeadlineStateMonotonicClockGateTest.java`（**7 条**）⇒ 含 ① **存储域**断言（反射读真实字段 ⇒ 旧实现存 epoch 毫秒 ⇒ 必红）② **墙钟前跳 1 小时** ⇒ 剩余预算不变、未过期（旧实现会判过期 ⇒ 必红）③ **墙钟后跳 1 小时** ⇒ 剩余预算不变（旧实现会算出 ≈3 602 000ms ⇒ **超时永不触发** ⇒ 必红）④ **兼容入口语义不变**（未来/过去/作用域清理三态）⑤ **纳秒预算 + 饱和不溢出** ⑥ **守恒**：生产代码不得再出现「拿墙钟和 deadline 比」的写法 ⑥-b **注入点必须包级私有** |
+| **✅ 变异验证** | **M1 = 把实现改回旧形态**（`bindToCurrent` 存墙钟 epoch 毫秒 + `isExpired`/`remainingMillis` 改回墙钟比较）⇒ ⇒ **7 条里精确 6 条红**（唯一绿的 ⑥-b 守的是注入点可见性、与实现无关 ⇒ 预期绿）⇒ ⇒ **守门不是假绿** |
+| **跨域影响面（已核）** | `DeadlineState` 的生产消费点**只有 4 处**：`service/common/.../persistence/DeadlineQueryTimeoutInjector.java:165`（共享层）· `service/users/user/user-rpc/.../UserDomainService.java:154` · `service/users/admin/admin-rpc/.../AdminDomainService.java:178`（均只调 `isExpired()`）· `service/favorite/favorite-rpc/.../fact/FavoriteAuthorityEndpointConfig.java:276`（`bindToCurrent`）⇒ ⇒ **4 处全部只依赖「剩余预算/是否过期」的语义 ⇒ 语义未变 ⇒ 零破坏** |
+| **⚠️ 语义微变（已出反馈单给 G3）** | `favorite-rpc` 的生产调用点 `FavoriteAuthorityEndpointConfig.java:276` 传的仍是**墙钟 epoch 毫秒** ⇒ ⇒ **到期时刻不变**，但**到期判定不再受墙钟跳变影响**（这正是修复点）⇒ ⇒ 对它是**更准**而非更松 ⇒ 已按 AGENTS.md §5.3e 出**反馈单 7 项**给 G3（favorite 域）知会 |
 
 **对照结论（同一件事的两侧，别混谈）**：
 - ✅ `GoStyleRequestDeadline`（**出向**）**纳秒精度 ✅ 与 Go 等价** —— 存 nanos、`applyTo` 用 `withDeadlineAfter(remainingNanos, NANOSECONDS)`。
-- 🔴 `DeadlineState`（**入向**）**墙钟 + 毫秒** —— 本条。
+- ✅ `DeadlineState`（**入向**）**单调钟 + 纳秒 ✅ 与 Go 等价** —— **2026-10-29 已修**（本条）。
 
-⇒ 两个载体**不共享实现**（一个 `ThreadLocal<Long>` nanos、一个 `ThreadLocal<Long>` epoch-millis），
-所以「出向已对齐」**不能**推出「入向也对齐」。
+⇒ 两个载体**仍不共享实现**（各自一个 `ThreadLocal<Long>` nanos），
+但**两侧现在都是单调钟 + 纳秒** ⇒ ⇒ 「出向已对齐」**可以**推出「入向也对齐」了（**2026-10-29 起**）。
 
 ---
 
@@ -553,7 +560,7 @@ ERROR logger-test-omits-err -service="logger-test-omits-err" event_id="2113…"
 | 生效条件 | 待 `hot-rpc` 修好后应转 `EXIT=0` ⇒ **该脚本同时是「修好了」的验收信号** |
 | 📌 **交接给主会话** | ⚠️ 该脚本**尚未进入 AGENTS.md §7.2 的工具表** ⇒ 主会话合并时需补一行，否则它**不可被发现**（§7.2 表格是工具的唯一索引） |
 
-### 决策 2：DRIFT-COMMON-005 **先记入台账，本轮不改**
+### 决策 2：DRIFT-COMMON-005 **先记入台账，本轮不改** —— 🟢 **2026-10-29 阻塞已解除并已修**（见 §一·五）
 
 | 项 | 值 |
 |---|---|
@@ -562,6 +569,8 @@ ERROR logger-test-omits-err -service="logger-test-omits-err" event_id="2113…"
 | 改动为什么必须跨域 | `bindToCurrent(long epochMillis)` 是 `service/common` 的**公共 API**，而 `admin-rpc` / `user-rpc` 的**测试**直接调它（`AdminDeadlinePassthroughTest.java:150`、`DeadlinePassthroughTest.java:144`）⇒ 改签名会打断别域 |
 | 关闭条件 | 需要一个**同时动 `service/common` + `admin-rpc` + `user-rpc`** 的决策（谁主导？API 兼容还是允许破坏？）⇒ **不属于单域可决** |
 | ⚠️ 遗留 | `align/like` 的 `SD-2026-10-23-09` 已就**同一现象**签字，但**描述只对了一半**（见 §六·五·6）⇒ 合并时两侧描述需对齐 |
+| **🟢 2026-10-29：关闭条件已被绕过 ⇒ 本条已修** | **关闭条件的前提是「只有改签名这一条路」** —— 而 2026-10-29 找到了**第二条路**：**签名与语义都不动**，只改**内部存储与读取**<br>⇒ ⇒ **跨域零破坏**（`admin-rpc` / `user-rpc` / `favorite-rpc` / `comment-rpc` 的调用方**一行不改**）⇒ ⇒ **「不属于单域可决」的前提消失** ⇒ ⇒ 本层（共享层波次）**自行落码**，**无需**再开「同时动三个域」的决策<br>⇒ 落码与证据 ⇒ **§一·五 的 DRIFT-COMMON-005 条目（已改为 ✅）** |
+| **⚠️ 仍需合并收口知会的一点** | `align/like` 的 `SD-2026-10-23-09`（同一现象的签字）与本条**描述只对了一半** ⇒ ⇒ **本条已修 ⇒ 该签字项的「现象」已不复存在** ⇒ ⇒ **留给合并收口执行者**决定是否同步订正（**不是本层能单方面改的** —— 它在 `docs/Intentional_Deviations/like/`） |
 
 ---
 
@@ -629,18 +638,18 @@ ERROR logger-test-omits-err -service="logger-test-omits-err" event_id="2113…"
 
 | §〇 原写 | 实测 | 依据 |
 |---|---|---|
-| **28** 条编号条目 | **27** 条 | `DRIFT-COMMON-004`（`hot-rpc` 缺 `GrpcServerConfigurer`）已由 **hot 域 2026-10-25 认领并关闭**（§十一 #1）⇒ `DRIFT-COMMON` 未修数 **3 → 2** |
+| **28** 条编号条目 | **25** 条 | `DRIFT-COMMON-004`（`hot-rpc` 缺 `GrpcServerConfigurer`）已由 **hot 域 2026-10-25 认领并关闭**（§十一 #1）⇒ `DRIFT-COMMON` 未修数 **3 → 2**；🟢 **2026-10-29 再减 2**（`-005` 本轮已修 · `-006` 的代码 2026-10-25 已删 ⇒ 此前把「已删」算成「未修」是陈旧快照）⇒ **2 → 0** ⇒ ⇒ **27 → 25** |
 | communityfact **15** 条 | ✅ **15 是对的** | §五 的表格只列 **14** 条（5 MISMATCH + 8 OBS + 1 UNRESOLVED）⇒ **漏了 `DRIFT-CF-018`**（它在 §六·六「补录」里）⇒ **§五 的「14 条」是旧快照**，§〇 的 15 才是全量 |
 
 **逐族明细（2026-10-25 扫描）**：
 
 | 编号族 | 未修 | 编号清单 | 状态 |
 |---|---|---|---|
-| `DRIFT-COMMON` | **2** | `-005`（`DeadlineState` 墙钟 vs Go 单调钟）/ `-006`（`markExpired` 死代码 + 跨域 javadoc 假断言） | 🔴 **无任何域认领**（§八 决策 2 明确「先记账不改」） |
+| `DRIFT-COMMON` | **0** | 🟢 `-005`（`DeadlineState` 墙钟 vs Go 单调钟）**2026-10-29 已修**（见 §一·五）<br>🟢 `-006`（`markExpired` 死代码 + 跨域 javadoc 假断言）**代码已于 2026-10-25 删除**（`align/global` 收口提交）⇒ **本表此前把它算作「未修」是陈旧快照** | ✅ **两条都已闭合** |
 | `DRIFT-CF`（communityfact） | **15** | `-001 -002 -003 -004 -005 -006 -008 -009 -011 -012 -013 -014 -015 -017 -018`（**无 -010 / -016**） | 🔴 **一条未动** |
 | `DRIFT-LOG`（logger） | **7** | `-001` ~ `-007` | 🔴 未修 |
 | `DRIFT-SF`（snowflake） | **3** | `-001` ~ `-003` | 🔴 未修 |
-| **合计** | **27** | | + **5 项未编号**（§六·六） |
+| **合计** | **25** | | + **5 项未编号**（§六·六）<br>🔴 **订正（2026-10-29）**：`DRIFT-COMMON` 族 2 → **0**（`-005` 本轮已修 · `-006` 的代码 2026-10-25 已删 ⇒ 本表此前是**陈旧快照**）⇒ ⇒ **27 → 25** |
 
 ⚠️ **5 个可比包 3 个 `NOT EQUIVALENT`** 依然成立（`communityfact` / `logger` / `observability` / `snowflake` 中只有 `response` 逐条等价）⇒ **§〇 第 36 行未过期**。
 

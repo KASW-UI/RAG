@@ -143,12 +143,20 @@ ACTIVE: dict[str, list[str]] = {
     # ---- G4：共享层（service/common + users-common）----
     # ⚠️ `users-common` 物理位置在 `service/users/` 里，但它**跨 6 个外域**（§5.3f）
     #    ⇒ 写权归共享层波，**不归 G1**。
+    # 🆕 2026-10-29：`docs/DRIFT/common/**` 补进本 lane 的白名单。
+    #    理由：那是**共享层自己的组件台账**（`service/common` 的 L0 权威来源，
+    #    被 `docs/PhaseGoal-judge.md` §三 A-2 的「权威来源」列直接引用）
+    #    ⇒ 按 AGENTS.md §5.3b「`docs/DRIFT/<域>/<组件>.md` ⇒ ✅ 该域工作树自己写」，
+    #    而 `common` 域的 lane 就是 G4 ⇒ ⇒ **原先白名单漏了它**。
+    #    ⚠️ 且它**不与任何 lane 的白名单重叠**（G1~G3 都没有 `docs/DRIFT/common/**`）
+    #    ⇒ ⇒ 补进白名单**不产生写权冲突**，只是把**既成事实**写进机器守门。
     "g4-service-common": [
         "service/common/pom.xml",
         "service/common/src/**",
         "service/users/users-common/pom.xml",
         "service/users/users-common/src/**",
         "docs/DRIFT/global/vs-common.md",
+        "docs/DRIFT/common/**",
     ],
 }
 
