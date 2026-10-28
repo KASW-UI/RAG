@@ -31,12 +31,16 @@ spring:
       # ⚠️ 取值出处（2026-10-23 补记，此前只有数值没有出处）：
       #   Go 的 admin.yaml 完全没配 BizRedis 超时
       #     → go-zero v1.10.2 redisclientmanager.go:32-39 建 red.Options 时不传任何 timeout
-      #     → go-redis/v9 options.go init() 默认：ReadTimeout = 3s
+      #     → go-redis/v9 **v9.20.0**（Sea 仓 go.mod:15 **直接 pin**）options.go 的 init() 默认：
+      #        ReadTimeout = 3s（options.go:364-370）· DialTimeout = 5s（options.go:338-339）· WriteTimeout = ReadTimeout（:374-378）
       #   ⇒ 读命令超时 3s，与 go-redis 默认逐字相同（完整出处链见 admin-rpc 侧同段注释）。
       #   🔴 go-zero redis.go:27 的 `readWriteTimeout = 2s` 是**死常量**，别被它误导。
       timeout: 3s
       # 连接超时：Go 的 go-redis DialTimeout 默认 **5s**。
-      # Lettuce 在 connect-timeout 未设时回落到 timeout ⇒ 不配这行会跟着变成 3s。
+      # 🔴 2026-10-27 订正：此处原写「Lettuce 在 connect-timeout 未设时回落到 timeout ⇒ 跟着变成 3s」
+      #    ——**那是错的**：Boot 4.0.8 createClientOptions 的字节码是 `if (connectTimeout != null) { … }`
+      #    ⇒ null ⇒ 整段跳过 ⇒ 用 Lettuce 自己的默认 **10s**（SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION）
+      #    ⇒ 不配这行 = 10s（≠ Go 的 5s）；修法与结论不变。详见 DRIFT-ADMINAPI-012 订正块。
       # Boot 4 里这是独立属性（DataRedisProperties.connectTimeout，模块 spring-boot-data-redis）。
       connect-timeout: 5s
 

@@ -3,18 +3,22 @@ package com.rag.users.user.api;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.RedisAsyncCommandsImpl;
 import io.lettuce.core.api.StatefulConnection;
+import com.rag.users.user.api.client.UserRpcClient;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.data.redis.autoconfigure.LettuceClientOptionsBuilderCustomizer;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContext;
 import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -23,6 +27,8 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.time.Duration;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -34,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static com.rag.users.user.api.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * 🔴 user-api 的 **Redis 断连行为**必须与 Go 真源同形：<b>快速失败 ⇒ fail-open 放行</b>。
@@ -74,7 +81,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <h2>修法</h2>
  *
- * <p>{@code RedisDisconnectedBehaviorConfig} 把 Lettuce 的断连行为设成
+ * <p>🔴 <b>2026-10-27 共享层收编后改写</b>：本组件的断连策略<b>已不再</b>由域内的
+ * {@code RedisDisconnectedBehaviorConfig} 提供（那份<b>已删除</b>）⇒ 改由<b>共享层</b>的
+ * {@code GoStyleRedisClientAutoConfiguration} 提供（经 {@code AutoConfiguration.imports} 清单注册
+ * ⇒ 本组件启动类扫 {@code com.rag.common} 时它会被 {@code AutoConfigurationExcludeFilter}
+ * 排除出组件扫描 ⇒ <b>只经清单注册一次</b>）⇒ 它把 Lettuce 的断连行为设成
  * {@link ClientOptions.DisconnectedBehavior#REJECT_COMMANDS}
  * ⇒ {@code DefaultEndpoint:314} 直接返回
  * {@code RedisException("Currently not connected. Commands are rejected.")}
@@ -114,12 +125,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 证明不了「断连时命令被排队还是被拒绝」——
  * 那正是 §3.3 说的「绿测试测不到真机制」。
  *
- * <h2>本类的可证伪性</h2>
+ * <h2>本类的可证伪性（2026-10-27 共享层收编后改写）</h2>
  *
- * <p>把 {@code RedisDisconnectedBehaviorConfig} 里的 {@code REJECT_COMMANDS} 改回 {@code DEFAULT}，
- * 用例 2 应当<b>红</b>，且失败消息里的实测耗时应是 <b>≈3000ms</b>（挂到 commandTimeout）
- * 而不是 &lt;1500ms ⇒ 说明这条守卫真的在盯「快速失败」这件事，
- * 而不是「Bean 存在」这种假断言。
+ * <p>域内副本已删 ⇒ 变异目标落在<b>共享层</b> ⇒ ⚠️ <b>共享层在 G4 写权面 ⇒ 域侧不能改它的源码做变异</b>
+ * ⇒ ⇒ 域侧的变异走<b>运行期排除</b>：给本测试加属性
+ * {@code spring.autoconfigure.exclude=com.rag.common.redis.GoStyleRedisClientAutoConfiguration}
+ * ⇒ ⇒ 共享层那份被排除 ⇒ 容器里 customizer 数量 = 0 ⇒ 断连行为回落 {@code DEFAULT}
+ * ⇒ ⇒ <b>用例 1 的机制腿必须红</b>（读到 DEFAULT 而不是 REJECT_COMMANDS）
+ * ⇒ ⇒ 用例 2 也应当<b>红</b>（命令被排队 ⇒ 失败消息里的实测耗时应是 <b>≈3000ms</b>，挂到 commandTimeout，
+ * 而不是 &lt;1500ms）⇒ 说明这条守卫真的在盯「快速失败」这件事，
+ * 而不是「Bean 存在」这种假断言 —— 也真的在盯「<b>共享层那份</b>有没有生效」。
+ * <p>（原域内变异：把域内 {@code RedisDisconnectedBehaviorConfig} 里的 {@code REJECT_COMMANDS} 改回 {@code DEFAULT}。）
  * （2026-10-24 实测：变异后用例 1、2 **都红**，用例 2 的耗时是 ≈3000ms。）
  */
 @SpringBootTest(
@@ -139,6 +155,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class UserApiRedisDisconnectedFastFailTest {
 
     /**
+     * 🔴 DRIFT-G1-002（2026-10-27）本测试**必须** mock 掉 {@code UserRpcClient}。
+     *
+     * <p>理由（与 admin-api 的 {@code AdminApiPlainText400ContentTypeTest} 同款）：
+     * {@code UserRpcClient.afterPropertiesSet()} 是「启动期拨号检查已武装」的自检，
+     * 而 devh 的 {@code immediate-connect-timeout} 现在是 <b>3s</b>
+     * ⇒ 本测试的 {@code grpc.client.user-rpc.address} 指向 {@code 127.0.0.1:65535}
+     * （**本来就没人监听**）⇒ 不 mock 的话<b>上下文启动就会失败</b>
+     * （{@code Can't connect to channel user-rpc}）。
+     *
+     * <p>被 mock 的 bean <b>不会</b>执行 {@code afterPropertiesSet()}
+     * ⇒ 启动期检查被跳过 ⇒ 本测试只关心 Redis 的快速失败语义，不受 gRPC 影响。
+     */
+    @MockitoBean
+    private UserRpcClient userRpcClient;
+
+    /**
      * 断连后命令必须<b>在 1500ms 内</b>失败。
      *
      * <p>阈值怎么定的：修复前的实测是 <b>≈3020ms</b>（挂到 {@code commandTimeout: 3s}），
@@ -149,7 +181,7 @@ class UserApiRedisDisconnectedFastFailTest {
 
     @Container
     static final GenericContainer<?> REDIS =
-            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379).withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 6379));
 
     /**
      * app 与 Redis 之间的透传代理。
@@ -177,6 +209,15 @@ class UserApiRedisDisconnectedFastFailTest {
 
     @Autowired
     private LettuceConnectionFactory connectionFactory;
+
+    /**
+     * 上下文句柄 —— 用来断言「容器里<b>恰好一份</b> customizer，且就是共享层那一份」。
+     *
+     * <p>⚠️ 这是<b>收编的验收判据</b>（2026-10-27 · G1 lane · 共享层收编落码）：
+     * 域内那份 {@code RedisDisconnectedBehaviorConfig} 已删 ⇒ 断连策略<b>只可能</b>来自共享层。
+     */
+    @Autowired
+    private ApplicationContext applicationContext;
 
     /**
      * 用例 1：<b>断连策略确实被装配进去了</b>，且 Redis 此刻是通的。
@@ -213,6 +254,63 @@ class UserApiRedisDisconnectedFastFailTest {
                         + "（DefaultEndpoint:149 / :837-852），挂到 commandTimeout(3s) ⇒ HTTP 预算先耗尽 ⇒ 503，"
                         + "而 Go 是快速失败 ⇒ fail-open 200。");
 
+        // ── bean 身份：容器里必须**恰好一份** customizer，且就是共享层那一份 ──
+        // ⚠️ 这两条是**收编的验收判据**（2026-10-27 · G1 lane）：域内副本已删 ⇒
+        //   断连策略只可能来自共享层的 GoStyleRedisClientAutoConfiguration
+        //   ⇒ 「恰好一份」= 收编真的发生了（不是两份叠加，也不是一份都没）
+        //   ⇒ 「名字是 goStyleRedisClientOptionsCustomizer」= 来的确实是共享层那一份
+        // ⇒ 本组件的启动类扫 `com.rag.common` 时，共享层那份会被
+        //   `AutoConfigurationExcludeFilter` 排除出组件扫描 ⇒ 只经 `AutoConfiguration.imports` 注册一次
+        Map<String, LettuceClientOptionsBuilderCustomizer> customizers =
+                applicationContext.getBeansOfType(LettuceClientOptionsBuilderCustomizer.class);
+        assertEquals(1, customizers.size(),
+                "容器里必须**恰好一份** LettuceClientOptionsBuilderCustomizer：实测 " + customizers.keySet() + "。"
+                        + "多于一份 ⇒ 域内副本没删干净（两份都在 ⇒ 后续每次改动都要改两处）；"
+                        + "少于一份 ⇒ 共享层那份没被装配（清单没被读 / 被 @ConditionalOnMissingBean 误退让）"
+                        + "⇒ **断连行为回落 DEFAULT ⇒ 命令被排队**。");
+        assertTrue(customizers.containsKey("goStyleRedisClientOptionsCustomizer"),
+                "那一份必须是共享层的 GoStyleRedisClientAutoConfiguration"
+                        + "（bean 名固定为 goStyleRedisClientOptionsCustomizer）⇒ 实测 " + customizers.keySet());
+
+        // ── 命令超时 / 连接超时的**消费层**锚点 ─────────────────────────
+        // ⚠️ 判据必须是 `getClientConfiguration().getCommandTimeout()`：
+        //   · `io.lettuce.core.ClientOptions` 在 lettuce 6.8.2 **没有** getCommandTimeout()
+        //   · `ClientOptions.getTimeoutOptions()` 的 source 恒为 DefaultTimeoutSource ⇒ 假断言
+        // ⇒ 本测试**不覆盖** spring.data.redis.timeout ⇒ 读到的就是**真实配置值**。
+        assertEquals(Duration.ofSeconds(3),
+                connectionFactory.getClientConfiguration().getCommandTimeout(),
+                "命令超时必须等于 3s（= go-redis ReadTimeout 默认）⇒ 这是命令超时的**消费层**锚点。"
+                        + "拿不到 3s 说明 spring.data.redis.timeout 压根没流到 Lettuce 客户端。");
+        assertEquals(Duration.ofSeconds(5),
+                connectionFactory.getClientConfiguration().getClientOptions()
+                        .map(io.lettuce.core.ClientOptions::getSocketOptions)
+                        .map(io.lettuce.core.SocketOptions::getConnectTimeout)
+                        .orElse(null),
+                "连接超时必须等于 5s（= go-redis DialTimeout 默认）⇒ 连接超时的**消费层**锚点。"
+                        + "若是 10s ⇒ 那是 Lettuce 自己的默认（Boot 4 在 null 时整段跳过，不回落 timeout）。");
+
+        // ── 命令超时的**机制腿**：3s 这个时长到底会不会被施加 ─────────
+        // 🔴 2026-10-27 探针实测（Boot 4.0.8 + spring-data-redis 4.0.7 + lettuce 6.8.2）：
+        //   TimeoutOptions.isTimeoutCommands        = true
+        //   TimeoutOptions.isApplyConnectionTimeout = true
+        //   TimeoutOptions.getSource()              = DefaultTimeoutSource ⇒ 恒返回 -1
+        //   LettuceConnectionFactory.getTimeout()   = 3000ms（连接级 ⇒ RedisURI.timeout）
+        // ⇒ **source 这一路给不出时长**（恒 -1）⇒ 3s 只能由 **applyConnectionTimeout 分支**
+        //   从连接级 timeout 取 ⇒ ⇒ 「命令超时 3s 真的生效」是**两条腿**：
+        //   ① 值（getCommandTimeout）② 机制（applyConnectionTimeout ＋ 连接级 timeout）
+        // ⇒ ⚠️ **只断言值 ⇒ 假绿**：若 applyConnectionTimeout 被关掉，值照样读得到 3s，
+        //   但命令**永不过期** ⇒ 断连时从「3s 快速失败」退化成「无限等待」
+        // ⇒ ⚠️ `isTimeoutCommands()` **不是**有效判据（它恒为 true，与时长是否被施加无关）
+        assertEquals(3000L, connectionFactory.getTimeout(),
+                "连接级 timeout（⇒ RedisURI.timeout）必须是 3000ms —— "
+                        + "Boot 4 的 TimeoutOptions.source 恒为 DefaultTimeoutSource（返回 -1）"
+                        + " ⇒ 命令过期的时长只能从这一路取");
+        assertTrue(options.getTimeoutOptions().isApplyConnectionTimeout(),
+                "Lettuce 的 TimeoutOptions 必须开着 applyConnectionTimeout："
+                        + "source 恒为 DefaultTimeoutSource（-1）⇒ 若这一位是 false，"
+                        + "source 与回落两条路都给不出时长 ⇒ 命令永不过期 ⇒ "
+                        + "「命令超时 3s」就只剩配置层事实、运行期不生效（假绿）");
+
         redisTemplate.opsForValue().set("uu:redis:probe", "1");
         assertEquals(Boolean.TRUE, redisTemplate.hasKey("uu:redis:probe"),
                 "Redis 可达时 hasKey 必须为 true（否则后面的故障注入测不到断连状态机）");
@@ -240,12 +338,17 @@ class UserApiRedisDisconnectedFastFailTest {
                         + "catch (Throwable) ⇒ exists=null ⇒ fail-open 放行）");
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
 
+        // 把实测值打出来：台账要引用**具体数字**，不能只写「断言通过」
+        System.out.printf("[Redis 断连实测] user-api hasKey 失败耗时=%dms（预算 %dms）%n",
+                elapsedMs, FAST_FAIL_BUDGET_MS);
+
         assertTrue(elapsedMs < FAST_FAIL_BUDGET_MS,
                 "Redis 断连后命令必须**快速失败**，实测耗时 " + elapsedMs + "ms，"
                         + "预算 " + FAST_FAIL_BUDGET_MS + "ms。"
                         + "若接近 3000ms ⇒ Lettuce 又在断连期间**排队**等重连 ⇒ "
                         + "请求会先撞上 HTTP 3s 预算 ⇒ 变成 503，而 Go 是 200（fail-open）。"
-                        + "检查 RedisDisconnectedBehaviorConfig 是否被装配。"
+                        + "检查共享层 GoStyleRedisClientAutoConfiguration 是否被装配"
+                        + "（AutoConfiguration.imports 清单是否生效）。"
                         + " 连接共享模式(shareNativeConnection)=" + connectionFactory.getShareNativeConnection() + "；"
                         + " 异常链：" + causeChain(thrown));
     }

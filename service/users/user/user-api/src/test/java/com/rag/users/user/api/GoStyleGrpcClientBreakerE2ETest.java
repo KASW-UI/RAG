@@ -28,10 +28,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import com.rag.users.user.api.support.RealTomcatPort;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static com.rag.users.user.api.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * 🔴 <b>user-api 的 gRPC client 熔断</b>：真 in-process gRPC server + 真 channel + 真拦截器。
@@ -90,7 +92,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 @SpringBootTest(
         classes = {UserApiApplication.class,
                 GoStyleGrpcClientBreakerE2ETest.FaultyRpcServer.class},
-        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT,
         properties = {
                 "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
                 "spring.cloud.nacos.discovery.enabled=false",
@@ -114,10 +116,11 @@ class GoStyleGrpcClientBreakerE2ETest {
 
     @Container
     static final GenericContainer<?> REDIS =
-            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
+            new GenericContainer<>("redis:7-alpine").withExposedPorts(6379).withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 6379));
 
     @DynamicPropertySource
     static void redis(DynamicPropertyRegistry r) {
+        r.add("server.port", RealTomcatPort::pick);
         r.add("spring.data.redis.host", REDIS::getHost);
         r.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
         r.add("spring.data.redis.password", () -> "");

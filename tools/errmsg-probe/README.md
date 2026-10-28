@@ -56,7 +56,7 @@ GO_REPO=/path/to/Sea-RideTheWind_golang bash tools/errmsg-probe/run-parity.sh
 ```
 CONST|<code>              码值集合（升序）
 TABLE|<code>|<msg>        码 → 文案（升序），取值走对外函数而非直接读表
-FALLBACK|<code>|<msg>     未登记码的回���结果（顺序 = cases 文件顺序）
+FALLBACK|<code>|<msg>     未登记码的回落结果（顺序 = cases 文件顺序）
 ```
 
 article 域当前 **49 行**：`CONST 15 + TABLE 15 + FALLBACK 19`，

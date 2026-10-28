@@ -66,13 +66,33 @@ public class NacosRegistration {
     /** 对应 Go yaml：Key: follow.rpc → 服务发现按这个名注册。 */
     private static final String SERVICE_NAME = "follow-rpc";
 
-    /** Spring Cloud Alibaba Nacos 默认 group（与 message-rpc / user-rpc 一致）。 */
-    private static final String DEFAULT_GROUP = "DEFAULT_GROUP";
-
     private final NacosServiceManager nacosServiceManager;
     private final GrpcServerProperties grpcServerProperties;
     private final String localIp;
     private final int nacosServerPort;
+
+    /**
+     * 🆕 DRIFT-G1-001（2026-10-27 · G1 lane · 真启动 A/B 实测）：**注册用的 group 必须读配置**。
+     *
+     * <p><b>Go 出处</b>：{@code service/follow/rpc/etc/follow.yaml:4-7}
+     * {@code Etcd: { Hosts: [...], Key: follow.rpc }} —— Go 侧的服务发现键是<b>配置项</b>。
+     *
+     * <p><b>修前</b>：本类把 group <b>写死</b>成 {@code "DEFAULT_GROUP"}
+     * ⇒ {@code NACOS_GROUP} 对 follow-rpc <b>完全无效</b>；
+     * 而 follow-api 的 yml 写的是 {@code group: ${NACOS_GROUP:DEFAULT_GROUP}}（<b>读配置</b>）
+     * ⇒ ⇒ 部署一旦设了不同的 {@code NACOS_GROUP} ⇒ <b>rpc 注册到 A 组、api 去 B 组找</b>
+     * ⇒ ⇒ <b>恒 "No servers found for follow-rpc" ⇒ 所有业务码塌成 1015</b>（实测）。
+     *
+     * <p><b>修后</b>：group 从 {@code spring.cloud.nacos.discovery.group} 读
+     * （= 同一份 yml 里已有的那一行，<b>不需要新增配置项</b>）。
+     * ⇒ <b>默认值零变化</b>：yml 里写的就是 {@code ${NACOS_GROUP:DEFAULT_GROUP}}
+     * ⇒ 不设环境变量时解析结果与修前<b>逐字相同</b>。
+     *
+     * <p>⚠️ 同 user-rpc / admin-rpc：<b>配置项早就存在（{@code application.yml:97}）只是代码不消费</b>
+     * ⇒ 与 {@code DRIFT-FOLLOW-004}（修的是 {@code NACOS_ADDR/PORT} 那一维）是<b>同族漏审</b>：
+     * <b>「配置项存在」≠「配置项被消费」</b>。
+     */
+    private final String groupName;
 
     /** 当前已注册实例句柄（防止重复注册 / 用于 deregister）。 */
     private volatile Instance registeredInstance;
@@ -80,9 +100,12 @@ public class NacosRegistration {
     public NacosRegistration(NacosServiceManager nacosServiceManager,
                              GrpcServerProperties grpcServerProperties,
                              @Value("${spring.cloud.nacos.discovery.server-addr:127.0.0.1:8848}")
-                             String nacosServerAddr) {
+                             String nacosServerAddr,
+                             @Value("${spring.cloud.nacos.discovery.group:DEFAULT_GROUP}")
+                             String groupName) {
         this.nacosServiceManager = nacosServiceManager;
         this.grpcServerProperties = grpcServerProperties;
+        this.groupName = groupName;
         // nacos server 地址可能是 "host" 或 "host:port"
         String[] parts = nacosServerAddr.split(":");
         this.nacosServerPort = parts.length > 1 ? Integer.parseInt(parts[1]) : 8848;
@@ -110,10 +133,10 @@ public class NacosRegistration {
             instance.setEphemeral(true);
 
             nacosServiceManager.getNamingService()
-                    .registerInstance(SERVICE_NAME, DEFAULT_GROUP, instance);
+                    .registerInstance(SERVICE_NAME, groupName, instance);
             this.registeredInstance = instance;
             LOG.info("NacosRegistration registered: service={} group={} ip={} port={} nacosPort={}",
-                    SERVICE_NAME, DEFAULT_GROUP, localIp, grpcServerProperties.getPort(), nacosServerPort);
+                    SERVICE_NAME, groupName, localIp, grpcServerProperties.getPort(), nacosServerPort);
         } catch (NacosException e) {
             // ⚠️ 注册失败只记日志、不让进程退出 —— 与 Go 的 etcd 注册失败行为一致
             //    （go-zero 注册失败会打日志，server 本身照常 Start）。
@@ -130,10 +153,11 @@ public class NacosRegistration {
         }
         try {
             nacosServiceManager.getNamingService()
-                    .deregisterInstance(SERVICE_NAME, DEFAULT_GROUP,
+                    .deregisterInstance(SERVICE_NAME, groupName,
                             registeredInstance.getIp(), registeredInstance.getPort());
-            LOG.info("NacosRegistration deregistered: service={} ip={} port={}",
-                    SERVICE_NAME, registeredInstance.getIp(), registeredInstance.getPort());
+            LOG.info("NacosRegistration deregistered: service={} group={} ip={} port={}",
+                    SERVICE_NAME, groupName,
+                    registeredInstance.getIp(), registeredInstance.getPort());
         } catch (NacosException e) {
             LOG.warn("NacosRegistration.deregister failed for {}: {}", SERVICE_NAME, e.getErrMsg(), e);
         }

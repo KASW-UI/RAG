@@ -7,6 +7,7 @@ import jakarta.servlet.ServletRequest;
 import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.Ordered;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.core.annotation.Order;
@@ -46,7 +47,16 @@ import java.util.concurrent.ConcurrentHashMap;
  *   <li><b>隔离单位 = {@code METHOD://path}</b>：Go 在 {@code engine.go:149} 对每个路由
  *       各建一个 breaker。13 个端点 ⇒ 最多 13 个 breaker，互不影响。
  *       本类用 {@link ConcurrentHashMap} 按同一 key 懒建，key 拼接方式与 Go 的
- *       {@code breakerSeparator = "://"} 逐字一致（便于两边日志对齐）。</li>
+ *       {@code breakerSeparator = "://"} 逐字一致（便于两边日志对齐）。
+ *       <br>⚠️ <b>2026-10-27 订正</b>：Go 的 {@code path} 是<b>注册期路由模板</b>
+ *       （{@code rest/engine.go:149} 传的是 {@code route.Path}）⇒ 同模板下的不同具体 URI
+ *       （{@code /article/1} 与 {@code /article/2}）<b>共用</b>一个 breaker。
+ *       本类原先用 raw {@code getRequestURI()} ⇒ 每个具体 URI 各一个 ⇒
+ *       <b>熔断爆炸半径与 Go 不同</b>（Go 会把同模板的兄弟 URI 一起挡住，RAG 不会）。
+ *       ⇒ 现改为：优先用 {@link GoStyleRouteTemplateResolver} 解析出的模板；
+ *       <b>解析不出来时回落 raw URI</b>（= 旧行为，不是新语义）。
+ *       <br>⚠️ 另：Go 侧<b>未命中路由（404 / 405）根本不经过 breaker</b>
+ *       （{@code rest/engine.go:244-268} 的 404 链只有 Trace + Log）⇒ 本类同样跳过。</li>
  *   <li><b>成败判据只看 HTTP 状态码 ≥500</b>（{@code breakerhandler.go:39}）。
  *       ⚠️ 这在本模块有个<b>必须说清的后果</b>：message-api 的所有业务错误
  *       （含下游 gRPC 失败）都是 <b>HTTP 200 + envelope</b>
@@ -80,18 +90,68 @@ public class GoStyleBreakerFilter implements Filter {
     private final boolean enabled;
     private final Map<String, GoStyleBreaker> breakers = new ConcurrentHashMap<>();
 
-    public GoStyleBreakerFilter(GoStyleProtectionProperties props) {
+    /**
+     * 「注册期路由模板」解析器；<b>可为 null</b>（本进程没有 Spring MVC ⇒ 没有自动配置注册它）。
+     *
+     * <p>⚠️ <b>null 不是「没有模板」，而是「判不出来」</b> ⇒ 此时<b>回落旧行为</b>
+     * （按 raw URI 分桶、照常进 breaker）⇒ 绝不因为「解析不了」而静默关掉熔断保护。
+     */
+    private final GoStyleRouteTemplateSource routeTemplateSource;
+
+    public GoStyleBreakerFilter(GoStyleProtectionProperties props,
+                                 ObjectProvider<GoStyleRouteTemplateSource> routeTemplateSourceProvider) {
         this.enabled = props.getBreaker().isEnabled();
+        this.routeTemplateSource = routeTemplateSourceProvider == null ? null : routeTemplateSourceProvider.getIfAvailable();
     }
 
     /** 取（或懒建）某路由的 breaker。测试直接调它来观测状态。 */
     GoStyleBreaker breakerFor(HttpServletRequest request) {
-        return breakers.computeIfAbsent(routeKey(request), GoStyleBreaker::new);
+        return breakerFor(request, resolveRoute(request));
     }
 
-    /** 与 Go {@code breakerhandler.go:21} 的 name 拼接一致。 */
-    static String routeKey(HttpServletRequest request) {
+    /**
+     * 取（或懒建）某路由的 breaker；<b>复用已解析出的结果</b>。
+     *
+     * <p>⚠️ <b>为什么要带 resolution 参数</b>：解析路由模板要走一遍 Spring 的路由匹配
+     * ⇒ 每请求解析<b>两次</b>就是白做一遍匹配 ⇒ ⇒ {@link #doFilter} 解析一次、这里复用。
+     */
+    private GoStyleBreaker breakerFor(HttpServletRequest request, GoStyleRouteResolution resolution) {
+        return breakers.computeIfAbsent(routeKey(request, resolution), GoStyleBreaker::new);
+    }
+
+    /**
+     * 与 Go {@code breakerhandler.go:21} 的 name 拼接一致。
+     *
+     * <p><b>⚠️ 键的语义（2026-10-27 改）</b>：Go 用的是<b>注册期路由模板</b>
+     * （{@code rest/engine.go:149} 传的是 {@code route.Path}）⇒ 同一模板下的不同具体 URI
+     * （如 {@code /article/1} 与 {@code /article/2}）<b>共用</b>一个 breaker。
+     * <p>⇒ 本方法优先用模板；<b>解析不出来时回落 raw URI</b>（= 旧行为，不是新语义）。
+     */
+    String routeKey(HttpServletRequest request) {
+        return routeKey(request, resolveRoute(request));
+    }
+
+    private String routeKey(HttpServletRequest request, GoStyleRouteResolution resolution) {
+        if (resolution.kind() == GoStyleRouteResolution.Kind.TEMPLATE) {
+            return request.getMethod() + "://" + resolution.template();
+        }
         return request.getMethod() + "://" + request.getRequestURI();
+    }
+
+    /**
+     * 解析路由模板；三态里只有「确定未命中」会让调用方跳过 breaker。
+     */
+    private GoStyleRouteResolution resolveRoute(HttpServletRequest request) {
+        if (routeTemplateSource == null) {
+            return GoStyleRouteResolution.UNKNOWN;
+        }
+        try {
+            GoStyleRouteResolution resolution = routeTemplateSource.resolve(request);
+            return resolution == null ? GoStyleRouteResolution.UNKNOWN : resolution;
+        } catch (RuntimeException e) {
+            // 解析本身抛异常 ⇒ 判不出来 ⇒ 回落旧行为
+            return GoStyleRouteResolution.UNKNOWN;
+        }
     }
 
     /** 当前已建的 breaker 数（= 有流量过的路由数）。 */
@@ -109,7 +169,16 @@ public class GoStyleBreakerFilter implements Filter {
         HttpServletRequest request = (HttpServletRequest) req;
         HttpServletResponse response = (HttpServletResponse) resp;
 
-        GoStyleBreaker breaker = breakerFor(request);
+        // Go 出处：rest/engine.go:244-268 —— 404 的链只有 Trace + Log，**没有 breaker**
+        //          （patrouter.go:73 没匹配上 ⇒ handleNotFound ⇒ notFoundHandler）
+        // ⇒ 判定「确定未命中」时，本层**完全不参与**（既不建 breaker，也不计数）
+        GoStyleRouteResolution resolution = resolveRoute(request);
+        if (resolution.kind() == GoStyleRouteResolution.Kind.NOT_MATCHED) {
+            chain.doFilter(req, resp);
+            return;
+        }
+
+        GoStyleBreaker breaker = breakerFor(request, resolution);
         if (!breaker.accept()) {
             // breakerhandler.go:25-32
             breaker.markDrop();

@@ -1,15 +1,9 @@
 package com.rag.follow.follow.api.interceptor;
 
-import com.rag.common.exception.AuthenticationException;
-import com.rag.follow.follow.api.config.FollowApiProperties;
-import com.rag.follow.follow.common.errmsg.FollowErrorCode;
-import com.rag.follow.follow.common.errmsg.FollowErrorMessages;
-import com.rag.users.common.jwt.BearerTokenExtractor;
-import com.rag.users.common.jwt.JwtUtil;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.Jws;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
+import com.rag.follow.follow.api.auth.FollowJwtAuthPaths;
+import com.rag.follow.follow.api.auth.FollowJwtSignatureVerifier;
+import com.rag.follow.follow.api.auth.FollowJwtVerificationResult;
+import com.rag.follow.follow.api.auth.GoStyleJwtAuthFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
@@ -18,10 +12,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import javax.crypto.SecretKey;
-
 /**
- * follow-api 的 JWT 验签拦截器 —— Go 端 {@code rest.WithJwt(secret)} 的等价物。
+ * follow-api 的 JWT 验签拦截器 —— Go 端 {@code rest.WithJwt(secret)} 的等价物
+ * （<b>验签结果消费</b>；验签本体已搬进 {@link GoStyleJwtAuthFilter}）。
  *
  * <p><b>Go 出处（三段，缺一不可）</b>：
  * <ol>
@@ -59,6 +52,23 @@ import javax.crypto.SecretKey;
  *       <b>HTTP 200 + {code:5004,msg:"unauthorized"}</b>；</li>
  *   <li>若在本层把它变成 401，Go 返回 200 + 5004 的场景在 RAG 上会变成 401 —— 状态码就错了。</li>
  * </ul>
+ *
+ * <h2>🔴 DRIFT-USERAPI-009②：验签已搬进 {@link GoStyleJwtAuthFilter}</h2>
+ *
+ * <p>Go 侧链序：<b>原生中间件 → JWT 验签 → observability(3s 计时) → 黑名单 → handler</b>
+ * （{@code rest/engine.go:101-113} + {@code rest/chain/chain.go:38-43} 的 Append 语义
+ * + {@code followcenter.go:42} 只有一个 {@code server.Use}）
+ * ⇒ <b>3s 预算不覆盖 JWT 验签</b>。
+ * <p>Servlet 侧所有 {@code Filter} 都在 {@code DispatcherServlet} 外面、
+ * {@code HandlerInterceptor} 在里面 ⇒ 验签要出预算，必须搬进 Filter
+ * ⇒ 验签搬到 {@link GoStyleJwtAuthFilter}（{@code @Order(+6)}，在 3s 预算的 {@code +7} 之外）。
+ * <p>⇒ 本类现在只做两件事：<b>消费</b>验签结果 + 把失败<b>原样重抛</b>
+ * （异常对象由 Filter 产出 ⇒ {@code GlobalExceptionHandler} 的 {@code @ExceptionHandler} 仍管得到
+ * ⇒ <b>401 + 空 body</b>的形状逐字不变）。
+ * <p>⇒ 黑名单<b>留在 {@link FollowBlacklistInterceptor}</b>（不动）——
+ * Go 的黑名单是 route 级中间件（{@code rest.WithMiddlewares} ⇒ {@code rest/server.go:222-233}
+ * 把 {@code middleware(route.Handler)} 包在 handler 外 ⇒ 比 chain 任何元素都内层）
+ * ⇒ 在 observability(3s) <b>之内</b> ⇒ RAG 现状已一致。
  */
 @Component
 public class FollowJwtAuthInterceptor implements HandlerInterceptor {
@@ -71,20 +81,12 @@ public class FollowJwtAuthInterceptor implements HandlerInterceptor {
      */
     public static final String CLAIM_ATTRIBUTE = "userId";
 
-    private final SecretKey key;
+    private final FollowJwtSignatureVerifier verifier;
 
-    public FollowJwtAuthInterceptor(FollowApiProperties properties) {
-        // L4 idiomatization（强制留痕 + Go ↔ RAG 对照）：
-        //   Go 出处：go-zero rest/token/tokenparser.go:83-85 的 keyfunc 无条件返回
-        //     `[]byte(secret)` —— golang-jwt 不校验 key 长度，36 字节 UUID 可直接签。
-        //   Java 表达差异：jjwt 0.12 强制 ≥32 字节（HS256 / RFC 7518），故构造器
-        //     调 Keys.hmacShaKeyFor 时必须先补齐；本构造器与 JwtUtil.getToken 共用
-        //     JwtUtil.padToHmacKeySize，强制签发与验签落在同一份 32 字节 key 上。
-        //   语义等价论证：Go 的 secret 本身就是 36 字节（UUID），≥32 ⇒ padding 对它是
-        //     no-op；即便换成 <32 字节的 secret，zero-fill 后 HS256 字节一致，
-        //     仅在「换密钥」这个非本组件动作上生效，不影响任何运行期行为。
-        this.key = Keys.hmacShaKeyFor(
-                JwtUtil.padToHmacKeySize(properties.getUserAuth().getAccessSecret()));
+    public FollowJwtAuthInterceptor(FollowJwtSignatureVerifier verifier) {
+        // ⚠️ 密钥构造已移入 {@link FollowJwtSignatureVerifier}（验签搬进 Filter 后的归属）；
+        //   L4 idiomatization 的 Go ↔ RAG 等价性论证见该类的构造器注释（内容未变）。
+        this.verifier = verifier;
     }
 
     @Override
@@ -103,62 +105,41 @@ public class FollowJwtAuthInterceptor implements HandlerInterceptor {
         // 「有没有匹配上 @RequestMapping 方法」——ResourceHttpRequestHandler 不是 HandlerMethod。
         // ⚠️ 不要改成「看路径是否以 /follow/v1/ 开头」之类的字符串判断：那是重新发明一遍路由表。
         // 完整证据（含真 Tomcat 探针输出）见 com.rag.common.http.GoStyleRouterErrorResponses。
+        //
+        // ⚠️ **验签搬到 Filter 后，本判据只能留在这里**（Filter 拿不到 handler）
+        // ⇒ Filter 会对未匹配路径也验签一次，但**不写响应** ⇒ 最终仍是 404 ⇒ 响应与 Go 一致。
         if (!(handler instanceof HandlerMethod)) {
             return true;
         }
 
-        // Go: rest/token/tokenparser.go:81-86 doParseToken → request.ParseFromRequest(r,
-        //     request.AuthorizationHeaderExtractor, ...)。头缺失时 extractor 返回 errNoAuthParam
-        //     → ParseToken 返回 err → authhandler.go:56 unauthorized()。
-        String authHeader = request.getHeader("Authorization");
-        if (authHeader == null || authHeader.isEmpty()) {
-            log.warn("path {} with missing Authorization header", request.getRequestURI());
-            throw unauthorized();
+        // ---------- 阶段 1：JWT 验签（结果由 GoStyleJwtAuthFilter 在 3s 预算之外产出）----------
+        FollowJwtVerificationResult result = (FollowJwtVerificationResult) request.getAttribute(
+                GoStyleJwtAuthFilter.VERIFICATION_ATTRIBUTE);
+        if (result == null) {
+            // 🔴 兜底：Filter 未命中（路径判据不一致 / Filter 未被注册）⇒ 就地验签。
+            //   行为与 DRIFT-USERAPI-009② 修复前完全一致（401 照常）⇒ **不会造成鉴权绕过**；
+            //   但验签落回 3s 预算**之内** ⇒ 该路径上 ② 未闭环 ⇒ 必须大声记日志。
+            log.warn("follow JWT 验签未命中 filter 缓存 ⇒ 就地验签（DRIFT-USERAPI-009② 在此路径未闭环）: {}",
+                    request.getRequestURI());
+            request.setAttribute(GoStyleJwtAuthFilter.VERIFICATION_SOURCE_ATTRIBUTE,
+                    GoStyleJwtAuthFilter.SOURCE_INLINE);
+            result = verifier.verify(request.getHeader("Authorization"), request.getRequestURI());
+        } else {
+            request.setAttribute(GoStyleJwtAuthFilter.VERIFICATION_SOURCE_ATTRIBUTE,
+                    GoStyleJwtAuthFilter.SOURCE_FILTER);
         }
 
-        // Go: golang-jwt/v4 request/oauth2.go stripBearerPrefixFromTokenString
-        //     —— 大小写不敏感、不匹配时原样返回整串。三条规则都在 BearerTokenExtractor 里。
-        String token = BearerTokenExtractor.tokenForSignatureVerification(authHeader);
-        if (token.isEmpty()) {
-            log.warn("path {} with empty Bearer token", request.getRequestURI());
-            throw unauthorized();
-        }
-
-        Claims claims;
-        try {
-            Jws<Claims> jws = Jwts.parser()
-                    .verifyWith(key)
-                    .build()
-                    .parseSignedClaims(token);
-            claims = jws.getPayload();
-        } catch (Throwable t) {
-            // 签名错 / 过期 / 格式错 —— Go 侧同样只走到 unauthorized()，不区分原因
-            log.warn("JWT verify failed on {} : {}", request.getRequestURI(), t.getMessage());
-            throw unauthorized();
+        // 验签失败 ⇒ 原样重抛（异常对象由 Filter 产出 ⇒ @ExceptionHandler 仍管得到 ⇒ 401 空 body 不变）
+        if (result.failed()) {
+            throw result.failure();
         }
 
         // Go: authhandler.go:71-79 遍历 claims，把非标准 claim（aud/exp/jti/iat/iss/nbf/sub 除外）
         //     逐个塞进 ctx。follow api 侧只有 logic/follow/helper.go 的 extractUserID 读
         //     "userId"，其余 claim 无消费者，故这里只落这一个。
-        request.setAttribute(CLAIM_ATTRIBUTE, claims.get(CLAIM_ATTRIBUTE));
+        // ⚠️ 存的是**原始对象**（不是 long）：取值判定属于业务层（helper.go:13-33），
+        //   失败返回 5004 ⇒ HTTP 200 + {code:5004} ⇒ 鉴权层**不能**把它变成 401。
+        request.setAttribute(CLAIM_ATTRIBUTE, result.claim());
         return true;
-    }
-
-    /**
-     * 统一构造鉴权失败。
-     *
-     * <p><b>body 形状：401 + 空 body。</b>Go 的 {@code unauthorized()}
-     * （{@code authhandler.go:106-122}）只调 {@code writer.WriteHeader(http.StatusUnauthorized)}，
-     * <b>不写任何字节</b>，也不设 Content-Type。
-     * 由 {@code GlobalExceptionHandler#handleAuthentication} 负责还原该形状。
-     *
-     * <p>业务码用 {@code ERROR_UNAUTHORIZED}（5004）：follow 域错误码表
-     * （{@code service/follow/common/errmsg.go:41}）里鉴权码就是 5004。
-     * 注意该 code <b>不会出现在 body 里</b>（body 为空）——它只用于日志与
-     * {@link FollowBlacklistInterceptor} 那条<b>有 body</b>的 401。
-     */
-    private static AuthenticationException unauthorized() {
-        int code = FollowErrorCode.ERROR_UNAUTHORIZED.getCode();
-        return new AuthenticationException(code, FollowErrorMessages.getMsg(code));
     }
 }

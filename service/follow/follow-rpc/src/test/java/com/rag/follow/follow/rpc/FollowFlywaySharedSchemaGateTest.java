@@ -23,6 +23,7 @@ import java.util.Properties;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static com.rag.follow.follow.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * 🔴 **共享 schema 下 Flyway 的 baseline 会把 V1 整条跳过** —— 对齐 message-rpc 的同款守门
@@ -65,7 +66,7 @@ class FollowFlywaySharedSchemaGateTest {
     static final PostgreSQLContainer<?> PG = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("follow_rpc_shared_schema_it")
             .withUsername("rag")
-            .withPassword("rag");
+            .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @Test
     @DisplayName("🔴 非空 schema 下 V1 必须真执行 ⇒ follow_relation 表必须存在")

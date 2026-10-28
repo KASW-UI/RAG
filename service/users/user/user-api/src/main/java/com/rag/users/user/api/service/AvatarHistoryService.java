@@ -29,7 +29,7 @@ import java.util.List;
  * <p><b>⚠️ 2026-10-23（DRIFT-USERAPI-005）：本方法<b>不接收任何入参 DTO</b>，这是刻意为之。</b>
  * 原签名带一个 {@code GetAvatarHistoryReq req} 参数，但它<b>在方法体里一次都没被用过</b>
  * （uid 走 JWT、limit 走常量），而 Controller 上挂着它就等于让 Spring 去解析 body ——
- * Go 侧 {@code getavatarhistoryhandler.go} 全文 26 行<b>没有 httpx.Parse</b>，根本��读 body。
+ * Go 侧 {@code getavatarhistoryhandler.go} 全文 26 行<b>没有 httpx.Parse</b>，根本不读 body。
  * ⇒ 连同 DTO 一起删除。删除前已 grep 全仓确认零消费者。
  * 理由详见 {@code UserController#getAvatarHistory} 的 javadoc。
  *      注：Limit = 30 是硬编码（与 Go 端一致，DRIFT-016 决策：1:1 不配置化）

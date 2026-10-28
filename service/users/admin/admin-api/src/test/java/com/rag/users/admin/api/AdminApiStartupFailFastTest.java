@@ -27,6 +27,7 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.time.Duration;
 import java.util.List;
+import com.rag.users.admin.api.support.RealGrpcPort;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -93,11 +94,11 @@ class AdminApiStartupFailFastTest {
      * 而「连不上」正是本测试要制造的输入。
      */
     private static int findClosedPort() {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        } catch (IOException e) {
-            throw new IllegalStateException("找不到空闲端口", e);
-        }
+        // ⚠️ 原来用 `new ServerSocket(0)`：那是 **OS 盲选口**（macOS 临时段 49152–65535）
+        //    ⇒ 与 Docker 随机发布口**同段** ⇒ 「挑到没人监听的口」这个前提**直接失效**
+        //    ⇒ 邻居占 127.0.0.1:P 时我们的通配绑定照样成功、lsof 两个监听者并存
+        //    ⇒ 客户端被更具体的那个抢走 ⇒ **静默假红**（机制与实测见 support/RealGrpcPort）。
+        return RealGrpcPort.pick();
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -139,7 +140,7 @@ class AdminApiStartupFailFastTest {
                     .withPropertyValues(
                             "grpc.client.admin-rpc.address=static://127.0.0.1:" + server.getPort(),
                             "grpc.client.admin-rpc.negotiation-type=plaintext",
-                            "grpc.client.admin-rpc.immediate-connect-timeout=3s")
+                            "grpc.client.admin-rpc.immediate-connect-timeout=10s") // 可达用例用**宽预算**：3s 是**生产值**（另有 yml 静态断言守住），本用例只验「可达 ⇒ 不该启动失败」；冷 JVM + 满负载下 TCP+HTTP/2 握手可能超 3s ⇒ **偶发红**（2026-10-27 实测：全量红 / 隔离绿 ⇒ 属测试自身预算过紧，不是产品缺陷）
                     .run(context -> {
                         assertThat(context).hasNotFailed();
                         assertThat(context).hasSingleBean(AdminRpcClient.class);
@@ -182,7 +183,7 @@ class AdminApiStartupFailFastTest {
                     .withPropertyValues(
                             "grpc.client.admin-rpc.address=static://127.0.0.1:" + server.getPort(),
                             "grpc.client.admin-rpc.negotiation-type=plaintext",
-                            "grpc.client.admin-rpc.immediate-connect-timeout=3s")
+                            "grpc.client.admin-rpc.immediate-connect-timeout=10s") // 可达用例用**宽预算**：3s 是**生产值**（另有 yml 静态断言守住），本用例只验「可达 ⇒ 不该启动失败」；冷 JVM + 满负载下 TCP+HTTP/2 握手可能超 3s ⇒ **偶发红**（2026-10-27 实测：全量红 / 隔离绿 ⇒ 属测试自身预算过紧，不是产品缺陷）
                     .run(context -> {
                         assertThat(context).hasNotFailed();
                         assertThat(context).hasSingleBean(AdminRpcClient.class);
@@ -255,7 +256,11 @@ class AdminApiStartupFailFastTest {
      */
     private static Server startRealGrpcServer() {
         try {
-            return NettyServerBuilder.forPort(0).build().start();
+            // ⚠️ 不能用 forPort(0)：那是 **OS 盲选口**（macOS 临时段 49152–65535）
+            //    ⇒ 与 Docker 随机发布口**同段** ⇒ 可能落到别的容器已发布的口号上
+            //    ⇒ 邻居占 127.0.0.1:P 时我们通配绑定照样成功、lsof 两个监听者并存
+            //    ⇒ 客户端被更具体的那个抢走 ⇒ **静默假红**（机制与实测见 support/RealGrpcPort）。
+            return NettyServerBuilder.forPort(RealGrpcPort.pick()).build().start();
         } catch (IOException e) {
             throw new IllegalStateException("起不了本地 gRPC server", e);
         }

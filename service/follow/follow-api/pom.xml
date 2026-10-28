@@ -164,6 +164,24 @@
             <artifactId>spring-boot-starter-webmvc-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+            Testcontainers（版本由 spring-boot-starter-parent 管理，不写 version）。
+            follow-api 需要的是 Redis 容器而不是 PG：FollowBlacklistInterceptor 的黑名单检查
+            走 StringRedisTemplate.hasKey —— 这是「Redis 断连时必须快速失败 ⇒ fail-open」
+            这条漂移（user-api 侧 DRIFT-USERAPI-014 的同款）的核心机制，
+            必须对着真 Redis 验证「断连 ⇒ 命令被拒而不是被排队挂到 commandTimeout」。
+            用 GenericContainer（core 自带）即可，无需额外 module。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <!-- ============== 10. 构建 ==============

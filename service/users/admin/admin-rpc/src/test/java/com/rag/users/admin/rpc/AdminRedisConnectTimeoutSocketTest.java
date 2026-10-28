@@ -57,7 +57,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  *   ≈5s     ← 本配置的 connect-timeout: 5s          ✅ 期望值
  *   ≈10s    ← Lettuce 自己的默认值（SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION = 10s）
  *             ⇒ 出现这个值就说明 connect-timeout **没生效**
- *   ≈3s     ← 回落到了 timeout: 3s（Lettuce 在 connect-timeout 未设时的回落）
+ *   ≈3s     ← 🔴 **不应出现**：Boot 4 在 connect-timeout 为 null 时**整段跳过**（**不**回落 timeout）
+ *             ⇒ 真实默认是上一行的 10s ⇒ 出现 3s 说明测到的是别的超时
  *   ≈75s    ← macOS 的 TCP connect 系统默认（内核 SYN 重传耗尽）
  * </pre>
  * ⇒ 断言区间取 {@code [4000ms, 9500ms)}：**只** 5s 落得进去。
@@ -184,7 +185,7 @@ class AdminRedisConnectTimeoutSocketTest {
                 "连接黑洞的失败耗时应落在 [4000ms, 9500ms) —— 该区间**只**容得下 5s。"
                         + "实测 " + elapsedMs + "ms（其中 getConnection 用了 " + connectMs + "ms）。"
                         + "≈10s ⇒ Lettuce 默认值（connect-timeout 没生效）；"
-                        + "≈3s ⇒ 回落到了 timeout: 3s（本测试已把 timeout 覆盖成 30s，出现 3s 说明覆盖没生效）；"
+                        + "≈3s ⇒ 本测试已把 timeout 覆盖成 30s，出现 3s 说明覆盖没生效（**不是**「回落 timeout」）；"
                         + "≈75s ⇒ TCP 系统默认（本配置没生效）");
     }
 }

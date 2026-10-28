@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static com.rag.users.user.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * E-3 根因 **R3** 的回归网 —— users 域 DDL 的字符串列必须是 {@code text}，不是 {@code varchar(255)}。
@@ -62,7 +63,7 @@ class UserRpcSchemaTextColumnTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("users_schema_text_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

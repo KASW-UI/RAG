@@ -27,7 +27,7 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 
 留档初版（commit `9b2303c`）写「Go admin 侧的 uid 走 `form:"uid,string"` 绑定，**key 缺失时静默保留零值**且不报错 ⇒ `uid=0` 进 rpc ⇒ 查无此人 ⇒ 返回 1003」。**前半段理由已被实测推翻**：
 
-- go-zero `httpx.Parse` 对 `form:"uid,string"` 的 required 缺失行为是**直接 400**（`core/mapping/unmarshaler.go` 的 `parseOption` 把所有非 `optional` 字段标 `Required=true`，缺失走 `newInitError` 报 `field %q is not set`），不是「静默保留零值」。
+- go-zero `httpx.Parse` 对 `form:"uid,string"` 的 required 缺失行为是**直接 400**（`go-zero@v1.10.2/core/mapping/unmarshaler.go` 的 `parseOption` 把所有非 `optional` 字段标 `Required=true`，缺失走 `newInitError` 报 `field %q is not set`），不是「静默保留零值」。
 - 实测覆盖：`admin.getuser` 三态（完全不传 → `400 field "uid" is not set` / `uid=abc` → `400 strconv.ParseInt` / `uid=0` → `200 {code:1003}`），取证脚本 `tools/difftest/probe-go-required-fields.py`（page_size=100 三组各 3 次，可复现）。
 
 **结论本身不变**（保留 RAG 的 1017），但理由改为「Go 把 `uid=0` 当合法查询，业务不存在语义掩盖参数拼装 bug」。边界也明确收窄到 `uid=0` 这一路径 —— 缺失/非数字/空串的覆盖在 N-6 + DRIFT-016（实施后两边统一 400+text/plain）。**N-3 与 N-6 不再是「同源」**，N-3 单独覆盖「显式 0 被业务路径吃掉」这一边界。
@@ -209,7 +209,7 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 | # | 问题 | 归属 | 出处 |
 |---|---|---|---|
 | **U-1** | 🔴 `users/user` 的 **DRIFT-USERRPC-V-001 结论被证伪** ⇒ user-rpc 的「status 为 null ⇒ fail-closed 抛 INTERNAL」**与 Go 相反** | users/user owner | `admin/rpc.md` §3 |
-| **U-2** | 🔴 `users_user.status` 的 `NOT NULL` 与 Go 的可空不一致 | users-common owner | `admin/rpc.md` §3 |
+| **U-2** | 🟡 **2026-10-27 订正：定性为「DDL 层差异 · 行为层零差异」⇒ 建议保持 RAG NOT NULL ⇒ 落点无动作**（Go 读 NULL ⇒ **0** 且不报错；RAG NOT NULL ⇒ 读不到 NULL ⇒ 也是 0 ⇒ **可观察结果相同**）⇒ ⚠️ **原写「🔴 `NOT NULL` 与 Go 的可空不一致」只是 DDL 层陈述，未带「行为层零差异」这一层** ⇒ 且**放开可空反而制造新漂移**（RAG `callSettersOnNulls=false` ⇒ 读出 null ≠ Go 的 0）⇒ ⇒ **不需要联合裁决**；⚠️ **销号签字不在 G1 写权面** ⇒ 仍待 G4 / 合并收口执行者确认 | users-common owner（**但落点无动作**） | `admin/rpc.md` §3 · 逐层证据链见 [`user/rpc.md` 的 V-002 订正块](../user/rpc.md) |
 | **U-3** | ✅ **已修**（2026-10-23 修复轮 §1.1）：`admin_admin.extra_info` 已由 `jsonb` 改为 `text`（对齐 Go 的 `serializer:json`），配套新增 `JsonTextTypeHandler`（text 列专用，**不复用** `JsonbTypeHandler`） | ~~users-common owner~~ **本域已改** | `admin/rpc.md` 修复轮 §1.1 |
 | **U-4** | ✅ **已修**（2026-10-23 修复轮 §1.2）：`admin_admin` / `admin_invite` 的 **6 个时间列**已改为 `timestamptz`，实体侧同步改 `OffsetDateTime` | ~~users-common owner~~ **本域已改** | `admin/rpc.md` 修复轮 §1.2 |
 | **U-5** | ✅ **已修**（2026-10-23 验证轮）：两份 DDL 注释里「**GORM 默认表名 admin_admin / admin_invite**」是**事实错误** —— Go 的 `TableName()` 返回 `admins` / `admin_invites`（`data_model.go:16-18` / `:31-33`）。同时订正了 `UserEntity.java` 的同款错误说法（「GORM 默认表名 user_user」⇒ 实际是 `users`） | ~~users-common owner~~ **本域已改** | `admin/rpc.md` 审计轮 §5 第 3 项 |

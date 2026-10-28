@@ -89,7 +89,7 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
 
 ⇒ 两斜杠写法把服务名解析成了 **authority**，path 留空。
 
-**修法**：`service/follow/follow-rpc/src/main/resources/application.yml:81`
+**修法**：`service/follow/follow-rpc/src/main/resources/application.yml:123`
 `discovery://user-rpc` → `discovery:///user-rpc`。
 
 > ⚠️ **同款缺陷仍在域外**：`article-rpc` / `comment-rpc` / `favorite-rpc` / `like-rpc` /
@@ -132,7 +132,7 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
 **rpc 连的是 `host:8848`、api 连的是 `host:port`** ⇒ 两个组件连**两台 Nacos**
 ⇒ rpc 注册在 A、api 在 B 找它 ⇒ 恒 "No servers found" ⇒ 所有业务码塌成 1015。
 
-**修法**：`follow-rpc/src/main/resources/application.yml:65` 改为
+**修法**：`follow-rpc/src/main/resources/application.yml:95` 改为
 `${NACOS_ADDR:nacos}:${NACOS_PORT:8848}`，与 follow-api 同一套变量语义。
 
 > ⚠️ 这个缺陷**两个 yaml 各自看都"对"**，只有放在一起才冲突 —— 属于 §3.3「配置里没写 ≠ 没开」的变体。
@@ -173,7 +173,7 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
 
 ### Flyway 账本隔离（§6.3 问题 4）
 
-`follow-rpc/src/main/resources/application.yml:59`
+`follow-rpc/src/main/resources/application.yml:79`
 `spring.flyway.table: flyway_schema_history_follow` ✅ 已隔离。
 真启动日志实测：`Creating Schema History table "public"."flyway_schema_history_follow"`，
 `first_db` 里最终只有 `block_relation` / `follow_relation` / `flyway_schema_history_follow` 三张表
@@ -191,9 +191,9 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
 **Go 侧的出口从哪来（逐行）**
 
 - `service/follow/rpc/etc/follow.yaml:20-27`：`DevServer.Enabled: true` / `Port: 16065` / `MetricsPath: /metrics`
-- `zrpc/server.go:63`：`c.SetUp()`
-- ⇒ `core/service/serviceconf.go:77`：`devserver.StartAgent(sc.DevServer)`
-- ⇒ `internal/devserver/server.go:79-87`：起一个独立 HTTP server，`:45-47`
+- `go-zero@v1.10.2/zrpc/server.go:63`：`c.SetUp()`
+- ⇒ `go-zero@v1.10.2/core/service/serviceconf.go:77`：`devserver.StartAgent(sc.DevServer)`
+- ⇒ `go-zero@v1.10.2/internal/devserver/server.go:79-87`：起一个独立 HTTP server，`:45-47`
   把 `promhttp.Handler()` 挂在 `MetricsPath` 上。
 
 ⇒ **Go 的 follow-rpc 是「纯 gRPC 进程 + 一个独立的小 HTTP 观测端口」**。
@@ -330,42 +330,51 @@ threading.GoSafe(func() {
 > 全部 `file:line` 引用**逐条命中**；
 > 复核中发现 4 处表述偏差已当场订正（对拍条数、Go 源文件数、测试条数、探针清单）。
 
-## 逐文件对照索引（21 个 Java ↔ 22 个 Go，**全量无遗漏**）
+## 逐文件对照索引（**20 个 Java** ↔ 22 个 Go，**全量无遗漏**）
 
 > ⚠️ 2026-10-24 复核补录：同 api.md，「逐条对照」这条断言此前**无法从台账里核对**
 > （`FollowRpcApplication`、`UserRpcClient`、`FollowRpcProperties`、
 > `MybatisPlusOrderingBridgeAutoConfiguration`、两个 Entity、4 个 `errmsg` 类
 > 共 **10 个类从未出现过**）⇒ 现补全索引。
+>
+> 🧾 **2026-10-27 订正（G1 lane · MP 排序桥收编）**：原第 5 行
+> `rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` **已删除** ——
+> 域内副本已收编到共享层 `com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration`
+> （经 `service/common` 的 `AutoConfiguration.imports` 注册 ⇒ 对本模块同样生效，
+> 因为 Boot 的 `ImportCandidates` 用 `ClassLoader.getResources`（**复数**）读 classpath 上
+> **全部**同名资源）⇒ ⇒ Java 侧 **21 → 20** 个文件，本表**原 #6~#21 顺次前移为 #5~#20**。
+> 该桥是**表达层**（刻意为空、不注册任何 bean、只建立 `DataSource → 桥 → MybatisPlus` 排序边）
+> ⇒ **删除它不产生任何行为差**。⚠️ 上文「共 10 个类从未出现过」那段是**2026-10-24 的历史陈述**，
+> 保留不改；它列举的 `MybatisPlusOrderingBridgeAutoConfiguration` **在 2026-10-24 确实存在**。
 
-| # | RAG 源文件（follow-rpc 17 + follow-common 4） | Go 对应物（follow/rpc 21 + follow/common 1） | 承重点 | 结论 |
+| # | RAG 源文件（follow-rpc **16** + follow-common 4） | Go 对应物（follow/rpc 21 + follow/common 1） | 承重点 | 结论 |
 |---|---|---|---|---|
 | 1 | `rpc/FollowRpcApplication.java` | `follow.go`（`main()`） | Go main 的五步逐条对应（**无 ticker/cron**） | ✅ |
-| 2 | `rpc/bootstrap/NacosRegistration.java` | `follow.go` → `zrpc.MustNewServer` → `zrpc/server.go:63 SetUp()` | 注册名 `follow-rpc`；Go 侧由 zrpc 自动注册 | ✅ |
+| 2 | `rpc/bootstrap/NacosRegistration.java` | `follow.go` → `zrpc.MustNewServer` → `go-zero@v1.10.2/zrpc/server.go:63 SetUp()` | 注册名 `follow-rpc`；Go 侧由 zrpc 自动注册 | ✅ |
 | 3 | `rpc/client/UserRpcClient.java` | `internal/svc/servicecontext.go` 的 `UserRpc` + `internal/logic/helper.go:81-94` | `GetUser` 的三分支判定 | ✅ |
 | 4 | `rpc/config/FollowRpcProperties.java` | `internal/config/config.go`（struct tag 默认值） | `ListConf` / `RecommendConf`；**`default=20` 与 `default=50` 是两个独立常量** | ✅ |
-| 5 | `rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` | **无 Go 对应物** | ⚠️ **表达层**：刻意为空，只建立自动配置排序边（`after=DataSource`、`before=MybatisPlus`），**不注册任何 bean** ⇒ 无行为影响 | ✅ |
-| 6 | `rpc/domain/FollowRelationEntity.java` | `internal/model/data_model.go` `FollowRelation` | `@TableName("follow_relation")`；主键 / `autoCreateTime` 的差异已在 DDL 节说明 | ✅ |
-| 7 | `rpc/domain/BlockRelationEntity.java` | `internal/model/data_model.go` `BlockRelation` | **两张表刻意不复用同一个 Entity**（Go 侧也是两个 struct + 两个 `TableName()`） | ✅ |
-| 8 | `rpc/mapper/FollowRelationMapper.java` | `internal/model/follow.go` 的 follow 查询 | 过滤列 / 投影列 | ✅ |
-| 9 | `rpc/mapper/BlockRelationMapper.java` | `internal/model/follow.go` 的 block 查询 | 过滤列 / 投影列 | ✅ |
-| 10 | `rpc/mapper/GoStyleLimitOffset.java` | `internal/model/follow.go:79-87` 等 **6 处** | **条件拼接**：`offset>0` / `limit>0` 才出现 LIMIT/OFFSET | ✅ |
-| 11 | `rpc/metrics/FollowRpcMetrics.java` | `internal/metrics/metrics.go` | 4 写方法 2 指标 / 4 读方法 1 指标；**直方图桶**（DRIFT-007） | ✅ |
-| 12 | `rpc/service/FollowBlockTransactionService.java` | `internal/model/follow.go:33-54` `CreateBlockAndCleanup` | 插 block + 双向删 follow **单事务**（独立 Bean，避开 `@Transactional` self-invocation 静默失效） | ✅ |
-| 13 | `rpc/service/FollowDomainService.java` | `internal/logic/{follow,unfollow,block,unblock}logic.go` | 校验分支、存在性校验、动作方法 | ✅ |
-| 14 | `rpc/service/FollowRecommendationService.java` | `internal/logic/getrecommendationslogic.go` | 推荐算法 6 条硬语义（提前返回/三重过滤/expanded 防环/末层不展开/升序/offset 越界返空） | ✅ |
-| 15 | `rpc/service/FollowRpcSupport.java` | `internal/logic/helper.go` | 校验（5003/5201）；列表归一化三段序（offset→limit→截断） | ✅ |
-| 16 | `rpc/service/FollowUserExistenceService.java` | `internal/logic/helper.go:81-94` `ensureUserExists` | 三分支（5101/5001/5101） | ✅ |
-| 17 | `rpc/service/impl/FollowServiceGrpcImpl.java` | `internal/server/followserviceserver.go:26-64` | 8 个 RPC 方法与返回类型逐条一致 | ✅ |
-| 18 | `common/errmsg/FollowErrorCode.java` | `service/follow/common/errmsg.go` | 错误码常量表 + 顺序 | ✅ |
-| 19 | `common/errmsg/FollowErrorMessages.java` | 同上 | 文案表 + 顺序 | ✅ |
-| 20 | `common/errmsg/FollowCodeError.java` | 同上 | Go `CodeError` 的承载（code + msg） | ✅ |
-| 21 | `common/errmsg/FollowGrpcError.java` | 同上 + go-zero `zrpc/internal/codes` | gRPC 码 ↔ 业务码的**三段转换** | ✅ |
+| 5 | `rpc/domain/FollowRelationEntity.java` | `internal/model/data_model.go` `FollowRelation` | `@TableName("follow_relation")`；主键 / `autoCreateTime` 的差异已在 DDL 节说明 | ✅ |
+| 6 | `rpc/domain/BlockRelationEntity.java` | `internal/model/data_model.go` `BlockRelation` | **两张表刻意不复用同一个 Entity**（Go 侧也是两个 struct + 两个 `TableName()`） | ✅ |
+| 7 | `rpc/mapper/FollowRelationMapper.java` | `internal/model/follow.go` 的 follow 查询 | 过滤列 / 投影列 | ✅ |
+| 8 | `rpc/mapper/BlockRelationMapper.java` | `internal/model/follow.go` 的 block 查询 | 过滤列 / 投影列 | ✅ |
+| 9 | `rpc/mapper/GoStyleLimitOffset.java` | `internal/model/follow.go:79-87` 等 **6 处** | **条件拼接**：`offset>0` / `limit>0` 才出现 LIMIT/OFFSET | ✅ |
+| 10 | `rpc/metrics/FollowRpcMetrics.java` | `internal/metrics/metrics.go` | 4 写方法 2 指标 / 4 读方法 1 指标；**直方图桶**（DRIFT-007） | ✅ |
+| 11 | `rpc/service/FollowBlockTransactionService.java` | `internal/model/follow.go:33-54` `CreateBlockAndCleanup` | 插 block + 双向删 follow **单事务**（独立 Bean，避开 `@Transactional` self-invocation 静默失效） | ✅ |
+| 12 | `rpc/service/FollowDomainService.java` | `internal/logic/{follow,unfollow,block,unblock}logic.go` | 校验分支、存在性校验、动作方法 | ✅ |
+| 13 | `rpc/service/FollowRecommendationService.java` | `internal/logic/getrecommendationslogic.go` | 推荐算法 6 条硬语义（提前返回/三重过滤/expanded 防环/末层不展开/升序/offset 越界返空） | ✅ |
+| 14 | `rpc/service/FollowRpcSupport.java` | `internal/logic/helper.go` | 校验（5003/5201）；列表归一化三段序（offset→limit→截断） | ✅ |
+| 15 | `rpc/service/FollowUserExistenceService.java` | `internal/logic/helper.go:81-94` `ensureUserExists` | 三分支（5101/5001/5101） | ✅ |
+| 16 | `rpc/service/impl/FollowServiceGrpcImpl.java` | `internal/server/followserviceserver.go:26-64` | 8 个 RPC 方法与返回类型逐条一致 | ✅ |
+| 17 | `common/errmsg/FollowErrorCode.java` | `service/follow/common/errmsg.go` | 错误码常量表 + 顺序 | ✅ |
+| 18 | `common/errmsg/FollowErrorMessages.java` | 同上 | 文案表 + 顺序 | ✅ |
+| 19 | `common/errmsg/FollowCodeError.java` | 同上 | Go `CodeError` 的承载（code + msg） | ✅ |
+| 20 | `common/errmsg/FollowGrpcError.java` | 同上 + go-zero `zrpc/internal/codes` | gRPC 码 ↔ 业务码的**三段转换** | ✅ |
 
 **Go 侧其余 5 个文件的落点**（未单列进上表，因为它们不是「一对一对应某个 Java 类」）：
 
 | Go 文件 | 落点 | 说明 |
 |---|---|---|
-| `followservice/followservice.go` | [`proto.md`](./proto.md) ＋ api 侧的 `client/FollowRpcClient.java`（**见 [`api.md` 行 #6](./api.md)，不是本表的 #6**） | **goctl 生成的 client 包装层**（`FollowService` interface + `NewFollowService`）⇒ 对应 RAG 的 `follow-proto` 生成 stub + api 侧 `FollowRpcClient`；**生成物，非手写语义**。⚠️ 它虽然**物理位置**在 `follow/rpc/` 目录下，但**语义上是给 api 侧调 rpc 用的客户端**，不是 rpc 服务端的一部分 ⇒ 不算 rpc 模块的对应物 |
+| `followservice/followservice.go` | [`proto.md`](./proto.md) ＋ api 侧的 `client/FollowRpcClient.java`（**见 [`api.md` 行 #6](./api.md) = `client/FollowRpcClient.java`；本表的 #6 是 `rpc/domain/BlockRelationEntity.java`，两者不是同一行**） | **goctl 生成的 client 包装层**（`FollowService` interface + `NewFollowService`）⇒ 对应 RAG 的 `follow-proto` 生成 stub + api 侧 `FollowRpcClient`；**生成物，非手写语义**。⚠️ 它虽然**物理位置**在 `follow/rpc/` 目录下，但**语义上是给 api 侧调 rpc 用的客户端**，不是 rpc 服务端的一部分 ⇒ 不算 rpc 模块的对应物 |
 | `internal/model/db.go` | `follow-rpc/src/main/resources/application.yml`（datasource 段）＋ `db/migration/V1,V2` | **建库与连接参数**（此前只在本文件 DDL 段被顺带提及，**未进索引** ⇒ 2026-10-24 复核补录）：DSN 的 `sslmode=`（← Go 的 `Mode` 字段）＋ **硬编码 `TimeZone=Asia/Shanghai`**（会话时区，影响 `timestamptz` 读出值）；`SetMaxIdleConns(10)` / `SetMaxOpenConns(100)` ⇒ RAG 侧 `hikari.minimum-idle:10` / `maximum-pool-size:100`；`AutoMigrate(&FollowRelation{}, &BlockRelation{})` ⇒ RAG 侧 **Flyway `V1/V2` + 独立账本 `flyway_schema_history_follow`** |
 | `internal/model/vars.go` | **无对应物（有意不复制）** | Go 侧一个**无消费者的死变量** `ErrorNotFound`（`errors.New("record not found")`）⇒ RAG 侧不复制死代码 |
 | `pb/follow.pb.go` / `pb/follow_grpc.pb.go` | [`proto.md`](./proto.md) | **protoc 生成物**；行为层的对照在 `.proto` 源文件层完成（逐行 diff 0 差异） |
@@ -374,8 +383,13 @@ threading.GoSafe(func() {
 > 且引用的「表 #5 `controller/FollowController.java`」是 **`api.md` 的行号、本表无此行** ⇒ 跨文档串行号。
 > 根因：8 个 handler 物理上属于 **Go `follow/api`**（HTTP 层），**已在 [`api.md` 行 #5](./api.md) 单独列出**。
 > ⇒ 本表改为只收 rpc 侧真实剩余的 5 个文件（`followservice.go` / `db.go` / `vars.go` / `pb`×2），
-> 账目因此对上：**行 #1–#21 覆盖 17 个 Go 文件**（16 个 rpc 侧 + `common/errmsg.go`）**+ 本表 5 个 = 22
+> 账目因此对上：**行 #1–#20 覆盖 17 个 Go 文件**（16 个 rpc 侧 + `common/errmsg.go`）**+ 本表 5 个 = 22
 > = Go `follow/rpc` 21 + `follow/common` 1**（`find` 实测，非估算）。
+>
+> 🧾 **2026-10-27 订正（G1 lane · MP 排序桥收编）**：本表原第 5 行
+> （`rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java`，**无 Go 对应物**）已删除 ⇒
+> Java 侧 21 → **20** 个文件 ⇒ **行 #1–#21 改为行 #1–#20**，
+> 但**Go 侧计数不变**（删掉的那行本来就没有 Go 对应物 ⇒ 仍是 17 个 Go 文件）。
 
 ## 证据强度
 
@@ -437,3 +451,23 @@ threading.GoSafe(func() {
      把生产地址喂给 **devh 真正的消费点**并断言两斜杠写法被拒（详见 DRIFT-003 节）。
      ⇒ **门禁脚本管「源码写法」，守门测试管「运行时能不能被消费」**，两者互补、缺一不可。
      ✅ **2026-10-24 复跑**：`Tests run: 3, Failures: 0, Errors: 0`（`BUILD SUCCESS`）。
+
+
+---
+
+## 🔴 `DRIFT-FOLLOW-013` · **「OS 盲选口」族** · 本组件 **2 处**（2026-10-28 · G1 lane）
+
+> 📌 **机制 / 本机实测（Q3·Q6·Q7·Q8）/ 守门细节 / 效力边界 ⇒ [`docs/DRIFT/users/vs-common.md` §65](../users/vs-common.md)**
+> ⇒ 本条只记**本组件那一份**（不抄机制表，避免两处漂移）。
+
+| 族 | 位置（**改造后**行号） | 状态 |
+|---|---|---|
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `FollowGrpcInterceptorWiringTest.java:115` | 已改 |
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `FollowRpcSlowThresholdGateTest.java:274` | 已改 |
+
+- **危害**：`forPort(0)` / `new ServerSocket(0)` / `RANDOM_PORT` 三种写法都是**让 OS 从临时端口段（49152–65535）里盲选** ⇒ ⇒ 与 Docker 随机发布口**同段**
+  ⇒ ⇒ 邻居占**更具体地址** `127.0.0.1:P` 时我方**通配绑定照样成功**（实测：两个监听者并存）⇒ ⇒ 客户端被抢 ⇒ **静默假红**（看着像被测代码炸了，其实压根没被请求到）。
+- **修法**：全部改走**域内私有** `support/RealGrpcPort`（`support/RealTomcatPort`）⇒ **段**：`22320–22339`（共享层预分配的 follow 域段 22300–22399 的子段）⇒ 段内挑口 ＋ **双地址 bind 探针**（只探通配**检不出**「更具体的占用者」）。
+- **段来源**：共享层已预分配给本域的段（`docs/DRIFT/global/vs-common.md` §4.10.19.3）⇒ **共享层台账零改动**（写权归 G4）。
+- **守门**：域级 `BlindPortGateTest`（落在 **user-rpc**，`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/BlindPortGateTest.java`）**5 条** ⇒ 一并覆盖本组件 ⇒ **本组件不单独建守门**（避免两份规则漂移）。
+- **边界**：**本组件生产代码零改动**（全部落在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项**（Go 侧无对应物 ⇒ 无对照义务）。

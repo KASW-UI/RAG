@@ -2,7 +2,6 @@ package com.rag.users.admin.rpc.service;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
-import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Scope;
 
@@ -58,9 +57,22 @@ import java.util.function.Supplier;
  * Java 没有 ctx 参数这一说 ⇒ 用 {@link Scope} 模拟「span 进入当前上下文、退出时还原」，
  * 并用 {@code Supplier} 代替 Go 的「后续代码内联在同一个函数里」。
  * <b>语义等价论证</b>：Go 的 {@code defer span.End()} ⇔ 本类的 {@code finally}；
- * Go 的 {@code span.RecordError(err)} ⇔ 本类的 {@code span.recordException(e)} + 置 ERROR 状态。
+ * Go 的 {@code span.RecordError(err)} ⇔ 本类的 {@code span.recordException(e)}。
  * <b>差异</b>：Go 的 {@code RecordError} 分布在具体错误分支上（本轮<b>未逐点复刻</b>，
  * 本类在<b>异常逃出</b>时统一记录）⇒ 属 IMPLEMENTATION DIFFERENCE，不影响 span 名与属性。
+ *
+ * <h2>🔴 span <b>状态</b>面：Go 恒为 Unset，RAG 也必须恒为 Unset</h2>
+ * <p>otel-go SDK v1.44.0 的 {@code sdk@v1.44.0/trace/span.go:631-656}
+ * {@code recordingSpan.RecordError} 的<b>方法注释原文</b>：
+ * “SetStatus is required if the Status of the Span should be set to Error,
+ * <b>this method does not change the Span status</b>.”
+ * ⇒ ⇒ Go 侧<b>只调 {@code span.RecordError}</b> 的那 16 处（{@code service/user/admin/rpc/internal/logic/}）
+ * 导出后 span 状态恒为 <b>Unset</b> ⇒ ⇒ <b>本类也不得额外置 ERROR</b>，
+ * 否则导出到 trace 的 span 状态与 Go 不一致（遥测面漂移）。
+ * <p>⚠️ 与之相对，Go <b>共享层</b> {@code service/common/observability/observability.go:103-105}
+ * 是<b>显式</b>调 {@code span.SetStatus(otelcodes.Error, msg)} 的 ⇒ 那条路径 RAG 置 ERROR 是对的
+ * （RAG 的 {@code Observability.markSystemError} 已照此实现）⇒ <b>两者不可混为一谈</b>。
+ * <p>⇒ 守门：{@code UserRpcSpanStatusGoParityTest}（域内主源码零处 span 状态写入 ＋ 判据自检）。
  *
  * <h2>⚠️ 与签字偏离 N-4 的关系（必须知情）</h2>
  * <p>Go 的 {@code audit.operator_id} <b>恒为 0</b>（读 {@code ctx["uid"]} 而 claim 名是 {@code userId}），
@@ -112,8 +124,10 @@ public final class AdminSpans {
             return body.get();
         } catch (RuntimeException | Error e) {
             // Go 的 span.RecordError(err) + defer span.End()
+            // ⚠️ **不置** span 状态：Go 的 RecordError 不改状态（otel-go SDK v1.44.0
+            //    sdk@v1.44.0/trace/span.go:631-656 注释原文："this method does not change
+            //    the Span status"）⇒ Go 的 span 状态恒为 Unset ⇒ 多置 ERROR 就是遥测面漂移。
             span.recordException(e);
-            span.setStatus(StatusCode.ERROR, e.getMessage() == null ? e.getClass().getName() : e.getMessage());
             throw e;
         } finally {
             span.end();

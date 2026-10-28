@@ -26,6 +26,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static com.rag.users.user.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * 🔴 DRIFT-USERRPC-V-004 守门测试 —— {@code users_user} 的时间列必须是 {@code timestamptz}。
@@ -95,7 +96,7 @@ class UserRpcUsersUserTimestamptzParityTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("user_rpc_tstz_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {

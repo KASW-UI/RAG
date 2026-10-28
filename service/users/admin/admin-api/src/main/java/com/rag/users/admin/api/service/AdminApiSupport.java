@@ -41,9 +41,40 @@ public class AdminApiSupport {
     /**
      * uid 字段从 String 解析（JSON 序列化为字符串避免精度丢失）。
      *
-     * <p>解析失败 / 为空 → 直接抛 {@code BusinessException(1017 请求参数错误)}，
-     * 与参考侧 {@code parseLongOrNull} → {@code LogicResult.fail(ErrorCode.ERROR_REQUEST_PARAM)}
-     * 的语义 1:1。
+     * <p>解析失败 / 为空 → 直接抛 {@code BusinessException(1017 请求参数错误)}。
+     *
+     * <p><b>⚠️ 2026-10-27 订正：原 javadoc 写的「与参考侧 {@code parseLongOrNull} →
+     * {@code LogicResult.fail(ErrorCode.ERROR_REQUEST_PARAM)} 的语义 1:1」—— 这条出处
+     * <b>无效</b>（AGENTS.md §3.1「不要拿代码注释当对照基准」）：「参考侧」指的是
+     * <b>Java 镜像期</b>的实现，<b>不是 Go 真源</b>；而 Go 真源里
+     * {@code ErrorRequestParam = 1017} <b>零调用点</b>
+     * （{@code service/user/common/errmsg/errmsg.go:30} 只定义常量，
+     * {@code :38-68} 的 {@code codeMsg} 里也没有它 ⇒ {@code GetErrMsg} 会回落到
+     * {@code codeMsg[Error]} = {@code "FAIL"}）⇒ <b>Go 侧永远不可能返回 1017</b>。
+     *
+     * <p><b>Go 侧的真实语义</b>（{@code service/user/admin/api/internal/types/types.go:67-69}
+     * 的 {@code Uid int64 `form:"uid,string"`}）：非法 uid 在 <b>go-zero 绑定层</b>就被拒
+     * ⇒ <b>HTTP 400</b>（{@code strconv.ParseInt: parsing "abc": invalid syntax}），
+     * <b>没有「业务码」这一层</b> ⇒ ⇒ 本方法抛 1017 这一层，在 Go 侧<b>没有对应物</b>。
+     *
+     * <p><b>⇒ 本方法在 HTTP 入口上不可达（2026-10-27 实测，不是推断）</b>：
+     * <ol>
+     *   <li>非数字 uid（{@code "abc"}）⇒ Jackson 反序列化就抛 {@code InvalidFormatException}
+     *       ⇒ <b>400 + text/plain</b>，请求到不了本方法；</li>
+     *   <li>uid 缺席 / 显式 null ⇒ {@code GoStyleRequest.normalize(req, …)} ⇒
+     *       {@code assertGoRequiredFields()} ⇒ {@code GoStyleRequired.field("uid", uid)}
+     *       ⇒ <b>400 {@code field "uid" is not set}</b>，同样到不了本方法；</li>
+     *   <li>⇒ 故 {@code uidStr == null} 与 {@code NumberFormatException} 两个分支
+     *       <b>都不会从 HTTP 入口到达</b> ⇒ ⇒ <b>1017 不进 wire</b>
+     *       （⇒ {@code DRIFT-USERSCOMMON-001} 的「影响面」表原写「admin-api 那两处 ✅ 进 wire」
+     *       是错的，已于 2026-10-27 订正为「不可达」）。</li>
+     * </ol>
+     * ⚠️ 本方法保留（防未来新增调用点绕过上面两层），但<b>它抛的 1017 在 Go 侧没有对应物</b>
+     * ⇒ 若将来有端点绕过 {@code normalize} 直连本方法，<b>那才会产生新的 wire 漂移</b>
+     * ⇒ 守门见 {@code AdminApiMvcPipelineTest} 的
+     * {@code missingUidIs400TextPlainEndToEnd} / {@code explicitNullIsRejected} /
+     * {@code nonNumericUidIsRejectedByJacksonNotByRequiredCheck}（三条都断言 rpc stub
+     * {@code never()} 被调用 ⇒ 错误发生在到达业务层之前）。
      *
      * <p>曾经返回 0L 而不报错：那会把"客户端传了非法 uid"静默降级成"查询 uid=0 的用户"，
      * 客户端拿到的是 {@code 1003 用户不存在} 而不是 {@code 1017 请求参数错误}，

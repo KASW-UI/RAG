@@ -6,6 +6,7 @@ import com.rag.users.admin.api.config.AdminApiProperties;
 import com.rag.users.admin.api.dto.GetUserListReq;
 import com.rag.users.admin.api.dto.UpdateUserReq;
 import com.rag.users.admin.api.interceptor.AdminJwtAuthInterceptor;
+import com.rag.users.admin.api.auth.AdminJwtSignatureVerifier;
 import com.rag.users.admin.api.metrics.AdminApiMetrics;
 import com.rag.users.admin.proto.AdminServiceGrpc;
 import com.rag.users.common.errmsg.ErrorCode;
@@ -38,6 +39,16 @@ import static org.mockito.ArgumentMatchers.any;
  * </ul>
  *
  * <p>每条断言都带 Go 出处，便于 review 时逐条核对。
+ *
+ * <h2>⚠️ 本类的 interceptor 用例现在走的是<b>兜底分支</b>（2026-10-27 · DRIFT-USERAPI-009② 推广）</h2>
+ * <p>验签已搬进 {@code GoStyleJwtAuthFilter}（Servlet Filter，3s 预算之外）⇒
+ * {@code AdminJwtAuthInterceptor} 改成<b>消费</b> Filter 放进 request attribute 的验签结果。
+ * <p>本类用的是 <b>Mockito mock 的 request</b> ⇒ {@code getAttribute(...)} 返回 {@code null}
+ * ⇒ interceptor 落进<b>兜底分支</b>（就地验签）。
+ * ⇒ 该分支与 <b>DRIFT-USERAPI-009② 修复前逐字一致</b>（同一份 verifier、同一套断言）
+ * ⇒ ⇒ <b>本类的全部行为断言依然有效、且仍然有效</b>（它们断言的是<b>行为</b>，不是<b>路径</b>）。
+ * <p>⇒ <b>生产路径（Filter 路径）</b>由新增的 {@code AdminApiJwtVerificationScopeTest} 覆盖
+ * （含「Filter 排在 3s 预算之前」与「interceptor 消费的是 Filter 的结果」两条）。
  */
 class AdminSemanticDriftApiRegressionTest {
 
@@ -365,7 +376,7 @@ class AdminSemanticDriftApiRegressionTest {
     void interceptor_checksBlacklistAfterSignatureVerification() {
         var redis = Mockito.mock(StringRedisTemplate.class);
         Mockito.when(redis.hasKey(Mockito.anyString())).thenReturn(Boolean.TRUE);
-        var interceptor = new AdminJwtAuthInterceptor(properties, redis);
+        var interceptor = new AdminJwtAuthInterceptor(new AdminJwtSignatureVerifier(properties), redis);
         Mockito.when(request.getRequestURI()).thenReturn("/admin/v1/getself");
         Mockito.when(request.getHeader("Authorization")).thenReturn("Bearer not-a-valid-jwt");
 
@@ -382,7 +393,7 @@ class AdminSemanticDriftApiRegressionTest {
     void interceptor_invalidSignatureRejectedBeforeBlacklistStage() {
         var redis = Mockito.mock(StringRedisTemplate.class);
         Mockito.when(redis.hasKey(Mockito.anyString())).thenReturn(Boolean.FALSE);
-        var interceptor = new AdminJwtAuthInterceptor(properties, redis);
+        var interceptor = new AdminJwtAuthInterceptor(new AdminJwtSignatureVerifier(properties), redis);
         Mockito.when(request.getRequestURI()).thenReturn("/admin/v1/getself");
         Mockito.when(request.getHeader("Authorization")).thenReturn("Bearer not-a-valid-jwt");
 
@@ -406,7 +417,7 @@ class AdminSemanticDriftApiRegressionTest {
     void interceptor_nonBearerPrefixCannotBypassBlacklist() {
         var redis = Mockito.mock(StringRedisTemplate.class);
         Mockito.when(redis.hasKey(Mockito.anyString())).thenReturn(Boolean.TRUE);
-        var interceptor = new AdminJwtAuthInterceptor(properties, redis);
+        var interceptor = new AdminJwtAuthInterceptor(new AdminJwtSignatureVerifier(properties), redis);
         Mockito.when(request.getRequestURI()).thenReturn("/admin/v1/getself");
         // 一个语法合法的 token，外层套一个不是 "Bearer " 的前缀
         Mockito.when(request.getHeader("Authorization")).thenReturn("XXBearer " + realToken());
@@ -423,7 +434,7 @@ class AdminSemanticDriftApiRegressionTest {
     void interceptor_bearerPrefixIsCaseInsensitive() {
         var redis = Mockito.mock(StringRedisTemplate.class);
         Mockito.when(redis.hasKey(Mockito.anyString())).thenReturn(Boolean.FALSE);
-        var interceptor = new AdminJwtAuthInterceptor(properties, redis);
+        var interceptor = new AdminJwtAuthInterceptor(new AdminJwtSignatureVerifier(properties), redis);
         Mockito.when(request.getRequestURI()).thenReturn("/admin/v1/getself");
         Mockito.when(request.getHeader("Authorization")).thenReturn("bearer " + realToken());
 
@@ -445,7 +456,7 @@ class AdminSemanticDriftApiRegressionTest {
     @DisplayName("DRIFT-009：Authorization 缺失时不查 Redis（Go 的 blacklist 中间件直接 next）")
     void interceptor_skipsRedisWhenHeaderAbsent() {
         var redis = Mockito.mock(StringRedisTemplate.class);
-        var interceptor = new AdminJwtAuthInterceptor(properties, redis);
+        var interceptor = new AdminJwtAuthInterceptor(new AdminJwtSignatureVerifier(properties), redis);
         Mockito.when(request.getRequestURI()).thenReturn("/admin/v1/getself");
         Mockito.when(request.getHeader("Authorization")).thenReturn(null);
 
@@ -459,7 +470,7 @@ class AdminSemanticDriftApiRegressionTest {
     @DisplayName("DRIFT-009：public 路径 /admin/v1/login 直接放行")
     void interceptor_publicPathsPassThrough() {
         var redis = Mockito.mock(StringRedisTemplate.class);
-        var interceptor = new AdminJwtAuthInterceptor(properties, redis);
+        var interceptor = new AdminJwtAuthInterceptor(new AdminJwtSignatureVerifier(properties), redis);
         Mockito.when(request.getRequestURI()).thenReturn("/admin/v1/login");
 
         assertTrue(interceptor.preHandle(request, null, new Object()));
@@ -472,7 +483,7 @@ class AdminSemanticDriftApiRegressionTest {
     void interceptor_validTokenWritesAttributes() {
         var redis = Mockito.mock(StringRedisTemplate.class);
         Mockito.when(redis.hasKey(Mockito.anyString())).thenReturn(Boolean.FALSE);
-        var interceptor = new AdminJwtAuthInterceptor(properties, redis);
+        var interceptor = new AdminJwtAuthInterceptor(new AdminJwtSignatureVerifier(properties), redis);
         Mockito.when(request.getRequestURI()).thenReturn("/admin/v1/getself");
 
         String token = JwtUtil.getToken(SECRET, System.currentTimeMillis() / 1000L, 2592000L, 4242L);
@@ -490,7 +501,7 @@ class AdminSemanticDriftApiRegressionTest {
     void interceptor_redisFailureIsFailOpen() {
         var redis = Mockito.mock(StringRedisTemplate.class);
         Mockito.when(redis.hasKey(Mockito.anyString())).thenThrow(new RuntimeException("redis down"));
-        var interceptor = new AdminJwtAuthInterceptor(properties, redis);
+        var interceptor = new AdminJwtAuthInterceptor(new AdminJwtSignatureVerifier(properties), redis);
         Mockito.when(request.getRequestURI()).thenReturn("/admin/v1/getself");
 
         String token = JwtUtil.getToken(SECRET, System.currentTimeMillis() / 1000L, 2592000L, 1L);

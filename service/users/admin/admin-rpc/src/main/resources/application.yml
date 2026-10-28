@@ -49,19 +49,28 @@ spring:
       #   Go 的 admin.yaml **完全没有** BizRedis 超时配置
       #     → go-zero v1.10.2 core/stores/redis/redisclientmanager.go:32-39
       #       建 red.Options 时**三个 timeout 一个都没传**（只传 Addr/User/Pass/DB/…）
-      #     → github.com/redis/go-redis/v9 options.go 的 init() 填库默认值：
-      #         DialTimeout = 5s          （:329-330）
-      #         ReadTimeout = 3 * time.Second（`switch opt.ReadTimeout { case 0: … }`）
+      #     → github.com/redis/go-redis/v9 **v9.20.0**（Sea 仓 go.mod:15 **直接 pin**）options.go 的 init() 填库默认值：
+      #         DialTimeout = 5s          （options.go:338-339）
+      #         ReadTimeout = 3 * time.Second（options.go:364-370 的 `switch opt.ReadTimeout { case 0: … }`）
+      #         WriteTimeout = ReadTimeout（options.go:374-378）
       #   ⇒ **读命令超时 3s**。本值与 go-redis 的 ReadTimeout 默认逐字相同。
       #   ⚠️ 这是一致但**无回归网**的巧合：go-zero 升 go-redis、默认值一变即静默分叉。
-      #      故在此写明出处，并配 AdminRedisTimeoutConfigTest 守住这个值。
+      #      故在此写明出处（**连版本号一起钉**），并配 AdminRedisTimeoutConfigTest 守住这个值。
+      #      🔴 2026-10-28 订正：上面那两处行号原写 `:329-330` ⇒ 那是 **v9.18.0** 的行号；
+      #         真源实际解析到 **v9.20.0**（Sea 仓 go.mod:15 直接 pin）⇒ 实际是 `:338-339`。
+      #         ⇒ **教训：引第三方源码的行号必须连版本号一起钉** ⇒ 否则版本一漂，行号即失效
+      #         （与「共享层文件被挪长 ⇒ 引用集体过期」同族，但对象是**外部依赖**）。
       #   🔴 红鲱鱼提醒：go-zero core/stores/redis/redis.go:27 有一行
       #      `readWriteTimeout = 2 * time.Second` —— **它是死常量，全文件仅此一处、
       #      从未被使用**。只看它会错判成「Go 的 Redis 超时是 2s」。
       timeout: 3s
-      # 连接（dial）超时：Go 侧 go-redis 的 DialTimeout 默认 **5s**；
-      # 而上面那个 timeout 同时管命令与连接（Lettuce 在 connect-timeout 未设时回落到 timeout）
-      # ⇒ 不显式配这一项，连接超时会跟着变成 3s，与 Go 的 5s 不一致。
+      # 连接（dial）超时：Go 侧 go-redis 的 DialTimeout 默认 **5s**。
+      # 🔴 2026-10-27 订正：此处原写「上面那个 timeout 同时管命令与连接（Lettuce 在 connect-timeout 未设时
+      #    回落到 timeout）⇒ 不显式配就变成 3s」——**那是错的**：
+      #    Boot 4.0.8 LettuceConnectionConfiguration.createClientOptions 的字节码是
+      #      `if (connectTimeout != null) { builder.socketOptions(…connectTimeout(…)); }`
+      #    ⇒ null ⇒ 整段跳过 ⇒ 用 Lettuce 自己的默认 **10s**（SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION）
+      #    ⇒ 不显式配 = 10s（≠ Go 的 5s）；修法与结论不变。详见 DRIFT-ARPC-013 订正块。
       # Boot 4 里这是**独立属性**（DataRedisProperties.connectTimeout，
       # 模块 spring-boot-data-redis；注意 RedisProperties 已从 spring-boot-autoconfigure 拆出）。
       connect-timeout: 5s

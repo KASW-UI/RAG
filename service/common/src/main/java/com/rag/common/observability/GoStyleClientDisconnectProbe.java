@@ -11,6 +11,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * <b>客户端断连的「主动探测」：往 socket 写一个合法的 HTTP/1.1 1xx 探针，把断连提前暴露出来。</b>
@@ -47,7 +48,11 @@ import java.nio.charset.StandardCharsets;
  *       ⇒ 499 晚于 Go，延迟 ≈ 探测间隔。</li>
  * </ol>
  * <p>⇒ 登记见 {@code docs/Intentional_Deviations/global/common-tails.md} 的
- * <b>{@code SD-2026-10-25-02}</b>（<b>待签字</b>）。本类实现的是该档里第 ⑤ 条路径
+ * <b>{@code SD-2026-10-25-04}</b>（<b>✅ 已签字 · 2026-10-25 用户拍板</b>）。
+ * ⚠️ **订正（2026-10-27）**：本类 javadoc 原先指向的 {@code SD-2026-10-25-02}
+ * 已于 2026-10-25 第十轮<b>撤销</b>（那条记录的是「框架限制」这个定性，
+ * 问题本身已被方案⑤修掉 ⇒ 该条作废、不需签字）⇒ ⇒ **签字档是 {@code SD-2026-10-25-04}**。
+ * 本类实现的是该档里第 ⑤ 条路径
  * （「主动探测写」）的<b>改良版</b>：不是「提前提交响应」，而是<b>直接写 socket</b>
  * ⇒ 不提交响应 ⇒ {@code Content-Type} / {@code Content-Length} 全部保住。
  *
@@ -58,6 +63,57 @@ import java.nio.charset.StandardCharsets;
  *   <li>1xx 是「informational response」，RFC 9110 规定客户端<b>必须忽略</b>，
  *       且<b>可以出现多次</b> ⇒ 重复探测天然合法；</li>
  *   <li>1xx <b>不带 body</b> ⇒ 不会与最终响应的 {@code Content-Length} 打架。</li>
+ * </ul>
+ *
+ * <h3>🔴 为什么必须有「行数上界」（2026-10-27 新增 · 本机制的第二个硬约束）</h3>
+ * <p>上面的 1xx 偏离是<b>已签字</b>的（{@code SD-2026-10-25-04}）⇒ <b>机制保留</b>；
+ * 但「<b>N = 探测轮数</b>」这个 N **原本没有上界** ⇒ ⇒ 必须补上界，否则会击穿客户端。
+ * <pre>
+ *   击穿点：JDK 的 java.net.http 对**每个响应**最多接受 8 个 interim(1xx) 响应
+ *     java.net.http/jdk/internal/net/http/Exchange.java:71-72
+ *         MAX_NON_FINAL_RESPONSES = Utils.getIntegerNetProperty("jdk.httpclient.maxNonFinalResponses", 8)
+ *     java.net.http/jdk/internal/net/http/Exchange.java:544-550
+ *         ⇒ 计数超限即抛 ProtocolException("Too many interim responses received: 9 &gt; 8")
+ *     （上限可由系统属性 jdk.httpclient.maxNonFinalResponses 配置 ⇒ 但**默认就是 8**）
+ * </pre>
+ * <p><b>为什么这会真的炸</b>：{@link HttpMiddleware} 的「切片等待」每片醒一次、
+ * 每片写一次探针 ⇒ <b>1xx 行数 ≈ 耗时 ÷ 探测间隔</b>，而探测间隔默认 500ms
+ * ⇒ ⇒ <b>任何耗时 &gt; ~4s 的请求</b>（8 × 500ms）就会让 JDK HttpClient 客户端
+ * <b>直接抛异常</b>，根本读不到最终响应。
+ * <p>⚠️ <b>跨域暴露面</b>：暴露量由各域的 {@code observability.http-timeout} 决定 ⇒
+ * <b>{@code article-api} = 70s</b>（Go 真源 {@code Timeout: 70000} 对齐值）⇒
+ * <b>最多 140 行</b>（= 70s ÷ 500ms，<b>推算值 · 未逐域实测</b>）；其余 9 域 = 3s ⇒ 最多 6 行
+ * ⇒ <b>article 域最危险</b>。
+ * <p>⇒ <b>本类的做法</b>：给<b>每个请求</b>的 1xx 行数设上界
+ * {@link #maxProbeLines()}（默认 {@link #DEFAULT_MAX_PROBE_LINES} = 4，
+ * <b>取 4 而不是 8</b>：留一半余量）。
+ * 🔴 <b>这个「余量」只对「按 RFC 9110 忽略 1xx」的客户端成立</b>
+ * （JDK {@code java.net.http} / Go {@code net/http} / curl / 浏览器 ⇒ 都会跳过 1xx 再读最终响应）：
+ * <ul>
+ *   <li>⚠️ <b>把 1xx 当最终响应</b>的客户端（实测：**Python {@code http.client} 3.11**
+ *       看到 {@code status=103}、body 为空 ⇒ <b>1 行即失效</b>）⇒ ⇒ <b>任何正的上界都救不了它</b>
+ *       ⇒ ⇒ 这类客户端在<b>慢请求</b>上<b>本来就</b>读不到最终响应
+ *       ⇒ ⇒ **本改动对它们既无改善也无恶化**（1xx 探针是已签字偏离 {@code SD-2026-10-25-04}）；
+ *       ⚠️ 但<b>不要</b>把「上界 4 ⇒ 客户端不会炸」写成<b>普遍</b>结论。</li>
+ *   <li>⚠️ <b>用 {@code Expect: 100-continue} 的客户端</b>：JDK 把那个 100 响应
+ *       <b>也计入同一个</b> interim 计数器（{@code Exchange.java:466}
+ *       {@code nonFinalResponses.incrementAndGet()}）⇒ ⇒ 计数 = 1 + 上界 ⇒
+ *       ⇒ 这种客户端要把上界<b>再降 1</b>（≤ 3）才安全。</li>
+ * </ul>
+ * <p>🔴 <b>「上界」与「探测间隔」是一个【乘积】，不是两个独立旋钮</b>：
+ * <b>有效探测窗口 = 上界 × 探测间隔</b>（默认 4 × 500ms = <b>2s</b>）⇒ ⇒ 运维若为「更快取消」
+ * 把间隔调到下限 {@link #MIN_PROBE_INTERVAL_MILLIS}（50ms）⇒ ⇒ 窗口<b>等比塌到 200ms</b>
+ * ⇒ ⇒ 也就是说：<b>间隔调小 ⇒ 客户端更安全，但断连的「提前发现」窗口同步变短</b>
+ * ⇒ ⇒ 这正是下面「代价」那条的来源。
+ * <ul>
+ *   <li>计数<b>按请求</b>（request attribute）⇒ 不会跨请求互相吃预算
+ *       ⇒ 不会把「后一个请求」的断连探测能力悄悄关掉；</li>
+ *   <li>预算用尽后 <b>不再写探针字节</b>，但<b>等待语义完全不变</b>
+ *       （仍然等到 worker 完成或超时 ⇒ <b>总窗口既不延长也不缩短</b>）⇒ <b>fail-open</b>；</li>
+ *   <li>⚠️ <b>代价（必须写清）</b>：预算用尽后<b>不再有「主动探测」</b>
+ *       ⇒ 超长请求（耗时 ≫ <b>上界 × 探测间隔</b>）里，客户端中途断连**不再被提前发现**
+ *       ⇒ 在飞的下游 gRPC 要等到<b>写最终响应</b>时才被取消（而不是提前取消）
+ *       ⇒ 这是「保住客户端能解析响应」换来的 ⇒ <b>宁可晚取消，不可让客户端失败</b>。</li>
  * </ul>
  *
  * <h3>为什么必须「write + flush」两步（§3.3 的实测结论，不是推测）</h3>
@@ -102,7 +158,16 @@ public final class GoStyleClientDisconnectProbe {
         /**
          * 探测不可用 ⇒ 调用方必须 <b>fail-open</b>（什么都不做，继续等）。
          */
-        UNAVAILABLE
+        UNAVAILABLE,
+        /**
+         * 本请求的 <b>1xx 行数预算已用尽</b> ⇒ <b>不再写探针字节</b>。
+         *
+         * <p>⇒ 调用方同样必须 <b>fail-open</b>（什么都不做，继续按原超时语义等待）
+         * ⇒ 与 {@link #UNAVAILABLE} 的区别只在于「为什么不做」：
+         * {@code UNAVAILABLE} = 机制不可用（反射链取不到 / 非 HTTP/1.1 / 响应已提交 /
+         * 被运维显式关闭），{@code BUDGET_EXHAUSTED} = 机制可用但<b>本请求已经写够了</b>。
+         */
+        BUDGET_EXHAUSTED
     }
 
     private static final Logger log = LoggerFactory.getLogger(GoStyleClientDisconnectProbe.class);
@@ -125,6 +190,40 @@ public final class GoStyleClientDisconnectProbe {
      * 探测间隔下限（毫秒）—— 防止有人把间隔调到 0/1ms 把请求变成「写 socket 忙循环」。
      */
     public static final long MIN_PROBE_INTERVAL_MILLIS = 50L;
+
+    /**
+     * 每请求的 1xx 探针<b>行数上界</b>的 system property。
+     *
+     * <p>⚠️ <b>同样刻意不是配置项</b>：理由同 {@link #PROBE_INTERVAL_PROPERTY}
+     * ⇒ 零 api 模块改动 ⇒ 用 <b>常量 + system property</b>。
+     * 需要放宽/收紧时用 {@code -Drag.common.http.disconnect-probe-max-lines=2} 覆盖。
+     *
+     * <p>取值语义：<b>0 = 显式关闭探针</b>（运维逃生口 ⇒ 会<b>失去主动断连探测</b>
+     * ⇒ 本层会打 WARN）；<b>&gt; 0 = 行数上界</b>；非法值 ⇒ 回退默认并打 WARN。
+     */
+    public static final String MAX_PROBE_LINES_PROPERTY = "rag.common.http.disconnect-probe-max-lines";
+
+    /**
+     * 默认的 1xx 行数上界。
+     *
+     * <p>⚠️ <b>为什么是 4 而不是 8</b>：客户端侧的硬上限是
+     * <b>JDK {@code java.net.http} 默认 8</b> 个 interim 响应
+     * （{@code jdk.httpclient.maxNonFinalResponses}，见类 javadoc 的取证段）
+     * ⇒ 取它的一半 ⇒ <b>即便客户端把上限配到 4 也炸不了</b>。
+     * ⇒ ⚠️ **不要写成 8**：那就没有余量了。
+     */
+    public static final int DEFAULT_MAX_PROBE_LINES = 4;
+
+    /**
+     * 1xx 行数计数器的 request attribute 名。
+     *
+     * <p>⚠️ <b>必须是 request attribute</b>（而不是静态字段）：
+     * 计数器的语义是「<b>本请求</b>已经写了多少行」⇒
+     * 用静态字段会让<b>前一个请求吃光后一个请求的预算</b>
+     * ⇒ 后面的请求将彻底失去主动断连探测 ⇒ ⇒ 守门
+     * {@code GoStyleClientDisconnectProbeBudgetGateTest} 有专属断言钉这一条。
+     */
+    private static final String PROBE_LINES_ATTRIBUTE = "rag.common.http.disconnect-probe-lines";
 
     /**
      * 探针字节：{@code HTTP/1.1 103 Early Hints\r\n\r\n}（ASCII）。
@@ -166,11 +265,76 @@ public final class GoStyleClientDisconnectProbe {
     }
 
     /**
+     * 当前生效的 1xx 行数上界。
+     *
+     * <p>每次调用都重新读 system property ⇒ 运维改值后<b>无需重启</b>即可生效
+     * ⇒ 与 {@link #probeIntervalMillis()} 同一套口径。
+     *
+     * <p>🔴 **告警只打一次**（2026-10-27 · 独立复核提出）：本方法被
+     * {@link #probe(HttpServletRequest, HttpServletResponse)} <b>每片</b>调一次
+     * ⇒ ⇒ 若在这里直接 {@code log.warn}，一个 70s 的请求会打 <b>140 条</b> WARN，
+     * 并发下线性放大 ⇒ ⇒ **日志风暴** ⇒ ⇒ 改为<b>每进程一次</b>（{@link AtomicBoolean} 门闩）。
+     *
+     * @return 行数上界；<b>0 = 探针被显式关闭</b>；非法值 ⇒ 回退
+     *         {@link #DEFAULT_MAX_PROBE_LINES}
+     */
+    public static int maxProbeLines() {
+        String raw = System.getProperty(MAX_PROBE_LINES_PROPERTY);
+        if (raw == null || raw.isBlank()) {
+            return DEFAULT_MAX_PROBE_LINES;
+        }
+        try {
+            int parsed = Integer.parseInt(raw.trim());
+            if (parsed < 0) {
+                warnMaxProbeLinesOnce(raw, "负数 ⇒ 非法", DEFAULT_MAX_PROBE_LINES);
+                return DEFAULT_MAX_PROBE_LINES;
+            }
+            if (parsed == 0) {
+                warnMaxProbeLinesOnce(raw, "0 ⇒ 显式关闭探针（**主动断连探测失效**）", 0);
+                return 0;
+            }
+            return parsed;
+        } catch (NumberFormatException e) {
+            warnMaxProbeLinesOnce(raw, "非整数 ⇒ 非法", DEFAULT_MAX_PROBE_LINES);
+            return DEFAULT_MAX_PROBE_LINES;
+        }
+    }
+
+    /** 1xx 行数上界异常的告警门闩（<b>每进程只告警一次</b> ⇒ 防日志风暴）。 */
+    private static final AtomicBoolean MAX_PROBE_LINES_WARNED = new AtomicBoolean();
+
+    /**
+     * 1xx 行数上界异常时告警一次。
+     *
+     * @param raw      原始配置值
+     * @param reason   判定理由
+     * @param effective 实际生效值
+     */
+    private static void warnMaxProbeLinesOnce(String raw, String reason, int effective) {
+        if (!MAX_PROBE_LINES_WARNED.compareAndSet(false, true)) {
+            return;
+        }
+        log.warn("[HTTP] 1xx 行数上界异常（{}={}，{}）⇒ 生效值 = {}（**每进程只告警一次**）",
+                MAX_PROBE_LINES_PROPERTY, raw, reason, effective);
+    }
+
+    /**
+     * 本请求<b>已经写出</b>的 1xx 行数。
+     *
+     * <p>只统计<b>真正写出去</b>的行（写失败那一次不算 ⇒ 写失败时客户端已经走了，
+     * 响应已死 ⇒ 预算不再有意义）。
+     */
+    private static int probeLinesWritten(HttpServletRequest request) {
+        Object attr = request.getAttribute(PROBE_LINES_ATTRIBUTE);
+        return attr instanceof Integer written ? written : 0;
+    }
+
+    /**
      * 执行一次断连探测。
      *
      * <p><b>本方法绝不抛异常</b>（fail-open）：任何失败都折叠成 {@link State#UNAVAILABLE}。
      *
-     * @param request  当前请求（用于取 socket + 判协议）
+     * @param request  当前请求（用于取 socket + 判协议 + 记行数预算）
      * @param response 当前响应（用于判「是否已提交」）
      * @return 探测结果
      */
@@ -189,6 +353,21 @@ public final class GoStyleClientDisconnectProbe {
         if (response != null && response.isCommitted()) {
             return State.UNAVAILABLE;
         }
+        // 🔴 预算闸门（2026-10-27）：**每请求的 1xx 行数必须有上界**，
+        //    否则慢请求会写出 N 行 103 ⇒ 击穿客户端的 interim 上限
+        //    （JDK java.net.http 默认 8 ⇒ 第 9 行即 ProtocolException）
+        //    ⇒ 详见类 javadoc 的「为什么必须有行数上界」一节。
+        //    ⚠️ 本闸门必须排在**反射链之前** ⇒ 预算用尽后不再做无谓的反射。
+        final int maxLines = maxProbeLines();
+        if (maxLines <= 0) {
+            // 显式关闭 ⇒ 机制整体不可用 ⇒ fail-open（调用方继续按原语义等待）
+            return State.UNAVAILABLE;
+        }
+        final int written = probeLinesWritten(request);
+        if (written >= maxLines) {
+            // 预算用尽 ⇒ 本请求不再写探针字节 ⇒ 等待语义完全不变（fail-open）
+            return State.BUDGET_EXHAUSTED;
+        }
         Object socketWrapper = resolveSocketWrapper(request);
         if (socketWrapper == null) {
             return State.UNAVAILABLE;
@@ -199,6 +378,8 @@ public final class GoStyleClientDisconnectProbe {
             Reflect.WRITE.invoke(socketWrapper, Boolean.TRUE, PROBE_BYTES,
                     Integer.valueOf(0), Integer.valueOf(PROBE_BYTES.length));
             Reflect.FLUSH.invoke(socketWrapper, Boolean.TRUE);
+            // ★ 只有**真的写出去**才占预算（写失败 ⇒ 客户端已走 ⇒ 响应已死）
+            request.setAttribute(PROBE_LINES_ATTRIBUTE, Integer.valueOf(written + 1));
             return State.ALIVE;
         } catch (InvocationTargetException ite) {
             Throwable cause = ite.getCause();

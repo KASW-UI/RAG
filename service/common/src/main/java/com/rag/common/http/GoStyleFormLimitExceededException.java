@@ -24,8 +24,11 @@ package com.rag.common.http;
  * <h2>⚠️ 哪些域会收到它</h2>
  * <p>只有 {@link GoStyleFormLimitMode#ENVELOPE} 模式的域
  * （hot / follow / like / message / comment —— 即 Go 侧<b>注册了</b> {@code SetErrorHandler} 的那些）。
- * <br>其余域（article / user / task / favorite）走
+ * <br>其余<b>装闸门</b>的域（article / user / admin）走
  * {@link GoStyleFormLimitMode#RAW} ⇒ 共享层<b>直接写</b> Go 的 {@code http.Error} 形状。
+ * <br>⚠️ <b>两个域收不到它</b>：{@code task}（Go 侧不解析 form/query ⇒ 闸门不开）
+ * 与 {@code favorite}（<b>域自己捕获</b>解析错 ⇒ 拒绝形状由域自己定 ⇒ 共享层不装闸门）
+ * ⇒ ⇒ 它们的超限由<b>域内自己</b>落到 Go 的解析失败出口（favorite = 200 + {code:5003,…}）。
  */
 public class GoStyleFormLimitExceededException extends RuntimeException {
 

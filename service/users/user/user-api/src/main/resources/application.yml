@@ -15,7 +15,24 @@ spring:
       host: ${REDIS_ADDR:redis}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
+      # ⚠️ 取值出处（2026-10-27 复核补记，此前只有数值没有出处）：
+      #   Go 的 user.yaml 完全没配 BizRedis 超时
+      #     → go-zero v1.10.2 redisclientmanager.go:32-39 建 red.Options 时不传任何 timeout
+      #     → go-redis/v9 **v9.20.0**（Sea 仓 go.mod:15 **直接 pin**）options.go 的 init() 默认：
+      #        DialTimeout = 5s（options.go:338-339）· ReadTimeout = 3s（options.go:364-370）· WriteTimeout = ReadTimeout（:374-378）
+      #   ⇒ 读命令超时 3s、连接超时 5s，与 go-redis 默认逐字相同。
+      #   🔴 go-zero redis.go:27 的 `readWriteTimeout = 2s` 是**死常量**（全文件只在 :293/:315 的
+      #      BLPop 用到，ExistsCtx 不用它）⇒ 别被它误导。
       timeout: 3s
+      # 连接超时：Go 的 go-redis DialTimeout 默认 **5s**。
+      # ⚠️ **本行原缺**（2026-10-27 补）⇒ Boot 4 在 connect-timeout 为 null 时**整段跳过**
+      #   ⇒ 用 Lettuce 自己的默认 **10s**（SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION）
+      #   ⇒ 连接超时 10s ≠ Go 的 DialTimeout 5s ⇒ admin-api 早已补上，本模块是遗漏。
+      #   🔴 2026-10-27 订正：此处原写「回落到 timeout ⇒ 跟着变成 3s」——**那是错的**
+      #      （Boot 4.0.8 LettuceConnectionConfiguration.createClientOptions 字节码：
+      #       `if (connectTimeout != null) { … }` ⇒ null ⇒ 整段不执行）⇒ 详见 DRIFT-USERAPI-016 订正块。
+      # Boot 4 里这是独立属性（DataRedisProperties.connectTimeout，模块 spring-boot-data-redis）。
+      connect-timeout: 5s
 
   # ===== 2. Jackson 全局时间戳策略：对齐 Go 版 encoding/json 默认 =====
   # Jackson 3.x（Spring Boot 4）默认写 ISO 8601 字符串，移除了 WRITE_DATES_AS_TIMESTAMPS 选项。
@@ -95,6 +112,32 @@ grpc:
       enable-keep-alive: true
       keep-alive-time: 30s
       permit-keep-alive-without-calls: true
+      # 🔴 DRIFT-G1-002（2026-10-27 · G1 lane · 真启动实测）：**启动期拨号检查必须武装**
+      #
+      # Go 出处（逐层到消费点）：
+      #   service/user/user/api/internal/svc/servicecontext.go:26
+      #       UserRpc: userservice.NewUserService(zrpc.MustNewClient(c.UserRpc)),
+      #   go-zero v1.10.2 zrpc/client.go:50-54   logx.Must(err)  ← 失败即 panic ⇒ 进程起不来
+      #   go-zero v1.10.2 zrpc/internal/client.go:18 / :122-142
+      #       dialTimeout = time.Second * 3
+      #       conn, err := grpc.DialContext(timeCtx, server, options...)  // options 含 WithBlock()
+      # ⇒ Go 侧启动时**阻塞拨号 3s**，连不上就 panic ⇒ **进程根本起不来**。
+      #
+      # 本属性对应 devh grpc-client-spring-boot-starter 3.1.0 的
+      # AbstractChannelFactory.newManagedChannel → connectOnStartup：
+      #   channel.getState(true) → 等 READY → 超时则 throw IllegalStateException(
+      #       "Can't connect to channel user-rpc") ⇒ stub 创建失败 ⇒ 上下文启动失败。
+      # ⇒ 与 Go 的 zrpc.MustNewClient 同型：「连不上 ⇒ 起不来」，不是「起来但请求全失败」。
+      #
+      # ⚠️ **只对 user-rpc 这一个 channel 开**（不要提到 grpc.client 顶层当全局）：
+      #   Go 侧 user-api 的 ServiceContext 里**只有** UserRpc 一个下游依赖
+      #   （service/user/user/api/internal/svc/servicecontext.go:16-28）
+      #   ⇒ 设成全局会凭空多出一条 Go 侧不存在的启动期硬依赖。
+      #
+      # ⚠️ devh 的默认值是 0（= 关闭）⇒ 「yml 里没写」就等于「机制没武装」。
+      #   UserRpcClient.afterPropertiesSet() 会断言本项已武装，删掉这行会让 user-api
+      #   起不来（宁可起不来，也不要静默退化成「Pod Ready 但 100% 请求失败」）。
+      immediate-connect-timeout: 3s
 
 # ===== 4. 业务配置（对齐 Go 端 UserAuth.*）=====
 # 对应 Go: UserAuth.AccessSecret / UserAuth.AccessExpire

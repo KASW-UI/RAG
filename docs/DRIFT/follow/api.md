@@ -16,9 +16,12 @@
 |---|---|---|---|
 | DRIFT-FOLLOW-001 | 空列表出参 Go=`"user_ids":null` / RAG=`"user_ids":[]` | **可观察（L1 wire）** | ✅ 已修 |
 | DRIFT-FOLLOW-005 | recommend 出参**字段顺序** Go=`target_id` 在前 / RAG=`mutual_score` 在前 | **可观察（L1 wire 字节序）** | ✅ 已修 |
-| DRIFT-FOLLOW-007 | 指标文本层：多一个 `application` tag / 直方图**零桶** | 可观察（抓取侧） | ✅ **已修**（tag + 桶）· ⚠️ 残留见下（**框架限制**） |
+| DRIFT-FOLLOW-007 | 指标文本层：多一个 `application` tag / 直方图**零桶** | 可观察（抓取侧） | ✅ **已修**（tag + 桶）· ⚠️ 残留 = **框架限制** · ✅ **已定性（用户 2026-10-27 拍板：不修，登记为框架限制）** |
 | DRIFT-FOLLOW-008 | MaxConns 闸门：**每路由一个**（Go）vs **全局一个**（RAG） | 可观察（并发行为） | 🔴 **未修**（`service/common` 共享模块 ⇒ 派单） |
 | DRIFT-FOLLOW-009 | 下游挂死时：Go **2s ⇒ 200+1015**；RAG **3s ⇒ 503 "Request Timeout"** | **可观察（状态码 + 时刻）** | ✅ 已修 |
+| **DRIFT-FOLLOW-010** | **3s 预算的作用域**：Go 的计时器在 Authorize **之后**起算（**验签不计入**）/ RAG 的计时器在 Filter 外层（**验签计入**） | 可观察（**超时边界**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内推广 `DRIFT-USERAPI-009②`） |
+| **DRIFT-FOLLOW-011** | **Redis 超时口径**：`timeout: 2s` ≠ Go 的 `ReadTimeout` **3s**，且**缺 `connect-timeout: 5s`** | 可观察（**Redis 挂住形态**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内自闭环） |
+| **DRIFT-FOLLOW-012** | **Redis 断连行为**：Lettuce 默认 `DEFAULT` ⇒ 命令被**排队**挂到 `commandTimeout` 3s ⇒ 撞 HTTP 预算 ⇒ **503**；Go 快速失败 ⇒ **fail-open 200** | 可观察（**状态码 + 时刻**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内自闭环） |
 | ~~OPEN-001~~ | ~~Content-Type 不支持 ⇒ RAG 415 / Go 不报错~~ | 可观察 | ✅ **已关闭（415 分支实测不可达）**，见下 |
 
 > **2026-10-24 第二轮（未知项 U1–U8 收口）新增 3 条**，全部有**双侧活体对拍**证据：
@@ -83,11 +86,11 @@ HTTP body：         {"user_ids":null}
 | 8 个路由（方法 + 路径） | `api/internal/handler/routes.go:16-64` | `controller/FollowController.java:97-145` | ✅ 一致（全 POST） |
 | 前缀 `/follow/v1` | `rest.WithPrefix("/follow/v1")` | `@RequestMapping("/follow/v1")` | ✅ 一致 |
 | **8 个端点全部要 JWT**，无 public 路径 | `rest.WithJwt(...)` 挂在整段 AddRoutes 上 | `config/WebMvcConfig.java:73-79`（`/follow/v1/**`，无 exclude） | ✅ 一致 |
-| 中间件顺序：JWT 在外、黑名单在内 | `rest/engine.go` chain 顺序 | 同上注册顺序 | ✅ 一致 |
+| 中间件顺序：JWT 在外、黑名单在内 | `go-zero@v1.10.2/rest/engine.go` chain 顺序 | 同上注册顺序 | ✅ 一致 |
 | 黑名单 fail-open（Redis 故障 ⇒ 放行） | `middleware/checkblacklistmiddleware.go:41` | `interceptor/FollowBlacklistInterceptor.java:150-161` | ✅ 一致 |
 | 黑名单 key 前缀 `user:jwt_blacklist:` | 同上 `:39` | `:105` | ✅ 一致 |
 | 黑名单 401 body = `{"code":5004,"msg":"unauthorized"}`（**无 data**） | 同上 `:42-48` | `:169-179` | ✅ 一致 |
-| 验签失败 = **401 + 空 body** | `rest/handler/authhandler.go:106` | `advice/GlobalExceptionHandler.java:91-95` | ✅ 一致 |
+| 验签失败 = **401 + 空 body** | `go-zero@v1.10.2/rest/handler/authhandler.go:106` | `advice/GlobalExceptionHandler.java:91-95` | ✅ 一致 |
 | 业务错误 ⇒ **HTTP 200 + envelope** | `api/followcenter.go:53-66`（`httpx.SetErrorHandler`） | `GlobalExceptionHandler.java:112-116` | ✅ 一致 |
 | 成功 ⇒ `{code:200,msg:"OK",data:<v>}` | `followcenter.go:45-51` | `advice/GlobalResponseAdvice.java:65-77` | ✅ 一致 |
 | 未注册路径 ⇒ 404（**不被鉴权遮蔽**） | go-zero router 404 | `handler instanceof HandlerMethod` 判据 | ✅ 一致（body `404 page not found` 逐字节相同） |
@@ -98,7 +101,7 @@ HTTP body：         {"user_ids":null}
 | 失败时用 rpc 回传的 msg，不查本地码表 | `NewErrCodeMsg(int(rpcResp.Code), rpcResp.Msg)` | `FollowApiSupport.requireRpcSuccess` | ✅ 一致 |
 | `,string` int64 入参**同时接受字符串与数字** | go-zero `mapping` 的 `json.Number` Kind==String | `users-common` 的 `GoStyleStringInt64` | ✅ 一致（见下） |
 | gRPC client 无 retry | `zrpc.RpcClientConf` 无 `Retries` 字段 | `client/FollowRpcClient.java` | ✅ 一致 |
-| gRPC client 熔断默认开 | `zrpc/internal/config.go:14` `Breaker default=true` | `GoStyleGrpcClientBreakerInterceptor` | ✅ 一致 |
+| gRPC client 熔断默认开 | `go-zero@v1.10.2/zrpc/internal/config.go:14` `Breaker default=true` | `GoStyleGrpcClientBreakerInterceptor` | ✅ 一致 |
 | 指标口径（3 个 counter + 1 个 histogram，label 名一致） | `api/internal/metrics/metrics.go` | `metrics/FollowApiMetrics.java` | ✅ 一致（**U1 已双侧抓取比对**；文本层残留见 DRIFT-FOLLOW-007） |
 
 ### `,string` 入参语义的实测核对（go-zero v1.10.2 真源）
@@ -225,7 +228,7 @@ RAG 侧改 `--grpc.client.follow-rpc.address=static://127.0.0.1:19999`），两�
   （`service/follow/api/followcenter.go:40-42` `DisableNativeRestTimeout` + `NewHTTPMiddleware`；
   `service/common/observability/http.go:53` `context.WithTimeout(r.Context(), timeout)`，
   `:67-68` `r = r.WithContext(ctx)`）。
-- Go 的 **zrpc 客户端超时 2s**：`zrpc/config.go:34`
+- Go 的 **zrpc 客户端超时 2s**：`go-zero@v1.10.2/zrpc/config.go:34`
   `Timeout int64 `json:",default=2000"``（`RpcClientConf`；`etc/followcenter.yaml` 未配 ⇒ 走 default）。
   客户端拦截器做的是 `context.WithTimeout(ctx, c.Timeout)` ⇒ **两层取更小的生效** ⇒ 2s 先到。
 - ⇒ Go 侧下游挂死时，**api 拿到的是 rpc 错误**（`DeadlineExceeded`）⇒ 走业务错误通道 ⇒
@@ -246,6 +249,175 @@ U3 的突发测试里抓到过 **`HTTP 200` + body `Request Timeout`** ——
 **证据**：`service/follow/follow-api/src/main/java/com/rag/follow/follow/api/client/FollowRpcClient.java`
 （`CLIENT_TIMEOUT_MILLIS` + `capByClientTimeout`）；
 实测：黑洞下游下 RAG 返回 `HTTP=200 elapsed=2.47s body={"code":1015,...}`。
+
+## DRIFT-FOLLOW-010 ✅ 3s 预算的作用域：Go 的计时器在 Authorize 之后（**验签不计入**）🟡 **已修（2026-10-27 · G1 lane）**
+
+> **本条是 follow 域首次登记这一族差异** —— 推广 user-api 的 `DRIFT-USERAPI-009②` 时**顺手查出**。
+> ⚠️ 与 user-api 那条**同族但不是同一条**（编号各自独立；follow 侧此前**零记录**）。
+
+- **Component**：follow-api / 全部端点
+- **Category**：Lifecycle / Timeout Scope
+- **Classification**：OBSERVABLE DIFFERENCE（**超时边界**，条件性）　**Risk**：LOW
+- **Go Behavior**（真源，逐行核实 go-zero@v1.10.2 + follow 真源）：
+  ```
+  service/follow/api/followcenter.go:40-42
+    httpTimeout := observability.DisableNativeRestTimeout(&c.RestConf)
+    server := rest.MustNewServer(c.RestConf)
+    server.Use(observability.NewHTTPMiddleware(c.Name, httpTimeout, observability.SlowThreshold()))
+    ⇒ observability 是**唯一**的 user middleware
+  go-zero@v1.10.2/rest/engine.go:101-113  bindRoute：
+    chn = ng.buildChainWithNativeMiddlewares(...)   // 原生中间件（索引 0 = 最外层）
+    chn = ng.appendAuthHandler(fr, chn, verifier)   // ← JWT 验签
+    for _, mw := range ng.middlewares { ... }        // ← observability(3s) 在 JWT **之内**
+    handle = chn.ThenFunc(route.Handler)
+  go-zero@v1.10.2/rest/chain/chain.go:38-43  Append = 「加在请求流的最后」⇒ 越 Append 越靠内
+  ⇒ 执行序：原生中间件 → **JWT 验签** → **observability(3s 计时)** → 黑名单 → handler
+  ⇒ 3s 计时器在 Authorize **之后**起算 ⇒ **验签耗时不计入 3s 预算**
+  ```
+  ⚠️ 附带一条**前提不能漏**：Go 的 native `TimeoutHandler` 被 `DisableNativeRestTimeout` 关掉了
+  （`followcenter.go:40`）⇒ 3s **只**由 observability 提供 ⇒ 「验签在预算之外」才有意义。
+- **RAG Behavior（修前）**：`FollowJwtAuthInterceptor` 是 `HandlerInterceptor`
+  ⇒ 跑在 `DispatcherServlet` **内部** ⇒ 在 `HttpMiddlewareFilter`（3s 预算）**之内**
+  ⇒ **验签耗时被计入 3s 预算**。
+- **Difference**：验签耗时（HMAC + claim 解析）在 Go 侧**不计入** 3s、在 RAG 侧**计入** ⇒
+  只在「验签本身慢到接近 3s」时可见 ⇒ **条件性**。
+  ⚠️ **黑名单两侧都计入**（Go 的黑名单是 route 级中间件 ⇒ 最内层 ⇒ 在计时器**之内**）⇒ **不是本条**。
+- **修法（域内，与 user-api 同配方）**：验签搬进 `@Order(+6)` 的 Servlet Filter
+  （在 3s 预算的 `+7` **之外**）；**401 仍由 `FollowJwtAuthInterceptor` 抛**
+  ⇒ ① follow 域特有的 **401 空 body** 形状逐字不变；② 黑名单 interceptor **完全不动**。
+- **Evidence strength**：**L3 活体**（真 Tomcat，见 §11.4）＋ **L2 装配层守门** ＋ **L1**（Go 链序逐行）。
+  ⚠️ **未跑双侧活体对拍**（Go 侧进程未起）⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」。
+- **守门**：`FollowApiJwtVerificationScopeTest`（**7 例**，新建）——
+  ① Filter 已注册 · ② **容器装配出的链**里 JWT Filter 排在 3s 预算 Filter **之前**
+  （断言的是 `ServletContextInitializerBeans` 的**装配结果**，不是两个 `@Order` 数字）·
+  ③ interceptor 消费的是 Filter 的结果（`request().attribute(...)= "filter"`）·
+  ④ **401 仍是空 body** · ⑤ **未注册路径仍是 404**（不是 401）· ⑥ **超限 body ⇒ 413**（压过 401）· ⑦ 路径判据自检。
+- **变异验证 3/3 变红**：① `@Order` +6→+8 ⇒ ② 红 · ② Filter 自己写 401 ⇒ ⑥ 红
+  （`expected:<413> but was:<401>`，**且 ⑤ 也红** —— 写响应连 404 语义一起破）· ③ 摘 `@Component` ⇒ ③ 红
+  （`expected:<filter> but was:<inline>`）。
+- ⚠️ **残余差异（如实登记）**：Filter 在路由匹配**之前**运行 ⇒ 未注册路径（404）**也会**做一次验签
+  ⇒ 但 Filter **不写响应** ⇒ 最终仍是 404 ⇒ **只是多一次 HMAC 计算，不影响任何响应**。
+- **真启动复验（L3 · 真 Tomcat）**：见 §11.4（10 条探针，**follow 侧 5 条全绿**）。
+
+## DRIFT-FOLLOW-011 ✅ follow-api 的 Redis 超时口径与 Go 不符（`timeout: 2s` ≠ Go 的 `ReadTimeout` 3s · 且缺 `connect-timeout`）🟡 **已修（2026-10-27 · G1 lane）**
+
+> 🆕 **本轮新立**（给 users 域对齐 Redis 超时时**顺手查出**）⇒ follow 域**首次**登记这一族（Redis 超时配置值）差异。
+> ⚠️ 与 `DRIFT-FOLLOW-010`（3s 预算作用域）**同族但不是同一条**：010 是「验签算不算进预算」，本条是「Redis 命令/连接超时值本身」。
+> ⚠️ 与 `DRIFT-USERAPI-015`（users 域）**同族但不是同一条**：015 是「**DNS 解析失败**时 Go/RAG 的 200/503 摇摆」，
+> **本条是「超时**配置值**没抄对」** ⇒ 后者是照抄题（**不是取舍题**）。
+
+- **Component**：follow-api / 全部端点的黑名单 EXISTS（`FollowBlacklistInterceptor`）
+- **Category**：Config / Timeout Semantics
+- **Classification**：OBSERVABLE DIFFERENCE（**条件性**：仅在「Redis 连不上（连接阶段挂住）」形态下可见）
+  **Risk**：LOW-MEDIUM
+- **Go Behavior**（取值出处链，逐层到消费点）：
+  ```
+  Go service/follow/api/etc/followcenter.yaml
+      BizRedis { Host=redis:6379 / Type=node / Pass="" } —— **没有任何 timeout 字段**
+    → go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-39
+      建 red.Options 时不传任何 timeout
+    → github.com/redis/go-redis/v9 options.go 的 init()
+        DialTimeout = 5s                                   （:329-330）
+        ReadTimeout = 3 * time.Second                       （switch opt.ReadTimeout { case 0: … }）
+  ⇒ Go 的**读命令超时 3s**、**连接超时 5s**
+  ```
+  ⚠️ **红鲱鱼**：go-zero `core/stores/redis/redis.go:27` 的 `readWriteTimeout = 2 * time.Second`
+  ⇒ **全文件只有 :293/:315 的 `BLPOP` 用它** ⇒ 对 `ExistsCtx` 是**死常量**
+  ⇒ ⛔ **不能拿它当依据**（而本域原先那个 `2s` **看起来正是从它来的** ⇒ 典型的「照抄死常量」）。
+- **RAG Behavior（修前）**：`application.yml` 写的是 `spring.data.redis.timeout: **2s**`
+  ⇒ **无出处、无人审过**（台账里只登记成「待审」的 `DRIFT-USERAPI-015 附带`）
+  ⇒ 且**没配 `connect-timeout`** ⇒ Lettuce 回落到 timeout ⇒ 连接超时也变成 **2s**。
+
+> 🔴 **2026-10-27 订正（字节码实测 · 保留原值不改写）**：上一行「**Lettuce 回落到 timeout ⇒ 连接超时也变成 2s**」的机制说法**是错的**。
+> Boot 4.0.8 `LettuceConnectionConfiguration.createClientOptions` 的**字节码**是：
+> ```java
+> Duration connectTimeout = getProperties().getConnectTimeout();   // :9
+> if (connectTimeout != null) {                                     // :16
+>     builder.socketOptions(SocketOptions.builder().connectTimeout(connectTimeout).build());
+> }
+> ```
+> ⇒ **null ⇒ 整段不执行** ⇒ 用 Lettuce 自己的默认
+> `io.lettuce.core.SocketOptions.DEFAULT_CONNECT_TIMEOUT_DURATION` = **10s**
+> （`javap -constants` 实测：`DEFAULT_CONNECT_TIMEOUT = 10l`）
+> ⇒ **不配 ⇒ 10s，不是 2s、也不是 3s**。
+> ⇒ ⚠️ 修前的真实漂移是「**连接超时 10s vs Go 的 5s**」（比原表述**更松**，不是「更严 2s」）
+> ⇒ **修法与结论不变**（显式配 `connect-timeout: 5s`）⇒ 本域现已配对。
+> ⇒ ⚠️ 本轮**变异实测已印证**：摘掉 `connect-timeout` ⇒ 客户端读数 `PT10S`（不是 PT3S）。
+> ⇒ 同款订正已加在 `follow-api` 的 yml 注释与 2 个守门 javadoc 里（**保留原值不改写**）。
+- **Difference**：
+  1. **读命令超时 2s vs Go 3s** ⇒ Redis「**连上但挂住**」时：Go 的 EXISTS 挂到 3s ⇒ 与 HTTP 预算（`observability.http-timeout: 3s`）**同刻耗尽** ⇒ **503**；
+     本域修前 2s 就 fail-open ⇒ **200** ⇒ **与 Go 不一致**（也与自己域内 `user-api` / `admin-api` 的 3s 不一致 ⇒ **同族三域口径不一**）。
+  2. **连接超时 2s vs Go 5s** ⇒ Redis「连不上且连接阶段挂住」时：Go 5s 放弃、本域 2s 放弃 ⇒ **本域更严**。
+- **修法**：`timeout: 2s` → **`3s`** ＋ 补 **`connect-timeout: 5s`** ＋ 把 Go 出处链写进 yml 注释。
+- **Evidence strength**：**L3**（Spring Boot 真实 `Binder` 绑定结果 ＋ yml 静态断言 ＋ **socket 层实测**）
+  ✅ **socket 层那一截已于 2026-10-27 收口**（`FollowApiRedisConnectTimeoutSocketTest`）：
+  把连接指向**黑洞 IP `192.0.2.1`** ＋ 把 `timeout` 覆盖成 30s（**为的是隔离出 connect 超时** ——
+  Lettuce 的连接是**异步**的，不覆盖的话**先到期的永远是 3s 的命令超时**）
+  ⇒ **实测失败耗时 5175ms**（落在 `[4000ms, 9500ms)` —— 该区间**只**容得下 5s：
+  ≈10s = Lettuce 默认值 ⇒ 属性没生效 · ≈3s = 回落到 timeout · ≈75s = TCP 系统默认）
+  ⇒ ⚠️ **黑洞可用性是环境相关的**（某些网络直接 `no route to host`）⇒ 时长断言用 `assumeTrue` 跳过，
+  **但「配置消费点」那条断言永远生效**。
+  ⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」。
+- **守门**：`FollowApiRedisTimeoutConfigTest`（**2 例**，新建）—— ① yml 两值逐字断言 ·
+  ② **用 Spring 真实的 `Binder`** 断言 `getConnectTimeout()==5s` / `getTimeout()==3s`。
+- **变异验证 2/2 变红**：把 `timeout` 改回 `2s` ⇒ 两条都红
+  （`expected:<3s> but was:<2s>` / `expected:<PT3S> but was:<PT2S>`）。
+- **连带**：同批给 `user-api`（缺 `connect-timeout` ⇒ 落 `DRIFT-USERAPI-016`）与 `admin-api`（值本就对、**零守门** ⇒ 补守门、不改 yml）
+  各补一条同款守门 ⇒ **三个 api 域的 Redis 超时口径归一且被钉住**。
+- **回归**：**6 组件 BUILD SUCCESS**（`admin-api` **137** · `admin-rpc` **115** · `user-api` **120** · `user-rpc` **137** · `follow-api` **65** · `follow-rpc` **78**
+  ⇒ **652 条全绿**；三个 api 各 +2 例新守门）。
+
+---
+
+## DRIFT-FOLLOW-012 ✅ follow-api 的 Redis **断连**行为与 Go 不符：命令被排队挂到 3s ⇒ **503**（Go 是 fail-open 200）🟡 **已修（2026-10-27 · G1 lane）**
+
+> 🆕 **本轮新立** ⇒ follow 域**首次**登记「Redis **断连**（≠ 挂住）」这一族差异。
+> ⚠️ 与 `DRIFT-FOLLOW-011`（超时**配置值**）**同族但不是同一条**：
+> 011 是「超时值没抄对（照抄题）」，本条是「**断连时 Lettuce 的行为**（取舍题）」——
+> 011 改 `application.yml` 两个数字即可，本条改的是 **Lettuce 的 `disconnectedBehavior`**。
+> ⚠️ 与 users 域的 `DRIFT-USERAPI-014`（user-api 同款）是**同一条**（三个 api 域的 Redis 都只服务黑名单这一处用途）。
+
+- **Component**：follow-api / 全部端点的黑名单 EXISTS（`FollowBlacklistInterceptor`）
+- **Category**：Failure Semantics / Timeout Semantics
+- **Classification**：OBSERVABLE DIFFERENCE（**条件性**：仅在「Redis 被优雅断开（FIN）」形态下可见）
+  **Risk**：MEDIUM（状态码 + 时刻都变）
+- **前提核实（两侧逐行，不是「同族大概」）**：
+  | 面 | Go（真源） | RAG | 结论 |
+  |---|---|---|---|
+  | 黑名单判据 | `service/follow/api/internal/middleware/checkblacklistmiddleware.go:40-41`<br>`exists, err := m.Redis.ExistsCtx(...)` → `if err == nil && exists { 401 }` | `FollowBlacklistInterceptor.isBlacklisted:150-156`<br>`redisTemplate.hasKey(...)` → `catch (Throwable t)` | ⇒ **两侧都是「Redis 挂了 ⇒ 判据为 false ⇒ 放行」**（fail-open）⇒ **目标形状一致** |
+  | Redis 失败耗时 | go-zero `core/stores/redis/redisclientmanager.go:32-39` 建 `red.Options` **不传任何 timeout** ＋ `maxRetries = 3`（`:18`）⇒ 连接被拒/被关时**每次重试立即失败** ⇒ **快速失败** | Boot 4 `LettuceConnectionConfiguration:209-230` **从不设** `disconnectedBehavior` ⇒ Lettuce 默认 `DEFAULT`（`DefaultEndpoint:149` / `:837-852`：`DEFAULT + autoReconnect=true ⇒ 命令排队等重连`）⇒ 挂到 `commandTimeout` | ⇒ **唯一的差别是「失败要花多久」** |
+  | HTTP 预算 | go-zero `rest/config.go:55` `Timeout int64 json:",default=3000"` | `application.yml` 的 `observability.http-timeout: 3s` | ⇒ **两侧同为 3s**（已对齐） |
+- **Difference**：Redis 被**优雅断开**时，本域的 `hasKey` 被**排队**等重连 ⇒ 挂到 `commandTimeout: 3s`
+  ⇒ **与 HTTP 预算同刻耗尽** ⇒ **503 `Request Timeout`**；
+  Go 侧快速失败（实测 ~1.7s，仍在预算内）⇒ 进业务层 ⇒ **fail-open 200** ⇒ **两侧对外形状不同**。
+- **修法**：新增**域内副本** `config/RedisDisconnectedBehaviorConfig`
+  ⇒ 把 Lettuce 的断连行为设成 `ClientOptions.DisconnectedBehavior.REJECT_COMMANDS`
+  ⇒ 断连时**立即拒命令** ⇒ 失败耗时 ≪ 3s ⇒ 进业务层 ⇒ **fail-open 200**（与 Go 同形）。
+  ⚠️ **本条只改「断连」，不改「连着但不回包」**：后者两侧**都是 503**
+  （Go 的 `ReadTimeout` 默认 3s ⇒ 同样撞预算）⇒ **两类故障分别对齐**。
+- **Evidence strength**：🟡 **L3**（**真 Redis 容器 ＋ 可控 TCP 代理制造 FIN** 的真故障注入）
+  ＋ **L1**（Go 侧源码逐行对照）
+  ⚠️ **不是 L4 双侧活体** —— Go 腿的活体对拍只在 **user-api 域**做过（2026-10-24 的 `200 / 1.72s`）
+  ⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」。
+- **守门**：`FollowApiRedisDisconnectedFastFailTest`（**2 例**，新建）——
+  ① 断连策略真被装配（读**运行时真正在用**的那份 `ClientOptions`）＋ Redis 可达时 `hasKey` 真通 ·
+  ② **真故障注入**（FIN）⇒ 断连后 `hasKey` **<1500ms** 失败
+  （预算 1500ms 落在修前 3012ms 与修后 0ms 之间，**两侧都判得开**）。
+  ⇒ 另加 `FollowApiRedisConnectTimeoutSocketTest`（**1 例**，socket 层 5s 连接超时，见 `DRIFT-FOLLOW-011`）。
+- **变异验证 2/2 变红**：把 `REJECT_COMMANDS` 改回 `DEFAULT` ⇒ 两条都红
+  （耗时实测 **3019ms** · 异常链 `QueryTimeoutException: Redis command timed out` ←
+  `RedisCommandTimeoutException: Command timed out after 3 second(s)`）。
+- **修前/修后实测**：修前 断连策略 = `DEFAULT` ＋ `hasKey` **3012ms** ⇒ 修后 `REJECT_COMMANDS` ＋ **0ms**。
+- ⚠️ **故障注入方式是这个测试的全部难点**：`container.stop()` 让容器被**强杀** ⇒ 连接收到 **RST**
+  ⇒ Lettuce 往 socket 写命令时**立刻失败** ⇒ **根本走不到** `disconnectedBehavior` 分支
+  ⇒ 两种配置的耗时都是 1~13ms ⇒ **分不出**（2026-10-24 在 user-api 域实测踩出来）。
+  ⇒ 线上真实形态是 `docker stop` ⇒ Redis **优雅退出** ⇒ **FIN** ⇒ 命令被排队。
+  ⇒ 本轮用**可控 TCP 透传代理**精确复刻：**先关监听口**（重连被拒）＋ **再对已建立连接半关闭**（发 FIN）。
+- **连带**：同批给 `admin-api` 落同款域内副本（落 `DRIFT-ADMINAPI-012`）
+  ⇒ **三个 api 域的 Redis 断连行为归一**（user-api 早有；admin-api / follow-api 本轮补）。
+  ⇒ ⚠️ **三份域内副本是过渡形态** ⇒ **共享层收编仍归 G4**（见 `users/vs-common.md` §6.4 的派单）。
+
+---
 
 ## U3 受控重测：客户端熔断 ✅ **等价**（首轮结论已撤回）
 
@@ -325,8 +497,8 @@ PITFALL-FOLLOW-011 / PITFALL-FOLLOW-012。）
 
 **根因**
 
-- Go：`rest/engine.go:146` 在 **`bindRoute` 的每条路由链里**各建一次
-  `handler.MaxConnsHandler(ng.conf.MaxConns)`；`rest/handler/maxconnshandler.go:20`
+- Go：`go-zero@v1.10.2/rest/engine.go:146` 在 **`bindRoute` 的每条路由链里**各建一次
+  `handler.MaxConnsHandler(ng.conf.MaxConns)`；`go-zero@v1.10.2/rest/handler/maxconnshandler.go:20`
   `latch := syncx.NewLimit(n)` ⇒ **每路由一个闸门**。
   ⇒ routeA 被慢请求占满时，**routeB 不受影响**。
 - RAG：`com.rag.common.protection.GoStyleMaxConnsFilter` 是 **一个全局 Semaphore**
@@ -346,9 +518,12 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 
 **现象（U1：两侧归零重测后抓 /metrics 对拍）**
 
-- Go 侧出口：`go-zero` 的 **DevServer**（`internal/devserver/server.go:79` `StartAgent`，
-  由 `zrpc/server.go:63` 的 `c.SetUp()` ⇒ `core/service/serviceconf.go:77` 触发）
-  ⇒ `http://<host>:16065/metrics`。
+- Go 侧出口：`go-zero` 的 **DevServer**（`go-zero@v1.10.2/internal/devserver/server.go:79` `StartAgent`，
+  由 `go-zero@v1.10.2/zrpc/server.go:63` 的 `c.SetUp()` ⇒ `go-zero@v1.10.2/core/service/serviceconf.go:77` 触发）
+  ⇒ `http://<host>:16064/metrics`（**api 侧 = 16064**；**rpc 侧才是 16065** —— 见 [`rpc.md`](rpc.md) 的 `DRIFT-FOLLOW-006`）。
+  ⚠️ **2026-10-27 订正**：本行原写 `16065`，那是 **follow-rpc** 的 DevServer 端口
+  （真源 `service/follow/rpc/etc/follow.yaml:23`）；**api 侧的真源是
+  `service/follow/api/etc/followcenter.yaml:28` `Port: 16064`**。
 - RAG 侧出口：`/actuator/prometheus`（`management.endpoints.web.exposure.include`）。
 
 **修前的三处差异**
@@ -419,11 +594,12 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 - 任何**按 `le` 字符串精确匹配**的查询（`le="1"`）⇒ 两侧不等价（RAG 侧匹配到 0 条）
 ⇒ ⇒ **建议把这类查询统一改成数值口径**，而不是为了它去改客户端库。
 
-⇒ **待用户拍板的点已收窄**（原表述「要不要绕过 Micrometer」过宽）：
+⇒ **~~待用户拍板的点已收窄~~**（原表述「要不要绕过 Micrometer」过宽）：
 真正的问题是「**愿不愿意让这 2 个指标脱离 Micrometer 抽象**」——
 代价：拿不到 Micrometer 的 tag 规范化 / `MeterFilter` 链 / `registry.getMeters()` 统一管理，
 且 `le` 渲染问题**依然存在**（收益只有「桶数对齐 + 去掉 `_max`」）。
-⇒ **本轮未改**（用户 2026-10-24 未拍板）。
+⇒ ~~**本轮未改**（用户 2026-10-24 未拍板）~~ ⇒ ✅ **用户 2026-10-27 拍板：不修，登记为框架限制**
+（**决策与处置全文见本文末尾「本轮未做」第 3 条**；**含复开触发条件**）。
 
 > **🧾 第二轮复核（2026-10-24 · 最全性）**：补录「逐文件对照索引」——
 > 此前「源码逐条对照（24 个 Go ↔ 27 个 Java）」这条断言**无法从台账里核对**
@@ -436,14 +612,14 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 > 约 25 条 `file:line` 引用（Go 侧 / go-zero 侧 / RAG 侧）**逐条命中**；
 > 复核中发现 5 处表述偏差已当场订正（对拍条数、文件计数、指标数值对拍状态等）。
 
-## 逐文件对照索引（27 个 Java ↔ 24 个 Go，**全量无遗漏**）
+## 逐文件对照索引（32 个 Java ↔ 24 个 Go，**全量无遗漏**）
 
 > ⚠️ 2026-10-24 复核补录：此前台账只列了「承重」文件，
 > 「源码逐条对照（24 个 Go 文件 ↔ 27 个 Java 文件）」这条断言**无法从台账里核对**
 > （**11 个类从未出现过**）⇒ 现补全索引，**每个源文件都有落点**。
 > 结论列的 ✅ 表示「该文件的行为已在双侧对照中核过」。
 
-| # | RAG 源文件（follow-api，27） | Go 对应物（follow/api，24） | 承重点 | 结论 |
+| # | RAG 源文件（follow-api，31） | Go 对应物（follow/api，24） | 承重点 | 结论 |
 |---|---|---|---|---|
 | 1 | `FollowApiApplication.java` | `followcenter.go` | main 的 8 件事逐条对应 | ✅ |
 | 2 | `config/FollowApiProperties.java` | `internal/config/config.go`（`UserAuth` 段） | `accessExpire` 本模块不读（Go 同样不读） | ✅ |
@@ -457,7 +633,7 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 | 10 | `dto/RelationActionResp.java` | `internal/types/types.go` `RelationActionResp` | 单字段 | ✅ |
 | 11 | `dto/RecommendListResp.java` | `internal/types/types.go` `RecommendListResp` | 单字段 | ✅ |
 | 12 | `dto/RecommendUser.java` | `internal/types/types.go` `RecommendUser` | **字段顺序** `target_id` 在前（DRIFT-005） | ✅ |
-| 13 | `interceptor/FollowJwtAuthInterceptor.java` | `rest/handler/authhandler.go` + `rest/token/tokenparser.go` | 验签失败 = **401 + 空 body**；`handler instanceof HandlerMethod` ⇒ 404 不被鉴权遮蔽；Bearer 前缀大小写不敏感；jjwt ≥32 字节 vs Go 不校验长度 | ✅ |
+| 13 | `interceptor/FollowJwtAuthInterceptor.java` | `go-zero@v1.10.2/rest/handler/authhandler.go` + `go-zero@v1.10.2/rest/token/tokenparser.go` | 验签失败 = **401 + 空 body**；`handler instanceof HandlerMethod` ⇒ 404 不被鉴权遮蔽；Bearer 前缀大小写不敏感；jjwt ≥32 字节 vs Go 不校验长度<br>⚠️ **2026-10-27**：**验签本体已搬进 `auth/GoStyleJwtAuthFilter`**（DRIFT-FOLLOW-010）⇒ 本类现在只**消费**验签结果 + 原样重抛 | ✅ |
 | 14 | `interceptor/FollowBlacklistInterceptor.java` | `internal/middleware/checkblacklistmiddleware.go` | key 前缀 `user:jwt_blacklist:`；fail-open；401 body 无 `data` | ✅ |
 | 15 | `advice/GlobalExceptionHandler.java` | `followcenter.go` `httpx.SetErrorHandler` | 业务错误 = **HTTP 200 + envelope**；415 分支实测不可达（OPEN-001） | ✅ |
 | 16 | `advice/GlobalResponseAdvice.java` | `followcenter.go` `httpx.SetOkHandler` | 成功 = `{code:200,msg:"OK",data:<v>}` | ✅ |
@@ -472,6 +648,11 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 | 25 | `service/GetFollowerListService.java` | `internal/logic/follow/getfollowerlistlogic.go` | 列表归一化三段序 | ✅ |
 | 26 | `service/GetBlockListService.java` | `internal/logic/follow/getblocklistlogic.go` | **归属校验**（只能查自己） | ✅ |
 | 27 | `service/GetRecommendationsService.java` | `internal/logic/follow/getrecommendationslogic.go` | **归属校验** + 推荐算法 6 条硬语义 | ✅ |
+| 28 | `auth/GoStyleJwtAuthFilter.java` | `go-zero@v1.10.2/rest/engine.go:101-113` + `go-zero@v1.10.2/rest/chain/chain.go:38-43` | 🔴 **验签搬出 3s 预算**（`@Order(+6)`，在预算的 `+7` **之外**）；**绝不写响应** ⇒ 413 仍压过 401、401 仍由 interceptor 抛（DRIFT-FOLLOW-010） | ✅ |
+| 29 | `auth/FollowJwtSignatureVerifier.java` | `go-zero@v1.10.2/rest/handler/authhandler.go:45-84` + `go-zero@v1.10.2/rest/token/tokenparser.go:81-86` | 验签本体；claim 存**原始对象**（取值判定属业务层 `helper.go:13-33` ⇒ 5004 ⇒ HTTP 200）；Bearer 前缀大小写不敏感 | ✅ |
+| 30 | `auth/FollowJwtAuthPaths.java` | `internal/handler/routes.go:16-64` | **无 public 路径**（8 端点全 protected）；Filter 与 interceptor **共用同一份**判据 | ✅ |
+| 31 | `auth/FollowJwtVerificationResult.java` | （表达层载体） | 失败带**异常对象**而非标志位 ⇒ `@ExceptionHandler` 仍管得到 ⇒ 401 空 body 形状不变 | ✅ |
+| 32 | `config/RedisDisconnectedBehaviorConfig.java` | `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:27-46`（go-redis `MaxRetries=3` ⇒ 快速失败） | 🔴 **Redis 断连 ⇒ 命令被拒而不是排队**（`REJECT_COMMANDS`）⇒ 断连时 fail-open **200** 而非 503（DRIFT-FOLLOW-012）<br>⚠️ **域内副本**（user-api 早有同款）⇒ **共享层收编归 G4**<br>🟢 **2026-10-27 订正：收编【已完成】** —— 域内副本**已删除**，共享层 `GoStyleRedisClientAutoConfiguration` 接管（见 [`users/vs-common.md` §26](../users/vs-common.md)）⇒ ⇒ **本行的「域内副本」是历史修法，不是现状** | ✅ |
 
 ## 证据强度
 
@@ -527,7 +708,7 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
    生效时不可达 + 何时会重新变成偏离 + 守住它的回归网是哪两条测试」。
 2. **DRIFT-FOLLOW-008（MaxConns 每路由 vs 全局）需派单到 `service/common`** ——
    实现位于共享模块，本域不得改（并发写会撞）。修法见该条目。
-3. **DRIFT-FOLLOW-007 的框架限制残留：拍板点已收窄，待用户定** ——
+3. **DRIFT-FOLLOW-007 的框架限制残留：拍板点已收窄，~~待用户定~~ ⇒ ✅ 已拍板（2026-10-27）** ——
    残留分三条（详见该条目）：**A 桶数并集**（Micrometer 层，可修）、
    **B `le="1.0"` 渲染**（client_java 层，**绕过 Micrometer 也修不掉**）、
    **C 多一个 `_max`**（Micrometer 层，可修）。
@@ -535,17 +716,33 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
    （`classicOnly()` + `classicUpperBounds(...)`）⇒ **收益只有「桶数对齐 12 + 去掉 `_max`」**，
    `le` 写法问题依旧，且代价是脱离 Micrometer 抽象
    （tag 规范化 / `MeterFilter` 链 / `registry.getMeters()` 统一管理都拿不到）。
-   ⇒ **本轮未改**（用户未拍板）。
+   ⇒ **本轮未改**（~~用户未拍板~~ ⇒ **用户 2026-10-27 拍板：不修**）。
    ⚠️ **对抓取侧的影响**：数值口径的 `histogram_quantile()` 两侧可用；
    **按 `le` 字符串精确匹配的查询两侧不等价** ⇒ 建议改数值口径，而不是为它改客户端库。
+   ⇒ ✅ **用户 2026-10-27 决策（登记为框架限制 · 不修）** ——
+   **决策**：**不脱离 Micrometer**，保留现框架抽象；残留**登记为框架限制**（已定性，不再是待办）。
+   **理由**（用户在选项说明里确认的取舍）：收益只有「桶数对齐 12 + 去掉 `_max`」，
+   而 `le="1.0"` **仍修不掉**（B 条在 client_java 层，绕过 Micrometer 也无解）
+   ⇒ **代价大于收益**（要付出脱离 Micrometer 抽象的长期成本，换一个改不干净的残局）。
+   **处置**：
+   ① **本域不改代码**（`FollowApiMetrics` 保持 Micrometer 实现）；
+   ② **抓取侧统一走数值口径**（`histogram_quantile()` 按数值聚合，**不要**用 `le="1"` 这类字符串精确匹配）
+   —— 这是本次决策**唯一需要落到使用侧的动作**；
+   ③ 该差异**登记在本域台账**（本条 ＋ 下方残留节）⇒ 签字档（`docs/Intentional_Deviations/`）
+   **不在 G1 写权面** ⇒ 由合并收口执行者决定是否登记。
+   ⚠️ **复开触发条件**（满足任一则重新评估）：① 监控告警/看板出现**按 `le` 字符串精确匹配**的真实查询
+   ⇒ 直接观测到不等价；② Micrometer 或 prometheus client 换版本后 `le` 渲染或桶并集行为变化
+   ⇒ 需重测；③ 本仓统一改用 OpenMetrics 暴露格式（`quantile` 可用）⇒ 需重新比较两侧语义。
 4. **DRIFT-FOLLOW-006（follow-rpc 指标无出口）：用户 2026-10-24 定 ⇒ 本轮不落地**，
    转「**全仓 rpc 层统一方案**」交主会话拍板（调查结论见 `docs/DRIFT/follow/rpc.md`）。
 5. 🔴 **共享索引已过时 ⇒ 交主会话更新**（`AGENTS.md:32` 与 `docs/DRIFT/_INDEX.md:32,85`
    仍写 follow「零台账 / 仅 proto 层」）—— 详见 [`rpc.md` 的待办 6](./rpc.md)。
-6. `follow-api` **没有 `spring-boot-maven-plugin`** ⇒ 打不出可执行 fat jar，
-   只能用 `java -cp <runtime classpath> <MainClass>` 启动。
-   与 `article-api` / `comment-api` / `hot-api` / `like-api` / `message-api` / `task-api` 同款
-   （只有 `favorite-api` 有）⇒ 属**打包形态**问题，不是 Go↔RAG 语义漂移，**未改动**。
+6. ~~`follow-api` **没有 `spring-boot-maven-plugin`** ⇒ 打不出可执行 fat jar~~
+   —— ✅ **已修**（2026-10-25 · 见本文件末尾「2026-10-25 补记」节：`DRIFT-MSG-V-030` 的**域内部分**）：
+   `service/follow/follow-api/pom.xml:173-178` **已有 `<build>` 段 ＋ `spring-boot-maven-plugin`**
+   ⇒ 本模块产物**已是可执行 fat jar** ⇒ **本条为过期待办**，保留原文供追溯
+   （当时其余 6 个 api 模块仍缺，是 `article-api` / `comment-api` / `hot-api` / `like-api` /
+   `message-api` / `task-api` 的同款缺口 ⇒ **属他域，G1 不动**）。
 7. ⚠️ **故障注入装置应从 `/tmp` 提升为仓库资产** —— 本轮 U3/U4 的结论**反转了两次**，
    根因都是**装置不对**（黑洞不完成 HTTP/2 握手 / etcd 前缀下多个键 / 探针固定 `-o` 文件）。
    ⇒ 建议把下面三个脚本固化进 `tools/difftest/fault-harness/`（**本轮未做**，
@@ -585,4 +782,221 @@ Go 侧不会 —— 这是**并发行为层面的真实差异**，不是表述�
 **从来没有碰过 jar 本身**（这正是 §3.3「编译通过 ≠ 产物可运行」的形态）。
 ⇒ **判据是守门脚本**：`tools/difftest/check-jar-executable.sh`
 （逐个 api 模块解包 `META-INF/MANIFEST.MF` 看 `Main-Class`）
+
+---
+
+## 11. 🆕 `DRIFT-FOLLOW-010` 的**实施记录**（2026-10-27 · G1 lane · 跨服务推广）
+
+> **元信息**：落码分支 `align/g1-users-follow`（基线 `a282012` = `do-my-own-gh`）·
+> **写权内**（全部落 `service/follow/follow-api/**`）·
+> **证据强度**：**双侧活体成立，但两侧判据强度不对称** —— ⚠️ **不笼统写「L4」**（据 G2 回执的建议 · 2026-10-27 订正）：
+> **Go 腿 = L4 活体 · 直接判据**（G2 建的探针 `/tmp/goprobe/probejwt/main.go`，**本域已独立复跑**，三腿全中 ⇒ 见 [`users/user/api.md` §9.y.0](../users/user/api.md)）·
+> **RAG 腿 = L3 真 Tomcat · 间接判据**（**真 Tomcat**，10 条探针：行为层 401/413/404 的真实响应形状 ＋ 装配层 Filter 链实际排序 —— **RAG 侧没有等价的 ctx-deadline 观测点** ⇒ 只能由行为与装配反推）＋ **L2 装配层守门**
+> ⇒ ⇒ **合并判据强度按弱侧记 = L3（弱侧口径）**；**只有 Go 腿单独是 L4** ⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」。
+> ⚠️ **两次独立运行**（Go 腿与 RAG 腿不在同一次编排里）⇒ 比的是**属性**（「验签是否计入 3s 预算」），**不是逐字节 diff**。
+> ⚠️ **未跑「同一套请求矩阵逐字节对拍」** ⇒ 按 AGENTS.md §0，读作「**在该证据强度下一致**」。
+>
+> ⚠️ **本条是 follow 域首次登记这一族差异** —— 推广 user-api 的 `DRIFT-USERAPI-009②` 时**顺手查出**。
+> ⚠️ 与 user-api 那条**同族但不是同一条**（编号各自独立）。
+
+### 11.1 Go 侧链序（逐行核实 · 真源 `service/follow/api/`）
+
+```
+service/follow/api/followcenter.go:40-42
+  httpTimeout := observability.DisableNativeRestTimeout(&c.RestConf)
+  server := rest.MustNewServer(c.RestConf)
+  server.Use(observability.NewHTTPMiddleware(c.Name, httpTimeout, observability.SlowThreshold()))
+  ⇒ observability 是**唯一**的 user middleware
+go-zero@v1.10.2/rest/engine.go:101-113   bindRoute：buildChainWithNativeMiddlewares → appendAuthHandler(JWT)
+                                          → ng.middlewares(observability) → chn.ThenFunc(route.Handler)
+go-zero@v1.10.2/rest/chain/chain.go:38-43 Append = 「加在请求流的最后」⇒ 越 Append 越靠内
+go-zero@v1.10.2/rest/server.go:222-233    WithMiddleware ⇒ middleware(route.Handler) ⇒ 黑名单最内层
+⇒ 执行序：原生中间件 → **Authorize(JWT)** → **observability(3s 计时)** → **黑名单** → handler
+⇒ 3s 计时器在 Authorize **之后**起算 ⇒ **JWT 验签耗时不计入 3s 预算**
+```
+
+⚠️ 附带一条**前提不能漏**：Go 的 native `TimeoutHandler` 被 `DisableNativeRestTimeout` 关掉了（`followcenter.go:40`）
+⇒ 3s **只**由 observability 提供 ⇒ 「验签在预算之外」才有意义。
+⇒ Go 侧 `follow/api/internal/handler/routes.go:16-64`：**8 个端点全 `WithJwt` + `WithMiddlewares(黑名单)`**
+⇒ **无 public 路径** ⇒ follow 域的 `FollowJwtAuthPaths` 因此**没有 public 集合**。
+
+### 11.2 落点窗口与共享层槽位（`service/common` **只读** · 2026-10-27 重算）
+
+| `@Order` | Filter | 作用 | 出处 |
+|---|---|---|---|
+| **+2** | 🆕 `GoStylePathNormalizingFilter` | Go 的 `path.Clean` 路径归一（G4 `9690b04`）⇒ ⚠️ **只包装 request、不短路、不产生响应头** ⇒ **在 3s 预算起点（+7）之前 ⇒ 不进预算** | ⚠️ **该文件不在我树**（`9690b04` 不在 `do-my-own-gh`）⇒ **合入主干后适用** |
+| **+3** | `GoStyleTraceparentFilter` | 起 SERVER span | `GoStyleTraceparentFilter.java:190` |
+| **+4** | `GoStyleMaxConnsFilter` | 连接数闸门 | `GoStyleMaxConnsFilter.java:96` |
+| **+5** | `GoStyleBreakerFilter` | 熔断 | `GoStyleBreakerFilter.java:77` |
+| **+6** | `GoStyleCpuSheddingFilter` | CPU 降载 | `GoStyleCpuSheddingFilter.java:63` |
+| **+7** | `HttpMiddlewareFilter` | **3s 预算起算点** | `HttpMiddlewareFilter.java:37` |
+| **+8** | `GoStyleMaxBytesFilter` | 请求体上限 | `GoStyleMaxBytesFilter.java:83` |
+
+⇒ **合法窗口 `[+3,+6]`** —— 四个槽位（+3/+4/+5/+6）**全被共享层占满** ⇒ 只能**并列** ⇒ 落 **+6**。
+⇒ **并列无害**：本 Filter **绝不写响应** ⇒ 与并列者的先后**不改变任何响应**。
+⇒ ✅ **G4 2026-10-27 13:2x 槽位回执独立复核**：共享层在 **G4 分支**上是 **7 个** Filter（**+2** 由 `9690b04` 引入）⇒ ⇒ **「6 vs 7」是代码态差，不是本域漏数** ⇒ ⇒ **本域「+6 必须 < +7」的推导不受影响**（+2 在区间外）⇒ ⇒ **但合入主干后本域的重排清单必须把 +2 一并算进去**（`PathNormalizing` 不短路、不产生响应头 ⇒ 影响可控，但仍是「被刻意排在那儿」的）。
+⇒ ⚠️ **跨树行号会漂**：G4 树 `HttpMiddleware.java` 的 `begin`/`clear` 在 `:324`/`:356`，**我树是 `:304`/`:336`**（差 20 行）⇒ ⇒ **凡引他树 `文件:行号` 必须同写该树的 commit id**。
+
+### 11.3 ✅ 实际落地的形态：**「Filter 只验签、interceptor 抛异常」**
+
+```
+[Traceparent +3] → [MaxConns +4] → [Breaker +5] → [CpuShedding +6] → [★ JWT 验签 +6]
+   → [3s 预算 +7] → [MaxBytes +8] → DispatcherServlet → [FollowJwtAuthInterceptor：抛 401] → Controller
+```
+
+| 新增/改动 | 落点 | 职责 |
+|---|---|---|
+| `auth/FollowJwtAuthPaths.java` | follow-api | protected 前缀判据（**无 public 路径**；**Filter 与 interceptor 共用同一份**） |
+| `auth/FollowJwtVerificationResult.java` | follow-api | 验签结果载体（**claim 存原始对象** + 失败带**异常对象** ⇒ `@ExceptionHandler` 仍管得到 ⇒ **401 空 body** 逐字不变） |
+| `auth/FollowJwtSignatureVerifier.java` | follow-api | 验签本体（**只验签，不写响应、不查 Redis**；含 `public static unauthorized()` = `AuthenticationException(5004)`） |
+| `auth/GoStyleJwtAuthFilter.java` | follow-api | `@Order(+6)`：**只验签、只写 request attribute、绝不写响应** |
+| `interceptor/FollowJwtAuthInterceptor.java`（改） | follow-api | 消费 Filter 的验签结果 → 失败**原样重抛** → **保留 `handler instanceof HandlerMethod` 判据**（未匹配路径仍 404） |
+| `interceptor/FollowBlacklistInterceptor.java` | follow-api | **完全不动**（黑名单是**另一个** interceptor ⇒ 本轮不碰） |
+
+⇒ **② 闭环**：验签发生在 3s 预算**之外** ⇒ 与 Go 一致。
+⇒ **① 不变**：401 仍由 interceptor 抛 ⇒ 仍在 `HttpMiddlewareFilter` **之内**。
+⇒ ⚠️ **follow 域的 401 是空 body**（不是 admin/user 的完整信封）⇒ **本轮刻意不统一**。
+
+### 11.4 ✅ 真启动复验（**真 Tomcat** · 2026-10-27 · L3 活体）
+
+环境：真 PG `127.0.0.1:56432/g1probe` + 真 Redis `57379` + 真 Nacos `8848`（`G1_GROUP`）+
+`user-rpc` / `admin-rpc` / `follow-rpc` / `admin-api` / `follow-api` **五个进程全部真起**
+（**follow-rpc 5.651s · follow-api 6.998s**）。
+⚠️ **必须先起 rpc、等就绪，再起 api** —— api 侧对 rpc 有 `immediate-connect-timeout: 3s`
+⇒ rpc 没 READY 就起 api ⇒ api 必然起不来（本轮实测踩到：`Can't connect to channel admin-rpc`）。
+
+| # | 探针 | 实测 | 判定 |
+|---|---|---|---|
+| 6 | follow 无 token（`/follow/v1/follow/list`） | **HTTP 401** + **空 body** | ✅ follow 域特有的 401 空 body **逐字不变** |
+| 7 | follow 合法 token | **HTTP 200** + `{"code":5101,"msg":"user not found"}` | ✅ **不是 401** ⇒ 验签通过、进到业务层 |
+| 8 | follow 坏签名 | **HTTP 401** + 空 body | ✅ |
+| 9 | follow 超限 body + 无 token | **HTTP 413** + **空 body** | ✅ **413 压过 401**（响应头层，MockMvc 测不到） |
+| 10 | follow 未注册路径 | **HTTP 404** + `text/plain` `404 page not found` | ✅ **不被鉴权遮蔽** ⇒ `HandlerMethod` 判据保留 |
+
+⇒ **follow 侧 5/5 符合预期**（admin 侧 5 条见 [`users/admin/api.md` §12.6](../users/admin/api.md)）。
+⇒ 日志里除**预期内**的 `AuthenticationException code=5004` 与业务错误码外无异常。
+
+⇒ **6 组件回归**：`follow-api` **63**（56 既有 ＋ 7 新增守门）· `follow-rpc` **78** · `admin-api` **135** · `admin-rpc` **115** · `user-api` **118** · `user-rpc` **137**
+⇒ **646 条全绿**（`BUILD SUCCESS`，5:48）。
+
+### 11.5 ⚠️ 残余差异（如实登记，**不冒充已对齐**）
+
+1. **JWT 验签与过载保护的相对次序**：RAG 的验签 Filter 与 `CpuShedding`(+6) **并列**
+   ⇒ 并列落在 Shedding 之前时**多做一次无用验签** ⇒ **不改变任何响应**（只多一次 HMAC 计算，wire 面零影响）。
+2. **`@Order` 并列的确定性**：+6 已被 `GoStyleCpuSheddingFilter` 占用 ⇒ Spring 对**同值**按 bean 定义注册顺序稳定排序
+   ⇒ 本轮实测装配结果满足「JWT 在预算之前」（+6 **严格小于** +7 ⇒ 与并列者的先后**无关**）。
+3. **未注册路径也会做一次验签**（Filter 在路由匹配**之前**运行）⇒ 但 Filter **不写响应** ⇒ 最终仍是 404 ⇒ **零响应差异**。
+4. **①（401 计入观测面）仍在** ⇒ 本条**不销号**。
+5. **follow 侧的 claim 语义与 user 侧不同**（畸形 claim 交业务层 ⇒ 5004 / HTTP 200，claim 存**原始对象**）
+   ⇒ **各域 verifier 语义刻意不统一**（本轮**不**趁机跨域「修好」）。
+
+### 11.6 🟡 跨服务推广状态（2026-10-27）
+
+| 服务 | 属哪个 lane | 本轮状态 |
+|---|---|---|
+| `user-api` | **G1** | ✅ 已修（提交 `49c298e`） |
+| `admin-api` | **G1** | ✅ **本轮已修**（见 [`users/admin/api.md` §12](../users/admin/api.md)） |
+| `follow-api` | **G1** | ✅ **本轮已修**（本节） |
+| `like-api` / `message-api` | **G2** | 🟡 待推广 |
+| ~~`task-api`~~ | ~~G2~~ | ❌ **N/A · 本条不适用**（**2026-10-27 由 G2 指出 · 本域已独立核实**）：Go 侧 `service/task/api/internal/handler/routes.go` **零 `rest.WithJwt`**、单块 `AddRoutes`、唯一端点 `POST /taskcenter/v1/task/get`；RAG 侧 `service/task/task-api` **无 `WebMvcConfig`、无任何 `*Jwt*`/`*Auth*`/`*Interceptor*` 类** ⇒ **两侧都没有验签环节 ⇒ 不存在这条漂移** |
+| `article-api` / `comment-api` / `favorite-api` | **G3** | 🟡 待推广 |
+| ~~`hot-api`~~ | ~~G3~~ | ❌ **N/A · 本条不适用**（**2026-10-27 由 G3 指出 · 本域已独立核实**）：Go 侧 `service/hot/api/internal/handler/routes.go` **零 `rest.WithJwt`**、单块 `AddRoutes`、唯一端点 `GET /hot/v1/articles`；RAG 侧 `service/hot/hot-api` **无 `WebMvcConfig`、无任何 `*Jwt*`/`*Auth*` 类** ⇒ **两侧都没有验签环节 ⇒ 不存在这条漂移**（热榜本就该匿名读） |
+
+⇒ **推广前必查每个域自己的三个数**：路径前缀（⇒ `JwtAuthPaths` 常量）· public 路径集合 · **401 body 形状**（follow = 空 body；admin/user = 完整信封 —— **不要统一**）。
+⇒ **配方全文** ⇒ [`users/user/api.md` §9.y §7](../users/user/api.md)。
+⇒ **🆕 G3 三域逐域注记（G3 回执 · 2026-10-27）**：`favorite-api` 401 = 三字段信封（已签字 `DEV-FAV-API-001`）＋ 有黑名单 ＋ 已有真 Tomcat 守门 ⇒ **验收成本最低**；
+`comment-api` 401 = 空 body ＋ 无黑名单 ＋ 全保护；`article-api` 401 = 空 body ＋ 无黑名单 ＋ 受保护路径 = `PROTECTED_ROUTES`(4 条，已 EQUIVALENT)；
+⇒ 后两域**无真 Tomcat 测试** ⇒ 「413 压过 401」这层**只能新写真 Tomcat 用例**才测得到。
+⇒ **🆕 G2 两域逐域注记（G2 回执 · 2026-10-27）**：`like-api` / `message-api` **均无 public 路径**（Go 6 + 13 条路由 100% 带 `WithJwt`）⇒ Filter 的 protected 判据**就是前缀本身**；
+🔴 **`message-api` 有两把 key**（8 条 `/message/v1/**` 用 UserAuth secret、5 条 `/message/v1/admin/**` 用 AdminAuth secret）⇒ Filter **必须按路径分派 key** ⇒ 直接抄「一把 key」会验错。
 ⇒ **2026-10-25 实测 `EXIT=0`**（修前 `EXIT=1`）。
+
+---
+
+## 12. 🆕 `DRIFT-FOLLOW-012` 的**实施记录**（2026-10-27 · G1 lane · 域内自闭环）
+
+> **元信息**：落码分支 `align/g1-users-follow` · **写权内**（`service/follow/follow-api/**`）·
+> **证据强度**：🟡 **L3 真容器活体**（真 Redis 容器 ＋ **可控 TCP 代理制造 FIN**）＋ **L1 Go 侧源码**
+> ⚠️ **不是 L4 双侧活体**（Go 腿的活体对拍只在 user-api 域做过）⇒ 按 AGENTS.md §0 记「在该证据强度下一致」。
+
+### 12.1 落码清单（**全部在 G1 写权内**）
+
+| 文件 | 性质 | 说明 |
+|---|---|---|
+| `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/config/RedisDisconnectedBehaviorConfig.java` | 🆕 **新增**（主代码）· ⚠️ **已于 Redis 收编轮【删除】** | 把 Lettuce 的 `disconnectedBehavior` 设成 `REJECT_COMMANDS` |
+| `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiRedisDisconnectedFastFailTest.java` | 🆕 **新增**（守门 · 2 例） | 真故障注入（FIN）⇒ 断连后 `hasKey` <1500ms 失败 |
+| `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiRedisConnectTimeoutSocketTest.java` | 🆕 **新增**（守门 · 1 例） | socket 层 5s 连接超时（黑洞 IP ＋ `timeout` 覆盖成 30s） |
+| `service/follow/follow-api/pom.xml` | ✏️ **改** | 🆕 补 `org.testcontainers:testcontainers` ＋ `testcontainers-junit-jupiter`（**test 作用域**）—— 本域原先**没有** testcontainers（user-api / admin-api 有）⇒ 断连守门需要真 Redis 容器。版本由 `spring-boot-starter-parent` 管理，**不写 `<version>`** |
+| `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiRedisTimeoutConfigTest.java` | ✏️ **改**（仅 javadoc） | 把「socket 层那截仍记 UNRESOLVED」改成「已由 `FollowApiRedisConnectTimeoutSocketTest` 收口（实测 5175ms）」 |
+
+⚠️ **零改动**：本域 `application.yml` **一个字没动**（`timeout: 3s` / `connect-timeout: 5s` 上一轮已对齐）·
+`FollowBlacklistInterceptor` / `FollowJwtAuthInterceptor` / `auth/*` 全部不动（黑名单仍 fail-open、401 形状不变）。
+
+### 12.2 修前 → 修后（**实测数字**）
+
+| 项 | 修前 | 修后 |
+|---|---|---|
+| Lettuce 断连策略 | `DEFAULT`（`expected: <REJECT_COMMANDS> but was: <DEFAULT>`） | `REJECT_COMMANDS` |
+| 断连后 `hasKey` 耗时 | **3012ms**（挂到 `commandTimeout: 3s`）⇒ 撞 HTTP 3s 预算 ⇒ **503** | **0ms** ⇒ 进业务层 ⇒ **fail-open 200** |
+| 异常链 | `QueryTimeoutException: Redis command timed out` ← `RedisCommandTimeoutException: Command timed out after 3 second(s)` | `RedisException: Currently not connected. Commands are rejected.` |
+| socket 层连接超时 | — | 实测 **5175ms**（`connect-timeout: 5s` 真在 socket 层生效） |
+
+### 12.3 变异验证（**绿测试必须是错误答案的守卫**）
+
+| # | 变异 | 结果 |
+|---|---|---|
+| ① | `REJECT_COMMANDS` → `DEFAULT`（本域） | 🔴 **红** —— 两条都红，耗时实测 **3019ms** |
+| ② | 摘掉 `connect-timeout: 5s`（本域） | 🔴 **红** —— `expected:<PT5S> but was:<PT10S>`（Lettuce 默认值） |
+
+⇒ **同批在 admin-api / user-api 上各做一次同款变异**（4/4 全红）⇒ 见
+[`users/admin/api.md` §13.4](../users/admin/api.md) 的 5/5 汇总表。
+
+⇒ **回归（2026-10-27 本轮收口）**：**6 组件 BUILD SUCCESS**，逐模块取自 `target/surefire-reports/TEST-*.xml`（**按模块聚合，不是按行序 tail**）：
+`user-api` **121**（上轮 120 · +1）· `user-rpc` **137** · `admin-api` **140**（上轮 137 · +3）· `admin-rpc` **115**
+· `follow-api` **68**（上轮 65 · +3）· `follow-rpc` **78** ⇒ **合计 659**（上轮 652 · **+7**）⇒ **Failures 0 / Errors 0**。
+⇒ **守门 5/5 EXIT=0**（`check-wave-lane-ownership` · `check-wave-role-model` · `check-wave-coupling` · `check-ledger-count` · `check-doc-links`）。
+⇒ ⚠️ **本轮回归的一次偶发（留痕，不掩盖）**：第一次 6 组件回归里 `FollowApiStartupFailFastTest.startsWithGlobalClientInterceptor`
+红过一次（cause = devh `connectOnStartup` 的「Can't connect to channel follow-rpc」⇒ **本地** channel 3s 内没到 READY）；
+**该测试与本轮改动无耦合面**（它测 gRPC 拨号，本轮改 Redis）。
+⇒ **归因取证（2026-10-27 · 用 surefire 报告的 mtime 还原并发时间线）**：
+· **05:25~05:45 窗口内四棵工作树全有 surefire 报告产出** ⇒ **4 个 maven 并发**（`g1` 16 份 · `g2` 81 份 · `g3` 29 份 · `g4` **256** 份）
+· **G4 的全量回归 05:30~05:46 逐分钟都有报告** ⇒ 与我的第一次回归窗口 **05:32:16~05:38:02 完全重叠**
+· 但**并发不是充分条件**：我的 3 次单独重跑（**05:40:17 / 05:41:09 / 05:42:02，G4 当时仍在跑**）**全绿**
+· 第二次 6 组件回归（05:42~05:50:52）⇒ **EXIT=0 · 659 全绿**
+⇒ **结论（诚实口径）**：**诱因高度可疑 = 并发 lane 回归的资源争抢**（与 G4 同窗口那次 `EXIT=137` 的 OOM-kill **同源**）
+⇒ **未做受控复现**（要复现得故意再开 4 个并发回归，代价过高）⇒ 记为「**偶发 · 诱因高度可疑 · 未受控复现**」，
+**不写成「已修」**；⇒ **但也不是本轮改动引入**（改动面 = Redis，红的是 gRPC 拨号；变异 5/5 变红证明守门有效；第二次全量 EXIT=0；同窗口 3 次单独重跑全绿）。
+⇒ **⇒ 落到一条通用纪律**（AGENTS.md §4.1「大回归错峰」不是形式主义）：**多 lane 并发时看到「本地连接/拨号超时」类偶发，先查别的 lane 的 maven 进程列表，别当代码问题**。
+⇒ 另：已给本轮新守门补**收尾卫生**（socket 守门 `@DirtiesContext(AFTER_CLASS)` 关 Lettuce 客户端；断连守门 `@AfterAll` 关 TCP 代理线程池）⇒ 消掉本域唯一可能与后续测试抢资源的路径。
+⇒ 📌 **同款现象 G2 侧也有**（`message-rpc` 的 `MessageRpcSlowThresholdGateTest` 全量并发下偶发 `UNAVAILABLE` ⇒ 已登记 `DRIFT-MSG-V-032`）⇒ **两边同族**。
+
+### 12.4 ⚠️ 效力边界（如实登记）
+
+1. **不是 L4**：Go 腿是**源码逐行对照**，不是本域活体对拍 ⇒ 记 **L3 + L1**
+2. **只覆盖「断连（FIN）」**：RST 形态（容器被强杀）**测不出**、也不构成漂移（那条路径两侧都快速失败）
+3. **只覆盖黑名单读路径**：follow-api 的 Redis **只有黑名单这一处用途**（`FollowBlacklistInterceptor:154`）
+   ⇒ 本条覆盖了 follow-api 的**全部** Redis 故障面
+4. **域内副本是过渡形态**：共享层收编仍归 G4 ⇒ G4 落码后要回来删这三份副本
+5. ⚠️ **follow 的黑名单 key 前缀是 `user:jwt_blacklist:`**（**不是** follow 自己的）
+   —— Go `checkblacklistmiddleware.go:39` 的原样 ⇒ 与 user-rpc 的登出写入端**共用一份**黑名单
+   ⇒ 本域的 Redis 依赖面**跨域**，改前缀会同时影响 user 域 ⇒ **未动**。
+
+
+---
+
+## 🔴 `DRIFT-FOLLOW-013` · **「OS 盲选口」族** · 本组件 **2 处**（2026-10-28 · G1 lane）
+
+> 📌 **机制 / 本机实测（Q3·Q6·Q7·Q8）/ 守门细节 / 效力边界 ⇒ [`docs/DRIFT/users/vs-common.md` §65](../users/vs-common.md)**
+> ⇒ 本条只记**本组件那一份**（不抄机制表，避免两处漂移）。
+
+| 族 | 位置（**改造后**行号） | 状态 |
+|---|---|---|
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `FollowApiStartupFailFastTest.java:92` | 已改 |
+| A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `FollowApiStartupFailFastTest.java:258` | 已改 |
+
+- **危害**：`forPort(0)` / `new ServerSocket(0)` / `RANDOM_PORT` 三种写法都是**让 OS 从临时端口段（49152–65535）里盲选** ⇒ ⇒ 与 Docker 随机发布口**同段**
+  ⇒ ⇒ 邻居占**更具体地址** `127.0.0.1:P` 时我方**通配绑定照样成功**（实测：两个监听者并存）⇒ ⇒ 客户端被抢 ⇒ **静默假红**（看着像被测代码炸了，其实压根没被请求到）。
+- **修法**：全部改走**域内私有** `support/RealGrpcPort`（`support/RealTomcatPort`）⇒ **段**：`22300–22319`（follow 域段的子段）⇒ 段内挑口 ＋ **双地址 bind 探针**（只探通配**检不出**「更具体的占用者」）。
+- **段来源**：共享层已预分配给本域的段（`docs/DRIFT/global/vs-common.md` §4.10.19.3）⇒ **共享层台账零改动**（写权归 G4）。
+- **守门**：域级 `BlindPortGateTest`（落在 **user-rpc**，`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/BlindPortGateTest.java`）**5 条** ⇒ 一并覆盖本组件 ⇒ **本组件不单独建守门**（避免两份规则漂移）。
+- **边界**：**本组件生产代码零改动**（全部落在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项**（Go 侧无对应物 ⇒ 无对照义务）。

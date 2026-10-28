@@ -25,11 +25,13 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static com.rag.users.admin.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * admin-rpc 真实 Spring 容器 + 真实 PostgreSQL 集成测试（issue #71186443）。
@@ -85,7 +87,7 @@ class AdminRpcContainerWiringTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("admin_rpc_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
@@ -487,6 +489,73 @@ class AdminRpcContainerWiringTest {
     })
     static class CorrectPlusWrongMountVariant {
         // 故意留空：它只需要「类型 + 挂载点」这个形状
+    }
+
+    // ==================================================================
+    // MP 排序桥（2026-10-27 · 共享层收编后新增）
+    // ==================================================================
+
+    /**
+     * <b>防回归：MP 排序桥必须由<b>共享层</b>那份提供（域内副本已删），且排序边真的生效。</b>
+     *
+     * <h2>为什么需要这条（AGENTS.md §3.3.3）</h2>
+     * <p>Boot 4 把 {@code DataSourceAutoConfiguration} 挪到了
+     * {@code org.springframework.boot.jdbc.autoconfigure}，而 MyBatis-Plus 声明的排序引用
+     * 还指着 Boot 3 的包名 ⇒ <b>静默悬空</b>（Boot 找不到这个类名 ⇒ <b>不报错</b>）
+     * ⇒ ⇒ 随后按 imports 的字母序求值：{@code com.baomidou.*} 在 {@code org.springframework.*} 之前
+     * ⇒ ⇒ MP <b>先跑</b> ⇒ {@code @ConditionalOnSingleCandidate(DataSource)} 此时找不到任何
+     * DataSource bean ⇒ <b>整个 MP 自动配置不生效</b> ⇒ 不产出 {@code SqlSessionFactory}
+     * ⇒ ⇒ mapper 报 {@code Property 'sqlSessionFactory' or 'sqlSessionTemplate' are required}。
+     *
+     * <p><b>这个失效面是「静默」的</b>：注解写对了、编译通过、上下文也可能起得来，
+     * 只有 mapper 第一次执行时才炸 ⇒ 必须有一条<b>运行期</b>判据钉住它。
+     *
+     * <h2>本判据分三层，逐层加码</h2>
+     * <ol>
+     *   <li><b>注册层</b>：classpath 上<b>全部</b>同名 {@code AutoConfiguration.imports} 资源里，
+     *       至少一份含共享层那份的 FQN
+     *       —— ⚠️ 原先用 {@code getResourceAsStream} 取<b>第一份</b>同名资源，
+     *       而 classpath 上可能有<b>多份</b> ⇒ <b>命中哪份取决于 classpath 顺序</b> ⇒ 判定不确定
+     *       ⇒ 改为遍历<b>全部</b>同名资源、断言「至少一份含目标行」⇒ 与清单份数<b>解耦</b>。</li>
+     *   <li><b>域内那份必须真的没了</b>：否则收编等于没做（全仓两份桥同时注册）。</li>
+     *   <li><b>机制层（最强）</b>：运行期证明排序边真的生效 —— MP 的 {@code SqlSessionFactory}
+     *       真的产出了（若排序边没建立，MP 早于 DataSource 求值 ⇒ 整个 MP 自动配置不生效
+     *       ⇒ <b>上下文根本起不来</b> ⇒ 本类其余用例连带失败）。</li>
+     * </ol>
+     *
+     * <p>⚠️ <b>与共享层那份的关系</b>：共享层那份用
+     * {@code afterName = "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration"}
+     * ＋ {@code beforeName = "com.baomidou.mybatisplus.autoconfigure.MybatisPlusAutoConfiguration"}
+     * （<b>字符串</b>形式 ⇒ 对「没有 MyBatis-Plus」的消费者结构性安全），
+     * 域内原副本用类字面量形式 ⇒ <b>指向同一对节点</b> ⇒ 排序图上<b>同向等价</b>
+     * ⇒ ⇒ 删除域内那份<b>不产生任何行为差</b>。
+     */
+    @Test
+    @DisplayName("防回归：MP 排序桥由共享层那份提供（域内副本已删），且排序边真的生效")
+    void mybatisOrderingBridgeMustBeProvidedBySharedLayer() throws Exception {
+        // ① 注册层：classpath 上全部同名 imports 资源里，至少一份含共享层那份
+        List<String> all = new ArrayList<>();
+        java.util.Enumeration<java.net.URL> resources = getClass().getClassLoader()
+                .getResources("META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports");
+        while (resources.hasMoreElements()) {
+            java.net.URL url = resources.nextElement();
+            all.add(new String(url.openStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+        }
+        assertFalse(all.isEmpty(), "classpath 上找不到 AutoConfiguration.imports ⇒ 断言无意义");
+        assertTrue(all.stream().anyMatch(s -> s.contains(
+                        "com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration")),
+                "排序桥未注册 ⇒ Boot 4 下 MyBatis-Plus 早于 DataSource 求值 ⇒ 整个 MP 自动配置不生效 ⇒ "
+                        + "mapper 报 sqlSessionFactory 缺失。实测读到的清单：" + all);
+
+        // ② 域内那份必须真的不在 classpath 上（类文件已删 ⇒ 加载失败）
+        assertThrows(ClassNotFoundException.class,
+                () -> Class.forName("com.rag.users.admin.rpc.config.MybatisPlusOrderingBridgeAutoConfiguration"),
+                "域内那份排序桥还在 ⇒ 收编没做 ⇒ 全仓会有两份桥同时注册，"
+                        + "共享层那份后续的改动在本域会静默不生效");
+
+        // ③ 机制层：MP 真的产出了 SqlSessionFactory（排序边真的生效）
+        assertNotNull(sqlSessionFactory,
+                "容器里没有 SqlSessionFactory ⇒ MP 自动配置没生效 ⇒ 排序边没建立（桥没被注册或没被消费）");
     }
 
     // ==================================================================

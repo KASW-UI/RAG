@@ -43,6 +43,7 @@ import java.util.function.Consumer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static com.rag.users.user.rpc.support.GoStyleHostPortPinning.pinContainerPort;
 
 /**
  * 🔴 user-rpc 的 **gRPC status description** 逐条对齐 Go 真源原始字节（N-2 守门）。
@@ -130,7 +131,7 @@ class UserRpcGoErrorMessageParityTest {
             new PostgreSQLContainer<>("postgres:16-alpine")
                     .withDatabaseName("users_rpc_wire_parity_it")
                     .withUsername("rag")
-                    .withPassword("rag");
+                    .withPassword("rag").withCreateContainerCmdModifier(cmd -> pinContainerPort(cmd, 5432));
 
     @DynamicPropertySource
     static void datasource(DynamicPropertyRegistry r) {
