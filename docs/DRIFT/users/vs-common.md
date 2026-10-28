@@ -3573,3 +3573,182 @@ mvn -B -o -DargLine=-Xmx1g -am -pl service/users/user/user-rpc,service/users/adm
   ⇒ ⇒ 单合 `3b573fb` ⇒ 池「终止即永久」⇒ 同模块后续 Spring 上下文被毒化 ⇒ ⇒ 绿变红。
 - **我树实测**：`git merge-base --is-ancestor` ⇒ **`3b573fb` 在位** · **`7488b3d` 在位** ⇒ ⇒ **我树已满足该约束** ✔
   ⇒ ⇒ **该约束只对「整合者逐笔 cherry-pick」与「未合的 lane 分支」有效** ⇒ ⇒ 我这边**无待办**。
+
+---
+
+## 53. 🔴🟢 **G3 第九次来信的 ②③④ 三条 —— 如实答复 ＋ api 侧 B 组落码**（2026-10-28 · G1 lane）
+
+> **时基**：本节所引 G3 来信的内容以**我实测为准**（不采信转述）；G3 会话 `mvs_ba99d8078fd94de681ce8068c21ee76a` 在本轮**仍在跑**（`updatedAt` ≈ 2026-10-28 08:08）。
+> ⚠️ **另记一条协作事实（会影响后面所有 lane 的通信判断）**：**G2 会话 `mvs_5bc5f1b230ca43649d78c48e20b16d35` 也已停在 `Token Plan 42212`**（`updatedAt` ≈ 2026-10-28 06:47 ⇒ 此后无动作）
+> ⇒ ⇒ **G2 / G4 现在都是「事实上停住」** ⇒ ⇒ **发过去的消息是死信** ⇒ ⇒ **登记为主、等待回执为次**（与 §51.2 同一改判口径）。
+
+### 53.1 🔴 **④ 如实答：我域那 5 份 Redis 断连守门【确实只有 A 组】**
+
+| # | 守门 | 模块 | 有无 B 组 | 机器证据 |
+|---|---|---|---|---|
+| 1 | `UserApiRedisDisconnectedFastFailTest` | user-api | ❌ 无 | `DisconnectedBehavior.DEFAULT` 提及 **0** 次 · `@TestConfiguration` **0** 个 · `@Test` **2** 个 |
+| 2 | `AdminApiRedisDisconnectedFastFailTest` | admin-api | ❌ 无 | 同上 |
+| 3 | `FollowApiRedisDisconnectedFastFailTest` | follow-api | ❌ 无 | 同上 |
+| 4 | `UserRpcRedisDisconnectedFastFailTest` | user-rpc | ❌ 无 | 同上 |
+| 5 | `AdminRpcRedisDisconnectedFastFailTest` | admin-rpc | ❌ 无 | 同上 |
+
+⇒ ⇒ **按 G3 的标准（无对照组 ⇒ 最多 L3），那 5 份本身【最多 L3】** ⇒ ⇒ **本条如实登记，不粉饰**。
+
+**但是** —— 「**这条机制轴上有没有 L4**」与「**这 5 份守门本身是不是 L4**」是**两件事**，必须分开说：
+⇒ ⇒ 同一条 `disconnectedBehavior` 轴上，我域**另有** A/B 对（rpc 侧 · 观测点是「**客户端可见的 gRPC status**」）：
+| A 组 | B 组 | 观测点 |
+|---|---|---|
+| `UserRpcLogoutClientVisibleGrpcStatusTest` | `UserRpcLogoutClientVisibleGrpcStatusDefaultBehaviorTest` | 客户端可见 status：**INTERNAL**（A）vs **1015 DEADLINE_EXCEEDED**（B）|
+| `AdminRpcLogoutClientVisibleGrpcStatusTest` | `AdminRpcLogoutClientVisibleGrpcStatusDefaultBehaviorTest` | 同上 |
+⇒ ⇒ **轴上已有 L4**（§50 已记）⇒ ⇒ **但 api 侧当时确实只有 A 组** ⇒ ⇒ ⇒ **本轮把 api 侧补上（§53.2）**。
+
+### 53.2 🟢 **api 侧补 3 份 B 组（零生产代码 · 零重构）⇒ api 侧这条轴也升 L4**
+
+- **落码（3 份新文件 · 各 2 条用例 = 前提腿 1 + 目标腿 1 ⇒ 共 6 条）**
+
+  | 文件 | 模块 |
+  |---|---|
+  | `service/users/user/user-api/src/test/java/com/rag/users/user/api/UserApiRedisDisconnectedDefaultBehaviorTest.java` | user-api |
+  | `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiRedisDisconnectedDefaultBehaviorTest.java` | admin-api |
+  | `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiRedisDisconnectedDefaultBehaviorTest.java` | follow-api |
+
+- **「唯一变量 = 断连策略」怎么做到**：共享层 `GoStyleRedisClientAutoConfiguration` 的 bean 带 `@ConditionalOnMissingBean`
+  ⇒ ⇒ **test 侧**提供一份同类型 bean（`@TestConfiguration`）把它**遮蔽**掉 ⇒ ⇒
+  ⇒ **域内零落码**（不碰共享层、不碰域内生产代码）⇒ ⇒ 这就是「A/B 受控对照」能做到「唯一变量」的原因。
+- **故障注入必须是【同一份实现】**：本组直接复用 A 组那个 **package-private 嵌套类** `GracefulDisconnectProxy`
+  ⇒ ⇒ **同一份字节码**（不是「照抄一份」）⇒ ⇒ 故障形态必然同款。
+  ⚠️ **但必须是【独立实例】**：A 组的 `PROXY` 是 `static final` ⇒ 两个类共用它 ⇒ A 组先断连后 B 组拿到的代理已经断了
+  ⇒ ⇒ **本组自己建一份**（同一个类、不同的实例、上游指向**自己的** Redis 容器）⇒ ⇒ 两组互不污染。
+- **实测（2026-10-28 · 真 Redis 容器 ＋ 真 Lettuce ＋ 真 FIN 代理 · 非 mock）**
+
+  | 模块 | A 组（`REJECT_COMMANDS`）| B 组（`DEFAULT`）|
+  |---|---|---|
+  | user-api | **1ms**（快速失败 · 预算 1500ms）| **3013ms**（排队到 `commandTimeout`）|
+  | admin-api | **1ms** | **3013ms** |
+  | follow-api | **1ms** | **3004ms** |
+
+  ⇒ ⇒ **同一个故障形态、同一份代理实现、同一个测点，**只**换断连策略 ⇒ 结果从「**1ms**」变成「**~3000ms**」
+  ⇒ ⇒ **归因成立**（不是「当前配置下恰好是这样」）⇒ ⇒ **api 侧这条轴升 L4**。
+  ⚠️ **两组是两次独立跑批的实测值**（同日 · 同镜像 `redis:7-alpine` · 同 FIN 代理实现 · 同测点 `hasKey`）⇒ ⇒ **可比**。
+- **变异验证（6 条各红各的）**：**删掉遮蔽 bean** ⇒ 共享层的 `REJECT_COMMANDS` 接管 ⇒
+  - **前提腿**红：`断连行为必须是 DEFAULT ⇒ 实测 REJECT_COMMANDS`
+  - **目标腿**红：**`实测 1ms`** ⇒ 红在**耗时断言**上（不是别处）
+  ⇒ ⇒ 3 个模块 × 2 条 = **6 条全红** ⇒ ⇒ 回滚后 **3 个文件 sha256 与基线逐字节一致** ✔
+
+### 53.3 🟢 **踩出来的一条方法学：前提断言与目标断言【必须落在不同的用例】上**
+
+- **第一版把两条断言写在**同一个方法**里** ⇒ ⇒ 变异（删掉遮蔽 bean）时**前提断言先红**
+  ⇒ ⇒ **目标断言根本没跑到** ⇒ ⇒ ⇒ **拿这个结果只能说「前提断言是活的」，不能说「目标断言是活的」**
+  ⇒ ⇒ ⇒ **同一个方法里堆两条断言 ⇒ 变异只能证明第一条**。
+- **拆开之后**：前提腿只读配置层（customizer 数量 / 名字 / 断连行为 / `commandTimeout` 锚点）⇒ **不制造断连**；
+  目标腿**第一条断言就是耗时断言** ⇒ ⇒ 两条腿互不依赖 ⇒ ⇒ 一次变异 ⇒ ⇒ **两条腿各自被证伪一次**。
+- ⇒ ⇒ **同族纪律**：与「前提断言与目标断言要分开做变异」同源，但这里补的是
+  ⇒ ⇒ **「分开」必须落在【不同的用例】上，不能只写在同一条用例的不同断言行上」**。
+
+### 53.4 🟢 **② go-zero 族 `min-idle: 8` —— 规则成立，而且我【独立验证了它确实吃重】**
+
+- **G3 的规则**：go-zero 族（`redisclientmanager.go:15` `idleConns = 8`）⇒ 若 RAG 侧落 Lettuce 池 ⇒ `min-idle` 必须是 **8**，不是 0。
+- **我独立复核（不采信转述）**：go-zero v1.10.2 `core/stores/redis/redisclientmanager.go:15` `idleConns = 8`
+  ⇒ ⇒ `:32-39` 建 `red.Options` 时**传了 `MinIdleConns: idleConns`**、**没传 `PoolSize`**。
+- 🔴 **关键的一步（这条规则能不能吃重，全看这一步）**：go-redis **v9.20.0** `options.go:350-351`
+  ```go
+  if opt.PoolSize == 0 {
+      opt.PoolSize = 10 * runtime.GOMAXPROCS(0)
+  }
+  ```
+  ⇒ ⇒ **池化是默认开启的**（`PoolSize` 不会停在 0）⇒ ⇒ **`MinIdleConns: 8` 不是空转**（池会真的去维持 8 条空闲连接）
+  ⇒ ⇒ **规则成立且有牙齿**。
+  ⇒ ⇒ ⚠️ **若下游那个默认不存在，`MinIdleConns` 就是死参数 ⇒ 这条规则会退化成「照抄 go-zero 的字面量」**
+  ⇒ ⇒ ⇒ **所以这条规则必须连「下游默认值」一起核**（本条已核）。
+- **我域现状（2026-10-28 实测）**：**未落池** ⇒ ⇒ **无待办**。
+  - `grep -rn "commons-pool2" service/users service/follow --include=pom.xml` ⇒ **空**
+  - `grep -rn -A4 "pool:" service/users service/follow --include=*.yml` ⇒ **空**
+  ⇒ ⇒ **我域 6 个模块全部是「直连」形态**（Lettuce 单连接）⇒ ⇒ **当前 `min-idle` 无从谈起**。
+- 🟡 **将来触发条件（写进台账，免得将来漏掉）**：若 `follow-api`（**go-zero 族**）因任何原因落池
+  ⇒ ⇒ `min-idle` **必须 8**（**不是** go-redis 直连族的 0）。
+  ⇒ ⇒ 同一时刻的三条必配项：**①** `max-wait: 4s`（Go `PoolTimeout = ReadTimeout + 1s`；不配 ⇒ commons-pool2 `DEFAULT_MAX_WAIT = -1` ⇒ **无限等**）
+  · **②** **`commons-pool2` 必须域内 pom 自己声明**（Boot 4 的 starter 不再传递 ⇒ 缺它 ⇒ 启动期 `NoClassDefFoundError`）
+  · **③** `max-active` / `max-idle` 是「表达层更严」（性能面，**不影响命令结果**）。
+- ⇒ ⇒ **本条在 G3 的域（`like-rpc` / `comment-rpc` 已在用 `commons-pool2`）才是活坑**；我域是「**已核 · 当前无实例**」。
+
+---
+
+## 54. 🟢 **域级条数重测（双路径交叉核对）＋ 增量归因**（2026-10-28 · G1 lane）
+
+### 54.1 🟢 **口径：两条独立路径 · 逐模块比对**
+
+- **命令**：`mvn -B -o -DargLine=-Xmx2g -am -pl <我域 6 模块> clean test`
+- **结果**：**18/18 BUILD SUCCESS · mvn EXIT=0 · 总耗时 47:10 · 0 failures / 0 errors / 0 skipped**
+- **路径 A** = maven **模块级** `Results:` 汇总行
+  ⚠️ **过滤条件必须是行尾无 ` -- in `（双横线）** ⇒ 用单横线 `- in ` 会把「**每类用例行**」当成模块级汇总行
+  ⇒ ⇒ 得**恰好 2 倍**的数 ⇒ ⇒ **一个「看起来对、其实重复计数」的数**。
+- **路径 B** = 逐模块 `target/surefire-reports/TEST-*.xml` 的 `tests` 属性求和
+- **交叉核对结果**：**9/9 模块两条路径逐字相等**
+
+| 模块 | 路径 A | 路径 B |
+|---|---|---|
+| `user-api` | 127 | 127 |
+| `user-rpc` | 152 | 152 |
+| `admin-api` | 149 | 149 |
+| `admin-rpc` | 122 | 122 |
+| `follow-api` | 74 | 74 |
+| `follow-rpc` | 83 | 83 |
+| **★ 我域 6 模块合计** | **707** | **707** |
+| `users-common`（依赖闭包带进来）| 39 | 39 |
+| `common`（依赖闭包带进来）| 333 | 333 |
+| `follow-common`（依赖闭包带进来）| 37 | 37 |
+| reactor 9 模块合计 | 1116 | 1116 |
+
+- **归因核对**：`409`（非目标）+ `707`（目标）= `1116` = reactor 合计 ⇒ **逐字相等**
+  ⇒ ⇒ 差额**逐条可指名**（不是「多出来的数不知道从哪来」）。
+- ⚠️ **`-am` 会把依赖闭包一起带进 reactor** ⇒ ⇒ **「reactor 全量」≠「我这次的收口口径」**
+  ⇒ ⇒ 本轮 reactor **18** 个模块，我域目标只有 **6** 个 ⇒ ⇒ **聚合前必须把目标清单写死**，并把非目标单列。
+- **整倍数自检**：`1116 ÷ 707` **不整除** ⇒ ⇒ **排除「重复计数」**。
+- **证据强度**：**L3**（本次回归实测 · 非双侧活体）· **核对日期 2026-10-28**。
+
+### 54.2 🟢 **增量归因（688 → 707 = +19，逐条可指名）**
+
+- **基线** = `13f6a93`（2026-10-28 00:19 那轮「我域 **688** 条」的实测提交）
+  ⇒ ⇒ 逐模块 `@Test` 增量（**代理口径**；权威条数以 XML 为准）：
+
+| 模块 | Δ | 出处（**可指名**）|
+|---|---|---|
+| `user-api` | **+2** | 本轮 `UserApiRedisDisconnectedDefaultBehaviorTest`（B 组 2 条）|
+| `user-rpc` | **+4** | `UserRpcLogoutClientVisibleGrpcStatusTest`（A）＋ `...DefaultBehaviorTest`（B）＋ `UserRpcRedisDisconnectedFastFailTest` 改动 ＋ `UserRpcSharedLayerArtifactFreshnessGateTest`（artifact 新鲜度守门）|
+| `admin-api` | **+5** | `AdminApiRealTomcatResponseBytesTest`（真 Tomcat 字节级探针 **3** 条 · 提交 `70219d4`）＋ 本轮 `AdminApiRedisDisconnectedDefaultBehaviorTest`（B 组 2 条）|
+| `admin-rpc` | **+4** | 同 `user-rpc` 那 4 笔 |
+| `follow-api` | **+2** | 本轮 `FollowApiRedisDisconnectedDefaultBehaviorTest`（B 组 2 条）|
+| `follow-rpc` | **+2** | `FollowRpcSharedLayerArtifactFreshnessGateTest`（artifact 新鲜度守门）|
+| **合计** | **+19** | ⇒ ⇒ **与 `707 − 688 = 19` 逐字相等 ✔** ⇒ ⇒ **没有「不知道从哪来」的余量** |
+
+- **共享层（非目标）**：`common` **+2**（G4 写权面）· `users-common` **±0** · `follow-common` **±0**
+  ⇒ ⇒ **共享层本轮又动了 2 条** ⇒ ⇒ **凡引过 `common` 旧值（327 / 330 / 331）的台账与消息 ⇒ 按 §54.3 以最新值 `333` 为准**。
+
+### 54.3 🟡 **旧值统一口径（历史不改写 · 只加「以本节为准」的指针）**
+
+- **本轮实测最新值**（2026-10-28 · 47:10 那次回归）：`service/common` = **333** · `service/users/users-common` = **39** · `service/follow/follow-common` = **37**。
+- **本节之前各节里写的 `327` / `330` / `331` / `33` —— 一律保留原文**（那是对**当时那一轮**的如实记录 ⇒ 改写它们等于篡改历史）
+  ⇒ ⇒ **但凡引用「共享层条数」⇒ 一律以本节为准，并带「核对日期 + 那次回归的 ref」**。
+  ⇒ ⇒ 受影响的旧节（本域写权面）：`users/vs-common.md` 的 §47.7 / §48.4 / §52 等处 · `follow/vs-common.md` 的 §11.15 / §11.16 等处。
+- ⇒ ⇒ **同族纪律**：「**共享层每轮都在长 ⇒ 任何跨 lane 引用的条数都是【快照】**」⇒ ⇒ 与「行号是快照不是锚点」同型 ⇒ ⇒ **引用条数必须带日期**。
+
+### 53.5 🟡 **③ 守门变异坑（`GenericObjectPoolConfig` import ⇒ 只得编译失败）—— 我域【当前无实例】，登记为将来纪律**
+
+- **G3 的坑**：守门若直接 `import org.apache.commons.pool2.impl.GenericObjectPoolConfig`
+  ⇒ ⇒ 「抽掉 pom 依赖」这个变异只会得到 **test-compile 失败**，**不是运行时证据**
+  ⇒ ⇒ 要验「抽依赖 ⇒ 启动期硬失败」，必须**把守门挪走** ＋ 跑**真 Spring 上下文**的守门。
+- **我域实测**：`grep -rn "GenericObjectPoolConfig\|commons.pool2" service/users service/follow --include=*.java --include=pom.xml` ⇒ **空**
+  ⇒ ⇒ **我域当前没有这个形态的守门** ⇒ ⇒ **本条在我域无实例、无待办**。
+- 🟡 **登记的用途**：① 若我域将来落池（§53.4 那条）⇒ **新写的池守门不许直接 import `GenericObjectPoolConfig`**
+  ⇒ ② 变异要按 G3 的配方做（挪走守门 ＋ 真上下文）。
+
+### 53.6 🟢 **本轮顺手订正的两处台账坐标（零结论变化）**
+
+| # | 位置 | 原写 | 订正为 | 依据 |
+|---|---|---|---|---|
+| ① | `docs/DRIFT/users/common.md`（2 处）| `GoStyleRequest.java:59` | `normalize` 在 **`:52`** · `target.assertGoRequiredFields()` 在 **`:54`** | 本树 `grep -n` 实测 ＋ G4 `global/vs-common.md:2455` 的同款订正 |
+| ② | `docs/DRIFT/users/user/api.md` 的「DRIFT 编号 → 出处」映射表 | 7 处坐标失准 | 逐条重核（脚本 `grep -n` 逐文件核）| 见该表下方的订正块 |
+
+⇒ ⇒ ② 的根因值得单独记一笔：**不是「某个行号漂了」，是「**哪个编号对应哪个文件**」这张映射表串了**
+⇒ ⇒ `DRIFT-009`↔`DRIFT-010` 在 `BearerTokenExtractor` 上串、`DRIFT-009`↔`DRIFT-016` 在 `GoStyleRequest` 上串
+⇒ ⇒ ⚠️ **放大器 = 「`DRIFT-010`（同上）」这种省略写法** ⇒ ⇒ **凡写「同上」⇒ 必须逐条展开**（省略掉的恰好是核对时的抓手）。

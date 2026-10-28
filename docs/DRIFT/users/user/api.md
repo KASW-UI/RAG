@@ -31,11 +31,26 @@
 
 本文件此前**没有任何 `DRIFT-*` 编号条目**（只有 §0 的搬移留档 N-1/N-2 与 §6.1 表格）。
 但 RAG 源码 javadoc 已在引用 users 域的**全局**编号：
-`DRIFT-003`（`AvatarSelectService.java:79`）、`DRIFT-004`（`GlobalExceptionHandler.java:59,282`）、
-`DRIFT-005`（`UserInfo.java:15`、`HttpMiddleware.java:543`）、`DRIFT-006`（`GlobalResponseAdvice.java:60`、`GlobalExceptionHandler.java:192`）、
-`DRIFT-009`（`BearerTokenExtractor.java:14,72`）、`DRIFT-010`（同上）、
-`DRIFT-016`（`GoStyleRequest.java:34`、`UserController.java:67`）、
+`DRIFT-003`（`AvatarSelectService.java:79`）、`DRIFT-004`（`GlobalExceptionHandler.java:62,353`）、
+`DRIFT-005`（`UserInfo.java:15`、`HttpMiddleware.java:876,886`）、`DRIFT-006`（`GlobalResponseAdvice.java:60`、`GlobalExceptionHandler.java:245`）、
+`DRIFT-009`（`UserController.java:92`、`HttpMiddleware.java:845`）、`DRIFT-010`（`BearerTokenExtractor.java:14,69`、`JwtSignatureVerifier.java:90`、`JwtAuthInterceptor.java:116`）、
+`DRIFT-016`（`UserController.java:78,135,144,187,193`）、
 `DRIFT-NEW-001/008/014/015/016`（`docs/DRIFT/users/_shared.md`）。
+
+> 🟡 **2026-10-28 逐条复核订正（坐标失准 · 结论不变）** —— 上一版把 **7 个坐标**写错了。
+> 上一版**整段**的结论（「源码 javadoc 已在引用这些全局编号 ⇒ 新条目必须避开」）**不受影响** ⇒ **变的只是坐标**。
+>
+> | 编号 | 原写 | 实测（2026-10-28 · 脚本 `grep -n` 逐文件核，不靠印象） |
+> |---|---|---|
+> | `DRIFT-004` | `GlobalExceptionHandler.java:59,282` | **`:62,353`** |
+> | `DRIFT-005` | `HttpMiddleware.java:543` | **`:876,886`**（该文件在 `service/common/.../observability/HttpMiddleware.java`，**不在** `.../http/`）|
+> | `DRIFT-006` | `GlobalExceptionHandler.java:192` | **`:245`** |
+> | `DRIFT-009` | `BearerTokenExtractor.java:14,72` | ❌ **`BearerTokenExtractor.java` 里根本没有 `DRIFT-009`**（它的 `:14,69` 是 **`DRIFT-010`**）⇒ `DRIFT-009` 实际在 **`UserController.java:92`**（另 `HttpMiddleware.java:845`）|
+> | `DRIFT-010` | 「同上」（= 跟着 `DRIFT-009` 写）| ❌ **「同上」本身是错的** ⇒ `DRIFT-010` 在 `BearerTokenExtractor.java:14,69` · `JwtSignatureVerifier.java:90` · `JwtAuthInterceptor.java:116` |
+> | `DRIFT-016` | `GoStyleRequest.java:34`、`UserController.java:67` | ❌ **`GoStyleRequest.java` 里没有 `DRIFT-016`**（它的 `:34` 写的是 **`DRIFT-009`**）⇒ `DRIFT-016` 实际在 **`UserController.java:78,135,144,187,193`** |
+>
+> ⇒ ⇒ **「编号串了 ⇒ 坐标也一起串了」**：三处是**同一个编号被写到了另一个编号的文件上**（`DRIFT-009`↔`DRIFT-010` 在 `BearerTokenExtractor` 上串；`DRIFT-009`↔`DRIFT-016` 在 `GoStyleRequest` 上串）⇒ ⇒ **错的不是某个行号，是「哪个编号对应哪个文件」这张映射表**。
+> ⇒ ⇒ **教训（与「行号是快照不是锚点」同族，但这里重一档）**：**凡写「同上」⇒ 必须逐条展开**（省略写法在「按编号逐个核」的场景下最危险 ⇒ 会把两个编号的坐标焊在一起）⇒ ⇒ **本次正是「逐条核」才暴露的 ⇒ 省略写法省掉的恰好是核对的抓手**。
 
 ⇒ 本轮新条目**统一使用 `DRIFT-USERAPI-0xx`**，与上述全部已有编号零冲突。
 （若日后收敛到全局号段，`USERAPI-00x` 是本组件的稳定映射键。）

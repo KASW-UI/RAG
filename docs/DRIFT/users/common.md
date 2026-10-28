@@ -135,7 +135,7 @@
 > | ① | **Go 侧 1017 / 1018 是死码** | `service/user/common/errmsg/errmsg.go:30-31` 只有常量定义；`grep -rn "ErrorRequestParam\|ErrorAvatarHistoryNotExist"` **全仓只命中这两行** ⇒ 零调用点 | ⇒ Go **永远不可能返回 1017/1018** ⇒ `GetErrMsg` 的回落（`errmsg.go:70-76` → `codeMsg[Error]` = `"FAIL"`）**对这两个码永不可观察** |
 > | ② | **RAG 侧 1017 在 user-rpc 侧仅日志** | `UserDomainService.java:237` `logger.logBusinessErr(otelCtx, 1017, …)` | ❌ 不进 wire ✔ |
 > | ③ | **RAG 侧 1018 在 user-rpc 侧仅日志** | `UserDomainService.java:722` / `:797` 均是 `logger.logBusinessErr(ctx, 1018, e)`，随后 `throw Status.NOT_FOUND.withDescription("头像历史不存在")` | ❌ 不进 wire（**wire 上是 gRPC NOT_FOUND + description，不是 1018**）✔ |
-> | ④ | **RAG 侧 1017 在 admin-api 侧不可达**（本轮新查，**原「影响面」表写错的地方**） | ① `GetUserReq.uid` 的类型是 **`Long`**（`dto/GetUserReq.java:27`）⇒ 非数字 uid ⇒ **Jackson 反序列化就抛** `InvalidFormatException` ⇒ **400 + text/plain**，到不了 service；<br>② uid 缺席/显式 null ⇒ controller 走 `GoStyleRequest.normalize(req, GetUserReq::new)`（`AdminController.java:219`）⇒ 内部 `target.assertGoRequiredFields()`（`users-common/.../GoStyleRequest.java:59`）⇒ `GoStyleRequired.field("uid", uid)` ⇒ **400 `field "uid" is not set`**，同样到不了 service；<br>③ ⇒ `parseUid` 的 `uidStr == null` 分支与 `NumberFormatException` 分支**都不会从 HTTP 入口到达** | ❌ **不进 wire** ⇒ **原表「✅ 进 wire」是错的** |
+> | ④ | **RAG 侧 1017 在 admin-api 侧不可达**（本轮新查，**原「影响面」表写错的地方**） | ① `GetUserReq.uid` 的类型是 **`Long`**（`dto/GetUserReq.java:27`）⇒ 非数字 uid ⇒ **Jackson 反序列化就抛** `InvalidFormatException` ⇒ **400 + text/plain**，到不了 service；<br>② uid 缺席/显式 null ⇒ controller 走 `GoStyleRequest.normalize(req, GetUserReq::new)`（`AdminController.java:219` ⇒ `GoStyleRequest.java:52`）⇒ 内部 `target.assertGoRequiredFields()`（`users-common/.../http/GoStyleRequest.java:54`）⇒ `GoStyleRequired.field("uid", uid)` ⇒ **400 `field "uid" is not set`**，同样到不了 service；<br>③ ⇒ `parseUid` 的 `uidStr == null` 分支与 `NumberFormatException` 分支**都不会从 HTTP 入口到达** | ❌ **不进 wire** ⇒ **原表「✅ 进 wire」是错的** |
 > | ⑤ | **覆盖面**：6 个带 uid 的 admin 端点**全部**过 `normalize` | 11/13 个端点走 `GoStyleRequest.normalize`；未走的 3 个是 `/logout`、`/getself`、`/invite/create` ⇒ **都不带 uid** | ✅ 无遗漏 |
 > | ⑥ | **双侧活体对拍反证**（**L4**） | `tools/difftest/matrix-results.txt`（run_id=1792602663396 · **273 条**）的四个新漂移根因桶 **R1~R4 全为 0** ⇒ **NEW_DRIFT = 0**；而 `tools/difftest/matrix.py:618-620` 的 `classify()` 写明「**status 不一致一律 NEW_DRIFT**」⇒ ⇒ **若 admin-api 的缺 uid 真在 wire 上返回 1017（Go = 400 ＋ RAG = 200 + 1017 信封）⇒ 必被记为 NEW_DRIFT** ⇒ 桶为 0 ⇒ **反证 1017 不进 wire** | ✅ **L4 反证**（⚠️ 证据边界：矩阵**只落汇总不落逐条分类** ⇒ 这是**桶为 0 的反证**，不是逐条对照） |
 >
@@ -159,7 +159,7 @@
 > ⇒ 若将来某个端点**绕过 `normalize`** 直连它 ⇒ **那才会产生新的 wire 漂移**（Go 无 1017，RAG 有）⇒ **重开触发条件已写进 javadoc**。
 
 > 🔴 **跨 lane 依赖（写明以免销号结论悄悄过期）** —— 本条的销号**依赖 `service/users/users-common/**` 的两个类**：
-> `GoStyleRequest.normalize`（`users-common/.../http/GoStyleRequest.java:59` ⇒ 内部 `target.assertGoRequiredFields()`）
+> `GoStyleRequest.normalize`（`users-common/.../http/GoStyleRequest.java:52` ⇒ 内部 `target.assertGoRequiredFields()`（同文件 **`:54`**））
 > ＋ `GoStyleRequired.field(...)`（`users-common/.../http/GoStyleRequired.java:32` ⇒ null 即抛 `GoRequiredFieldException`）
 > ⇒ ⚠️ **这两个类在 G4 写权面**（AGENTS.md §5.3f：`service/users/users-common/**` 整库归 G4，**只有 `ErrorCode`/`PasswordUtil`/`SchemaInitializer` 三个类留在 users 域**）
 > ⇒ ⇒ **G4 若动这两处 ⇒ 本条销号结论必须复核**（复开触发条件 = 「必填校验不再在 service 层之前拦」或「`normalize` 不再调 `assertGoRequiredFields()`」）

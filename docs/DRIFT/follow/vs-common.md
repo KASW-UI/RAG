@@ -631,3 +631,74 @@ G4 那张「逐组件实测表」是**在 G4 自己的树上解析 YAML** 得出
 - **变异验证**：A 不带 `-am` 单模块构建 ⇒ **恰红 1 条**（红在第①条，消息点名「陈旧 common jar」+ 修法 `-am`）；
   B 放回域内副本 ⇒ **恰红 1 条**（红在第②条）⇒ ⇒ 两条断言**各有**判别力 ⇒ 复原后全绿。
 - ⇒ ⇒ 完整经过与「类path 层 ≡ 产物层」的机械论证 ⇒ [`users/vs-common.md` §48.2](../users/vs-common.md)。
+
+### 11.17 🟢 **follow-api 的 Redis 断连 B 组落码（api 侧这条轴升 L4）**（2026-10-28 · G1 lane）
+
+- **背景**：G3 第九次来信的 ④ 反问 —— 「你域那 5 份 Redis 断连守门是否**只有 A 组**」
+  ⇒ ⇒ **如实答：是，只有 A 组**（机器证据：`DisconnectedBehavior.DEFAULT` 提及 **0** 次 · `@TestConfiguration` **0** 个）
+  ⇒ ⇒ ⇒ **那 5 份本身【最多 L3】**，本条如实登记、不粉饰。
+  ⇒ ⇒ **但**同一条 `disconnectedBehavior` 轴上我域**另有** A/B 对（rpc 侧 · 观测点是「客户端可见的 gRPC status」）
+  ⇒ ⇒ **轴上已有 L4**；**api 侧当时确实只有 A 组** ⇒ ⇒ ⇒ **本轮把 api 侧补上**。
+- **本域落码**：`FollowApiRedisDisconnectedDefaultBehaviorTest`
+  （`service/follow/follow-api/src/test/java/com/rag/follow/follow/api/` · **2 条** = 前提腿 1 ＋ 目标腿 1）
+  - **零生产代码**（只加测试文件，不碰 `src/main/java`）
+  - **零重构**：故障注入直接复用 A 组那个 **package-private 嵌套类**
+    `FollowApiRedisDisconnectedFastFailTest.GracefulDisconnectProxy` ⇒ ⇒ **同一份字节码**（不是照抄）
+    ⇒ ⚠️ **但必须是独立实例**：A 组的 `PROXY` 是 `static final` ⇒ 两个类共用它 ⇒ A 组先断连后 B 组拿到的代理已经断了
+    ⇒ ⇒ **本组自己建一份**（同一个类、不同的实例、上游指向**自己的** Redis 容器）⇒ ⇒ 两组互不污染
+  - **唯一变量 = 断连策略**：test 侧 `@TestConfiguration` 提供一份 `DEFAULT` 的 `LettuceClientOptionsBuilderCustomizer`
+    ⇒ ⇒ **遮蔽**共享层那份 `REJECT_COMMANDS`（靠 `@ConditionalOnMissingBean`）⇒ ⇒ **域内零落码**
+- **实测（2026-10-28 · 真 Redis 容器 ＋ 真 Lettuce ＋ 真 FIN 代理 · 非 mock）**：**3004ms**（排队到 `commandTimeout`）
+  ⇒ ⇒ 与 A 组的「**1ms** 快速失败（预算 1500ms）」**同故障形态 · 同代理实现 · 只换策略** ⇒ ⇒ **归因成立**
+  ⚠️ **两组是两次独立跑批的实测值**（同日 · 同镜像 `redis:7-alpine` · 同 FIN 代理实现 · 同测点 `hasKey`）⇒ ⇒ **可比**。
+- **变异**：**删掉遮蔽 bean** ⇒ 共享层 `REJECT_COMMANDS` 接管 ⇒ ⇒
+  **前提腿**红（`断连行为必须是 DEFAULT ⇒ 实测 REJECT_COMMANDS`）**＋ 目标腿**红（**`实测 1ms`**，红在**耗时断言**上）
+  ⇒ ⇒ **2 条全红** ⇒ ⇒ 回滚后 **sha256 与基线逐字节一致** ✔
+- ⚠️ **本域的两条硬约束（写下来，免得将来重踩）**：
+  1. **不要**用 `container.stop()` 做故障注入 ⇒ 那是 **RST** ⇒ 不走 `disconnectedBehavior` 分支 ⇒ **测不出这条漂移**
+     ⇒ ⇒ 只能用「先关监听口 ＋ 再半关闭已建立连接」的 **FIN** 代理
+  2. **B 组必须先把连接建立起来**再断连 ⇒ ⇒ 否则测的是「连接被拒」（~15ms 快失败）
+     ⇒ ⇒ **会长得跟 A 组一样 ⇒ ⇒ 假象**（这是 2026-10-28 第一版 B 组真实踩到并修掉的）
+- ⇒ ⇒ 完整经过 · A/B 方法学 · 变异口径 ⇒ [`users/vs-common.md` §53](../users/vs-common.md)。
+
+### 11.18 🟡 **go-zero 族 `min-idle: 8` 规则 —— follow-api 属该族 · 当前未落池 ⇒ 无待办**（2026-10-28 · G1 lane）
+
+- **规则（G3 提出）**：go-zero 族 ⇒ 若落 Lettuce 池 ⇒ `min-idle` 必须是 **8**，**不是** 0。
+- **我独立复核（不采信转述）**：go-zero v1.10.2 `core/stores/redis/redisclientmanager.go:15` `idleConns = 8`
+  ⇒ ⇒ `:32-39` 建 `red.Options` 时**传了 `MinIdleConns`**、**没传 `PoolSize`**。
+  ⇒ 🔴 **规则能不能吃重，全看 go-redis 的下游默认值**：go-redis **v9.20.0** `options.go:350-351`
+  ```go
+  if opt.PoolSize == 0 {
+      opt.PoolSize = 10 * runtime.GOMAXPROCS(0)
+  }
+  ```
+  ⇒ ⇒ **池化默认开启** ⇒ ⇒ **`MinIdleConns: 8` 不是空转** ⇒ ⇒ **规则成立且有牙齿**。
+  ⇒ ⇒ ⚠️ 若那个默认不存在 ⇒ `MinIdleConns` 就是死参数 ⇒ ⇒ **这条规则必须连「下游默认值」一起核**。
+- **本域现状（2026-10-28 实测）**：**未落池**
+  - `grep -rn "commons-pool2" service/follow --include=pom.xml` ⇒ **空**
+  - `grep -rn -A4 "pool:" service/follow --include=*.yml` ⇒ **空**
+  ⇒ ⇒ **follow-api 当前是「直连」形态** ⇒ ⇒ **`min-idle` 无从谈起 ⇒ 无待办**。
+- 🟡 **将来触发条件**：若 `follow-api` 因任何原因落池 ⇒ ⇒ `min-idle` **必须 8**
+  ⇒ ⇒ 同一时刻的三条必配项：**①** `max-wait: 4s`（Go `PoolTimeout = ReadTimeout + 1s`；不配 ⇒ commons-pool2 `DEFAULT_MAX_WAIT = -1` ⇒ **无限等**）
+  · **②** **`commons-pool2` 必须域内 pom 自己声明**（Boot 4 的 starter 不再传递 ⇒ 缺它 ⇒ 启动期 `NoClassDefFoundError`）
+  · **③** `max-active` / `max-idle` 是「表达层更严」（性能面，**不影响命令结果**）。
+- 🟡 **守门变异坑（登记，本域当前无实例）**：池守门若直接 `import org.apache.commons.pool2.impl.GenericObjectPoolConfig`
+  ⇒ ⇒ 「抽掉 pom 依赖」这个变异**只得 test-compile 失败**，**不是运行时证据**
+  ⇒ ⇒ 要验「抽依赖 ⇒ 启动期硬失败」必须**把守门挪走** ＋ 跑**真 Spring 上下文**的守门。
+  ⇒ ⇒ 本域实测 `GenericObjectPoolConfig` / `commons.pool2` **零命中** ⇒ ⇒ **无实例、无待办**。
+- ⇒ ⇒ 完整论证 ⇒ [`users/vs-common.md` §53.4 / §53.5](../users/vs-common.md)。
+
+### 11.19 🟢 **follow 域条数重测（2026-10-28 · 双路径交叉核对）**（2026-10-28 · G1 lane）
+
+- **回归**：`mvn -B -o -DargLine=-Xmx2g -am -pl <我域 6 模块> clean test` ⇒ ⇒ **18/18 BUILD SUCCESS · EXIT=0 · 47:10 · 0f/0e/0s**
+- **两条独立路径逐模块相等**：**路径 A** = maven 模块级 `Results:` 汇总行 · **路径 B** = 逐模块 surefire `TEST-*.xml` 求和
+  | follow 域模块 | 路径 A | 路径 B |
+  |---|---|---|
+  | `follow-api` | **74** | **74** |
+  | `follow-rpc` | **83** | **83** |
+  | `follow-common`（本域私有）| **37** | **37** |
+  | **follow 域合计** | **194** | **194** |
+- **增量归因（688 → 707 = +19 的 follow 侧那一半）**：`follow-api` **+2**（本轮 B 组 2 条）· `follow-rpc` **+2**（`FollowRpcSharedLayerArtifactFreshnessGateTest` artifact 新鲜度守门）· `follow-common` **±0**
+  ⇒ ⇒ **逐条可指名，无余量**。
+- ⚠️ **共享层旧值**：`common` 327/330/331 ⇒ ⇒ **最新 = 333**（2026-10-28 实测）⇒ ⇒ **凡引用条数以 [`users/vs-common.md` §54](../users/vs-common.md) 为准**（历史原文保留不改写）。
+- ⇒ ⇒ 完整口径（含 reactor 18 模块 vs 目标 6 模块的差值归因 409 + 707 = 1116）⇒ [`users/vs-common.md` §54](../users/vs-common.md)。
