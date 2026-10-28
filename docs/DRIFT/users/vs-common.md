@@ -4001,3 +4001,41 @@ mvn -B -o -DargLine=-Xmx1g -am -pl service/users/user/user-rpc,service/users/adm
 - ⇒ ⇒ **纪律（本条补的是一整类）**：**多 lane 并发时不要同时起域级回归** ——
   **端口段是【共享资源】**，所以并发风险**不止** EXIT=137 的 OOM，还有**【容器端口编程失败】**这一类
   ⇒ ⇒ ⇒ **「并发」两个字在台账里必须落到具体资源上**（CPU/内存/**宿主端口段**）。
+
+---
+
+## 58. 🟢 **发给 G4 的回信（登记）+ 本轮自查的两条新事实**（2026-10-28 · G1 lane）
+
+- **发出对象** = G4 会话 `mvs_e8063ac67c654150ab7797b8116ef0a1`（标题 `G4Common`）
+  ⇒ ⇒ **送达态 = `mode=queued` · position 60 · ahead 60** ⇒ ⇒ **排队待跑**（G4 当时是 `42212` Token Plan 上限）
+  ⇒ ⇒ ⇒ **「我发了」≠「对方看到了」** ⇒ ⇒ 用它的回执做决策前**须去它侧 transcript 确认 `cross-session-message` 块**。
+- **信的内容（9 段）**：⓪时基（它标的 `a38ad75` 已过期）· ①**它上次要我 merge 的两笔已在我树内**（`22dc67e` / `c164e63`，`is-ancestor` 实测）
+  · ②**白名单清空的正确顺序**（下）· ③⑤三道机器网实跑结果（**单批次 16 条全绿**）＋**跨轮口径订正**
+  · ④环境类失败的完整归因 · ⑤⑥槽位「6 vs 7」实测确认 · ⑥接受它立的「`-pl` 覆盖面」纪律
+  · ⑦我域当前状态（HEAD / 707 / 9 绿 3 已知红点）· ⑧下一轮 = 波末收口，**不由我触发** · ⑨它会话 42212，我域不阻塞。
+
+### 58.1 🟢 **白名单清空的前置 = 我域那笔删除**（实测钉死，可直接 cherry-pick）
+
+| 事实 | 实测 |
+|---|---|
+| 删域内副本的那笔提交 | **`312a09b`**（删 5 份 `RedisDisconnectedBehaviorConfig` ＋ 5 份守门补 bean 身份断言）|
+| 该提交所在树 | **仅 `align/g1-users-follow`**（G4 / G2 / G3 **均 ∉** —— `is-ancestor` 实测）|
+| 我树域内 `LettuceClientOptionsBuilderCustomizer` **主源码声明数** | **0**（`service/users` ＋ `service/follow` 全扫）⇒ 它的守门在我树**绿**（网② 3 条绿，已实跑）|
+| G4 / G2 / G3 树 | 那份文件**还在** ⇒ **现在清白名单会让它们自己假红** |
+| `312a09b` 触及路径 | `service/users/**` ＋ `service/follow/**` ＋ `docs/DRIFT/users|follow/**`（17 文件）⇒ **零共享层路径 ⇒ cherry-pick 零冲突** |
+
+⇒ ⇒ **正确顺序 = 先把 `312a09b` 并进 G4 树（或等四 lane 合主干），再由 G4 / 合并收口执行者清白名单**
+⇒ ⇒ **我域零落码**（清白名单那一步不在我写权面）。
+
+### 58.2 🟢 **本轮把「我域还有没有能自闭合的 OPEN」重扫了一遍**（结论：没有）
+
+| 扫到的 OPEN | 落点 | 复核结论 |
+|---|---|---|
+| `DRIFT-USERRPC-V-004` 的 `users_user_avatar_history` 半边 | 我域 | ✅ **实为已关闭** —— `user/rpc.md` 该行已由**第六轮复核**更正为「已修（列类型与可观察半边）」，DDL 已是 `TIMESTAMPTZ` ＋ 守门 `UserRpcAvatarHistoryTimestamptzParityTest`（9 条 · 真 PG）⇒ `_shared.md` 里那句「🔴 仍然 OPEN」是**2026-10-23 第三轮的历史断言**，且该文件头部**已自标**「中段还留着…这类已被同文件第三轮推翻的断言 ⇒ 当前状态一律以文件末尾为准」⇒ ⇒ **不重写历史，也不再加订正块**（已被文件头覆盖） |
+| `DRIFT-USERAPI-013`（过载保护：breaker 键空间 ＋ 注释与实现矛盾）| **`service/common`**（11 个 protection 类）| 🔴 **不在我写权面** ⇒ 跨域 ⇒ 归 G4 / 合并收口执行者 ⇒ **本域只报告**（`user/api.md` §7「7.x-2」已完成 2026-10-26 只读复核：Go key = 注册期 `route.Path` 模板 / RAG = raw `getRequestURI()`；可观察面在 `article-api`）|
+| `DRIFT-ARPC-010`（= E66 · Redis 写不绑 deadline）| **`service/common`**（Redis 调用路径）| 🔴 **不在我写权面** ⇒ 归 G4 ⇒ 维持 OPEN（两侧同编号 ⇒ 销账别当两条）|
+| `DRIFT-FOLLOW-008`（MaxConns 闸门粒度：Go 每路由一个 vs RAG 全局一个）| 共享层 | 🔴 归 G4 |
+| `DRIFT-USERRPC-V-011`（`DEFAULT CURRENT_TIMESTAMP` 残留 **8 处**，刻意保留）| 我域 DDL | 🟡 **等用户裁决**（见 §1「等拍板」清单）|
+| `DRIFT-ARPC-002`（`UpdateUserResp.success` Go=false / RAG=true）| 我域 | 🟡 **等用户裁决**（已有双侧活体证据 ＋ 决策 tripwire）|
+
+⇒ ⇒ **结论：我域可自闭合的项已全部闭合** ⇒ ⇒ **我域唯一未完成项 = 波末 C7 收口回归**（待四 lane 全合主干·**非我触发**）。
