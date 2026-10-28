@@ -1085,6 +1085,6 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 [`docs/DRIFT/comment/vs-common.md`](../comment/vs-common.md) 的 **C-7**。
 
 **门禁快照（20 条）**：**canonical 在** [`docs/DRIFT/article/rpc.md`](../article/rpc.md) 的
-「**二十四、🔴 G4 共享层合并后的门禁快照（20 条）**」一节 ⇒ ⇒ **16 绿 / 4 红，四条红都不在本域**
+「**二十四、🔴 G4 共享层合并后的门禁快照（20 条）**」一节 ⇒ ⇒ **15 绿 / 4 红 / 1 用法错（EXIT=2，不是红项），四条红都不在本域**
 （`check-ledger-count` = 合并收口执行者 · `check-ddl-static` = users 域 · `check-tomcat-limits` = G2 域 ·
 `check-wave-coupling` = G4-9 共享矩阵）。

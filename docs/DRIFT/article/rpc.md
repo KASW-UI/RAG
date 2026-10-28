@@ -2185,15 +2185,21 @@ JDBC 连**固定口** + `inet_server_port()` 回报**容器内口** ⇒ ⇒ 才�
    **每类行被当成模块级汇总行 ⇒ 得 2122（= 1061 × 2）** ⇒ ⇒ **过滤必须用 `-- in `**；
 3. **自检规则**：**总数恰好是真实数的整数倍 ⇒ 必是重复计数**。
 
-### 24.2 门禁 20 条：**16 绿 / 4 红**（**四条红都不在四域**，逐条点名）
+### 24.2 门禁 20 条：**15 绿 / 4 红 / 1 用法错**（**四条红都不在四域**，逐条点名）
+
+> 📌 **订正（2026-10-28 · G3 · 我自己记账时踩的）**：本节初稿写的是「**16 绿 / 4 红**」⇒ ⇒ **错**
+> ⇒ ⇒ 那个 16 是「20 − 4」**减出来的** ⇒ ⇒ 它把 **`check-merge-tree-content.py` 的 `EXIT=2`（无参数 ⇒ 用法错）
+> 当成了绿** ⇒ ⇒ **EXIT=2 既不是绿也不是红**（**根本没跑**）⇒ ⇒ 正确口径 = **15 绿 / 4 红 / 1 用法错**。
+> ⇒ ⇒ **教训**：「总数 − 红数」**不等于**「绿数」⇒ ⇒ 必须**逐条数 `EXIT=0` 的个数**（同族 = 「总数变了不是结论」）。
 
 | 门禁 | EXIT | 归谁 | 成因（必须点名，否则下一轮分不清「真红」与「预期红」）|
 |---|---|---|---|
-| `check-ledger-count` | 🔴 | **合并收口执行者** | 索引 **315** vs 本树实测 **332**（差 **+17** ⇒ 台账条目数在波次中持续增长）⇒ ⇒ **合并收口时统一 `--fix`** ⇒ ⛔ **各 lane 不各自 `--fix`**（会互相覆盖）|
-| `check-ddl-static` | 🔴 | **users 域** | users 域既知 **9** 处 DDL 差异（**类型/长度 0 差异**，其余为可空性 / `DEFAULT CURRENT_TIMESTAMP` 残留 / 缺 3 条非唯一索引）⇒ ⇒ **不在四域** ⇒ ⇒ 本域零改动 |
-| `check-tomcat-limits` | 🔴 | **G2 域（task-api）** | `task-api` 的 `mode=raw` 应为 `off` ⇒ ⇒ **不在四域** ⇒ ⇒ 本域零改动 |
-| `check-wave-coupling` | 🔴 | **G4-9（共享矩阵）** | `MqConsumer` 快照 `['comment','hot','task']` vs 现状 `['article','comment','hot','task']` ⇒ ⇒ **只差 `article` 一项** ⇒ ⇒ 落点 `docs/DRIFT/_cross/cross-domain-coupling.md` ⇒ ⛔ **G3 不写（共享面）** ⇒ ⇒ **等 G4 更新** |
-| 其余 **16** 条 | ✅ EXIT=0 | 本域 | —— |
+| `check-ledger-count` | 🔴 1 | **合并收口执行者** | 索引 **315** vs 本树实测 **332**（差 **+17** ⇒ 台账条目数在波次中持续增长）⇒ ⇒ **合并收口时统一 `--fix`** ⇒ ⛔ **各 lane 不各自 `--fix`**（会互相覆盖）|
+| `check-ddl-static` | 🔴 1 | **users 域** | users 域既知 **9** 处 DDL 差异（**类型/长度 0 差异**，其余为可空性 / `DEFAULT CURRENT_TIMESTAMP` 残留 / 缺 3 条非唯一索引）⇒ ⇒ **不在四域** ⇒ ⇒ 本域零改动 |
+| `check-tomcat-limits` | 🔴 1 | **G2 域（task-api）** | `task-api` 的 `mode=raw` 应为 `off` ⇒ ⇒ **不在四域** ⇒ ⇒ 本域零改动 |
+| `check-wave-coupling` | 🔴 1 | **G4-9（共享矩阵）** | `MqConsumer` 快照 `['comment','hot','task']` vs 现状 `['article','comment','hot','task']` ⇒ ⇒ **只差 `article` 一项** ⇒ ⇒ 落点 `docs/DRIFT/_cross/cross-domain-coupling.md` ⇒ ⛔ **G3 不写（共享面）** ⇒ ⇒ **等 G4 更新** |
+| `check-merge-tree-content` | ⚪ **2（用法错）** | —— | **无参数运行** ⇒ `EXIT=2`（用法错）⇒ ⇒ **不是红项** ⇒ ⇒ 带四个 lane 参数运行 = **EXIT=0 / 问题 0 / 不可信 0**（合并树内容完整）⇒ ⇒ 判定时**先看有没有带 lane 参数** |
+| 其余 **15** 条 | ✅ **EXIT=0** | 本域 | —— |
 
 ⚠️ **`tools/difftest/check-merge-tree-content.py`（G4 新增）**：按四 lane 顺序合并 ⇒
 **EXIT=0 · 问题 0 · 不可信 0** ⇒ ⇒ **合并树内容完整**（逐文件 blob 比对 = 三方并集）

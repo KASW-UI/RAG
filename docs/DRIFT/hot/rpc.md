@@ -2509,8 +2509,36 @@ func main() {
 （2122 = 1061 × 2 就是这么来的）。
 
 **门禁快照（20 条）**：**canonical 在** [`docs/DRIFT/article/rpc.md`](../article/rpc.md) 的
-「**二十四、🔴 G4 共享层合并后的门禁快照（20 条）**」一节 ⇒ ⇒ **16 绿 / 4 红，四条红都不在本域**。
+「**二十四、🔴 G4 共享层合并后的门禁快照（20 条）**」一节 ⇒ ⇒ **15 绿 / 4 红 / 1 用法错（EXIT=2，不是红项），四条红都不在本域**。
 
 **🔴 `MAX_PARAMETER_COUNT = 10001` 是【设计值】，不是待修的漂移** ⇒ ⇒
 **「等共享层把它改成 10000」的期待作废** ⇒ ⇒ canonical 论证见
 [`docs/DRIFT/favorite/api.md`](../favorite/api.md) **§21.3**。
+
+## 📌 坑位 · 🔴 **共享层的 otel 守门有 3 s 轮询窗口 ⇒ 并发跑批时会假红，且会「打断整个 reactor」**（2026-10-28 · G3）
+
+**现象**：跑 `mvn -pl service/hot/hot-rpc -am test` 时 ⇒ ⇒ **reactor 在 `service/common` 就停了**
+⇒ ⇒ **hot-rpc 根本没跑到** ⇒ ⇒ 报错：
+
+```
+[ERROR] GoStyleOtelAgentGateTest.shutdownFlushesPendingSpans -- Time elapsed: 3.099 s <<< FAILURE!
+java.lang.AssertionError: 条件在 3000ms 内未成立
+	at ...GoStyleOtelAgentGateTest.awaitTrue(GoStyleOtelAgentGateTest.java:203)
+```
+
+⇒ ⇒ `service/common` 当时的汇总 = **333 / 1 failure**。
+
+**判定（不靠猜）**：**单跑该类** ⇒ `mvn -pl service/common test -Dtest=GoStyleOtelAgentGateTest`
+⇒ ⇒ **3 条 / 0 failures / 0 errors**（2026-10-28 · 同树同 HEAD）⇒ ⇒ **是时序 flake，不是真红**
+⇒ ⇒ 成因 = 该守门用 **3000 ms 轮询窗口**等「span 被 flush 出去」⇒ ⇒ **并发跑批时窗口没赶上**。
+
+**⇒⇒ 两条纪律（本域自留）**：
+
+1. 🔴 **跨模块回归一律带 `--fail-at-end`** ⇒ ⇒ 否则**一条 flake 就能让下游模块整片没跑到**
+   ⇒ ⇒ 而「下游没跑到」在报告里会被误读成「下游没测」⇒ ⇒ **本轮我就被这个坑了一次**
+   （⇒ 本轮 12 模块那轮**本来就带了** `--fail-at-end` ⇒ ⇒ 1387 那个口径**有效**）；
+2. 🔴 **共享层的一条 flake ⇒ 不要在域侧「修」它** ⇒ ⇒ `service/common/**` 是 **G4 的写权面**
+   ⇒ ⇒ **只登记 + 通知** ⇒ ⇒ 本条已随回函报给 G4（建议：窗口放宽，或接受它会打断 reactor）。
+
+**归口**：⛔ `service/common` = 共享层 ⇒ **G3 不改**（AGENTS.md §5.3c）⇒ ⇒ 只登记 + 上报。
+**证据强度**：L4（真跑出来 ＋ 单跑复验）· 核对日期 **2026-10-28**。

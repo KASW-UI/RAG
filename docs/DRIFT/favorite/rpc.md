@@ -3804,7 +3804,7 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 ⇒ ⇒ **须在合并收口前重跑一次全量**取权威值（**不推算**）。
 
 **门禁快照（20 条）**：**canonical 在** [`docs/DRIFT/article/rpc.md`](../article/rpc.md) 的
-「**二十四、🔴 G4 共享层合并后的门禁快照（20 条）**」一节 ⇒ ⇒ **16 绿 / 4 红，四条红都不在本域**。
+「**二十四、🔴 G4 共享层合并后的门禁快照（20 条）**」一节 ⇒ ⇒ **15 绿 / 4 红 / 1 用法错（EXIT=2，不是红项），四条红都不在本域**。
 
 **🔴 同域的段数闸门（Go `net/url` 段数上限）**：canonical 在
 [`docs/DRIFT/favorite/api.md`](../favorite/api.md) **§21**（含 §21.3 的
