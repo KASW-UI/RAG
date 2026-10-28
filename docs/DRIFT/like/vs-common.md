@@ -1221,3 +1221,31 @@ mvn -o -B -DargLine=-Xmx2g -am -pl service/common,service/message/message-api,se
 
 **④ 原值保留不改写**
 原判断与原数字（`test` / `verify` 双口径差 5 条）**原样保留**；本条只说明它**已过期**。
+
+### 🔴 第二十五轮 · **本域 7 个 rpc 测试类的监听口撞 Docker 发布口 ⇒ 已修**（根因与完整证据链见 `message/vs-common.md` 第二十五轮）
+
+**① 现象（本域侧）**
+第二十四轮收口回归（`mvn -o -B -am -pl <9 模块> clean test`）在 `message-rpc` 段报
+`java.net.BindException: Address already in use`（`/0.0.0.0:49992`）⇒ **该 fork 第一个 gRPC 监听就撞口**
+⇒ ⇒ 整批 context 起不来 ⇒ ⇒ 表现为「被测行为坏了」，**实为被测环境起不来**。
+
+**② 本域受影响面（实测复算 · 口径 = 非注释行 ＋ 只算测试类）**
+`service/like/like-rpc` 写 `grpc.server.port=0` 的**真实测试类 = 7**：
+`LikeDomainFactSchemaParityTest` · `LikeRedisDisconnectFastRejectGateTest` · `LikeRedisPoolExhaustionP99GateTest` ·
+`LikeRpcGrpcInterceptorWiringTest` · `LikeRpcRedisTimeoutsGateTest` · `LikeRpcSlowThresholdGateTest` · `LikeRpcSpringContextWiringTest`。
+⇒ ⚠️ **不算** `LikeRpcRuntimeBootGateTest`（它本来就是 `--grpc.server.port=` ＋ **自己探测的口** ⇒ 不在隐患面内）。
+
+**③ 修法（已落码 · `e9c3946`）**
+新增 `service/like/like-rpc/src/test/java/com/rag/like/like/rpc/support/GrpcTestPort.java`（96 行）
+＋ 上述 **7 个**类各注入 `registry.add("grpc.server.port", GrpcTestPort::freePort)`。
+⇒ 📌 `@DynamicPropertySource` 优先级高于 `@SpringBootTest(properties)` ⇒ 内联的 `=0` **保留作回退**。
+⇒ 📌 形态照抄仓里既有的 `LikeRpcRuntimeBootGateTest#freePort()` ⇒ 不是新发明。
+⇒ 📌 **不用固定口**（G4 波末全量与各域收口回归会并发跑同一批 rpc 模块 ⇒ 固定口 ⇒ 两棵树互撞）
+⇒ ⇒ **不新增端口段、不动 `22700–22999` 段表** ⇒ 与 G4 的段表裁定**无冲突**。
+
+**④ 证据**
+- 本域 7 个类在本轮 9 模块 `clean test` 中**全部绿**（`like-rpc` 段 F/E/S = 0/0/0）
+- 整轮 `Address already in use` 命中数 = **0**
+- 波级隐患面（已通报 G1 / G3 / G4）：全仓 **67** 个真实测试类写 `grpc.server.port=0`；我域 3 个 rpc 共 **21** 个已修
+  ⇒ ⇒ **仍待修 46**（article 8 · comment 2 · favorite 8 · follow 3 · hot 5 · admin 11 · user 9）
+  ⇒ ⚠️ 我第一版统计说「70」是**错的**（多算了 3 个 `GrpcTestPort` helper 的 javadoc 文字）⇒ **原值保留不改写**，详见 `message/vs-common.md` 第二十五轮 ⑤。

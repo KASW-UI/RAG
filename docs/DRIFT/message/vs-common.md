@@ -901,3 +901,62 @@ mvn -o -B -DargLine=-Xmx2g -am -pl service/common,service/message/message-api,se
 
 **④ 原值保留不改写**
 原判断与原数字（`test` / `verify` 双口径差 5 条）**原样保留**；本条只说明它**已过期**。
+
+### 🔴 第二十五轮 · **收口回归那 3 个 error 不是「被测行为坏了」，是「被测环境起不来」** —— 根因 = `grpc.server.port=0` 撞 Docker 发布口（2026-10-28）
+
+**① 现象（第二十四轮收口回归实测 · BUILD FAILURE · `MVN_EXIT=1`）**
+`mvn -o -B -DargLine=-Xmx2g -am -pl <9 模块> clean test` ⇒ `service/message/message-rpc` 的
+`MessageIsReadLambdaWiringTest` **3 条用例全 error**：
+```
+Failed to load ApplicationContext
+  → Failed to start bean 'shadedNettyGrpcServerLifecycle'
+  → java.net.BindException: Address already in use   （/0.0.0.0:49992）
+```
+⇒ **该 fork 里的第一个 gRPC server 监听就撞上了** ⇒ ⇒ 整批 context 起不来
+⇒ ⇒ 表现像「3 条用例 error」，**实为被测环境起不来**（⚠️ 极易被误读成新回归 —— 我第一反应也差点这么读）。
+
+**② 根因（实测链 · 非推测 · 双重取证）**
+- `49992` 被 `com.docker.backend` 占着：`lsof -nP -iTCP:49992 -sTCP:LISTEN` ⇒ `com.docke … IPv6 … TCP *:49992 (LISTEN)`；
+  `docker ps` ⇒ `Sea-kafka  0.0.0.0:49992->9093/tcp, [::]:49992->9093/tcp`（**Up 7 天** ⇒ 长期在池子里）。
+- 所有 rpc 测试写 `grpc.server.port=0` ⇒ 监听口由 **OS 临时段**挑（macOS 实测 `net.inet.ip.portrange` = `49152–65535`）
+  ⇒ ⇒ **与 Docker published 段同池**（本机 `com.docker.backend` 在该段占着 30+ 个口）。
+- Netty 的 gRPC server 用**双栈 IPv6 socket**（实测 `bound=/[0:0:0:0:0:0:0:0]:53428`）⇒ 该族在 IPv6 空间选口、却在 bind 阶段与 IPv4 持有者冲突。
+- ⚠️ **20 万次 `bind(0)` 压测（同一份 shaded Netty）0 失败** ⇒ ⇒ 这是**低概率环境态**，不是「每次必现」
+  ⇒ ⇒ **收口口径必须可复跑** ⇒ ⇒ 不能靠「重跑一次算过」。
+
+**③ 修法（已落码 · `e9c3946` · 24 个代码文件）**
+新增各域 `support/GrpcTestPort`（message / like / task 各 1 份 · 各 96 行）：
+`ServerSocket(0)` 取候选 → **显式再绑一次做确认**（绑不上 = 此刻被占 ⇒ 换下一个）⇒ 返回**此刻真绑得上**的端口；
+21 个 rpc 测试类注入 `registry.add("grpc.server.port", GrpcTestPort::freePort)`。
+- 📌 `@DynamicPropertySource` 优先级高于 `@SpringBootTest(properties)` ⇒ ⇒ 内联的 `grpc.server.port=0` **保留作回退**。
+- 📌 形态**照抄仓里既有的** `LikeRpcRuntimeBootGateTest#freePort()`（同款 `ServerSocket(0)` 探测）⇒ ⇒ 不是新发明。
+- 📌 **不用固定口**：G4 的 52 模块波末全量与各域收口回归**会并发**跑同一批 rpc 模块 ⇒ 固定口 ⇒ 两棵树互撞
+  ⇒ ⇒ 本修法**动态探测 · 不新增端口段 · 不动 `22700–22999` 段表**（与 G4 正在裁定的段表口径**无冲突**）。
+
+**④ 证据**
+- `MessageIsReadLambdaWiringTest` ⇒ `Tests run: 3, Failures: 0, Errors: 0`（修复前 = 3 errors）✔
+- 整轮 `Address already in use` 命中数 = **0** ✔
+
+**⑤ 隐患面（波级 · 已通报 G1 / G3 / G4）**
+
+| 口径 | 数 |
+|---|---|
+| 全仓 rpc 域写 `grpc.server.port=0` 的**真实测试类** | **67** |
+| 其中我域 3 个 rpc（**已修**） | 21（like 7 · message 9 · task 5）|
+| ⇒ **仍待修**（7 个域）| **46**（article 8 · comment 2 · favorite 8 · follow 3 · hot 5 · admin 11 · user 9）|
+
+⚠️ **我第一版统计说「70」是错的**（**原值保留，不改写**）：多算的 3 个是**我这轮新增的 `GrpcTestPort` helper 文件**
+—— 它们的 **javadoc 里写了 `"grpc.server.port=0"` 这句解释文字** ⇒ 被「按文件里出现过该字符串」的口径计入
+⇒ ⇒ **正确口径 = 只算非注释行 ＋ 只算测试类（`*Test.java` / `*Tests.java` / `*IT.java`）** ⇒ ⇒ **67**。
+⇒ 📌 **可复跑产物**：`/tmp/g2-port-hazard-count.json`（逐模块明细）。
+
+**⑥ 同类文件、不同风险（复算时最容易混进去）**
+- `*RuntimeBootGateTest`（article / comment / like 各 1 个）**不是** `=0` 形态 ⇒ 是 `--grpc.server.port=` ＋ **自己探测的口** ⇒ 本来就不在隐患面内。
+- favorite 的 3 个类是 `registry.add("grpc.server.port", () -> env("PROBE_RAG_PORT"))` ⇒ **环境变量驱动** ⇒ 也不是 `=0` 形态。
+
+**⑦ 共享层同款隐患 ⇒ 属 G4 写权（我域只登记 ＋ 通报，零落码）**
+`service/common/src/test/java` 里有 **6 个**类用 `tomcat.setPort(0)`（实测复核：`GoStyleTraceparentFilterTest` ·
+`GoStyleTraceparentFilterTraceSourceGateTest` · `GoStyleClientDisconnectProbeGateTest` ·
+`GoStyleClientDisconnectProbeBudgetGateTest` · `GoStyleTimeoutResponseRaceGateTest` · `HttpClientDisconnectRealTomcatTest`）
+⇒ 同样落在 OS 临时段 ⇒ **同样会撞 Docker 发布口** ⇒ ⇒ 已于第二十四轮通报 G4（请其落码）。
+⇒ ⚠️ **口径提醒**：另有 **29 个** api 侧测试类用 `RANDOM_PORT`（Tomcat 侧等价形态 = `r.add("server.port", 探测口)`）⇒ 属同一族隐患。
