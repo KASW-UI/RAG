@@ -84,14 +84,35 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 #   ⇒ ⇒ 脚本把「找不到 Go 仓」当成「Go 侧 0 个端点」⇒ **hot 域假红**，
 #      且 `--domain <错名>` 时**一个域都不跑**却 EXIT=0 ⇒ **假绿**。
 # ⇒ ⇒ 现在：环境变量优先（**校验**）→ 否则**逐级向上搜索** → 都找不到 ⇒ **显式报错退出**。
-_GO_REPO_DIR_NAME = "Sea-RideTheWind_golang"
-# 判据：必须同时含「Go 侧 api 的 routes.go」与「proto 目录」⇒ 才算 Go 真源仓。
-_GO_REPO_MARKER = "service/article/api/internal/handler/routes.go"
+# 🔴 2026-10-29 修复（同一根因被 G1 报作 `S1-FOLLOW-008`②、G2 报作「工作树假红」、G3 报作 `G4-10`）：
+#   原默认值 = `os.path.join(os.path.dirname(REPO), "Sea-RideTheWind_golang")`
+#   ⇒ 在 **worktree** 里 `REPO` = `.../RAG.worktrees/<lane>` ⇒ 拼出
+#      `.../RAG.worktrees/Sea-RideTheWind_golang` ⇒ **不存在**
+#   ⇒ ⇒ 脚本把「找不到 Go 仓」当成「Go 侧 0 个端点」⇒ **hot 域假红**，
+#      且 `--domain <错名>` 时**一个域都不跑**却 EXIT=0 ⇒ **假绿**。
+# ⇒ ⇒ 现在：**共用共享实现** `tools/difftest/go_repo.py`
+#      （环境变量优先**且校验** → 逐级向上搜索 → 都找不到 ⇒ 抛错退出码 2）。
+#
+# 🔴🔴 **为什么改成「共享实现」而不是在本脚本里就地修**（2026-10-29 · G4 lane）：
+#   **同一个根因被三个 lane 独立报出**（G1 / G2 / G3），
+#   且 **G3 本轮新写的探针初版也踩了同一个坑** ⇒ ⇒ **就地修 = 下一个新脚本还会重犯**
+#   ⇒ ⇒ 修法必须落在**共享解析函数**上 ⇒ 本脚本与 `tools/difftest/lib/go-repo.sh`
+#   （shell 版，判据**逐条一致**）共用同一套口径。
+#
+# ⚠️ **判定标志必须是「与域无关」的结构性文件**（`go.mod` / `proto/` / `service/`）
+#    ⇒ 本脚本**旧版**用的是**域专属**标志（`service/article/api/internal/handler/routes.go`）
+#    ⇒ ⇒ 「只跑 favorite 域的脚本」与「只跑 article 域的脚本」判据不同
+#    ⇒ ⇒ 又变成「同一个仓、两个结论」（同族陷阱）⇒ 已一并改正。
 
-
-def _looks_like_go_repo(path):
-    return (os.path.isfile(os.path.join(path, _GO_REPO_MARKER))
-            and os.path.isdir(os.path.join(path, "proto")))
+try:
+    # 同目录导入（`tools/difftest/`）
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from go_repo import resolve_go_repo as _shared_resolve_go_repo
+except ImportError as _imp:  # pragma: no cover - 只在共享模块缺失时触发
+    raise SystemExit(
+        "❌ 找不到共享模块 `tools/difftest/go_repo.py`（Go 真源定位的唯一实现）\n"
+        f"   原因：{_imp}\n"
+        "   ⇒ 本脚本**不再自带**一份解析逻辑（那会与共享实现漂移 ⇒ 下一个新脚本还会踩同一个坑）")
 
 
 def _resolve_go_repo():
@@ -100,40 +121,8 @@ def _resolve_go_repo():
     🔴 找不到 ⇒ **抛 FileNotFoundError**（由 main 显式报错退出）。
        **绝不允许**退化成「Go 侧 0 个端点」⇒ 那会把「没查」读成「一致」。
     """
-    env = os.environ.get("GO_REPO")
-    if env:
-        if not _looks_like_go_repo(env):
-            raise FileNotFoundError(
-                f"GO_REPO 环境变量指向的目录**不是 Go 真源仓**：{env}\n"
-                f"  判据：必须同时含 {_GO_REPO_MARKER} 与 proto/ 目录。\n"
-                f"  ⇒ 请把它指向 Sea-RideTheWind_golang 的真实路径。")
-        return env, "GO_REPO 环境变量"
+    return _shared_resolve_go_repo(repo_root=REPO)
 
-    # 逐级向上搜索：worktree 与主仓都能命中同一份真源
-    cur = os.path.dirname(REPO)
-    seen = []
-    for _ in range(8):
-        candidates = [os.path.join(cur, _GO_REPO_DIR_NAME)]
-        try:
-            candidates += sorted(
-                os.path.join(cur, d) for d in os.listdir(cur)
-                if os.path.isdir(os.path.join(cur, d)) and d != _GO_REPO_DIR_NAME)
-        except OSError:
-            pass
-        for cand in candidates:
-            if _looks_like_go_repo(cand):
-                return cand, f"向上搜索命中（自 {REPO} 起）"
-        seen.append(cur)
-        parent = os.path.dirname(cur)
-        if parent == cur:
-            break
-        cur = parent
-    raise FileNotFoundError(
-        "**找不到 Go 真源仓**（Sea-RideTheWind_golang）⇒ 本脚本无法做对照。\n"
-        f"  已搜索：{seen}\n"
-        "  ⇒ 请显式指定：GO_REPO=/绝对路径/Sea-RideTheWind_golang python3 tools/difftest/"
-        "check-surface-parity.py\n"
-        "  ⚠️ **本脚本不得在找不到真源时给出绿灯** —— 那会把「没查」读成「一致」。")
 
 # ── 域定义：Go 原件 ↔ RAG 模块 ────────────────────────────────────────────
 # go_rpc  : Go proto 文件名（users 域的 user.proto 在 RAG 侧改名 users.proto）

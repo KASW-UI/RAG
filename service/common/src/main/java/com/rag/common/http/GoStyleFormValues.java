@@ -231,6 +231,25 @@ public final class GoStyleFormValues {
      *   <li>go-zero 的 <b>2048 非空值计数</b>（{@code httpx/util.go:44-53}）。</li>
      * </ol>
      *
+     * <h2>🔴 消费者清单（改本方法的规则或次序 ⇒ 必须同步通知下列域）</h2>
+     * <p><b>本方法不是「只有共享层闸门在用」</b> —— 它已被<b>域内闸门直接消费</b>，
+     * 而域内闸门的拒绝形状会直接变成<b>该域对外的可观察行为</b>：
+     * <ul>
+     *   <li><b>{@code favorite-api}</b> ——
+     *       {@code service/favorite/favorite-api/src/main/java/com/rag/favorite/favorite/api/interceptor/FavoriteGoQueryLimitInterceptor.java}
+     *       <b>只读调用</b>本方法（不复制规则）⇒ ⇒ 本方法的规则/次序 <b>就是</b>
+     *       favorite-api 7 个端点<b>全部 query 解析失败路径</b>的可观察行为
+     *       （非空 query 值 &gt; 2048 ⇒ 200+5003 · {@code %zz} ⇒ 200+5003 ·
+     *       10001 段 ⇒ 200+5003 · 含分号 ⇒ 200+5003）。
+     *       ⚠️ <b>域侧回归网</b>（改动本方法会让它们红 ⇒ 可当守门用）：
+     *       {@code FavoriteApiRealTomcatGateTest}（真 Tomcat · 16/16）＋
+     *       {@code FavoriteGoQueryLimitInterceptorTest}。</li>
+     * </ul>
+     * <p>⇒ ⇒ <b>动本方法前</b>：① 先跑 favorite-api 的上述两条守门；② 改完必须通知
+     * <b>favorite 域（G3）</b>同步复验 ⇒ 因为该域的可观察行为<b>承重于本方法</b>。
+     * <p>⚠️ <b>反过来说</b>：本方法<b>只读不写</b>，域侧调用方<b>不得</b>改写它的返回值语义
+     * ⇒ 域侧只允许「<b>判定</b>本方法的结论」并<b>自行决定拒绝形状</b>。
+     *
      * @param query 原始 query string（{@code request.getQueryString()}）；{@code null} / 空串 ⇒ 不拒绝
      * @return {@code null} = 按 Go 的语义<b>应当放行</b>；
      *         否则 = Go 的原文（{@code http.Error} 的 body 内容，<b>不含</b>尾随换行）
