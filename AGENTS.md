@@ -166,13 +166,13 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 
 1. **每个 phase 一个 PR**；PR 自带 spec（`RAG/.agents/specs/<slug>.md`），提交前 spec 已落仓。
 2. **issue 在 PR 之前**；PR body 引用 issue。
-3. **分支策略（2026-10-23 改写，取代「不开 worktree + git stash」）**：串行仍在 `do-my-own-gh`；**多域并发对齐时一域一 worktree**
-   （`align/<域>` + `../RAG.worktrees/<域>`，均从 `do-my-own-gh` 切，主干最后接合并）。**工作树内只写自己域的台账文件；
+3. **分支策略（2026-10-23 改写，取代「不开 worktree + git stash」）**：串行仍在 `do-my-own-gh`；并发 ⇒ **一波次一棵**（§3d；路径 `align/<slug>` + `../RAG.worktrees/<slug>`）。**工作树内只写自己域的台账文件；
    共享索引（各 `_INDEX.md`/`AGENTS.md`/`_MANIFEST.json`）合并后统一更新** ⇒ 多路并发必撞，且事后无法区分台账归属。
    ⚠️ `git stash` 是工作区级状态，会被并发 agent 互偷 ⇒ 不再作隔离手段。⚠️ **共享文件的改动要尽早提交**（实测已被并发会话
    `git checkout` 整体回滚过一次）。
-3b. **三档台账：每域必读 + 必写**（2026-10-23 用户定）—— 开工前**必读** `docs/DRIFT/` + `docs/Intentional_Deviations/` +
-   `docs/Pitfalls/` 的**本域子目录 + `_cross/`**；产出**必写回**同名的**本域子目录**。⚠️ **只写自己域，三个 `_INDEX.md` 合并后统一更新**。⇒ 细则 ⇒ [`docs/Worktree.md`](docs/Worktree.md) §二·五·**三·1d**
+3b. **四档台账：每域必读 + 必写**（2026-10-23 用户定）—— 开工前**必读** `docs/DRIFT/` + `docs/Intentional_Deviations/` +
+   `docs/PhaseGoal/` + `docs/Pitfalls/` 的**本域子目录 + `_cross/`**；产出**必写回**同名的**本域子目录**。⚠️ **只写自己域，三个 `_INDEX.md` 合并后统一更新**。⇒ 细则 ⇒ [`docs/Worktree.md`](docs/Worktree.md) §二·五·**三·1d**
+3b-0. 🔴 **开工前置四步（四棵 lane 强制 · 2026-10-29 用户定）** —— ① **先定自己的任务** ② **读完上列四档** ③ **回执「读完了」** ④ **经用户批准才开工**（未批准 ⇒ 除 ③ 回执外不得写代码/台账；**调度员不得代批准**）。⇒ 细则 ⇒ [`docs/Worktree.md`](docs/Worktree.md) §二·五
 3c. **`global` 收口域（2026-10-25 用户定）** —— 跨微服务 + 共享层影响的搁置漂移**全部归它**
    （§3.5）。⇒ **共享层只有 `align/g4-service-common` 能写**；
    修法同时涉及共享层与别的域代码时**必须同一次提交**（否则留下半截）。
@@ -184,14 +184,14 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
    ⇒ 总纲 ⇒ [`domain-common-lanes.md`](docs/DRIFT/_cross/domain-common-lanes.md) · 波次表 ⇒ [`cross-domain-coupling.md`](docs/DRIFT/_cross/cross-domain-coupling.md)
 3e. 🆕 **G4 = 共享层常设执行者（2026-10-27 用户定）** —— `service/common` + `users-common` ⇒ **写权唯一**（`align/g4-service-common`）：**随时接收** G1/G2/G3 反馈单（7 项：现象 / Go 侧 `文件:行号` / RAG 侧现状 / 证据强度 / 建议修法 / 影响面 / 是否阻塞本波）⇒ **执行落码** ⇒ **全量回归** ⇒ **回执**；**先于 G1 就位 standby**、**落码窗口常开**（G1~G3 只读、只登记）。
    ⇒ G4 **并行、不阻塞** ⇒ ✅ **撤销「基线不可变 / 结论作废」**（**收口回归在波末跑** ⇒ 窗口 = 收口回归后～合并前 ⇒ 变了就**重跑一次收口回归**）；**例外升级**：某波「不改共享层就过不了」⇒ **就地升级为全量回归波**，等 **G4 落码后**再重跑。
-   ⇒ **G1/G2/G3 遇 `users-common` / `service/common` 导致的问题 ⇒ 发消息给 G4**（反馈单 7 项）；**G4 三棵都没反馈 ⇒ G4 无活干**（standby）⇒ **G4 可开子会话并行加速，上限 10 个**（共享层落码按文件切 ⇒ 零重叠；细则 ⇒ `docs/Worktree.md` §三·0）。
+   ⇒ **G4 可开子会话并行加速，上限 10 个**（共享层落码按文件切 ⇒ 零重叠；细则 ⇒ `docs/Worktree.md` §三·1d）。
    ⇒ 规则表 **C1~C7** · 依赖 DAG · 逐类归属 ⇒ [`cross-domain-coupling.md`](docs/DRIFT/_cross/cross-domain-coupling.md)（守门 `check-wave-coupling.py` ＋ `check-wave-role-model.py`）
 3f. ⚠️ **共享判据 = 依赖度数，不是目录位置**（2026-10-27 实测）：`service/common`（20 模块）与 `service/users/users-common`（**10** 模块 / **6 外域 api**）**都是共享层**（⇒ 写权归 G4）；其余 7 个 `<域>-common` 只被**本域**引用（pom / import / 扫描面 **三层实测**）⇒ **真私有**（⇒ 归各自域）⇒ `users-common` 是**混合体** ⇒ **按类判定**（8 个跨域类归 G4 / 3 个 users 专用类留 users 域），**不按模块一刀切**、**不搬目录**。
 3g. 🆕 **四棵工作树的当前目标（2026-10-28 用户定）** —— **两份标准文件 = 唯一目标**：
    **阶段 1 准入线** ⇒ [`docs/PhasedGoal.md`](docs/PhasedGoal.md)（P0 九条 / P1 机制 / P2 不阻塞 —— 与 `twoStage.md` §2.1 **逐字相同**）；
    **两阶段全流程 + 阶段归属 A/B/C/D + §9 故障矩阵** ⇒ [`docs/twoStage.md`](docs/twoStage.md)（**权威全文**）。
    ⇒ **lane 只做阶段 1、只做本域**：必读 = PhasedGoal.md 全文 + **twoStage.md 的** §5.3 / §5.4 / §10；**不碰** **twoStage.md 的** §1.3 / §2.2 / §6 / §7（阶段 2 ⇒ 收口执行者）；**§4（阶段 0 事实基线）必读**。
-4. **作用范围**：仅限 RAG 仓库。`Sea-RideTheWind_golang` 已冻结只读；其他非 Spring Boot 的 Java 实现不在范围内。
+4. **作用范围**：仅限 RAG 仓库（Go 真源已冻结只读，见 §一）。
 5. **Go 是真理之源**（2026-10-20 第三次切换，全子模块适用）：proto 字段号、错误码、JWT claims、表结构、HTTP path、
    Kafka topic 等语义细节一律以 Go 对应子模块为准；差异**只允许出现在表达层**，出现行为差异时默认判 **RAG 错**。
 6. **session 语言**：用户用中文；技术术语、代码、文件路径保留英文。
@@ -220,13 +220,13 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 
 ### 6.4 其他子模块
 
-`service/message` 台账见 §0 域表（不重复）；**实施阶段 5（全量 + 端到端）未启动**；需真实 PG + Redis 集成测试补上（当前测试大量 mock 数据层）。
+`service/message` 台账见 §0 域表（不重复）；需真实 PG + Redis 集成测试补上（当前测试大量 mock 数据层）。
 
 ## 七、引用清单
 
 ### 7.1 真理之源（判定行为）
 
-Go 真源仓库：见 §一 表首行（**已冻结**，不接受写入）。
+Go 真源仓库见 §一 表首行。
 RAG 不是从 Go「推测」行为，而是**逐字对照 Go 源码**（§3.1）。
 > 📖 完整锚点表（路由 / 事务 / 行锁 / 身份 / JWT / 建表 + message 域 9 个 RPC）⇒ [`go-anchors.md`](docs/DRIFT/_cross/go-anchors.md) —— **参考资料，非政策**
 

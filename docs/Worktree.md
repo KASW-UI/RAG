@@ -179,10 +179,102 @@ python3 tools/difftest/check-wave-lane-ownership.py     # ⇒ EXIT=0
 docs/DRIFT/<本域>/                    ← 本域已有台账：哪些已修、哪些还 OPEN
 docs/Intentional_Deviations/<本域>/   ← 本域签字偏离：哪些「看着像 bug」其实是决策
 docs/Pitfalls/<本域>/                 ← 本域踩过的坑：这个域特有的陷阱
+docs/PhaseGoal/                       ← 本轮判定项：g<N>.md（per-lane 投影）+ PhaseGoal-judge.md（权威）
 docs/DRIFT/_cross/                    ← 跨模块档案（跨域不变量：共享 Flyway 账本 / 建表责任交叉 / 事实投递链路）
 ```
 
 ⚠️ `_cross/` 必看的原因：跨组件不变量不属于任何单个组件，**塞进组件任务里就会被漏掉**。
+
+### 🔴 开工前置四步（2026-10-29 用户定 · 四棵 lane 强制 · **未经批准不得开工**）
+
+> AGENTS.md §五·3b-0 的一句话规则在这里展开。**本节是「开工前」的硬门槛，不是建议。**
+
+**为什么要有这一节**：四棵 lane 并发时，最贵的错误不是写错代码，而是**没读就写** ——
+① 不知道自己的任务边界 ⇒ 越界改别域 / 抢共享层写权；
+② 没读 `docs/Intentional_Deviations/` ⇒ **把签字偏离当新回归「顺手修回 Go 行为」⇒ 制造新漂移**（本仓最危险的错）；
+③ 没读 `docs/Pitfalls/` ⇒ 重复踩同一个坑；
+④ 没读 `docs/PhaseGoal/` ⇒ 不知道本轮判定项与阶段边界 ⇒ 做多了（预支阶段二）或做少了（漏 P0）。
+
+| 步 | 动作 | 产出 |
+|---|---|---|
+| **① 定任务** | 写清**本 lane 本轮做什么 / 明确不做什么**（哪些域、哪些文件面、哪个阶段） | 「任务范围」一句话 ＋ **不做清单** |
+| **② 读四档** | 读完**本 lane 面**的四档（见下表） | 「已读清单」＝ **文件路径 + 读到的关键结论** |
+| **③ 回执「读完了」** | 在**会话里**发开工前置回执（模板见下）**＋** 写进本 lane 的**每个域台账的固定小节 `## 开工前置回执`**（落点见下） | 回执（会话 ＋ 台账各一份，**同一份内容**） |
+| **④ 等批准** | 🔴 **未经用户（Jason）明确批准 ⇒ 不得写任何代码或台账**（**③ 的回执小节除外**；只允许读） | 批准 |
+
+**② 的「本 lane 面」怎么读（四档 × 四棵）**
+
+| lane | 本 lane 域 | `docs/DRIFT/` | `docs/Intentional_Deviations/` | `docs/PhaseGoal/` | `docs/Pitfalls/` |
+|---|---|---|---|---|---|
+| **G1** | `users`（**不含 `users-common`**）+ `follow` | `users/` · `follow/` | `users/` · `follow/` | **`g1.md`** ＋ `PhaseGoal-judge.md` 的 users/follow 行 | `users/` · `follow/` |
+| **G2** | `message` + `like` + `task` | 同名三目录 | 同名三目录 | **`g2.md`** ＋ judge 的三域行 | 同名三目录 |
+| **G3** | `article` + `comment` + `favorite` + `hot` | 同名四目录 | 同名四目录 | **`g3.md`** ＋ judge 的四域行 | 同名四目录 |
+| **G4** | **共享层** `service/common` + `users-common` | `common/` · `global/` | `global/`（含 `common-tails.md`） | **`g4.md`** ＋ judge 的 `service/common` 行 | `common/` · `global/` |
+| **全部** | —— | `docs/DRIFT/_cross/`（**四棵都要读**） | —— | `docs/PhasedGoal.md` ＋ `docs/twoStage.md` §4/§5.3/§5.4/§10 | `docs/Pitfalls/_cross/` |
+
+⚠️ `docs/DRIFT/_cross/` **四棵都要读** —— 跨组件不变量不属于任何单个组件，塞进组件任务里就会被漏掉。
+⚠️ `docs/PhaseGoal/` 是**机器生成**的（`check-phasegoal-lanes.py --write`）⇒ **`docs/PhaseGoal-judge.md` 是权威源，`docs/PhaseGoal/g<N>.md` 是它的 per-lane 投影** ⇒ 两者矛盾 ⇒ 以 judge 为准并登记（不要直接改生成物）。
+
+**③ 开工前置回执模板**（**会话 + 台账各一份**）
+
+```
+【开工前置回执 · <lane> · <日期>】
+① 任务范围：<本 lane 本轮做什么>
+   不做：<明确不碰的域 / 文件面 / 阶段>
+② 已读四档：
+   · docs/DRIFT/<...>                → 关键结论：<...>
+   · docs/Intentional_Deviations/<...> → 关键结论：<...>
+   · docs/PhaseGoal/g<N>.md + PhaseGoal-judge.md → 关键结论：<...>
+   · docs/Pitfalls/<...>             → 关键结论：<...>
+   · docs/DRIFT/_cross/              → 关键结论：<...>
+③ 待批准项：<需要用户/调度员拍板的点；若无则写「无」>
+④ 等批准 ⇒ 批准后才开工
+⑤ 批准记录：<批准人> · <批准时间> · <批准范围>   ← 由**调度员代填**，回执人**不得自批**
+```
+
+⚠️ **⑤ 的标题里不许出现「Jason 批准」这四个字** —— 核验命令按 `批准记录：Jason` 匹配，标题若自带该串 ⇒ 任何写了回执的 lane 都会被误判成「已获批准」（**G1 与 G4 于 2026-10-29 03:13 各自独立发现此缺陷**）⇒ 标题保持 `批准记录：<批准人>` 的**占位形态**，**只有调度员真的填了 `Jason` 才算批准**。
+
+**④ 批准人**：**用户（Jason）** 为批准人；**调度员**负责收齐四条 lane 的回执、汇总待批准项、转达「已批准开工」。
+⇒ 调度员**不得**代用户批准。
+
+**③ 的回执落点（固定小节 ⇒ 可一条命令核验）**
+
+| lane | 回执落点（固定小节标题 `## 开工前置回执`） |
+|---|---|
+| **G1** | `docs/DRIFT/users/vs-common.md` ＋ `docs/DRIFT/follow/vs-common.md` |
+| **G2** | `docs/DRIFT/message/vs-common.md` ＋ `docs/DRIFT/like/vs-common.md` ＋ `docs/DRIFT/task/vs-common.md` |
+| **G3** | `docs/DRIFT/article/vs-common.md` ＋ `docs/DRIFT/comment/vs-common.md` ＋ `docs/DRIFT/favorite/vs-common.md` ＋ `docs/DRIFT/hot/vs-common.md` |
+| **G4** | `docs/DRIFT/global/vs-common.md` |
+
+⇒ **本 lane 的每个域台账都要有这一节**（不是「挑一个写」）⇒ 收口时才能一眼看出「这个域开工前到底读没读」。
+
+**核验命令（收口 / 调度用）**：
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG"
+for f in docs/DRIFT/{users,follow,message,like,task,article,comment,favorite,hot,global}/vs-common.md; do
+  printf "%-46s 回执=%s  批准=%s\n" "$f" \
+    "$(grep -c '^## 开工前置回执' "$f")" \
+    "$(grep -cE '⑤ 批准记录：Jason · [0-9]{4}-' "$f")"
+done
+```
+
+⚠️ **批准列的判据是 `⑤ 批准记录：Jason · <日期>`**（**要求完整填充形态**）—— 前三版都有假阳性：
+- **第一版** `Jason 批准` ⇒ 命中**回执模板自带的 ⑤ 标题** ⇒ 回执一写就 ≥1 ⇒ **假绿**（**G1 与 G4 于 2026-10-29 03:13 各自独立发现**）；
+- **第二版** `批准记录：Jason` ⇒ 仍会命中**旧模板行** `⑤ Jason 批准记录：<批准人> …` ⇒ **假绿**（**G4 当场指出**）；
+- **第三版** `批准记录：[^<]` ⇒ 仍会命中**散文里讨论这个判据的行**（G1 回执里写着「匹配 `批准记录：` 后有非空字符的行」⇒ 反引号命中 `[^<]`）⇒ **假绿**（**调度员 03:2x 实测发现**）。
+
+⇒ **正确判据** = **锚定 ⑤ 标记 ＋ 要求批准人 ＋ 要求日期** ⇒ 模板行、空栏、散文提及**都不匹配**；**只有调度员真的填了 `⑤ 批准记录：Jason · 2026-…` 才算批准**。
+⚠️ **两列都要 ≥1 才算「该域已开工」** ⇒ **缺回执或缺批准 ⇒ 收口那一步不得认定该 lane 已开工**，也不得把它的产出计入阶段一判定。
+
+⚠️ **以下形式都算「没读」，回执不成立**：
+- 只列文件路径、不写读到的结论 ⇒ 「读了但没读懂」；
+- 只读了 `docs/DRIFT/`，漏了 `docs/Intentional_Deviations/` ⇒ **最危险的一种**；
+- 用「已按 §3.1 对照」代替具体 `文件:行号` ⇒ 无法核；
+- **台账里写了回执、但会话里没说** ⇒ **不算**（调度方只看得到会话）；
+- **回执里自己写「已批准 / 已获批」** ⇒ **不算批准**（批准只能来自 Jason 的明示；调度员只能代填**已存在的**批准）；
+- 只写「已读四档」不写**本 lane 面的具体路径** ⇒ 退回（无法核是不是只读了自己域）；
+- 把回执写成「已读全部文档」这种空话 ⇒ 无可核内容 ⇒ 退回重做。
 
 ### 产出必写回（只写自己域的子目录）
 
@@ -272,6 +364,7 @@ docs/DRIFT/_cross/                    ← 跨模块档案（跨域不变量：�
 | **交付物** | **9 条机制面轴（A1~A9）**的**本域侧**逐轴结论（✅/🔴/🟡 ＋ **证据强度** ＋ **核对日期**）＋ **两侧同时跑**的探针（§3.3：只跑 RAG 的探针**不算数**） |
 | **派单** | 发现共享层缺陷 ⇒ 本域**只登记**（**反馈单 7 项**，§5.3e）⇒ **转派 G4**；**域侧能自修的域侧修** ⇒ 不甩单、不留半截 |
 | **G4 反馈链** | G1/G2/G3 遇到 **`users-common` / `service/common` 引起的问题** ⇒ **发消息给 G4**（**反馈单 7 项**）⇒ G4 **执行落码** + **回执**；🔴 **G1/G2/G3 三棵都没反馈 ⇒ G4 就没有活干**（standby 等单）⇒ ⚡ **G4 可开子会话并行加速，上限 10 个**（共享层落码**按文件切** ⇒ 零重叠；**先于 G1 就位 standby**、**落码窗口常开**） |
+| **开工前置** | 🔴 **四棵 lane 开工前必做四步**（2026-10-29 用户定）—— ① **先定自己的任务**（含「不做什么」）② **读完本 lane 面的四档**（`docs/DRIFT/`·`docs/Intentional_Deviations/`·`docs/PhaseGoal/`·`docs/Pitfalls/` ＋ `_cross/`）③ **在会话里回执「读完了」** ④ 🔴 **经用户/调度员批准才开工**（未批准 ⇒ 不得写任何代码或台账）⇒ **细则 ＋ 回执模板 ⇒ §二·五** |
 | **机器守门** | `tools/difftest/check-wave-lane-ownership.py` ⇒ **EXIT=0** 才算合规（写权不重叠 + 排他归属 + 路径落空 + 分支存在） |
 
 📌 **为什么从 10 条 lane 收敛到 4 棵工作树**：10 条 `<域>-common` lane 是「**一个域一棵**」，
