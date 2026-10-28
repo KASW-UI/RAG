@@ -1147,3 +1147,61 @@ XML 侧 9 个目标模块求和 = **1030**；maven 侧模块级汇总行 = **106
 | **r31** | — | — | — | ✅ **全绿 · 1030** |
 
 ⚠️ **共同点**：三个里有两个长得像「被测行为坏了」，**实为环境** ⇒ ⇒ 这就是为什么台账要求「判绿红只看 surefire 三项 + 退出码」。
+
+### 🟢 第二十六轮 · **A3 轴本域最后一项销号：form 值超限的【业务信封】形状 ⇒ 真 Tomcat 活体 + 变异验证**（2026-10-28）
+
+**① 销号前 A3 轴在本域的确切状态（逐条核对，不是抄上一轮的结论）**
+| A3 子项 | 状态 | 证据 |
+|---|---|---|
+| 路径归一（`..`） | ✅ **已闭合** | 第十轮：`MessageApiPathNormalizationRealTomcatTest`（真 Tomcat）＋ A/B 对照组 `MessageApiPathNormalizationControlTest` ＋ 本域独立变异验证 |
+| 保护层 413/503 裸响应形状 | ✅ **已闭合** | `MessageApiProtectionRealTomcatTest`（真 Tomcat）：413 + 空 body + 无 Content-Type；413 压过鉴权；未超限 ⇒ 401 |
+| form 闸门与鉴权的**先后** | 🟡 **有界残留 · 刻意不改**（已登记） | RAG = 闸门先（`Ordered.HIGHEST_PRECEDENCE`）· Go = auth 先 ⇒ 差别已登记，不改判据 |
+| 🔴 **envelope 拒绝形状 / 2049 参数** | ❌ **本轮销号的这一格** | 此前**只有 MockMvc** 覆盖（`MessageApiMvcPipelineTest`）⇒ ⇒ **缺一次真 Tomcat 活体** |
+
+⇒ ⇒ **本轮补的就是最后一格**（G4 第二封回信第 ③ 条点名的「你域内唯一未销号项」· 域侧做）。
+
+**② 新增探针**（`service/message/message-api/src/test/java/com/rag/message/message/api/MessageApiFormLimitEnvelopeRealTomcatTest.java` · **4 条**）
+① **端口段前提**：真容器必须落在本域专用端口段（`21700–21799`）⇒ 防止 `RANDOM_PORT` 落进 OS 临时段、请求打到别人的 Docker 服务。
+② **模式前提**：`GoStyleFormValueLimitInterceptor.mode()` 必须 = `ENVELOPE`（**直接断言**，不靠「返回 200」区分「关掉」与「根本没装」）。
+③ 🔴 **目标断言**：>2048 个**非空 query 值**（实测用 2100）⇒ **HTTP 200** ＋ body 含 `"code":5001` ＋ **body 不含 Go 裸 400 文案** `too many form values`。
+④ **阳性对照**：未超限 + 无 token ⇒ **401**（证明 ③ 不是「无条件短路」，形状断言有判别力）。
+
+**③ 期望值的 Go 出处（逐字）**
+Go `service/message/api/messagecenter.go:53` ⇒ `httpx.SetErrorHandler` ⇒ `code = messagecommon.ErrorServerCommon`（**5001**）· `msg = GetErrMsg(code)`（**"internal server error"**）· 返回 **`http.StatusOK`** ＋ `{Code, Msg, Data:nil}`。
+⇒ ⇒ 本域契约 = 「**除鉴权失败外，HTTP 状态码恒为 200，成败全在 body 的 code 里**」。
+⇒ ⇒ ⚠️ 共享层在 ENVELOPE 模式下是**抛异常**（`GoStyleFormValueLimitInterceptor:90-93`）而不是写响应 ⇒ ⇒ **必须是 Interceptor**（Filter 抛的异常到不了 `@RestControllerAdvice`）⇒ ⇒ **这一段只有真容器能判，MockMvc 不够** ⇒ ⇒ 这就是本探针存在的理由。
+
+**④ 变异 M-D1（证明判据不是假绿）**
+- 变异对象 = 本域 `message-api/src/main/resources/application.yml` 的 `mode: envelope` ⇒ `mode: raw`（**域侧写权面**）。
+- md5 账：变异前 `199873219f92ca913b79c7fd04fe7cf5` → 变异后 `558d05b0e64e009ad82f56682b2caad2` → 还原后**回到 `19987321…`** ✔
+- 实测：`Tests run: 4, Failures: 2` ⇒ 红的是
+  ① `formLimitModeMustBeEnvelope`（**模式前提**，预期会红 —— 它就是盯着这个开关的）＋
+  ② **`overLimitQueryValuesYieldBusinessEnvelope`（目标断言）** ⇒ ⇒ **目标断言确实在目标断言上红** ✔
+  另两条（端口段、阳性对照）**仍绿** ✔
+- 🔴 **变异把 RAG 的另一侧形状也实测出来了**：`mode: raw` 时 ⇒ **HTTP 400** ＋ body =
+  **`too many form values, error: p0=1&p1=1&…`** ⇒ ⇒ **Go 的裸 400 形状逐字一致**
+  ⇒ ⇒ 由此可判定：**RAG 侧的 `envelope` 模式正是与 Go `SetErrorHandler` 对齐的那一侧**，
+  而 `raw` 对应的是 Go 侧 user/admin api（**未注册** `SetErrorHandler`）的行为 ⇒ ⇒ **两边形状都实测到了，不是推测**。
+- 还原后复跑：`Tests run: 4, Failures: 0` ⇒ ✅ **绿腿闭合**。
+
+**⑤ ⇒ ⇒ 销号结论**
+🟢 **A3 轴「envelope 拒绝形状 / 2049 参数」这一格 = RAG 腿 L4**（真 Tomcat 活体 ＋ 变异验证 ＋ Go 出处逐字）。
+⇒ ⇒ 本域 A3 轴仅剩**已登记的「有界残留 · 刻意不改」**（form 闸门与鉴权先后）⇒ ⇒ **无未销号项**。
+
+**⑥ 写权与边界**
+- 探针类落在 **message-api 的 test 目录**（本域写权面）· 变异对象是**本域** yml ⇒ ⇒ **零越权**。
+- ⚠️ **共享层那半仍是 G4 的**：本探针只钉住「**本域**观测到的形状」，
+  共享层 `GoStyleFormValueLimitInterceptor` / `GoStyleFormLimitWebMvcConfig` 的行为未改 ⇒ ⇒ **不越权、不落码**。
+- ⚠️ **本类不进 Go 腿**：Go 侧期望值取自 `messagecenter.go:53` 源码（**未做 Go 活体对拍**）⇒ ⇒ 证据边界显式标注。
+
+**⑦ 三域现状（一句话对照）**
+| 域 | A3「真实请求证据」 | 本轮 |
+|---|---|---|
+| **message** | 🟡 → ✅ **L4** | **本轮补上 envelope 形状**（真 Tomcat ＋ M-D1 变异） |
+| **like** | 🟢 **已补**（第十轮） | 本轮**未动**（已复核，不重复劳动） |
+| **task** | 🟢 **已补**（第十轮）＋ form 闸门 **OFF** ⇒ envelope 形状 **N/A** | 本轮**未动** |
+
+⚠️ **教训（留给全波）**：G4 那封回信说「A3 真 Tomcat 探针 = 你域内唯一未销号项」⇒ ⇒ **按字面看像是「我什么都没做」**
+⇒ ⇒ **实读本域三份台账才发现**：路径归一（第十轮）与 413 形状（`MessageApiProtectionRealTomcatTest`）**早已闭合**，
+真正缺的只有 **envelope 拒绝形状**那一格 ⇒ ⇒ **别人的「未销号」描述可能停在旧 tip**
+⇒ ⇒ **先核自己的台账，再决定要不要补**（否则会重复劳动，或漏掉真正的那一格）。
