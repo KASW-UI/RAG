@@ -156,7 +156,7 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 
 ### 4.2 5 阶段范围
 
-**Phase 1–4**（`user-rpc`→`user-api`→`admin-rpc`→`admin-api`，pattern 见 §4.1）✅ **均已完成**（users 域四组件台账齐备）⇒ **Phase 5**（全量 `mvn clean package` + compose 跑 gRPC 端到端）**未启动**。每阶段独立 stop point：跑绿后停下等用户 review。
+**实施阶段 1–4**（`user-rpc`→`user-api`→`admin-rpc`→`admin-api`，pattern 见 §4.1）✅ **均已完成**（users 域四组件台账齐备）⇒ **实施阶段 5**（全量 `mvn clean package` + compose 跑 gRPC 端到端）**未启动**。每阶段独立 stop point：跑绿后停下等用户 review。
 
 ### 4.3 用户问答原话
 
@@ -190,7 +190,7 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 3g. 🆕 **四棵工作树的当前目标（2026-10-28 用户定）** —— **两份标准文件 = 唯一目标**：
    **阶段 1 准入线** ⇒ [`docs/PhasedGoal.md`](docs/PhasedGoal.md)（P0 九条 / P1 机制 / P2 不阻塞 —— 与 `twoStage.md` §2.1 **逐字相同**）；
    **两阶段全流程 + 阶段归属 A/B/C/D + §9 故障矩阵** ⇒ [`docs/twoStage.md`](docs/twoStage.md)（**权威全文**）。
-   ⇒ **lane 只做阶段 1、只做本域**：必读 = PhasedGoal.md 全文 + **twoStage.md 的** §5.3 / §5.4 / §10；**不碰** **twoStage.md 的** §1.3 / §4 / §6 / §7（= 阶段 2 的业务语义核对与 12 维度生产级审查 ⇒ 收口执行者的事）。
+   ⇒ **lane 只做阶段 1、只做本域**：必读 = PhasedGoal.md 全文 + **twoStage.md 的** §5.3 / §5.4 / §10；**不碰** **twoStage.md 的** §1.3 / §2.2 / §6 / §7（阶段 2 ⇒ 收口执行者）；**§4（阶段 0 事实基线）必读**。
 4. **作用范围**：仅限 RAG 仓库。`Sea-RideTheWind_golang` 已冻结只读；其他非 Spring Boot 的 Java 实现不在范围内。
 5. **Go 是真理之源**（2026-10-20 第三次切换，全子模块适用）：proto 字段号、错误码、JWT claims、表结构、HTTP path、
    Kafka topic 等语义细节一律以 Go 对应子模块为准；差异**只允许出现在表达层**，出现行为差异时默认判 **RAG 错**。
@@ -220,7 +220,7 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 
 ### 6.4 其他子模块
 
-`service/message` 台账见 §0 域表（不重复）；**Phase 5（全量 + 端到端）未启动**；需真实 PG + Redis 集成测试补上（当前测试大量 mock 数据层）。
+`service/message` 台账见 §0 域表（不重复）；**实施阶段 5（全量 + 端到端）未启动**；需真实 PG + Redis 集成测试补上（当前测试大量 mock 数据层）。
 
 ## 七、引用清单
 
