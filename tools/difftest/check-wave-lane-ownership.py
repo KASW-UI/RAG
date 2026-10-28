@@ -44,6 +44,11 @@
 6. **7 个真私有 `<域>-common` 无跨域引用** —— 别的域 import 了它 ⇒ 改那个库会炸掉工作树外的模块
    ⇒ 真私有必须真私有（不私有就该提级为共享层、归 G4）。
 7. **每条 ACTIVE lane 的分支必须真实存在** —— 防「守门盯着已删分支」这种假绿。
+8. **域内探针目录（`tools/<kind>/<域>/`）的写权按域判** —— 🆕 2026-10-29（R0·T-0.5 选项 A 落码）
+   ⇒ 落点口径统一为 `tools/<kind>/<域>/`（R0·T-0.6）
+   ⇒ 「哪个 lane 能写哪个域的探针」按**域**判，不按目录判 ⇒ 一个域的探针散在多个 `<kind>/` 下也不越权。
+   ⚠️ **这条是「按域授权」而不是「按目录授权」** ⇒ 判据必须**能识别同一个域出现在多个 `<kind>/` 下**
+   ⇒ 只按目录判会漏判 ⇒ ⇒ 断言 8 用**域级集合求交**（而不是文件级 glob）。
 
 退出码
 ------
@@ -158,6 +163,48 @@ ACTIVE: dict[str, list[str]] = {
         "docs/DRIFT/global/vs-common.md",
         "docs/DRIFT/common/**",
     ],
+}
+
+# 10 个业务域 + 共享层（`common` 是 `service/common`；`users-common` 是共享层 users-common）
+# ⚠️ 这张表是「**哪些 `<域>` 目录名算域级探针目录**」的判据 ⇒ 用来把
+#    `tools/<kind>/go/`、`tools/<kind>/java/`、`tools/difftest/lib/`、`tools/difftest/conf/`
+#    这类**探针种类目录 / 公共素材目录**排除在外（它们不属于任何域 ⇒ 归合并收口执行者）。
+DOMAIN_SLUGS = {
+    "users", "follow", "message", "like", "task",
+    "article", "comment", "favorite", "hot",
+    "common", "users-common",
+}
+
+# 🆕 **本波（R2）要求必须落地的域级探针目录** —— 授权 ≠ 必须产出。
+#    这张表让「R2 说要落仓、但目录还不存在」这件事**机器可核**（而不是靠人记得）。
+#    ⇒ R2 收口时逐条核销 ⇒ 全部落地后本表可清空。
+PROBE_REQUIRED: dict[str, list[str]] = {
+    "g1-users-follow": ["follow", "users-common"],          # G-1 / G-4
+    "g2-message-like-task": ["like"],                        # G-2
+}
+
+# ---------------------------------------------------------------- 域内探针写权（按域判 · T-0.5 选项 A）
+# 🆕 2026-10-29（R0·T-0.5 裁定：选项 A）——
+#   机器守门的任何 lane 白名单都不含 `tools/**` ⇒ 按机器口径 `tools/**` 无 lane 拥有
+#   ⇒ 但 R2 要求「域内探针落仓」⇒ 若不给 lane 授权 ⇒ 所有探针都得串行落在主线 ⇒ R2 直接变慢。
+#   ⇒ 裁定：**域内探针目录 `tools/<kind>/<域>/` 归对应域 lane**（**按域授权**）。
+#
+# ⚠️ **为什么必须「按域」而不是「按目录」**：
+#   同一个域的探针天然会散在多个 `<kind>/` 下（例：`favorite` 域同时有
+#   `tools/api-envelope-probe/favorite/` + `tools/errmsg-probe/favorite/` + `tools/proto-wire-probe/favorite/`）
+#   ⇒ 若按目录授权 ⇒ 每加一个 `<kind>/` 就要再改一次白名单 ⇒ 迟早漏 ⇒ ⇒ **按域**。
+#
+# ⚠️ **本表是「授权」，不是「归属」**：探针目录本身是**机器口径**（T-0.6 统一落点）。
+#   域级台账（`docs/DRIFT/<域>/**`）的写权**仍然**走上面的 `ACTIVE` 白名单 ⇒ 两张表互不重叠。
+PROBE_OWNERS: dict[str, list[str]] = {
+    # ---- G1：users（不含 users-common）+ follow ----
+    "g1-users-follow": ["users", "follow"],
+    # ---- G2：message + like + task ----
+    "g2-message-like-task": ["message", "like", "task"],
+    # ---- G3：article + comment + favorite + hot ----
+    "g3-article-comment-favorite-hot": ["article", "comment", "favorite", "hot"],
+    # ---- G4：共享层（common + users-common）----
+    "g4-service-common": ["common", "users-common"],
 }
 
 # ---------------------------------------------------------------- 共享文件
@@ -360,6 +407,51 @@ def main() -> int:
                 " ⇒ 要么建分支，要么把它从 `ACTIVE` 移走"
             )
 
+    # ---- 8. 域内探针写权（按域判 · T-0.5 选项 A）------------------------
+    # 8a. 同一个域不得被两个 lane 同时声明 ⇒ 否则两棵工作树会同时写同一批探针文件 ⇒ 合并必冲突。
+    seen_domains: dict[str, str] = {}
+    for lane, doms in PROBE_OWNERS.items():
+        for dom in doms:
+            if dom in seen_domains:
+                failures.append(
+                    f"🔴 域内探针写权重叠：域 `{dom}` 同时被 `{seen_domains[dom]}` 与 `{lane}` 声明"
+                    " ⇒ 两个 lane 会同时写同一批探针 ⇒ 合并必冲突"
+                )
+            else:
+                seen_domains[dom] = lane
+
+    # 8b. 仓里现存的 `tools/<kind>/<域>/` 目录，其 `<域>` 必须**有主**（否则＝无人拥有 ⇒ 越权写入无门可拦）
+    #     ⇒ 这是「补上机器口径里缺失的那一块」的关键断言。
+    #     ⚠️ 目录名允许带层级后缀（`favorite-rpc` / `favorite-api`）⇒ 先按**最长匹配**归到域根。
+    def domain_root_of(dir_name: str) -> str | None:
+        for d in sorted(DOMAIN_SLUGS, key=len, reverse=True):
+            if dir_name == d or dir_name.startswith(d + "-"):
+                return d
+        return None
+
+    for kind_dir in sorted(p for p in (REPO / "tools").iterdir() if p.is_dir()):
+        for dom_dir in sorted(p for p in kind_dir.iterdir() if p.is_dir()):
+            dom = domain_root_of(dom_dir.name)
+            if dom is None:
+                continue  # 不是域级探针目录（探针种类目录 / 公共素材目录）⇒ 归合并收口执行者
+            if dom not in seen_domains:
+                failures.append(
+                    f"🔴 域内探针目录无人拥有：`{dom_dir.relative_to(REPO)}`"
+                    f" ⇒ 域 `{dom}` 不在 `PROBE_OWNERS` 任何 lane 的授权里"
+                    " ⇒ 写它没有任何守门能拦 ⇒ 要么给对应 lane 授权，要么把目录挪走"
+                )
+
+    # 8c. 本波（R2）**要求必须落地**的域级探针目录，缺一个就红 ⇒
+    #     「R2 说要落仓」这件事机器可核，而不是靠人记得。
+    for lane, doms in PROBE_REQUIRED.items():
+        for dom in doms:
+            if not any((REPO / "tools").glob(f"*/{dom}")):
+                failures.append(
+                    f"🔴 本波要求的域级探针目录缺失：lane `{lane}` 的域 `{dom}`"
+                    f"（`tools/*/{dom}/`）在仓里**一个都没有**"
+                    f" ⇒ R2 的该项还没落仓（判据见 `docs/RoundPlan/Round-2.md`）"
+                )
+
     # ---- 输出 -----------------------------------------------------------
     print("波次 lane 写权守门（G1~G4）")
     print("=" * 60)
@@ -383,6 +475,7 @@ def main() -> int:
     print("  · 7 个真私有 `<域>-common` 无跨域引用")
     print("  · 每条 lane 的白名单路径都命中真实文件")
     print("  · 每条 lane 的分支都真实存在")
+    print(f"  · 域内探针写权按域判（{len(seen_domains)} 个域 · {len(PROBE_REQUIRED)} 个域本波要求落仓）")
     return 0
 
 

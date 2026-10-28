@@ -307,6 +307,33 @@ done
 （article / comment / favorite / follow / hot / like / message / task / users / global）
 ⇒ 每域的 `<域>-common` 对账台账坑位**已就位** ⇒ 工作树 agent **不用再建文件**，直接开工填 §2 的 9 轴表。
 
+### 1f. 🆕 **域内探针的落点口径 + 写权**（2026-10-29 R0·T-0.5 / T-0.6 裁定）
+
+> **背景**：`tools/**` 在机器守门 `check-wave-lane-ownership.py` 的**任何 lane 白名单里都不存在**
+> ⇒ 按机器口径 `tools/**` **无 lane 拥有**（归合并收口执行者）⇒
+> ⇒ 而 R2 要求「域内探针必须落仓」⇒ 若不给 lane 授权 ⇒ 所有探针都得**串行**落在主线 ⇒ R2 直接变慢。
+
+| 裁定 | 内容 | 落点 |
+|---|---|---|
+| **T-0.5 选项 A** | **域内探针目录 `tools/<kind>/<域>/` 归对应域 lane** ⇒ 按**域**授权，不按目录授权 | `tools/difftest/check-wave-lane-ownership.py` 的 `PROBE_OWNERS` 表 |
+| **T-0.6** | **新探针统一落 `tools/<kind>/<域>/`**（按探针种类分层）⇒ 与已有的 `tools/proto-wire-probe/` `tools/errmsg-probe/` 一致 ⇒ 域内探针**不混进** `tools/difftest/` ⇒ **不触发** `PhaseGoal-judge.md` §6.3 的守门计数漂移 | 本节 |
+
+⚠️ **为什么必须「按域」而不是「按目录」**：同一个域的探针天然散在**多个 `<kind>/` 下**
+（例：`favorite` 域同时有 `tools/api-envelope-probe/favorite/` + `tools/errmsg-probe/favorite/` + `tools/proto-wire-probe/favorite/`）
+⇒ 按目录授权 ⇒ 每加一个 `<kind>/` 就要再改一次白名单 ⇒ **迟早漏** ⇒ ⇒ 按域。
+
+⚠️ **`tools/difftest/` 下已有的域探针**（`users` / `comment` / `task`）**不搬移** ——
+搬移会动 `tools/difftest/check-*` 的计数口径 ⇒ 必须同改 `PhaseGoal-judge.md` §6.3 ⇒ **制造 B14** ⇒ **禁止**。
+⇒ **新探针**按 `tools/<kind>/<域>/` 落 ⇒ **存量**留在原处 ⇒ 两种并存是**已知且被接受的**状态。
+
+🔴 **机器守门现在会拦的**（`check-wave-lane-ownership.py` 断言 8）：
+① 同一个域被两个 lane 同时授权 ⇒ 红；② 仓里现存的 `tools/<kind>/<域>/` 目录**没有主** ⇒ 红；
+③ 本波（R2）**要求落地**的域级探针目录缺失 ⇒ 红（`PROBE_REQUIRED` 表 ⇒ R2 收口时逐条核销）。
+
+```bash
+python3 tools/difftest/check-wave-lane-ownership.py     # ⇒ EXIT=0 是收口判据之一
+```
+
 ### 1b. 🆕 `global` 收口域的**单写权**（2026-10-25 用户定）
 
 > **`global` 不是第 11 个微服务域，是「收口域」**：单微服务域已各自对齐完毕，
