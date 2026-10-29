@@ -939,6 +939,15 @@ def detect_status(entry) -> str | None:
     return None
 
 
+PRIO_DECL_RE = re.compile(r"优先级\s*\**\s*(P[0-3])")
+
+
+def entry_prio_decl(entry) -> str:
+    """U4-1 · 条目自己正文里的优先级声明（如「优先级 **P2**」）⇒ P0-P3"""
+    m = PRIO_DECL_RE.search(entry["seg"][:1200])
+    return m.group(1) if m else ""
+
+
 def entry_stage_decl(entry) -> tuple[str, str]:
     """U5-f · 条目**自己段落里**的归属声明 ⇒ (stage, 依据)
 
@@ -996,7 +1005,17 @@ def detect_evidence(entry, live_probes: dict[str, str], all_tools: set[str]) -> 
             refs.add(ref)
     hit_live = sorted(r for r in refs if r in live_probes)
     if hit_live:
-        return "A 活体", "探针 " + ",".join(hit_live[:2]) + ("…" if len(hit_live) > 2 else "")
+        # ⚠️ **A 档必须带上探针的真实退出码** —— 「有活体证据」≠「结论被证实」：
+        #    实测：A 档引用的探针里 **23 条指向 EXIT=2（环境问题 ⇒ 结论不可用）**
+        #    **12 + 11 条指向 EXIT=1（不一致）** ⇒ 只写「A 活体」会让人以为这条已被证实。
+        #    ⇒ 值形如 `A 活体 · 红(1)` / `A 活体 · 环境(2)` / `A 活体 · 绿(0)` / `A 活体 · 混(0/1/2)`。
+        codes = sorted({live_probes[r] for r in hit_live})
+        if len(codes) == 1:
+            verdict = {"0": "绿", "1": "红", "2": "环境", "4": "码4"}.get(codes[0], codes[0])
+            tag = f"{verdict}({codes[0]})"
+        else:
+            tag = "混(" + "/".join(codes) + ")"
+        return f"A 活体 · {tag}", "探针 " + ",".join(hit_live[:2]) + ("…" if len(hit_live) > 2 else "")
     nptr = len(PTR_RE.findall(entry["seg"]))
     if nptr:
         return "B 静态", f"{nptr} 个可复算指针"
@@ -1077,6 +1096,16 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
                 stage = st
                 stage_src = why
                 rules.append("U5f")
+        if not stage and e["dir"] == "Pitfalls":
+            # ⚠️ **U5-P · Pitfalls 条目 = 元教训 ⇒ 阶段归属「不适用」**
+            #   理由：§10 的 A-D 是给「**问题**」分的（缺陷 / 风险 / 待恢复语义 / 确认不实现），
+            #   而坑位是「**教训**」——「测试全绿也起不来」不是一条待修的问题，
+            #   而是「下次怎么防」。⇒ 给它硬分 A-D 是**范畴错误**。
+            #   ⇒ 若某条坑位**指向**一个具体行为差异 ⇒ 那个差异在 **DRIFT 侧**定级，
+            #     坑位本身只承担「防」的角色（可由派生链回指）。
+            stage = "N/A（不适用）"
+            stage_src = "docs/Pitfalls/**（元教训 ⇒ 不是「问题」，不参与 A-D 定级）"
+            rules.append("U5P")
         if not stage:
             stage = "—"
             stage_src = "（未派生 · 待人工定级）"
@@ -1096,6 +1125,9 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
         if explicit_prio:
             prio = explicit_prio
             rules.append("U4-0")
+        elif entry_prio_decl(e):
+            prio = entry_prio_decl(e)
+            rules.append("U4-1")
         elif stage == "A":
             prio = "P0"
             rules.append("U4a")
@@ -1225,7 +1257,7 @@ TSV_COLS = ["id", "dir", "domain", "source", "unit", "status", "evidence",
             "prio", "stage", "blocking", "final_goal", "schedule", "gap",
             "rules", "title"]
 
-STAGE_ORDER = {"A": 0, "B": 1, "C": 2, "D": 3, "—": 4}
+STAGE_ORDER = {"A": 0, "B": 1, "C": 2, "D": 3, "—": 4, "N/A（不适用）": 5}
 PRIO_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
 
@@ -1267,7 +1299,11 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a(f"> 其中只有 **{stats['n_staged']}** 个（**{stats['n_staged_pct']}%**）带阶段归属，")
     a(f"> **{stats['n_unstaged_open']}** 条是**开放状态**（🔴 未闭合 / 仍生效 / ⏳ 未签字）却**没有阶段归属** ——")
     a("> **它们既不在施工单里，也没有明确推给阶段 2**。这就是「台账不能当施工单」的量化原因。")
-    a("> 本派生层把这三条数字**变成可复算的断言**，并把它们排成**可开工的清单**（§四）。")
+    a(f"> 证据面上：有活体证据的 **{stats['n_a_total']}** 条里，**只有 "
+      f"{stats['a_sub'].get('A 活体 · 绿(0)', 0)} 条**的活体证据是**绿**（支持当前结论），")
+    a(f"> 其余 **{stats['n_a_total'] - stats['a_sub'].get('A 活体 · 绿(0)', 0)}** 条的证据本身是"
+      f"**红 / 环境问题 / 混合** ⇒ **「有活体证据」≠「结论被证实」**。")
+    a("> 本派生层把这几条数字**变成可复算的断言**，并把它们排成**可开工的清单**（§四）。")
     a("")
     a("### 1.2 覆盖面（旧口径的盲区）")
     a("")
@@ -1428,10 +1464,38 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a("")
     a("| 档 | 含义 | 条目数 |")
     a("|---|---|---|")
-    for k, v in (("A 活体", "段内点名了已在活体台账实跑过的探针"),
+    for k, v in (("A 活体", "段内点名了**已在活体台账实跑过**的探针（**带探针的真实退出码**）"),
                  ("B 静态", "有可复算的 `文件:行号` 指针，但无活体探针"),
                  ("C 无指针", "两样都没有 ⇒ 结论今天不可复算")):
         a(f"| **{k}** | {v} | {stats['evid_counts'].get(k, 0)} |")
+    a("")
+    a("### 5.1 A 档内部再分（**「有活体证据」≠「结论被证实」**）")
+    a("")
+    a("> ⚠️ **A 档带的是探针的真实退出码** —— 因为实测发现：**A 档引用的探针里**")
+    a("> 有指向 **EXIT=2（环境问题 ⇒ 结论不可用）**的，也有指向 **EXIT=1（不一致）**的。")
+    a("> ⇒ **只写「A 活体」会让人以为这条已被证实** ⇒ 必须把退出码带出来。")
+    a("> ⚠️ 且「**红**」**≠ 有缺陷** —— 红分三种（已签字偏离 / 已登记残留 / 真问题），")
+    a("> 逐条定性见 [`live-parity-2026-10-30.md`](live-parity-2026-10-30.md) §0 与 §四。")
+    a("")
+    a("| A 档细分 | 含义 | 条目数 |")
+    a("|---|---|---|")
+    for k, v in sorted(stats["a_sub"].items()):
+        mean = {
+            "A 活体 · 绿(0)": "探针断言**全部成立** ⇒ 这条的活体证据**支持**当前结论",
+            "A 活体 · 红(1)": "探针判定**不一致** ⇒ 当前结论**未被证实**（红 ≠ 有缺陷）",
+            "A 活体 · 环境(2)": "探针判定「**环境问题**」⇒ 结论**不可用**",
+            "A 活体 · 混(0/1)": "多个探针退出码**不一致**（有的绿有的红）⇒ 需逐条看",
+            "A 活体 · 混(0/1/2)": "同上（还有退出码 2）⇒ 需逐条看",
+            "A 活体 · 混(0/2)": "同上（绿 + 环境问题）⇒ 需逐条看",
+            "A 活体 · 混(0/4)": "同上（绿 + 退出码 4）⇒ 需逐条看",
+        }.get(k, "")
+        a(f"| **{k}** | {mean} | {v} |")
+    a("")
+    a(f"> ⇒ **真正「活体坐实」（绿）的只有 "
+      f"{stats['a_sub'].get('A 活体 · 绿(0)', 0)} 条**（"
+      f"{stats['a_sub'].get('A 活体 · 绿(0)', 0) * 100 // max(len(rows), 1)}%）；")
+    a(f"> 其余 **{stats['n_a_total'] - stats['a_sub'].get('A 活体 · 绿(0)', 0)}** 条 A 档的证据本身是"
+      f"**红 / 环境问题 / 混合** ⇒ **不可当成「已坐实」**。")
     a("")
     a("---")
     a("")
@@ -1520,13 +1584,18 @@ def main() -> int:
     pids = {e["id"] for e in problems}
     stats["n_old_recognized"] = len({i for i in pids if old.match(i)})
     stats["n_old_missed"] = stats["n_problem_ids"] - stats["n_old_recognized"]
+    stats["a_sub"] = collections.Counter(r["evidence"] for r in rows if r["evidence"].startswith("A"))
+    stats["n_a_total"] = sum(v for k, v in stats["a_sub"].items())
     stats["stage_counts"] = collections.Counter(r["stage"] for r in rows)
     stats["prio_counts"] = collections.Counter(r["prio"] for r in rows)
-    stats["n_staged"] = stats["n_problem_ids"] - stats["stage_counts"].get("—", 0)
+    stats["n_staged"] = stats["n_problem_ids"] - stats["stage_counts"].get("—", 0) \
+        - stats["stage_counts"].get("N/A（不适用）", 0)
     stats["n_staged_pct"] = (stats["n_staged"] * 100 // max(stats["n_problem_ids"], 1))
     stats["n_unstaged"] = stats["stage_counts"].get("—", 0)
+    stats["n_meta"] = stats["stage_counts"].get("N/A（不适用）", 0)
     open_states = ("🔴 未闭合", "仍生效", "⏳ 未签字")
     stats["n_unstaged_open"] = sum(1 for r in rows if r["stage"] == "—" and r["status"] in open_states)
+    stats["n_to_grade"] = stats["n_unstaged_open"]
     stats["n_conflict"] = sum(1 for r in rows if r.get("_conflict", 1) > 1)
     _op = ("🔴 未闭合", "仍生效", "⏳ 未签字")
     stats["n_gap_ab"] = sum(1 for r in rows if r["status"] in _op and r["schedule"] == "未排期"
