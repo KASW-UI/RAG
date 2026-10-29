@@ -228,6 +228,46 @@ def load_exclusions() -> dict[str, str]:
 # U1 · 条目扫描
 # ════════════════════════════════════════════════════════════════════════
 
+KEEP_OUT_RE = re.compile(r"阶段归属定级附录")
+
+
+def compute_keepouts(lines: list[str]) -> list[tuple[int, int]]:
+    """**派生层维护的小节**（回写附录）⇒ 其内容**不参与**条目识别与分段。
+
+    ⚠️ **为什么需要**（2026-10-30 定级回写时暴露）：台账末尾要追加一节
+    「阶段归属定级附录」，把 U5-O 的定级结论**同步回本域台账**（AGENTS.md §5.3b
+    「产出必写回同名的本域子目录」）。但那一节**长得像台账**（编号 + 表格）⇒
+      ① 其表格行会被当成**新条目** ⇒ 凭空多出条目（自噬）；
+      ② 其内容会落进**前一个候选的段落**（段尾延伸到文件末尾）
+         ⇒ `entry_stage_decl` 会从附录里读到**别的编号**的类
+         ⇒ 把那一条的归属**改错**（比自噬更危险：它污染的是真实结论）。
+    ⇒ 处置 = **保留区（keepout）**：该小节既不产生候选，也**截断前一段**。
+
+    ⚠️ **标题必须带「附录」二字** —— 台账里本来就有「阶段归属」小节，
+       那是**要被读的**（U5-f 的来源）⇒ 不能一刀切屏蔽。
+    """
+    heads = []
+    for i, l in enumerate(lines):
+        m = re.match(r"^\s{0,3}(#{2,5})\s+(.+?)\s*$", l)
+        if m:
+            heads.append((i, len(m.group(1)), m.group(2)))
+    out: list[tuple[int, int]] = []
+    for idx, (i, lvl, txt) in enumerate(heads):
+        if not KEEP_OUT_RE.search(txt):
+            continue
+        end = len(lines)
+        for j, lvl2, _ in heads[idx + 1:]:
+            if lvl2 <= lvl:
+                end = j
+                break
+        out.append((i, end))
+    return out
+
+
+def _in_keepout(line_no: int, keepouts: list[tuple[int, int]]) -> bool:
+    return any(a <= line_no < b for a, b in keepouts)
+
+
 def scan_ledgers(exclusions: dict[str, str]):
     """返回 (entries, line_index)。line_index: 仓内相对路径 -> [(start, end, id)]"""
     entries = []
@@ -243,10 +283,13 @@ def scan_ledgers(exclusions: dict[str, str]):
             continue          # ⚠️ 自噬防护 · 目录级（U5-O 叠加层）
         dom = rel.parts[1] if len(rel.parts) > 1 else "_root"
         lines = p.read_text(encoding="utf-8", errors="ignore").split("\n")
+        keepouts = compute_keepouts(lines)
         # 候选起点
         cands: list[tuple[int, str, str]] = []   # (行号0基, id, unit)
         heading_lines: list[int] = []
         for i, l in enumerate(lines):
+            if _in_keepout(i, keepouts):
+                continue          # ⚠️ 保留区（派生层维护的小节）⇒ 不产生候选
             m = re.match(r"^\s{0,3}(#{2,5})\s+(.+?)\s*$", l)
             if m:
                 heading_lines.append(i)
@@ -274,6 +317,13 @@ def scan_ledgers(exclusions: dict[str, str]):
         for k, (i, ident, unit) in enumerate(cands):
             nxtc = [c[0] for c in cands if c[0] > i]
             end = nxtc[0] if nxtc else len(lines)
+            # ⚠️ **保留区截断** —— 派生层维护的小节（回写附录）既不产生候选，
+            #    也**不许落进前一个条目的段落** ⇒ 否则 `entry_stage_decl` 会从附录里
+            #    读到**别的编号**的类 ⇒ 把那一条的归属改错（比自噬更危险）。
+            for a, _b in keepouts:
+                if i < a < end:
+                    end = a
+                    break
             seg = "\n".join(lines[i:end])
             title = lines[i].strip()
             if unit == "tablerow":
@@ -744,9 +794,13 @@ def scan_grading_tables():
         if any(f"docs/{rel}".startswith(d) for d in SELF_ARTIFACT_DIRS):
             continue          # ⚠️ 自噬防护 · 目录级（**两个扫描器都要挡**）
         lines = p.read_text(encoding="utf-8", errors="ignore").split("\n")
+        keepouts = compute_keepouts(lines)
         heading = ""
         i = 0
         while i < len(lines):
+            if _in_keepout(i, keepouts):
+                i += 1
+                continue          # ⚠️ 保留区（派生层维护的小节）⇒ 不读它的表格
             hm = re.match(r"^\s{0,3}#{2,5}\s+(.+?)\s*$", lines[i])
             if hm:
                 heading = hm.group(1)
