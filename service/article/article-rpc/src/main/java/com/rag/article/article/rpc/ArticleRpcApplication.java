@@ -160,21 +160,46 @@ public class ArticleRpcApplication {
      * <br>后果：失败消息在 Java 侧不提交位点 ⇒ rebalance / 重启后<b>无限重投</b>，
      * 与 Go 相反的 poison-pill 语义。
      *
-     * <h3>为什么 {@code seekAfterError=true} 正好等于 Go 的行为</h3>
-     * <p>{@code FailedBatchProcessor.seekOrRecover}（spring-kafka 4.0.7 反编译确认）在该分支里是：
-     * <pre>{@code
-     * if (isSeekAfterError()) {
-     *     SeekUtils.seekOrRecover(thrownException, remaining, consumer, container, false, ...);
-     *     ConsumerRecord&lt;?, ?&gt; recovered = remaining.get(0);
-     *     commit(consumer, container,
-     *             singletonMap(new TopicPartition(...),
-     *                    ListenerUtils.createOffsetAndMetadata(container, recovered.offset() + 1)));
-     * }
-     * }</pre>
-     * 提交的正是<b>失败记录自己的 {@code offset + 1}</b>，与 Go 的
-     * {@code CommitMessages(ctx, msg)} 逐条提交<b>同构</b>。
-     * ⇒ 本实现<b>显式</b>写 {@code setSeekAfterError(true)}（虽与 Spring 默认值相同），
-     * 是为了让这个<b>与直觉相反</b>的选择在代码里可见、可 review、可被测试锁死。
+     * <h3>🔴 2026-10-29 更正：<b>原来这段把机制归错了</b>（AGENTS.md §3.3.2）</h3>
+     * <p><b>原注释</b>（已删）声称「{@code seekAfterError=true} 正好等于 Go 的行为」，
+     * 并引用 {@code FailedBatchProcessor.seekOrRecover} 里那个 {@code commit(offset+1)} 分支。
+     * <b>真 Kafka 变异验证证明该归因不成立</b>：
+     * <ul>
+     *   <li><b>MUT-M2</b>：把 {@code setSeekAfterError(true)} 改成 {@code false}
+     *       ⇒ <b>行为完全不变</b>（失败消息仍只投递 1 次、位点仍提交为「它自己的 offset+1」）
+     *       ⇒ ⇒ <b>该属性不是承重项</b>；</li>
+     *   <li><b>MUT-M1</b>：把 {@code new FixedBackOff(0L, 0L)} 改成 {@code new FixedBackOff(0L, 9L)}
+     *       ⇒ 失败消息被<b>重复投递 9 次</b>（投递计数 38 ⇒ 47）
+     *       ⇒ ⇒ <b>零重试 BackOff 才是承重项</b>。</li>
+     * </ul>
+     *
+     * <h3>✅ 真实机制（2026-10-29 真 Kafka 实测 ＋ spring-kafka 4.0.7 源码逐行核对）</h3>
+     * <p>失败消息被丢弃（不重投）由<b>两件独立的事</b>合成，<b>缺一不可</b>：
+     * <ol>
+     *   <li><b>「不 seek（⇒ 不重投）」＝ {@code FixedBackOff(0L, 0L)}</b><br>
+     *       {@code FailedRecordTracker} 构造时 {@code backOff.start().nextBackOff() == STOP}
+     *       ⇒ {@code noRetries = true} ⇒ 失败时 {@code recovered(...)} <b>第一次就返回 true</b>
+     *       ⇒ {@code SeekUtils.doSeeks(records, consumer, ex, recoverable=true, ...)}
+     *       把<b>首条（失败记录）判为 skipped ⇒ 不 seek</b>
+     *       （spring-kafka 4.0.7 {@code SeekUtils.java:106-131}）；</li>
+     *   <li><b>「提交失败记录自己的 offset+1」＝ 容器侧的 RECORD ack</b><br>
+     *       {@code KafkaMessageListenerContainer.java:2897} {@code commitOffsetsIfNeededAfterHandlingError(cRecord)}
+     *       ⇒ {@code :2936} {@code ackCurrent(cRecord, isManualAck)}
+     *       ⇒ {@code :3196-3200} {@code isRecordAck} 分支 ⇒ {@code commitOffsets(buildSingleCommits(cRecord))}
+     *       ⇒ 提交的正是<b>这条失败记录的 offset+1</b>。<br>
+     *       ⚠️ 它<b>不是</b> {@code SeekUtils.java:229} 那个 commit ——
+     *       那条由 {@code commitRecovered} 把门（默认 false）且要求 {@code AckMode.MANUAL_IMMEDIATE}
+     *       ⇒ <b>本模块（RECORD + 未 setCommitRecovered）不走它</b>。</li>
+     * </ol>
+     *
+     * <p>⇒ 与 Go <b>同构</b>：Go {@code kq/queue.go:230-242} 在 handler 返回 error 后，
+     * 因 {@code ForceCommit=true}（声明点 {@code kq/config.go:24}）<b>不执行 continue</b>
+     * ⇒ 落到 {@code kq/queue.go:240} {@code CommitMessages(ctx, msg)}
+     * ⇒ 提交的正是<b>失败消息自己的位点</b> ⇒ 消息被丢弃；且 Go 侧<b>没有重试循环</b>
+     * ⇒ 不会进程内重投。两侧逐条一致。
+     *
+     * <p>⚠️ {@code setSeekAfterError(true)} <b>保留</b>（它与 Spring 默认值一致、且显式写出来更可 review），
+     * 但<b>不得再把它说成对齐 Go 的原因</b> —— 它在本模块<b>不是承重项</b>（MUT-M2 实测）。
      *
      * <p>⚠️ recoverer 只记日志、不做任何恢复动作 —— 与 Go 的 {@code errorHandler == nil}
      * （未传 {@code WithHandleError}）不冲突：Go 那条分支本来就只做 {@code CommitMessages}。
@@ -192,7 +217,13 @@ public class ArticleRpcApplication {
      * <p>做成具名 Bean 而不是工厂方法内部的局部变量：<b>可被测试读到</b>
      * （{@code createContainer(...)} 是 public，测试能拿到工厂真正产出的容器并读它的
      * {@code getCommonErrorHandler()}），且<b>单一真相源</b>——两个 listener 共用同一契约。
-     * 锁死用例：{@code ArticleSpringContextWiringTest#kafkaContainersCarryTheForceCommitErrorHandler}。
+     * <ul>
+     *   <li>装配面锁死：{@code ArticleSpringContextWiringTest#kafkaContainersCarryTheForceCommitErrorHandler}
+     *       （<b>只断言属性值 ⇒ 承重项（BackOff）变了它不一定红</b>）；</li>
+     *   <li><b>行为面锁死（承重）：</b>{@code ArticleKafkaForceCommitGateTest}（真 Kafka）
+     *       ⇒ 断言「失败消息只投递 1 次」＋「位点被提交为<b>它自己的 offset+1</b>」
+     *       ⇒ MUT-M1（改 BackOff）⇒ <b>精确转红</b>。</li>
+     * </ul>
      */
     @Bean
     public CommonErrorHandler articleNoCommitErrorHandler() {

@@ -104,6 +104,12 @@ public final class RealContainerHostPort {
     /** {@code ArticleTransactionWiringTest} 的 PG 宿主口。 */
     public static final int TRANSACTION_WIRING = 22858;
 
+    /** 🔴 真 Kafka 守门（U-3 / U-4 / U-9）的 PG 宿主口。 */
+    public static final int KAFKA_FORCE_COMMIT_GATE = 22859;
+
+    /** 🔴「创建文章写路径 + 死 broker」守门（{@code ArticleCreateArticleKafkaFailureBoundaryTest}）的 PG 宿主口。 */
+    public static final int CREATE_ARTICLE_KAFKA_FAILURE = 22860;
+
     /** 守门自己起容器用的口（脚手架段第一口）⇒ <b>不与任何测试类复用</b>。 */
     public static final int GATE_LIVE = SCRATCH_FIRST;
 
@@ -127,6 +133,8 @@ public final class RealContainerHostPort {
         "SCHEMA_GATE_STARTUP_ORDER",
         "SPRING_CONTEXT_WIRING",
         "TRANSACTION_WIRING",
+        "KAFKA_FORCE_COMMIT_GATE",
+        "CREATE_ARTICLE_KAFKA_FAILURE",
     };
 
     /**
