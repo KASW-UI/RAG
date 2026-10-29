@@ -1393,3 +1393,231 @@ Go `service/message/api/messagecenter.go:53` ⇒ `httpx.SetErrorHandler` ⇒ `co
 ⇒ **净结论**：G2 侧 6 条候选里**只有 2 条是真错**（① 版本号 · ③ 路径）⇒ **另 4 条经核对是守门假阳性 ⇒ 一行都不用改** ⇒ ⇒ **建议：候选清单收敛为 2 条**；并把「**补 `PINNED`（`gorm.io/driver/postgres v1.6.0` ＋ `github.com/lovoo/goka v1.1.16`）**」作为**独立的一件事**处理（落点属 G3 私有目录 `tools/g3-anchor-check/`）。
 
 ⚠️ **这 4 条的假阳性判定本身也留痕**：它们与本 lane 上一轮在 `docs/DRIFT/like/rpc.md` §12.2 坐实的「**多候选任一通过 ⇒ 假绿**」是**同一个根因的两面** —— 上次是「**真身不满足、干扰项满足 ⇒ 判过**」（假绿），这次是「**真身满足、干扰项不满足 ⇒ 报错**」（假错）⇒ ⇒ **同一个候选解析缺陷，两个方向都会出错** ⇒ ⇒ **候选解析必须按域消歧 ＋ 命中后必须回真源读那一行**（该结论已由调度员转述进 `docs/CLOSEOUT-2026-10-29.md` §8.3；本回执只做**我域内的逐条核对**）。
+
+<!-- @new 2026-10-29 · `align/r3-ddl-message-like-task` · RoundPlan `docs/RoundPlan/Round-3.md` **T-3.1 的 G2 侧（`message` 域）** · 基线 = `do-my-own-gh` @ `d10227c5` -->
+
+## DDL 逐域机器核（`--indexes` + `--check-source`）· 2026-10-29 · R3·T-3.1（G2 lane · `message` 域）
+
+> **本节为什么存在**：`tools/difftest/check-ddl-static.py` **默认不开 `--indexes`** ⇒ 索引 / 唯一约束 / 触发器**从未被机器核过**（AGENTS.md §3.1 对照清单的最后几项）；**默认不开 `--check-source`** ⇒ 只比活库、不比仓里的 `.sql` ⇒ 「迁移改了但没人重跑」**不可见**。
+> 主线已把这两层补上并逐域实跑，但结论只落在 `docs/PhaseGoal-judge.md` §七 ⇒ **域级证据链断了一节** ⇒ 本节把 `message` 域的结论**落到本域台账**。
+> ⚠️ **本节只落结论与证据，不修任何差异**（RoundPlan T-3.1：「冒出的新差异**按域登记**，**不在本轮当场修**」）。
+> ⚠️ **本节零改动 `service/**`** —— 迁移脚本在 `service/message/message-rpc/**`（**别的 lane 在改**）⇒ 变异测试走**逐字节相同的临时副本**（见 §D.5）⇒ 提交后 `git diff --stat -- service/` = **0 行**。
+> ⚠️ **`message` 域不是 N/A** —— N/A 的是 **`hot`**（两侧无数据库）⇒ `message` 域**两侧都有真库**（Go 3 张表 / RAG 3 张表）⇒ 本节是**实跑**结论。
+
+### D.1 执行口径（命令原文 · EXIT · 日期 · 环境）
+
+| 项 | 值 |
+|---|---|
+| 实跑日期 | **2026-10-29**（14:22:5x–14:23:23 本机时间） |
+| 工作树 / 分支 | `/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-message-like-task` · `align/r3-ddl-message-like-task`<br>⚠️ **实跑基点 = `do-my-own-gh` @ `d10227c5`**（工作树先 `git reset --hard do-my-own-gh` 对齐主线，再跑）⇒ **实跑结论与提交基点同源** |
+| 真源 | `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang` —— **冻结 · 只读**；脚本**只复制**副本，从不写入 |
+| 容器 / 库 | `ddl-message-pg`（`postgres:16-alpine` · 端口 55569）· Go 库 `go_message_db` · RAG 库 `rag_message_db` |
+| Go 侧 schema 来源 | **真源自己的 `AutoMigrate`**：`Sea-RideTheWind_golang/service/message/rpc/internal/model/db.go:20`（`func InitDB(conf DBConf) *gorm.DB`）→ `:42`（`db.AutoMigrate(&Notification{}, &Conversation{}, &ConversationMessage{})`）⇒ 探针调的正是**真源自己的 `InitDB`**（`dbconf` 探针）⇒ 跑的是**真源同一份 struct tag + 同一个 gorm 版本**<br>⚠️ **gorm 版本钉死**：真源 `go.mod:27` `gorm.io/driver/postgres v1.6.0` · `go.mod:28` `gorm.io/gorm v1.31.1` ⇒ §3.3.1 要求的「消费点」是 **`gorm.io/driver/postgres@v1.6.0/postgres.go` 的 `DataTypeOf`**（`time.Time` → `timestamptz` · 无 size 的 `int64` → `bigint`）⇒ **列类型结论不是从 struct tag 推断的，是 GORM 在建表时生成的** |
+| Go struct 出处 | `service/message/rpc/internal/model/data_model.go:30-43`（`Notification` → `message_notification`）· `:49-65`（`Conversation` → `message_conversation`）· `:71-82`（`ConversationMessage` → `message_conversation_message`） |
+| RAG 侧 schema 来源 | 仓内 `service/message/message-rpc/src/main/resources/db/migration/`（**Flyway**）**5 份**：`V1__create_message_notification.sql` · `V2__create_message_conversation.sql` · `V3__create_message_conversation_message.sql` · `V4__conversation_pair_unique_index.sql` · `V5__message_time_columns_timestamptz.sql` |
+| 豁免名单 | **一个都没用**（`--allow-idx` / `--allow-default` **均未传**）⇒ 下面所有差异数是**原始值**，没有被白名单压过 |
+| 两侧表集合 | Go `go_message_db` = {`message_notification`, `message_conversation`, `message_conversation_message`} · RAG `rag_message_db` = **同 3 张** ⇒ 逐条一致 |
+
+**命令 ① —— 建库 + 双侧活体对拍（索引 / 约束 / 触发器 + 源码↔活库 一次跑全）**
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-message-like-task"
+bash tools/difftest/ddl-parity.sh message
+```
+
+⇒ **EXIT=1** —— 末行 `== 实质差异合计 7 处 ⇒ 退出码 1 ==`；runner 行 `=== 对拍退出码: 1 ===`
+⇒ Go 探针打印 `AUTOMIGRATE_OK`；RAG 侧按序执行 `V1` → `V2` → `V3` → `V4` → `V5`
+
+**命令 ② —— 只读静态对拍（显式带 `--indexes --check-source`）**
+
+```bash
+python3 tools/difftest/check-ddl-static.py --domain message --indexes --check-source
+```
+
+⇒ **EXIT=1**（**7 处**）—— **与 ① 同数同因** ⇒ 两条路径互为复算（① 是「建库 + 对拍」，② 是「只对拍已建好的库」）
+
+**命令 ③ —— 打印 RAG 侧 SQL 清单**
+
+```bash
+python3 tools/difftest/check-ddl-static.py --domain message --print-rag-sql
+```
+
+⇒ **EXIT=0**，输出 **5 行**，与 ① 实际执行的 5 份 `.sql` **逐条一致** ⇒ **清单没有落后于仓**（「清单只有一个产生点」在本域成立）
+
+### D.2 八个被核维度的逐项结论
+
+| # | 维度 | 两侧规模 | 结论 | 计入失败数 |
+|---|---|---|---|---|
+| 1 | **源码 ↔ 活库**（`--check-source`） | 3 张表 | ✅ **0 差异** —— 仓里的 `.sql` 在**干净临时库** `rag_message_db_srccheck` 上原样重放后，与活库**逐项一致**（表 / 列 / 列属性 / 可空性 / DEFAULT / 索引 / 约束 / 触发器） | 0 |
+| 2 | **列类型 / 长度** | 37 列 ↔ 37 列（键集合一致 ✓） | ✅ **0 差异** —— 脚本原话「逐字相同 37 列」 | 0 |
+| 3 | **可空性（NOT NULL）** | 37 列 | ✅ **0 差异** —— 脚本原话「两侧完全一致 ✓」 | 0 |
+| 4 | **DEFAULT** | 37 列 | 🔴 **6 处残留** | 6 |
+| 5 | **索引**（`pg_indexes`） | Go 12 / RAG 12 | 🔴 **1 处残留**（另 2 处 = 命名形态差 ⇒ 语义等价，不计失败） | 1 |
+| 6 | **唯一约束 / 主键**（`pg_constraint`） | Go 3 / RAG 3 | ✅ **0 处差异** —— 脚本原话「逐条一致 3 行 ✓」 | 0 |
+| 7 | **触发器**（`pg_trigger`） | 两侧各 0 | ⚪ **两侧都没有触发器 ⇒ 本维度「无对象可比」** —— ⚠️ **这不是「触发器已对齐」** | 0 |
+| 8 | **触发器形式 / 触发器函数体** | 两侧各 0 | ⚪ **同上 ⇒ 无对象可比** —— 脚本原话「两侧**没有可成对比对的触发器** ⇒ 本维度**什么都没比**（不是「已对齐」）」 | 0 |
+| | **合计** | | | **7** |
+
+> ⚠️ **读法**：本域 DDL 的**行为层**（类型 / 长度 / 可空性 / 唯一约束）在 **8 个维度里 4 个为 0**；剩下的 **7 处全部是「已登记并已签字的已知差异」**，**不是新回归**（逐条见 §D.4）。
+> ⚠️ **维度 7/8 不是「通过」而是「无对象」** —— Go 侧 `message` 域**根本没有触发器**（真源 `service/message/**` 全域无 `CREATE TRIGGER`）⇒ 本域的触发器语义**没有可核对象**。
+
+### D.3 「0 差异」项（逐条列全，不写「其余一致」）
+
+**① 列类型 / 长度 —— 37 列逐字相同（0 处差异）**
+
+| 表 | 抽样列 | Go 侧类型 | RAG 侧类型 | 判定 |
+|---|---|---|---|---|
+| `message_notification` | `id` / `recipient_id` / `sender_id` / `sender_role` / `kind` | `bigint` / `bigint` / `bigint` / `integer` / `integer` | 同左 | ✅ 逐字相同 |
+| `message_notification` | `title` / `content` / `extra` | `character varying(255)` / `text` / `jsonb` | 同左 | ✅ 逐字相同（`extra` 的 `jsonb` 来自 Go tag `type:jsonb` ⇒ `data_model.go:40`） |
+| `message_notification` | `is_read` / `read_at` | `boolean` / `timestamp with time zone` | 同左 | ✅ 逐字相同 |
+| `message_conversation` | `participant1_role` … `last_message_preview` | `integer` / `bigint` / `character varying(255)` | 同左 | ✅ 逐字相同 |
+| `message_conversation_message` | `conversation_id` / `content` / `is_read` / `read_at` | `bigint` / `text` / `boolean` / `timestamp with time zone` | 同左 | ✅ 逐字相同 |
+
+⇒ 脚本汇总行：`类型/长度差异 0 处：` + `逐字相同 37 列。`
+⇒ ⚠️ **时间列已是 `timestamp with time zone`**（不是 `timestamp without time zone`）⇒ `DRIFT-MSG-V-020` 那轮 `V5` 迁移的**类型面已闭合**（**只余 DEFAULT 残差**，见 §D.4 残留 ①）。
+
+**② 可空性（NOT NULL）—— 0 处差异**
+
+- 脚本原话：`补充对照 · NOT NULL（可空性）：差异 0 处` + `（两侧完全一致 ✓）`
+- 抽样：`message_notification.read_at` / `extra`（Go tag **无** `not null` ⇒ 两侧都可空）· `message_notification.title` / `content`（Go tag **有** `not null` ⇒ 两侧都 `NOT NULL`）· `message_conversation_message.status` 等同理。
+- ⇒ `V5__message_time_columns_timestamptz.sql:74-75,84-85,92` 那 5 条 `DROP NOT NULL` **与 Go 侧逐条对齐** ⇒ 本维度**已闭合**。
+
+**③ 源码 ↔ 活库 —— 0 差异（本轮新增维度）**
+
+- 目录扫描得到 **5 份**迁移脚本 ⇒ **清单由目录扫描产生**，不会落后于仓。
+- 在**干净临时库** `rag_message_db_srccheck` 上**原样重放**（交给 PG 自己解析 ⇒ 与生产同一条路径）⇒ 与活库逐项对比：**表集合 3 ↔ 3** · **列集合 0 差异** · **列属性 0 差异** · **可空性 / DEFAULT 0 差异** · **索引 0 差异** · **约束 0 差异** · **触发器 0 差异**
+- ⇒ 脚本原文：`✅ 仓里的迁移脚本**重放结果**与活库逐项一致`
+- ⇒ **含义**：本域仓里的 `.sql` 与**当前活库**之间**没有分叉** ⇒ 「迁移改了没人重跑」这一类漂移**在 `message` 域为零**。
+
+**④ 唯一约束 / 主键 —— 0 处差异（3 行逐条一致）**
+
+| 约束 | contype | 定义 |
+|---|---|---|
+| `message_notification_pkey` | p | `PRIMARY KEY (id)` |
+| `message_conversation_pkey` | p | `PRIMARY KEY (id)` |
+| `uk_conversation_pair` | u | `UNIQUE (participant1_role, participant1_id, participant2_role, participant2_id)` |
+
+⇒ `uk_conversation_pair` 在两侧都是**唯一索引载体**（Go 的 `uniqueIndex` tag ⇒ `pg_indexes` 有它、`pg_constraint` 无它；RAG 的 `V4` 已把 `V2` 的 `ADD CONSTRAINT` 改成 `CREATE UNIQUE INDEX` ⇒ 两侧**载体相同**）⇒ 唯一性判定 / `23505` / `ON CONFLICT` 仲裁完全一致。
+
+**⑤ 索引命名形态差 —— 2 处语义等价（不计失败）**
+
+| 语义等价配对 | 唯一性 | 列 |
+|---|---|---|
+| `idx_message_conversation_last_message_at` ≡ `idx_conversation_last_message_at` | non-unique | `last_message_at` |
+| `idx_message_conversation_updated_at` ≡ `idx_conversation_updated_at` | non-unique | `updated_at` |
+
+⇒ ✅ **已签字** `SD-2026-10-24-01`（[`docs/Intentional_Deviations/message/rpc.md:30`](../../Intentional_Deviations/message/rpc.md)）⇒ **不重复质疑、不改回**。
+
+### D.4 残留 7 处（逐条列出 + 定级 + 签字状态）
+
+> **定级口径** = `docs/twoStage.md` **§十**（`twoStage.md:941-973`）：**A** = 阶段 1 准入阻断 · **B** = 阶段 1 竞争力补强 · **C** = 阶段 2 最终工程建设 · **D** = 经分析确认可不实现或不适用（**须有明确理由**）。
+> ⚠️ **一条差异 ≠ 一个缺陷**：本节 7 处 ⇒ 归成 **2 条**（DEFAULT 6 · 索引 1）。
+> ✅ **本节 2 条**（DEFAULT 6 + 索引 1）**全部已签字** ⇒ 按 AGENTS.md §0：**不重复质疑、不得「顺手改回 Go 的旧写法」**。
+
+#### 残留 ① ✅ DEFAULT 6 处 —— 6 个时间列 `DEFAULT CURRENT_TIMESTAMP`（Go 侧**无默认**）· **已签字**
+
+| 表（RAG） | 列 | Go 侧 DEFAULT | RAG 侧 DEFAULT | Go 出处（tag 里**没有** `default`） | RAG 出处 |
+|---|---|---|---|---|---|
+| `message_conversation` | `created_at` | `<NULL>` | `CURRENT_TIMESTAMP` | `service/message/rpc/internal/model/data_model.go:63`（`autoCreateTime`） | `V2__create_message_conversation.sql:21` |
+| `message_conversation` | `last_message_at` | `<NULL>` | `CURRENT_TIMESTAMP` | `data_model.go:62`（`not null;index`，**无** `default`） | `V2__create_message_conversation.sql:20` |
+| `message_conversation` | `updated_at` | `<NULL>` | `CURRENT_TIMESTAMP` | `data_model.go:64`（`autoUpdateTime;index`） | `V2__create_message_conversation.sql:22` |
+| `message_conversation_message` | `created_at` | `<NULL>` | `CURRENT_TIMESTAMP` | `data_model.go:81`（`autoCreateTime;index:idx_message_conversation_time,priority:2`） | `V3__create_message_conversation_message.sql:17` |
+| `message_notification` | `created_at` | `<NULL>` | `CURRENT_TIMESTAMP` | `data_model.go:41`（`autoCreateTime;index:idx_notification_recipient_time,priority:2`） | `V1__create_message_notification.sql:18` |
+| `message_notification` | `updated_at` | `<NULL>` | `CURRENT_TIMESTAMP` | `data_model.go:42`（`autoUpdateTime`） | `V1__create_message_notification.sql:19` |
+
+| 项 | 内容 |
+|---|---|
+| 成因 | Go 的 `autoCreateTime` / `autoUpdateTime` 由 **GORM 在 Go 代码里赋值** ⇒ **不建 DB 默认**；RAG 侧多一条 DB 级默认 |
+| 签字状态 | ✅ **已签字 `SD-2026-10-24-04`** —— **2026-10-24 用户拍板：保留签字**（保留 RAG 侧的 DEFAULT，**不加** `V6` 迁移去 `DROP DEFAULT`）⇒ [`docs/Intentional_Deviations/message/rpc.md:80`](../../Intentional_Deviations/message/rpc.md)（**同条亦复述于该档头部第 17-18 行**）· DRIFT 侧 `DRIFT-MSG-V-020`（[`docs/DRIFT/message/rpc.md`](rpc.md)） |
+| **定级** | **D 类**（经分析确认可不实现 —— **有明确理由**） |
+| 定级理由 | ① DEFAULT 只在「**INSERT 省略该列**」时发作 ⇒ 两侧**所有** INSERT 都**显式绑定**该列（签字档原文引 `ConversationMapper.java:143-155` / `NotificationMapper.java:205-219` / `ConversationMessageMapper.java:159-166`）⇒ **当前不可观察**；② 删掉它是为「**不可观测的维度**」冒险 ⇒ 收益低于风险（签字档原文：「为一个不可观测的维度冒『有人在某条裸 SQL 路径上依赖了默认』的风险不划算」）；③ 方向是「**RAG 更宽松**」（多一个默认值）⇒ **不构成阶段 1 准入阻断** ⇒ **不是 A 类**；④ **不是 C 类** —— 已签字的就是「保留」这个决策 ⇒ 再谈「阶段 2 恢复 Go 语义」等于**推翻一次已拍板的决策** ⇒ 按签字档的「**代价（必须知情）**」留痕即可 ⇒ 有明确理由的「不实现」⇒ **D 类** |
+| ⚠️ **必须知情的是「将来会分岔」** | 签字档原文：「这不是『永远等价』，是『当前无路径』」—— 将来若有人写一条**省略该列**的 INSERT：Go 写 `NULL`（`created_at`/`updated_at`）或 `NOT NULL` 违规（`last_message_at`），RAG 写 `now()` ⇒ **两侧分岔，方向是「RAG 悄悄填了个时间」** ⇒ 排查成本高 |
+| 处置 | **本轮不修、不重复质疑**（已签字 ⇒ AGENTS.md §0：「对拍看到它们变红，先确认是不是签字项，不要当新回归去『修』」） |
+
+#### 残留 ② ✅ 索引 1 处 —— `idx_notification_recipient_read` 的**列数**：Go 1 列 / RAG 2 列 · **已签字**
+
+| 项 | 内容 |
+|---|---|
+| 差异 | 索引**同名** `idx_notification_recipient_read`，但列不同：Go = `cols=['is_read']`（**单列**）· RAG = `cols=['recipient_id', 'is_read']`（**复合 2 列**）⇒ 两侧都 `unique=False` |
+| Go 出处 | `service/message/rpc/internal/model/data_model.go:38` —— `IsRead bool \`gorm:"column:is_read;not null;default:false;index:idx_notification_recipient_read,priority:2"\``<br>⇒ ⚠️ 该索引**只有 `priority:2`、没有 `priority:1` 成员**（`recipient_id` 的 `priority:1` 被写到了**另一个**索引名 `idx_notification_recipient_time` 上，见 `data_model.go:32`）⇒ GORM 于是只建出**单列**索引 `(is_read)` ⇒ 那是**声明笔误的产物**，不是设计意图 |
+| RAG 出处 | `service/message/message-rpc/src/main/resources/db/migration/V1__create_message_notification.sql:43-44` —— `CREATE INDEX IF NOT EXISTS idx_notification_recipient_read ON message_notification (recipient_id, is_read);`（该文件 `:32-41` 已就地写下「**与 Go 侧不一致是已签字的有意偏离，别顺手改回单列**」） |
+| 签字状态 | ✅ **已签字 `SD-2026-10-23-06`** —— **2026-10-23 用户拍板：保留 RAG 现状，不回改成 Go 的单列索引** ⇒ [`docs/Intentional_Deviations/message/rpc.md:141`](../../Intentional_Deviations/message/rpc.md) |
+| **定级** | **D 类**（经分析确认不实现 —— **有明确理由**） |
+| 定级理由 | ① **查询结果完全相同** ⇒ 不改变任何写入语义、冲突行为、唯一性判定 ⇒ **纯查询计划差异（性能）** ⇒ **不是 A 类**；② 方向是「**RAG 更优**」—— `ListNotifications` 的真实过滤形状是 `WHERE recipient_id = ? AND is_read = false`（签字档原文引 `service/message/rpc/internal/model/message.go`）⇒ RAG 的复合索引**正好命中这个前缀**，Go 的单列索引只能先定位 `is_read=false` 的全部行再回表过滤 `recipient_id` ⇒ **回改会造成计划回退**；③ 有明确理由的「不实现」⇒ **D 类**；④ **不是 C 类** —— 没有「待恢复的 Go 语义」要恢复，签字档已给出「RAG 更优」的结论 |
+| ⚠️ **必须知情的代价** | 两侧 `pg_indexes` / `\d` 输出不同 ⇒ **任何按索引定义做逐字节比对的 DDL 工具在这一条上必然为红**（本轮实测正是如此）⇒ 属**预期差异，不是回归** |
+| 处置 | **本轮不修、不重复质疑** |
+
+### D.5 变异验证（证明守门有牙齿，不是假绿）
+
+> ⚠️ **为什么不直接改仓内的 `.sql`**：`service/message/**` 由**别的 lane 在改**（`service/**` 本 lane **零写权**）⇒ 本轮**零改动仓内迁移脚本** ⇒ 变异走**临时副本**路线：把 `check-ddl-static.py` 与该域的 `db/migration/` 目录**原样拷到一棵临时树**（保持相对路径 ⇒ 脚本内的 `REPO_ROOT` 与仓内布局一致 ⇒ 它读到的**仍是仓里那份 `.sql` 的同一份字节**，只是不在仓里写），**逐字节校验 sha256 相同**，再在**副本**上做变异。
+
+**变异：`message_notification.sender_id` 的列类型（`BIGINT` → `INTEGER`）**
+
+| 步骤 | 命令 / 动作 | 结果 |
+|---|---|---|
+| 建临时树 | `cp` 脚本 + `cp` 该域 5 份 `.sql` ⇒ `/tmp/g2-mut/message/{tools/difftest,service/message/message-rpc/src/main/resources/db/migration}` | sha256 **5/5 逐字节 SAME**（见下表） |
+| 基线 | `python3 /tmp/g2-mut/message/tools/difftest/check-ddl-static.py --domain message --indexes --check-source` | **EXIT=1**（**7** 处）· 源码↔活库 = `✅ 重放结果与活库逐项一致` |
+| 变异 | 副本 `V1__create_message_notification.sql:10`：`sender_id       BIGINT       NOT NULL,` → `sender_id       INTEGER       NOT NULL,`（改**一个列的类型**，命中目标行 **1** 处） | 变异前后该行已回显核对（`before`/`after` 两行均打印在运行日志里） |
+| 变异后重跑 | 同上命令 | **EXIT=1**（**8** 处 = 7 + **1**）· 源码↔活库 **转红**：<br>`🔴 列属性不同：message_notification.sender_id  源码=('integer', '')  活库=('bigint', '')`<br>`❌ 源码 ↔ 活库**分叉 1 处** ⇒ 活库已过期于仓里的迁移脚本` |
+| 还原 | 删掉临时树里的 `service/` 后**重新拷贝**原件 | sha256 **5/5 逐字节 SAME** |
+| 还原后重跑 | 同上命令 | **EXIT=1**（**7** 处 · **回到基线**）· 源码↔活库 回到 `✅ 一致` |
+| **还原校验** | `shasum -a 256` 临时副本 vs 仓内文件 | **5 份全部 SAME**（sha256 原值见下）⇒ 逐字节回到变异前 |
+| **收尾** | `rm -rf` 整棵临时树 | `exists=no` ⇒ **工作树与 `/tmp` 均无临时副本残留** |
+
+**sha256 对照（变异前 = 还原后，两次完全相同）**
+
+| 文件 | sha256（副本 = 原件，两次一致） |
+|---|---|
+| `V1__create_message_notification.sql` | `17f16b79011b25c733c30bdf39389d0c020e35e95f843547fdaeb1b251c61f13` |
+| `V2__create_message_conversation.sql` | `97a65f86ecc77eb8a664ecc0d5e774059a05466161f90b3a1c2d0053f2a062da` |
+| `V3__create_message_conversation_message.sql` | `d9a13539a2abb41d6ca34626db45a5dcd43a1797c05381b4ba4797f9a436aed3` |
+| `V4__conversation_pair_unique_index.sql` | `30fad63c1281dc40622ed7ca65364fb8f9de402bea7092bc32bfa760178286c9` |
+| `V5__message_time_columns_timestamptz.sql` | `c73f3c8d146bc2e5e5e6a8c1cb0b536fb942869d6f6d614c34b20de00af1eaba` |
+| `check-ddl-static.py`（脚本副本） | `cc87da8dfde81eb11dd160150299369e6012d3eb8d815e44ede02a5c517a6ebb` |
+
+⇒ **结论**：变异**精确报出 1 处**、**指向被改的那一列**（`message_notification.sender_id`），其余 7 处**不变** ⇒ 守门**不是假绿**；还原后**精确回到基线** ⇒ 无残留。
+⚠️ **本域的「期望 EXIT」口径**：本域 Go↔活库**本就有 7 处已签字差异** ⇒ 还原后的正确期望值是 **EXIT=1（7 处）**，**不是** EXIT=0 ⇒ 变异判据用的是「**源码↔活库这一维度的差异数 0 → 1 → 0**」＋「总差异数 7 → 8 → 7」，不是总退出码。
+
+**仓内零改动核验**
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-message-like-task"
+git status --short          # ⇒ 空
+git diff --stat -- service/ # ⇒ 0 行
+```
+
+### D.6 人工补查（脚本**不查**的维度 · **人工闭合，非脚本原生结论**）
+
+> ⚠️ `tools/difftest/check-ddl-static.py` 的「约束」维度**只覆盖 `pg_constraint` 的主键 / 唯一类**；**CHECK（`contype='c'`）、外键（`contype='f'`）、分区（`relkind='p'`）、存储过程 / 自定义函数（`pg_proc`）** 都需要**另查** ⇒ 下表是**本轮人工补查**的结果，**明确标注为人工闭合，不冒充脚本原生结论**。
+
+| 维度 | Go 侧 `go_message_db` | RAG 侧 `rag_message_db` | 人工闭合结论 |
+|---|---|---|---|
+| **CHECK**（`pg_constraint` where `contype='c'`） | 2 行，**但 `conrelid` 为 0** ⇒ 是 PG **内建域**的约束（`cardinal_number_domain_check` / `yes_or_no_check`），**不是用户表约束** | **同样 2 行、逐字相同** | ✅ **用户表 CHECK：两侧各 0 ⇒ 无对象可比**（内建域约束两侧**逐字一致**，不构成差异） |
+| **外键**（`contype='f'`） | 0 行 | 0 行 | ✅ **两侧各 0 ⇒ 无外键** |
+| **分区**（`pg_class.relkind='p'` / `relispartition`） | 0 行 | 0 行 | ✅ **两侧各 0 ⇒ 无分区表** |
+| **存储过程 / 自定义函数**（`pg_proc`，排除扩展与 `pg_catalog`） | 0 行 | 0 行 | ✅ **两侧各 0 ⇒ 无用户自定义例程** |
+| **触发器**（`pg_trigger`，排除 internal） | 0 行 | 0 行 | ✅ **两侧各 0 ⇒ 无对象可比**（与 §D.2 维度 7/8 同源） |
+
+⇒ **「无对象可比」≠「已对齐」**：以上 5 个维度**两侧都没有可比对象**，本轮**未核**（无对象可核），**不写成「已对齐」**。
+
+### D.7 证据强度 · 效力边界 · 未能核到的部分
+
+| 项 | 结论 |
+|---|---|
+| 证据强度 | **E4（真 PG 双侧活体）** —— 两侧各建一个真库（Go 侧跑**真源自己的** `AutoMigrate`，RAG 侧按序执行 `V1`~`V5`），逐条 dump `pg_indexes` / `pg_constraint` / `pg_trigger` / `information_schema.columns`；**外加 `--check-source` 的「源码重放 ↔ 活库」真库对照** |
+| 变异验证 | ✅ **已做**（§D.5）⇒ 守门有牙齿，**不是假绿** |
+| **效力边界 ①** | 本节结论只覆盖 **`message` 域 3 张表**；`service/message/message-common/**` 与 `service/common/**` 的**共享层**不在本节范围 |
+| **效力边界 ②** | 结论覆盖的是**当前迁移脚本 + 当前 Go struct tag** ⇒ 任何人改了 `data_model.go` 的 tag 或改了 `db/migration/` 下的 `.sql`，本节结论**即失效** ⇒ 需重跑 `ddl-parity.sh message` |
+| **效力边界 ③** | `--check-source` 的「源码 ↔ 活库」维度**与 Go 侧无关** ⇒ 它只保证「仓里的 `.sql` 与活库没分叉」，**不代表**活库与 Go 一致（那是前 6 个维度的事） |
+| **未能核到 ①** | **触发器维度（维度 7/8）**：两侧各 0 个触发器 ⇒ **无对象可比 ⇒ 本维度未核**（不是「已对齐」） |
+| **未能核到 ②** | **`--check-source` 不检查 CHECK / 外键 / 分区 / 存储过程** ⇒ §D.6 是**人工补查**（`contype in ('c','f')` / `relkind='p'` / `pg_proc` 三条手工 SQL）⇒ **非脚本原生结论**，但**已人工闭合** |
+| **未能核到 ③** | **未做「同一次写入两侧落库后读回」的活体数据对拍**（本节是 **schema 层**对照，**不是数据层**）⇒ 数据层的等价性另由 `docs/DRIFT/message/rpc.md` 的各轮双侧活体承担 ⇒ **本节不重复声称数据层已对齐** |
+| **未能核到 ④** | **Go 侧手写 `.sql` 夹具未纳入本节基线** —— `message` 域真源**没有** `internal/model/migrations/` 目录 ⇒ 本节基线**无基线选择歧义**（与 `like` 域不同，见 [`docs/DRIFT/like/vs-common.md`](../like/vs-common.md) 同名节） |
+
+### D.8 本节边界（本节**不**声称什么）
+
+1. **不修任何差异** —— 本轮只**登记**（RoundPlan T-3.1）。
+2. **不重复质疑已签字项** —— 残留 ① ② **均已签字** ⇒ 本节只做**留痕 + 定级**，**不改回**。
+3. **不声称触发器已对齐** —— 两侧各 0 ⇒ 「无对象可比」。
+4. **不声称数据层已对齐** —— 本节是 **schema 层**。
+5. **不写共享面** —— `docs/DRIFT/_cross/**` · `docs/DRIFT/global/**` · `docs/PhaseGoal-judge.md` · `docs/RoundPlan/**` **本 lane 一律不写**（合并后由**合并收口执行者**统一更新）⇒ 例如 §D.4 残留 ② 的索引差异在 `docs/DRIFT/global/lanes/L3-ddl.md` 有**共享面**的登记，本节**只复述、不修改**该文件。

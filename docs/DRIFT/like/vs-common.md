@@ -1515,3 +1515,246 @@ G4 共享层 **5** · G3 **11**（article 3 · comment 4 · hot 4）· G1 **9**�
 |---|---|
 | task 矩阵的证据强度 | **R3（逐条读 Go 出处）＋ E4（真 Tomcat 容器里的真 HTTP 往返）** ⇒ ⇒ **不是双侧活体 ⇒ 不写 L4**（task 域的双侧活体是 `docs/DRIFT/task/api.md` §二·五 的 **44 条**，2026-10-24，本轮未重跑） |
 | 两者**不互相替代** | like 探针 = **双侧活体**（含事实投递 + E60 双失败）；task 矩阵 = **版本控制内的失败路径回归网**（33 条，含变异验证）⇒ ⇒ **两条证据线各自成立，合并后才是「像域 + task 域」的阶段 1 证据** |
+
+<!-- @new 2026-10-29 · `align/r3-ddl-message-like-task` · RoundPlan `docs/RoundPlan/Round-3.md` **T-3.1 的 G2 侧（`like` 域）** · 基线 = `do-my-own-gh` @ `d10227c5` -->
+
+## DDL 逐域机器核（`--indexes` + `--check-source`）· 2026-10-29 · R3·T-3.1（G2 lane · `like` 域）
+
+> **本节为什么存在**：`tools/difftest/check-ddl-static.py` **默认不开 `--indexes`** ⇒ 索引 / 唯一约束 / 触发器**从未被机器核过**；**默认不开 `--check-source`** ⇒ 只比活库、不比仓里的 `.sql` ⇒ 「迁移改了但没人重跑」**不可见**。
+> 主线已把这两层补上并逐域实跑，但结论只落在 `docs/PhaseGoal-judge.md` §七 ⇒ **域级证据链断了一节** ⇒ 本节把 `like` 域的结论**落到本域台账**。
+> ⚠️ **本节只落结论与证据，不修任何差异**（RoundPlan T-3.1）。
+> ⚠️ **本节零改动 `service/**`** —— like 域迁移属 **G4 写权**、`service/like/**` 由别的 lane 在改 ⇒ 变异测试走**逐字节相同的临时副本**（见 §L.5）⇒ 提交后 `git diff --stat -- service/` = **0 行**。
+> ⚠️ **`like` 域不是 N/A** —— N/A 的是 **`hot`**（两侧无数据库）⇒ `like` 域**两侧都有真库**（Go 5 张表 / RAG 5 张表）。
+> ⚠️ **本域有「基线选择」歧义**（Go 侧 `internal/model/migrations/001~003` 是**测试夹具**还是**生产 DDL**）⇒ 本节的基线口径写在 §L.1，**必须与 §L.2 一起读**。
+
+### L.1 执行口径（命令原文 · EXIT · 日期 · 环境 · **基线选择**）
+
+| 项 | 值 |
+|---|---|
+| 实跑日期 | **2026-10-29**（14:23:2x–14:24:16 本机时间） |
+| 工作树 / 分支 | `/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-message-like-task` · `align/r3-ddl-message-like-task`<br>⚠️ **实跑基点 = `do-my-own-gh` @ `d10227c5`**（工作树先 `git reset --hard do-my-own-gh` 对齐主线，再跑）⇒ **实跑结论与提交基点同源** |
+| 真源 | `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang` —— **冻结 · 只读**；脚本**只复制**副本，从不写入 |
+| 容器 / 库 | `ddl-like-pg`（`postgres:16-alpine` · 端口 55561）· Go 库 `go_like_db` · RAG 库 `rag_like_db` |
+| **基线选择（本域关键）** | **基线 A = 生产权威**：Go 侧**只跑**真源自己的 `AutoMigrate`（`service/like/rpc/internal/model/db.go:15`）⇒ **不跑** `internal/model/migrations/001~003`。<br>⚠️ **依据**：那三份 `.sql` 与 comment 域同路径形态，而 comment 域那三份已被签字认定为「**测试夹具**，不进生产」（[`docs/Intentional_Deviations/comment/rpc.md`](../../Intentional_Deviations/comment/rpc.md) §`SD-2026-10-24-CAND-02`）；**本轮独立复核**：① `001`/`002` 只被 `service/comment/rpc/internal/model/test-community-postgres.sh:51,53` 执行；② **`003_like_fact_delivery.sql` 全仓 0 引用**（`grep -rn "003_like_fact_delivery" --include=*.go --include=*.sh .` ⇒ **0 命中**）⇒ ⇒ **Go 生产侧没有这三份 `.sql` 的任何对象**。<br>⚠️ **基线 B（`--with-go-sql`，连夹具一起放）本轮未跑** ⇒ 该档结论**沿用主线已实跑的登记**（`docs/DRIFT/global/lanes/L3-ddl.md` §8.2：基线 B 下 **RAG 只多 1 处** CHECK `like_fact_stream_version_range`）⇒ **本节不把基线 B 的数字当成本轮实测**。 |
+| Go 侧 schema 来源 | **真源自己的 `AutoMigrate`**：`service/like/rpc/internal/model/db.go:10`（`func InitDB(dsn string) *gorm.DB`）→ `:15`（`db.AutoMigrate(&LikeRecord{}, &LikeConsumeInbox{}, &LikeOutboxEvent{}, &LikeDomainFactOutbox{}, &LikeFactStream{})`）⇒ 探针调的正是**真源自己的 `InitDB`**（`dsn` 探针）⇒ 跑的是**真源同一份 struct tag + 同一个 gorm 版本**<br>⚠️ **gorm 版本钉死**：真源 `go.mod:27` `gorm.io/driver/postgres v1.6.0` · `go.mod:28` `gorm.io/gorm v1.31.1` ⇒ §3.3.1 要求的「消费点」是 **`gorm.io/driver/postgres@v1.6.0/postgres.go` 的 `DataTypeOf`**（`int32` 无 size tag ⇒ `integer`；`int64` ⇒ `bigint`）⇒ **列类型结论不是从 struct tag 推断的，是 GORM 在建表时生成的** |
+| Go struct 出处 | `service/like/rpc/internal/model/data_model.go:9-21`（`LikeRecord` → `like_record`，`:23-25` `TableName()`）· `:29-37`（`LikeConsumeInbox` → `like_consume_inbox`，`:39-41`）· `:43-53`（`LikeOutboxEvent` → `like_outbox_event`，`:55-57`）· `service/like/rpc/internal/model/domain_fact.go:14-29`（`LikeDomainFactOutbox` → `like_domain_fact_outbox`，`:31`）· `:35-40`（`LikeFactStream` → `like_fact_stream`） |
+| RAG 侧 schema 来源 | 仓内 `service/like/like-rpc/src/main/resources/db/migration/`（**Flyway**，独立账本 `flyway_schema_history_like`）**6 份**：`V1__create_like_record.sql` · `V2__create_like_consume_inbox.sql` · `V3__create_like_outbox_event.sql` · `V4__create_like_domain_fact_outbox.sql` · `V5__create_like_fact_stream.sql` · `V6__align_like_domain_fact_outbox_with_go.sql` |
+| 豁免名单 | **一个都没用**（`--allow-idx` / `--allow-default` **均未传**）⇒ 下面所有差异数是**原始值**，没有被白名单压过 |
+| 两侧表集合 | Go `go_like_db` = {`like_record`, `like_consume_inbox`, `like_outbox_event`, `like_domain_fact_outbox`, `like_fact_stream`} · RAG `rag_like_db` = **同 5 张** ⇒ 逐条一致 |
+
+**命令 ① —— 建库 + 双侧活体对拍（索引 / 约束 / 触发器 + 源码↔活库 一次跑全）**
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-message-like-task"
+bash tools/difftest/ddl-parity.sh like
+```
+
+⇒ **EXIT=1** —— 末行 `== 实质差异合计 5 处 ⇒ 退出码 1 ==`；runner 行 `=== 对拍退出码: 1 ===`
+⇒ Go 探针打印 `AUTOMIGRATE_OK`；RAG 侧按序执行 `V1` → `V2` → `V3` → `V4` → `V5` → `V6`（`V6` 打印 `NOTICE: trigger "like_domain_fact_identity_immutable" ... does not exist, skipping` ⇒ **幂等重放已验证**）
+
+**命令 ② —— 只读静态对拍（显式带 `--indexes --check-source`）**
+
+```bash
+python3 tools/difftest/check-ddl-static.py --domain like --indexes --check-source
+```
+
+⇒ **EXIT=1**（**5 处**）—— **与 ① 同数同因** ⇒ 两条路径互为复算
+
+**命令 ③ —— 打印 RAG 侧 SQL 清单**
+
+```bash
+python3 tools/difftest/check-ddl-static.py --domain like --print-rag-sql
+```
+
+⇒ **EXIT=0**，输出 **6 行**，与 ① 实际执行的 6 份 `.sql` **逐条一致** ⇒ **清单没有落后于仓**
+
+### L.2 八个被核维度的逐项结论
+
+| # | 维度 | 两侧规模 | 结论 | 计入失败数 |
+|---|---|---|---|---|
+| 1 | **源码 ↔ 活库**（`--check-source`） | 5 张表 | ✅ **0 差异** —— 仓里的 `.sql` 在**干净临时库** `rag_like_db_srccheck` 上原样重放后，与活库**逐项一致** | 0 |
+| 2 | **列类型 / 长度** | 42 列 ↔ 42 列（键集合一致 ✓） | ✅ **0 差异** —— 脚本原话「逐字相同 42 列」 | 0 |
+| 3 | **可空性（NOT NULL）** | 42 列 | ✅ **0 差异** —— 脚本原话「两侧完全一致 ✓」 | 0 |
+| 4 | **DEFAULT** | 42 列 | ✅ **0 差异** —— 脚本原话「两侧完全一致 ✓」 | 0 |
+| 5 | **索引**（`pg_indexes`） | Go 17 / RAG 19 | 🔴 **2 处残留**（另 1 处 = 命名形态差 ⇒ 语义等价，不计失败） | 2 |
+| 6 | **约束**（`pg_constraint`） | Go 5 / RAG 7 | 🔴 **2 处残留**（2 处 = **额外 CHECK**；另 5 行逐条一致） | 2 |
+| 7 | **触发器**（`pg_trigger`） | Go 0 / RAG 1 | 🔴 **1 处残留**（RAG 独有 1 个触发器） | 1 |
+| 8 | **触发器形式 / 触发器函数体** | Go 0 / RAG 1 | ⚪ **无可成对比对的触发器 ⇒ 本维度「什么都没比」** —— ⚠️ **这不是「触发器已对齐」**（该单边触发器的函数属性已由维度 7 计过，**不在此重复计失败**） | 0 |
+| | **合计** | | | **5** |
+
+> ⚠️ **读法**：本域 DDL 的**行为层主干**（类型 / 长度 / 可空性 / DEFAULT / 唯一约束）在 **8 个维度里 5 个为 0**；剩下的 **5 处全部是「RAG 侧多出来的对象」**（**方向单一**）⇒ 逐条见 §L.4。
+> ⚠️ **维度 8 不是「通过」而是「无对象」** —— Go 侧**没有**触发器可与 RAG 的比 ⇒ 本域的触发器**语义等价性未核**。
+
+### L.3 「0 差异」项（逐条列全，不写「其余一致」）
+
+**① 列类型 / 长度 —— 42 列逐字相同（0 处差异）**
+
+| 表 | 抽样列 | Go 侧类型 | RAG 侧类型 | 判定 |
+|---|---|---|---|---|
+| `like_record` | `id` / `user_id` / `author_id` / `last_operation_id` | `bigint` | `bigint` | ✅ 逐字相同（Go tag 显式 `type:bigint`，见 `data_model.go:11,14,16`） |
+| `like_record` | `target_type` / `target_id` | `character varying(32)` / `character varying(64)` | 同左 | ✅ 逐字相同 |
+| `like_record` | `state` | `smallint` | `smallint` | ✅ 逐字相同（Go tag `type:smallint`，`data_model.go:15`） |
+| `like_record` | `created_at` / `updated_at` / `delete_at` | `timestamp with time zone` | 同左 | ✅ 逐字相同（`DeleteAt gorm.DeletedAt` ⇒ 可空） |
+| `like_domain_fact_outbox` | `delivery_status` / `retry_count` | `integer` | `integer` | ✅ 逐字相同 —— ⚠️ 这是 `V6` 那轮**专门修**的项（Go `DeliveryStatus int32` 无 `type` tag ⇒ GORM 取 `integer`；此前 RAG 是 `BIGINT`）⇒ **已闭合** |
+| `like_domain_fact_outbox` | `technical_offset` / `fact_version` | `bigint` | `bigint` | ✅ 逐字相同（`int64 ⇒ Size=64`）⇒ ⚠️ 说明 `V6` **不是无差别降级** |
+
+⇒ 脚本汇总行：`类型/长度差异 0 处：` + `逐字相同 42 列。`
+
+**② 可空性（NOT NULL）—— 0 处差异** ⇒ 脚本原话 `（两侧完全一致 ✓）`
+⇒ 抽样：`like_record.user_id` / `target_type` / `target_id` / `author_id` / `state` 两侧均 `NOT NULL`（Go tag 有 `not null`）· `like_record.delete_at` 两侧均可空（`gorm.DeletedAt`）。
+
+**③ DEFAULT —— 0 处差异** ⇒ 脚本原话 `（两侧完全一致 ✓）`
+⇒ 抽样：`like_record.state` 两侧均 `0` · `like_record.last_operation_id` 两侧均 `0` · `like_domain_fact_outbox.delivery_status` 两侧均 `0` · `retry_count` 两侧均 `0`。
+⇒ ⚠️ 与 `message` 域 6 处 / `users` 域 8 处的「RAG 多 DEFAULT」**不同族** ⇒ **本域这个维度是真 0 差异**，不是被豁免名单压过的。
+
+**④ 源码 ↔ 活库 —— 0 差异（本轮新增维度）**
+
+- 目录扫描得到 **6 份**迁移脚本 ⇒ **清单由目录扫描产生**。
+- 在**干净临时库** `rag_like_db_srccheck` 上**原样重放** ⇒ 与活库逐项对比：**表集合 5 ↔ 5** · **列集合 0 差异** · **列属性 0 差异** · **可空性 / DEFAULT 0 差异** · **索引 0 差异** · **约束 0 差异** · **触发器 0 差异**
+- ⇒ 脚本原文：`✅ 仓里的迁移脚本**重放结果**与活库逐项一致`
+- ⇒ **含义**：本域仓里的 `.sql` 与**当前活库**之间**没有分叉**。
+
+**⑤ 约束 —— 5 行逐条一致 + 2 行 RAG 独有**
+
+| 逐条一致的 5 行 | contype | 定义 |
+|---|---|---|
+| `like_record_pkey` | p | `PRIMARY KEY (id)` |
+| `like_consume_inbox_pkey` | p | `PRIMARY KEY (id)` |
+| `like_outbox_event_pkey` | p | `PRIMARY KEY (id)` |
+| `like_domain_fact_outbox_pkey` | p | `PRIMARY KEY (id)` |
+| `uk_like_fact_stream` | u | `UNIQUE (aggregate_id, fact_version)` |
+
+⇒ 脚本原话 `逐条一致 5 行 ✓` + `（两侧约束集合完全一致 ✓）`（脚本指的是**共有部分**；2 行 RAG 独有的 CHECK 单列为「实质差异」，见 §L.4 残留 ②）。
+
+**⑥ 索引命名形态差 —— 1 处语义等价（不计失败）**
+
+| 语义等价配对 | 唯一性 | 列 |
+|---|---|---|
+| `idx_like_record_delete_at` ≡ `idx_like_record_deleted_at` | non-unique | `delete_at` |
+
+⇒ Go 列名是 `delete_at`（`data_model.go:20` `DeleteAt gorm.DeletedAt`）⇒ GORM 索引名 `idx_like_record_delete_at`；RAG 迁移脚本写成 `deleted_at`（`V1__create_like_record.sql:49-50`）⇒ **仅命名形态差** ⇒ ✅ **已登记**为语义等价（`docs/DRIFT/global/lanes/L3-ddl.md` §8.3 第 12 行）⇒ **不是漂移**。
+
+### L.4 残留 5 处（逐条列出 + 定级 + 签字状态）
+
+> **定级口径** = `docs/twoStage.md` **§十**（`twoStage.md:941-973`）：**A** = 阶段 1 准入阻断 · **B** = 阶段 1 竞争力补强 · **C** = 阶段 2 最终工程建设 · **D** = 经分析确认可不实现或不适用（**须有明确理由**）。
+> ⚠️ **一条差异 ≠ 一个缺陷**：本节 5 处 ⇒ 归成 **3 条**（额外索引 2 · 额外 CHECK 2 · 额外触发器 1）。
+> ⚠️ **方向单一**：5 处**全部**是「**RAG 侧多出来的对象**」⇒ 没有一处是「Go 有、RAG 缺」⇒ **不是 A 类**（不阻断阶段一准入）。
+
+#### 残留 ① 🟢 额外索引 2 条（RAG 独有）—— **性能非行为**
+
+| 索引名 | 表 | 列 | Go 出处 | RAG 出处 |
+|---|---|---|---|---|
+| `idx_like_fact_delivery` | `like_domain_fact_outbox` | `(delivery_status, created_at, event_id)` non-unique | `service/like/rpc/internal/model/migrations/003_like_fact_delivery.sql:12-13`（**只在夹具里**；`003` 全仓 0 引用 ⇒ Go 生产没有） | `service/like/like-rpc/src/main/resources/db/migration/V6__align_like_domain_fact_outbox_with_go.sql:103-104` |
+| `idx_like_legacy_fact_subject_target` | `like_domain_fact_outbox` | **部分索引** `((payload->>'subject_ref'), (payload->>'target_type'), (payload->>'target_id')) WHERE delivery_envelope IS NULL` non-unique | `service/like/rpc/internal/model/migrations/002_like_dc_wire.sql:15-17`（**只在夹具里**） | `V6__align_like_domain_fact_outbox_with_go.sql:93-95` |
+
+| 项 | 内容 |
+|---|---|
+| 签字状态 | ⏳ **未签字候选**（**已登记在案**）—— `docs/DRIFT/global/lanes/L3-ddl.md` §8.3 第 3、4 行分类为「🟢 **只记不修（性能非行为）**」· 本域 DRIFT 侧见 [`docs/DRIFT/like/rpc.md`](rpc.md)（`V6` 那轮的「②③④⑤⑥ 台账没列全的 5 项」表，第 ③④ 项）<br>⚠️ **同族的待签字候选** = `SD-2026-10-24-CAND-02`（**comment 域那条**，本域**无独立编号** ⇒ 引用时必须给「文件 + 域」，不能只写编号，AGENTS.md §0） |
+| **定级** | **D 类**（经分析确认不实现 —— **有明确理由**） |
+| 定级理由 | ① 两条都是**非唯一**普通索引 ⇒ PG **只用唯一索引 / 约束判唯一** ⇒ 增删它们**不改变任何写入语义、冲突行为、唯一性判定、查询结果** ⇒ **纯查询计划（性能）差异** ⇒ **不是 A 类**、**不是 C 类**；② 方向是「**RAG 更全**」（多了索引 ⇒ 不可能让任何原本能写的行被拒）⇒ **无拒绝路径**；③ 有明确理由的「不实现」⇒ **D 类**；④ ⚠️ **但要知情**：Go **生产**侧确实没有这两条索引（只在夹具 `.sql` 里）⇒ 严格说这是一处**生产 schema 构成差**，只是它**不产生行为差** ⇒ 登记即可，**不建议动**（删索引在生产大表上是 DDL 风险，收益只是省一点写入开销） |
+
+#### 残留 ② 🟡 额外 CHECK 2 条（RAG 独有）—— **写路径上可拒绝**
+
+| 约束名 | 表 | 定义 | Go 出处 | RAG 出处 |
+|---|---|---|---|---|
+| `like_new_fact_has_dc_wire` | `like_domain_fact_outbox` | `CHECK ((aggregate_id IS NOT NULL) AND (fact_version IS NOT NULL) AND (delivery_envelope IS NOT NULL)) **NOT VALID**` | `service/like/rpc/internal/model/migrations/002_like_dc_wire.sql:21-28`（`DO $$ … ADD CONSTRAINT … NOT VALID`）—— **只在夹具里** | `V6__align_like_domain_fact_outbox_with_go.sql:83-87` |
+| `like_fact_stream_version_range` | `like_fact_stream` | `CHECK ((version >= 1) AND (version <= '9007199254740991'::bigint))` | `service/like/rpc/internal/model/migrations/002_like_dc_wire.sql:8-11` —— ⚠️ **内联在 `CREATE TABLE IF NOT EXISTS like_fact_stream (…)` 里** ⇒ AutoMigrate（`db.go:15`）已建过这张表 ⇒ **整条 CREATE 是空操作** ⇒ ⇒ **Go 生产侧永远没有这条 CHECK**（**连夹具基线 B 下也没有**） | `V6__align_like_domain_fact_outbox_with_go.sql:141-145`（抄成独立 `ALTER` ⇒ 与 comment 域 `comment_fact_stream_version_range` **完全同型**） |
+
+| 项 | 内容 |
+|---|---|
+| 签字状态 | ⏳ **未签字候选**（**已登记在案**）—— `docs/DRIFT/global/lanes/L3-ddl.md` §8.3 第 1、2 行分类为「🟡 **RAG 更严 ⇒ 已签字族候选**」· 本域 DRIFT 侧见 [`docs/DRIFT/like/rpc.md`](rpc.md)（同表的第 ②⑥ 项）<br>⚠️ **同族的待签字候选** = `SD-2026-10-24-CAND-02`（**comment 域那条**，本域**无独立编号**） |
+| **定级** | **C 类**（阶段 2 最终工程建设项） |
+| 定级理由 | ① **CHECK 是写路径上的拒绝路径** ⇒ 与「多余索引」**不同类**：它**可能拒掉 Go 侧本来会接受的行** ⇒ 原则上**可观察**（比 DEFAULT 更强）⇒ **不能判 D**（说「不实现」得给出「Go 会接受但 RAG 会拒的行不会发生」的理由，而该理由**依赖调用方保证**，不是 schema 自证）；② 方向是「**RAG 更严**」⇒ **不阻断阶段 1 准入**（正常写路径下两侧行为相同）⇒ **不是 A 类**；③ 但「**是否保留这条拒绝路径**」= 业务语义决策（是否允许「缺信封 / 超 2^53 的 version」被写进来）⇒ 属「**业务语义恢复**」的最终形态 ⇒ 阶段 2 ⇒ **C 类**；④ **不是 B 类** —— 阶段 1 竞争力补强指的是「形成可信的技术亮点」，本条是**减法**（要不要多一道防线），不是亮点建设 |
+| ⚠️ **当前不可观察（有实测依据）** | 本域 DRIFT 台账已实测两条 CHECK **在当前写路径上不会误伤**：`LikeDomainFactService:157-158` 调 `insertFact` 时 `streamId` / `factVersion` / `envelopeJson` **三者都非 null** ⇒ `like_new_fact_has_dc_wire` 不会触发；`version` 由业务保证 ≥ 1 且 ≤ 2^53-1 ⇒ `like_fact_stream_version_range` 不会触发。⇒ **「当前不触发」≠「永远不会触发」** ⇒ 与签字档的同类口径一致：**登记 + 留痕，不在本轮改回** |
+
+#### 残留 ③ 🟡 额外触发器 1 个（RAG 独有）—— **唯一「原则上真能观察到」的一类**
+
+| 触发器 | 表 | 定义 | Go 出处 | RAG 出处 |
+|---|---|---|---|---|
+| `like_domain_fact_identity_immutable` | `like_domain_fact_outbox` | `BEFORE UPDATE … FOR EACH ROW EXECUTE FUNCTION reject_like_domain_fact_identity_change()` —— 函数体：`NEW.event_id / event_type / payload / aggregate_id / fact_version / delivery_envelope` 任一 `IS DISTINCT FROM OLD.…` ⇒ `RAISE EXCEPTION 'like fact envelope is immutable'` | `service/like/rpc/internal/model/migrations/003_like_fact_delivery.sql:15-32`（函数 `:15-28` + 触发器 `:29-32`）—— **只在夹具里**；⚠️ **`003` 全仓 0 引用** ⇒ Go 生产没有这个触发器 | `V6__align_like_domain_fact_outbox_with_go.sql:115-133`（函数 `:115-128` + 触发器 `:130-133`） |
+
+| 项 | 内容 |
+|---|---|
+| 签字状态 | ⏳ **未签字候选**（**已登记在案**）—— `docs/DRIFT/global/lanes/L3-ddl.md` §8.3 第 5 行（「🟡 **RAG 更严 ⇒ 已签字族候选**（**唯一原则上可观察的一类**」）· 触发器形态的逐条对照见 `docs/DRIFT/global/lanes/L10-ddldeep.md`（like 域第 1 行）· 本域 DRIFT 侧见 [`docs/DRIFT/like/rpc.md`](rpc.md)（同表的第 ⑤ 项） |
+| 函数体一致性 | ✅ **两侧函数体逐字节相同**（`reject_like_domain_fact_identity_change` 的 plpgsql 体逐字照抄）⇒ 差异只在「**Go 生产有没有建这个触发器**」，不在「**触发器长什么样**」 |
+| **定级** | **C 类**（阶段 2 最终工程建设项） |
+| 定级理由 | ① **触发器是写路径上真正可观察的拒绝**：RAG 侧 `UPDATE` 改到那 6 个不可变列之一 ⇒ `RAISE EXCEPTION` ⇒ **请求失败**；Go 侧**没有这个触发器** ⇒ 同样的 `UPDATE` **会成功** ⇒ ⇒ **两侧行为真的不同**（不是「性能」也不是「当前恰好不触发」）⇒ **不能判 D**；② 方向是「**RAG 更严**」⇒ **不阻断阶段 1 准入**（正常投递元数据写路径不碰这 6 列）⇒ **不是 A 类**；③ 「**要不要保留这道防线**」= 业务语义决策（信封不可变是不是本域的硬约束）⇒ 属阶段 2 的最终形态 ⇒ **C 类**；④ ⚠️ **当前写路径不误伤**（本域 DRIFT 台账已实测：`LikeDomainFactOutboxMapper` 三处 `UPDATE` 只写 `delivery_status` / `retry_count` / `technical_*` / `delivered_at`，**没有一列**落在不可变清单里）⇒ ⇒ **登记 + 留痕，不在本轮改回** |
+| ⚠️ **Go 侧 `bootstrap/LikeSchemaGate` 的口径** | Go 侧 `service/like/rpc/internal/model/db.go:15` 之外的 `bootstrap/LikeSchemaGate` 会 **fail-fast 校验** `like_domain_fact_identity_immutable` 触发器与 5 张表存在 ⇒ 即「**Go 自己也认为这个触发器该在**」⇒ 这条差异更像是「**Go 生产漏执行了夹具**」而非「**RAG 多加了一道不该加的防线**」⇒ **该结论支持保留 RAG 侧**（但仍属**未签字候选**，本轮不替用户拍板） |
+
+### L.5 变异验证（证明守门有牙齿，不是假绿）
+
+> ⚠️ **为什么不直接改仓内的 `.sql`**：like 域迁移属 **G4 写权**、`service/like/**` 由别的 lane 在改 ⇒ 本轮**零改动仓内迁移脚本** ⇒ 变异走**临时副本**路线：把 `check-ddl-static.py` 与该域的 `db/migration/` 目录**原样拷到一棵临时树**（保持相对路径 ⇒ 脚本内的 `REPO_ROOT` 与仓内布局一致 ⇒ 它读到的**仍是仓里那份 `.sql` 的同一份字节**，只是不在仓里写），**逐字节校验 sha256 相同**，再在**副本**上做变异。
+
+**变异：`like_record.last_operation_id` 的列类型（`BIGINT` → `INTEGER`）**
+
+| 步骤 | 命令 / 动作 | 结果 |
+|---|---|---|
+| 建临时树 | `cp` 脚本 + `cp` 该域 **6 份** `.sql` ⇒ `/tmp/g2-mut/like/{tools/difftest,service/like/like-rpc/src/main/resources/db/migration}` | sha256 **6/6 逐字节 SAME**（见下表） |
+| 基线 | `python3 /tmp/g2-mut/like/tools/difftest/check-ddl-static.py --domain like --indexes --check-source` | **EXIT=1**（**5** 处）· 源码↔活库 = `✅ 重放结果与活库逐项一致` |
+| 变异 | 副本 `V1__create_like_record.sql:21`：`last_operation_id  BIGINT       NOT NULL DEFAULT 0,` → `last_operation_id  INTEGER       NOT NULL DEFAULT 0,`（改**一个列的类型**，命中目标行 **1** 处） | 变异前后该行已回显核对（`before`/`after` 两行均打印在运行日志里） |
+| 变异后重跑 | 同上命令 | **EXIT=1**（**6** 处 = 5 + **1**）· 源码↔活库 **转红**：<br>`🔴 列属性不同：like_record.last_operation_id  源码=('integer', '')  活库=('bigint', '')`<br>`❌ 源码 ↔ 活库**分叉 1 处** ⇒ 活库已过期于仓里的迁移脚本` |
+| 还原 | 删掉临时树里的 `service/` 后**重新拷贝**原件 | sha256 **6/6 逐字节 SAME** |
+| 还原后重跑 | 同上命令 | **EXIT=1**（**5** 处 · **回到基线**）· 源码↔活库 回到 `✅ 一致` |
+| **还原校验** | `shasum -a 256` 临时副本 vs 仓内文件 | **6 份全部 SAME**（sha256 原值见下）⇒ 逐字节回到变异前 |
+| **收尾** | `rm -rf` 整棵临时树 | `exists=no` ⇒ **工作树与 `/tmp` 均无临时副本残留** |
+
+**sha256 对照（变异前 = 还原后，两次完全相同）**
+
+| 文件 | sha256（副本 = 原件，两次一致） |
+|---|---|
+| `V1__create_like_record.sql` | `0a760802a54f395acd9d68c116246c7f6c27b9e69c50f2b0c4bf1c6844a178dc` |
+| `V2__create_like_consume_inbox.sql` | `f6e3538fc5ac1c53e0b11bf4b624c60060ff622016a3462c0e9814bfa020337b` |
+| `V3__create_like_outbox_event.sql` | `5af3552a49076c46177b5df7a9986d982818db7961ee71f582818e96ab04e832` |
+| `V4__create_like_domain_fact_outbox.sql` | `5d6d598c5786777f14ae7720b28716cbeaa9c1b660fd0952720bb19585f5a9d0` |
+| `V5__create_like_fact_stream.sql` | `4f56386596ee349b4dd8f2c4157669a95183c310cd978154acd91aa7c78bf75e` |
+| `V6__align_like_domain_fact_outbox_with_go.sql` | `1ea34f3383a8648c4b7d8dc5cc5f5ea3652d3c539d89435a94ea1837296400b8` |
+| `check-ddl-static.py`（脚本副本） | `cc87da8dfde81eb11dd160150299369e6012d3eb8d815e44ede02a5c517a6ebb` |
+
+⇒ **结论**：变异**精确报出 1 处**、**指向被改的那一列**（`like_record.last_operation_id`），其余 5 处**不变** ⇒ 守门**不是假绿**；还原后**精确回到基线** ⇒ 无残留。
+⚠️ **本域的「期望 EXIT」口径**：本域 Go↔活库**本就有 5 处已登记差异** ⇒ 还原后的正确期望值是 **EXIT=1（5 处）**，**不是** EXIT=0 ⇒ 变异判据用的是「**源码↔活库这一维度的差异数 0 → 1 → 0**」＋「总差异数 5 → 6 → 5」，不是总退出码。
+
+**仓内零改动核验**
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-message-like-task"
+git status --short          # ⇒ 空
+git diff --stat -- service/ # ⇒ 0 行
+```
+
+### L.6 人工补查（脚本**不查**的维度 · **人工闭合，非脚本原生结论**）
+
+> ⚠️ `tools/difftest/check-ddl-static.py` 的「约束」维度**会把 CHECK（`contype='c'`）也列进「实质差异」**（本域 §L.2 维度 6 的 2 行即 CHECK）⇒ **CHECK 已被脚本原生覆盖**；但**外键（`contype='f'`）、分区（`relkind='p'`）、存储过程 / 自定义函数（`pg_proc`）** 仍需**另查** ⇒ 下表是**本轮人工补查**的结果，**明确标注为人工闭合，不冒充脚本原生结论**。
+
+| 维度 | Go 侧 `go_like_db` | RAG 侧 `rag_like_db` | 人工闭合结论 |
+|---|---|---|---|
+| **CHECK**（`pg_constraint` where `contype='c'`） | 2 行，**但 `conrelid` 为 0** ⇒ PG **内建域**约束（`cardinal_number_domain_check` / `yes_or_no_check`），**不是用户表约束**；**用户表 CHECK = 0** | 2 行内建域（同左）**＋ 2 行用户表 CHECK**（`like_new_fact_has_dc_wire` / `like_fact_stream_version_range`） | 🔴 **RAG 多 2 条** ⇒ **已在 §L.4 残留 ② 计过**（脚本原生也报了同样 2 处 ⇒ **双路一致**） |
+| **外键**（`contype='f'`） | 0 行 | 0 行 | ✅ **两侧各 0 ⇒ 无外键** |
+| **分区**（`pg_class.relkind='p'` / `relispartition`） | 0 行 | 0 行 | ✅ **两侧各 0 ⇒ 无分区表** |
+| **存储过程 / 自定义函数**（`pg_proc`，排除扩展与 `pg_catalog`） | 0 行 | **1 行**：`public.reject_like_domain_fact_identity_change`（`prokind=f` · `rettype=trigger` · `VOLATILE` · `plpgsql`） | 🔴 **RAG 多 1 个函数** ⇒ ⚠️ **它就是残留 ③ 那个触发器的函数体** ⇒ **不是独立对象**，**不在此重复计失败**（脚本原话：「单边触发器的函数属性（**不在此计失败** —— 已由上面的『触发器集合』维度计过）」）⇒ **已在 §L.4 残留 ③ 计过** |
+| **触发器**（`pg_trigger`，排除 internal） | 0 行 | 1 行：`like_domain_fact_outbox.like_domain_fact_identity_immutable` | 🔴 **RAG 多 1 个** ⇒ **已在 §L.4 残留 ③ 计过**（双路一致） |
+
+⇒ **「无对象可比」≠「已对齐」**：外键 / 分区两个维度**两侧都没有可比对象** ⇒ 本轮**未核**（无对象可核），**不写成「已对齐」**。
+
+### L.7 证据强度 · 效力边界 · 未能核到的部分
+
+| 项 | 结论 |
+|---|---|
+| 证据强度 | **E4（真 PG 双侧活体）** —— 两侧各建一个真库（Go 侧跑**真源自己的** `AutoMigrate`，RAG 侧按序执行 `V1`~`V6`），逐条 dump `pg_indexes` / `pg_constraint` / `pg_trigger` / `information_schema.columns`；**外加 `--check-source` 的「源码重放 ↔ 活库」真库对照** |
+| 变异验证 | ✅ **已做**（§L.5）⇒ 守门有牙齿，**不是假绿** |
+| **效力边界 ①** | 本节结论只覆盖 **`like` 域 5 张表**；`service/like/like-common/**` 与 `service/common/**` 的**共享层**不在本节范围 |
+| **效力边界 ②** | 结论覆盖的是**当前迁移脚本 + 当前 Go struct tag** ⇒ 改了任一侧即**失效** ⇒ 需重跑 `ddl-parity.sh like` |
+| **效力边界 ③** | **`--check-source` 的「源码 ↔ 活库」维度与 Go 侧无关** ⇒ 它只保证「仓里的 `.sql` 与活库没分叉」，**不代表**活库与 Go 一致 |
+| **效力边界 ④** | ⚠️ **基线选择敏感**：本节基线 = **A（Go 生产权威，只跑 AutoMigrate）**。**基线 B（连夹具 `001~003` 一起放）下差异会从 5 处降到 1 处**（只余 `like_fact_stream_version_range` 一条 CHECK，因为该 CHECK **内联在 `CREATE TABLE IF NOT EXISTS` 里** ⇒ AutoMigrate 先建过表 ⇒ 整条 CREATE 是空操作 ⇒ Go 侧**永远**没有）⇒ ⇒ **5 处中有 4 处的「Go 侧出处」只在夹具里** ⇒ **引用时必须带上「夹具 / 生产」这个限定**，否则会误读成「Go 生产缺了这 4 个对象」 |
+| **未能核到 ①** | **触发器形式 / 函数体维度（维度 8）**：Go 侧 0 个触发器 ⇒ **无可成对比对的触发器 ⇒ 本维度未核**（不是「已对齐」） |
+| **未能核到 ②** | **`--check-source` 不检查外键 / 分区 / 存储过程** ⇒ §L.6 是**人工补查**（`contype='f'` / `relkind='p'` / `pg_proc` 三条手工 SQL）⇒ **非脚本原生结论**，但**已人工闭合** |
+| **未能核到 ③** | **基线 B（`--with-go-sql`）本轮未实跑** ⇒ 该档数字**沿用主线已实跑的登记**（`docs/DRIFT/global/lanes/L3-ddl.md` §8.2）⇒ **本节不把基线 B 的数字当成本轮实测** |
+| **未能核到 ④** | **未做「同一次写入两侧落库后读回」的活体数据对拍**（本节是 **schema 层**对照）⇒ 数据层的等价性另由 [`docs/DRIFT/like/rpc.md`](rpc.md) 的各轮双侧活体承担 ⇒ **本节不重复声称数据层已对齐** |
+| **未能核到 ⑤** | ⚠️ **本节 5 处残留**在本域 `docs/Intentional_Deviations/like/` 下**没有独立编号的签字条目**（`like/rpc.md` 现存 2 条 `SD-` 编号都与 DDL 无关：`SD-2026-10-23-06` 业务码载体 / `SD-2026-10-23-07` Nacos 注册）⇒ ⇒ **本节的「签字状态」一律写「未签字候选（已登记在案）」**，**不冒充已签字** ⇒ 也**不替用户拍板**（AGENTS.md 用户偏好：登记类事项不升级为拍板） |
+
+### L.8 本节边界（本节**不**声称什么）
+
+1. **不修任何差异** —— 本轮只**登记**（RoundPlan T-3.1）。
+2. **不重复质疑已登记项** —— 本节 5 处**均已在案**（`docs/DRIFT/like/rpc.md` + `docs/DRIFT/global/lanes/L3-ddl.md` §8.3）⇒ 只做**留痕 + 定级**，**不改回**。
+3. **不声称触发器已对齐** —— Go 侧 0 ⇒ 「无对象可比」；RAG 多的那 1 个**已单列**为残留 ③。
+4. **不声称数据层已对齐** —— 本节是 **schema 层**。
+5. **不写共享面** —— `docs/DRIFT/_cross/**` · `docs/DRIFT/global/**` · `docs/PhaseGoal-judge.md` · `docs/RoundPlan/**` **本 lane 一律不写**（合并后由**合并收口执行者**统一更新）⇒ 例如 §L.4 的 3 条在 `docs/DRIFT/global/lanes/L3-ddl.md` 与 `L10-ddldeep.md` 有**共享面**登记，本节**只复述、不修改**那两个文件。

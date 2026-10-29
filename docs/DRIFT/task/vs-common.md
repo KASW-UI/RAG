@@ -1605,3 +1605,204 @@ bash service/task/task-api/src/test/probe/failure-path-matrix-mutation/run.sh
 3. **空 body / 畸形 JSON 两条只断言状态码**（400），**不比对文案** ⇒ 理由 = Go `encoding/json` 与 Jackson 的解析错误措辞不同（`api.md` §二·五 已登记为**全域共性**）⇒ **不是漏测，是有意不锁**。
 4. **路径变体**（`/task/get` vs `/taskcenter/v1/task/get` 等）**不在本矩阵** ⇒ 由本域既有 `TaskApiPathNormalizationRealTomcatTest`（真 Tomcat）＋ `TaskApiPathNormalizationControlTest`（A/B 对照组）守。
 5. **本矩阵只锁 HTTP 面的失败路径** ⇒ **不覆盖** task-rpc 侧（Kafka / Redis / PG 断连等）⇒ 那部分见 [`rpc.md`](rpc.md) 与 `docs/DRIFT/task/vs-common.md` §4·十二 之后的各轮。
+
+<!-- @new 2026-10-29 · `align/r3-ddl-message-like-task` · RoundPlan `docs/RoundPlan/Round-3.md` **T-3.1 的 G2 侧（`task` 域）** · 基线 = `do-my-own-gh` @ `d10227c5` -->
+
+## DDL 逐域机器核（`--indexes` + `--check-source`）· 2026-10-29 · R3·T-3.1（G2 lane · `task` 域）
+
+> **本节为什么存在**：`tools/difftest/check-ddl-static.py` **默认不开 `--indexes`** ⇒ 索引 / 唯一约束 / 触发器**从未被机器核过**；**默认不开 `--check-source`** ⇒ 只比活库、不比仓里的 `.sql` ⇒ 「迁移改了但没人重跑」**不可见**。
+> 主线已把这两层补上并逐域实跑，但结论只落在 `docs/PhaseGoal-judge.md` §七 ⇒ **域级证据链断了一节** ⇒ 本节把 `task` 域的结论**落到本域台账**。
+> ⚠️ **本节只落结论与证据，不修任何差异**（RoundPlan T-3.1）。
+> ⚠️ **本节零改动 `service/**`** —— `service/task/**` 由别的 lane 在改 ⇒ 变异测试走**逐字节相同的临时副本**（见 §T.5）⇒ 提交后 `git diff --stat -- service/` = **0 行**。
+> ⚠️ **`task` 域不是 N/A** —— N/A 的是 **`hot`**（两侧无数据库）⇒ `task` 域**两侧都有真库**（Go 2 张表 / RAG 2 张表）。
+> ⚠️ **`task` 域没有 `-common` 模块**（Go 侧同样没有，**不是遗漏**）⇒ 本节**不含**任何「域 ↔ `service/common`」的结论（那属于本文件其余各节）。
+
+### T.1 执行口径（命令原文 · EXIT · 日期 · 环境）
+
+| 项 | 值 |
+|---|---|
+| 实跑日期 | **2026-10-29**（14:24:0x–14:24:51 本机时间） |
+| 工作树 / 分支 | `/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-message-like-task` · `align/r3-ddl-message-like-task`<br>⚠️ **实跑基点 = `do-my-own-gh` @ `d10227c5`**（工作树先 `git reset --hard do-my-own-gh` 对齐主线，再跑）⇒ **实跑结论与提交基点同源** |
+| 真源 | `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang` —— **冻结 · 只读**；脚本**只复制**副本，从不写入 |
+| 容器 / 库 | `ddl-task-pg`（`postgres:16-alpine` · 端口 55568）· Go 库 `go_task_db` · RAG 库 `rag_task_db` |
+| Go 侧 schema 来源 | ⚠️ **本域与其它域不同**：真源**没有** `model.InitDB` ⇒ 它是在 `service/task/rpc/internal/svc/service_context.go:47` **直接**调 `gdb.AutoMigrate(&Model.TaskProgress{}, &Model.UserLikeCount{})` ⇒ 探针走 **`automigrate` 档**，**复刻那同一行调用**（同一份 struct tag + 同一个 gorm 版本）⇒ 建出来的表就是真源生产那张 |
+| Go struct 出处 | `service/task/rpc/internal/Model/taskModel.go:28-37`（`TaskProgress`）· `:39-41`（`TableName()` → `task_progress`）· `:43-47`（`UserLikeCount`）· `:49-51`（`TableName()` → `user_like_count`）<br>⚠️ **Model 包的路径是 `internal/Model`（大写 M）** —— 与其它域的 `internal/model` 不同 |
+| RAG 侧 schema 来源 | 仓内 `service/task/task-rpc/src/main/resources/db/migration/`（**Flyway**）**2 份**：`V1__create_task_progress.sql` · `V2__create_user_like_count.sql` |
+| 豁免名单 | **一个都没用**（`--allow-idx` / `--allow-default` **均未传**）⇒ 差异数是**原始值**，没有被白名单压过 |
+| 两侧表集合 | Go `go_task_db` = {`task_progress`, `user_like_count`} · RAG `rag_task_db` = **同 2 张** ⇒ 逐条一致 |
+| **基线选择** | **本域无歧义** —— Go 侧**没有** `internal/model/migrations/` 目录 ⇒ **不存在「夹具 vs 生产」的两档问题**（对比 `like` 域，见 [`docs/DRIFT/like/vs-common.md`](../like/vs-common.md) 同名节） |
+
+**命令 ① —— 建库 + 双侧活体对拍（索引 / 约束 / 触发器 + 源码↔活库 一次跑全）**
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-message-like-task"
+bash tools/difftest/ddl-parity.sh task
+```
+
+⇒ **EXIT=0** —— 末行 `== 实质差异合计 0 处 ⇒ 退出码 0 ==`；runner 行 `=== 对拍退出码: 0 ===`
+⇒ Go 探针打印 `AUTOMIGRATE_OK`；RAG 侧按序执行 `V1__create_task_progress.sql` → `V2__create_user_like_count.sql`
+
+**命令 ② —— 只读静态对拍（显式带 `--indexes --check-source`）**
+
+```bash
+python3 tools/difftest/check-ddl-static.py --domain task --indexes --check-source
+```
+
+⇒ **EXIT=0**（**0 处**）—— **与 ① 同数同因** ⇒ 两条路径互为复算（① 是「建库 + 对拍」，② 是「只对拍已建好的库」）
+
+**命令 ③ —— 打印 RAG 侧 SQL 清单**
+
+```bash
+python3 tools/difftest/check-ddl-static.py --domain task --print-rag-sql
+```
+
+⇒ **EXIT=0**，输出 **2 行**，与 ① 实际执行的 2 份 `.sql` **逐条一致** ⇒ **清单没有落后于仓**
+
+### T.2 八个被核维度的逐项结论
+
+| # | 维度 | 两侧规模 | 结论 | 计入失败数 |
+|---|---|---|---|---|
+| 1 | **源码 ↔ 活库**（`--check-source`） | 2 张表 | ✅ **0 差异** —— 仓里的 `.sql` 在**干净临时库** `rag_task_db_srccheck` 上原样重放后，与活库**逐项一致** | 0 |
+| 2 | **列类型 / 长度** | 11 列 ↔ 11 列（键集合一致 ✓） | ✅ **0 差异** —— 脚本原话「逐字相同 11 列」 | 0 |
+| 3 | **可空性（NOT NULL）** | 11 列 | ✅ **0 差异** —— 脚本原话「两侧完全一致 ✓」 | 0 |
+| 4 | **DEFAULT** | 11 列 | ✅ **0 差异** —— 脚本原话「两侧完全一致 ✓」 | 0 |
+| 5 | **索引**（`pg_indexes`） | Go 2 / RAG 2 | ✅ **0 处实质差异** —— 脚本原话「两侧索引定义逐条一致 ✓」（2 处 = **命名形态差** ⇒ 语义等价，不计失败） | 0 |
+| 6 | **唯一约束 / 主键**（`pg_constraint`） | Go 2 / RAG 2 | ✅ **0 处实质差异** —— 脚本原话「逐条一致 0 行 ✓」＋「两侧约束集合完全一致 ✓」（2 处 = **命名形态差** ⇒ 语义等价，不计失败） | 0 |
+| 7 | **触发器**（`pg_trigger`） | 两侧各 0 | ⚪ **两侧都没有触发器 ⇒ 本维度「无对象可比」** —— ⚠️ **这不是「触发器已对齐」** | 0 |
+| 8 | **触发器形式 / 触发器函数体** | 两侧各 0 | ⚪ **同上 ⇒ 无对象可比** —— 脚本原话「两侧**没有可成对比对的触发器** ⇒ 本维度**什么都没比**（不是「已对齐」）」 | 0 |
+| | **合计** | | | **0** |
+
+> ⚠️ **读法**：本域 DDL 的**行为层**（类型 / 长度 / 可空性 / DEFAULT / 索引 / 唯一约束）在 **8 个维度里 6 个为 0** ⇒ **本域无 DDL 行为漂移** ⇒ **残留 0 处 ⇒ 无需定级**。
+> ⚠️ **维度 7/8 不是「通过」而是「无对象」** —— Go 侧 `task` 域**根本没有触发器**（真源 `service/task/**` 全域无 `CREATE TRIGGER`）⇒ 本域的触发器语义**没有可核对象**。
+
+### T.3 「0 差异」项（逐条列全，不写「其余一致」）
+
+**① 列类型 / 长度 —— 11 列逐字相同（0 处差异）**
+
+| 表 | 列 | Go 侧类型 | RAG 侧类型 | 判定 |
+|---|---|---|---|---|
+| `task_progress` | `user_id` / `task_id` / `progress` / `target` | `bigint` | `bigint` | ✅ 逐字相同（Go `int64` ⇒ GORM 无 size tag ⇒ 取 `bigint`，`taskModel.go:29,30,32,33`） |
+| `task_progress` | `status` | `text` | `text` | ✅ 逐字相同（Go `string` 无 size tag ⇒ `text`，`taskModel.go:31`） |
+| `task_progress` | `done_at` / `created_at` / `updated_at` | `timestamp with time zone` | 同左 | ✅ 逐字相同（`time.Time` / `*time.Time` ⇒ PG 上 `timestamptz`） |
+| `user_like_count` | `user_id` | `text` | `text` | ✅ 逐字相同 —— ⚠️ **本表 `user_id` 是 `TEXT`、`task_progress.user_id` 是 `BIGINT`** ⇒ 这是 Go 的现状（`TaskProgress.UserID int64` vs `UserLikeCount.UserID string`，`taskModel.go:29` vs `:44`）⇒ **两侧都保持原样，未「顺手统一」** |
+| `user_like_count` | `like_count` | `bigint` | `bigint` | ✅ 逐字相同（`int64`） |
+| `user_like_count` | `updated_at` | `timestamp with time zone` | 同左 | ✅ 逐字相同 |
+
+⇒ 脚本汇总行：`类型/长度差异 0 处：` + `逐字相同 11 列。`
+
+**② 可空性（NOT NULL）—— 0 处差异** ⇒ 脚本原话 `（两侧完全一致 ✓）`
+⇒ 抽样：`task_progress.user_id` / `task_id` 两侧均 `NOT NULL`（Go tag `primary_key`）· `task_progress.status` / `progress` / `target` / `done_at` 两侧**均可空**（Go tag 里**没有一个字段带 `not null`** ⇒ 与 `V1__create_task_progress.sql:11` 的注释「没有一个字段带 `not null` tag ⇒ 除主键外全部可空」一致）· `user_like_count.user_id` 两侧均 `NOT NULL`。
+
+**③ DEFAULT —— 0 处差异** ⇒ 脚本原话 `（两侧完全一致 ✓）`
+⇒ 抽样：`task_progress` 8 列与 `user_like_count` 3 列**两侧 DEFAULT 全为 `<NULL>`** ⇒ ⇒ 本域**没有**「RAG 多 `CURRENT_TIMESTAMP`」那类残差（与 `message` 域 6 处 / `users` 域 8 处**不同族**）。
+
+**④ 源码 ↔ 活库 —— 0 差异（本轮新增维度）**
+
+- 目录扫描得到 **2 份**迁移脚本 ⇒ **清单由目录扫描产生**。
+- 在**干净临时库** `rag_task_db_srccheck` 上**原样重放** ⇒ 与活库逐项对比：**表集合 2 ↔ 2** · **列集合 0 差异** · **列属性 0 差异** · **可空性 / DEFAULT 0 差异** · **索引 0 差异** · **约束 0 差异** · **触发器 0 差异**
+- ⇒ 脚本原文：`✅ 仓里的迁移脚本**重放结果**与活库逐项一致`
+- ⇒ **含义**：本域仓里的 `.sql` 与**当前活库**之间**没有分叉** ⇒ 「迁移改了没人重跑」这一类漂移**在 `task` 域为零**。
+
+**⑤ 索引 —— 2 ↔ 2，逐条一致（0 处实质差异）**
+
+| 语义等价配对 | 唯一性 | 列 |
+|---|---|---|
+| `task_progress_pkey` ≡ `pk_task_progress` | unique | `(user_id, task_id)` |
+| `user_like_count_pkey` ≡ `pk_user_like_count` | unique | `(user_id)` |
+
+⇒ 脚本原话：「（两侧索引定义逐条一致 ✓）」＋「语义等价（仅命名形态差，**不计失败**）2 处」。
+⇒ **语义影响为零**：PG 层面的唯一性判定、`23505` 报错、`ON CONFLICT` 仲裁完全相同；差别只是 `pg_indexes.indexname` / `pg_constraint.conname` 的**字符串**（Go 侧是 GORM 的 `TableName()_pkey`，RAG 侧迁移脚本写的是 `pk_<表名>`）。
+
+**⑥ 约束 —— 2 ↔ 2，集合完全一致（0 处实质差异）**
+
+| 语义等价配对 | contype | 定义 |
+|---|---|---|
+| `task_progress.task_progress_pkey` ≡ `task_progress.pk_task_progress` | p | `PRIMARY KEY (user_id, task_id)` |
+| `user_like_count.user_like_count_pkey` ≡ `user_like_count.pk_user_like_count` | p | `PRIMARY KEY (user_id)` |
+
+⇒ 脚本原话：「逐条一致 0 行 ✓」＋「（两侧约束集合完全一致 ✓）」。
+⇒ ⚠️ 脚本这一行「**逐条一致 0 行**」是**因为两行的 `conname` 字符串不同**（都落进「语义等价」分支）⇒ **不是「一个约束都没比」** —— 两个约束**都比过了**，只是名字形态不同。
+
+### T.4 残留 —— **0 处** ⇒ 无需定级
+
+| 项 | 结论 |
+|---|---|
+| 残留条数 | **0 处** |
+| 定级 | **无** —— `twoStage.md` §十 的 **A / B / C / D** 四个阶段归属**只对「存在的差异」定级** ⇒ 本域**没有任何差异需要定级** ⇒ **不硬套一个「D 类」来凑数** |
+| 已签字项复核 | 本域 `docs/Intentional_Deviations/task/` 下有 3 份档（`api.md` / `proto.md` / `rpc.md`）⇒ 逐条核对：**其中没有一条是 DDL / schema 层面的偏离** ⇒ ⇒ **本域的 0 处残留与签字档无交叉**，不涉及「已签字项要不要重复质疑」的问题 |
+| 与主线记录的交叉 | 主线 `docs/DRIFT/global/lanes/L3-ddl.md` §8.3 把 `task` 记为**「0 差异」**（该表 13~16 行是 `article`/`follow`/`hot`/`users`，`task` 未单列差异行）⇒ 本轮**独立实跑复现了同一结论**，且**多核了 `--check-source` 那一层**（主线未在共享面登记本域的源码↔活库结果） |
+
+### T.5 变异验证（证明守门有牙齿，不是假绿）
+
+> ⚠️ **为什么不直接改仓内的 `.sql`**：`service/task/**` 由**别的 lane 在改** ⇒ 本轮**零改动仓内迁移脚本** ⇒ 变异走**临时副本**路线：把 `check-ddl-static.py` 与该域的 `db/migration/` 目录**原样拷到一棵临时树**（保持相对路径 ⇒ 脚本内的 `REPO_ROOT` 与仓内布局一致 ⇒ 它读到的**仍是仓里那份 `.sql` 的同一份字节**，只是不在仓里写），**逐字节校验 sha256 相同**，再在**副本**上做变异。
+> ⚠️ **本域是三域里基线最干净的一个（0 差异）** ⇒ 变异判据**最硬**：**总退出码必须 0 → 1 → 0**，而不只是「差异数 +1」。
+
+**变异：`task_progress.progress` 的列类型（`BIGINT` → `INTEGER`）**
+
+| 步骤 | 命令 / 动作 | 结果 |
+|---|---|---|
+| 建临时树 | `cp` 脚本 + `cp` 该域 **2 份** `.sql` ⇒ `/tmp/g2-mut/task/{tools/difftest,service/task/task-rpc/src/main/resources/db/migration}` | sha256 **2/2 逐字节 SAME**（见下表） |
+| 基线 | `python3 /tmp/g2-mut/task/tools/difftest/check-ddl-static.py --domain task --indexes --check-source` | **EXIT=0**（**0** 处）· 源码↔活库 = `✅ 重放结果与活库逐项一致` |
+| 变异 | 副本 `V1__create_task_progress.sql:31`：`progress    BIGINT,` → `progress    INTEGER,`（改**一个列的类型**，命中目标行 **1** 处） | 变异前后该行已回显核对（`before`/`after` 两行均打印在运行日志里） |
+| 变异后重跑 | 同上命令 | **EXIT=1**（**1** 处）· 源码↔活库 **转红**：<br>`🔴 列属性不同：task_progress.progress  源码=('integer', '')  活库=('bigint', '')`<br>`❌ 源码 ↔ 活库**分叉 1 处** ⇒ 活库已过期于仓里的迁移脚本` |
+| 还原 | 删掉临时树里的 `service/` 后**重新拷贝**原件 | sha256 **2/2 逐字节 SAME** |
+| 还原后重跑 | 同上命令 | **EXIT=0**（**0** 处 · **回到基线**）· 源码↔活库 回到 `✅ 一致` |
+| **还原校验** | `shasum -a 256` 临时副本 vs 仓内文件 | **2 份全部 SAME**（sha256 原值见下）⇒ 逐字节回到变异前 |
+| **收尾** | `rm -rf` 整棵临时树 | `exists=no` ⇒ **工作树与 `/tmp` 均无临时副本残留** |
+
+**sha256 对照（变异前 = 还原后，两次完全相同）**
+
+| 文件 | sha256（副本 = 原件，两次一致） |
+|---|---|
+| `V1__create_task_progress.sql` | `fde86b7f1fc27c6c3109610a9007f3fad7436557659350f0f0d5723b6a65d881` |
+| `V2__create_user_like_count.sql` | `0dbf8b8bf428278ac8318101595bdd2d340013e0deb5df172ed3a9c8eb5effd8` |
+| `check-ddl-static.py`（脚本副本） | `cc87da8dfde81eb11dd160150299369e6012d3eb8d815e44ede02a5c517a6ebb` |
+
+⇒ **结论**：变异**精确报出 1 处**、**指向被改的那一列**（`task_progress.progress`），且**总退出码 0 → 1 → 0** ⇒ 守门**不是假绿**；还原后**精确回到基线** ⇒ 无残留。
+⇒ 本域是三域里**唯一能直接用「总退出码」判变异**的（`message` / `like` 基线本身是 EXIT=1 ⇒ 只能看差异数变化）。
+
+**仓内零改动核验**
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-message-like-task"
+git status --short          # ⇒ 空
+git diff --stat -- service/ # ⇒ 0 行
+```
+
+### T.6 人工补查（脚本**不查**的维度 · **人工闭合，非脚本原生结论**）
+
+> ⚠️ `tools/difftest/check-ddl-static.py` 的「约束」维度**只覆盖主键 / 唯一类**；**CHECK（`contype='c'`）、外键（`contype='f'`）、分区（`relkind='p'`）、存储过程 / 自定义函数（`pg_proc`）** 都需要**另查** ⇒ 下表是**本轮人工补查**的结果，**明确标注为人工闭合，不冒充脚本原生结论**。
+
+| 维度 | Go 侧 `go_task_db` | RAG 侧 `rag_task_db` | 人工闭合结论 |
+|---|---|---|---|
+| **CHECK**（`pg_constraint` where `contype='c'`） | 2 行，**但 `conrelid` 为 0** ⇒ PG **内建域**约束（`cardinal_number_domain_check` / `yes_or_no_check`），**不是用户表约束** | **同样 2 行、逐字相同** | ✅ **用户表 CHECK：两侧各 0 ⇒ 无对象可比**（内建域约束两侧**逐字一致**，不构成差异） |
+| **外键**（`contype='f'`） | 0 行 | 0 行 | ✅ **两侧各 0 ⇒ 无外键** |
+| **分区**（`pg_class.relkind='p'` / `relispartition`） | 0 行 | 0 行 | ✅ **两侧各 0 ⇒ 无分区表** |
+| **存储过程 / 自定义函数**（`pg_proc`，排除扩展与 `pg_catalog`） | 0 行 | 0 行 | ✅ **两侧各 0 ⇒ 无用户自定义例程** |
+| **触发器**（`pg_trigger`，排除 internal） | 0 行 | 0 行 | ✅ **两侧各 0 ⇒ 无对象可比**（与 §T.2 维度 7/8 同源） |
+
+⇒ **「无对象可比」≠「已对齐」**：以上 5 个维度**两侧都没有可比对象**，本轮**未核**（无对象可核），**不写成「已对齐」**。
+⇒ ⚠️ 与 `like` 域**同款事实**（RAG 迁移脚本 `V1:43-46` 与 `V2:27-28` 都明写「不额外加 CHECK 约束 / 不加索引」）⇒ ⇒ **两侧都不加 CHECK** 是**有意设计**，不是漏写。
+
+### T.7 证据强度 · 效力边界 · 未能核到的部分
+
+| 项 | 结论 |
+|---|---|
+| 证据强度 | **E4（真 PG 双侧活体）** —— 两侧各建一个真库（Go 侧跑**真源自己的那一行** `gdb.AutoMigrate(&Model.TaskProgress{}, &Model.UserLikeCount{})`，RAG 侧按序执行 `V1`~`V2`），逐条 dump `pg_indexes` / `pg_constraint` / `pg_trigger` / `information_schema.columns`；**外加 `--check-source` 的「源码重放 ↔ 活库」真库对照** |
+| 变异验证 | ✅ **已做**（§T.5）⇒ 守门有牙齿，**不是假绿**（本域是三域里**唯一**能用「总退出码 0→1→0」直接判变异的） |
+| **效力边界 ①** | 本节结论只覆盖 **`task` 域 2 张表**；**`task` 域没有 `-common` 模块**（Go 侧同样没有）⇒ 本节**不含**任何共享层结论 |
+| **效力边界 ②** | 结论覆盖的是**当前迁移脚本 + 当前 Go struct tag** ⇒ 改了任一侧即**失效** ⇒ 需重跑 `ddl-parity.sh task` |
+| **效力边界 ③** | **`--check-source` 的「源码 ↔ 活库」维度与 Go 侧无关** ⇒ 它只保证「仓里的 `.sql` 与活库没分叉」，**不代表**活库与 Go 一致（那是前 6 个维度的事） |
+| **效力边界 ④** | ⚠️ **Go 侧 `task_def` 表不在本节范围** —— 真源**没有** `task_def` 表（它是 `model/taskModel.go:22-25` 的**代码常量** `AllTaskDefs`）⇒ ⇒ **本节「2 张表」两侧一致**正是正确结果，**不是漏比** |
+| **未能核到 ①** | **触发器维度（维度 7/8）**：两侧各 0 个触发器 ⇒ **无对象可比 ⇒ 本维度未核**（不是「已对齐」） |
+| **未能核到 ②** | **`--check-source` 不检查 CHECK / 外键 / 分区 / 存储过程** ⇒ §T.6 是**人工补查**（`contype in ('c','f')` / `relkind='p'` / `pg_proc` 三条手工 SQL）⇒ **非脚本原生结论**，但**已人工闭合** |
+| **未能核到 ③** | **未做「同一次写入两侧落库后读回」的活体数据对拍**（本节是 **schema 层**对照）⇒ 数据层的等价性另由 [`docs/DRIFT/task/api.md`](api.md) §二·五 的 44 条双侧活体承担 ⇒ **本节不重复声称数据层已对齐** |
+| **未能核到 ④** | 本节**未核** RAG 侧 Flyway 的**运行时**行为（账本表 `flyway_schema_history_task` 的落库、多进程同库共存）⇒ 那属 §6.3 问题 4 的**共享层**范围，本节**不越界**、也**不重复声称**已闭环 |
+
+### T.8 本节边界（本节**不**声称什么）
+
+1. **不修任何差异** —— 本轮只**登记**（RoundPlan T-3.1）；本域本轮**无差异可登记**。
+2. **不声称触发器已对齐** —— 两侧各 0 ⇒ 「无对象可比」。
+3. **不声称数据层已对齐** —— 本节是 **schema 层**。
+4. **不声称共享层已闭环** —— Flyway 账本隔离属 `global` 收口域（§6.3 问题 4）⇒ **本 lane 不写、不重复声称**。
+5. **不写共享面** —— `docs/DRIFT/_cross/**` · `docs/DRIFT/global/**` · `docs/PhaseGoal-judge.md` · `docs/RoundPlan/**` **本 lane 一律不写**（合并后由**合并收口执行者**统一更新）。
