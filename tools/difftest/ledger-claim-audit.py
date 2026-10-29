@@ -57,6 +57,14 @@ HEADING_RE = re.compile(r"^(#{2,4})\s+(.+?)\s*$")
 ID_RE = re.compile(
     r"\b((?:DRIFT-[A-Z0-9]+|SD|DEV|PIT|PF|UNRESOLVED|S1|SHOT|CYCLE|E)(?:[-_][A-Za-z0-9]+)*-\d+[A-Za-z]?)\b"
 )
+# ── 表格行条目（**首列 = 编号**）—— 2026-10-30 补盲区 ────────────────────
+# ⚠️ **2026-10-30 实测盲区（工具自身缺陷）**：原实现**只在「标题行里带编号」时**才认领指针
+#    ⇒ `docs/DRIFT/common/alignment-2026-10-23.md` §五/§六 两张最密集的表（**26 条结论**）
+#    与 `docs/DRIFT/global/lanes/**` 的坑表 ⇒ **整段从未被审计**
+#    ⇒ 「落空 0」**只覆盖了带编号标题的条目** ⇒ 是**假保证**（同族：弱判据把真缺陷洗成 0）。
+# ⇒ 表格行若首列是编号 token ⇒ **同样开一条 claim**（归属比外层章节更精确）。
+TABLE_ROW_RE = re.compile(r"^\s*\|\s*\*{0,2}`?([A-Za-z][A-Za-z0-9_.\-]*)`?\*{0,2}\s*\|")
+
 # 证据指针：<path>:<numbers>
 PTR_RE = re.compile(
     r"([A-Za-z0-9_./\-*]+(?:\.java|\.go|\.py|\.sh|\.md|\.yml|\.yaml|\.sql|\.xml|\.json|\.txt|\.class)):(\d+(?:\s*[-–,]\s*\d+)*)"
@@ -226,6 +234,15 @@ def _resolve(path: str, ctx: str = "") -> tuple[list, str]:
     suf = [f for f in pool if str(f).endswith("/" + path)]
     if suf:
         return suf, ("resolved" if len(suf) == 1 else "ambiguous")
+    # ⚠️ **2026-10-30 新增一档（follow+task lane 实测抓到的工具口子）**：
+    #    直连不命中 + 后缀不命中 ⇒ 只剩 **basename 回退**。
+    #    此时若台账给的路径**带目录部分**（含 `/`）⇒ **那个目录就是错的**
+    #    （实例：`service/task/rpc/internal/mq/initGoKa.go` ⇒ Go 真源里 `mq/` **不存在**，
+    #      真目录是 `Init/`）⇒ 旧实现把它判成 `resolved` ⇒ **跨目录指错永远绿灯**
+    #    （同族：弱兜底把真缺陷洗成 0）。
+    # ⇒ 但**裸 basename**（`util.go:35`）是**台账常态写法** ⇒ basename 命中属**预期解析** ⇒ 保持 resolved。
+    if "/" in path:
+        return pool, "basename"
     # 同名多候选 ⇒ 歧义（不许兜底成通过）
     return pool, ("resolved" if len(pool) == 1 else "ambiguous")
 
@@ -255,6 +272,16 @@ def audit_file(md: pathlib.Path, domain: str | None):
                        "ptr": 0, "ok": 0}
                 claims.append(cur)
             continue
+        # ⚠️ **表格行条目**：首列是编号 token ⇒ **同样开一条 claim**
+        #    （归属到该行本身，比外层章节更精确 ⇒ 指针算在该条目头上）
+        rm = TABLE_ROW_RE.match(line)
+        if rm:
+            rids = ID_RE.findall(rm.group(1))
+            if rids:
+                cur = {"id": rids[0], "file": str(md.relative_to(ROOT)), "line": ln,
+                       "status": next((w for w in STATUS_WORDS if w in line), ""),
+                       "ptr": 0, "ok": 0}
+                claims.append(cur)
         if cur is None:
             continue
         if not any(w in line for w in STATUS_WORDS) and "证据" not in line and "依据" not in line:
@@ -319,6 +346,13 @@ def audit_file(md: pathlib.Path, domain: str | None):
                     #    ⇒ ⇒ **歧义单列提示档，不计失败**（与 `check-ledger-selfcheck.py` 第 4 层同口径）。
                     problems.append((cur["file"], cur["line"], cur["id"], path, nums,
                                      f"歧义({len(cands)} 个同名候选)·提示"))
+                elif kind == "basename":
+                    # ⚠️ **2026-10-30 新增档**：指针**带目录**但直连/后缀都不命中 ⇒ 只按 basename 命中
+                    #    ⇒ **目录部分指错**（如 `internal/mq/` vs 真目录 `internal/Init/`）
+                    #    ⇒ 单列提示档（不计硬失败），但**必须可见** —— 否则跨目录指错永远绿灯。
+                    hit = ", ".join(str(c) for c in cands[:3])
+                    problems.append((cur["file"], cur["line"], cur["id"], path, nums,
+                                     f"basename 回退·目录可能指错(命中 {hit})·提示"))
     return claims, problems
 
 

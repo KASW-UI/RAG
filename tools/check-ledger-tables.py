@@ -32,19 +32,20 @@
 ## 边界（别误用）
 
 - ⚠️ 本脚本**只管结构**，**不管内容**：它查不出「写错了内容」，那是 `check-ledger-selfcheck.py` 的活。
-- ⚠️ **默认只扫 global 域自己写的台账**（见下方「扫描范围」）⇒
-  **别的域的文件即使有同样形态，也不会让本门禁变红**（那是它们的台账，由各自 owner 处置）。
-  `--all` 可以全仓扫（用于**盘点并转达 owner**）。
+- ⚠️ **默认扫描面 = 三个台账目录全量**（2026-10-30 扩围）⇒
+  **任何域的台账有同样形态，本门禁都会变红**（原口径只扫 `global` 域自己写的台账 ⇒
+  `users`/`follow`/`task` 等域**结构坑无守门** ⇒ follow+task lane 报的缺口）。
+  `--all` 与默认面等价（实测 `docs` 全量 EXIT=0）。
 - ⚠️ 本脚本**只读**，不改任何文件。
 
-## 扫描范围（默认）
+## 扫描范围（默认 · 2026-10-30 扩围后）
 
 | 路径 | 为什么在范围内 |
 |---|---|
-| `docs/DRIFT/global/**` | global 域自己的漂移台账 |
-| `docs/Pitfalls/global/**` | global 域自己的踩坑台账 |
-| `docs/Intentional_Deviations/**` | 签字偏离档（global 也写 `common/` 那份） |
-| `docs/DRIFT/_INDEX.md` · `docs/Pitfalls/_INDEX.md` | 两个共享索引（global 历轮在写） |
+| `docs/DRIFT/**` | 全部域的漂移台账 |
+| `docs/Pitfalls/**` | 全部域的踩坑台账 |
+| `docs/Intentional_Deviations/**` | 签字偏离档 |
+| `docs/DRIFT/_INDEX.md` · `docs/Pitfalls/_INDEX.md` | 两个共享索引 |
 
 ## 用法
 
@@ -63,10 +64,16 @@ import shutil
 import sys
 import tempfile
 
-# ── 默认扫描范围（global 域自己写的台账 + 两个共享索引）────────────────────
+# ── 默认扫描范围（**三个台账目录全量** + 两个共享索引）────────────────────
+# ⚠️ **2026-10-30 扩围（follow+task lane 报的缺口）**：原默认只扫 `global` 域自己写的台账
+#    ⇒ `docs/DRIFT/{users,follow,task}/**` · `docs/Pitfalls/{users,follow,task}/**`
+#    ⇒ **结构坑（规约 §〇之二 的 ①标题嵌可变状态 ②标题被并进上一行表格末格
+#      ③表格末格被拆行 ④同一条目内标题状态与表格状态行自相矛盾）在本域无任何守门**
+#    ⇒ 「别的域坏了不会让本门禁变红」在本 phase（**三目录全量真实性重核**）已不成立
+#    ⇒ **默认面扩到三个台账目录全量**（`--all` 的实测仍是 EXIT=0 ⇒ 无存量违规）。
 DEFAULT_SCAN = [
-    'docs/DRIFT/global',
-    'docs/Pitfalls/global',
+    'docs/DRIFT',
+    'docs/Pitfalls',
     'docs/Intentional_Deviations',
     'docs/DRIFT/_INDEX.md',
     'docs/Pitfalls/_INDEX.md',
