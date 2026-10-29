@@ -613,3 +613,23 @@ req := r.WithContext(ctx)
 | 2026-10-25 | **新增候选 `SD-2026-10-25-CAND-12`**（T-4 资源面残留）。T-4 的**观测面**已修（499 可见）⇒ 不在本档；本档只收**资源面**（断连后在飞 gRPC 不被提前取消）—— 经真 Tomcat 11.0.24 实测 + Tomcat 源码取证确认为**框架限制** ⇒ 落为**待签字候选**（**未签字**） |
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 `SD-2026-10-25-CAND-11`（T-2 / T-5 同一条），把「代码自称有意、但无签字」的第三态**归位到待签字候选** ⇒ 等用户拍板 |
 | 2026-10-25 | **用户签字** ⇒ 候选号 `CAND-11` 转正为 **`SD-2026-10-25-01`**，状态由「待签字」改为「已签字」。签字决定 = **保留 RAG 的全局闸门，不改成 per-route**。并完成两处落地：代码 javadoc 改为指向本档的指针 + 从 DRIFT 侧移除该条 |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W3
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| `SD-2026-10-25-CAND-14` | D | P3 | 否 | Go 标准库 `net/http/server.go:1596-1611`（`writeStatusLine` ⇒ 其中 `:1602-1605` 用 `StatusText(code)` 把 **reason phrase** 写进状态行）＋ `go-zero@v1.10.2/rest/httpx/responses.go:183`（`w.WriteHeader(code)` ⇒ 状态行交给 Go 标准库写）vs RAG `service/article/article-api/src/main/java/com/rag/article/article/api/advice/GlobalExceptionHandler.java:342`（`ResponseEntity.status(HttpStatus.NOT_FOUND).build()` ⇒ 状态行由**容器**写 ⇒ RAG 侧**没有任何代码**能补 reason phrase，仓内也无守门）⇒ **差异仍成立**（字节级：RAG `HTTP/1.1 200` vs Go `HTTP/1.1 200 OK`）⇒ Tomcat 刻意省略（`Http11OutputBuffer` 的「The reason phrase is optional but the space before it is not. Skip sending the reason phrase」注释）且**无开关** ⇒ 落点在容器层 ⇒ `service/common` 够不着 ⇒ 框架限制 ⇒ 签字认账，不实现（RFC 7230／9112 允许省略 ⇒ 业务语义无影响） | 2026-10-30 |
+| `SD-2026-10-25-CAND-15` | D | P3 | 否 | Go `go-zero@v1.10.2/rest/router/patrouter.go:77-82`（405 出口在 router 层 ⇒ 不经 TraceHandler ⇒ **无** `Traceparent`）＋ `go-zero@v1.10.2/rest/engine.go:113-115`（**注册点** ⇒ 被注册进 router 的是已包过 TraceHandler 的 handler）＋ `go-zero@v1.10.2/rest/handler/tracehandler.go:61`（`propagator.Inject(spanCtx, propagation.HeaderCarrier(w.Header()))` ⇒ 注入点在**每路由链内部**）vs RAG `service/common/src/main/java/com/rag/common/http/GoStyleTraceparentFilter.java:282`（注入在 `chain.doFilter` 之前 ⇒ 405 出口已带 `Traceparent`）＋ `service/article/article-api/src/main/java/com/rag/article/article/api/advice/GlobalExceptionHandler.java:338-342` ⇒ **差异仍成立**（RAG 多带一个 `Traceparent`；**只**影响「方法不匹配」这一个出口 —— 404 与正常响应两侧都带 ⇒ 别读成「RAG 一律多一个」）⇒ 已登记为待签字候选 ⇒ 出口层级差异、共享层改不动 ⇒ 归 D（签字认账，不实现） | 2026-10-30 |

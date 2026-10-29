@@ -183,3 +183,23 @@
 | **B10 变异坑** | 改**上游模块的资源**（`users-common` 的 DDL）只跑下游 ⇒ Maven 从 `~/.m2` 解析旧 jar ⇒ 改动到不了运行代码 | 把上游拉进**同一 reactor**（`-am`）+ 加 `-Dsurefire.failIfNoSpecifiedTests=false` |
 | **§3.3** | 「注解存在 / Bean 存在 / 编译通过」≠「机制生效」 | 纯 Mockito 单测**不算** ⇒ 必须真容器 / 真 PG / 真启动 |
 | **§3.3** | 「只跑 RAG 的探针」不算数 | 要「双侧同时跑」，Go 半边必须**真调真源** |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W3
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| `PIT-GLOBAL-019` | D | P1 | 否 | Go `service/user/admin/rpc/internal/model/db.go:15`（`db.AutoMigrate(&Admin{}, &AdminInvite{}, &User{})` ⇒ Go 侧上游建表真源随进程走，无「旧 jar」问题）vs RAG `service/users/users-common/src/main/java/com/rag/users/common/errmsg/ErrorCode.java:10`（上游共享模块 `users-common` 的类 ⇒ 改它或它的 `db/01_create_user.sql` 而**只跑下游** admin-rpc ⇒ Maven 从 `~/.m2` 解析**旧 jar** ⇒ 跑的不是你改的那份）⇒ **差异仍成立**（**坑仍生效**：改上游模块的资源做变异而只跑下游 ⇒ 变异的不是旧字节码就是旧资源，测试照样全绿 ⇒ 报成 GREEN **假阴性**；唯一防线 = `-am` 把上游拉进同一 reactor ＋ `-Dsurefire.failIfNoSpecifiedTests=false`）⇒ 归 B（阶段一验证闭环） ⇒ **归 D（阶段归属不适用）**：本条是**元教训**（坑位）而非待修问题 ⇒ §10 的 A-D 不适用 ⇒ 取 D 类「**可不实现或不适用**」；它指向的行为差异（出向 deadline 载体）在 **DRIFT 侧**定级（`E65` ⇒ 本表 `G4-A4-05` / `B-10` / `B-11`）⇒ 本条只承担「防」的角色 | 2026-10-30 |
+| `PIT-GLOBAL-020` | D | P1 | 否 | Go `service/common/communityfact/process.go:57`（`case <-ctx.Done():` ⇒ Go 侧社区事实投递循环的终止判据）vs RAG `service/common/src/main/java/com/rag/common/communityfact/Dispatcher.java:221`（`public static DispatcherHandle runAsync(...)` ⇒ **非阻塞**；与 `:184-188` 的阻塞版 `run` 是两个方法 ⇒「`runAsync` 被误写成阻塞式」的残留**不存在**）⇒ **差异仍成立**（**坑仍生效**，属制度性风险：共享工作树里跑变异 ⇒ 变异态可能被 `git add -A` 扫进主线；已发生的那次误提交 `5c3b424` **已修回** ⇒ 本条不残留行为分叉，但「变异只在 lane 自己的工作树跑 ＋ 提交前 `git diff` 逐个确认已还原 ＋ 不用 `git add -A`」这条防线必须保留）⇒ 归 B（阶段一验证闭环） ⇒ **归 D（阶段归属不适用）**：本条是**元教训**（坑位）而非待修问题 ⇒ §10 的 A-D 不适用 ⇒ 取 D 类「**可不实现或不适用**」；它指向的 `Dispatcher.runAsync` 行为差异已在 DRIFT 侧定级（`DRIFT-CF-018`）⇒ 本条只承担「防」的角色 | 2026-10-30 |

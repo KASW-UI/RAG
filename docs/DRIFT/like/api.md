@@ -1709,3 +1709,22 @@ EXIT=0
 | **「真 Tomcat ＋ 慢下游」的超时用例**没有补 | ⇒ **U-03 不销号**（仍是 🟡 取证缺口）⇒ 属阶段二 |
 | **DC → 第三仓消费端那一跳**没有取证 | 对端仓（`Sea-BreakTheWaves`）**不在本项目范围** ⇒ ⇒ **U-01 仍是 🟡** |
 | **`docs/PhaseGoal/g2.md` / `docs/PhaseGoal-judge.md` 的基线措辞**没有改 | ① 那是**机器生成物 ＋ 主线写权**（AGENTS.md §5.3）② 本 lane 只写 `tools/api-full-parity-probe/like/**` ＋ `docs/DRIFT/like/**` ⇒ ⇒ **上报收口**：基线 P0#1 现状栏写「`like` / `follow` / `users-common` 的**双侧活体探针不在版本控制内**（G-1/G-2/G-4）」⇒ **对 `like` 这半句已过期**（现在有落仓入口了）⇒ 但 **G-2 仍未闭合**（旧探针没回来）⇒ **改法请主线斟酌**（不能直接删 `like` ⇒ 会把「旧矩阵仍不可复算」这个事实抹掉） |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W7
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| U-06 | C | P2 | 否 | Go `go-zero@v1.10.2/core/service/serviceconf.go:77`（`devserver.StartAgent(sc.DevServer)`，在 `ServiceConf.SetUp()` 内 ⇒ `rest.RestConf`/`zrpc.RpcServerConf` **都内嵌**它 ⇒ api 与 rpc 侧**都起**）＋ `internal/devserver/server.go:43-58`（`HealthPath` / `MetricsPath` / **pprof 五条路由**）＋ 真源 `service/like/api/etc/likecenter.yaml:20-27`（`Enabled: true` · `Port: 9099` · `MetricsPath: /metrics` · `HealthPath: /healthz` · `EnablePprof: true`）＋ `service/like/rpc/etc/like.yaml:19-26`（`Port: 9098`）。RAG `service/like/like-api/src/main/java/com/rag/like/like/api/LikeApiApplication.java:75-81`（`@SpringBootApplication(scanBasePackages = {…, "com.rag.common"})` ⇒ **单一 Boot 上下文**，且**全仓 `ManagementServerFactoryCustomizer` = 0 命中** ⇒ 无独立 management 上下文）＋ `service/like/like-api/src/main/resources/application.yml:175-180`（`management.endpoints.web.exposure.include: health,info,prometheus`，**无 `management.server.port`** ⇒ actuator 与业务**共用 18887**；**无 pprof** 对应物）⇒ ⇒ **差异仍成立**（端口 + 路径 + pprof 三层都不同；⚠️ 消费点在 go-zero **框架内**、不在仓内代码里 ⇒ 仓内 grep 不到 `DevServer` 读取点**不能**判死配置）。**C**：十组件共性 ⇒ 落点 G4/收口执行者，且属**部署形态决策**（建议走签字登记或阶段二统一）；**P2**：缺 pprof + 抓取路径/端口形态不同 = 运维面能力缺口，不命中 P0 九条 ⇒ 不阻断阶段一（⚠️ 与已登记的 `SD-2026-10-24-11` 不同轴：那条签的是**指标名可见面**，本条是**端点形态**） | 2026-10-30 |

@@ -871,3 +871,22 @@ Go 侧返回 `""`（剥成空串）。
 | **`UNRESOLVED-USERSCOMMON-004`** | 🟡 **部分关闭**（33 列逐列实测 · 24 列逐字节相同 · 9 列 = 3 类已登记差异） | 🟡 **维持部分关闭** | 两侧真 PG 活体对拍结论**本轮未复跑**（该探针属 G4 写权面 + 需要真 PG 容器）⇒ ⇒ **本轮不重复核、不改判** | ➖ 不改判（**未复跑 ⇒ 不宣称已验**）<br>⚠️ **2026-10-30 真实性复核（users lane）**：原判 **🟡 维持部分关闭**（理由：两侧真 PG 活体对拍结论本轮未复跑）⇒ **现行态 = 🟡 维持部分关闭**，但 ⚠️ **本轮已复跑 ⇒ 理由换新**：命令 `python3 tools/difftest/check-ddl-static.py --domain users --check-source --indexes` ⇒ **退出码 1**（实质差异 16 处）· **类型/长度 0 差异**（35 列键集合一致、35 列逐字相同）· **NOT NULL 差异 1 处**（`users_user.status`）· **DEFAULT 差异 8 处**（8 个 `DEFAULT CURRENT_TIMESTAMP`）· **索引实质差异 7 处**（Go 独有 3 + RAG 独有 4，**均为非唯一索引 ⇒ 性能面非行为面**）· **约束集合两侧完全一致**（各 8/12 行，12 处仅命名形态差）· **触发器两侧各 0 个 ⇒ 该维度「什么都没比」，不等于「已对齐」**。⇒ **🟡 部分关闭的定性成立**（剩余差异全部是已登记类别）。⚠️ **口径订正**：原写的「33 列 / 24 列逐字节相同」是**旧口径** ⇒ 现为 **35 列 / 类型长度 0 差异 / 35 列逐字相同**（工具已把可空性与 DEFAULT 拆出单列）。**RAG** `service/users/users-common/src/main/java/com/rag/users/common/ddl/SchemaInitializer.java:53` · `service/users/users-common/src/main/resources/db/01_create_user.sql` · **Go** `service/user/user/rpc/internal/model/db.go:33`。核对日期 2026-10-30。|
 
 > ⚠️ **本节没有做的事（诚实边界）**：① **没有改任何产品代码**（`service/users/users-common/**` = G4 写权面；`DRIFT-USERSCOMMON-006` 只登记不落码）；② **没有复跑真 PG 活体对拍**（`UNRESOLVED-USERSCOMMON-004` 的 33 列结论**沿用上一轮**，本轮**未验**）；③ **没有核 go-zero v1.10.2 的逐行内容**（本机只有 v1.10.0 ⇒ 口径已写进上表）。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W5
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-USERSCOMMON-006 | B | P2 | 否 | Go `golang-jwt/jwt/v4@v4.5.2/request/oauth2.go:10`（`if len(tok) > 6 && strings.ToUpper(tok[0:7]) == "BEARER "` ⇒ 判据是 `> 6` ⇒ `"Bearer "`（7 字符）**被剥成空串**）＋ `oauth2.go:11`（`return tok[7:], nil`）vs RAG `service/users/users-common/src/main/java/com/rag/users/common/jwt/BearerTokenExtractor.java:75`（`if (authHeader.length() > BEARER_PREFIX.length()` ⇒ 判据变成 **`> 7`** ⇒ 恰好 7 字符的 `"Bearer "` **不被剥**）＋ `BearerTokenExtractor.java:64`（该类自己的 javadoc 写的就是 Go 的 `> 6` ⇒ **实现与自身注释矛盾** ⇒ 不是设计取舍）⇒ **差异仍成立**（**潜伏 · wire 不可观察**：两侧在畸形头上都落 401；影响面 = 8 个外域 api 的验签路径）⇒ 修法 = `length() >= BEARER_PREFIX.length()`，落点 `service/users/users-common/**`（**G4 写权**）＋ 探针 `c.bearer.sig.5` 的 `REG` 行须同一次提交改 `CASE` ⇒ 归 B（阶段一竞争力补强：共享层 JWT 解析的实现/注释自相矛盾 + 探针期望值须同批对齐；不阻断准入） | 2026-10-30 |

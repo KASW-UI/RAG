@@ -2749,3 +2749,25 @@ span 状态恒为 **`Unset`** ⇒ ⇒ **RAG 侧多置一个 `ERROR`** 就是**�
 >   **所有依赖活体实测的条目一律维持原证据强度，不升级、不降级**。
 
 > ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/exp-difftest-grpc-user9.sh` ⇒ **EXIT=1**（2026-10-30 03:53:22 · 20s）—— 🔴 **探针判定为「不一致」**；覆盖断言：==> [1/5] 准备自己的容器与两个库（**不碰共享的 go_db / rag_db**） ⏐ ==> [2/5] 生成 Go 运行配置副本（端口与库名都指向本脚本自己的资源） ⏐ ==> [3/5] 构建（Go 二进制 + RAG jar） ⏐ ==> [4/5] 起两套 user-rpc（Go :19005 / RAG :59211） ⏐ ==> [5/5] 编译并跑双端口对拍。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../_cross/live-parity-2026-10-30.md)。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W5
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-USERRPC-V-001 | D | P3 | 否 | Go `service/user/user/rpc/internal/model/data_model.go:11`（`Status int64 gorm:"column:status;default:0"` ⇒ 值类型 ⇒ GORM 恒写 0 ⇒ 该列永不出现 NULL）＋ `service/user/user/rpc/internal/logic/loginlogic.go:67`（`if user.Status == 1 {` ⇒ status 读成 0 ⇒ 不判封禁 ⇒ 放行登录）vs RAG `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/service/UserDomainService.java:260`（`if (user.getStatus() != null && user.getStatus() == 1L)` ⇒ fail-closed 守卫已删）＋ `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/domain/UserEntity.java:110`（`private Long status = 0L;` ⇒ NULL 读成 0）⇒ **差异已消失**（两侧同形：「status ⇒ 0 ⇒ 不判封禁 ⇒ 放行登录」；RAG 侧 `status BIGINT NOT NULL` ⇒ 更不可达）⇒ 已修（**证伪关闭**，commit `9ae121d`）⇒ 无落码动作 | 2026-10-30 |
+| DRIFT-USERRPC-V-016 | D | P3 | 否 | Go `service/user/user/rpc/user.go:36`（`zrpc.MustNewServer(c.RpcServerConf, …)` ⇒ 生产侧等价面；Go 全仓 `forPort(0)` ／ `new ServerSocket(0)` ／ `RANDOM_PORT` 三个模式串 **0 命中** ⇒ Go 侧无对应物 ⇒ 不构成 Go 对照项）vs RAG `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcSlowThresholdGateTest.java:304`（`ServerBuilder.forPort(RealGrpcPort.pick())`）＋ `UserRpcSlowThresholdGateTest.java:331` ＋ `UserRpcGrpcInterceptorWiringTest.java:139` ＋ `UserRpcLogoutClientVisibleGrpcStatusTest.java:221` ＋ `UserRpcLogoutClientVisibleGrpcStatusDefaultBehaviorTest.java:225` ⇒ **差异已消失**（本组件 5 处「OS 盲选口」已全部改走域内私有固定段端口 `22220–22239`）⇒ 且**生产代码零改动**（全在 `src/test/java`）⇒ 无落码动作（域级守门 `BlindPortGateTest.java` 5 条在位） | 2026-10-30 |
+| V-002 | D | P3 | 否 | Go `service/user/user/rpc/internal/model/data_model.go:11`（`gorm:"column:status;default:0"` ⇒ 值类型 · 无 `not null` ⇒ 建出可空列，但 GORM 恒写 0 ⇒ 实际永不出现 NULL）vs RAG `service/users/users-common/src/main/resources/db/01_create_user.sql:39`（`status BIGINT NOT NULL DEFAULT 0`）＋ `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/domain/UserEntity.java:136`（`private Long status = 0L;` ⇒ 读成 0）⇒ **差异仍成立**（DDL 层可空性：Go `is_nullable=YES` ／ RAG `NO`）**但行为层零差异**（Go 读 NULL ⇒ 0；RAG 读不到 NULL ⇒ 也是 0）⇒ 2026-10-27 逐层证据链已推翻「必须与 admin 域同一次提交」⇒ 正确处置 = **保持 RAG NOT NULL**（放开可空反而制造新漂移：RAG `callSettersOnNulls=false` ⇒ 读出 `null` ≠ Go 的 `0`）⇒ 无落码动作；唯一残留落点 = `SD-2026-10-25-CAND-17` 签字（合并收口执行者写权面） | 2026-10-30 |
+| V-013 | D | P3 | 否 | Go `service/user/user/rpc/internal/logic/getuserlogic.go:44`（`status.Error(codes.Internal, "DB查询失败")` ⇒ logic 层根本不返回 1015）vs RAG `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/service/UserDomainService.java:209`（`catch (StatusRuntimeException e)` ⇒ `DEADLINE_EXCEEDED` 原样上抛）＋ `service/common/src/main/java/com/rag/common/persistence/SqlTimeoutStatusTranslator.java:107`（PG `57014` ⇒ `Status.DEADLINE_EXCEEDED`）⇒ **差异仍成立**（**仅源码层形态**；客户端可见面两侧同为 1015 ⇒ **不构成 wire 漂移**）⇒ 归 D（**不得改回 Go 的 `codes.Internal`** —— 那样 RAG 渲染 5001 反而离 Go 更远；17 处注释理由已订正 + 类级 javadoc 完整论证在位）⇒ 无落码动作 | 2026-10-30 |

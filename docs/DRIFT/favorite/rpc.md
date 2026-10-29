@@ -4166,3 +4166,22 @@ EXIT=0
 - 本节**只追加**，**不改写**任何历史结论。
 - `U7`（环境受限）在 §26/§27 的历史口径里仍按原文读；**本节的实测**把「rpc 层双侧活体」这一项从未验变成已验 ⇒ **以本节为准**。
 - `docs/PhaseGoal-judge.md:189` 里 `favorite-rpc` 的 **R4 / E4** 与「`U7`（环境受限）」那一栏 ⇒ **该栏已被本节实测推翻**（R 档「可复算」的**复算命令**现在有了）⇒ ⚠️ **`docs/PhaseGoal-judge.md` 不在本 lane 写权内**（收口执行者改）。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W4
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| E62 | D | P3 | 否 | Go `service/common/observability/rpc.go:38`（`timeoutCtx, cancel := context.WithTimeout(ctx, timeout)` ⇒ Go 侧 ctx deadline ⇒ PG 侧**到点立即发 CancelRequest** ⇒ 取消时刻 == deadline，**毫秒级**）vs RAG `service/common/src/main/java/com/rag/common/persistence/DeadlineQueryTimeoutInjector.java:209`（`Statement target = unwrapDriverStatement(statement);` ⇒ **探测与调用前先 unwrap 到驱动实现类** ⇒ `setQueryTimeoutMs` 可达 ⇒ 毫秒路径生效）＋ `service/common/src/main/java/com/rag/common/persistence/DeadlineQueryTimeoutInjector.java:207`（`private boolean applyMillisecondTimeout(Statement statement, long millis) {`）⇒ **差异已消失**（台账 `DRIFT/global/_README.md:428` 记的 E62「🔴 毫秒精度在连接池代理路径上不生效 ⇒ 退回秒级向上取整」已被**第四十五轮**闭合（`180f865`）：unwrap 已落 + 真 HikariCP 池 + 真 PG 守门 3 条绿 + 变异 M1/M2/M3 全精确命中 + 探针复跑两侧差 **22ms/18ms**（修前 833ms）⇒ **favorite 域也一并受益**，`docs/DRIFT/favorite/rpc.md:3606` §39 已把 (A)/(B) 两格互换）⇒ **经分析确认不需要再实现** ⇒ 无落码动作 | 2026-10-30 |

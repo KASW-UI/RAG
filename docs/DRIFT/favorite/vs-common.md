@@ -656,3 +656,24 @@ git diff --stat -- service/        # ⇒ 0 行
 | [`docs/DRIFT/_cross/ddl-type-divergences.md`](../../DRIFT/_cross/ddl-type-divergences.md) | 🔴 **属 `_cross` ⇒ 本 lane 无写权** ⇒ 只在此登记：该文件对 `favorite` 域的「类型/长度 0 差异」**与本节一致**（38 列逐字相同）⇒ ⇒ **无需更正** |
 
 ---
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W4
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| E68 | D | P3 | 否 | Go `service/favorite/rpc/internal/logic/delete_favorite_folder_logic.go:96`（该文件**只有 96 行** ⇒ 台账里写成 `delete_favorite_folder_logic.go:336-378` 的锚点**行号在范围内但指错文件**）＋ `service/favorite/rpc/internal/model/favorite_fact.go:336`（`func (m *FavoriteModel) DeleteFolderCascade(ctx context.Context, folderID, userID int64) error {` ⇒ 符号**真实**所在）vs RAG `service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/service/FavoriteFactWriteService.java:187`（javadoc「🔴 对应 Go {@code DeleteFolderCascade}（favorite_fact.go:336-378）」⇒ 台账那个错锚点 `delete_favorite_folder_logic.go:336-378` 的**出处就在这一行** —— RAG 侧写对了文件、只有台账抄错）＋ `:212`（`public void deleteFolderCascade(long folderId, long userId) {` ⇒ RAG 侧实现的真实行）＋ `tools/check-ledger-selfcheck.py:1250`（「🔴 **为什么要有这一层**（favorite 域第二十二轮实测带出 · 2026-10-26）」⇒ 第 4 层「唯一声明」补判据已落）＋ `tools/check-ledger-selfcheck.py:26-28`（判据原文：「台账说这个锚点处是符号 X；X 在真源里**唯一声明**过；但 X **不在**这个锚点文件里」）＋ `tools/check-ledger-selfcheck.py:1350`（「符号必须**在全真源里唯一声明**（否则『声明处唯一』这条判据会把它挡掉）」）⇒ **差异已消失**（台账 `docs/DRIFT/global/_README.md:433` 记的「🔴 第 4 层只能判行号越界 ⇒ 判不出『行号合法但指错文件』⇒ 这类锚点的证据是假的」已被**第四十七轮**闭合：判据收紧四道 + 变异自证（正例必须被抓到 + 阴性对照必须不报）⇒ favorite 域 20 个 Go 锚点逐条回源核对 = 18 正确 + 2 条错锚点**已订正**）⇒ **经分析确认不需要再实现** ⇒ 无落码动作（⚠️ 台账 `docs/DRIFT/global/_README.md:433` 末尾仍记「🟡 **仍开着**：新判据只在 `LEDGER_FILES` 已配置的域生效（task / users / users-admin）⇒ favorite 域的 12 份台账不在配置里」—— 但该脚本 `tools/check-ledger-selfcheck.py:57` 的 `LEDGER_FILES` 确实**不含** favorite ⇒ **favorite 域跑这条新判据仍需 favorite owner 自行加配置**，该残留属**域侧配置动作**而非本条判据本身失效） | 2026-10-30 |
+| F-5 | C | P2 | 否 | Go `go-zero@v1.10.2/rest/router/patrouter.go:79-82`（`w.Header().Set(allowHeader, allows)` + `w.WriteHeader(http.StatusMethodNotAllowed)` ⇒ **裸状态码**：既不 `fmt.Fprintln` 也不 `http.Error` ⇒ **无 body、无 Content-Type**）vs RAG `service/common/src/main/java/com/rag/common/http/GoStyleRouterErrorResponses.java:138`（`public static ResponseEntity<Void> methodNotAllowed(java.util.Collection<String> supportedMethods) {` ⇒ 返回 `ResponseEntity<Void>`、body=null）＋ `service/favorite/favorite-api/src/main/java/com/rag/favorite/favorite/api/advice/GlobalResponseAdvice.java:81`（`response.getHeaders().setContentType(GO_JSON_CONTENT_TYPE);` ⇒ **在 `body == null` 判断之前**就写 Content-Type ⇒ **多一项 `Content-Type: application/json;charset=utf-8`**）⇒ **差异仍成立**（405 的 status 与 body 两侧全等，**仅多一个 Content-Type** ⇒ 落点 = **favorite 域的 `GlobalResponseAdvice` 写序** + 共享层 `GoStyleRouterErrorResponses` 的形状约定；台账 `docs/DRIFT/favorite/vs-common.md:227` 记的「🔴 仍开」与 `tools/api-full-parity-probe/favorite/expected.txt:71`（`r02_method_not_allowed_post SAME_BODY status=405 · ct=- · body= · biz=-`）一致 ⇒ 两侧 405 归在 **SAME_BODY** 档（status+body 全等、Content-Type 允许不同））⇒ 修法 = 把 `setContentType` 移到 `body == null` 早退**之后**（与 `hot`/`follow`/`message`/`like` 四域已有的同款写法一致：`service/follow/follow-api/src/main/java/com/rag/follow/follow/api/advice/GlobalResponseAdvice.java:66` 的「body 为 null 或是 Response 实例时直接 return body」在前）⇒ 归 **C**（阶段二共享层/域侧工程化统一收口，**不阻断**阶段一准入；影响面 = 10 个 api 域的 405 形状） | 2026-10-30 |
+| G4-13 | C | P2 | 否 | Go `go-zero@v1.10.2/rest/httpx/util.go:22-65`（`GetFormValues`：**非空值计数** + `r.ParseForm()` 错误传播）＋ `go-zero@v1.10.2/rest/httpx/requests.go:50-68`（`httpx.Parse` 对**每个请求**都过一遍）＋ Go 1.25.11 `src/net/url/url.go:1019-1022`（**段数 → 解析错误** 的判据顺序）vs RAG `service/favorite/favorite-api/src/main/java/com/rag/favorite/favorite/api/interceptor/FavoriteGoQueryLimitInterceptor.java:122`（`String violation = GoStyleFormValues.goParseViolation(request.getQueryString());` ⇒ **只读调用**共享层判据）＋ `service/common/src/main/java/com/rag/common/http/GoStyleFormValues.java:257`（`public static String goParseViolation(String query) {` ⇒ 段数 → 解析错误 → 非空值计数，**次序与 Go 一致**）⇒ **差异仍成立（不是 Go↔RAG 漂移，而是「跨域承重」状态变更）**：favorite 域的可观察行为（2049 个非空值 ⇒ 200+5003 · `%zz` ⇒ 200+5003 · 10001 段 ⇒ 200+5003 · 分号 ⇒ 200+5003）**已与 Go 一致**；残留动作 = **共享层那个类的语义变成跨域承重** ⇒ G4 若要动 `GoStyleFormValues` 的规则/次序**必须同步通知 favorite 域**（域侧守门 `FavoriteApiRealTomcatGateTest` + `FavoriteGoQueryLimitInterceptorTest` 会红 ⇒ 可当回归网）⇒ 归 **C**（阶段二共享层工程化时加「消费者清单」到该类 javadoc；**不需要改行为**，不阻断阶段一准入） | 2026-10-30 |

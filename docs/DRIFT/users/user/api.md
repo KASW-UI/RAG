@@ -3651,3 +3651,23 @@ RAG 侧的完整机制链（**消费点**）：
 - **段来源**：共享层已预分配给本域的段（`docs/DRIFT/global/vs-common.md` §4.10.19.3）⇒ **共享层台账零改动**（写权归 G4）。
 - **守门**：域级 `BlindPortGateTest`（落在 **user-rpc**，`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/BlindPortGateTest.java`）**5 条** ⇒ 一并覆盖本组件 ⇒ **本组件不单独建守门**（避免两份规则漂移）。
 - **边界**：**本组件生产代码零改动**（全部落在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项**（Go 侧无对应物 ⇒ 无对照义务）。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W5
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| D-015 | D | P3 | 否 | Go `service/user/user/api/internal/middleware/checkblacklistmiddleware.go:35`（`exists, err := m.Redis.ExistsCtx(r.Context(), blackListKey)`）＋ `checkblacklistmiddleware.go:36`（`if err == nil && exists` ⇒ Redis 故障 ⇒ **fail-open 放行**）vs RAG `service/users/user/user-api/src/main/java/com/rag/users/user/api/interceptor/JwtAuthInterceptor.java:180`（`exists = redisTemplate.hasKey(blacklistKey);`）＋ `JwtAuthInterceptor.java:181`（`catch (Throwable t)` ⇒ **fail-open**）＋ `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java:131`（`builder.disconnectedBehavior(ClientOptions.DisconnectedBehavior.REJECT_COMMANDS)`）⇒ **差异已消失**（台账记的「主机名解析失败 ⇒ 200/503 摇摆」在 2026-10-26 **复现不出来** —— dns 形态 24 次两侧都 200、blackhole 形态 4 次两侧都 503 ⇒ 两侧同形；对应条目 `DRIFT-USERAPI-015` 已于 2026-10-27 正式关闭，本行 D-015 是**未同步的镜像行**）⇒ 两侧当前都 fail-open ⇒ 无落码动作（保留重开触发条件） | 2026-10-30 |
+| DRIFT-USERAPI-017 | D | P3 | 否 | Go `service/user/user/api/internal/handler/routes.go:15`（生产侧等价面；Go 全仓 `forPort(0)` ／ `new ServerSocket(0)` ／ `RANDOM_PORT` 三个模式串 **0 命中** ⇒ Go 侧无对应物 ⇒ 不构成 Go 对照项）vs RAG `service/users/user/user-api/src/test/java/com/rag/users/user/api/UserApiStartupFailFastTest.java:92`（`return RealGrpcPort.pick();`）＋ `UserApiStartupFailFastTest.java:258`（`NettyServerBuilder.forPort(RealGrpcPort.pick())`）＋ `UserApiGrpcNegotiationTest.java:101` ＋ `GoStyleGrpcClientBreakerE2ETest.java:123`（`r.add("server.port", RealTomcatPort::pick);`）⇒ **差异已消失**（本组件 4 处「OS 盲选口」已全部改走域内私有固定段端口 `22200–22219`）⇒ 且**生产代码零改动**（全在 `src/test/java`）⇒ 无落码动作 | 2026-10-30 |

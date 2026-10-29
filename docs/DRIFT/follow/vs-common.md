@@ -1288,3 +1288,22 @@ git diff --stat -- service/ # ⇒ 0 行
 | `DRIFT-FOLLOW-006` / `S1-FOLLOW-001` 的**双侧 series 逐条一致** | 需**真 Go + 真 RAG 进程同时跑** ⇒ 本轮未起 | 已核**配置层**（端口 / `register-enabled` / starter-web / 探针就绪判据 `tools/metrics-probe/follow/run.sh:355,361`）⇒ 未独立改判 |
 | `S1-FOLLOW-004`（compose 编排） | 根级 `docker-compose.yaml` **不在本 lane 写权面** | 已核**现状**（7 个 service ⇒ 无 follow 入口）⇒ 未独立改判 |
 | `DRIFT-G1-002` 的**真启动 fail-fast 实测**（进程退出） | 需真 Nacos + 真进程 ⇒ 本轮未起 | 已核**配置层**（`application.yml:129` = `immediate-connect-timeout: 3s`）⇒ 未独立改判 |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W7
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| PITFALL-FOLLOW-005 | D | P3 | 否 | Go `service/common/observability/http.go:36`（`NewHTTPMiddleware` —— 只被 **api 侧** `service/follow/api/followcenter.go:42` 等 7 个 api main 引用；**rpc 侧零引用** ⇒ Go 的纯 gRPC 进程**根本不存在**「关闭路径触及 web 类型」这回事）。RAG `service/common/src/main/java/com/rag/common/spring/HttpPoolLifecycle.java:52-54`（`@Component` + `@ConditionalOnWebApplication(type = SERVLET)` ⇒ **只有 servlet 进程才注册这个 Bean** ⇒ 纯 gRPC 进程里 HTTP 池的关闭路径根本不存在）＋ `service/common/src/main/java/com/rag/common/spring/ObservabilityLifecycle.java:85`（「本方法**只碰** `RpcInterceptor`」）＋ `:94`（「HTTP 池改由 `HttpPoolLifecycle` 关 ⇒ **不在本方法里**」）＋ 域侧前提也已变：`service/follow/follow-rpc/pom.xml:216`（`spring-boot-starter-web` ⇒ classpath 上已有 servlet-api）⇒ ⇒ `NoClassDefFoundError: jakarta/servlet/Filter` 的前提**两侧都不成立** ⇒ **差异已消失** ⇒ **D**：本条无待实现项（原「派 G4」是 2026-10-27 落码前的陈旧快照） | 2026-10-30 |

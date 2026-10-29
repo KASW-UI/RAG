@@ -184,3 +184,22 @@
 |---|---|---|
 | SD-2026-10-23-06@like | gRPC 业务码从 `grpc-status` 迁移到自定义 trailer `rag-like-biz-code` | **框架限制** |
 | SD-2026-10-23-07@like | Nacos 注册失败时**不退出进程**（Go 是 `os.Exit(1)`） | **有意偏离** |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W7
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| SD-2026-10-24-11 | C | P3 | 否 | Go `service/like/api/internal/metrics/metrics.go:20`（`prometheus.Register(ApiRejectCount)`，**在 `InitMetrics()` 内** `:17`）＋ `service/like/api/likecenter.go:28`（`main()` 里**没有** `metrics.InitMetrics()` 调用 ⇒ 全 `service/like/api` 树内该函数**只有定义、无调用点** ⇒ 该 CounterVec **从未注册进 Prometheus 默认 registry** ⇒ Go 的 `:9099/metrics` **看不到** `like_api_reject_total`；⚠️ 对照：follow/hot/message 的 api main 都调了，如 `service/follow/api/followcenter.go:33` ⇒ like 域是**唯一漏调**）。RAG `service/like/like-api/src/main/java/com/rag/like/like/api/metrics/LikeApiMetrics.java:75`（`Counter.builder("like_api_reject_total")`）＋ `:79`（`.register(registry)` ⇒ **声明即注册** ⇒ `/actuator/prometheus` 能看到）⇒ ⇒ **差异仍成立**（Java 侧比 Go 侧**多暴露一个指标**）。**C**：本条在 `docs/Intentional_Deviations/like/api.md` 里仍是 **⏳ 未签字候选**（核对日期 2026-10-29）⇒ **尚未成为决策** ⇒ 按问题定级、**不归 D**；处置 = 阶段二走签字登记（Go 侧是漏调 ⇒ 修回去 = 倒退），差异本身不影响任何业务判定 ⇒ **P3**、不阻断阶段一 | 2026-10-30 |

@@ -2680,3 +2680,22 @@ java.lang.AssertionError: 条件在 3000ms 内未成立
 ⇒ ⇒ **G2 报的「hot = 5 处」** vs **本树实测「6 处」**（`NacosRegistrationHealthGateTest` · `HotRpcSpringContextWiringTest` · `HotGrpcInterceptorWiringTest` · `HotRedisDisconnectFastRejectGateTest` · `HotRpcSlowThresholdGateTest` · `mq/HotKafkaConsumerGateTest`）
 ⇒ ⇒ ⇒ **两边数的是不同树**（G2 数的树里 hot 域没有 `HotKafkaConsumerGateTest` 那处 ⇒ 或该树尚未含最新改动）⇒ ⇒ **不是谁数错，是「比的不是同一份」** ⇒ ⇒ 迁移**前**应以**本树实测**为准，迁移**后**以「各形态 = 0」为准（口径见本节「源扫」）。
 ⇒ ⇒ ⛔ **本条只登记差异，不回退任何一方数字**（回退会掩盖「两棵树不同」这个事实本身）。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W7
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| G-HOT-001 | D | P3 | 否 | Go `service/hot/rpc/internal/mqs/hot_handler.go:132`（`OnPartitionsRevoked` 内 `h.hkMu.Lock()`）→ `:136`（`h.syncToRedis(ctx, pid)`）→ `:196`（`syncToRedis` 内 `h.hkMu.RLock()`）⇒ Go `sync.RWMutex` **不可重入** ⇒ **必然自死锁**（`defer Unlock` 永不执行 ⇒ `delete` 从不执行 ⇒ 分片快照从未落盘）。RAG `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotEventConsumer.java:216-217`（`registry.detach(partitions)` 后**锁外** `detached.forEach(store::flush)`）＋ `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotPartitionSketchRegistry.java:113-127`（写锁内原子摘引用并返回，**落盘由调用方在锁外完成**；`:136-149` 的 `detachWithinWriteLock` = 变异靶子）⇒ ⇒ 两侧行为**确实不同**（差异仍成立），但已由 `docs/Intentional_Deviations/hot/rpc.md` 的 **`SD-1`（✅ 仍成立，2026-10-22 签字）** 明写「照抄会复现 Go 的死锁；Java `ReentrantReadWriteLock` 允许降级 ⇒ 直译会把死锁悄悄变成能跑」⇒ **D**：**决策不是缺陷**，且 Go 侧该路径实际不可达 ⇒ 无客户端可见后果，只留痕 | 2026-10-30 |

@@ -5346,3 +5346,22 @@ git diff --stat -- service/ # ⇒ 0 行
 | [`docs/DRIFT/users/_shared.md`](_shared.md) §2（真库对照表 · **V-002 / V-011**） | 域内 DRIFT 侧的同两条目 ⇒ 本节给出**2026-10-29 的机器复核**（`--indexes` + `--check-source`），并把它们与签字档的编号对上 |
 
 ---
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W5
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| Round-2 | D | P3 | 否 | Go `service/user/common/jwt/jwt.go:12`（`token := jwt.New(jwt.SigningMethodHS256)` ⇒ 签名算法钉死 HS256）vs RAG `service/users/users-common/src/main/java/com/rag/users/common/jwt/JwtUtil.java:28`（`.signWith(key, SignatureAlgorithm.HS256)` ⇒ 同形）⇒ **差异已消失**（本条登记的是**缺口**而非行为差异：`docs/PhaseGoal-judge.md` §九 G-4「`users-common` 的 176 条双侧活体证据在 `/tmp/commonprobe/**` 已消失 ⇒ 不可复算」⇒ 探针已落仓 `tools/api-full-parity-probe/users-common/run.sh` ＋ `mutate-parity.sh` ＋ `expected.txt` ＋ `go/` ＋ `java/` ⇒ 证据**可复算**，M1~M4 变异各精确转红 + 还原后转绿）⇒ 闭合记录类 ⇒ 无落码动作 | 2026-10-30 |

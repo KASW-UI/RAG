@@ -1421,3 +1421,23 @@ RAG 侧 > 500ms 的步骤（**实测**）：
 >   而该成因**逐行仍在共享层代码里**（`HttpMiddleware` + `GoStyleClientDisconnectProbe`）；
 >   至于「空载复跑是否 `unexpected=0`」—— 本轮**未复跑**（需起两套真栈，代价高）
 >   ⇒ ⇒ **该一格维持「未实测」，不写成已解除**（与本节 §4「怎么解除」的原文口径一致）。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W5
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| ADJ-01 | D | P3 | 否 | Go `service/user/user/rpc/internal/model/data_model.go:11`（`Status int64 gorm:"column:status;default:0"` ⇒ 值类型 · 无 `not null` ⇒ GORM 恒写 0 ⇒ 该列实际永不出现 NULL）＋ `service/user/admin/rpc/internal/model/data_model.go:41`（同款 tag）vs RAG `service/users/users-common/src/main/resources/db/01_create_user.sql:39`（`status BIGINT NOT NULL DEFAULT 0`）＋ `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/domain/UserEntity.java:136`（`private Long status = 0L;`）⇒ **差异仍成立**（DDL 层可空性：Go `is_nullable=YES` ／ RAG `NO`）**但行为层零差异**（Go 读 NULL ⇒ 0；RAG NOT NULL ⇒ 读不到 NULL ⇒ 也是 0）⇒ 正确处置 = **保持 RAG NOT NULL**（放开可空反而制造新漂移）⇒ 无落码动作；唯一残留落点 = `SD-2026-10-25-CAND-17` 签字（合并收口执行者写权面） | 2026-10-30 |
+| V-004 | D | P3 | 否 | Go `service/user/user/rpc/internal/logic/avatarhelpers.go:18`（`createTime = item.CreateTime.Format(time.RFC3339)` ⇒ 按进程本地时区渲染带偏移）vs RAG `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/service/AvatarDomainService.java:115`（`ct.atZoneSameInstant(ZoneId.systemDefault()).toOffsetDateTime()`）＋ `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/domain/UserAvatarHistoryEntity.java:76`（`private OffsetDateTime createTime;`）⇒ **差异已消失**（列已改 TIMESTAMPTZ、渲染点已换算到进程本地时区 ⇒ 与 Go 同形）⇒ 已修 ⇒ 无落码动作。⚠️ 台账 `users/_shared.md:777` 那段「仍 TIMESTAMP／仍 LocalDateTime／仍 atOffset(UTC)」三句已被同文件 `:826-853` 的订正块撤销（**原文保留，本层不删**） | 2026-10-30 |

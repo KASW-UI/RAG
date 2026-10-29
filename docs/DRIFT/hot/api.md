@@ -2430,3 +2430,22 @@ java.lang.IllegalArgumentException: Request header is too large
 ⇒ 属**框架限制**（不是「RAG 偷懒」）⇒ 建议登记为**签字偏离候选**
 （`SD-2026-10-25-CAND-10`，**未签字**，见 [`docs/Intentional_Deviations/_INDEX.md`](../../Intentional_Deviations/_INDEX.md)）。
 ⚠️ 触发条件是「请求行 > 1 MiB + 4 KiB」⇒ **病态输入**，正常客户端不会碰到。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W7
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-HOTAPI-027 | D | P3 | 否 | Go `go-zero@v1.10.2/rest/engine.go:145-147`（**路由循环内** `chn.Append(handler.MaxConnsHandler(ng.conf.MaxConns))` ⇒ 每条路由各建一个）＋ `rest/handler/maxconnshandler.go:20`（`latch := syncx.NewLimit(n)` 在 handler 闭包**内部** ⇒ **per-route**）＋ `rest/config.go:52`（`MaxConns int json:",default=10000"`）。RAG `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java:102`（`private final Semaphore latch;`）＋ `:104-106`（**构造期建一次** ⇒ **全进程一个** = global）＋ `service/hot/hot-api/src/main/resources/application.yml:143`（`max-conns: 10000`）⇒ ⇒ 「Go per-route / RAG global」这个**行为差异仍成立**（且默认阈值 10000 下 RAG 侧结构性不可达：Tomcat `max-threads` 默认 200）。**D**：已由 `docs/Intentional_Deviations/global/common-tails.md` 的 **`SD-2026-10-25-01`**（✅ 仍成立，明写覆盖 T-2（follow `DRIFT-FOLLOW-008`）· T-5（hot `D27`）两条同一件事）**签字** ⇒ **决定 = 保留 RAG 的全局闸门，不改成 per-route** ⇒ 是决策不是缺陷 | 2026-10-30 |

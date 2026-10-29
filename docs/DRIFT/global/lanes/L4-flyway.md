@@ -200,3 +200,22 @@ bash tools/difftest/check-flyway-concurrent.sh --keep   # 保留容器与临时�
 | `tools/difftest/README.md` | 加一行新脚本说明（本 lane **不写**该共享文件） |
 | `docs/Pitfalls/_cross/flyway-ledger-collision.md` | ①「三模块同库共存仍记 `unresolved`」⇒ **已闭环**（见本文件 §8）②「文档声称由 `FlywayLedgerIsolationTest` 负责，**该测试类全仓不存在**」⇒ 本 lane **仍未创建**该类；实测由 `check-flyway-concurrent.sh` + 各域 `*FlywaySharedSchemaGateTest` 承担 ⇒ **要么真写这个类，要么改掉那句声明**（本 lane 无权改该文件） |
 | `docs/DRIFT/global/cross-domain.md` ⑤ 的 `favorite-rpc` 段 | 故障形态订正：**不是「服务起不来」，是「服务起得来、首次查库才炸」**（L4-01） |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W3
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| `L4-01` | D | P3 | 否 | Go `service/favorite/rpc/internal/model/db.go:33`（`db.AutoMigrate(&FavoriteFolder{}, &FavoriteItem{}, &FavoriteFactOutbox{})` ⇒ Go 侧建表成功即有 `favorite_folder`，无版本账本故**不可能**被 baseline 跳过）vs RAG `service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/mapper/FavoriteFolderMapper.java:76-82`（`@Select` 查 `favorite_folder` ⇒ 台账记的故障形态「服务起得来、首次查库才炸（relation favorite_folder does not exist）」的落点）＋ `service/favorite/favorite-rpc/src/main/resources/application.yml:108`（`baseline-version: 0`，**2026-10-27 G3 域侧自修**）⇒ **差异已消失**（V1 不再被 baseline 跳过 ⇒ `favorite_folder` 建得出来 ⇒ 台账记的那条故障形态不复存在）⇒ 本条原为「只记账」的登记项，现已无待办 | 2026-10-30 |

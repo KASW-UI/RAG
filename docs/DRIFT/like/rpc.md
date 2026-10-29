@@ -2521,3 +2521,22 @@ bash tools/api-full-parity-probe/like/mutate-parity.sh   # ⇒ EXIT=0
 
 ⇒ §7 的 **1~7 条状态不变**（`003-C` 仍开放 · `L-U9` 仍开放 · `003-B` 双侧活体仍开放 · `P-U-1/2/3` 仍开放 · `D-08` 变异验证仍开放 · Redis 池 `max-active` 残留不变 · message 三条仍归 G4）。
 ⇒ **本域必相对齐项 = 0** ⇒ like-rpc 仍判 **✅**。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W7
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| OP-09 | D | P3 | 否 | Go `service/like/rpc/internal/model/domain_fact.go:76-138`（`appendLikeFact`：遗留未版本化事实 ⇒ 报错 `:101-110`；原子取号 `:111-116`；版本须 ∈ [1, 2^53-1] `:117-119`；payload 与冻结信封**同一份原文** `:120-132`；outbox 落库 `:133-137`）＋ `service/message/rpc/internal/logic/markconversationreadlogic.go:39-64`（校验 → 查会话 → 参与者校验 → `MarkConversationRead` **单条 UPDATE**，**不触碰 conversation 表**）。RAG `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeDomainFactService.java:68-159`（逐条对应：遗留检查 `:100-104`；原子取号 `:107-112`；payload `:115-135`（`aggregate_version` `:121` / `target_revision` `:126` 恒 `null`）；信封 `:138-155`（内嵌**同一份 `payloadJson` 原文**）；outbox `:157-158`）＋ `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/service/MessageAtomicService.java:222-227`（`@Transactional` + **单条** `markReadByConversationAndRecipient`，不碰 conversation 表 ⇒ V-006 已修）⇒ ⇒ 两个来源（like 事实生产侧 / message MarkConversationRead）**两侧均一一对应** ⇒ **差异已消失**。⚠️ 台账尾部那句「投递侧与权威读侧仍是 4 行骨架 ⇒ `DRIFT-LIKE-003` 未关闭」是**陈旧快照**（实测 `LikeFactDispatchService.java` 275 行 / `LikeDeliveryValidator.java` 383 行 / `LikeAuthorityLookupService.java` 407 行 / `LikeFactDispatchScheduler.java` 138 行 ⇒ 投递侧已实现为 `DRIFT-LIKE-003-A`；残余的 003-B 取证缺口与 003-C 暴露形态**已另立编号** `DRIFT-LIKE-003-B/-003-C` ⇒ 不并入本条）⇒ **D**：本条无待实现项 | 2026-10-30 |
