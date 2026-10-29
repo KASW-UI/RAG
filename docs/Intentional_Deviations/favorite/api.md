@@ -37,12 +37,12 @@
 
 ---
 
-## DEV-FAV-API-001 · ✅ **已签字** · 401 响应的 body 形态
+## DEV-FAV-API-001 · ✅ **已签字** · 401 响应的 body 形态 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 | | 内容 |
 |---|---|
 | **Go 行为** | ① **验签失败**（`rest/handler/authhandler.go:106-122` 的 `unauthorized()`）⇒ `writer.WriteHeader(401)`，**body 为空**（一个字节都不写）。<br>② **黑名单命中**（`api/internal/middleware/checkblacklist_middleware.go:39-45`）⇒ 401 + 手写 `fmt.Sprintf` 的 **两字段** JSON：`{"code":5004,"msg":"未登录或登录已失效"}`（**没有 `data` 字段**）。 |
-| **RAG 行为** | 两种情形**统一**成三字段 envelope：`{"code":5004,"msg":"未登录或登录已失效","data":null}`（`FavoriteJwtAuthInterceptor#unauthorized` → `GlobalExceptionHandler#handleAuthentication:102-110`）。 |
+| **RAG 行为** | 两种情形**统一**成三字段 envelope：`{"code":5004,"msg":"未登录或登录已失效","data":null}`（`FavoriteJwtAuthInterceptor#unauthorized` → `GlobalExceptionHandler#handleAuthentication:102-110`）。<br>🔴 **2026-10-29 真实性复核 —— 上面这个行号指向的是 javadoc，不是方法体（原文保留，不改写）**：实测 `service/favorite/favorite-api/src/main/java/com/rag/favorite/favorite/api/advice/GlobalExceptionHandler.java` ⇒ `:102` 在**类 javadoc**里、`:110` 是 `@ExceptionHandler(AuthenticationException.class)` 注解 ⇒ **方法体在 `:111-118`**（`public ResponseEntity<Response> handleAuthentication(...)` ⇒ `:115` `response.setStatus(401)` ⇒ `:116-117` `ResponseEntity.status(UNAUTHORIZED).body(new Response(e.getCode(), e.getMessage(), null))` ⇒ **三字段**）。⇒ ⇒ **语义断言正确**（仍是三字段 envelope、仍是 401）⇒ **签字仍成立**；**指针应读作 `:110-118`**（本档上方「2026-10-29 逐条重核」表里写的 `:110-117` 是准确的 ⇒ **两处口径不一致的地方以那张表为准**）。**核对日期 2026-10-29**。 |
 | **对齐的部分** | ✅ **HTTP 状态码 401 一致**；✅ **body 里的业务码 5004 一致**；✅ **msg 文案一致**。 |
 | **差异** | 仅 **body 的字段集合**：Go 空 body / 两字段；RAG 三字段。 |
 | **为什么接受** | ① 与 users / admin / comment 域的既有形态统一（全仓 401 一律走 envelope）；② 空 body 对客户端与排障都不友好，而状态码与业务码已完全对齐，不影响客户端的失败分支判定；③ **属表达层**（envelope 的字段组织），不是 L1 语义。 |
@@ -53,7 +53,7 @@
 
 ---
 
-## DEV-FAV-API-002 · ✅ **已签字** · 500 兜底的 body 形态
+## DEV-FAV-API-002 · ✅ **已签字** · 500 兜底的 body 形态 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 | | 内容 |
 |---|---|

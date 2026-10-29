@@ -26,10 +26,16 @@
 > ⚠️ **计数影响**：本域 **2 条全部仍成立** ⇒ **主线更新 `docs/Intentional_Deviations/_INDEX.md` 时本域无需减项**（本 lane 不写共享索引）。
 > ⚠️ **两条的「不可达」豁免依据本轮未重数**：原文写「favorite 域 **56 个** `GRPCError` 调用点没有一个传 `codes.OK`」与「actual error 全部来自 gRPC stub」⇒
 > ⇒ **本轮未重跑那次调用点普查**（**超出本 lane 的核对范围**）⇒ ⇒ **该数字按原句保留**，**不**据此改写任何一侧；若将来要引用，请先重数。
+>
+> 📌 **2026-10-29 真实性复核 —— 上面那个「未重数」**已补齐**（原句保留，不改写）**：本轮**实测重数**（真源 `Sea-RideTheWind_golang/service/favorite/`，排除 `errmsg.go:104` 的定义行与 `_test.go`）：
+> `grep -rn "GRPCError(" service/favorite/ --include=*.go | grep -v errmsg.go:104 | grep -v _test.go | wc -l` ⇒ **56** ⇒ **与原文的「56 个」逐位对上**；
+> 分文件 = `create_favorite_folder_logic.go` 7 · `create_favorite_logic.go` 10 · `delete_favorite_folder_logic.go` 6 · `delete_favorite_logic.go` 6 · `get_favorite_folders_logic.go` 2 · `get_favorites_by_folder_logic.go` 5 · `helper.go` 11 · `update_favorite_folder_name_logic.go` 9 ⇒ **合计 56**；
+> ⇒ ⚠️ **且 `grep -rn "codes.OK" service/favorite/ --include=*.go`（排除 `_test.go`）⇒ 零命中** ⇒ ⇒ **「56 个调用点没有一个传 `codes.OK`」成立** ⇒ ⇒ **「不可达」豁免依据成立**（本轮**未**改写任何一侧）⇒ ⇒ **DEV-FAV-COMMON-001 的状态维持 ✅ 仍成立**。
+> ⇒ 📌 **与 Pitfall `PIT-FAV-RPC-022`（「台账里最危险的断言是『数字』」）的呼应**：本轮**机器重算**了这个数字 ⇒ **56 是可复算的**，不再是「信原句」。**核对日期 2026-10-29**。
 
 ---
 
-## DEV-FAV-COMMON-001 · ✅ **已签字** · `GRPCError(codes.OK, …)` 的返回形态
+## DEV-FAV-COMMON-001 · ✅ **已签字** · `GRPCError(codes.OK, …)` 的返回形态 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 | | 内容 |
 |---|---|
@@ -43,7 +49,7 @@
 
 ---
 
-## DEV-FAV-COMMON-002 · ✅ **已签字** · `status.FromError` 的「顶层 vs cause 链」判定
+## DEV-FAV-COMMON-002 · ✅ **已签字** · `status.FromError` 的「顶层 vs cause 链」判定 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 | | 内容 |
 |---|---|

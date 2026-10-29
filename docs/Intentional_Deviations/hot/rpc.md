@@ -38,7 +38,7 @@
 | ID | 结论 | 证据（核对日期 2026-10-29） |
 |---|---|---|
 | `SD-HOT-RPC-001` | ✅ **仍成立** | RAG 侧仍**不外抛**：`service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotEventConsumer.java:118-123` 仍是 `try { return consumeMessage(...); } catch (RuntimeException e) { return e; }` ⇒ 消费异常**降级成 drop**；Go 侧 `service/hot/rpc/internal/mqs/hot_handler.go:105-107` + `service/common/observability/mq.go:30`（**裸** `err := fn(consumeCtx)`，**无 recover**）⇒ panic 直接崩进程 ⇒ 差异未变 |
-| `SD-HOT-RPC-002` | ✅ **仍成立** | Go 侧仍默认重试 3 次：go-redis `v9.20.0` `options.go` 的 `init()`（**消费点**）`if opt.MaxRetries == 0 { opt.MaxRetries = 3 }`；RAG 侧 Lettuce 仍**无命令级重试入口**（Spring Data Redis 4.0.7 的 `connection/lettuce` 包内 `RetryPolicy` 引用数 = 0；Lettuce 6.8.2 jar 内**无** `io/lettuce/core/retry` 包）⇒ 差异未变 |
+| `SD-HOT-RPC-002` | ✅ **仍成立** | Go 侧仍默认重试 3 次：go-redis `v9.20.0` `options.go` 的 `init()`（**消费点**）`if opt.MaxRetries == 0 { opt.MaxRetries = 3 }`；RAG 侧 Lettuce 仍**无命令级重试入口**（Spring Data Redis 4.0.7 的 `connection/lettuce` 包内 `RetryPolicy` 引用数 = 0；Lettuce 6.8.2 jar 内**无** `io/lettuce/core/retry` 包）⇒ 差异未变<br>📌 **2026-10-29 真实性复核 · 补成可复算（不改写上面那句）**：Go 侧默认值的**消费点**在 `~/go/pkg/mod/github.com/redis/go-redis/v9@v9.20.0/options.go:393-397`（**真源 pin**：`Sea-RideTheWind_golang/go.mod:15` `github.com/redis/go-redis/v9 v9.20.0`）—— 实际形态是 **`switch`**（不是上面写的 `if`）：`case -1: opt.MaxRetries = 0` / `case 0: opt.MaxRetries = 3` ⇒ ⇒ **「未设置 ⇒ 默认 3」的语义逐字成立** ⇒ **差异未变、签字仍成立**；⚠️ 只是**上面那句的代码形态写法不准（`if` vs `switch`）** ⇒ 行号已补为 `:393-397`（**语义正确、形态表述需按此读**）。**核对日期 2026-10-29** |
 | `SD-HOT-RPC-003` | ✅ **仍成立** | RAG 侧 `@KafkaListener` 仍**无** `concurrency` 属性 ⇒ 取默认 **1**：`service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotEventConsumer.java:98-100`（`@KafkaListener(topics=…, groupId=…, containerFactory=…)`，**无** `concurrency=`）；Go 侧仍是 sarama **每分区一个 goroutine** ⇒ 单实例多分区时两侧不等价、3 副本部署时等价 ⇒ 差异未变 |
 | `SD-HOT-RPC-004` | ✅ **仍成立** | RAG 侧仍**存活 + NOT_SERVING**：`service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/bootstrap/NacosRegistration.java:125-126`（注册失败 ⇒ `LOG.error` + `markHealth(ServingStatus.NOT_SERVING)`）+ `:165` `markHealth(...)`；Go 侧仍是 `zrpc/server.go:88-93` 的 `panic(err)` ⇒ 进程退出 ⇒ 差异未变 |
 | `SD-1` | ✅ **仍成立** | RAG 侧仍是「**锁内取引用 → 锁外 Redis I/O**」：`service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotPartitionSketchRegistry.java:136-149` `detachWithinWriteLock(...)`（写锁内建引用、锁外落盘）+ `:155-169` 独立的读锁方法 ⇒ 没有在持写锁时再取读锁 ⇒ Go 的**必然自死锁**未被搬过来 ⇒ 差异未变 |
@@ -49,7 +49,7 @@
 
 ---
 
-## SD-HOT-RPC-001 · 消费异常降级成 drop（Go 会崩进程）
+## SD-HOT-RPC-001 · 消费异常降级成 drop（Go 会崩进程） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 - **Component**：`HotEventConsumer.onMessage` → `consumeMessage`
 - **Go 出处**：
@@ -73,7 +73,7 @@
   （本轮用 `HeavyKeeperGoParityTest` 的对拍 fixture 承担这件事）。
 - **留痕位置**：`HotEventConsumer` 类注释「🚨 本类的第一语义：永不外抛」小节 + 本条。
 
-## SD-HOT-RPC-002 · Redis 命令不做 3 次自动重试
+## SD-HOT-RPC-002 · Redis 命令不做 3 次自动重试 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 - **Component**：全部 Redis 命令（`HotRedisSnapshotStore` / `HotMergeScheduler` / `HotRankingQueryService`）
 - **Go 出处**：
@@ -108,7 +108,7 @@
 
 ---
 
-## SD-HOT-RPC-003 · 容器并发度 `concurrency=1`（Go 是每分区一个 goroutine）
+## SD-HOT-RPC-003 · 容器并发度 `concurrency=1`（Go 是每分区一个 goroutine） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 - **Component**：Kafka 消费并发度（`@KafkaListener` 的 `concurrency`）
 - **Go 出处**：
@@ -134,7 +134,7 @@
 
 ---
 
-## SD-HOT-RPC-004 · 注册失败 ⇒ 进程存活 + 健康检查 NOT_SERVING（Go 是 panic 退出）
+## SD-HOT-RPC-004 · 注册失败 ⇒ 进程存活 + 健康检查 NOT_SERVING（Go 是 panic 退出） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 - **Component**：服务注册（etcd / Nacos）
 - **Go 出处**（逐条读到**消费点**）：
@@ -176,7 +176,7 @@
 
 ---
 
-## SD-1 ✅ 已签字（第一轮，2026-10-22）· 分区撤销路径的**锁升级**：Go 必然自死锁，RAG 改「锁内取引用 → 锁外落盘」
+## SD-1 ✅ 已签字（第一轮，2026-10-22）· 分区撤销路径的**锁升级**：Go 必然自死锁，RAG 改「锁内取引用 → 锁外落盘」 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > 🟥 **2026-10-24 第十一轮回填**：本条原先**只有汇总表一行、正文缺章节** ⇒ 已补齐。
 > ⚠️ **编号说明**：`SD-1 / SD-2 / SD-3` 是**第一轮的旧编号**，与 `SD-HOT-RPC-001..004` 是**两批不同条目**，不是同一批的两种写法。
@@ -194,7 +194,7 @@
 
 ---
 
-## SD-2 ✅ 复核通过（2026-10-23）· Redis ZSet member 非字符串时**跳过**（Go 是裸类型断言 ⇒ panic）
+## SD-2 ✅ 复核通过（2026-10-23）· Redis ZSet member 非字符串时**跳过**（Go 是裸类型断言 ⇒ panic） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 - **Component**：`HotRedisSnapshotStore` 的 ZSet member 解析
 - **Go 出处**：`hot_handler.go:370` `scoreMap[z.Member.(string)] += …` ——
@@ -208,7 +208,7 @@
 
 ---
 
-## SD-3 ✅ 复核通过（2026-10-23，照抄 Go）· Redis 脚本报错被**误报成「lock lost」**
+## SD-3 ✅ 复核通过（2026-10-23，照抄 Go）· Redis 脚本报错被**误报成「lock lost」** ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 - **Component**：`HotRedisSnapshotStore` 的 Lua 脚本执行结果判定
 - **Go 出处**：`hot_handler.go:311` / `:408` `result, _ := …Int()` ——

@@ -3654,6 +3654,13 @@ python3 /tmp/global-selfcheck.py --entity-all \
 | 回归（**本轮 · D10 落码后 · 2026-10-27**） | ✅ **favorite-rpc 114 条**（skipped 3）全绿 · favorite-api 105 条（skipped 1）全绿 ⇒ **四域 12 模块合计 922 条**（0 failures / 0 errors / 4 skipped · **10:17 min** · BUILD SUCCESS · 基线 `deeeb8d` + 本轮文档改动 · 核对日期 2026-10-27 · 两口径逐模块一致）<br>⚠️ **上一行的 919 保留原值不改写**（那是基线 `eb4d1d2` 的口径）⇒ ⇒ **两个数不在同一条基线上 ⇒ 不可相加**；本轮本域 **favorite 三个模块逐条不变**（29 / 105 / 114）⇒ ⇒ 差额 **+3 全部来自 comment-rpc**（D10 新增 3 条守门，commit `deeeb8d`） |
 > 🔴 **2026-10-27 · 订正注记（承 G1 的 ③：「0 failures」必须带**跑次与时间戳**，否则下轮会被当现状）**：本行的 **919 / 922 条 ＋ 0 failures / 0 errors** 属于**它标注的那个跑次**（**919 = D10 落码前** · **922 = D10 落码后**）⇒ ⇒ **两个数都不是口径差，是不同跑次** ⇒ **当前数 = 922**（G1 侧「域内 12 模块」口径正确）⇒ ⇒ **但当前不是全绿**。<br>**当前实测（2026-10-27 17:21 · G3 树 · 域内 12 模块 · 129 份 surefire XML 逐文件求和）**：合计 **922 条 / skipped 4** ⇒ **与上表 922 一致** ⇒ ⇒ **但有 3 份报告带失败/错误**：<br>① `17:21:19` `FavoriteApiRealTomcatGateTest`（**3 errors**）＋ ② `17:21:40` `FavoriteApiEnvelopeParityTest`（**1 error**）⇒ 根因 = `java.net.ProtocolException: Too many interim responses received: 9 > 8`（**JDK HttpClient 对 Tomcat 多次 100-Continue 的上限**）⇒ ⇒ **根因在共享层 `cd893d1` 抬容器上限到 10001**（Tomcat 不再在 2048 拒 ⇒ 继续读大 body）⇒ ⇒ **不是域内问题** ⇒ 已转派 G4；<br>③ `13:08:29` `CommentRpcRuntimeBootGateTest`（**1 error** · `realFatJarProcessBootsAndListens`）⇒ ⇒ **就绪探测 flake 族**（article-rpc / comment-rpc / like-rpc 同款）⇒ ⚠️ **与 G1 域那款「连接预算」根因不同 ⇒ 分开记，不并成「同款 flake」**。<br>⇒ ⇒ **读本表的人以本注记为准**：上表的绿是**那一跑次**的绿，**当前域内 12 模块有 5 条红**（favorite 4 条 ＋ comment-rpc 1 条）。
 
+> 🔴 **2026-10-29 真实性复核 —— 上行「0 failures / 0 errors / 4 skipped」**不得读成「全绿」**（原值保留，不改写）：
+> 那 **4 条 skipped** = **探针驱动型双侧对拍测试的设计内跳过**（实测 2026-10-29）：
+> · `favorite-rpc` 3 条 —— `FavoriteSqlStatementParityTest`（`:113` `@EnabledIfEnvironmentVariable(named = "PROBE_GO_TARGET", …)`）、`FavoriteGrpcContractParityTest`（`:133` 同）、`FavoriteCreateSuccessParityTest`（`:88` `PROBE_GO_TARGET_SUCCESS`）；
+> · `favorite-api` 1 条 —— `FavoriteApiFullParityTest`（`:86` `PROBE_GO_API`）；
+> ⇒ ⇒ **不是漏跑**（各有独立探针：`tools/sql-statement-probe/favorite/`、`tools/grpc-contract-probe/favorite/`、`tools/api-full-parity-probe/favorite-rpc/`、`tools/api-full-parity-probe/favorite/`）⇒ **但默认回归的「0F/0E」覆盖不到双侧对拍面** ⇒ ⇒ **读法**：默认回归绿 ⇒ **只说明默认回归面绿**；双侧一致性的证据在**那 4 个探针各自的 `EXIT=0`** 里。
+> ⇒ **逐条清单与判据** ⇒ [`api.md` §13.2「变异验证（防假绿）」下的「2026-10-29 真实性复核」块](./api.md)。**核对日期 2026-10-29**。
+
 ### 10.3 ⚠️ 一条**误报**（G2 给的清单里有一条**不能改**）
 
 | 文件 | 结论 |

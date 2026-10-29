@@ -124,7 +124,7 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | D2 | **变异验证** | ✅ **已闭合（第十轮，2026-10-24）** | hot-api 主干 **10 个系统性语义变异 ⇒ 10/10 全部被守门抓到**（基线 85→**86** tests / 0 failures）；🔴 并**查出并修补 1 个真实守门缺口**（`page_size=51` 边界无测试 ⇒ 新增 `HotApiMvcPipelineTest#pageSizeCapBoundaryIsApplied`）。⚠️ 第一轮 3 个「没变红」复核后确认**全是「变异本身是 no-op」**（含 `Integer.parseInt(String)` 本就是十进制，已 jshell 实测）⇒ 不是守门缺口。✅ **第十一轮已扩展到全 hot 域**：hot-rpc **10 个**（基线 86 条）+ hot-common **4 个**（基线 14 条）⇒ 合计 **hot 域 25 个变异点全部被守门抓到**；🔴 hot-rpc 侧**查出并修补 2 个真实守门缺口**（合并的 >100 截断层 / 桶冲突衰减概率的 uint32 语义） |
 | D3 | 客户端**断连**取消不再传播 | ✅ **活体坐实**（2026-10-24 第七轮） | Go 把请求 ctx 传进 100 次补全，Servlet 断连不会自动取消在飞的 gRPC。已用「请求线程取一次预算 + 显式下传」保住**超时**语义，**断连**语义不等价 ⇒ **第七轮用裸 socket 强制 RST 实测**：Go 侧断连后 **1~3ms** 内 8 个在飞 gRPC 全部取消；RAG 侧**等到 2s deadline** 才结束，**且断连后继续发第二批** ⇒ 差异由「静态推断」升级为「活体证据」。连带产出 **DRIFT-HOTAPI-025** |
 | D4 | Go panic 时指标误记为 `success` | ⚠️ 有意差异（2026-10-23） | Go 的 `defer` 读命名返回值 `err`，panic 展开时仍为 nil；Java 按客户端实际看到的结果记 `fail`。该路径无代码可达 |
-| D5 | 指标**暴露**是单向增强 | ⚠️ 有意偏离（2026-10-23） | Go 的 5 个指标注册了但**无端点暴露**（yaml 的 Prometheus 块无 Host；`DevServer` 块在 go-zero v1.10.2 无对应字段）。分桶边界已对齐回 `prometheus.DefBuckets` |
+| D5 | 指标**暴露**是单向增强 | ⚠️ 有意偏离（2026-10-23）<br>🔴 **2026-10-29 真实性复核**：原判 **⚠️ 有意偏离（2026-10-23）** ⇒ **现行态 = ⛔ 已失效（被签字描述的那个行为不存在 ⇒ 这一格不再是「有意偏离」）**。<br>依据（两侧 · 核对日期 2026-10-29）：Go 侧**确实暴露** `/metrics` —— `Sea-RideTheWind_golang/service/hot/api/etc/hotcenter.yaml:16-23` 的 `DevServer{Enabled: true, Host: 0.0.0.0, Port: 16067, MetricsPath: /metrics, EnableMetrics: true}` ⇒ 被 go-zero v1.10.2 `core/service/serviceconf.go:77` `devserver.StartAgent(sc.DevServer)` 真实消费 ⇒ `internal/devserver/server.go:45-48` `if s.config.EnableMetrics { prometheus.Enable(); s.handleFunc(s.config.MetricsPath, promhttp.Handler().ServeHTTP) }` ⇒ **默认 registry** 的 `/metrics` 被挂上 ⇒ 正是 `service/hot/api/internal/metrics/metrics.go:47-51` 用 `prometheus.MustRegister(...)` 注册的那 5 个 `hot_api_*`（**RAG 侧**：`service/hot/hot-api/src/main/resources/application.yml:182-183` `management.metrics.tags.application: hot-api` + Actuator `/actuator/prometheus` ⇒ 确实暴露）。<br>⇒ ⇒ **「Go 注册了但无端点暴露」这个前提不成立** ⇒ **权威订正**见 [`docs/Intentional_Deviations/hot/api.md`](../../Intentional_Deviations/hot/api.md) 的 `SD-HOT-API-004`（该条 2026-10-29 已判 **⛔ 已失效·已撤销** ⇒ 不计入「已签字」计数）⇒ **本行的差异描述与历史叙述原样保留，不改写** | Go 的 5 个指标注册了但**无端点暴露**（yaml 的 Prometheus 块无 Host；`DevServer` 块在 go-zero v1.10.2 无对应字段）。分桶边界已对齐回 `prometheus.DefBuckets`<br>🔴 **2026-10-29 订正（原文保留，不改写）**：上面这句的前提**已被实测证伪** —— ① Go yaml **有** `DevServer` 块且 `EnableMetrics: true`（`service/hot/api/etc/hotcenter.yaml:16-23`）⇒ **不是**「无对应字段」；② go-zero v1.10.2 `core/service/serviceconf.go:40` `DevServer DevServerConfig` + `:77` `devserver.StartAgent(sc.DevServer)` + `internal/devserver/server.go:45-48` ⇒ ⇒ **Go 侧 `http://0.0.0.0:16067/metrics` 确实有这 5 个 `hot_api_*` 指标**。<br>⇒ **残留的真实差异只剩「暴露面不同源」**（Go = 独立 dev server 的 `:16067/metrics` ＋ `/healthz` ＋ `/debug/pprof/`；RAG = 业务**同端口** `:18897/actuator/prometheus`）⇒ **不是本条签字的内容** ⇒ **不新签、不计数** ⇒ 归本文件待办（跨域观察面差异）。<br>⇒ ⚠️ **本条不得再被读成「RAG 单向增强」** —— 2026-10-29 核对日期。 |
 | D6 | **端口** | ✅ **已签字**（2026-10-24 第六轮，用户拍板「保持」） | Go `hotcenter.yaml` = 8893；`Infrastructure.md §3` 给 hot 预占 18897 ⇒ **保持 18897**（`HOT_API_PORT` 可覆盖）⇒ `SD-HOT-API-009`。⚠️ HTTP 端口**不是 wire 契约**（各自独立）⇒ 无行为差异 |
 | D7 | GET + JSON body 覆盖 query | ✅ **2026-10-23 复核：原结论修正 —— 这不是漂移** | **原文保留**：「Go 的 `httpx.Parse` 还会跑 `ParseJsonBody`。极冷边界，未承诺一致」。<br>**修正依据**：`core/mapping/utils.go:589-597` `usingDifferentKeys(key, field)` —— 字段有 `form` tag 但**没有 `json` tag** ⇒ JSON unmarshaler（`jsonTagKey`）**整字段跳过**（`unmarshaler.go:571-573` 直接 `return nil`）。<br>**Go 侧活体探针实测**：`?page=5` + body `{"page":9,"page_size":3}` → **`page=5 pageSize=20`**；无 query + body → **`1/20`**；POST + body → **`1/20`**。JSON body **完全被忽略**。<br>⇒ RAG「不读 body」与 Go 行为**一致**，原记的「未实现」是**假阳性**。真漂移另有其人，见 **DRIFT-HOTAPI-013**（畸形 JSON body）。 |
 | D8 | client 熔断实际生效 | ✅ **已闭合（第十轮，2026-10-24）** | **装配层**（第四轮 `GoStyleGrpcClientBreakerWiringTest` 3 例）+ **行为层**（第十轮 `GoStyleGrpcClientBreakerE2ETest`：内嵌恒返 INTERNAL 的 gRPC server ⇒ 判据是「**下游调用次数停止增长**」）⇒ 熔断**真的打开**已被行为级证据坐实；**变异验证**（`service/common` 的 `if (!breaker.accept())` → `&& Boolean.FALSE` ⇒ 变红 ✅） |
@@ -1242,7 +1242,7 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
 | **真 Tomcat 响应头 / percent-encoding**（U6/U8/D14） | ✅ **本轮已闭合** | 真 Tomcat（RANDOM_PORT）下：404 = `404 page not found\n` + `text/plain` + `nosniff`；405 = 裸状态码 + `Allow`、无 body；`%2B5` ⇒ 解码成 `+5` ⇒ `page=5`（两侧等价）。⚠️ D14 本身仍**跨域移交** common 域（那是超时/499 路径，不是 404/405） |
 | **Prometheus 导出形态**（U11） | ✅ **本轮已闭合** | 真 `/actuator/prometheus`：Counter 名 `hot_api_request_total`（**两侧都是单 `_total`**，原注释的「双 `_total`」说法已被实测推翻并订正） |
 | **client breaker 装配层**（U4/D8） | ✅ **已闭合（第十轮）** | hot-api 此前**没有** wiring 测试（而 `follow-api` / `message-api` 各有一份）⇒ 第四轮新增 `GoStyleGrpcClientBreakerWiringTest`（3 例）+ 变异 M-W1 变红（**装配层**）；🟥 **第十轮补齐行为层**：`GoStyleGrpcClientBreakerE2ETest` 内嵌恒返 INTERNAL 的 gRPC server，判据是「**下游调用次数停止增长**」（hot-api 响应体前后都是 5001，**看不出**熔断）⇒ **「熔断真的打开」已被行为级证据坐实**；变异（`if (!breaker.accept())` → `&& Boolean.FALSE`）变红 ✅。⚠️ 第十二轮附带修：该测试阶段 F 的**比率型断言**改为**直接计数**（P-HOTAPI-23） |
-| **全局 `application` 标签**（DRIFT-HOTAPI-019） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「保持」⇒ `SD-HOT-API-007`：全仓统一配了同一项 ⇒ hot-api 单独去掉会成为**唯一例外** |
+| **全局 `application` 标签**（DRIFT-HOTAPI-019） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「保持」⇒ `SD-HOT-API-007`：全仓统一配了同一项 ⇒ hot-api 单独去掉会成为**唯一例外**<br>🔴 **2026-10-29 真实性复核**：原判 **✅ 已签字（行为仍在）** ⇒ **现行态 = ✅ 仍成立**，但**签字理由里的「全仓统一 / 唯一例外」这个前提是错的**（原句保留，不改写）—— 实测（逐模块看 `management:` → `metrics:` → `tags:` → `application:` 这个**嵌套**块；⚠️ **不能用 `grep 'management.metrics.tags.application'` 这种点号路径** —— YAML 是嵌套写法 ⇒ 该串在任何模块里都不出现 ⇒ 会误得「0/8 全没配」）：**8 个非 users 的 api 模块里 5 个配了**（`article-api` `:225` / `comment-api` `:173` / `favorite-api` `:195` / `hot-api` `:183` / **`message-api` `:213`**），**3 个没配**（`follow-api` / `like-api` / `task-api`）⇒ ⇒ hot-api 单独去掉该标签 ⇒ **变成 3 个例外之一**，**不是「唯一例外」**。<br>⇒ 📌 **口径补全**：把 users 域的两个 api 一并计入 ⇒ **全仓 10 个 api 模块里 7 个配了 / 3 个没配**（`users/user` `:187` ＋ `users/admin` `:178` 也配了）⇒ ⇒ **「全仓统一」这个理由的强度下降，但不影响签字本身**（被签字的行为确实仍在：RAG 侧每个 Prometheus 指标仍带 `application="hot-api"`，Go 侧默认 registry 仍不带全局标签）。<br>⇒ ⚠️ **核对日期 2026-10-29**；权威条目见 [`docs/Intentional_Deviations/hot/api.md`](../../Intentional_Deviations/hot/api.md) 的 `SD-HOT-API-007`（含同款订正注记）。 |
 | **Nacos 服务注册**（DRIFT-HOTAPI-020） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「保持」⇒ `SD-HOT-API-008`。⚠️ 签字即接受残留风险：「Nacos 不可达 ⇒ hot-api 起不来」（实测 `ErrCode:-401`）；缓解手段 = `register-enabled=false` |
 | **日志面已对齐的部分** | ✅ **本轮闭合** | `DRIFT-HOTAPI-016` 已修（`CodeError.Error()` 整串 + 日志级别 + 字段集），3 条变异全红 |
 | **容器输入上限三旋钮**（D21/D22/D23 ⇒ `DRIFT-HOTAPI-021/022/023`） | ✅ **第十三轮已闭合并已修（跨域落地 10/10）** | 10 个 api 模块的 `application.yml` 统一配 `relaxed-query-chars: ["[", "]"]` / `max-parameter-count: 2048` / `max-http-request-header-size: **1028KB**`（⚠️ **不是 1MB**：Go 真实上限 = `DefaultMaxHeaderBytes(1<<20)` **+ 4096 bufio slop**）。**双侧活体复测**：`?page[]=5` 两侧 **200 且响应体逐字节相同**；值个数首个翻转 n **两侧都是 2049**；请求行首个翻转长度 **两侧都是 1052536 字节（差 0）**。守门 = `tools/difftest/check-tomcat-limits.py`（静态 10/10 ✅）＋ `HotApiRealTomcatGateTest` 3 条**真 Tomcat**运行时断言（**MUT-A/B/C 变异全红** ✅） |
@@ -2244,6 +2244,58 @@ go-zero 的 `maxFormParamCount` 数的是**非空值个数** ⇒ **两层语义�
 ⚠️ RAG 侧的应用层判据（`GoFormValues.requireFormValueCountWithinLimit`）**逐字复刻了 Go 的空值跳过**
 （`if (v == null || v.isEmpty()) continue;`）—— 但它调 `request.getParameterMap()`，
 **Tomcat 的参数解析在那一刻先抛** ⇒ 应用层那段**根本执行不到**。
+
+> ### 🔴 2026-10-29 真实性复核（本节「根因」格**已钉死** · 原文保留，不改写）
+>
+> ⚠️ **上面这段「根因」描述的是 2026-10-27 之前的状态**（那时容器上限 = yaml 的 2048 ⇒ 容器先于应用层拒）。
+> ⇒ **它与本条上半部分「2026-10-29 对齐」块、以及与 favorite 域的 L4 实测（§18）**曾经**自相矛盾** ——
+> **现已钉死**（核对日期 2026-10-29 · 两侧源码 + 本地 sources jar 实测）：
+>
+> **① Tomcat 到底数什么（钉死）** —— Tomcat **11.0.24**（Spring Boot 4.0.8 管的版本：`spring-boot-dependencies-4.0.8.pom:209` `<tomcat.version>11.0.24</tomcat.version>`）：
+> `org/apache/tomcat/util/http/Parameters.java:241-254` `addParameter(String key, String value)`：
+> ```java
+> if (limit > -1 && parameterCount >= limit) {          // :247
+>     throw new InvalidParameterException(...);          // :249
+> }
+> parameterCount++;                                     // :251  ← 每次调用都 +1
+> paramHashValues.computeIfAbsent(key, ...).add(value);  // :253
+> ```
+> ⇒ **`parameterCount++` 在 `:251`，位于 `addParameter` 的每次调用里 ⇒ 它数的是「**名值对总数**」**
+> （**不是**「去重后的参数名个数」）⇒ **对 GET query 而言 = 段数**（每个 `a=1` 段 = 1 个名值对）
+> ⇒ **query 与 body 表单字段都计入**（`processParameters` 的两条路径都调 `addParameter`）。
+> ⇒ **抛点在 `addParameter`（`:247-251`）**，不是 `processParameters` 本身（那是调用方）—— 原文写的类名正确、**方法名指错了一层**（**原文保留，不改写**）。
+> ⇒ **「limit=1000 ⇒ 第 1001 个就抛 / limit=2048 ⇒ 第 2049 个就抛」= 正确**（`>=` 判定 ⇒ 第 `limit+1` 个抛）。
+>
+> **② Go 到底数什么（钉死）** —— Go **1.25.11**（`go version` ⇒ `go1.25.11 darwin/arm64`）：
+> `src/net/url/url.go:1001` `const defaultMaxParams = 10000`；`:1003-1017` `urlParamsWithinMax(params)` 判 `params <= defaultMaxParams`；
+> `:1019-1022` `parseQuery` 调 `urlParamsWithinMax(strings.Count(query, "&") + 1)` ⇒ **数的是「段数」** ⇒ **首个翻转点 = 10001 段**。
+> ⇒ go-zero 应用层 `rest/httpx/util.go:15` `maxFormParamCount = 2048`、`:44-45` 空值 `continue`、`:48-52` 超限报错
+> ⇒ **数的是「非空值个数」**，且计数器 `n` 声明在 **`:33`**（**在 `for name, values := range r.Form`（`:35`）之外**）⇒ **跨所有 key 共享**（**原文未写这一句 ⇒ 补**）。
+>
+> **③ 由此得到的「轴」结论（这才是残留差异的真正形状）**：
+>
+> | 轴 | Go 数什么 | RAG 数什么 | 现行阈值 | 差 |
+> |---|---|---|---|---|
+> | **段数轴**（`net/url` 10000 段） | **段数** | **段数**（Tomcat `parameterCount`） | Go **10000** / RAG **10001** | 🔴 **差一格**（Go 翻转点 10001 段 / RAG 10002 段） |
+> | **非空值轴**（go-zero 2048 非空值） | **非空值个数** | **非空值个数**（`GoFormValues.requireFormValueCountWithinLimit` 逐字复刻） | 两侧都 **2048** | ✅ **一致** |
+>
+> ⇒ ⇒ **原文那句「两层限制的语义不同」只在「非空值轴」上成立**（且那一轴**现在已一致**）；
+> ⇒ ⇒ **当前真正仍 OPEN 的残留是「段数轴」上的同轴差一格**，**不是**「语义不同」。
+> ⇒ ⇒ **修法随之收窄**：**不需要**「关掉 Tomcat 上限 + 各域补 10000 段判据」两步（原文「修法」节保留，不改写）——
+> **共享层把 `MAX_PARAMETER_COUNT` 从 `10001` 改成 `10000`** 即可让**段数轴**与 Go 同形；
+> ⚠️ **但改完必须逐轴复测非空值轴**（Tomcat 上限一旦 = 10000，2049 个非空值仍会被容器先拒 ⇒ 拒绝**形状**是
+> Tomcat 的 400/HTML 还是 Go 的 200+5003 ⇒ 取决于应用层判据是否抢在容器解析之前 ⇒ **这是「动手前须先钉死」的那一点**）。
+>
+> **④ 「动手前须先钉死」的三件事（2026-10-29 明确记录）**：
+> ① Tomcat 的比较语义 = **名值对总数**（= query 段数）—— 上面 ① 已钉死；
+> ② 共享层的**实际运行期值** = **10001**（不是 yaml 里的 2048）—— 已钉死：`service/common/src/main/java/com/rag/common/http/GoStyleTomcatParameterLimitCustomizer.java:170` `MAX_PARAMETER_COUNT = 10001`、
+> `:181-196` `customize(...)` **无 `mode` 分支**（无条件抬上限）；
+> ⚠️ **为什么 yaml 的 2048 不生效（机制，2026-10-29 实测）**：Boot 4.0.8 `TomcatWebServerFactoryCustomizer.ORDER = 0`（`spring-boot-tomcat-4.0.8-sources.jar` 的 `autoconfigure/TomcatWebServerFactoryCustomizer.java:73`）⇒ **先于**共享层的 `@Order(Ordered.LOWEST_PRECEDENCE)` 执行；
+> 而 Boot 的 `customizeMaxParameterCount`（同文件 `:333-334`）**不是** `factory.setMaxParameterCount(...)`，而是 **`factory.addConnectorCustomizers((connector) -> connector.setMaxParameterCount(v))`** ⇒ 两个 connector customizer **按插入顺序**跑（`TomcatWebServerFactory.java:417-419`）⇒ **后插入者胜** ⇒ **运行期 = 10001**；
+> ③ **当前仍 🔴 的只有「后续格（段数轴）」** ⇒ **修法落在共享层** ⇒ **本域无权改** ⇒ **只登记，不改产品代码**（AGENTS.md §5.3c）。
+>
+> ⇒ **本条状态取值（2026-10-29）**：**主轴 = ✅ 已闭合** / **后续格（段数轴）= 🔴 仍 OPEN** ⇒ **两格状态不同是「有意为之」**（见本条上半部分的「2026-10-29 对齐」块）。
+> ⇒ **本节的差异描述与历史叙述全部原样保留**；本注记只追加「已钉死」的事实与**收窄后的修法**。
 
 ### 影响范围
 

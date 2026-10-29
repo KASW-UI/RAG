@@ -148,7 +148,7 @@ RAG `FavoriteFolder`：`getFolderId()` 返回 `String`、`getCreatedAt()` 返回
 | | 内容 |
 |---|---|
 | **原断言** | `FavoriteRpcClient` 的类注释写「⚠️ **client 熔断：Go 侧有且默认开，Java 侧尚未接入（已登记的已知偏离）**」，并给出一段「为什么现在不补」的论证 |
-| **实测** | **两处皆假**：① **熔断早已生效** —— `GoStyleGrpcClientBreakerInterceptor` 带 `@GrpcGlobalClientInterceptor`，被 `FavoriteApiApplication` 的 `scanBasePackages`（含 `com.rag.common`）扫到即自动注册；② 「已登记」是假 —— `docs/Intentional_Deviations/favorite/` 三个文件**至今 0 字节** |
+| **实测** | **两处皆假**：① **熔断早已生效** —— `GoStyleGrpcClientBreakerInterceptor` 带 `@GrpcGlobalClientInterceptor`，被 `FavoriteApiApplication` 的 `scanBasePackages`（含 `com.rag.common`）扫到即自动注册；② 「已登记」是假 —— `docs/Intentional_Deviations/favorite/` 三个文件**至今 0 字节** |<br>🔴 **2026-10-29 真实性复核 —— 上行 ② 那句已过期（原文保留，不改写）**：原判「`docs/Intentional_Deviations/favorite/` 三个文件**至今 0 字节**」⇒ **现行态 = ⛔ 已不成立（现在有内容）**。实测（`wc -l`，核对日期 2026-10-29）：`api.md` **76 行** / `common.md` **64 行** / `proto.md` **34 行** / `rpc.md` **180 行** ⇒ ⇒ **4 个文件全部非空** ⇒ ⇒ 「没有登记」这个前提**已不成立**（本域现有 **8 条** `DEV-FAV-*` 登记，其中 **5 条已签字 + 2 条已撤销** ⇒ 见 [`../../Intentional_Deviations/favorite/`](../../Intentional_Deviations/favorite/)）。<br>⇒ ⚠️ **但 ① 那半句仍然成立**（`GoStyleGrpcClientBreakerInterceptor` 仍带 `@GrpcGlobalClientInterceptor`，`FavoriteApiApplication` 的 `scanBasePackages` 仍含 `com.rag.common`）⇒ ⇒ **本条的两个断言现在一真一假** ⇒ ⇒ **D3 仍按「已修」读**（javadoc 的假断言已改正、熔断早已生效这一点没变），**但它引用的「0 字节」证据已不可再引**。 |
 | **修复** | 改正断言 + 补「装配证据」一节（指向运行证据） |
 | **回归网** | `FavoriteApiProtectionWiringTest`（**6 例**）：读 starter 的 `GlobalClientInterceptorRegistry` 断言拦截器**真的在里面**（只断言「Bean 存在」不够 —— 证明不了 channel factory 会不会消费它，§3.3）；断言保护层默认值 == Go 默认值；断言 4 个 filter 的**相对** `@Order` 与 Go 链序一致（🔴 **2026-10-26 合并当天**：原先断言的是**绝对**值 `+1/+2/+3/+6` ⇒ 被 `global` 第十九轮的合法后移打断 ⇒ 改为 Go 真源承载语义的相对链序 ⇒ **§12**） |
 
@@ -171,6 +171,12 @@ RAG `FavoriteFolder`：`getFolderId()` 返回 `String`、`getCreatedAt()` 返回
 > Go 逐字复刻的 2048 判据**在真栈上不可达**（与 hot 域 `check-tomcat-limits.py`
 > 脚本头部写的「RAG 自己实现的 2048 判据在 GET query 上不可达」同源）。
 > ⇒ 它只有在容器层上限被放宽时才生效 ⇒ 见 §3 的跨域条目。
+>
+> 🔴 **2026-10-29 真实性复核 —— 上面这段结论**已过期**（原值保留，不改写）**：原判 **「容器层永远先于应用层拒 ⇒ 2048 判据在真栈上不可达」** ⇒ **现行态 = ⛔ 已不成立（该判据现在是「唯一判定者」）**。
+> 依据（两侧 · 核对日期 2026-10-29）：共享层 `service/common/src/main/java/com/rag/common/http/GoStyleTomcatParameterLimitCustomizer.java:170` `MAX_PARAMETER_COUNT = 10001`、`:181-196` `customize(...)` **无 `mode` 分支**（**无条件**抬上限）⇒ ⇒ **运行期容器上限 = 10001**（**不是** yaml 里的 2048）⇒ ⇒ 2049 个非空值**不再**被容器先拒 ⇒ ⇒ **域内那道 Go 逐字复刻的 2048 判据重新可达、且成为唯一判定者**。
+> ⇒ ⚠️ **为什么 yaml 的 2048 不生效（机制，2026-10-29 实测）**：Boot 4.0.8 `TomcatWebServerFactoryCustomizer.ORDER = 0` ⇒ 先于共享层的 `@Order(Ordered.LOWEST_PRECEDENCE)`；且它的 `customizeMaxParameterCount` 是 **`factory.addConnectorCustomizers(...)`**（不是 `setMaxParameterCount`）⇒ 两个 connector customizer **按插入顺序**执行 ⇒ **后插入者胜** ⇒ 运行期 = 10001。
+> ⇒ ⇒ **本节只作历史记录读**；当前口径以 **§1.6 的 `maxFormParamCount` 行**（已带 2026-10-27 订正）＋ **§3**（跨域条目）为准。
+> ⇒ ⇒ **残留**：容器上限 10001 与 Go 的 `net/url` `defaultMaxParams = 10000`（Go 1.25.11 `src/net/url/url.go:1001`）**差一格** ⇒ 归 `DRIFT-HOTAPI-030` 的**后续格（段数轴）**（跨域 ⇒ 收口在 `global`/G4 ⇒ **本域不改**）。
 
 ### D5 · 🔴 **L1 语义漂移**：JWT 验签被计入 3s 预算（Go 的计时器在 Authorize **之后**起算 ⇒ 验签在预算**之外**）
 
@@ -701,6 +707,19 @@ service/favorite/api/internal/svc/service_context.go:20
 | 还原 | ✅ **1/1 绿** · `sha256` 与变异前备份**逐字一致** |
 | 整域回归 | ✅ **四域 12 模块 = 919 条**（article-common 15 / article-api 99 / article-rpc 155 / comment-common 27 / comment-api 52 / comment-rpc 116 / favorite-common 29 / favorite-api 105 / favorite-rpc 114 / hot-common 14 / hot-api 96 / hot-rpc 97）⇒ **0 failures / 0 errors / 4 skipped** · 9:44 min · BUILD SUCCESS<br>口径：`mvn -o --fail-at-end -pl <12 模块> -am test`；基线 `eb4d1d2` + 本轮改动；核对日期 **2026-10-27**；两口径（模块汇总行求和 ≡ 逐类明细行求和）**逐模块一致** |
 > 🔴 **2026-10-27 · 订正注记（承 G1 的 ③：「0 failures」必须带**跑次与时间戳**，否则下轮会被当现状）**：本行的 **919 条 ＋ 0 failures / 0 errors** 属于**D10 落码前那一跑次**（2026-10-27 09:44 min）⇒ ⇒ **不是当前数**（**当前 = 922**，见 `favorite/rpc.md` / `hot/rpc.md` 的 D10 落码后那行）⇒ ⇒ **当前也不是全绿**。<br>**当前实测（2026-10-27 17:21 · G3 树 · 域内 12 模块 · 129 份 surefire XML 逐文件求和）**：合计 **922 条 / skipped 4** ⇒ ⇒ **但有 3 份报告带失败/错误**：① `17:21:19` `FavoriteApiRealTomcatGateTest`（**3 errors**）＋ ② `17:21:40` `FavoriteApiEnvelopeParityTest`（**1 error**）⇒ 根因 = `java.net.ProtocolException: Too many interim responses received: 9 > 8`（**JDK HttpClient 对 Tomcat 多次 100-Continue 的上限**）⇒ ⇒ **根因在共享层 `cd893d1` 抬容器上限到 10001** ⇒ **不是域内问题** ⇒ 已转派 G4；③ `13:08:29` `CommentRpcRuntimeBootGateTest`（**1 error** · `realFatJarProcessBootsAndListens`）⇒ ⇒ **就绪探测 flake 族**（article-rpc / comment-rpc / like-rpc 同款；⚠️ **与 G1 域那款「连接预算」根因不同 ⇒ 分开记**）。<br>⇒ ⇒ **读本表的人以本注记为准**：上表的绿是**那一跑次**的绿，**当前域内 12 模块有 5 条红**（favorite 4 条 ＋ comment-rpc 1 条）。
+
+> 🔴 **2026-10-29 真实性复核 —— 「0 failures / 0 errors / 4 skipped」**不得读成「全绿」**（原值保留，不改写）：这 **4 条 skipped 不是「失败」也不是「漏跑」，而是**探针驱动型对拍测试的**设计内跳过** ⇒ ⇒ **它们恰恰说明本域的双侧活体对拍**不在默认回归里** ⇒ ⇒ 「0F/0E」只覆盖**默认回归面**，**不覆盖**双侧对拍面。
+>
+> | skipped 的 4 条（类） | 所属模块 | 门控注解（实测行号） | 缺哪个环境变量就 skip | 由谁单独驱动 |
+> |---|---|---|---|---|
+> | `FavoriteSqlStatementParityTest` | `favorite-rpc` | `:113` `@EnabledIfEnvironmentVariable(named = "PROBE_GO_TARGET", matches = ".+")` | `PROBE_GO_TARGET` | `tools/sql-statement-probe/favorite/run.sh` |
+> | `FavoriteGrpcContractParityTest` | `favorite-rpc` | `:133` 同上（`PROBE_GO_TARGET`） | `PROBE_GO_TARGET` | `tools/grpc-contract-probe/favorite/run.sh` |
+> | `FavoriteCreateSuccessParityTest` | `favorite-rpc` | `:88` `@EnabledIfEnvironmentVariable(named = "PROBE_GO_TARGET_SUCCESS", matches = ".+")` | `PROBE_GO_TARGET_SUCCESS` | `tools/api-full-parity-probe/favorite-rpc/run.sh` |
+> | `FavoriteApiFullParityTest` | `favorite-api` | `:86` `@EnabledIfEnvironmentVariable(named = "PROBE_GO_API", matches = ".+")` | `PROBE_GO_API` | `tools/api-full-parity-probe/favorite/run.sh` |
+>
+> ⇒ ⇒ **3（favorite-rpc）+ 1（favorite-api）= 4** ⇒ 与本表「favorite-rpc skipped 3 / favorite-api skipped 1」的分模块口径**逐条对上**。
+> ⇒ ⇒ **这 4 条不是漏跑**（它们**有**独立的双侧活体对拍通道 ⇒ `tools/*-probe/favorite*/run.sh`）⇒ **但默认回归的「0F/0E」覆盖不到它们** ⇒ ⇒ **正确读法**：默认回归绿 ⇒ **只说明默认回归面绿**；双侧一致性的证据**在那 4 个探针各自的运行结果里**（各探针自带 `EXIT=0` 口径）。
+> ⇒ **核对日期 2026-10-29**。
 
 **证据强度**：L3 静态实测（Boot 4.0.8 **字节码** + Lettuce 6.8.2 常量 + go-redis v9.20.0 源码）
 ＋ L4 **真容器**装配断言（`ApplicationContextRunner` + Boot 真实 `DataRedisAutoConfiguration`）。

@@ -20,13 +20,13 @@
 
 | ID | 结论 | 证据（核对日期 2026-10-29） |
 |---|---|---|
-| `SD-HOT-API-001` | ✅ **仍成立** | Go 侧随机性仍在：`rest/httpx/util.go:36` 的 `for name, values := range r.Form` 遍历 **map**（顺序随机）+ `:59-61` 剥 `[]` 后缀写进同一个 key ⇒ 谁覆盖谁随机。RAG 侧仍是**取确定值**：`service/hot/hot-api/src/main/java/com/rag/hot/hot/api/form/GoFormValues.java:200-215`（先查精确名，再查 `name[]`，取**首个非空**）⇒ 差异仍存在 |
+| `SD-HOT-API-001` | ✅ **仍成立** | Go 侧随机性仍在：`rest/httpx/util.go:36` 的 `for name, values := range r.Form` 遍历 **map**（顺序随机）+ `:59-61` 剥 `[]` 后缀写进同一个 key ⇒ 谁覆盖谁随机。RAG 侧仍是**取确定值**：`service/hot/hot-api/src/main/java/com/rag/hot/hot/api/form/GoFormValues.java:200-215`（先查精确名，再查 `name[]`，取**首个非空**）⇒ 差异仍存在<br>🔴 **2026-10-29 真实性复核 —— 上行那两个 Go 行号各差 1（原文保留，不改写）**：go-zero v1.10.2 实测 ⇒ `for name, values := range r.Form` 在 **`:35`**（`:36` 是 `filtered := make(...)`）；剥 `[]` 后缀并写回同一 key 在 **`:57-60`**（`:57` HasSuffix → `:58` `name = name[:len(name)-2]` → `:60` `params[name] = filtered`）⇒ ⇒ **语义断言逐条正确、签字仍成立**，但**指针应读作 `:35` / `:57-60`**（E68 同型：行号合法但指向错行）。**核对日期 2026-10-29**。 |
 | `SD-HOT-API-002` | ✅ **仍成立** | RAG 侧仍**不**把 Servlet 断连转成 gRPC 取消：断连信号仍只体现为「2s deadline 到点结束」（`docs/DRIFT/hot/api.md` 的 **D3** 行 + `DRIFT-HOTAPI-025`）⇒ 「少一个取消源」的形态未变 |
 | `SD-HOT-API-003` | ✅ **仍成立** | Go 的 `defer` 读**命名返回值** `err` ⇒ panic 展开时仍为 nil ⇒ 指标仍被记 `success`；RAG 侧仍按客户端**实际看到的结果**记 `fail` ⇒ 差异未变（且该路径仍无代码可达） |
 | `SD-HOT-API-004` | ⛔ **已失效（签字描述的行为已不存在）** ⇒ **应从计数中剔除** | 签字描述的是「**Go 注册了 5 个 collector 但无端点暴露** ⇒ RAG 单向增强」。**实测：该不对称不存在** —— Go 侧**确实暴露** `/metrics`：<br>① `service/hot/api/hotcenter.go:41` `rest.MustNewServer(c.RestConf)`；<br>② go-zero v1.10.2 `rest/server.go:48-50` `NewServer` → `c.SetUp()`；<br>③ `rest/config.go:45-46` `RestConf` 内嵌 `service.ServiceConf`；<br>④ `core/service/serviceconf.go:40` `DevServer DevServerConfig json:",optional"` + `:29` `DevServerConfig = devserver.Config` + `:77` `devserver.StartAgent(sc.DevServer)`；<br>⑤ `internal/devserver/config.go` `Enabled(default=true)` / `MetricsPath(default=/metrics)` / `EnableMetrics(default=true)`，`internal/devserver/server.go:45-48` `if s.config.EnableMetrics { prometheus.Enable(); s.handleFunc(s.config.MetricsPath, promhttp.Handler().ServeHTTP) }`；<br>⑥ Go 真源 `service/hot/api/etc/hotcenter.yaml` 的 `DevServer: {Enabled: true, Host: 0.0.0.0, Port: 16067, MetricsPath: /metrics, EnableMetrics: true}` **被解析**；<br>⑦ 被暴露的正是 `promhttp.Handler()`（**默认 registry**）⇒ 正是 `service/hot/api/internal/metrics/metrics.go:47-51` 用 `client_golang` 的 `prometheus.MustRegister(...)` 注册的那 5 个 `hot_api_*`。<br>⇒ ⇒ **Go 侧 `http://0.0.0.0:16067/metrics` 有这 5 个指标** ⇒ **「RAG 单向增强」这个被签字的行为已不存在** ⇒ 签字自动失效。<br>⚠️ **签字理由的表述也随之不成立**（见下条目的订正注记） |
 | `SD-HOT-API-005` | ✅ **仍成立** | RAG 侧仍记 grpc-java 形态：`service/common/src/main/java/com/rag/common/logger/Logger.java` 的 `error_reason` 取 `err.getMessage()`；Go 侧 `service/common/logger/logger.go:118-123` 记 `err.Error()`（grpc-go 形态 `"rpc error: code = Unavailable desc = …"`）⇒ 形态差异未变 |
 | `SD-HOT-API-006` | ⛔ **已失效（2026-10-25 已撤销 · 本轮复核确认）** ⇒ **不计入计数** | 复核确认原判：RAG 侧 JSON 响应**现在带** `charset=utf-8` ⇒ `service/common/src/main/java/com/rag/common/http/GoStyleJsonContentTypeAdvice.java`（`@AutoConfiguration`，已登记进 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` ⇒ **10 个 api 全部生效**）写 `application/json;charset=utf-8`（`:127` `GO_JSON_CONTENT_TYPE` / `:151` `response.getHeaders().set(...)`）⇒ **被签字描述的那个行为（「不带 charset」）已不存在** ⇒ 维持撤销 |
-| `SD-HOT-API-007` | ✅ **仍成立** ＋ ⚠️ **描述需订正** | 被签字的行为仍在：`service/hot/hot-api/src/main/resources/application.yml:182-183` `management.metrics.tags.application: hot-api` ⇒ RAG 侧 Prometheus 指标**带** `application="hot-api"`（Go 侧默认 registry 无此标签）。<br>⚠️ **但签字理由里的一个前提已过期**（原句保留在正文，见该条目的「订正注记」）：**「全仓统一配了同一项」已不成立** —— 实测 8 个 api 模块里**只有 5 个**配了 `management.metrics.tags.application`（`article-api` / `comment-api` / `favorite-api`（`${spring.application.name}`）/ `hot-api` / **`message-api`**），`follow-api` / `like-api` / `task-api` **未配** ⇒ hot-api 去掉该标签将变成 **3 个例外之一**，而非「唯一例外」（⚠️ **主线二次订正**：本条原写「4 个 / `message-api` 未配 / 5 个例外」⇒ 有误 ⇒ 详见下方「订正注记」） |
+| `SD-HOT-API-007` | ✅ **仍成立** ＋ ⚠️ **描述需订正** | 被签字的行为仍在：`service/hot/hot-api/src/main/resources/application.yml:182-183` `management.metrics.tags.application: hot-api` ⇒ RAG 侧 Prometheus 指标**带** `application="hot-api"`（Go 侧默认 registry 无此标签）。<br>⚠️ **但签字理由里的一个前提已过期**（原句保留在正文，见该条目的「订正注记」）：**「全仓统一配了同一项」已不成立** —— 实测 8 个 api 模块里**只有 5 个**配了 `management.metrics.tags.application`（`article-api` / `comment-api` / `favorite-api`（`${spring.application.name}`）/ `hot-api` / **`message-api`**），`follow-api` / `like-api` / `task-api` **未配** ⇒ hot-api 去掉该标签将变成 **3 个例外之一**，而非「唯一例外」（⚠️ **主线二次订正**：本条原写「4 个 / `message-api` 未配 / 5 个例外」⇒ 有误 ⇒ 详见下方「订正注记」）<br>📌 **2026-10-29 真实性复核 · 口径补全（不改写上面那句）**：上面那句数的是**「8 个非 users 的 api 模块」** ⇒ **若把 users 域的两个 api 一并计入**，实测（逐模块看 `management:` → `metrics:` → `tags:` → `application:` 这个**嵌套**块；⚠️ **不能用 `grep 'management.metrics.tags.application'` 点号路径** —— YAML 是嵌套写法 ⇒ 该串在任何模块里都不出现 ⇒ 会误得「0 个全没配」）**全仓 10 个 api 模块里 7 个配了 / 3 个没配**：`article-api`（`:225`）/ `comment-api`（`:173`）/ `favorite-api`（`:195`）/ `hot-api`（`:183`）/ **`message-api`（`:213`）** / `users/user`（`:187`）/ `users/admin`（`:178`）配了；**`follow-api` / `like-api` / `task-api` 没配**。<br>⇒ ⇒ **签字的行为仍成立**（RAG 侧每个指标仍带 `application="hot-api"`，Go 侧默认 registry 仍不带全局标签）⇒ **维持签字、不撤销**；只是**「全仓统一」这个理由的强度下降** ⇒ **3 个例外之一**这一格无论按哪个口径都成立。**核对日期 2026-10-29** |
 | `SD-HOT-API-008` | ✅ **仍成立** | RAG 侧仍注册到 Nacos：`service/hot/hot-api/src/main/resources/application.yml:22-26`（`spring.cloud.nacos.discovery.server-addr` / `namespace` / `group`）+ `HotApiApplication` 的 `@EnableDiscoveryClient` ⇒ Go 侧 hot-api 仍**完全不注册** ⇒ 差异未变 |
 | `SD-HOT-API-009` | ✅ **仍成立** | `service/hot/hot-api/src/main/resources/application.yml:34` 仍为 `port: ${HOT_API_PORT:18897}`（Go `etc/hotcenter.yaml` 的 `Port: 8893`）⇒ 端口差异未变 |
 | `SD-HOT-API-010` | ✅ **仍成立** | RAG 侧仍保留跨请求总上限：`service/hot/hot-api/src/main/java/com/rag/hot/hot/api/config/HotHydrationExecutorConfiguration.java:65` `POOL_SIZE = 64`（+ 队列 64）⇒ Go 侧无此封顶 ⇒ 差异未变 |
@@ -50,7 +50,7 @@
 
 ---
 
-## SD-HOT-API-001 · 重复键混用时取确定值（Go 侧随机）
+## SD-HOT-API-001 · 重复键混用时取确定值（Go 侧随机） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 - **Component**：`GET /hot/v1/articles` 的 query 解析
 - **Go 出处**：
@@ -58,6 +58,18 @@
     ⇒ `?page=1&page[]=2` 时，**两个 key 写的是同一个 `params["page"]`**，后者**覆盖**前者；
   - `rest/httpx/util.go:36` — `for name, values := range r.Form` ⇒ **map 遍历序随机**
     ⇒ 谁覆盖谁是**随机的**。
+  > 🔴 **2026-10-29 真实性复核 —— 上面两个行号各差 1（原值保留，不改写）**：
+  > 本机实测（go-zero **v1.10.2**，真源 `go.mod:17` pin；文件 `~/go/pkg/mod/github.com/zeromicro/go-zero@v1.10.2/rest/httpx/util.go`）⇒
+  > **① `for name, values := range r.Form` 在 `:35`**（`:36` 是 `filtered := make([]string, 0, len(values))`）；
+  > **② 剥 `[]` 后缀 + 写回同一个 key 在 `:57-60`**（`:57` `if strings.HasSuffix(name, arraySuffix)` → `:58` `name = name[:len(name)-2]` → `:60` `params[name] = filtered`）；
+  > ⇒ **语义断言本身逐条正确**（map 遍历序随机 ⇒ 谁覆盖谁随机；`[]` 后缀被剥掉 ⇒ 两个 key 写同一个 `params["page"]`）⇒ **签字仍成立**；
+  > ⇒ ⚠️ **但指针必须改对** —— 「行号合法、指向错行」是 E68 同型（**指针能解析 ≠ 结论为真**）⇒ ⇒ **本条的行号应读作 `:35` 与 `:57-60`**。
+  > ⇒ 📌 **旁证（同一文件的另外两个真锚点，供后续引用照抄）**：`:15` `maxFormParamCount = 2048`；`:33` `var n int`（**在 name 循环之外** ⇒ 计数器**跨所有 key 共享**）。
+  > 🔴 **2026-10-29 附带发现：同一个错行号已经进了【产品代码注释】（本 lane 不改代码 ⇒ 只登记）** ——
+  > `service/hot/hot-api/src/main/java/com/rag/hot/hot/api/form/GoFormValues.java:129` 与 `:203` 两处「Go: …」注释写的也是 `httpx/util.go:59-61` ⇒ **同一个差 1 的行号**。
+  > ⇒ **语义断言本身正确**（`?page[]=5` 确实被剥掉 `[]` 后缀归到 key `page`）⇒ **只是行号指向了 `:59`–`:61`（`}` / `params[name] = filtered` / `}`）而不是真正的剥后缀那一行 `:57-58`**。
+  > ⇒ ⚠️ **AGENTS.md §3.3.2 的形态**（「以「Go: …」措辞写出的断言本身是高危项」）⇒ **改法 = 把这两处注释的 `:59-61` 改成 `:57-60`** ⇒ **但 `service/**` 是产品代码、本 phase 的写权边界只在 `docs/**`** ⇒ ⇒ **不擅自改** ⇒ **登记在此，交由 hot 域的落码轮处理**。
+  > ⇒ 📌 **同文件里另外两条「Go: …」注释是对的**（可作对照）：`:210` `Go: httpx/util.go:44-45`（空值被丢弃 ⇒ **正确**）· `:204` 的 `name[]` 查询逻辑与 Go 的 `params[name]` 一一对应 ⇒ **正确**。
 - **实测（go-zero v1.10.2 活体探针，同一 URL 连跑 8 次）**：`page=2` 6 次、`page=1` 2 次
   ⇒ **Go 自己的行为是非确定性的**。
 - **RAG 形态**：`GoFormValues.firstFormValue` 先查**精确名** `page`，查不到再查 `page[]`
@@ -70,7 +82,7 @@
 
 ---
 
-## SD-HOT-API-002 ✅ 已留痕 · 客户端**断连**的取消信号不再向 100 次补全传播
+## SD-HOT-API-002 ✅ 已留痕 · 客户端**断连**的取消信号不再向 100 次补全传播 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > 🟥 **2026-10-24 第十一轮回填**：本条原先**只有汇总表一行、正文缺章节** ⇒ 已补齐。
 
@@ -84,7 +96,7 @@
 
 ---
 
-## SD-HOT-API-003 ✅ 已留痕 · Go panic 时指标被误记为 `success`，RAG 按客户端实际看到的结果记 `fail`
+## SD-HOT-API-003 ✅ 已留痕 · Go panic 时指标被误记为 `success`，RAG 按客户端实际看到的结果记 `fail` ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > 🟥 **2026-10-24 第十一轮回填**：本条原先**只有汇总表一行、正文缺章节** ⇒ 已补齐。
 
@@ -96,7 +108,7 @@
 
 ---
 
-## SD-HOT-API-004 ⛔ **已失效（2026-10-29 重核 · 签字描述的行为已不存在）** · 5 个 `hot_api_*` 指标**真的被暴露**（Go 注册了但无端点暴露）
+## SD-HOT-API-004 ⛔ **已失效（2026-10-29 重核 · 签字描述的行为已不存在）** · 5 个 `hot_api_*` 指标**真的被暴露**（Go 注册了但无端点暴露） ｜ **状态（核对日期 2026-10-29）：⛔ 已失效·已撤销**
 
 > 🟥 **2026-10-24 第十一轮回填**：本条原先**只有汇总表一行、正文缺章节** ⇒ 已补齐。
 
@@ -143,7 +155,7 @@
 
 ---
 
-## SD-HOT-API-005 ✅ 已签字 · 下游 gRPC 失败的日志串用 grpc-java 形态
+## SD-HOT-API-005 ✅ 已签字 · 下游 gRPC 失败的日志串用 grpc-java 形态 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 - **Component**：hot-api 业务错误日志的 `error_reason` 字段，在**下游 gRPC 调用失败**时的形态
 - **Go 出处**：
@@ -174,7 +186,7 @@
 
 ---
 
-## SD-HOT-API-006 ⛔ 已撤销（2026-10-25）· `Content-Type` 的 `charset=utf-8` 参数
+## SD-HOT-API-006 ⛔ 已撤销（2026-10-25）· `Content-Type` 的 `charset=utf-8` 参数 ｜ **状态（核对日期 2026-10-29）：⛔ 已失效·已撤销**
 
 ### 撤销记录（2026-10-25 · 第二十五轮 · global T-6）
 
@@ -265,7 +277,7 @@ org/apache/coyote/Http11OutputBuffer.writeHeaders()
 
 ---
 
-## SD-HOT-API-007 ✅ 已签字 · Prometheus 指标带全局标签 `application="hot-api"`
+## SD-HOT-API-007 ✅ 已签字 · Prometheus 指标带全局标签 `application="hot-api"` ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > ### ⚠️ 2026-10-29 订正注记（台账对齐 phase · W-E lane）—— **签字仍有效，但签字理由的「全仓统一」前提已过期**
 >
@@ -312,7 +324,7 @@ org/apache/coyote/Http11OutputBuffer.writeHeaders()
 
 ---
 
-## SD-HOT-API-008 ✅ 已签字 · hot-api 注册到 Nacos（Go 侧不注册）
+## SD-HOT-API-008 ✅ 已签字 · hot-api 注册到 Nacos（Go 侧不注册） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 - **Component**：hot-api 的**服务注册**（部署面）
 - **Go 出处**：
@@ -345,7 +357,7 @@ org/apache/coyote/Http11OutputBuffer.writeHeaders()
 
 ---
 
-## SD-HOT-API-009 ✅ 已签字 · hot-api 的 HTTP 端口取 18897
+## SD-HOT-API-009 ✅ 已签字 · hot-api 的 HTTP 端口取 18897 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 - **Component**：hot-api 的 HTTP 监听端口
 - **Go 出处**：`service/hot/api/etc/hotcenter.yaml` 的 `Port: 8893`（go-zero `rest.RestConf`）。
@@ -362,7 +374,7 @@ org/apache/coyote/Http11OutputBuffer.writeHeaders()
 
 ---
 
-## SD-HOT-API-010 ✅ 已签字 · 补全的**跨请求**并发总上限（RAG 有，Go 没有）—— RAG 更保守的一侧
+## SD-HOT-API-010 ✅ 已签字 · 补全的**跨请求**并发总上限（RAG 有，Go 没有）—— RAG 更保守的一侧 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 - **Component**：hot-api 的补全执行器（`service/hot/hot-api/.../config/HotHydrationExecutorConfiguration.java`）
 - **Go 出处**：
@@ -406,13 +418,13 @@ org/apache/coyote/Http11OutputBuffer.writeHeaders()
 
 ---
 
-## SD-2026-10-25-CAND-10：超长请求行 ⇒ RAG **400 + Tomcat HTML**，Go **431 + `text/plain`**
+## SD-2026-10-25-CAND-10：超长请求行 ⇒ RAG **400 + Tomcat HTML**，Go **431 + `text/plain`** ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**
 
 | 项 | 值 |
 |---|---|
 | 状态 | 🟡 **待签字候选（未签字）** —— 属**框架限制**，不是「RAG 偷懒」 |
 | 组件 | `service/hot/hot-api`（**性质是 Tomcat 全体** ⇒ 10 个 api 模块都适用） |
-| **Go 出处** | **Go 标准库 `net/http/server.go`**（⚠️ **不在 `Sea-RideTheWind_golang` 项目树里** ⇒ 见 **PIT-GLOBAL-001** / **PIT-GLOBAL-006**）：<br>· **`:931`** `const DefaultMaxHeaderBytes = 1 << 20 // 1 MB` ⇒ **上限基数 = 1 MiB**；<br>· **`:941`** `return int64(s.maxHeaderBytes()) + 4096 // bufio slop` ⇒ **真实阈值 = 1 MiB + 4096**（**RAG 侧的 `1028KB` 就是照这条配的**）；<br>· **`:2040`** `const errorHeaders = "\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n"` ⇒ **`Content-Type` 是 `text/plain; charset=utf-8`**；<br>· **`:2049-2050`** `const publicErr = "431 Request Header Fields Too Large"` + `fmt.Fprintf(c.rwc, "HTTP/1.1 "+publicErr+errorHeaders+publicErr)` ⇒ **状态码 431 + body 就是这行字**。<br>**RAG 侧** Tomcat `org/apache/coyote/http11/Http11InputBuffer.java:768`（`fill`）抛 `IllegalArgumentException: Request header is too large` ⇒ 请求**没进 Servlet** ⇒ 状态码与错误体由 Tomcat 决定（`Constants.java` 无 431 预置常量 ⇒ 走 `Http11OutputBuffer` 的默认分支）。<br>⚠️ **阈值本身两侧已对齐**（翻转点**都是 1052536 字节，差 0**）⇒ 差异**只在拒绝时的呈现形态**（状态码 + `Content-Type` + body） |
+| **Go 出处** | **Go 标准库 `net/http/server.go`**（⚠️ **不在 `Sea-RideTheWind_golang` 项目树里** ⇒ 见 **PIT-GLOBAL-001** / **PIT-GLOBAL-006**）：<br>· **`:931`** `const DefaultMaxHeaderBytes = 1 << 20 // 1 MB` ⇒ **上限基数 = 1 MiB**；<br>· **`:941`** `return int64(s.maxHeaderBytes()) + 4096 // bufio slop` ⇒ **真实阈值 = 1 MiB + 4096**（**RAG 侧的 `1028KB` 就是照这条配的**）；<br>· **`:2040`** `const errorHeaders = "\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n"` ⇒ **`Content-Type` 是 `text/plain; charset=utf-8`**；<br>· **`:2049-2050`** `const publicErr = "431 Request Header Fields Too Large"` + `fmt.Fprintf(c.rwc, "HTTP/1.1 "+publicErr+errorHeaders+publicErr)` ⇒ **状态码 431 + body 就是这行字**。<br>**RAG 侧** Tomcat `org/apache/coyote/http11/Http11InputBuffer.java:768`（`fill`）抛 `IllegalArgumentException: Request header is too large` ⇒ 请求**没进 Servlet** ⇒ 状态码与错误体由 Tomcat 决定（`Constants.java` 无 431 预置常量 ⇒ 走 `Http11OutputBuffer` 的默认分支）。<br>⚠️ **阈值本身两侧已对齐**（翻转点**都是 1052536 字节，差 0**）⇒ 差异**只在拒绝时的呈现形态**（状态码 + `Content-Type` + body）📌 **2026-10-29 真实性复核 —— 这个指针是「jar 内第三方源码」，补成可复算**（**行号 `:768` 原样保留，不改**）：**版本** = Tomcat **11.0.24**（Spring Boot 4.0.8 管的版本 ⇒ `~/.m2/repository/org/springframework/boot/spring-boot-dependencies/4.0.8/spring-boot-dependencies-4.0.8.pom:209` `<tomcat.version>11.0.24</tomcat.version>`）⇒ **jar** = `~/.m2/repository/org/apache/tomcat/embed/tomcat-embed-core/11.0.24/tomcat-embed-core-11.0.24-sources.jar` ⇒ **成员** = `org/apache/coyote/http11/Http11InputBuffer.java` ⇒ **该行实际内容（实测）** = `throw new IllegalArgumentException(sm.getString("iib.requestheadertoolarge.error"));` ⇒ **所在方法** = `private boolean fill(boolean block)`（方法头在 `:753`）⇒ ⇒ **指针正确**。<br>⇒ ⚠️ **本机可核验**（不是「不可核验的外部锚点」）⇒ 机器判据 `tools/difftest/ledger-claim-audit.py --domain hot` 把它单列进 **「📦 jar 内第三方源码」档**、**不计失败**（该档单列 = 已定位到具体 jar + 成员路径 + 那一行的实际内容）。 |
 | 行为层 | **HTTP 状态码 + 错误响应体形状**（客户端可见）—— 仅限「请求行 > 1 MiB + 4 KiB」 |
 | 证据强度 | ✅ **双侧活体实测**（2026-10-25，二分出两侧翻转点） |
 
