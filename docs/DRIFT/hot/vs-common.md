@@ -176,6 +176,135 @@
 
 ---
 
+## 9. 🟢 新立 `T-2.7`：**hot 域独立失败路径矩阵**（**1 个 HTTP 端点 × 6 类失败维度** ＋ **5 个 gRPC 方法**）⇒ 基线 §九 `G-13` 在本域**闭合**（2026-10-29 · R2 lane · `align/r2-article-hot`）
+
+### 9.1 起因（基线原文）
+
+`docs/PhaseGoal-judge.md` P0 **#2** 的判据：
+> 「存在失败路径处理」**推不出**「参数校验 / 业务规则 / 认证 / 权限四项都有效」；且失败路径**域覆盖不全**
+
+＋ §九 **`G-13`**：「**4 域无独立失败路径矩阵**（`article` / `follow` / `task` / `hot`）」⇒ 🟡 **否**。
+⇒ **hot 是这 4 域之一** ⇒ 本轮补齐。
+
+### 9.2 落点（4 个文件 · **生产代码零改动**）
+
+| 文件 | 动作 | 内容 |
+|---|---|---|
+| `service/hot/hot-api/src/test/java/com/rag/hot/hot/api/support/RealTomcatPort.java` | **新增** | 真 Tomcat 的端口选取 ＋ **双地址** bind 自检 · 段 **18146–18150** |
+| `service/hot/hot-api/src/test/java/com/rag/hot/hot/api/HotApiFailurePathMatrixTest.java` | **新增** | **20 条**：1 端点 × 6 类失败维度 ＋ 边界值 ＋ 路由层 |
+| `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotRpcFailurePathMatrixTest.java` | **新增** | **8 条**：**5 个 gRPC 方法**逐个（**真 gRPC server ＋ 真 client**，断言的是**线上字节**） |
+| `service/hot/hot-api/src/test/mutate/mutate-failure-matrix.sh` | **新增** | **5 条变异**逐条精确转红 ＋ 还原后转绿（§9.6） |
+
+⇒ ⚠️ **hot 域生产代码零改动** ⇒ ⇒ **不构成 Go 对照项**（与本档 §3 同款口径）。
+
+### 9.3 为什么 hot-rpc 那份要起**真 gRPC server**
+
+已有的 `HotServiceGrpcImplErrorMappingTest` 只在 **observer 回调层**断言 ⇒ 它证明不了「这个 status 能不能**穿过 netty 传输层**到达客户端」。
+⇒ 本类起一个**真 gRPC server**（`RealGrpcPort` 段 `22500–22579`）＋ **真 `ManagedChannel`** 调用 ⇒ 断言的是**线上字节**。
+
+⚠️ **端口段为什么不取 global 段表的 `22500–22599`**：该段已被 **hot-rpc 整段吃满**（`hot-rpc/.../support/RealGrpcPort.java:91-94` 占 `22500–22579` ＋ `RealGrpcPortTest.java:48-51` 占 `22580–22599` 作守门脚手架）⇒ **段内无切片** ⇒ hot-api 的真 Tomcat 取 lane 分配的 `18146–18150`。📌 global 段表（`docs/DRIFT/global/vs-common.md` §4.10.19.3 · **G4 写权**）里 hot 域那一行仍是「预分配 22500–22599」⇒ **需 G4 在收口时补记本段** ⇒ **本域只在自己的台账登记，不改共享文件**。
+
+### 9.4 矩阵（期望值逐条带 Go `文件:行号`）
+
+**① hot-api（`GET /hot/v1/articles` · 真 Tomcat）**
+
+| 维度 | Go 出处 | 形态 | 条数 |
+|---|---|---|---|
+| **认证（零鉴权）** | `api/internal/handler/routes.go:16-25`（`AddRoutes` **只有** `WithPrefix`，**没有** `WithJwt` / `WithCors` / `WithMaxBytes`） | 无 token / 乱 token ⇒ **进业务**（**不得 401/403**） | 2 |
+| **参数校验** | `getHotArticlesHandler.go:18-20`（`httpx.Parse` 失败 ⇒ `httpx.ErrorCtx`）＋ `hotcenter.go:53-66`（**注册了** `SetErrorHandler`） | `page=abc` / `page_size=abc` ⇒ **HTTP 200 + `{code:5001,msg:"internal server error"}`**（**不是 400**）＋ **RPC 完全未被调用** | 3 |
+| **边界值** | `getHotArticlesLogic.go:172-190`（`normalizePagination`）· `:196`（`paginate` 的 **int32 乘法**） | `page≤0` ⇒ 回落 **1**；`page_size≤0` ⇒ 回落 **20**；`page_size>50` ⇒ **夹取 50**；`page=1000000` ⇒ **int32 溢出 ⇒ 空页（不是错误）**；同名多值 ⇒ **取第一个**（**不是 400**） | 4 + 1 + 1 + 1 + 1 |
+| **下游 fatal** | `getHotArticlesLogic.go:65-69`（rpc 出错）· `:70-75`（`hotResp == nil`） | 两条都是 **fatal** ⇒ **200 + `{code:5001}`** | 2 |
+| **下游 best-effort** | `getHotArticlesLogic.go:137-142`（RPC 出错 ⇒ skip）· `:143-147`（文章缺失 ⇒ skip）· `:150-154`（未发布 ⇒ skip）· `:127-130`（空 `article_id` ⇒ skip） | **只跳过该条**，其余照常返回 ⇒ **200 + `{code:200}`**，`total` 相应减少（**不得**整包 5001） | 3 |
+| **路由层** | `rest/router/patrouter.go:73`（未注册路径）· `:79-82`（方法不匹配） | 404 ⇒ **`404 page not found\n` + text/plain + nosniff**；405 ⇒ **裸状态码 + `Allow: GET` + 空 body + 无 Content-Type** | 2 |
+
+**② hot-rpc（5 个 gRPC 方法 · 真 gRPC server）**
+
+| 方法 | Go 出处 | 期望（**线上字节**） | 条数 |
+|---|---|---|---|
+| `GetHotArticles` | `get_hot_articles_logic.go:44-51` | 正常 ⇒ items 原样下发；**Redis 失败 ⇒ `UNKNOWN`**（Go **裸 error** 的落地码，`status.FromError` 返回 ok=false ⇒ **不是 INTERNAL**）＋ description 是原始错误文本 | 2 |
+| `LikeArticle` | `like_article_logic.go:44` | **`UNIMPLEMENTED`** ＋ 精确文案 **`LikeArticle not implemented yet`** | 1 |
+| `CoinArticle` | `coin_article_logic.go:36` | **`UNIMPLEMENTED`** ＋ 精确文案 **`CoinArticle not implemented yet`** | 1 |
+| `ShareArticle` | `share_article_logic.go:36` | **`UNIMPLEMENTED`** ＋ 精确文案 **`ShareArticle not implemented yet`** | 1 |
+| `CommentArticle` | `comment_article_logic.go:30` | **`success = true`**（**唯一不对称的那个** ⇒ 统一成 UNIMPLEMENTED 就是行为变更） | 1 |
+| 未注册方法 | `hot_service_server.go:12`（内嵌 `pb.UnimplementedHotServiceServer`） | **`UNIMPLEMENTED`** | 1 |
+
+### 9.5 🔴 本域最容易被「统一风格」抹掉的**三处不对称**
+
+| # | 不对称 | Go 出处 | 后果 |
+|---|---|---|---|
+| ① | **hot-api 注册了 `httpx.SetErrorHandler`** ⇒ **解析失败 = 200 + `{code:5001}`**（article-api 是 400 text/plain） | `hotcenter.go:53-66` | 照抄 article 的判据 ⇒ 本域 200 变 400 |
+| ② | **fatal 与 best-effort 方向相反**：hot-rpc 出错 ⇒ 整包 5001；article-rpc 出错 ⇒ **只跳过该条** | `getHotArticlesLogic.go:65-75` vs `:137-142` | 统一成「都抛异常」⇒ 「article-rpc 抖一下」从「少一条」变成「整包失败」—— **可用性级别**的漂移 |
+| ③ | **4 个互动方法里 3 个 UNIMPLEMENTED ＋ 1 个 `success=true`** | `like/coin/share_article_logic.go` vs `comment_article_logic.go:30` | 统一风格 ⇒ 客户端从「拿到成功」变成「拿到错误码」 |
+
+### 9.6 变异验证（**5/5 精确转红** ＋ 还原后转绿 ⇒ 网有牙）
+
+`service/hot/hot-api/src/test/mutate/mutate-failure-matrix.sh`（**还原用「备份 + 复制回来」，绝不用 `git checkout --`；**`rm -rf` 在本机会被回收站守卫整体拒绝**）。
+
+**判定口径比「跑一遍红了」严格**：**红的方法集合必须与预期**完全相等**（多红一条 = 判据之间有意外耦合；少红一条 = 这条断言是摆设）**。
+
+| # | 变异（改**生产代码**） | 预期红的方法集合 | 实测 |
+|---|---|---|---|
+| **H1** | `HotRankPaginator.MAX_PAGE_SIZE` **50 ⇒ 51** | `pageSizeIsClampedTo50` | ✅ 一致 |
+| **H2** | `HotRankPaginator.DEFAULT_PAGE` **1 ⇒ 2** | `nonPositivePaginationFallsBackToDefault` | ✅ 一致 |
+| **H3** | `HotArticleQueryService#fatal` 的业务码 **5001 ⇒ 5002** | `hotRpcNilResponseIsFatal` ＋ `hotRpcUnavailableIsFatal` | ✅ 一致 |
+| **H4** | `HotArticleHydrator` 的「**未发布 ⇒ skip**」闸门**反相**（`!= PUBLISHED` ⇒ `== UNSPECIFIED`）⇒ 草稿漏进热榜 | `unpublishedOrMissingArticleIsSkipped` | ✅ 一致 |
+| **H5** | `InteractionStubService.LIKE_UNIMPLEMENTED_MSG` 文案**逐字改错** | `likeArticleIsUnimplemented` | ✅ 一致 |
+
+⇒ **实跑**：`bash service/hot/hot-api/src/test/mutate/mutate-failure-matrix.sh` ⇒ **exit 0**（5/5 精确转红 ＋ 还原后两条 `exit 0`）。
+
+⚠️ **第一版 H4 打偏了（已订正，保留记录 —— 这一段本身就是「变异没打中」的现场）**：
+
+| 轮次 | 变异写法 | 实测 | 根因 |
+|---|---|---|---|
+| ① | 把「补全失败 ⇒ `return null`（skip）」改成「`throw e`（整包冒泡）」 | **红集合为空**（变异**没打中**） | `HotArticleHydrator#hydrate` 的 `catch (RuntimeException e)`（`:127-134`）会把任务体抛出的异常**吞掉**（Go 侧 `wg.Wait()` 同样不会失败）⇒ **「补全失败 ⇒ 整包失败」在当前实现里结构上不可达** |
+| ② | 把状态闸门反相写成 `ArticleStatus.UNSPECIFIED` | **编译失败**（`找不到符号: 变量 UNSPECIFIED`） | proto 的 `ARTICLE_STATUS_UNSPECIFIED` ⇒ protoc-java 的 Java 常量名是 **`ArticleStatus.ARTICLE_STATUS_UNSPECIFIED`**，不是 `UNSPECIFIED` |
+| ③（**采纳**） | `!= PUBLISHED` ⇒ `== ARTICLE_STATUS_UNSPECIFIED` | ✅ **精确转红**（`unpublishedOrMissingArticleIsSkipped`） | 打在**真正决定输出内容的那一处** |
+
+⇒ 📌 **这本身是一条有用的结论**：hot 域的 best-effort 有**两层**防护（内层 skip ＋ 外层吞异常）⇒ 变异必须打在**可观察的那一层**。
+⇒ 教训对应 `docs/Pitfalls/article/api.md` **P-21**：「仍全绿」的第一嫌疑是「**变异没打中**」；另加一条：**枚举常量名要按生成码核对**（proto 的 `ARTICLE_STATUS_UNSPECIFIED` ⇒ Java 的 `ARTICLE_STATUS_UNSPECIFIED`，**不是** `UNSPECIFIED`）。
+
+### 9.7 🟡 上报项：**`:59`（A7 行）与 `:67`（H-1 行）的自相矛盾 —— 裁定与不改写**
+
+| 项 | 内容 |
+|---|---|
+| **现象** | 本文件 `:59`（**A7 行**）的前半句写「🔴 **但无机器回归网**：`tools/difftest/check-proto-static.sh` **只覆盖 `user`/`admin`/`task`** ⇒ **hot 的 proto 契约无自动守门**」；而 `:67`（**H-1 行**）写「✅ **补 proto 契约回归网（2026-10-27 阶段 2 已落码）**」⇒ ⇒ **同一文件两行互相打架** |
+| **本轮核实（逐条实测）** | ① `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/proto/HotProtoContractTest.java` **存在**；② `.../HotProtoWireParityTest.java` **存在**；③ `git ls-files` 命中 `service/hot/hot-rpc/src/test/resources/proto-contract/{generate.py,hot-proto-contract.expected.txt}` ⇒ **守门在版本控制内**（不是 `/tmp` 摆设）；④ `tools/proto-wire-probe/hot/`（`run.sh` ＋ `mutate-wire.sh` ＋ `expected.txt` ＋ `go/main.go`）**存在** |
+| **裁定** | **`:67`（H-1）为准** ⇒ hot 的 proto 契约**确实有**自动守门（descriptor 级 `HotProtoContractTest` ＋ wire 字节级 `HotProtoWireParityTest` ＋ `tools/proto-wire-probe/hot/`）⇒ **A7 的证据强度按 L4 计**（与 §8 第 4 行「A7 = L3（descriptor 级）」的**旧口径**也不一致 ⇒ 一并由收口执行者核） |
+| **本轮处置** | ⛔ **不改写 `:59` / `:67` 原文** —— 两行都带**别的 lane 的落码记录与证据强度列** ⇒ 改写会掩盖「谁在何时落了什么」⇒ ⇒ **只在本节登记裁定 + 证据** ⇒ **由收口执行者**在合并收口时统一回填 |
+| **归属** | **共享面（`docs/DRIFT/hot/**` 虽在 G3 写权，但这两行的改写牵涉「跨 lane 的证据强度口径」）⇒ 收口执行者** |
+
+### 9.8 效力边界（如实登记，不夸大）
+
+| 边界 | 内容 |
+|---|---|
+| **证据强度** | **L3 / R3**（期望值逐条抄自 Go 源码 ＋ **真 Tomcat / 真 gRPC server** 自动化断言 ＋ **变异 5/5 精确转红**）⇒ 满足基线 §1.1 **R3** 的 ④⑤⑥ |
+| ⛔ **不是 R4** | R4 要求**双侧活体对拍 ＋ 变异** ⇒ 本类**只有**变异，**没有**双侧活体 ⇒ ⇒ **不得**据此宣称「与 Go 逐字节一致」 |
+| ⚠️ **P0 #2 仍不是 ✅** | `task` 域**仍无**独立失败路径矩阵（`T-2.8` · **G2**）⇒ 本条只闭合 **hot 域**（+ 本轮 article 域）⇒ **不因本条把 P0 #2 判成 ✅** |
+| ⚠️ **hot-rpc 的 Redis 客户端行为未覆盖** | `HotRpcFailurePathMatrixTest` 用**替身**让数据层失败（要验的是「失败 ⇒ UNKNOWN」这条**映射**）⇒ ⇒ **不声称**覆盖 Redis 客户端自身行为 |
+| ⚠️ **全局端口段表待 G4 补记** | 见 §9.3 ⇒ **共享文件 ⇒ 本域不擅自改** |
+
+### 9.9 实跑记录（**真实输出** · 2026-10-29）
+
+| 命令 | 结果 |
+|---|---|
+| `mvn -o -B -pl service/hot/hot-api -DargLine=-Xmx2g test` | **`Tests run: 116, Failures: 0, Errors: 0, Skipped: 0`** · **EXIT=0**（其中本轮新增 `HotApiFailurePathMatrixTest` = **20 条**，`Tests run: 20, Failures: 0`）|
+| `mvn -o -B -pl service/hot/hot-rpc -DargLine=-Xmx2g test` | **`Tests run: 129, Failures: 0, Errors: 0, Skipped: 0`** · **EXIT=0**（其中本轮新增 `HotRpcFailurePathMatrixTest` = **8 条**，`Tests run: 8, Failures: 0`）|
+| `bash service/hot/hot-api/src/test/mutate/mutate-failure-matrix.sh` | **EXIT=0**（**5/5 精确转红** ＋ 还原后 hot-api / hot-rpc 两条 `exit 0`）|
+| `python3 tools/difftest/check-wave-lane-ownership.py` | g3 lane **零违规**（剩余 3 项违规属 **g1 / g2** 的探针目录缺失 ⇒ **不是本 lane**）|
+
+⚠️ **本轮**生产代码**零改动** ⇒ ⇒ **不构成 Go 对照项**（与本档 §3 同款口径）。
+
+### 9.10 ⚠️ **本轮的栈形态 ＋ 串扰排查口径**（2026-10-29 主线同步后补记）
+
+| 项 | 结论 |
+|---|---|
+| **是否起双侧栈** | **否** —— 本轮只起 **RAG 单侧**：`hot-api` 的**真 Tomcat**（`DEFINED_PORT` ＋ 段 `18146–18150`）＋ `hot-rpc` 的**真 gRPC server**（段 `22500–22579`）＋ **打桩的 gRPC 客户端** ⇒ ⇒ **Go 真源进程一次都没起** ⇒ ⇒ 本轮**不是**双侧活体对拍 ⇒ 证据强度按 **R3**（§9.8）计，**不得**升 R4 |
+| **是否共享 Nacos** | **否** —— ① `hot-rpc` / `article-rpc` 客户端地址全部写死 `static://127.0.0.1:65535`（**不走服务发现**）；② `spring.cloud.service-registry.auto-registration.enabled=false`（**不注册**）；③ `spring.cloud.nacos.discovery.server-addr=127.0.0.1:1`（**死口**，不是宿主口 `49848`）⇒ ⇒ **本轮完全不接触共享 Nacos** ⇒ ⇒ **不受「共享 Nacos 里存在同 serviceName 的陈旧/他栈实例」那种串扰影响** |
+| **是否观测到 `INTERNAL` / `code=5001` / 熔断 failure** | **观测到的全部是测试自己打的桩**，逐条核对：① `hotRpcUnavailableIsFatal` 刻意让 hot-rpc 抛 `UNAVAILABLE` ⇒ 期望 5001；② `hotRpcNilResponseIsFatal` 刻意让 hot-rpc 返 `null` ⇒ 期望 5001；③ `unparsableQueryIs200With5001` 的 5001 来自**解析失败**这条被测路径；④ `HotServiceGrpcImpl -- [Hot] unhandled error: Redis …` 是 `redisFailureMapsToUnknownNotInternal` 的**输入**，**输出**是 `UNKNOWN` ⇒ ⇒ **没有一条是环境串扰**。三个模块全量套件 **210 / 116 / 129 条全绿 · EXIT=0**；两轮变异脚本**可重复**（article **6/6**、hot **5/5**，两次跑出**同一组**红集合）⇒ ⇒ **无并发串扰迹象** |
+| ⚠️ **反向纪律（AGENTS.md §3.3）** | **跑红 ≠ 是缺陷** ⇒ 本轮 hot 侧第一版 H4 变异**红集合为空**时，先判「**变异没打中**」（§9.6 的三轮记录）而不是判「产品有缺陷」⇒ ⇒ 与主线 2026-10-29 记录的那次 `INTERNAL` 偶发**同一纪律** |
+
+---
+
 ## 开工前置回执
 
 > ⚠️ **本节是 AGENTS.md §五·3b-0 第 ③ 步的「开工前置回执」**（模板 ⇒ `docs/Worktree.md` §二·五）⇒
@@ -228,7 +357,7 @@
 - `docs/Intentional_Deviations/hot/` ⇒ 已签 **17 条**（`SD-HOT-RPC-001~004` + `SD-1/2/3` + `SD-HOT-API-001~005/007~010`）⇒ 倾向 = **「RAG 更稳 / 更保守 / 单向增强」占多数**；`SD-HOT-API-006` ⛔ 2026-10-25 已撤销（`api.md:22`）；**未签字候选 1 条** = `SD-2026-10-25-CAND-10`（`api.md:332`）⇒ 登记类；`hot/common.md:7`「本组件无单独登记的签字偏离」＋ `:22-34` 两条「看起来像偏离、实际不是」。
 - `docs/Intentional_Deviations/_INDEX.md` ⇒ **CAND 族共 14 条未签字** ⇒ 按 §5.3c **不升级为拍板**；⚠️ `SD-` 编号**存在跨域撞号** ⇒ 引用必须给「**文件 + 域**」，不能只写编号。
 - `docs/PhaseGoal/g3.md` ⇒ **lane 判定 🟡**（16 组件：✅15 · 🟡1 · 🔴0）；**差距 = `article-rpc` 一个组件**；**§2.1「本 lane 自修」只有 `article-rpc` 一行**（`S-5` + `U-3/U-4/U-9/U-4′`）；**§2.2 转派 G4** = comment-rpc `D8/D9/U13` · favorite-api `U9/405/B2` · favorite-rpc `U7/U9/E65`；**§3 P0 主责 = #4**，协作 #1/#2/#3/#6/#8，不涉及 #5/#7/#9；§5 收口验收命令全可复算。
-- `docs/PhaseGoal-judge.md` ⇒ **§1.3** ✅ 判据 = `R ≥ R3` **且** 归属本组件的必相对齐项 = 0 **且** 有**可复算**判定命令；**§1.5 判定权威层模型**（`:93-108`）= **L0 台账「条目级最新状态」是唯一权威** ⇒ **不得引用台账头的「组件判定」行**；**§8.4 阶段一准入 = ❌ 未通过**，三类硬阻断 = **X-11 密钥链（P0 #8）** · **X-12 项目说明（P0 #5）** · like-rpc `DRIFT-LIKE-003` + global `E60` + 共享层 27 条；**§九 证据缺口**：`G-3`（article 双侧活体 0 条，⚫ **可解除**）· `G-5`（hot-common 探针在 `/tmp` ⇒ **本轮已闭合，可撤**）· `G-6` / `G-7` / `G-13`（4 域无失败路径矩阵，含 **article + hot**）· `G-15` / `G-18`（**本轮已订正**）· **`G-19`**（proto 消费方式未取证，10 个 proto 全部）· `G-20`（共享面 `:45` 已过期）。
+- `docs/PhaseGoal-judge.md` ⇒ **§1.3** ✅ 判据 = `R ≥ R3` **且** 归属本组件的必相对齐项 = 0 **且** 有**可复算**判定命令；**§1.5 判定权威层模型**（`:93-108`）= **L0 台账「条目级最新状态」是唯一权威** ⇒ **不得引用台账头的「组件判定」行**；**§8.4 阶段一准入 = ❌ 未通过**，三类硬阻断 = **X-11 密钥链（P0 #8）** · **X-12 项目说明（P0 #5）** · like-rpc `DRIFT-LIKE-003` + global `E60` + 共享层 **28 项（A 类 0）**（🔴 **2026-10-29 主线订正**：原写「27 条」⇒ 共享层基数已订正为「**28 项未修 · A 类 0**」⇒ 本树 `docs/DRIFT/global/vs-common.md` 尚未合入该订正 ⇒ **合并后自动一致**）；**§九 证据缺口**：`G-3`（article 双侧活体 0 条，⚫ **可解除**）· `G-5`（hot-common 探针在 `/tmp` ⇒ **本轮已闭合，可撤**）· `G-6` / `G-7` / `G-13`（4 域无失败路径矩阵，含 **article + hot**）· `G-15` / `G-18`（**本轮已订正**）· **`G-19`**（proto 消费方式未取证，10 个 proto 全部）· `G-20`（共享面 `:45` 已过期）。
 - `docs/PhasedGoal.md` ⇒ `:38-52` **P0 九条**（准入）· `:54-68` **P1**（至少 2~3 个机制形成闭环）· `:70-78` **P2**（生产级 SLO / 容量规划 / 灾备 / 灰度 / 穷尽故障组合 ⇒ **不阻塞**）；`:26-36` 明确「本节是语言描述，**可判定版在 `PhaseGoal-judge.md`**」。
 - `docs/twoStage.md` ⇒ **§4 阶段 0 事实基线**（`:258-310`：事实调查 / 三条核心链路 / 差异基线 9 字段，**必须保留到阶段 2 验收完成**）· **§5.3 差异与暂缓项 11 项必填**（`:359-379`，明写「不得只写『后续优化』」）· **§5.4 改造记录 9 项必填**（`:381-397`，「必须根据计划**实际修改**项目，而不是只输出建议」）· **§10 阶段归属 A/B/C/D**（`:941-975`：**A 类 = 阶段 1 准入阻断项**；**P0–P3 是严重度、A–D 是阶段归属，两者不能互相替代**）。
 - `docs/Pitfalls/article/api.md` ⇒ **P-1**（`:11`「没有 error handler ⇒ 一律 400」只走了一半推理）· **P-4**（`:141`「注解存在 ≠ 机制生效」）· **P-5**（`:171`「代码里写了 ≠ 客户端收到」）· **P-15**（`:516` 变异模块没重编 ⇒ **假的仍全绿**）· **P-21**（`:789`「仍全绿」的第一嫌疑是「**变异没打中**」）· **P-22**（`:830`「**javadoc 写了 Go 出处是待核实的断言，不是证据**」）。
