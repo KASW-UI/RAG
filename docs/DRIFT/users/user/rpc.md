@@ -564,6 +564,13 @@ RAG 多一层 properties。**该条不重开。**
 > ⇒ ⇒ **本条从「🔴 仍成立，但被卡」降级为「🟡 DDL 层差异 · 行为层零差异」**，**建议保持 RAG NOT NULL**。
 > ⇒ ⚠️ **本条尚未销号**（销号须与 G4 共同确认，见下）；**分类字段保留原值 `OBSERVABLE DIFFERENCE` 不改写**（订正以注记形式留痕）。
 > ⇒ 🔴 **给 G4 派单 #6 的回执**：其「两步方案」的第 1 步（把 `UserEntity.status` 改成能表达 NULL）**不能执行** ⇒ 那会破坏本条第 ③ 层已用双侧活体对拍证实的等价性；其裁决点「Go 侧读到 NULL status 会扫描报错」**事实错误**（第 ① ② 层）⇒ **#6 应当按「行为层零差异」重新定性，而不是走两步方案**。
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **🟡（2026-10-27 订正：定性为「DDL 层差异 · 行为层零差异」⇒ 建议保持 NOT NULL）** ⇒ **现行态 = 🟡 维持**（**可空性差异仍真实存在，但方向与「放开可空」相反**）。
+> - **RAG 侧**：`service/users/users-common/src/main/resources/db/01_create_user.sql:39` = `status      BIGINT NOT NULL DEFAULT 0,` ⇒ **NOT NULL 在位**（`:13` 为同句的注释头行）。
+> - **Go 侧**：`service/user/user/rpc/internal/model/data_model.go:11` = `Status     int64             `gorm:"column:status;default:0"`` ⇒ **无 `not null` tag** ⇒ GORM v2 对标量字段**默认不加 NOT NULL** ⇒ Go 侧 `status` 可空（`bigint` / `is_nullable=YES`）。
+> - ⇒ **两侧可空性差异仍存在**；但 Go 读 NULL 得 0、RAG 因 NOT NULL 读不到 NULL 也得 0 ⇒ **可观察结果相同**（本条原判的「行为层零差异」成立）⇒ **维持 🟡、维持「建议保持 NOT NULL」**。
+> - ⚠️ 本轮**未复跑真 PG 对拍** ⇒ 「可空性差异」按 §0 读作**在该证据强度下一致**（静态 DDL + Go model tag 两侧在场）；「行为层零差异」这一层**沿用原结论，本轮未重新取证**。
+> - ⚠️ **诚实边界**：本条**尚未销号**，与 G4 的共同确认项**仍开着**。核对日期 2026-10-30。
+> 🟢 **2026-10-30 补记（本轮真 PG 活体实测，替换上一段「未复跑」的诚实边界）**：本轮**已复跑** `python3 tools/difftest/check-ddl-static.py --domain users --check-source --indexes` ⇒ **退出码 1**（实质差异 16 处）。其中与本条直接相关的一行：**补充对照 · NOT NULL（可空性）：差异 1 处 ⇒ `users_user.status` go=(nullable=YES) / rag=(nullable=NO)** ⇒ **本条的可空性差异已被真 PG 活体实证**（不再是「静态 DDL + Go tag 推断」）。同一次实测还给出：**类型/长度差异 0 处**（35 列键集合一致、35 列逐字相同）· **DEFAULT 差异 8 处**（8 个 `create_time`/`update_time` 的 `DEFAULT CURRENT_TIMESTAMP`）· **索引实质差异 7 处**（Go 独有 3 条非唯一索引 + RAG 独有 4 条非唯一索引 ⇒ **性能面非行为面**）· **约束集合两侧完全一致** · **触发器两侧各 0 个 ⇒ 该维度「什么都没比」，不等于「已对齐」**。⚠️ 「**行为层零差异**」这一层仍**未复跑**（需真 PG 插 NULL 行的对照实验）⇒ 该层**沿用原结论**。核对日期 2026-10-30。
 
 ### DRIFT-USERRPC-V-003 DDL：`extra_info` 列类型 **text ↔ jsonb** —— ✅ **已修（2026-10-23 23:4x，commit `ec33159`）**
 
@@ -650,6 +657,10 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 
 **跨域**：`admin_admin.extra_info` 已由 admin 域改为 `text`（`DRIFT-ARPC-004①`，`c10f639`/`d7b2b45`）。
 本条修复后**两张表列类型一致，且都与 Go 一致** ⇒ §5b 记的那个不对称状态已消除。
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已修（2026-10-23 23:4x，commit `ec33159`）** ⇒ **现行态 = ✅ 维持已修**（**列类型两侧现在都是 `text`**）。
+> - **RAG 侧**：`service/users/users-common/src/main/resources/db/01_create_user.sql:41` = `extra_info  TEXT,` ⇒ **已是 text**（`:15` 为注释头行）· `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/domain/UserEntity.java:115` = `@TableField(value = "extra_info", typeHandler = com.rag.users.user.rpc.mapper.JsonTextTypeHandler.class)` ⇒ **写路径绑定也是 text 型 handler**。
+> - **Go 侧**：`service/user/user/rpc/internal/model/data_model.go:13` = `ExtraInfo  map[string]string `gorm:"column:extra_info;serializer:json"`` ⇒ GORM v2 的 `serializer:json` 字段落地为 **text** ⇒ **两侧同型**。
+> - ⇒ **`jsonb` 那一侧的差异已消失** ⇒ 维持 ✅ 已修。核对日期 2026-10-30。
 
 ### DRIFT-USERRPC-V-004 DDL：4 个时间列 **timestamptz ↔ timestamp**，连带 `create_time` 的时区标签 —— ✅ **已修（列类型与可观察半边）**
 
@@ -725,6 +736,10 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
   「**protobuf3 的空 map 在 wire 上不可表达**」（零条目 ⇒ 字段缺席 ⇒ 解出来是 nil）
   ⇒ ⇒ **V-005 判为「不成立」予以关闭**。本行「可达性未证」是**过期状态**。
 - **Risk**: LOW
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 判为「不成立」予以关闭** ⇒ **现行态 = ✅ 维持关闭**（**关闭理由在本轮被重新取证，仍然成立**）。
+> - **Go 侧**：`service/user/user/rpc/internal/logic/updateuserlogic.go:58-59` = `if in.ExtraInfo != nil {` / `toUpdate.ExtraInfo = in.ExtraInfo` ⇒ **分支条件是「指针非 nil」** ⇒ protobuf3 的**空 map 在 wire 上不可表达**（零条目 ⇒ 字段缺席 ⇒ 解出来必为 nil）⇒ Go 这条分支**不可达**。
+> - **RAG 侧**：`service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/service/UserDomainService.java:371` = `if (req.getExtraInfoCount() > 0) {` ⇒ **用 count 而非 null 判断** ⇒ 与 Go 同样不可达。
+> - ⇒ **两侧都到不了「显式空 map」这一格** ⇒ **本条不成立**、维持关闭。核对日期 2026-10-30。
 
 ### DRIFT-USERRPC-V-006 `users_user.id` / `users_user_avatar_history.id` 的取值来源不同 —— ✅ **已关闭（第四轮，真 PG 实证；永不进 wire）**
 
@@ -893,6 +908,11 @@ CAST 加回去端到端全绿也抓不到 ⇒ 只验第 1 条不够。
 - **Recommended**：删掉三个异常类与两个 mapper 方法，或把 javadoc 的伪出处改成「RAG 侧预留、未启用」。
 
 ---
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已修（2026-10-23 第四轮，commit `fa2de52`）** ⇒ **现行态 = ✅ 维持已修**（**三个异常类与两个 mapper 方法现在确实只剩注释、无任何声明/定义**）。
+> - **RAG 侧（异常类）**：`service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/exception/UserExceptions.java:34` = `// ── 2026-10-23 删除：以下三个异常类全仓零 throw 点…` · `:35` = `// 原类：PasswordMismatchException / UsernameExistsException / TokenBlacklistedException` ⇒ **仅注释，无类声明**；保留的 `NotFoundException` / `AvatarHistoryNotFoundException` 有真实 throw 点（见同文件 `:26` / `:29`）。
+> - **RAG 侧（mapper 方法）**：`service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/mapper/UserMapper.java:186` = `// 原 selectCurrentByUid(@Select) 与 findCurrentAvatar(default 包装) 全仓零调用点，` ⇒ **仅注释，方法定义已删**。
+> - **Go 侧（伪出处的反证）**：`service/user/user/rpc/internal/logic/loginlogic.go`（密码不匹配 ⇒ `return &pb.LoginResp{Status: 1}, nil`，**不是异常**）· `service/user/user/api/internal/logic/user/logoutlogic.go`（**无任何 token 有效性检查**）⇒ 两个 javadoc 声称的 Go 出处确实不存在。
+> - ⇒ 维持 ✅ 已修。⚠️ 本轮**未复跑** `mvn -pl user-rpc -am test` ⇒ 守门存在性已核（文件在位），**当前全绿未复跑**。核对日期 2026-10-30。
 
 ## 8. Test Cases（spec §29 + §30）
 
@@ -1481,6 +1501,10 @@ SEMANTICALLY EQUIVALENT（全部可达路径） + 7 项 OBSERVABLE DIFFERENCE
 3. 渲染 → **落在进程本地时区**（见 §2 的归因更正）
 
 **守门**：`UserRpcAvatarHistoryTimestamptzParityTest`（**9 条，真 PG**，本轮新建）
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已修（列类型与可观察半边）** ⇒ **现行态 = ✅ 维持已修**（**DDL 与迁移脚本都在**）。
+> - **RAG 侧**：`service/users/users-common/src/main/resources/db/02_create_user_avatar_history.sql:30` = `create_time  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,` · `:31` = `update_time  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP` ⇒ **建表语句已是 TIMESTAMPTZ**；`:87` = `ALTER TABLE users_user_avatar_history ALTER COLUMN create_time TYPE TIMESTAMPTZ USING create_time AT TIME ZONE 'UTC';` · `:88` = 同句对 `update_time` ⇒ **迁移脚本也在**（存量库可改型）。
+> - **Go 侧**：`service/user/user/rpc/internal/model/data_model.go:30` = `CreateTime  time.Time `gorm:"column:create_time;autoCreateTime"`` · `:31` = `UpdateTime  time.Time `gorm:"column:update_time;autoUpdateTime"`` ⇒ **无 `type:` tag** ⇒ GORM v2 对 `time.Time` 的 PG 默认类型就是 **timestamptz** ⇒ 两侧同型。
+> - ⇒ 维持 ✅ 已修。⚠️ 「**可观察半边**（`create_time` 渲染形态）」本轮**未复跑双侧活体对拍** ⇒ 按 §0 读作在该证据强度下一致。核对日期 2026-10-30。
 
 #### DRIFT-USERRPC-V-009 ✅ 已修（**本轮新发现**）—— 上传响应的 `create_time` 是空串
 
@@ -1503,6 +1527,10 @@ SEMANTICALLY EQUIVALENT（全部可达路径） + 7 项 OBSERVABLE DIFFERENCE
   Go 侧 `autoCreateTime` 与 `autoUpdateTime` 在 Create 路径上取**同一个** `curTime` ⇒ 同一个 `now`。
 - **守门**：同上 9 条里的 `uploadAvatarResponseCarriesNonEmptyCreateTime` +
   `returnedEntityCarriesTheStoredInstant` + `uploadResponseCreateTimeEqualsLaterRead`。
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已修（上传响应的 `create_time` 是空串）** ⇒ **现行态 = ✅ 维持已修**。
+> - **RAG 侧**：`service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/service/AvatarDomainService.java:117` = `b.setCreateTime(RFC3339.format(local));` ⇒ **上传响应现在真的写 `create_time`**（`:116` = `OffsetDateTime local = ct.atZoneSameInstant(ZoneId.systemDefault()).toOffsetDateTime();` ⇒ 带偏移量；`:118` 的注释写明「布局在偏移为 0 时输出 `"Z"`、否则 `"+08:00"`，与 Go 的 `"Z07:00"` 逐字符同构」；`:78` = `private static final DateTimeFormatter RFC3339 =`）。
+> - **Go 侧**：`service/user/user/rpc/internal/model/user.go`（`AvatarHistoryItem.CreateTime.Format(time.RFC3339)`；RAG 侧对照注释见 `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/service/AvatarDomainService.java:52` = `createTime = item.CreateTime.Format(time.RFC3339)`）。
+> - ⇒ 维持 ✅ 已修。核对日期 2026-10-30。
 
 #### DRIFT-USERRPC-V-010 ✅ 已修（**本轮新发现**）—— 全零值 update 也必须推进 `update_time`
 
@@ -1535,6 +1563,10 @@ SEMANTICALLY EQUIVALENT（全部可达路径） + 7 项 OBSERVABLE DIFFERENCE
   ⇒ 发出的 SQL 与 Go 的 `UPDATE users SET update_time = ? WHERE uid = ?` 逐条同构。
 - **守门**：`UserRpcContainerWiringTest#zeroValuePatchStillAdvancesUpdateTimeOnly`（**真 PG**，本轮**反转**了旧用例）
   + `UserRpcJsonTextAndAvatarProjectionTest#updateUserById_noBusinessFields_stillAdvancesUpdateTime`。
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已修（全零值 update 也必须推进 `update_time`）** ⇒ **现行态 = ✅ 维持已修**。
+> - **RAG 侧**：`service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/mapper/UserMapper.java:95` = `🔴 <b>2026-10-23（DRIFT-USERRPC-V-010 修复）：{@code update_time} 必须<b>无条件</b>进 SET</b>` ⇒ **修法的意图与来由在代码里被显式钉住**；`:84` = `<p><b>update_time 必须在 SET 子句里显式带上</b>（DRIFT-001 修复）` ⇒ 两轮的修法都在；`:113` = `⇒ <b>Go 总会发出一条只推进 update_time 的 UPDATE</b>` · `:121`-`:122` 逐行列出 `请求体 {}` / `{"extra_info":{}}` 两个原本漂移的格子。
+> - **Go 侧**：`service/user/user/rpc/internal/model/data_model.go:15` = `UpdateTime time.Time `gorm:"column:update_time;autoUpdateTime"`` ⇒ **autoUpdateTime 无条件推进**。
+> - ⇒ 维持 ✅ 已修。⚠️ 本轮**未复跑**对应守门 ⇒ 守门存在性已核、**当前全绿未复跑**。核对日期 2026-10-30。
 
 ### 2. 🔴 归因更正：偏移量由**进程本地时区**决定，**不是** PG 会话时区
 
@@ -1665,16 +1697,16 @@ history 列表 create_time: Go = ['2026-10-23T21:21:40+08:00']  RAG = ['2026-10-
 
 | ID | 内容 | 本轮结论 | 为什么不动 |
 |---|---|---|---|
-| **DRIFT-USERRPC-V-002** | `users_user.status` **NOT NULL**（Go 可空） | 🟡 **2026-10-27 订正：DDL 层差异 · 行为层零差异**（Go 读 NULL ⇒ **0**，不报错；RAG NOT NULL ⇒ 读不到 NULL ⇒ 也是 0 ⇒ **可观察结果相同**）⇒ **建议保持 RAG NOT NULL**（⚠️ 尚未销号，须与 G4 共同确认） | 🟡 **真库实证确认**（§4） | ⚠️ **本行原写「动它会立刻激活 admin-rpc 的同款缺陷」—— 该指认已于 2026-10-23 被第三轮双侧活体对拍撤销**（admin-rpc 的 `= 0L` 是**与 Go 同形**的一侧，**不是缺陷**）⇒ **且「放开可空」会制造新漂移**（RAG 读出 null ≠ Go 的 0 ⇒ 方向相反）⇒ **正确处置是保持 NOT NULL**，不是与 admin 侧同改 |
-| **DRIFT-USERRPC-V-003** | `extra_info` `text` ↔ `jsonb` | ✅ **已修**（`ec33159`） | 你随后拍板「一起改成 text」。连带改 `JsonTextTypeHandler` + 去掉 2 处 CAST + 3 条守门（详见 §502）。跨域不对称随之消除 |
+| **DRIFT-USERRPC-V-002** | `users_user.status` **NOT NULL**（Go 可空） | 🟡 **2026-10-27 订正：DDL 层差异 · 行为层零差异**（Go 读 NULL ⇒ **0**，不报错；RAG NOT NULL ⇒ 读不到 NULL ⇒ 也是 0 ⇒ **可观察结果相同**）⇒ **建议保持 RAG NOT NULL**（⚠️ 尚未销号，须与 G4 共同确认） | 🟡 **真库实证确认**（§4） | ⚠️ **本行原写「动它会立刻激活 admin-rpc 的同款缺陷」—— 该指认已于 2026-10-23 被第三轮双侧活体对拍撤销**（admin-rpc 的 `= 0L` 是**与 Go 同形**的一侧，**不是缺陷**）⇒ **且「放开可空」会制造新漂移**（RAG 读出 null ≠ Go 的 0 ⇒ 方向相反）⇒ **正确处置是保持 NOT NULL**，不是与 admin 侧同改<br>⚠️ **2026-10-30 真实性复核（users lane）**：原判 **🟡（DDL 层差异 · 行为层零差异 ⇒ 建议保持 NOT NULL）** ⇒ **现行态 = 🟡 维持**。可复算指针（补本行 PTRLESS 缺口）：**RAG** `service/users/users-common/src/main/resources/db/01_create_user.sql:39` = `status      BIGINT NOT NULL DEFAULT 0,` · **Go** `service/user/user/rpc/internal/model/data_model.go:11` = `Status int64` + gorm tag `column:status;default:0`（**无 not null tag** ⇒ GORM 建表可空）⇒ 两侧可空性差异仍在。⚠️ **未复跑真 PG 对拍**；**尚未销号**。核对日期 2026-10-30。<br>🟢 **2026-10-30 补记（真 PG 活体实测）**：本轮已复跑 `python3 tools/difftest/check-ddl-static.py --domain users --check-source --indexes` ⇒ **退出码 1**；输出「补充对照 · NOT NULL（可空性）：差异 **1** 处 ⇒ `users_user.status` go=(nullable=YES) / rag=(nullable=NO)」⇒ **本条的可空性差异已被活体实证**（替换上一段的「未复跑真 PG 对拍」）。⚠️ 「行为层零差异」仍未复跑 ⇒ 沿用原结论。|
+| **DRIFT-USERRPC-V-003** | `extra_info` `text` ↔ `jsonb` | ✅ **已修**（`ec33159`） | 你随后拍板「一起改成 text」。连带改 `JsonTextTypeHandler` + 去掉 2 处 CAST + 3 条守门（详见 §502）。跨域不对称随之消除<br>⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已修（`ec33159`）** ⇒ **现行态 = ✅ 维持已修**。可复算指针（补本行 PTRLESS 缺口）：**RAG** `service/users/users-common/src/main/resources/db/01_create_user.sql:41` = `extra_info  TEXT,` + `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/domain/UserEntity.java:115`（`typeHandler = JsonTextTypeHandler.class`）· **Go** `service/user/user/rpc/internal/model/data_model.go:13` = `ExtraInfo map[string]string` + gorm tag `column:extra_info;serializer:json` ⇒ 两侧同型。核对日期 2026-10-30。|
 | **DRIFT-USERRPC-V-011（新）** | 时间列 **DEFAULT `CURRENT_TIMESTAMP`**（Go 无 DEFAULT） | 🔴 新发现 | 两侧写入路径都**显式**写这两个列（Go 靠 GORM autoCreateTime；RAG 本轮起靠应用侧时钟）⇒ DEFAULT 只在「有人不写该列」时生效 ⇒ **当前不可观察**。⚠️ 改它要先确认 admin 域与 `users_user` 的写入路径 |
-| **DRIFT-USERRPC-V-006** | `id` 的取值来源（Go `bigserial` 序列 vs RAG `IdType.ASSIGN_ID` 雪花） | ✅ **已关闭**（第四轮，真 PG 实证：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出；**永不进 wire**） | ⚠️ 本行此前写「仍成立」，是**过期状态**（第四轮已关，第六轮复核才发现汇总表没同步） |
-| **DRIFT-USERRPC-V-007** | 超时的 gRPC `description` 不同（`service/common` 组件） | ✅ **已销账（2026-10-26）** | 由 **`global` 域**修完（落点 `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` 的 `GO_DEADLINE_EXCEEDED_DESCRIPTION`；守门 `RpcInterceptorTimeoutDescriptionGateTest`；探针 `tools/semantic-probe/rpc-timeout/`）⇒ 两侧 description 逐字一致。⚠️ 修前状态保留在 §7 V-007 小节 |
-| **DRIFT-USERRPC-V-008** | 死代码 + **伪出处**（3 个异常类 + 2 个 mapper 方法） | ✅ **已修**（`fa2de52`） | 第四轮 §2 已删；且**伪出处是两个，不是一个**（`PasswordMismatchException` 声称的 `ALREADY_EXISTS` 在 Go 恰好相反）。⚠️ 本行此前仍写「仍成立」，属台账脱节，本轮复核更正 |
+| **DRIFT-USERRPC-V-006** | `id` 的取值来源（Go `bigserial` 序列 vs RAG `IdType.ASSIGN_ID` 雪花） | ✅ **已关闭**（第四轮，真 PG 实证：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出；**永不进 wire**） | ⚠️ 本行此前写「仍成立」，是**过期状态**（第四轮已关，第六轮复核才发现汇总表没同步）<br>⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已关闭（第四轮，真 PG 实证：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出；永不进 wire）** ⇒ **现行态 = ✅ 维持关闭**。可复算指针（补本行 PTRLESS 缺口）：**RAG** `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/domain/UserEntity.java:34` = `@TableId(type = IdType.ASSIGN_ID)` ⇒ **雪花 ID 仍在**（`:18` 的类注释明写「`@TableId(type = IdType.ASSIGN_ID)` 主键策略（雪花 ID）取代 JPA 的 `@Id + @GeneratedValue`」）· **Go** `service/user/user/rpc/internal/model/data_model.go:6` = `Id uint64` + gorm tag `primaryKey` ⇒ GORM 对 uint64 主键建 **bigserial 序列** ⇒ 两侧机制不同、但**都自产、都不进 wire** ⇒ 维持关闭。⚠️ 「真 PG 实证 `last_value` 仍是 1」本轮**未复跑** ⇒ 按 §0 读作在该证据强度下一致。核对日期 2026-10-30。|
+| **DRIFT-USERRPC-V-007** | 超时的 gRPC `description` 不同（`service/common` 组件） | ✅ **已销账（2026-10-26）** | 由 **`global` 域**修完（落点 `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` 的 `GO_DEADLINE_EXCEEDED_DESCRIPTION`；守门 `RpcInterceptorTimeoutDescriptionGateTest`；探针 `tools/semantic-probe/rpc-timeout/`）⇒ 两侧 description 逐字一致。⚠️ 修前状态保留在 §7 V-007 小节<br>⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已销账（2026-10-26，由 `global` 域修完）** ⇒ **现行态 = ✅ 维持销账**（**修法与守门都还在**）。可复算指针（补本行 PTRLESS 缺口）：**RAG** `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:168` = `private static final String GO_DEADLINE_EXCEEDED_DESCRIPTION = "context deadline exceeded";` ⇒ **常量在位**（`:330` = `goStyleStatusMessage(Code.DEADLINE_EXCEEDED, GO_DEADLINE_EXCEEDED_DESCRIPTION)` ⇒ 消费点）· **Go** `google.golang.org/grpc@v1.81.1/rpc_util.go:1100` = `var errContextDeadline = status.Error(codes.DeadlineExceeded, context.DeadlineExceeded.Error())` ⇒ **Go 侧 description 字面量就是 `context deadline exceeded`**（真源 `go.mod:25` pin `grpc v1.81.1`）⇒ 两侧逐字一致 ⇒ 维持销账。守门/探针**文件在位**：`service/common/src/test/java/com/rag/common/observability/RpcInterceptorTimeoutDescriptionGateTest.java` · `tools/semantic-probe/rpc-timeout/`。⚠️ 本轮**未复跑**探针。核对日期 2026-10-30。|
+| **DRIFT-USERRPC-V-008** | 死代码 + **伪出处**（3 个异常类 + 2 个 mapper 方法） | ✅ **已修**（`fa2de52`） | 第四轮 §2 已删；且**伪出处是两个，不是一个**（`PasswordMismatchException` 声称的 `ALREADY_EXISTS` 在 Go 恰好相反）。⚠️ 本行此前仍写「仍成立」，属台账脱节，本轮复核更正<br>⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已修（`fa2de52`）** ⇒ **现行态 = ✅ 维持已修**。可复算指针（补本行 PTRLESS 缺口）：**RAG** `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/exception/UserExceptions.java:35`（三个原类的**删除说明注释**，**无类声明**）+ `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/mapper/UserMapper.java:186`（两个原 mapper 方法的**删除说明注释**，**无方法定义**）· **Go** `service/user/user/rpc/internal/logic/loginlogic.go`（密码不匹配 ⇒ `return &pb.LoginResp{Status: 1}, nil`，**非异常** ⇒ 伪出处之一）⇒ 维持已修。核对日期 2026-10-30。|
 | **DRIFT-USERRPC-V-012（新 · 2026-10-26）** | **超时时的业务日志错误归因**：RAG 记「Redis 写入异常」而客户端收到「超时」；Go 两侧一致 | ✅ **已修（2026-10-27 · G1 lane · 域内一行）** —— 仅**「原始异常被整个吞掉」**这一条闭环（补 `logBusinessErr`）⇒ **wire 面零影响**；⚠️ ②③ 两条架构级**另立项** ⇒ **本条不销** | 三形态 × 双侧 gRPC 直连实测发现（**wire 面两侧一致**：都是 `INTERNAL` + 同一句）：<br>① **RAG 把原始异常整个吞掉**（`catch (Exception e)` 里既没 log 也没挂 cause ⇒ 实测 `cause=null`）⇒ 底层 Lettuce 异常在日志里看不见<br>🔴 **2026-10-26 晚范围收窄**：**只对 `logout` 的 Redis 写路径这 1 处成立**（本类 18 处 `catch (Exception e)` 里其余 17 处**都带 `e` 记了日志**）⇒ 修法收窄为「只补 1 处」；<br>② **B-1 守卫只挡 SQL 路径**（Redis 抛 `QueryTimeoutException` / `RedisConnectionFailureException`，**都不是** gRPC 的 `StatusRuntimeException` ⇒ 守卫永不命中）；<br>③ RAG 的 Redis 写**不绑** gRPC deadline ⇒ 在途写跑满 3s（客户端 2s 已收 `DEADLINE_EXCEEDED`）⇒ 解释「日志晚 1s」。<br>⚠️ **修法不能改 status/description**（会与 Go 不一致）⇒ 只能在 `catch (Exception e)` 里**补一行把原始异常记进日志**（与 admin 域写法对齐）⇒ 域内一行可闭环。<br>⚠️ 与 `global` 域 **E38 第②层**同型；**admin 域已独立确认并登记 `DRIFT-ARPC-010`** ⇒ **三域口径宜一起定** |
 | **DRIFT-USERRPC-V-014（新 · 2026-10-27）** | **Redis 超时/断连在 rpc 侧的两条**：① 缺 `connect-timeout` ⇒ 连接超时落 Lettuce 自己的默认 **10s** ≠ Go `DialTimeout` **5s**；② 断连时 Lettuce `DEFAULT` 把命令**排队** ⇒ 挂到 `commandTimeout: 3s` ≫ 本组件 `rpc-timeout: 2s` ⇒ **RPC 先超时** ⇒ 客户端看到 1015「服务繁忙」，而 Go 是**快速失败** ⇒ `INTERNAL「注销失败,Redis写入异常」` | ✅ **已修（2026-10-27 · G1 lane · 域内自闭环）** —— ① 补 `connect-timeout: 5s` ＋ 守门；② 落**域内副本** `config/RedisDisconnectedBehaviorConfig`（`REJECT_COMMANDS`）⇒ 断连时**立即拒命令** ⇒ 走进 `catch (Exception e)` ⇒ **INTERNAL「注销失败,Redis写入异常」** ⇒ 与 Go 同形 | 与 api 侧 `DRIFT-ADMINAPI-012` / `DRIFT-FOLLOW-012` **同机制、不同形态**（api 侧后果 = 503；rpc 侧后果 = **RPC 撞超时**）⇒ 由 G2 在 task/like 域独立发现的同款形态**互相印证**。⚠️ **共享层收编仍归 G4**（现共 **5** 份域内副本 ⇒ 收编时须**一并删掉**，否则双份配置）<br>🟢 **2026-10-27 订正：收编【已完成】** —— **5 份域内副本已全部删除**，共享层那份接管（见 [`vs-common.md` §26](../vs-common.md)）⇒ ⇒ **本段「收编仍归 G4 / 现共 5 份副本」是历史状态，不是现状**|<br>🔴🟢 **2026-10-28 订正：本条的证据强度升【双侧 L4】** —— 「客户端看到 1015 vs INTERNAL」那一格原先只到 **RAG 腿 L1**（源码推断）⇒ ⇒ **本轮真起 gRPC server ＋ 真客户端把 wire 上的 status 抓了下来**：Go `Internal`/1689ms · RAG(A 组) `INTERNAL`/19ms · RAG(B 组·同场反例) **`DEADLINE_EXCEEDED`**/2013ms ⇒ ⇒ **归因也升 L4**（B 组是受控反事实）⇒ ⇒ 逐条 ⇒ [`vs-common.md` §50](../vs-common.md)|
 | **UNRESOLVED-USERRPC-004 ②** | 启动期 Redis 不可用：Go `MustNewRedis` fail-fast vs RAG 懒连接 | ✅ **已闭环（2026-10-24，§9.3）** —— **原推断被活体实验证伪**：go-zero `RedisConf.NonBlock` 的 struct tag 默认 `true` ⇒ `MustNewRedis` **不做连接检查** ⇒ **两侧都启动成功** ⇒ **无差异** | 本轮做了「把两侧 Redis 都指到死端口再起进程」的注入实验（`tools/difftest/exp-difftest-redis-failfast.sh`） |
-| **UNRESOLVED-USERRPC-005** | `users_user` 建表责任交叉（user-rpc ↔ admin-rpc） | ✅ **已闭环（2026-10-24，§9.2）** —— 双侧对称并发启动实测：两侧都能起来、表都建齐、0 致命错误 | ⚠️ 本行此前写「仍 unresolved」，是**过期状态**（第六轮已关，第七轮复核才发现汇总表没同步）。⇒ **机制不同**（Go 靠 `HasTable` 的时序侥幸 / RAG 靠 advisory lock）**但可观察结果一致** |
+| **UNRESOLVED-USERRPC-005** | `users_user` 建表责任交叉（user-rpc ↔ admin-rpc） | ✅ **已闭环（2026-10-24，§9.2）** —— 双侧对称并发启动实测：两侧都能起来、表都建齐、0 致命错误 | ⚠️ 本行此前写「仍 unresolved」，是**过期状态**（第六轮已关，第七轮复核才发现汇总表没同步）。⇒ **机制不同**（Go 靠 `HasTable` 的时序侥幸 / RAG 靠 advisory lock）**但可观察结果一致**<br>⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已闭环（2026-10-24，§9.2）** ⇒ **现行态 = ✅ 维持已闭环**（**机制仍不同、可观察结果仍一致**；本轮**未复跑**双侧对称并发启动 ⇒ 按 §0 读作在该证据强度下一致）。依据：**RAG** `service/users/users-common/src/main/java/com/rag/users/common/ddl/SchemaInitializer.java:53`（幂等重放器）+ `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/bootstrap/UserSchemaBootstrap.java:51` + `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/bootstrap/AdminSchemaBootstrap.java:55`（两侧各自重放）· **Go** `service/user/user/rpc/internal/model/db.go:33` = `db.AutoMigrate(...)` ⇒ **Go 靠 `HasTable` 的时序侥幸、RAG 靠 advisory lock**。harness **文件在位**：`tools/difftest/exp-go-concurrent-automigrate.sh` · `tools/difftest/exp-difftest-concurrent-schema.sh` · `tools/difftest/flyway-concurrent-boot.java` · `tools/difftest/check-flyway-concurrent.sh`。核对日期 2026-10-30。|
 
 ### 5b. 跨域状态更新（2026-10-23 晚）：V-003 的跨域不对称**已消除** ✅
 
@@ -1866,8 +1898,8 @@ admin 域拥有 `03_create_admin.sql` / `04_create_admin_invite.sql`，**四个�
 | # | 为什么仍 open（**历史**） |
 |---|---|
 | `UNRESOLVED-USERRPC-004` ② | 启动期 Redis 不可用时两侧的失败时机（Go `MustNewRedis` fail-fast vs RAG 懒连接）。<br>**①（id 谁胜出）已由本轮 V-006 关闭**（真 PG：两条 bigserial 序列 `last_value` 仍是 1 ⇒ 雪花胜出）。<br>② ✅ **已于 2026-10-24 闭环并**证伪原推断**（§9.3）：go-zero `RedisConf.NonBlock` 的 struct tag 默认 `true` ⇒ `MustNewRedis` **不做连接检查** ⇒ 活体实测**两侧都启动成功** ⇒ **无差异**。本行原写「需注入实验，未做」是**过期状态** |
-| `UNRESOLVED-USERRPC-005` | `users_user` 建表责任交叉（user-rpc ↔ admin-rpc）。**跨组件**：必须两个 rpc **同库并发启动**才能验，单侧 harness 证明不了。<br>✅ **已于 2026-10-24 闭环（§9.2）**：造了**双侧对称**的 harness（Go 两个 rpc 同库 / RAG 两个 rpc 同库，各起 9 轮）⇒ 两侧都起来、表都建齐、0 致命错误 |
-| `UNRESOLVED-USERRPC-007` | 9 个 RPC 的 **gRPC 层错误 message 逐字对拍**。第三轮 §6.1 明写「`grpc-message-dual-port-runner.java` 本轮**未**跑」；已覆盖的只是 HTTP wire 层。<br>✅ **已于 2026-10-24 闭环（§9.1）**：43 场景双侧活体对拍（9 RPC × 字段级 / `grpc-message` 逐字 / 边界输入）⇒ 39 等价 + 4 处差异（**全部**是 N-2 已签字的 Go 源码乱码） |
+| `UNRESOLVED-USERRPC-005` | `users_user` 建表责任交叉（user-rpc ↔ admin-rpc）。**跨组件**：必须两个 rpc **同库并发启动**才能验，单侧 harness 证明不了。<br>✅ **已于 2026-10-24 闭环（§9.2）**：造了**双侧对称**的 harness（Go 两个 rpc 同库 / RAG 两个 rpc 同库，各起 9 轮）⇒ 两侧都起来、表都建齐、0 致命错误<br>⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已于 2026-10-24 闭环（§9.2）** ⇒ **现行态 = ✅ 维持已闭环**。可复算指针（补本行 PTRLESS 缺口）：**RAG** `service/users/users-common/src/main/java/com/rag/users/common/ddl/SchemaInitializer.java:109`（`applyAll` 消费点）+ `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/bootstrap/UserSchemaBootstrap.java:51` · **Go** `service/user/user/rpc/internal/model/db.go:33` = `db.AutoMigrate(&User{}, &UserAvatarHistory{})` ⇒ 两侧建表责任交叉的事实仍在、但**机制不同**（Go 时序侥幸 vs RAG advisory lock）⇒ 维持闭环。⚠️ **双侧对称并发启动本轮未复跑**（需真 PG）。核对日期 2026-10-30。|
+| `UNRESOLVED-USERRPC-007` | 9 个 RPC 的 **gRPC 层错误 message 逐字对拍**。第三轮 §6.1 明写「`grpc-message-dual-port-runner.java` 本轮**未**跑」；已覆盖的只是 HTTP wire 层。<br>✅ **已于 2026-10-24 闭环（§9.1）**：43 场景双侧活体对拍（9 RPC × 字段级 / `grpc-message` 逐字 / 边界输入）⇒ 39 等价 + 4 处差异（**全部**是 N-2 已签字的 Go 源码乱码）<br>⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已于 2026-10-24 闭环（§9.1，43 场景双侧活体对拍：39 等价 + 4 处差异全部是 N-2 已签字的 Go 源码乱码）** ⇒ **现行态 = ✅ 维持已闭环**。依据：**探针与 runner 文件在位** ⇒ `tools/difftest/exp-difftest-grpc-user9.sh`（10446 字节）· `tools/difftest/grpc-user9-dual-port-runner.java`（40043 字节）⇒ **不是「引用的守门/实测不存在」那种假闭环**。⚠️ **诚实边界**：本轮**未复跑**这 43 场景（需真进程 + 真 PG + 真 Redis）⇒ 「39 等价 + 4 处差异」这个**具体数字**本轮**未重新取证**，按 §0 读作在该证据强度下一致；**文件在位 ≠ 本轮跑过**。核对日期 2026-10-30。|
 
 ### ⚠️ 顺带查出的一处**台账事实错误**（与 AGENTS.md 已记的 `FlywayLedgerIsolationTest` 同型）
 

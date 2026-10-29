@@ -480,6 +480,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 - **需合并判读**：`admin/rpc.md`（这 5 个方法的 `operatorId` 在下游是否参与任何判定）。
 
 ---
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **SEMANTIC MISMATCH · Risk HIGH** ⇒ **现行态 = ✅ 维持「已签字 ⇒ 非缺陷」**（**两侧语义差仍在，但它是决策不是缺陷**）。
+> 依据（两侧，当场核过）：**RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/IdentityResolver.java:93`（`public static long claimedUID(...)` ⇒ **消费点**）＋ `:97`（`request.getAttribute("userId")`）＋ `:99`（`!(v instanceof Long)` ⇒ 拒绝）＋ `:104`（`uid <= 0` ⇒ 拒绝）⇒ **「RAG 会因 claim 无效而拒绝」这半边仍在** · **Go** `service/user/admin/api/internal/logic/admin/banuserlogic.go:36-39`（`var adminUid int64` + `if uidNumber, ok := l.ctx.Value("uid").(json.Number); ok { … }` ⇒ **取不到即恒 0、不报错**）⇒ **「Go 恒 0 且不校验」这半边仍在**。⇒ 两侧差异确实存在 ⇒ 按 AGENTS.md §0 第 1 条，**已签字偏离 ⇒ 状态是「✅ 仍成立」，不是 🔴**（本条原提醒仍有效：N-4 只管**取值**、**不覆盖校验**，签校验的是 `SD-2026-10-23-01`）。核对日期 2026-10-30。
 
 ### DRIFT-ADMINAPI-002 · `getself` 多出 Go 没有的两道身份一致性校验
 
@@ -512,6 +514,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 > ⇒ **不是静态推导**。
 
 ---
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **SEMANTIC MISMATCH · Risk MEDIUM（2026-10-27 已降级为「实现差异（防御性加固）」）** ⇒ **现行态 = ✅ 维持「降级后的定性」**（**两道校验代码都还在 ⇒ 前提仍不可达 ⇒ 无可观察差异**）。
+> 依据（两侧，当场核过）：**RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/IdentityResolver.java:132`（`if (admin == null || admin.equals(AdminInfo.getDefaultInstance()))` ⇒ ⇒ 1003）＋ `:135`（`if (admin.getUid() != uid)` ⇒ ⇒ 5001）⇒ **两道校验都仍在** · **Go** `service/user/admin/api/internal/logic/admin/getselflogic.go:62-69`（拿到 `rpcResp.Admin` **直接**构造响应、**零校验**）⇒ **Go 侧仍无这两道** · **前提不可达**（两侧都总是 set `Admin`）：Go `service/user/admin/rpc/internal/logic/getselflogic.go:45` = `Admin: &pb.AdminInfo{` ⇒ **总是构造**。核对日期 2026-10-30。
 
 ### DRIFT-ADMINAPI-003 · 签名有效但 `userId` claim 缺失/非数字：Go 200+1006，RAG 401+1006
 
@@ -565,6 +569,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
   `/admin/v1/getself`。⚠️ 本轮未跑。
 
 ---
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **OBSERVABLE DIFFERENCE · Risk MEDIUM（已被 `SD-2026-10-23-01` 覆盖 ⇒ 不是待修漂移）** ⇒ **现行态 = ✅ 维持「已签字 ⇒ 非缺陷」**（**HTTP 状态码差异仍在，但它是决策**）。
+> 依据（两侧，当场核过）：**RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/auth/AdminJwtSignatureVerifier.java:101` = `Object claim = jws.getPayload().get("userId");`（**消费点** ⇒ 判 claim 在**鉴权层**）＋ `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/advice/GlobalExceptionHandler.java:59`（`@ExceptionHandler(AuthenticationException.class)`）＋ `:67`（`.body(new Response(e.getCode(), e.getMessage(), null))` ⇒ 业务码 1006）⇒ **「RAG 401+1006」这半边仍在** · **Go** `service/user/admin/api/internal/logic/admin/getselflogic.go:36-40`（`userId.Int64()` 失败 ⇒ `errmsg.ErrorTokenRuntime` ⇒ **业务层 1006**，**不是 401**）⇒ **「Go 200+1006」这半边仍在**。⇒ 两侧差异确实存在 ⇒ **已签字 ⇒ 不是缺陷**。核对日期 2026-10-30。
 
 ### DRIFT-ADMINAPI-004 · 黑名单 401 的业务码从 Go 的 `401` 变成 RAG 的 `1006`
 
@@ -592,6 +598,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
   两侧各打一次，比较**响应体的 `code` 字段**。⚠️ 本轮未跑。
 
 ---
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **OBSERVABLE DIFFERENCE · Risk MEDIUM（已签字 `SD-2026-10-23-08`）** ⇒ **现行态 = ✅ 维持「已签字 ⇒ 非缺陷」**（**业务码差异仍在，但它是决策**）。
+> 依据（两侧，当场核过）：**RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/advice/GlobalExceptionHandler.java:59`（`@ExceptionHandler(AuthenticationException.class)`）＋ `:62`（`log.warn("admin AuthenticationException code={} …", e.getCode(), …)`）＋ `:67`（`.body(new Response(e.getCode(), e.getMessage(), null))` ⇒ **业务码取自 `e.getCode()` = 1006**）⇒ **「RAG 是 1006」这半边仍在** · **Go** `service/user/admin/api/internal/middleware/checkblacklistmiddleware.go:38`（写 `{"code":401,"msg":"登录已失效,请重新登陆"}` ⇒ **业务码 401**）⇒ **「Go 是 401」这半边仍在**。⇒ 两侧差异确实存在 ⇒ **已签字 ⇒ 不是缺陷**。核对日期 2026-10-30。
 
 ### DRIFT-ADMINAPI-005 · 下游未 set `user` 时：Go 恒输出零值 user 对象，RAG 让字段整个消失
 
@@ -632,6 +640,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 > ⇒ 那个语言层事实本身是**已证**的 ⇒ **本条不再是「前提待定」，而是「前提不可达」**。
 
 ---
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **OBSERVABLE DIFFERENCE · Risk LOW-MEDIUM（2026-10-27 已降级为「实现差异（防御性加固）」）** ⇒ **现行态 = ✅ 维持「降级后的定性」**（**守卫代码仍在 ⇒ 前提不可达 ⇒ 无可观察差异**）。
+> 依据（两侧，当场核过）：**RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/IdentityResolver.java:132`（`admin == null || admin.equals(AdminInfo.getDefaultInstance())` ⇒ **同类防御性守卫仍在**）⇒ **「RAG 让字段整个消失」的那道 `if (rpcResp.hasUser())` 守卫仍在** · **Go** `service/user/admin/api/internal/types/types.go:72` = `User  UserInfo `json:"user,omitempty"`` ⇒ **`omitempty` 挂在 struct 上 ⇒ Go 不省略**（语言层事实）· **前提不可达**（两侧都总是 set `user`）：Go `service/user/admin/rpc/internal/logic/getuserlogic.go:43` = `User: &pb.UserInfo{` · Go `service/user/user/rpc/internal/logic/updateuserlogic.go:81` = `User: &pb.UserInfo{` ⇒ **总是构造**。核对日期 2026-10-30。
 
 ### DRIFT-ADMINAPI-006 · 中间件外层顺序不同 ⇒ 401 请求的遥测面与 3s 预算包含范围都不同
 
@@ -694,6 +704,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 > ⇒ 判定某条框架机制是否生效，必须读到**消费该开关的那段控制流**（AGENTS.md §3.3.1 第 1 条）。
 
 ---
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **① 仍成立（遥测面）· ② ✅ 已修（2026-10-27）** ⇒ **现行态 = ✅ 维持「拆半状态：① 仍开放 / ② 已修」**（**两侧的顺序事实都未变**）。
+> 依据（两侧，当场核过）：**RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/IdentityResolver.java:93`（`claimedUID` ⇒ 仍在业务层取 claim）+ `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/advice/GlobalExceptionHandler.java:59`（鉴权失败 ⇒ 401 handler 仍在）⇒ **① 遥测面这半边的机制未变** · **Go** `service/user/admin/api/admincenter.go:34`（`httpTimeout := observability.DisableNativeRestTimeout(&c.RestConf)`）＋ `:36`（`server.Use(observability.NewHTTPMiddleware(c.Name, httpTimeout, …))`）⇒ **Go 的 3s 计时器仍在 Authorize 之后起算** · **② 已修那半边的落点也在位**：`service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/auth/GoStyleJwtAuthFilter.java` ✅ **文件存在**。⇒ **「逐半读」的口径仍成立，本条不能按「整条已修/整条未修」读**。核对日期 2026-10-30。
 
 ### DRIFT-ADMINAPI-007 · 503 超时响应缺 `X-Content-Type-Options: nosniff` —— ✅ **已闭合（2026-10-28 · G1 lane · 真 Tomcat L4）**
 
@@ -788,6 +800,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 > **不产生任何跨 lane 提交** ⇒ 零越权。
 
 ---
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已闭合（2026-10-28 · G1 lane · 真 Tomcat L4）** ⇒ **现行态 = ✅ 维持已闭合**（**`nosniff` 那行仍在共享层**）。
+> 依据（两侧，当场核过）：**RAG** `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:728` = `resp.setHeader("X-Content-Type-Options", "nosniff");`（**消费点** ⇒ 503/499 响应确实带该头）· **Go** `net/http.Error` 的 5 件事（`Del("Content-Length")` / `setContentType` / `set nosniff` / `WriteHeader` / `Fprintln`）⇒ **`nosniff` 在 Go 侧无条件写出**。⇒ **「已闭合」这半边仍成立**；残差（`Content-Type` 分号后空格 = Tomcat 重渲染）**仍归「框架限制、不改」**。⚠️ **本轮未复跑真 Tomcat 实测** ⇒ 按 AGENTS.md §0 读作「在该证据强度下一致」。核对日期 2026-10-30。
 
 ### DRIFT-ADMINAPI-008 · `getself` 的 gRPC 兜底映射与 Go 的 per-endpoint switch 不一致
 
@@ -834,6 +848,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 > 它**确实可达**，且是**另一条**（`DRIFT-ARPC-009`，在 `rpc.md`）⇒ **本降级不销它**。
 
 ---
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **OBSERVABLE DIFFERENCE · Risk LOW** ⇒ **现行态 = ✅ 维持**（**通用兜底表仍比 Go 的 switch 宽**）。
+> 依据（两侧，当场核过）：**RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/advice/GlobalExceptionHandler.java:83` = `private int mapRPCStatusToCode(Status.Code code) {`（**通用表本体**）＋ `:84`（INTERNAL→5001）＋ `:85`（NOT_FOUND→1003）＋ `:86`（ALREADY_EXISTS→1001）＋ `:87`（INVALID_ARGUMENT→500）＋ `:88`（PERMISSION_DENIED→1016）⇒ **通用表确实覆盖 5 档** · **Go** `service/user/admin/api/internal/logic/admin/getselflogic.go:52-60`（`NotFound→1003 / Internal→5001 / **default→1015**`）⇒ **Go 的 default 仍把 ALREADY_EXISTS / PERMISSION_DENIED / UNAUTHENTICATED / INVALID_ARGUMENT 全部压成 1015**。⇒ **「RAG 侧给更多码」这半边仍成立**。核对日期 2026-10-30。
 
 ### DRIFT-ADMINAPI-009 · 下游不可达时的启动语义不同（Go 快速失败，RAG 懒连接）
 
@@ -852,6 +868,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
   但**本组件未验证过真实启动序列** ⇒ 见 §9 UNRESOLVED-ADMINAPI-005。
 
 ---
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **OBSERVABLE DIFFERENCE（§6 已实修）** ⇒ **现行态 = ✅ 维持「已实修」**（**启动期失败语义仍由框架原生机制承担**）。
+> 依据（两侧，当场核过）：**RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/client/AdminRpcClient.java:142` = `@GrpcClient("admin-rpc")`（**消费点** ⇒ 下游 channel 由 starter 装配）· **Go** `service/user/admin/api/internal/svc/servicecontext.go:26`（`zrpc.MustNewClient(c.AdminRpc)` ⇒ **启动即失败**）⇒ **两侧启动语义不同这半边仍成立**（RAG 仍是懒连接侧）。⇒ **「已实修」指的是 RAG 侧改用框架原生机制（不再是纯静默懒连接），不是两侧变得相同** ⇒ **本条定性仍成立**。核对日期 2026-10-30。
 
 ### DRIFT-ADMINAPI-010 · 组件资产计数与 AGENTS.md §4.2 不符（**非运行时语义差异**）
 
@@ -869,6 +887,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 - **Evidence strength**：`静态源码·双侧`（grep 双侧均执行）
 
 ---
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **OBSERVABLE DIFFERENCE（文档层）· Risk LOW** ⇒ **现行态 = ✅ 维持**（**「RAG 侧只有 1 个 `@GrpcClient`」这个计数事实仍成立**）。
+> 依据（两侧，当场核过）：**RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/client/AdminRpcClient.java:142` = `@GrpcClient("admin-rpc")` ⇒ **实测 `@GrpcClient` 命中数 = 1**（全 `service/users/admin/admin-api/src/main` 树内仅此一处）· **Go** `service/user/admin/api` 全树 grep `user/rpc` **零命中** ⇒ **「Go 侧没有 user-rpc 依赖」这半边仍成立**。⇒ **「AGENTS.md §4.2 记的 2 client 与实际不符」这个文档层差异仍在** ⇒ **本条不是运行时漂移**；⚠️ **本轮未改 `AGENTS.md`（不在写权面）**。核对日期 2026-10-30。
 
 ## 8. Test Cases
 
@@ -933,6 +953,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | 5 个方法的 `operator_id` 在下游是否参与任何业务判定（⇒ 决定 DRIFT-ADMINAPI-001 的严重度） | `admin-rpc` | grep 只看到 `createInviteCode` 会用；其余 5 个本轮只见到 log 调用，**但本轮不审 rpc，不能下结论** |
 
 **Required Confirmation**：与 `admin/rpc.md` 合并判读；**本组件在得到答复前不得改 DRIFT-ADMINAPI-002/005/008**。
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已闭环（2026-10-29 · admin-rpc 侧答复 ⇒ 前提不可达）** ⇒ **现行态 = ✅ 维持已闭环**（**答复所依赖的事实逐条仍在**）。
+> 依据（两侧，当场核过）：**Go** `service/user/admin/rpc/internal/logic/getselflogic.go:45` = `Admin: &pb.AdminInfo{`（**总是构造** ⇒ 「不会返回未 set 的 `Admin`」仍成立）· `service/user/admin/rpc/internal/logic/getuserlogic.go:43` = `User: &pb.UserInfo{`（**总是构造**）· `service/user/user/rpc/internal/logic/updateuserlogic.go:81` = `User: &pb.UserInfo{`（**总是构造**）· **RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/IdentityResolver.java:132`（`admin == null || admin.equals(getDefaultInstance())` ⇒ **防御性守卫仍在**）⇒ **「前提不可达」仍成立**。核对日期 2026-10-30。
 
 ### UNRESOLVED-ADMINAPI-002 · admin-api 的 text/plain 400 **没有真实 Tomcat 守门**
 
@@ -951,6 +973,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 - **Required Confirmation**：给该脚本补两行 admin 入口（`/admin/v1/create` 缺 `username`、
   `/admin/v1/banuser` 缺 `uid`），并用 `./tools/difftest/run.sh` 起真实栈执行。
   **本轮未跑**（需要完整构建 + 两套栈，代价远超本组件的静态对照）。
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已关闭（2026-10-24）** ⇒ **现行态 = ✅ 维持已关闭**（**守门脚本已在位且含 admin 入口**）。
+> 依据（两侧，当场核过）：**RAG/工具** `tools/difftest/check-plaintext400-headers.sh` ✅ **存在**（脚本头 `:2` 明写「真实 Tomcat 下断言 text/plain 400 的响应头 —— E-1 收口的端到端守门脚本」）· **RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/advice/GlobalExceptionHandler.java:59`（`@ExceptionHandler(AuthenticationException.class)` ⇒ 401 路径在位）+ `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:728`（`nosniff` 在位）⇒ **「已关闭」所依赖的两件东西都还在**。⚠️ **本轮未复跑真 Tomcat 守门** ⇒ 按 AGENTS.md §0 读作「在该证据强度下一致」。核对日期 2026-10-30。
 
 ### UNRESOLVED-ADMINAPI-003 · Go 的 `omitempty` 对 struct 无效这一条，本轮只做了静态判定
 
@@ -960,6 +984,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 - 本轮**没有跑探针实证**（Go 侧需要起进程或写小程序）。这是 DRIFT-ADMINAPI-005 的判定支点之一。
 - **Required Confirmation**：一个 10 行的 Go 程序即可判定；或直接把 admin-rpc 的实际返回形态确认掉
   （那样 DRIFT-ADMINAPI-005 可能整条作废）。
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已关闭（2026-10-24）** ⇒ **现行态 = ✅ 维持已关闭**（**语言层事实 + 两侧守卫都未变**）。
+> 依据（两侧，当场核过）：**Go** `service/user/admin/api/internal/types/types.go:72` = `User  UserInfo `json:"user,omitempty"`` ⇒ **`omitempty` 挂在 struct 上 ⇒ `encoding/json` 不省略 struct**（语言层事实）· **RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/IdentityResolver.java:132`（`admin == null || admin.equals(AdminInfo.getDefaultInstance())`）⇒ **守卫仍在**。⇒ **本条维持关闭**（不是「只做了静态判定」的旧状态）。核对日期 2026-10-30。
 
 ### UNRESOLVED-ADMINAPI-004 · RAG 侧 worker-pool 饱和 → 无 body 的 503
 
@@ -971,6 +997,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
   （与 Go 侧任何分支都不同源 —— Go 用 goroutine，无池）。
 - **没有测试覆盖**，**也没有并发压测数据**说明该分支在真实负载下的可达性。
 - **Required Confirmation**：并发压测 + 观察池饱和阈值。本轮未跑。
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已关闭（2026-10-24）** ⇒ **现行态 = ✅ 维持已关闭**（**机制仍在；「默认配置下不可达」这半边本轮未复测**）。
+> 依据（两侧，当场核过）：**RAG** `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:388` = `httpResp.setStatus(503);`（**消费点** ⇒ 池满 ⇒ 503 且不写 body 的分支仍在）⇒ **机制仍在**。⚠️ **「默认配置下不可达」（Tomcat `max-threads` 200 < 池 max 512）这半边本轮未复测**（需并发压测）⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」。⇒ **本条维持关闭，但「不可达」不是本轮新验的**。核对日期 2026-10-30。
 
 ### UNRESOLVED-ADMINAPI-005 · 两项启动期事实未实测
 
@@ -978,8 +1006,10 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 
 | 项 | 未知点 |
 |---|---|
-| DRIFT-ADMINAPI-009 | Nacos 不可达时 admin-api 的**真实**启动序列与就绪探针表现（静态只说明「不会像 Go 那样 panic」） |
+| DRIFT-ADMINAPI-009 | Nacos 不可达时 admin-api 的**真实**启动序列与就绪探针表现（静态只说明「不会像 Go 那样 panic」）<br>⚠️ **2026-10-30 真实性复核（users lane）**：原判（作为待定项）**已被 `UNRESOLVED-ADMINAPI-005` 的关闭覆盖** ⇒ **现行态 = ✅ 维持「已关闭」**（**底层差异事实未消失**）。依据：**RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/client/AdminRpcClient.java:142` = `@GrpcClient("admin-rpc")`（**消费点** ⇒ 启动期装配链在此）· **Go** `service/user/admin/api/internal/svc/servicecontext.go:26`（`zrpc.MustNewClient` ⇒ 启动即 panic）⇒ **两侧启动语义差异这半边仍在**。⇒ **该行作为「待定项」已关闭，但不得据此认为两侧已等价**。核对日期 2026-10-30。|
 | M-43 | Micrometer Counter 名 `admin_api_intercept_total` 在 `/actuator/prometheus` 上**最终叫什么**（Micrometer 有 `_total` 归一化规则，未实测）⇒ 与 Go 的 `admin_api_intercept_total` 是否同名也未实测 |
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已关闭（2026-10-24）** ⇒ **现行态 = ✅ 维持已关闭**（**机制在位；counter 名那半边本轮未复跑**）。
+> 依据（两侧，当场核过）：**RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/client/AdminRpcClient.java:142` = `@GrpcClient("admin-rpc")`（**消费点** ⇒ 启动期下游解析链在位）⇒ **「① Nacos 不可达 ⇒ 起不来」的机制未变**。⚠️ **「② counter 名 = `admin_api_intercept_total`」这半边本轮未复跑** `/actuator/prometheus` ⇒ 按 AGENTS.md §0 读作「在该证据强度下一致」。⇒ **本条维持关闭**。核对日期 2026-10-30。
 
 ### UNRESOLVED-ADMINAPI-006 · 本组件的绝大多数结论是 `静态源码·双侧`
 
@@ -1377,7 +1407,7 @@ assertEquals("text/plain", asPlainText.getResponse().getContentType(),
 | 签字 | 管什么 | 不管什么 |
 |---|---|---|
 | **N-4** | `operator_id` **取值** —— Go 恒 0，RAG 传真实 uid | 不管 claim 校验 |
-| **SD-2026-10-23-01** | claim **校验** —— Go 不校验，RAG 严格校验 | 不管取值 |
+| **SD-2026-10-23-01** | claim **校验** —— Go 不校验，RAG 严格校验 | 不管取值<br>⚠️ **2026-10-30 真实性复核（users lane）**：原判（作为 N-4 / SD-2026-10-23-01 的分工说明）**不变** ⇒ **现行态 = ✅ 维持「✅ 仍成立」**（**两侧的校验语义差仍在**）。依据：**RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/IdentityResolver.java:93`（`claimedUID`）＋ `:99`（`!(v instanceof Long)` ⇒ 拒绝）＋ `:104`（`uid <= 0` ⇒ 拒绝）＋ `:132`（`admin == null || admin.equals(getDefaultInstance())` ⇒ 拒绝）＋ `:135`（`admin.getUid() != uid` ⇒ 拒绝）⇒ **「RAG 严格校验」在位** · **Go** `service/user/admin/api/internal/logic/admin/banuserlogic.go:36-39`（取不到 `uid` 即**恒 0、不报错**）⇒ **「Go 不校验」在位**。⇒ **差异仍在 ⇒ 签字仍有效 ⇒「✅ 仍成立」**（签字档取值域，非 DRIFT 的 ✅/🔴）。核对日期 2026-10-30。|
 
 ## 4. 上文 §3~§5 各条的现状（2026-10-23 核对）
 

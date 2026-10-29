@@ -345,7 +345,7 @@ writer.WriteHeader(http.StatusUnauthorized)
 
 | 签字 | 管的是 | 方向 |
 |---|---|---|
-| `SD-USERAPI-002` | **观测面**：401 是否进 access log / span / HTTP 指标 | RAG **多**记 |
+| `SD-USERAPI-002` | **观测面**：401 是否进 access log / span / HTTP 指标 | RAG **多**记<br>⚠️ **2026-10-30 真实性复核（users lane）**：本行是「与 `SD-USERAPI-003` 各管一面」的对照表（**非独立偏离条目**）⇒ 复核结论随**正本** `SD-USERAPI-002@users`（本文件 §「SD-USERAPI-002@users」小节，2026-10-29 已重核）⇒ **维持 ✅ 仍成立**。可复算指针（补本行 PTRLESS 缺口，两侧各一）：**RAG** `service/common/src/main/java/com/rag/common/spring/HttpMiddlewareFilter.java:40-41`（`:40` `@Order(Ordered.HIGHEST_PRECEDENCE + 7)` + `:41` `public class HttpMiddlewareFilter implements Filter` ⇒ **观测面在 DispatcherServlet 之外**）· `service/users/user/user-api/src/main/java/com/rag/users/user/api/interceptor/JwtAuthInterceptor.java:87`（`implements HandlerInterceptor` ⇒ **鉴权在 DispatcherServlet 之内**）· **Go** `go-zero@v1.10.2/rest/engine.go:101-113`（`chn = ng.appendAuthHandler(fr, chn, verifier)` ⇒ Authorize 产生的 401 **不经过 observability**）⇒ **「RAG 观测面比 Go 大」的前提仍在 ⇒ 签字有效**。⚠️ 本轮**未复跑任何探针** ⇒ 按 §0 读作「在该证据强度下一致」。核对日期 2026-10-30。|
 | **`SD-USERAPI-003`（本条）** | **响应体形状**：JWT 401 的 body | RAG **统一**成 envelope |
 
 ### 关闭条件

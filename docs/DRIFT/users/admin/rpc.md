@@ -419,6 +419,8 @@ Recommended:   按 `user-rpc/.../mapper/UserMapper.java:127` 的同款手法，�
 > **关联**：`users_user` 侧（user 域）的 `create_time` 是**另一张表、另一套结论** ——
 > user 半边两侧都显式写该列 ⇒ 不可观察（见 `users/_shared.md` ADJ-04；
 > **admin 侧对 `users_user` 没有 INSERT** ⇒ 该结论对 admin 侧亦成立 ⇒ 已答，见 `admin/_shared.md` §5 U-7）。
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **OBSERVABLE DIFFERENCE · Risk HIGH（2026-10-23 修复轮 §FIX-ARPC-001 已修）** ⇒ **现行态 = ✅ 维持「已修」**（**5 处写路径的 `setSql` 全部在位**）。
+> 依据（两侧，当场核过）：**RAG**（5 处落点逐个核过，全是 `setSql("update_time = CURRENT_TIMESTAMP")`）：`service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminDomainService.java:406`（`updateSelf`）＋ `:687`（`banUser`）＋ `:729`（`unBanUser`）＋ `:1036`（`updateUser`）＋ `:1191`（`resetUserPassword`）⇒ **「RAG 侧不推进」这半边已消失** · **Go** `service/user/admin/rpc/internal/model/data_model.go:12-13` / `:27-28` / `:44-45`（`gorm:"column:update_time;autoUpdateTime"` ⇒ **声明点**）＋ 消费点 `gorm@v1.31.2/callbacks/update.go:243-259` / `:279-281` ⇒ **Go 侧仍无条件推进**。⇒ **两侧现在同形 ⇒ 本条已闭合**。⚠️ **本条标题写「所有写路径」而正文限定「全是 UPDATE」**（INSERT 路径的 `create_time` 是另一套结论）⇒ **该措辞边界仍按原样保留**。⚠️ **本轮未复跑真 PG 实测** ⇒ 按 AGENTS.md §0 读作「在该证据强度下一致」。核对日期 2026-10-30。
 
 ### DRIFT-ARPC-002 —— `UpdateUserResp.success` 在 wire 上两侧相反
 
@@ -465,6 +467,8 @@ Evidence:      静态源码 + proto 定义行号（两侧逐字）
 Must Preserve: 决策要显式化：要么签字「RAG 修掉了 Go 的漏写」，要么把 RAG 改成 false
 Recommended:   交用户裁决 + 补一条断言该字段的回归测试（当前**零测试**覆盖它）
 ```
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **OBSERVABLE DIFFERENCE · Risk HIGH（2026-10-23 修复轮 §2 已修 ⇒ 对齐 Go）** ⇒ **现行态 = ✅ 维持「已修」**（**RAG 侧已不再 `setSuccess(true)`**）。
+> 依据（两侧，当场核过）：**RAG** `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminServiceGrpcImpl.java:219`（`// 🔴 2026-10-23：去掉 setSuccess(true)，对齐 Go（DRIFT-ARPC-002）。` ⇒ **注释与修法在位**）＋ `:234` = `return UpdateUserResp.newBuilder().setUser(toProtoUser(user)).build();`（**构造点** ⇒ **只 set 了 `user`，没 set `success`**）· **Go** `service/user/admin/rpc/internal/logic/updateuserlogic.go:105-113`（`return &pb.UpdateUserResp{ User: … }` ⇒ **也没 set `Success`**）⇒ **两侧 wire 一致（`success` 都是 proto3 默认 `false`）**。⇒ **HTTP 面仍两侧都是 `{"success":true}`**（api 层硬编码，RAG `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/AdminUpdateUserService.java:99` = `resp.setSuccess(true);`）⇒ **原判「HTTP 面不受影响」仍成立**。核对日期 2026-10-30。
 
 ### DRIFT-ARPC-003 —— `system.default-password` 为空时行为分歧
 
@@ -494,6 +498,8 @@ Must Preserve: 决策显式化 —— 这是 RAG 多出来的一道保护，属 
 Recommended:   保留该守卫但补 §3.2 javadoc 标注「Go 侧无此校验，这是有意收紧」，
                或直接删掉以逐字对齐 Go
 ```
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **OBSERVABLE DIFFERENCE · Risk LOW（已签字 `SD-2026-10-23-06`）** ⇒ **现行态 = ✅ 维持「✅ 仍成立（签字有效）」**（**RAG 侧的守卫仍在**）。
+> 依据（两侧，当场核过）：**RAG** `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminDomainService.java:1150`（`String defaultPassword = properties.getSystem().getDefaultPassword();`）＋ `:1151`（`if (defaultPassword == null || defaultPassword.isEmpty()) {` ⇒ ⇒ 抛 INTERNAL「密码加密失败」）⇒ **「RAG 多一道守卫」这半边仍在** · **Go** `service/user/admin/rpc/internal/logic/resetuserpasswordlogic.go:55-56`（**无空值判断** ⇒ 空串交给 bcrypt ⇒ 成功）⇒ **「Go 无此守卫」这半边仍在**。⇒ **差异确实存在 ⇒ 已签字 ⇒ 是决策不是缺陷**。核对日期 2026-10-30。
 
 ### DRIFT-ARPC-004 —— DDL 列类型：时间列 `timestamptz` vs `timestamp`、`extra_info` `text` vs `jsonb`
 
@@ -554,6 +560,8 @@ Must Preserve: ① 的 jsonb 边界行为、② 的有效期判定、③ 的时�
 Recommended:   时间列统一改成 `timestamptz`（比改 Java 侧改成 timestamptz 成本低，
                因为 Java 侧已经全部用 LocalDateTime，改 DDL 一处即可让两侧语义同构）
 ```
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **OBSERVABLE DIFFERENCE · Risk MEDIUM（2026-10-23 修复轮 §1 已修 ①②）** ⇒ **现行态 = ✅ 维持「已修」**（**① `extra_info` 已是 `TEXT`；② 时间列已是 `timestamptz`**）。
+> 依据（两侧，当场核过）：**RAG ①** `service/users/users-common/src/main/resources/db/03_create_admin.sql:58` = `extra_info  TEXT,`（**DDL 消费点**）＋ `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/domain/AdminEntity.java:89` = `@TableField(value = "extra_info", typeHandler = com.rag.users.admin.rpc.mapper.JsonTextTypeHandler.class)` ⇒ **类型处理器已换成写 JSON 串**（`service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/mapper/JsonTextTypeHandler.java` ✅ **在位**）＋ `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminDomainService.java:394`（`// 🔴 2026-10-23：**去掉了 CAST(... AS jsonb)**（DRIFT-ARPC-004①）。`）· **Go ①** `service/user/admin/rpc/internal/model/data_model.go:11`（`ExtraInfo map[string]string `gorm:"column:extra_info;serializer:json"``）⇒ **text 列** · **RAG ②** `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/bootstrap/AdminSchemaBootstrap.java:55` = `SchemaInitializer.applyAll(connection, "admin-rpc");` ⇒ **DDL 由幂等重放器执行 ⇒ 时间列已是 `timestamptz`** · **Go ②** `service/user/admin/rpc/internal/model/data_model.go:12-13` / `:27-28`（`time.Time` 无 type tag ⇒ postgres driver 生成 `timestamptz`）。⇒ **两侧已同形 ⇒ 本条已闭合**。核对日期 2026-10-30。
 
 ### DRIFT-ARPC-005 —— 启动期建表覆盖面：Go 3 张 vs RAG 4 张
 
@@ -582,6 +590,8 @@ Evidence:      静态源码两侧逐行
 Recommended:   在 AdminSchemaBootstrap 的 javadoc 里明确写「本模块比 Go 多重放
                02_create_user_avatar_history.sql，是共用脚本集的设计结果」
 ```
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **已关闭为「IMPLEMENTATION DIFFERENCE，不是缺陷」** ⇒ **现行态 = ✅ 维持「已关闭（非缺陷）」**（**RAG 侧仍重放全部 4 份**）。
+> 依据（两侧，当场核过）：**RAG** `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/bootstrap/AdminSchemaBootstrap.java:55` = `SchemaInitializer.applyAll(connection, "admin-rpc");` ⇒ **重放的是 users 域全套 DDL（含 `users_user_avatar_history`）⇒ 4 张** · **Go** `service/user/admin/rpc/internal/model/db.go:15` = `err = db.AutoMigrate(&Admin{}, &AdminInvite{}, &User{})` ⇒ **3 张**。⇒ **「3 vs 4」这个计数差仍在** ⇒ **按原判：实现差异，不是缺陷**（全部 `CREATE … IF NOT EXISTS` ⇒ 多建一张不破坏任何东西）。核对日期 2026-10-30。
 
 ### DRIFT-ARPC-006 —— 无 gRPC span：Go 逐 Logic 手写 `tracer.Start`，RAG 侧业务方法无 span 属性 —— ✅ **已修（2026-10-23 实施轮 §2 · 8 处 span）**
 
@@ -619,6 +629,8 @@ Recommended:   要么在 AdminDomainService 补 OTel span（对齐 Go 的 audit.
 ```
 
 ---
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **🟡（2026-10-23 实施轮 §2 已修 · 8 处 span）** ⇒ **现行态 = ✅ 维持「已修」**（**`audit.*` 属性与 `audit.operator_id` 常量在位**）。
+> 依据（两侧，当场核过）：**RAG** `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminSpans.java:103` = `public static final String ATTR_OPERATOR_ID = "audit.operator_id";`（**属性常量在位**；同文件 `:26`-`:40` 的 javadoc 表逐条列出 8 个 logic 的 `audit.*` 属性）· **Go** `service/user/admin/rpc/internal/logic/`（**逐 Logic 手写 `tracer.Start`** ⇒ 8 个 logic）⇒ **两侧都产出 `audit.*` 属性** ⇒ **「RAG 侧零 span」这半边已消失**。⇒ **本条已闭合**（⚠️ **计数订正保留**：Go 是 **8 个 logic** 有 span，不是 13 —— 13 是 attribute 条数）。核对日期 2026-10-30。
 
 ## 8. Test Cases（spec §29 + §30）
 
@@ -689,6 +701,8 @@ Required Confirm: 跑 tools/difftest/exp-difftest-grpc-errors.sh（该脚本此�
 > ⇒ 与 AGENTS.md §6.3「状态表纪律」同源：**未核对 ⇒ 按 UNKNOWN 处理**，
 > 而 UNKNOWN 条目不销号，下一轮 agent 会重复投入。
 > **本轮起：每轮结束必须回头销 UNRESOLVED。**
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已关闭（2026-10-23 22:4x · `exp-difftest-grpc-admin-errors.sh` 18 用例）** ⇒ **现行态 = ✅ 维持已关闭**（**对拍脚本与执行体都还在**）。
+> 依据（当场核过）：**RAG/工具** `tools/difftest/exp-difftest-grpc-admin-errors.sh` ✅ **存在**（**编排脚本**）＋ `tools/difftest/GrpcAdminDualPortRunner.java` ✅ **存在**（**双端口执行体**）。⚠️ **效力边界仍在**：那 18 个用例**只覆盖错误路径**（成功路径只有 `login.ok` / `logout.ok` / `getself.ok` / `getuserlist.empty`）⇒ **「13 个 RPC 的错误路径已双侧活体对拍」成立，「13 个 RPC 全部闭环」不成立**。⇒ **本条维持关闭**（⚠️ **本轮未复跑该脚本** ⇒ 数字 `cases=18 / code_mismatch=0 / payload_diff=0` 沿用上一轮 ⇒ 按 §0 读作「在该证据强度下一致」）。核对日期 2026-10-30。
 
 ### UNRESOLVED-ARPC-002 —— 超时是否 min 客户端 deadline
 
@@ -811,6 +825,8 @@ Required Confirm: 起一个 Redis 容器并 iptables 掉网络，两侧各打一
 >
 > **守门网**：`AdminRedisTimeoutConfigTest`（yml 文本层 + Binder 绑定层）
 > + `AdminRedisConnectTimeoutSocketTest`（配置消费点 + socket 层黑洞实测）。
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已关闭（2026-10-24 验证轮续 §2 · 含 socket 层实证）** ⇒ **现行态 = ✅ 维持已关闭**（**配置侧两处仍在**）。
+> 依据（两侧，当场核过）：**RAG** `service/users/admin/admin-rpc/src/main/resources/application.yml`（`connect-timeout: 5s` + `timeout: 3s` ⇒ **配置消费点**）· **Go** `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-39`（建 `red.Options` 时**三个 timeout 一个都没传** ⇒ 走 go-redis/v9 `options.go` 的 `init()`：`DialTimeout = 5s` / `ReadTimeout = 3s`）⇒ **「配置层等价」这半边仍成立**。⚠️ **关闭时必须一起记的那条仍在**：**Lettuce 的连接是异步的** ⇒ 故障时**先到期的往往是命令超时（3s）而不是连接超时（5s）** ⇒ 「配置等价」**不是**「可观察时延等价」。⇒ **本条维持关闭**（⚠️ **本轮未复跑 socket 黑洞实测** ⇒ 按 §0 读作「在该证据强度下一致」）。核对日期 2026-10-30。
 
 ### UNRESOLVED-ARPC-004 —— `extra_info` jsonb 的边界写入行为
 
@@ -826,6 +842,8 @@ Impact:         恶意/异常输入下 Go 成功而 RAG 5001。
 Required Confirm: 对 createAdmin / updateUser / updateSelf 各打一次
                 extra_info={"k":"\u0000"}，两侧比对。
 ```
+> ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已关闭（§4 · 双侧活体对拍实测 · 2026-10-28 G1 补记）** ⇒ **现行态 = ✅ 维持已关闭**（**修法已落码：列已改 `TEXT`、处理器已改 `JsonTextTypeHandler`**）。
+> 依据（两侧，当场核过）：**RAG** `service/users/users-common/src/main/resources/db/03_create_admin.sql:58` = `extra_info  TEXT,`（**DDL 已是 text**）＋ `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/domain/AdminEntity.java:89`（`typeHandler = …JsonTextTypeHandler.class` ⇒ **已不再走 jsonb 校验**）⇒ **「RAG 侧 jsonb 拒收 U+0000」这个前提**已因 2026-10-23 的 `DRIFT-ARPC-004①` 修法而**消失** · **Go** `service/user/admin/rpc/internal/model/data_model.go:11`（`serializer:json` ⇒ text 列照收）。⇒ **两侧现在同形（都是 text 列、都不经 jsonb 校验）⇒ 本条已闭环**（⚠️ **§4 里的双侧活体对拍表是 2026-10-23 修法**落地**前**的观测，属历史留档；⚠️ **本轮未复跑该对拍**）。核对日期 2026-10-30。
 
 ### UNRESOLVED-ARPC-005 —— `users_user` 建表责任交叉（跨组件，单侧验不完）
 
