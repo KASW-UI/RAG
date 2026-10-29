@@ -178,7 +178,7 @@
 | 域 | 组件 | 必达终点指标（可判定） | 判定命令（**覆盖范围见 §六**） | R | E | **权威来源**（L0） | 仍开放项 | 状态 |
 |---|---|---|---|---|---|---|---|---|
 | `article` | `article-api` | 【API 型】全 6 条 | `python3 tools/difftest/check-surface-parity.py --domain article`（契约面）＋ 模块级 `mvn -pl service/article/article-api -am test` | **R3** ↑ | E3 | `docs/DRIFT/article/api.md:26`（判定）· `:886`（`UNRESOLVED-002`）· `:1095`（双侧 0 条） | `UNRESOLVED-002`（**跨组件**：依赖 article-rpc 响应语义约定） | ✅ |
-| `article` | `article-rpc` | 【RPC 型】全 5 条 | 同上 `--domain article` ＋ `python3 tools/difftest/check-grpc-interceptor-wiring.py` | **R2** | E3 | `docs/DRIFT/article/rpc.md:46`·`:95`（`S-5`）· `:658-666`（U-3/4/9/4′） | **`S-5`**（content security 实现被 security 域阻塞 ⇒ 外部客户端恒抛、审核链路不可用）· `U-3`/`U-4`/`U-9`/`U-4′`（取证缺口） | 🟡 |
+| `article` | `article-rpc` | 【RPC 型】全 5 条 | `bash tools/api-full-parity-probe/article/run.sh`（**双侧活体** · 3 场景逐字节 ＋ **两侧播种同一行**）＋ `mvn -o -pl service/article/article-rpc -am test`（**真 Kafka 门禁 4 条** ＋ **写路径边界 1 条**（真 PG ＋ 死 broker））＋ `python3 tools/difftest/check-grpc-interceptor-wiring.py` | **R3** ↑ | **E4** | `docs/DRIFT/article/rpc.md` **§12**（§12.1 `S-5` 改判 · §12.2 `U-4′` 销号 · §12.3 `U-3`/`U-4` 闭合 · §12.4 `U-9` 拆半 · §12.5 RPC 型 5 条逐条核 · §12.6 变异 3/3 · §12.7 可复算判定命令 · §12.8 结论 · §12.9 `S-5` 连带项重评估）· `tools/api-full-parity-probe/article/README.md`（落仓探针） | ✅ **`S-5` 改判「范围外」**（judge §1.1 **R0** = Go 侧无对应件）⇒ 原写「⛔ 阻塞」是**错的** ⇒ 实为**永不闭环**（`AGENTS.md:43` 的 `knowledge`/`points`/`security` 三域**不迁移** ⇒ 不是待办）⇒ **不计入本组件必相对齐项**<br>✅ **`U-4′` 销号**（双侧活体 **0 条 → 3 场景逐字节** ＋ **两侧播种同一行** · **L4**）<br>✅ **`U-3` / `U-4` 闭合**（**真 Kafka** · **行为断言**而非属性断言）⇒ ⚠️ **`U-4` 的归因订正**：承重项是 **`FixedBackOff(0L,0L)`**，**不是** `setSeekAfterError(true)` ⇒ 生产 javadoc 已按实测机制改写（AGENTS.md §3.3.2）<br>🟡 **`U-9` 拆两半**：`U-9a` ✅ 闭合（offset 提交 / 跳过语义 · 两侧同构）· `U-9b` 🟡 **取证缺口**（**不降 R** ⇒ 按 §1.1 ⑥ 第 4 条不计入）<br>✅ **§七 RPC 型 5 条逐条核**（③ ④ 本轮补齐）· **变异 3/3 精确转红**（全部已还原）⇒ **归属本组件的必相对齐项 = 0** | ✅ |
 | `article` | `article-common` | 【COMMON 型】全 3 条 | `GO_REPO=… bash tools/errmsg-probe/run-parity.sh` ⇒ EXIT=0 | **R4** | E4 | `docs/DRIFT/article/common.md:5`·`:50-53` | **0 条** | ✅ |
 | `article` | `article-proto` | 【PROTO 型】①–⑤（⑥ 不适用） | `python3 tools/difftest/check-surface-parity.py --domain article`（rpc 方法集） | **R3** | E3 | `docs/DRIFT/article/proto.md:18`·`:175`（`P-U-1`）· `:236-238` | `P-U-1`（跨栈活体未实测 ⇒ 取证缺口）· **台账未见变异验证** | ✅ |
 | `comment` | `comment-api` | 【API 型】全 5 条 | `bash tools/difftest/comment/run_diff.sh` ⇒ 23 步矩阵 | **R4** | E4 | `docs/DRIFT/comment/api.md:24`·`:334-344` | `U4`（共享台账过期结论待更正）· `U10`（D1 机制未查实，可观察行为已定） | ✅ |
@@ -230,7 +230,7 @@
 
 | 域 | 组件数 | 组件状态明细 | **域状态** | 阻塞项（落点） |
 |---|---|---|---|---|
-| `article` | 4 | api ✅ · rpc 🟡 · common ✅ · proto ✅ | **🟡** | `S-5`（**本域**，security 域阻塞）· `U-3/4/9/4′`（取证缺口） |
+| `article` | 4 | api ✅ · rpc ✅ · common ✅ · proto ✅ | **✅** | ✅ **`S-5` 改判「范围外」**（§1.1 **R0** = Go 侧无对应件 ⇒ `knowledge`/`points`/`security` 三域**不迁移** ⇒ **不是待办**）⇒ 原写「⛔ 阻塞」是**错的**<br>· ✅ **`U-4′` 销号**（双侧活体 3 场景逐字节 ＋ 两侧播种同一行 · L4）· ✅ **`U-3`/`U-4` 闭合**（真 Kafka · 行为断言）· 🟡 **`U-9b`**（**取证缺口**，非必对齐 ⇒ 不降 R）⇒ **本域阻塞项归零** |
 | `comment` | 4 | api ✅ · rpc ✅ · common ✅ · proto ✅ | **✅** | `D8`/`D9`（**`service/common`** ⇒ 阻塞共享层，不阻塞本域） |
 | `favorite` | 4 | api ✅ · rpc ✅ · common ✅ · proto ✅ | **✅** | `U9`（部署形态，待拍板）· `E65`（**`service/common`**） |
 | `follow` | 4 | api ✅ · rpc ✅ · common ✅ · proto ✅ | **✅** | ✅ **`DRIFT-FOLLOW-006` 已关闭**（2026-10-29 · `573cf08f`）—— 5 个 `follow_rpc_*` 指标的**抓取出口落地**（观测口 16065，与 Go `DevServer.Port` 同口）＋ **顺带修一个真缺陷**（`_bucket` 边界与 Go `prometheus.DefBuckets` 零重合 ⇒ 已逐桶对齐）⇒ **本域阻塞项归零**<br>· `-008`（MaxConns 闸门粒度 ⇒ 落点 **`service/common`** ⇒ **跨组件残留 ⇒ 不计入组件 R、不阻塞本域**） |
@@ -396,7 +396,7 @@
 
 | 条件 | 判据 | 当前 |
 |---|---|---|
-| **C-1 核心域达标** | 9 个微服务域中**核心 6 域**（`favorite` `comment` `message` `task` `article` `users`）**全部 ✅ 达标** | 🟡 **5/6**（favorite ✅ · comment ✅ · message ✅ · task ✅ · users ✅；**article 🟡**） |
+| **C-1 核心域达标** | 9 个微服务域中**核心 6 域**（`favorite` `comment` `message` `task` `article` `users`）**全部 ✅ 达标** | ✅ **6/6**（favorite ✅ · comment ✅ · message ✅ · task ✅ · **article ✅** · users ✅）⇒ **S1-2 成立**<br>⚠️ **article 转 ✅ 的依据**（2026-10-29 · `a76ebfe2`）：`article-rpc` **R2 → R3** ⇒ ① **`S-5` 改判「范围外」**（§1.1 **R0** = Go 侧无对应件 ⇒ `security` 三域**不迁移** ⇒ 原写「⛔ 阻塞」是**错的**、实为**永不闭环**）② **`U-4′` 销号**（双侧活体 **3 场景逐字节** ＋ **两侧播种同一行** · **L4**）③ **`U-3`/`U-4` 闭合**（**真 Kafka** · **行为断言**）④ 归属本组件的**必相对齐项 = 0**（🟡 `U-9b` 是**取证缺口** ⇒ 按 §1.1 ⑥ 第 4 条不计入） |
 | **C-2 无 🔴 组件** | 全仓 **0** 个 🔴 未达标组件 | ✅ **满足**（2026-10-29 R3 轮）—— 共享层 `service/common` 由 🔴 上调 **🟡**（R 档 **R2 → R3**）⇒ ⇒ **全仓 0 个 🔴 未达标组件**<br>⚠️ **依据三条**：① **真缺陷 `DRIFT-CF-018` 已修**（`Dispatcher` 的阻塞重载永远交不出句柄 ⇒ `@PreDestroy` 停不下来 ⇒ 进程关不掉）＋ **变异验证 3 组全部精确转红**（3/5 · 2/3 · 2/3）⇒ 非假绿 ② **24 条编号 + 5 项未编号逐条定级**（**A 类 0 · B 类 0 · C 类 21 · D 类 6 · 证据缺口 1**）⇒ **域内硬阻塞 = 0**（`DRIFT-COMMON` 族未修数 = 0）③ **405 例 / 0F / 0E / 0S**<br>⚠️ **仍非 ✅**：9 轴里 **A1 / A3 / A4 / A5 / A6 五格 🟡**（A6 本轮由 🔴 降为 🟡）⇒ **不阻断阶段一**，但也不能称「已对齐」 |
 | **C-3 跨组件不变量** | 矩阵 C 的 12 条中 **X-1~X-10 无 🔴** | ✅ **不满足 X-11 / X-12**（属 P0 #8 / #5）<br>🟡 X-2 / X-4 / X-7 / X-8 / X-10 均为「部分满足」 |
 | **C-4 P0 九条** | P0 无 🔴 | ✅ **满足**（2026-10-29）—— **P0 汇总 = ✅ 5 / 🟡 4 / 🔴 0**（#3 #6 #7 #8 #9 已 ✅；#1 #2 #4 #5 仍 🟡 ⇒ **证据/覆盖不足，不是缺陷**）⇒ **已无 🔴** |
