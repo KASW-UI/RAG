@@ -34,6 +34,10 @@ Go 侧通读 36 个文件、RAG 侧通读 71 个文件。
 | **DRIFT-MSG-V-009** | 直方图 bucket 布局不同（**第十轮实测：两侧桶边界零交集** —— Go 11 桶 vs Micrometer 69 桶） | ✅ **已签字留档**（`SD-2026-10-24-02`） |
 | **DRIFT-MSG-V-010** | 错误解包深度不同（**第十轮订正**：真正不一致的只有 `CodeError` 那一支，`status` 那一支两侧都已穿透） | ✅ **已签字留档**（`SD-2026-10-24-03`） |
 
+> ⚠️ **2026-10-30 真实性复核（主线 · 本档 `DRIFT-MSG-V-001..013` 全量重核）** —— 本表的「状态」列是 **2026-10-22 第二轮**的判断 ⇒
+> **逐条现行态以本档末尾 §2026-10-30 复核块为准**（13 条全部逐条回 Go 真源 + RAG 源码核过：**12 条维持 · 0 条改判 · 1 条 UNRESOLVED 仍开着**）。
+> ⚠️ **本档是历史档** —— `DRIFT-MSG-V-014` 及以后的编号**定义在** [`DRIFT/message/rpc.md`](../message/rpc.md)（message 域面，本轮由 message lane 核）。
+
 #### 🔴 第二批：**补测试时当场挖出 3 条 P0，静态审计两轮都没抓到**（§6.7.7）
 
 | 编号 | 一句话 | 后果 |
@@ -455,3 +459,39 @@ Go 侧这条同时命中信息泄露与错误归因两条，已属缺陷而非�
 | **顺手更正** | `UNRESOLVED-MSG-009` 的**前提已过期**（它建议的「补一条 `V4` 迁移」已由 `V5` 做完）⇒ 别再去补；剩下的只是部署口径问题 |
 
 ⚠️ **逐条证据在** [`DRIFT/message/rpc.md`](../message/rpc.md) 的「第十轮」小节（含实测量、复现命令、踩到的两个环境坑）。
+
+---
+
+## §2026-10-30 真实性复核（主线 · 本档 `DRIFT-MSG-V-001..013` + `UNRESOLVED-MSG-V-001` 全量重核）
+
+> **性质**：本档 = 2026-10-22 第二轮的历史留档 ⇒ 表内「状态」列是**时点快照** ⇒ 本节给出**现行态**。
+> **方法**：逐条回 **Go 真源**（`/Users/pr/Documents/java&golang/Sea-RideTheWind_golang`，冻结只读）+ **RAG 源码**双向核；
+> **每条都核「该行确实讲这件事」**（行号能解析 ≠ 指对行）。**原值一律保留**，本节只给现行态。
+> **结论**：**13 条 V-* 全部维持（0 改判）** + **1 条 UNRESOLVED 仍开着**。
+
+| 编号 | 原判（2026-10-22） | **现行态（2026-10-30）** | 两侧依据（当场核过） | 改判 |
+|---|---|---|---|---|
+| **DRIFT-MSG-V-001** | ✅ 已修 | ✅ **已修（维持）** | RAG `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/mapper/NotificationMapper.java:79` `countByRecipient(long recipientId, int role, int kind, boolean unreadOnly)` ＋ `:102-103` `countUnreadByRecipient` **委托**它 ⇒ `total` 与 `items` 共用同一 `unreadOnly`<br>守门 `listNotificationsTotalMustRespectUnreadOnly`（**真 PG · 在仓**） | 否 |
+| **DRIFT-MSG-V-002** | ✅ 已修 | ✅ **已修（维持）** | RAG `…/service/MessageAtomicService.java:60` `static final int INSERT_BATCH_SIZE = 200` ＋ `:176-181` 分片循环（`for (int from = 0; from < batch.size(); from += INSERT_BATCH_SIZE)`）⇒ 12 列/行 × 200 = **2400 参数 ≪ 65535**<br>守门 `notificationBatchInsertMustSurviveTheParameterLimit`（6000 条）＋ `batchInsertMustStayAtomicAcrossChunks`（**均在仓**） | 否 |
+| **DRIFT-MSG-V-003** | ⏸ 已签字（第八轮**收窄**到只剩「不回显原始错误文本」） | ✅ **仍成立（签字范围收窄 ≠ 撤销）** | RAG `docs/DRIFT/message/rpc.md:616` 表格行（裸 GORM error ⇒ grpc `INTERNAL(13)`）＋ `docs/Intentional_Deviations/message/rpc.md:191`「`DRIFT-MSG-V-003` 签字范围收窄（2026-10-24 第八轮 · **不是撤销**）」⇒ 被签字描述的行为**今天仍存在** ⇒ **签字仍有效** | 否 |
+| **DRIFT-MSG-V-004** | ✅ 已修 | ✅ **已修（维持）** | RAG `…/mapper/ConversationMessageMapper.java:136` `w.orderByAsc(ConversationMessageEntity::getCreatedAt)` ⇒ 排序键已是 `created_at ASC`<br>⚠️ `:125-131` javadoc 明写**刻意不加 `id` tie-breaker** ⇒ 与 Go 侧「`created_at` 并列时顺序不确定」**同形**（不擅自改好）<br>守门 `conversationMessagesMustBeOrderedByCreatedAtNotId`（**在仓**） | 否 |
+| **DRIFT-MSG-V-005** | ✅ 已修 | ✅ **已修（维持）** | RAG `…/mapper/ConversationMapper.java:80-81` `w.orderByDesc(ConversationEntity::getLastMessageAt)` ＋ `w.orderByDesc(ConversationEntity::getUpdatedAt)` ⇒ **次级键 `updated_at DESC` 在位**，且 `:73-75` javadoc 明写「顺序不可颠倒」<br>守门 `conversationListMustUseUpdatedAtAsTiebreaker`（**在仓**） | 否 |
+| **DRIFT-MSG-V-006** | ✅ 已修 | ✅ **已修（维持）** | RAG `…/service/MessageAtomicService.java:202` **仅剩注释**记载「修复前：本方法除消息表外还调 conversation…」⇒ **`touchUpdatedAt` 的调用点在全模块已不存在**（模块内 grep 该标识符**只命中这一行注释**）<br>守门 `markConversationReadMustNotTouchConversationUpdatedAt`（**在仓**） | 否 |
+| **DRIFT-MSG-V-007** | ✅ 已修（第七轮 V-020：8 列改 `TIMESTAMPTZ`） | ✅ **已修（维持）** | RAG `service/message/message-rpc/src/main/resources/db/migration/V5__message_time_columns_timestamptz.sql:69,71,73,79,81,83,89,91` = **8 条 `ALTER TABLE … ALTER COLUMN … TYPE TIMESTAMPTZ`** ⇒ **恰为 8 列**，与台账口径一致<br>Go 侧 `gorm.io/driver/postgres` 把 `schema.Time` 映射为 `timestamptz` ⇒ 两侧同形 | 否 |
+| **DRIFT-MSG-V-008** | ✅ 已修 | ✅ **已修（维持）** | RAG `…/service/MessageRpcSupport.java:226` `private static String trimGoSpace(…)`（逐码点复刻 Go `unicode.IsSpace`）＋ `:482` 调用点<br>守门 `MessageRpcSupportTrimPreviewTest`（**在仓**） | 否 |
+| **DRIFT-MSG-V-009** | ✅ 已签字留档 | ✅ **仍成立**（`SD-2026-10-24-02`） | 签字条目仍在 `docs/Intentional_Deviations/message/rpc.md:52`「直方图**桶边界零交集**」⇒ **决策仍有效**（决策不是缺陷） | 否 |
+| **DRIFT-MSG-V-010** | ✅ 已签字留档 | ✅ **仍成立**（`SD-2026-10-24-03`） | 签字条目仍在 `docs/Intentional_Deviations/message/rpc.md:73`「嵌在 cause 链里的 `CodeError`」⇒ **决策仍有效** | 否 |
+| **DRIFT-MSG-V-011** | 🔴 P0（`#{item.isRead}` ⇒ **`SendNotification` 100% 失败**） | ✅ **已修（维持）** | RAG `…/mapper/NotificationMapper.java:213` **实际 SQL = `#{item.read}`**（**不是** `#{item.isRead}`）⇒ MyBatis `Reflector` 能找到属性 ⇒ 通知写入路径已通 | 否 |
+| **DRIFT-MSG-V-012** | 🔴 P0（`limit`/`offset` 传反 ⇒ `LIMIT 0` ⇒ **会话列表永远空**） | ✅ **已修（维持）** | RAG `…/service/MessageDomainService.java:526-528` `listByParticipant(role, id, **limit**, **in.getOffset()**)` ⇒ **实参顺序已正确**（`limit` 落 `limit`、`offset` 落 `offset`）⇒ 不再产生 `LIMIT 0` | 否 |
+| **DRIFT-MSG-V-013** | 🔴 P0（`JacksonTypeHandler` 用 `setString` ⇒ **jsonb 拒收**；且缺 `autoResultMap`） | ✅ **已修（维持）** | RAG `…/mapper/JsonbMapTypeHandler.java:64` `ps.setObject(i, toJson(parameter), **Types.OTHER**)` ＋ `…/domain/NotificationEntity.java:33` `@TableName(value = "message_notification", **autoResultMap = true**)` ＋ `…/mapper/NotificationMapper.java:217` 显式 `typeHandler=` ⇒ **写入方向与读出方向两侧都修好** | 否 |
+| **UNRESOLVED-MSG-V-001** | 🟡 UNRESOLVED（Nacos `namespace`/`group` 不一致 ⇒ 活体对拍不可做） | 🟡 **仍开着（跨域）** | RAG `docs/DRIFT/message/rpc.md:1221`「沿用，跨轮次」＋ `:584`「历史 `UNRESOLVED-MSG-V-001`，**本轮未动**」⇒ **两侧 namespace/group 未对齐** ⇒ 前提未变 ⇒ **仍不能做活体对拍**（**跨域** ⇒ user/admin 域） | 否 |
+
+### ⚠️ 本轮自己踩到的一个判据坑（值得写进 Pitfalls）
+
+**核 V-002 时，我第一次用 `grep … | cut -c1-150` 读常量，把 `INSERT_BATCH_SIZE = 200` 读成了 `20`** ——
+⇒ 原因是**那行加路径前缀超过 150 字符 ⇒ 被 `cut` 截断** ⇒ 我差点把它当成「台账数字过期」写进订正段。
+⇒ ⇒ **纪律：凡要读一个数值（尤其是常量 / 行号 / 计数），不许用固定宽度截断**（`cut -c` / `head -c` / `column`）
+⇒ **要么整行输出，要么按字段解析** ⇒ 否则**「判据截断」会被当成「被测物错了」**（本轮已自证：换 `sed -n '56,62p'` 后读到的是 `200`）。
+
+⚠️ **姊妹坑**（本轮同款）：**核守门存在性时我用 `find -name <方法名>.java` 去找测试方法** ⇒ 5 个守门被判「不存在」⇒
+实际上它们是**测试类里的方法**（`grep -rl "void <方法名>"` **6/6 全部在仓**）⇒ ⇒ **「按文件名找测试」是错的判据**（方法名 ≠ 文件名）。
