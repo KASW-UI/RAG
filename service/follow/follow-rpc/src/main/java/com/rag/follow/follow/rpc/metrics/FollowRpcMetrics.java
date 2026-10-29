@@ -6,6 +6,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -92,17 +93,56 @@ public class FollowRpcMetrics {
                 .increment();
 
         long durationNanos = System.nanoTime() - startedAtNanos;
-        // ⚠️ **用 publishPercentileHistogram()，不用 publishPercentiles()**：
+        // ⚠️ **桶边界必须显式钉成 Go 的 DefBuckets（2026-10-29 · DRIFT-FOLLOW-006 落地时实测）**：
         //   Go 侧是 prometheus.NewHistogramVec(..., Buckets: prometheus.DefBuckets)
         //   （service/follow/rpc/internal/metrics/metrics.go:19-24）⇒ 暴露 `_bucket{le=...}`。
-        //   `publishPercentiles()` 是**分位数**开关，Prometheus 文本格式**不支持**
-        //   （只有 OpenMetrics 才有 quantile）⇒ 对着 Prometheus 抓取端它是无效配置，
-        //   而 `publishPercentileHistogram()` 才是产出 `_bucket` 的那个开关，
-        //   且其桶边界与 Go 的 prometheus.DefBuckets 逐个相同。
+        //
+        //   **只用 `publishPercentileHistogram()` 是不够的** ⇒ Micrometer 会用它自己的
+        //   **HdrHistogram 派生的 68 个桶**（0.001 / 0.001048576 / … / 30.0）
+        //   ⇒ 与 Go 的 `prometheus.DefBuckets`
+        //   （`client_golang@v1.23.2/prometheus/histogram.go:271`
+        //     = {.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10}，11 个）
+        //   **零重合**（实测：Go 侧 96 条 `_bucket` 与 RAG 侧 552 条无一同名）。
+        //   ⇒ 后果：同一段 PromQL（`histogram_quantile(0.95, …_bucket)`）
+        //     在两侧**给出不同的分位数** ⇒ 监控语义不等价。
+        //
+        //   ⇒ **修法 = 只用 `serviceLevelObjectives(...)`（SLO 直方图）**：
+        //     Micrometer 的 SLO 直方图**以 SLO 边界为桶边界** ⇒ 逐个等于 DefBuckets。
+        //     实测（RAG 侧 `/actuator/prometheus`）：
+        //       RAG : 0.005 0.01 0.025 0.05 0.1 0.25 0.5 1.0 2.5 5.0 10.0 +Inf
+        //       Go  : 0.005 0.01 0.025 0.05 0.1 0.25 0.5 1   2.5 5   10  +Inf
+        //     ⇒ **边界逐个相同**；只剩 `1` vs `1.0` / `5` vs `5.0` / `10` vs `10.0`
+        //       的**文本**差异（Java double 的 toString）⇒ Prometheus 的 `le` 按浮点解析
+        //       ⇒ **语义等价**，已在 DRIFT-FOLLOW-006 的残余差异里登记。
+        //
+        //   ⚠️ **不要再加 `publishPercentileHistogram()`**：实测 Micrometer 会把
+        //     **SLO 边界「叠加」到它自己的 68 个 HdrHistogram 桶上**（⇒ 79 个桶）
+        //     ⇒ 反而更不接近 Go。
+        //   ⚠️ **也**不能用 `publishPercentiles()`：那是**分位数**开关，
+        //     Prometheus 文本格式**不支持**（只有 OpenMetrics 才有 quantile）
+        //     ⇒ 对着 Prometheus 抓取端它是无效配置。
+        //
+        //   ⚠️ **Boot 4 已删掉 `management.metrics.distribution.buckets.<meter>`**
+        //     （`MetricsProperties.Distribution`（spring-boot-micrometer-metrics 4.0.8）
+        //      只有 percentilesHistogram / percentiles / slo / minimumExpectedValue /
+        //      maximumExpectedValue / expiry / bufferLength，**没有 buckets**）
+        //     ⇒ 桶边界**只能**在代码侧钉（Boot 3 的那个属性在这条路上走不通）。
         timerCache.computeIfAbsent(method, name -> Timer.builder(RPC_REQUEST_DURATION)
                         .description("Follow rpc request duration in seconds")
                         .tag("method", name)
-                        .publishPercentileHistogram()
+                        // ⚠️ **顺序 = Go DefBuckets 的顺序**（升序）⇒ 逐个对应，见上。
+                        .serviceLevelObjectives(
+                                Duration.ofMillis(5),    // .005
+                                Duration.ofMillis(10),   // .01
+                                Duration.ofMillis(25),   // .025
+                                Duration.ofMillis(50),   // .05
+                                Duration.ofMillis(100),  // .1
+                                Duration.ofMillis(250),  // .25
+                                Duration.ofMillis(500),  // .5
+                                Duration.ofSeconds(1),   // 1
+                                Duration.ofMillis(2500), // 2.5
+                                Duration.ofSeconds(5),   // 5
+                                Duration.ofSeconds(10))  // 10
                         .register(registry))
                 .record(durationNanos, java.util.concurrent.TimeUnit.NANOSECONDS);
     }
