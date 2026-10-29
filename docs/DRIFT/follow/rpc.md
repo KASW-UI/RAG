@@ -14,10 +14,10 @@
 
 | # | 漂移 | 级别 | 状态 |
 |---|---|---|---|
-| DRIFT-FOLLOW-002 | 运行时 classpath 缺 `grpc-inprocess` ⇒ `NoClassDefFoundError` ⇒ 启动失败 | **启动阻塞（硬失败）** | ✅ 已修 |
-| DRIFT-FOLLOW-003 | `discovery://user-rpc` 两斜杠被 devh 拒绝 ⇒ 启动失败 | **启动阻塞（硬失败）** | ✅ 已修 |
-| DRIFT-FOLLOW-004 | `server-addr` 硬编码 `:8848`、忽略 `NACOS_PORT`，与 follow-api 语义冲突 ⇒ api/rpc 连到两台 Nacos | 运行时故障（业务码塌成 1015） | ✅ 已修 |
-| DRIFT-FOLLOW-006 | 5 个 `follow_rpc_*` 指标**无任何抓取出口**（Go 有 DevServer `/metrics`，RAG 的 follow-rpc 是纯 gRPC 进程） | **可观察（抓取侧）** | ✅ **已修（2026-10-29 · 编号 `S1-FOLLOW-001`）** —— 出口已落地（Tomcat + Actuator，**端口 16065 与 Go 一字不差**）⇒ 双侧 series 集合**逐条一致**（仅余 **P3/D 类**的 8 条 `_max` 增项）⇒ 详见下方 §「DRIFT-FOLLOW-006 的落地（2026-10-29）」 |
+| DRIFT-FOLLOW-002 | 运行时 classpath 缺 `grpc-inprocess` ⇒ `NoClassDefFoundError` ⇒ 启动失败 | **启动阻塞（硬失败）** | ✅ 已修<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针）**：RAG `service/follow/follow-rpc/pom.xml:256-260` = `io.grpc:grpc-inprocess` **无 `<scope>test</scope>`**（compile 默认）⇒ **现行态 = ✅ 已修（不变）**；⚠️ **跨域那半边**（域外 4 模块仍是 `test` scope）**已于 2026-10-29 订正**，本轮逐模块复核**属实**（全仓已无 `test` scope）；核对日期 2026-10-30 |
+| DRIFT-FOLLOW-003 | `discovery://user-rpc` 两斜杠被 devh 拒绝 ⇒ 启动失败 | **启动阻塞（硬失败）** | ✅ 已修<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 子结论订正）**：RAG `service/follow/follow-rpc/src/main/resources/application.yml:163` = `address: discovery:///user-rpc`（**三斜杠**）⇒ **现行态 = ✅ 已修（不变）**；⚠️ **「域外 5 个模块仍是两斜杠 ⇒ 待修」已陈旧**（本轮逐模块实测：全仓已无两斜杠）⇒ **该跨域待办已销账**；核对日期 2026-10-30 |
+| DRIFT-FOLLOW-004 | `server-addr` 硬编码 `:8848`、忽略 `NACOS_PORT`，与 follow-api 语义冲突 ⇒ api/rpc 连到两台 Nacos | 运行时故障（业务码塌成 1015） | ✅ 已修<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针）**：RAG `service/follow/follow-api/src/main/resources/application.yml:58` ＋ `service/follow/follow-rpc/src/main/resources/application.yml:95` = **同一串** `${NACOS_ADDR:nacos}:${NACOS_PORT:8848}` ⇒ **现行态 = ✅ 已修（不变）**；核对日期 2026-10-30 |
+| DRIFT-FOLLOW-006 | 5 个 `follow_rpc_*` 指标**无任何抓取出口**（Go 有 DevServer `/metrics`，RAG 的 follow-rpc 是纯 gRPC 进程） | **可观察（抓取侧）** | ✅ **已修（2026-10-29 · 编号 `S1-FOLLOW-001`）** —— 出口已落地（Tomcat + Actuator，**端口 16065 与 Go 一字不差**）⇒ 双侧 series 集合**逐条一致**（仅余 **P3/D 类**的 8 条 `_max` 增项）⇒ 详见下方 §「DRIFT-FOLLOW-006 的落地（2026-10-29）」<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针）**：RAG `service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web` ＋ `service/follow/follow-rpc/src/main/resources/application.yml:131` = `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}` ＋ `:112` = `register-enabled: false` · Go `service/follow/rpc/etc/follow.yaml:23` = `Port: 16065` ⇒ **现行态 = ✅ 已落地（不变）**；核对日期 2026-10-30 |
 
 > ⚠️ **三条都发生在「测试全绿」的状态下** —— 修复前 63 条测试 0 失败（**原写「现为 68 条」，已过期** —— 🆕 **2026-10-29 实测 = 86 条**：`mvn -o -B -pl service/follow/follow-rpc test` ⇒ surefire XML `testsuite` 求和 = **86** / 0 failures / 0 errors / 0 skipped · **14 个测试类**），
 > 而 `java -jar` 起不来。根因见 [`docs/Pitfalls/follow/rpc.md`](../../Pitfalls/follow/rpc.md)。
@@ -109,6 +109,17 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
 > ⚠️ **同款缺陷仍在域外**：`article-rpc` / `comment-rpc` / `favorite-rpc` / `like-rpc` /
 > `message-rpc` 的 grpc client 地址**全是两斜杠**；而**全部 api 模块都是三斜杠**。
 > ⇒ 这是「rpc 层单方面的写法偏差」，本域已修，域外 5 个模块待修。
+>
+> ⚠️ **2026-10-30 真实性复核（follow+task lane · 跨域子结论已陈旧）**：上面这段「域外 5 个模块待修」**已不成立**。
+> **依据（本轮逐模块实测 `grep -rn 'address: discovery:' service/*/*/src/main/resources/application.yml`）**：
+> `service/article/article-rpc/src/main/resources/application.yml:144` = `discovery:///security-rpc` · `:150` = `discovery:///message-rpc` ·
+> `service/comment/comment-rpc/src/main/resources/application.yml:228` = `discovery:///message-rpc` · `:234` = `discovery:///article-rpc` ·
+> `service/favorite/favorite-rpc/src/main/resources/application.yml:171` = `discovery:///user-rpc` · `:179` = `discovery:///article-rpc` ·
+> `service/like/like-rpc/src/main/resources/application.yml:227` = `discovery:///message-rpc` ·
+> `service/message/message-rpc/src/main/resources/application.yml:164` = `discovery:///user-rpc` · `:171` = `discovery:///admin-rpc`
+> ⇒ ⇒ **全仓已无两斜杠写法**（本域 `service/follow/follow-rpc/src/main/resources/application.yml:163` 亦为三斜杠）。
+> ⇒ **原句是 2026-10-24 的陈旧快照** ⇒ **本条主状态不变（✅ 已修）**，只是「域外待修」这半边**已销账** ⇒ **不再作为跨域待办**。
+> ⇒ 核对日期 2026-10-30。
 
 ### 🛡️ 防回归网：`FollowRpcProductionAddressTest`（2026-10-24 补录，commit `d50750e`）
 
@@ -664,3 +675,36 @@ Go  : 0.005 0.01 0.025 0.05 0.1 0.25 0.5 1   2.5 5   10  +Inf
 - **段来源**：共享层已预分配给本域的段（`docs/DRIFT/global/vs-common.md` §4.10.19.3）⇒ **共享层台账零改动**（写权归 G4）。
 - **守门**：域级 `BlindPortGateTest`（落在 **user-rpc**，`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/BlindPortGateTest.java`）**5 条** ⇒ 一并覆盖本组件 ⇒ **本组件不单独建守门**（避免两份规则漂移）。
 - **边界**：**本组件生产代码零改动**（全部落在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项**（Go 侧无对应物 ⇒ 无对照义务）。
+
+
+---
+
+## 🆕 **2026-10-30 真实性复核回执**（follow+task lane · 「台账结论 ↔ 代码」逐条复核 · follow 域 · `rpc.md`）
+
+> **口径**：同 [`api.md`](api.md) 的 2026-10-30 回执（Go 真源 + RAG 两侧逐条核 · 指针逐条核到「那一行确实讲这件事」）。
+> **原值一律保留**；本轮**未改判任何一条**，只做**子结论订正 + 指针补齐**。
+> **机器判据**：`python3 tools/difftest/ledger-claim-audit.py --domain follow --strict` ⇒ **🔴 落空 = 0**。
+
+### 一、逐条结论表（编号 · 落点 · 原状态 → 现行态 · 两侧依据 · 是否改判）
+
+| 编号 | 落点 | 原状态 → 现行态 | 依据（两侧 `文件:行号` · 核对日期 2026-10-30） | 改判 |
+|---|---|---|---|---|
+| `DRIFT-FOLLOW-002` | §结论表 `:17` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-rpc/pom.xml:256-260` = `io.grpc:grpc-inprocess` **无 `<scope>test</scope>`**（compile 默认）＋ `:236`（注释明写「scope 必须是 compile（默认），不能是 test」）⇒ **运行期 classpath 有该类** ⇒ **本域成立**；⚠️ 跨域那半边（域外 4 个模块仍是 `test` scope）**2026-10-29 已订正**，本轮复核**属实**：逐模块 `grep -A4 grpc-inprocess` ⇒ `article-rpc` / `like-rpc` / `task-rpc` = **无 `<scope>`**、`favorite-rpc` = `<scope>runtime</scope>`（**不是 `test`**）⇒ **全仓已无 `grpc-inprocess` 的 `test` scope** ⇒ **跨域待办已销账** | 否（**子结论订正已在本条正文**） |
+| `DRIFT-FOLLOW-003` | §结论表 `:18` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-rpc/src/main/resources/application.yml:163` = `address: discovery:///user-rpc`（**本轮重核：该行确实讲这件事**）＋ 守门 `service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/FollowRpcProductionAddressTest.java:87` = `@DisplayName("生产 application.yml 的 grpc client 地址必须是 discovery:///user-rpc（三斜杠）")` ⇒ **「两斜杠」形态已消除** | 否（**子结论订正**：域外 5 个模块「全是两斜杠」**已陈旧** ⇒ 已在本条正文追加订正段） |
+| `DRIFT-FOLLOW-003` | §标题 `:79` | ✅ 已修 → ✅ 已修（不变） | 同上（根因段「devh 判据 = `uri.getPath()`」**不因代码未变而失效**）⇒ 结论仍成立 | 否（**子结论订正**：见本条正文追加段） |
+| `DRIFT-FOLLOW-004` | §结论表 `:19` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-api/src/main/resources/application.yml:58` = `server-addr: ${NACOS_ADDR:nacos}:${NACOS_PORT:8848}` ＋ RAG `service/follow/follow-rpc/src/main/resources/application.yml:95` = **同一串** ⇒ **两端必指同一台 Nacos**（本轮逐行重核两行内容一致） | 否 |
+| `DRIFT-FOLLOW-004` | §标题 `:132` | ✅ 已修 → ✅ 已修（不变） | 同上（根因段「同域两个模块对同一环境变量给出两种语义」**不因代码未变而失效**）⇒ 结论仍成立 | 否 |
+| `DRIFT-FOLLOW-006` | §结论表 `:20` | ✅ 已修（2026-10-29 · 编号 `S1-FOLLOW-001`）→ ✅ 已落地（不变） | RAG `service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web`（**给了 Actuator 一个 servlet 载体**）＋ RAG `service/follow/follow-rpc/src/main/resources/application.yml:131` = `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}` ＋ `:112` = `register-enabled: false`（**关掉自动注册 ⇒ 避免 Nacos 里出现错端口实例**）· Go `service/follow/rpc/etc/follow.yaml:23` = `Port: 16065` ⇒ **端口一字不差** ＋ 探针 `tools/metrics-probe/follow/run.sh:355` = 就绪判据 = **真抓到 `/actuator/prometheus`**（`:361` = 未就绪即 `die`）⇒ **抓取出口已在** | 否 |
+
+### 二、本轮新增/订正的证据指针
+
+| 落点 | 原指针 | 现行指针 | 说明 |
+|---|---|---|---|
+| §`DRIFT-FOLLOW-003` 的「同款缺陷仍在域外」段 | 「域外 5 个模块 grpc 地址全是两斜杠 ⇒ 待修」 | 逐模块现行地址：`service/article/article-rpc/src/main/resources/application.yml:144,150` · `service/comment/comment-rpc/src/main/resources/application.yml:228,234` · `service/favorite/favorite-rpc/src/main/resources/application.yml:171,179` · `service/like/like-rpc/src/main/resources/application.yml:227` · `service/message/message-rpc/src/main/resources/application.yml:164,171` | **陈旧快照** ⇒ 全仓已无两斜杠 ⇒ 跨域待办销账 |
+
+### 三、仍未核到（**待核实**）
+
+| 项 | 为什么判不了 | 本轮做过什么 |
+|---|---|---|
+| `DRIFT-FOLLOW-006` 的**双侧 series 逐条一致**（含 8 条 `_max` 增项） | 需**真 Go follow-rpc + 真 RAG follow-rpc 同时跑**并各抓一次 `/metrics` vs `/actuator/prometheus` ⇒ 本轮**未起进程** | 已核**配置层**（端口 / `register-enabled` / starter-web / 探针就绪判据）⇒ 状态**沿用 2026-10-29 结论**，本轮**未独立改判** |
+| `DRIFT-FOLLOW-002` 的**真启动复验**（`NoClassDefFoundError` 未复现） | 需**真容器起 `follow-rpc`** ⇒ 本轮**未起** | 已核 **pom 的 scope**（L1 源码）⇒ 未独立改判 |

@@ -465,18 +465,46 @@ java.net.BindException: Address already in use
 
 | 编号 | 状态（本轮核后） | 依据（核对日期 2026-10-29） | 改判 |
 |---|---|---|---|
-| `PIT-FOLLOW-006` | 已闭环（不变） | RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/service/FollowApiSupport.java:265` = `out.setUserIds(null);` ＋ `…/FollowApiMvcPipelineTest.java:625-626` = 断言 `"user_ids":null` ⇒ 触发条件（proto3 空 repeated 在 wire 上消失）已消除 | 否 |
-| `PIT-FOLLOW-007` | 已闭环（不变） | 同上：断言已从 `"user_ids":[]` 改成 `"user_ids":null`（`:625-626`）⇒ **「锁死错误答案」的断言已改** | 否 |
-| `PIT-FOLLOW-009` | 已闭环（不变） | RAG `…/follow-api/…/dto/RecommendUser.java:57` = `@JsonPropertyOrder({"target_id", "mutual_score"})` ⇒ Jackson 的字母序分支已被 `JsonPropertyOrder` 固定 | 否 |
+| `PIT-FOLLOW-006` | 已闭环（不变） | RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/service/FollowApiSupport.java:265` = `out.setUserIds(null);` ＋ `…/FollowApiMvcPipelineTest.java:625-626` = 断言 `"user_ids":null` ⇒ 触发条件（proto3 空 repeated 在 wire 上消失）已消除<br>⚠️ **2026-10-30 复核（follow+task lane · 短确认 + 补全路径）**：RAG `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiMvcPipelineTest.java:625-626` = `assertTrue(emptyBody.contains("\"user_ids\":null"), …)` ⇒ **断言锁的是 `null`**；Go `service/follow/api/internal/logic/follow/getrecommendationslogic.go:70` = `users := make([]types.RecommendUser, 0, len(rpcResp.Users))` ⇒ proto3 空 repeated 在 wire 上消失 ⇒ Go 得 nil ⇒ **两侧同形 ⇒ 现行态 = 已闭环（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-FOLLOW-007` | 已闭环（不变） | 同上：断言已从 `"user_ids":[]` 改成 `"user_ids":null`（`:625-626`）⇒ **「锁死错误答案」的断言已改**<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiMvcPipelineTest.java:625-626` = `assertTrue(emptyBody.contains("\"user_ids\":null"), "空 user_ids 必须是 null（与 Go 的 nil 切片一致），实际 body = " + emptyBody);` ⇒ **断言消息本身就写着「必须是 null」** ⇒ **「锁死错误答案」的形态确已消除** ⇒ **现行态 = 已闭环（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-FOLLOW-009` | 已闭环（不变） | RAG `…/follow-api/…/dto/RecommendUser.java:57` = `@JsonPropertyOrder({"target_id", "mutual_score"})` ⇒ Jackson 的字母序分支已被 `JsonPropertyOrder` 固定<br>⚠️ **2026-10-30 复核（follow+task lane · 短确认 + 补全路径）**：RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/dto/RecommendUser.java:57` = `@JsonPropertyOrder({"target_id", "mutual_score"})`（**本轮重核该行**）· Go `service/follow/api/internal/types/types.go:21` / `:22` = `TargetId` 在前、`MutualScore` 在后 ⇒ **字段顺序两侧同形 ⇒ 现行态 = 已闭环（不变）**；核对日期 2026-10-30 | 否 |
 | `PIT-FOLLOW-008` | 已闭环（不变） | RAG `service/follow/follow-api/pom.xml:196` = `spring-boot-maven-plugin` ⇒ 产物为可执行 fat jar | 否 |
 | `PIT-FOLLOW-010` | 已闭环（不变） | 仓内可复算落点逐行核过：`tools/api-full-parity-probe/follow/run.sh:529` = `out="$(mktemp "${WORK}/body.XXXXXX")" \|\| return 1` ＋ `:579-581` = `http_code == 000` 守卫 ＋ `tools/api-full-parity-probe/follow/mutate-parity.sh:161-173` = **M5** 把这条假绿复现出来 ⇒ 触发条件已消除 | 否（**指针形态已改**：原 **`/tmp/probe.sh` 的第 3 行** ⇒ 标注不可核验并改指仓内落点） |
-| `PIT-FOLLOW-011` | 仍生效（不变） | 探针形态属**一次性外部装置** ⇒ 本轮未复跑；**触发条件（故障模拟器不完成 HTTP/2 握手）在本仓探针里仍在** ⇒ 维持「仍生效」 | 否 |
-| `PIT-FOLLOW-012` | 仍生效（不变） | 属 **go-zero 库行为**（etcd 键 = 前缀 + `/`）⇒ 本轮未复跑 Go 探针；库版本（`go-zero v1.10.2`）未变 ⇒ 维持「仍生效」 | 否 |
-| `PIT-FOLLOW-015` | 仍生效（不变 · **适用范围已写明**） | RAG `…/follow-api/…/metrics/FollowApiMetrics.java:131` = `.publishPercentileHistogram()` ＋ `:132` = `.serviceLevelObjectives(GO_DEF_BUCKETS)` ⇒ **api 侧两个开关同开 ⇒ 并集仍在（80 桶）** ⇒ 触发条件在；⚠️ 已在条目内写明「**follow-rpc 只开 SLO ⇒ 12 桶 ⇒ 该条不适用于单开 SLO 的形态**」 | 否 |
-| `PIT-FOLLOW-016` | 仍生效（不变） | 属**方法论**（对拍装置自身会骗人）⇒ 本轮未复跑；同类形态在本域探针里仍需逐条防（见 `PIT-FOLLOW-010` 的 M5 变异） | 否 |
+| `PIT-FOLLOW-011` | 仍生效（不变） | 探针形态属**一次性外部装置** ⇒ 本轮未复跑；**触发条件（故障模拟器不完成 HTTP/2 握手）在本仓探针里仍在** ⇒ 维持「仍生效」<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/api-full-parity-probe/follow/README.md:12` = 「\`blackhole3.py\`）**全在 \`/tmp\` 且已消失**」⇒ **仓内确实没有黑洞模拟器**（探针本体 = `tools/api-full-parity-probe/follow/run.sh`）⇒ **触发条件仍在**；且 RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/client/FollowRpcClient.java:164` = `CLIENT_TIMEOUT_MILLIS = 2000L` ⇒ **「握手未完成（≈70ms 的 `UNAVAILABLE`）」与「业务层无响应（2s 的 `DEADLINE_EXCEEDED`）」仍会落到两条不同分支** ⇒ **本条仍生效**；核对日期 2026-10-30 | 否 |
+| `PIT-FOLLOW-012` | 仍生效（不变） | 属 **go-zero 库行为**（etcd 键 = 前缀 + `/`）⇒ 本轮未复跑 Go 探针；库版本（`go-zero v1.10.2`）未变 ⇒ 维持「仍生效」<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：Go 真源 `go-zero@v1.10.2/core/discov/internal/registry.go:517` = `func makeKeyPrefix(key string) string {` ＋ `:309` = `resp, err = cli.Get(ctx, makeKeyPrefix(key.key), clientv3.WithPrefix())`（**本轮逐行重核这两行**）⇒ **前缀语义仍在** ⇒ **RAG 侧无 analogue（Nacos 而非 etcd）⇒ 无从修、也不该改** ⇒ **本条仍生效**；核对日期 2026-10-30 | 否 |
+| `PIT-FOLLOW-015` | 仍生效（不变 · **适用范围已写明**） | RAG `…/follow-api/…/metrics/FollowApiMetrics.java:131` = `.publishPercentileHistogram()` ＋ `:132` = `.serviceLevelObjectives(GO_DEF_BUCKETS)` ⇒ **api 侧两个开关同开 ⇒ 并集仍在（80 桶）** ⇒ 触发条件在；⚠️ 已在条目内写明「**follow-rpc 只开 SLO ⇒ 12 桶 ⇒ 该条不适用于单开 SLO 的形态**」<br>⚠️ **2026-10-30 复核（follow+task lane · 短确认 + 补全路径）**：RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/metrics/FollowApiMetrics.java:131` = `.publishPercentileHistogram()` ＋ `:132` = `.serviceLevelObjectives(GO_DEF_BUCKETS)` ⇒ **两开关仍同开**（**本轮重核**）· 对照 RAG `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/metrics/FollowRpcMetrics.java:118-120`（明写「**不要再加 `publishPercentileHistogram()`**」）＋ `:134` = `.serviceLevelObjectives(` ⇒ **rpc 侧 12 桶** ⇒ **适用范围界定仍成立 ⇒ 现行态 = 仍生效（不变）**；⚠️ **「80 桶」这个数字沿用 2026-10-24 实测，本轮未复测**；核对日期 2026-10-30 | 否 |
+| `PIT-FOLLOW-016` | 仍生效（不变） | 属**方法论**（对拍装置自身会骗人）⇒ 本轮未复跑；同类形态在本域探针里仍需逐条防（见 `PIT-FOLLOW-010` 的 M5 变异）<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/api-full-parity-probe/follow/mutate-parity.sh:154-161` = 「**M5：复现 FAILING-010** —— 把 run.sh 改回旧写法」⇒ **「装置/探针自身会骗人」的形态在仓内**（**且被做成可复现的变异**）＋ `docs/DRIFT/follow/vs-common.md:59`（A5 轴「`RANDOM_PORT` 面仍是记账缺口」）⇒ **方法论仍生效**；核对日期 2026-10-30 | 否 |
 
 ### 仍未核到（**待核实**）
 
 | 编号 | 为什么判不了 | 本轮做过什么 |
 |---|---|---|
 | `PIT-FOLLOW-011` / `-012` / `-016` 的**触发条件复现** | 需外部装置 / Go 侧进程 / 完整对拍 ⇒ 本轮**未复跑** | 只核了台账与仓内证据面（引用文件零缺失）⇒ 状态**沿用 2026-10-29 对齐 lane 的结论**，未独立改判 |
+
+---
+
+## 🆕 **2026-10-30 真实性复核回执**（follow+task lane · 「台账结论 ↔ 代码」逐条复核 · follow 域 · 本文件）
+
+> **口径**：逐条核「被描述的那个行为现在还在不在」（Go 真源 + RAG 两侧）＋「证据指针那一行是不是真的在讲这件事」（**指针能解析 ≠ 结论为真**）。
+> **原值一律保留**；本轮**未改判任何一条**，只做**指针补齐 / 路径补全**（明细已追加在上表各行）。
+> **机器判据**：`python3 tools/difftest/ledger-claim-audit.py --domain follow --strict` ⇒ **🔴 落空 = 0**。
+
+### 逐条结论表（编号 · 原状态 → 现行态 · 依据 · 是否改判 · 核对日期 2026-10-30）
+
+| 编号 | 原状态 → 现行态 | 依据（`文件:行号`） | 改判 |
+|---|---|---|---|
+| `PIT-FOLLOW-006` | 已闭环 → 已闭环（不变） | RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/service/FollowApiSupport.java:265` = `out.setUserIds(null);` ＋ `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiMvcPipelineTest.java:625-626` = 断言 `"user_ids":null` · Go `service/follow/api/internal/logic/follow/getrecommendationslogic.go:70` ⇒ **两侧同形** | 否 |
+| `PIT-FOLLOW-007` | 已闭环 → 已闭环（不变） | RAG `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiMvcPipelineTest.java:625-626` = 断言消息「空 user_ids 必须是 null（与 Go 的 nil 切片一致）」⇒ **「锁死错误答案」的形态已消除** | 否（**补指针**） |
+| `PIT-FOLLOW-009` | 已闭环 → 已闭环（不变） | RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/dto/RecommendUser.java:57` = `@JsonPropertyOrder({"target_id", "mutual_score"})` · Go `service/follow/api/internal/types/types.go:21` / `:22` ⇒ **字段顺序两侧同形** | 否（**补全路径**） |
+| `PIT-FOLLOW-008` | 已闭环 → 已闭环（不变） | RAG `service/follow/follow-api/pom.xml:196` = `spring-boot-maven-plugin` ⇒ **产物是可执行 fat jar**（**本轮重核该行**） | 否 |
+| `PIT-FOLLOW-010` | 已闭环 → 已闭环（不变） | RAG `tools/api-full-parity-probe/follow/run.sh:529` = `out="$(mktemp "${WORK}/body.XXXXXX")" \|\| return 1` ＋ `:579-581` = `http_code == 000` 守卫 ＋ `tools/api-full-parity-probe/follow/mutate-parity.sh:154-161` = **M5** 把这条假绿复现出来 ⇒ **触发条件已消除**（**本轮逐行重核这三处**） | 否 |
+| `PIT-FOLLOW-011` | 仍生效 → 仍生效（不变） | RAG `tools/api-full-parity-probe/follow/README.md:12` = 「`blackhole3.py`）**全在 `/tmp` 且已消失**」⇒ **仓内无黑洞模拟器** ＋ RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/client/FollowRpcClient.java:164` = `CLIENT_TIMEOUT_MILLIS = 2000L` ⇒ **触发条件仍在** | 否（**补指针**） |
+| `PIT-FOLLOW-012` | 仍生效 → 仍生效（不变） | Go 真源 `go-zero@v1.10.2/core/discov/internal/registry.go:517` = `func makeKeyPrefix(key string) string {` ＋ `:309` = `cli.Get(ctx, makeKeyPrefix(key.key), clientv3.WithPrefix())` ⇒ **前缀语义仍在** | 否（**补指针**） |
+| `PIT-FOLLOW-015` | 仍生效（适用范围已写明）→ 仍生效（不变） | RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/metrics/FollowApiMetrics.java:131` / `:132` ⇒ **两开关同开** · 对照 RAG `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/metrics/FollowRpcMetrics.java:118-120` / `:134` ⇒ **rpc 侧 12 桶 ⇒ 适用范围界定仍成立** | 否（**补全路径**） |
+| `PIT-FOLLOW-016` | 仍生效 → 仍生效（不变） | RAG `tools/api-full-parity-probe/follow/mutate-parity.sh:154-161` = 「**M5：复现 FAILING-010**」⇒ **「装置自身会骗人」的形态在仓内** ＋ `docs/DRIFT/follow/vs-common.md:59`（A5 轴 `RANDOM_PORT` 缺口） | 否（**补指针**） |
+
+### 仍未核到（**待核实**）
+
+| 编号 | 为什么判不了 | 本轮做过什么 |
+|---|---|---|
+| `PIT-FOLLOW-011` / `-012` / `-016` 的**触发条件复现** | 需外部装置 / Go 侧进程 / 完整对拍 ⇒ 本轮**未复跑** | 只核了**仓内证据面**（探针目录清单 / Go 真源源码行 / 变异脚本）⇒ **状态沿用 2026-10-29 结论，未独立改判** |

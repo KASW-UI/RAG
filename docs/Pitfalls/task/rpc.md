@@ -396,7 +396,7 @@ WRONGTYPE 只发生在「用某类型的读/改命令去动另一种类型的 ke
 > **旧号**：`PITFALL-TASK-RPC-09` ⇒ **新号**：`PIT-TASK-09`
 > **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
 > **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 已提交位点存在 `__consumer_offsets` 是**Kafka 事实** ⇒ 删 topic 不会清位点 ⇒ 永远可能发生 ⇒ 但本轮**不跑 Kafka 对拍** ⇒ 不影响本轮产出
-> **证据**：Go `service/task/rpc/internal/mq/initGoKa.go:134-135` `cfg.Consumer.Offsets.Initial = sarama.OffsetOldest` 仍在 ⇒ 「`OffsetOldest` 只在无已提交位点时生效」的前提未变
+> **证据**：Go `service/task/rpc/internal/mq/initGoKa.go:134-135` `cfg.Consumer.Offsets.Initial = sarama.OffsetOldest` 仍在 ⇒ 「`OffsetOldest` 只在无已提交位点时生效」的前提未变<br>⚠️ **2026-10-30 真实性复核（follow+task lane · 指针订正）**：上面这行指针**指错文件 + 指错行** —— ① **目录写错**：`service/task/rpc/internal/mq/` **在 Go 真源里不存在**（真实目录是 **`Init/`**，`find` 实测全仓只有 `service/task/rpc/internal/Init/initGoKa.go` 一个 `initGoKa.go`）；② **行号写错**：真实的那行是 Go 真源 `service/task/rpc/internal/Init/initGoKa.go:131` = `cfg.Consumer.Offsets.Initial = sarama.OffsetOldest`（**本轮逐行重核**），而 `:134-135` 落在 `tmCfg := goka.NewTopicManagerConfig()` / `tmCfg.Stream.Replication = 1` 两行上 ⇒ **讲的不是这件事**。⇒ **现行指针 = `service/task/rpc/internal/Init/initGoKa.go:131`**（另两处同款：`:173` / `:207`）⇒ ⇒ **本条状态不变（仍生效）**，只是**指针不可复算**这一点本轮修掉。⚠️ **该错为何机器判据抓不到**：`ledger-claim-audit.py` 的 `_resolve()` 在直连路径不存在时会**退化成按 basename 匹配** ⇒ 把「指错文件」判成 `resolved` ⇒ **机器绿灯 ≠ 指针指对文件**。核对日期 2026-10-30
 
 ### 现象
 
@@ -414,7 +414,7 @@ RAG 侧却完全正常（`rag.task.logs.raw.User:0:7`）。
 - 已提交位点存在 `__consumer_offsets`，键是 **group + topic + partition**。
   **topic 同名 ⇒ 位点还在**（哪怕 topic 已删重建）。
 - Go 的 goka 用 `cfg.Consumer.Offsets.Initial = sarama.OffsetOldest`
-  （`initGoKa.go:134-135` 等三处），但 `OffsetOldest` **只在没有已提交位点时生效**。
+  （`initGoKa.go:134-135` 等三处，⚠️ **2026-10-30 已订正 ⇒ 真实行号 = `service/task/rpc/internal/Init/initGoKa.go:131` / `:173` / `:207`**），但 `OffsetOldest` **只在没有已提交位点时生效**。
   有旧位点（比如 9）就从 9 开始 ⇒ 新 topic 只有 7 条（offset 0-6）⇒ **整段被跳过**。
 - RAG 侧侥幸没事：`@KafkaListener` 用 `auto-offset-reset=latest`，
   而消息是**启动之后**才灌的 ⇒ 起点就是队尾 ⇒ 全部收到。
@@ -1524,38 +1524,38 @@ AGENTS.md 早就记过一个坑：**台账的 commit 清单「写成 4 行却只
 |---|---|---|---|
 | `PIT-TASK-01` | 已闭环（不变） | RAG `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mapper/TaskProgressUpsertParityTest.java:71` = 「刻意**不加** `@EnabledIfDockerAvailable`」＋ **本轮实测 surefire XML 求和 = task-rpc `tests=137 failures=0 errors=0 skipped=0` / task-api `tests=135 failures=0 errors=0 skipped=0`** ⇒ 「静默全跳」已消除 | 否 |
 | `PIT-TASK-02` | 已闭环（不变） | RAG `service/task/task-rpc/src/main/java/com/rag/task/task/rpc/config/TaskSinkProperties.java:60` = `private Duration initTtl = Duration.ofDays(90);` ⇒ 键名与 yaml `init-ttl` 逐字对上（relaxed binding 不再失配） | 否 |
-| `PIT-TASK-03` | 已闭环（不变） | 同上：注释与实现已一致（`:52-58` 写明「必须是 `Duration`，不能是 `long`」· `:60` 即为 `Duration`） | 否 |
-| `PIT-TASK-04` | 仍生效（不变） | 属**探针写法**（Python `urllib` 自动补 `Content-Type`）⇒ 与仓内产品代码无关；本轮未复跑探针 | 否 |
-| `PIT-TASK-05` | 仍生效（不变） | 属**对拍判读**（header 格式淹没真差异）⇒ 同上；RAG 侧 `DRIFT-TASK-API-004`（`Content-Type` charset/空白）**仍开放** ⇒ 该坑的触发条件仍在 | 否 |
+| `PIT-TASK-03` | 已闭环（不变） | 同上：注释与实现已一致（`:52-58` 写明「必须是 `Duration`，不能是 `long`」· `:60` 即为 `Duration`）<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `service/task/task-rpc/src/main/java/com/rag/task/task/rpc/config/TaskSinkProperties.java:52-58` = 「必须是 `Duration`，不能是 `long`」的注释段 ＋ `:60` = `private Duration initTtl = Duration.ofDays(90);`（**本轮逐行重核**）⇒ **注释与实现一致 ⇒ 现行态 = 已闭环（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-04` | 仍生效（不变） | 属**探针写法**（Python `urllib` 自动补 `Content-Type`）⇒ 与仓内产品代码无关；本轮未复跑探针<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/difftest/parity-task.py:17` = `import urllib.request` ＋ `:52` = `req = urllib.request.Request(url, data=data, method=method)` ⇒ **仓内探针确实仍用 `urllib`** ⇒ **「自动补 `Content-Type`」的触发条件仍在** ⇒ **现行态 = 仍生效（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-05` | 仍生效（不变） | 属**对拍判读**（header 格式淹没真差异）⇒ 同上；RAG 侧 `DRIFT-TASK-API-004`（`Content-Type` charset/空白）**仍开放** ⇒ 该坑的触发条件仍在<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/difftest/diff.py:509` = `class Normalizer:` ＋ `:510` = 「把两侧各自生成的易变值映射成同一个占位符，再逐字段比对」⇒ **归一化这一步仍在仓内、仍必须做**；且 RAG 侧 `DRIFT-TASK-API-004` **本轮复核仍为 🟡 未修** ⇒ **该坑的触发条件仍在** ⇒ **现行态 = 仍生效（不变）**；核对日期 2026-10-30 | 否 |
 | `PIT-TASK-06` | 已闭环（不变） | RAG `service/task/task-rpc/src/main/java/com/rag/task/task/rpc/service/RedisPipelines.java:98` = 「这里**绝不能**再调 `operations.exec()` —— pipeline 模式没发过 MULTI」⇒ 两侧对 pipeline 的理解已一致 | 否 |
-| `PIT-TASK-07` | 已闭环（不变） | 真 Redis 守门**存在**：`service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mq/RedisPipelinesRealRedisGateTest.java`（本轮实测存在）⇒ 「零真 Redis 覆盖」已消除 | 否 |
-| `PIT-TASK-08` | 仍生效（不变） | 属 **Redis 语义**（`SET` 类型无关）⇒ 真源与 RAG 两侧同形 ⇒ 形态仍在 | 否 |
-| `PIT-TASK-09` | 仍生效（不变） | 属 **Kafka 语义**（删 topic 不删 `__consumer_offsets`）⇒ 与本仓代码无关 | 否 |
-| `PIT-TASK-10` | 仍生效（不变） | 属**容器内 Kafka CLI 的监听器选择**⇒ 与本仓代码无关 | 否 |
-| `PIT-TASK-11` | 仍生效（不变） | 属**框架调用时机**（方法签名对了 ≠ 会被调到）⇒ 本轮未复现 | 否 |
-| `PIT-TASK-12` | 仍生效（不变） | 属**配置键名写错 = 静默失效** ⇒ 机制仍在（`PIT-TASK-02` 的修法正是它的产物） | 否 |
-| `PIT-TASK-13` | 仍生效（不变） | 属**探针写法**（`getInputStream().available()` 自触发）⇒ 与仓内产品代码无关 | 否 |
-| `PIT-TASK-14` | 已闭环（不变） | 探针脚本存在（`tools/difftest/**`）⇒ 两侧 db 编号按轮次定的机制仍在用 | 否 |
-| `PIT-TASK-15` | 仍生效（不变） | 属 **bash 词法** ⇒ 与代码无关 | 否 |
+| `PIT-TASK-07` | 已闭环（不变） | 真 Redis 守门**存在**：`service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mq/RedisPipelinesRealRedisGateTest.java`（本轮实测存在）⇒ 「零真 Redis 覆盖」已消除<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mq/RedisPipelinesRealRedisGateTest.java:86` = `class RedisPipelinesRealRedisGateTest {`（**本轮实测文件在位**）＋ 同文件 `:202` = `void execPropagatesCommandError() {`（真 Redis 的**命令级错误**用例）⇒ **真 Redis 覆盖确已存在** ⇒ **现行态 = 已闭环（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-08` | 仍生效（不变） | 属 **Redis 语义**（`SET` 类型无关）⇒ 真源与 RAG 两侧同形 ⇒ 形态仍在<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mq/RedisPipelinesRealRedisGateTest.java:202` = `void execPropagatesCommandError() {`（**用 string 类型 key + `HGET` 造错误源** ⇒ **正确姿势已在**）· Go 真源 `service/task/rpc/internal/sink/like_sink.go:167` = `pipe := c.rdb.Pipeline()` ＋ `:210` = `pipe2 := c.rdb.Pipeline()` ⇒ **两侧同形** ⇒ **「`SET` 类型无关」这条 Redis 事实仍在 ⇒ 现行态 = 仍生效（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-09` | 仍生效（不变） | 属 **Kafka 语义**（删 topic 不删 `__consumer_offsets`）⇒ 与本仓代码无关<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 指针订正 + 短确认）**：Go 真源 `service/task/rpc/internal/Init/initGoKa.go:131` = `cfg.Consumer.Offsets.Initial = sarama.OffsetOldest`（**本轮逐行重核**）⇒ **「`OffsetOldest` 只在无已提交位点时生效」的前提未变** ⇒ **该形态仍在**；⚠️ **原证据行的指针 `service/task/rpc/internal/mq/initGoKa.go:134-135` = 指错文件（`mq/` 不存在）+ 指错行（真实行 = `:131`）** ⇒ **已订正**（见本条正文的订正段）；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-10` | 仍生效（不变） | 属**容器内 Kafka CLI 的监听器选择**⇒ 与本仓代码无关<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/difftest/docker-compose.task-kafka.yml:89` = `KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://127.0.0.1:59992,INTERNAL://localhost:19092`（**本轮重核该行仍在**）⇒ **两个监听器并存 ⇒ 容器内必须选 `INTERNAL`** 这条结论**未变** ⇒ **现行态 = 仍生效（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-11` | 仍生效（不变） | 属**框架调用时机**（方法签名对了 ≠ 会被调到）⇒ 本轮未复现<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `service/task/task-api/src/test/java/com/rag/task/task/api/TaskApiContentTypeTest.java:182-183` = `@DisplayName("multipart 开关必须真的被解析成 false（Boot 4 属性名无 mvc.，写错即静默失效）")` + `void multipartSwitchIsActuallyApplied() {`⇒ **「配置意图 ≠ 配置生效」这条缝在本域仍被守着**（属性名写错 ⇒ 静默失效）⇒ **现行态 = 仍生效（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-12` | 仍生效（不变） | 属**配置键名写错 = 静默失效** ⇒ 机制仍在（`PIT-TASK-02` 的修法正是它的产物）<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `service/task/task-rpc/src/main/java/com/rag/task/task/rpc/config/TaskSinkProperties.java:52-58` = 「必须是 `Duration`，不能是 `long`」＋ `:60` = `private Duration initTtl = Duration.ofDays(90);`（**键名与实现已对齐**）· 对照 RAG `service/task/task-rpc/src/main/resources/application.yml:254` = `definitions:` ＋ `:260` = `init-ttl: 90d` ⇒ ⇒ **「键名写错 ⇒ 静默失效」的机制仍在本仓成立**（本条正文的「产物」正是 `PIT-TASK-02` 的修法）⇒ **现行态 = 仍生效（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-13` | 仍生效（不变） | 属**探针写法**（`getInputStream().available()` 自触发）⇒ 与仓内产品代码无关<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `service/task/task-api/src/test/java/com/rag/task/task/api/TaskApiContentTypeTest.java:182-183` = 守门类里**真实读响应体**的那条用例 ⇒ **当前仓内的探针没有「`available()` 自触发」写法** ⇒ **本条所指的旧探针形态不在仓内**；⚠️ **但「探针写法」这一类形态仍可能在新探针里重现** ⇒ **维持「仍生效」**（不因「当前没踩到」就写「已闭环」）⇒ **现行态 = 仍生效（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-14` | 已闭环（不变） | 探针脚本存在（`tools/difftest/**`）⇒ 两侧 db 编号按轮次定的机制仍在用<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/difftest/run-task-kafka-e2e.sh:179` = `--spring.data.redis.database=1 \`（**隔离**）＋ `tools/difftest/run-task-http-parity.sh:213` = `--spring.data.redis.database=0 \`（**共用**）⇒ **两个脚本各自写明理由 ⇒ 机制仍在用** ⇒ **现行态 = 已闭环（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-15` | 仍生效（不变） | 属 **bash 词法** ⇒ 与代码无关<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：**该形态已被做成机器可查** —— RAG `tools/difftest/check-deadline-verdict.py:382` = `trap_re = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7f]")` ＋ `:381` = 「⑤ bash lint：`$VAR` 后面紧跟非 ASCII 字符（bash 会把它并进变量名 ⇒ unbound variable）」⇒ **lint 形态在仓内 ⇒ 但 bash 3.2 的词法事实永远存在** ⇒ **现行态 = 仍生效（不变）**；核对日期 2026-10-30 | 否 |
 | `PIT-TASK-16` | 已闭环（不变） | `tools/difftest/run-task-http-parity.sh:78` = `wait_port_free() {` ＋ `:89` = `wait_port_listen() {` ⇒ 「`pkill` 后只 `sleep 2`」的形态已被等待函数替代 | 否 |
-| `PIT-TASK-17` | 仍生效（不变） | 属 **Nacos 2.x 客户端端口推算** ⇒ 与本仓代码无关 | 否 |
-| `PIT-TASK-18` | 已闭环（不变） | RAG `…/mq/TaskUserCountConsumer.java:84` / `TaskArticleCountConsumer.java:80` / `TaskRawDiagnosticConsumer.java:54` = 三处**点分** `properties = "auto.offset.reset=…"` ⇒ 连字符写法已消除（⚠️ 本轮同时订正了 `TaskUserCountConsumer.java` 的指针行号，见 `docs/DRIFT/task/rpc.md`） | 否 |
-| `PIT-TASK-19` | 仍生效（不变） | 属**探针自欺** ⇒ 本轮未复现 | 否 |
+| `PIT-TASK-17` | 仍生效（不变） | 属 **Nacos 2.x 客户端端口推算** ⇒ 与本仓代码无关<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/difftest/run-task-nacos-discovery.sh:42` = `NACOS_GRPC=50849          # = NACOS_HTTP + 1000，不能乱填`（**本轮重核该行仍在**）＋ `:36-39` = 「Nacos 2.x 的**客户端**按「HTTP 端口 + 1000」推算 gRPC 端口」⇒ **该客户端行为与本仓代码无关、仍成立** ⇒ **现行态 = 仍生效（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-18` | 已闭环（不变） | RAG `…/mq/TaskUserCountConsumer.java:84` / `TaskArticleCountConsumer.java:80` / `TaskRawDiagnosticConsumer.java:54` = 三处**点分** `properties = "auto.offset.reset=…"` ⇒ 连字符写法已消除（⚠️ 本轮同时订正了 `TaskUserCountConsumer.java` 的指针行号，见 `docs/DRIFT/task/rpc.md`）<br>⚠️ **2026-10-30 复核（follow+task lane · 短确认 + 补全路径）**：RAG `service/task/task-rpc/src/main/java/com/rag/task/task/rpc/mq/TaskUserCountConsumer.java:84` = `properties = "auto.offset.reset=earliest",` ＋ `…/TaskArticleCountConsumer.java:80` = 同款 ＋ `…/TaskRawDiagnosticConsumer.java:54` = `properties = "auto.offset.reset=latest",`（**本轮逐行重核三处**）⇒ **三处全为点分写法 ⇒ 现行态 = 已闭环（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-19` | 仍生效（不变） | 属**探针自欺** ⇒ 本轮未复现<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：**「探针要有区分力」这条纪律已落仓** —— RAG `tools/difftest/run-task-offset-oldest.sh:22-23` = 「【阴性对照】kq 路（latest）在同样条件下**确实没读到**预灌的消息 —— 没有这条阴性对照，earliest 那条就可能是假绿（探针无区分力）」＋ `:428` = 「【阶段 B】先灌消息，再起消费者」⇒ **反自欺的装置形态在仓内**；⚠️ **「同一个实验连翻三次车」那段记录本身是历史**（v1~v3 的探针未落仓）⇒ **本轮未复现** ⇒ **维持「仍生效」**；核对日期 2026-10-30 | 否 |
 | `PIT-TASK-20` | 已闭环（不变） | `tools/difftest/docker-compose.task-kafka.yml:39` = `name: taskprobe` ⇒ 显式项目名已声明 ⇒ 「从目录名推导」的形态已消除 | 否 |
-| `PIT-TASK-21` | 仍生效（不变） | 属 **bash 词法**（全角标点进变量名）⇒ 与代码无关 | 否 |
-| `PIT-TASK-22` | 已闭环（不变） | 顺序对拍的判据形态已在仓内（`tools/difftest/**`）⇒ 保持 | 否 |
+| `PIT-TASK-21` | 仍生效（不变） | 属 **bash 词法**（全角标点进变量名）⇒ 与代码无关<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/difftest/check-deadline-verdict.py:382` = `trap_re = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7f]")`（**全角标点也在 `[^\x00-\x7f]` 命中范围内** ⇒ 与本条同族）⇒ **lint 形态在仓内；但 bash 3.2 的词法事实永远存在** ⇒ **现行态 = 仍生效（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-22` | 已闭环（不变） | 顺序对拍的判据形态已在仓内（`tools/difftest/**`）⇒ 保持<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/difftest/run-task-offset-oldest.sh:30` = 「⚠️ 与 run-task-kafka-e2e.sh 的**关键差别**：本脚本**先灌消息、后起消费者**」＋ `:428` = 「【阶段 B】先灌消息，再起消费者」＋ `:450` = 「【阶段 B】预灌 kq 路的输入 —— 阴性对照的种子」⇒ **顺序对拍的判据形态确实在仓内** ⇒ **现行态 = 已闭环（不变）**；核对日期 2026-10-30 | 否 |
 | `PIT-TASK-23` | 已闭环（不变） | 键扫描器形态见 `tools/check-ledger-selfcheck.py:1676` = `def layer5_unmentioned(root, texts, domain):` ⇒ **按类/前缀逐段匹配**的形态在 | 否 |
-| `PIT-TASK-24` | 已闭环（不变） | 同上文件的 `:2261` = `def layer6_unmentioned_production(root, texts, domain):` ⇒ 已区分生产类型 | 否 |
+| `PIT-TASK-24` | 已闭环（不变） | 同上文件的 `:2261` = `def layer6_unmentioned_production(root, texts, domain):` ⇒ 已区分生产类型<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/check-ledger-selfcheck.py:2261` = `def layer6_unmentioned_production(root, texts, domain):`（**本轮重核该行内容**）⇒ **「生产类型层」确实已与测试类层分开** ⇒ **现行态 = 已闭环（不变）**；核对日期 2026-10-30 | 否 |
 | `PIT-TASK-25` | 已闭环（不变） | `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/config/TaskConfigKeyBindingContractTest.java:246` = `@DisplayName("白名单纪律 · 每条登记的前缀都必须真的盖住至少一个孤儿键（防止白名单写成空壳）")` ⇒ 反向纪律在 | 否 |
-| `PIT-TASK-26` | 仍生效（不变） | 属**方法论**（台账的「已修」断言过期时不会报错 ⇒ 必须能机械复核）⇒ 本 lane 本身即该机制的执行者 | 否 |
-| `PIT-TASK-27` | 仍生效（不变） | 属**方法论**（写死计数必然滞后）⇒ 本轮已按此执行（改用不变式 + 当场实测，不复述台账数字） | 否 |
-| `PIT-TASK-28` | 仍生效（不变） | 属**方法论**（纯文本找登记会把正文引用当登记）⇒ 机械复核用的是**编号 + 标题**口径 | 否 |
-| `PIT-TASK-29` | 仍生效（不变） | 属**方法论** ⇒ 同上 | 否 |
+| `PIT-TASK-26` | 仍生效（不变） | 属**方法论**（台账的「已修」断言过期时不会报错 ⇒ 必须能机械复核）⇒ 本 lane 本身即该机制的执行者<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/check-ledger-selfcheck.py:613` = `def layer2_claims(root, domain):` ⇒ **「已修断言」已被做成机械判据（第 2 层）** ⇒ **机制在**；⚠️ **但「过期断言不会自己报错」这件事本身不会消失** ⇒ **现行态 = 仍生效（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-27` | 仍生效（不变） | 属**方法论**（写死计数必然滞后）⇒ 本轮已按此执行（改用不变式 + 当场实测，不复述台账数字）<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/check-ledger-selfcheck.py:844` = `def layer3_numbers(root, texts, domain):` ⇒ **「数字断言」已被单列成一层机械判据** ⇒ **机制在**；⚠️ **写死计数必然滞后**这件事不因有判据而消失 ⇒ **现行态 = 仍生效（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-28` | 仍生效（不变） | 属**方法论**（纯文本找登记会把正文引用当登记）⇒ 机械复核用的是**编号 + 标题**口径<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/check-ledger-selfcheck.py:770-792` = 占位符残留 / 同一 commit 多行的判据段（**本轮重核该段**）⇒ **判据已锚定到「只认表格行」形态** ⇒ **机制在**；⚠️ **「纯文本找登记会把正文引用当登记」的口径风险仍在** ⇒ **现行态 = 仍生效（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-29` | 仍生效（不变） | 属**方法论** ⇒ 同上<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/check-ledger-selfcheck.py:963` = 「① **域无关**（任何分支都跑）：占位符残留 / 同一 commit 多行 /」（**本轮重核该行**）⇒ **判据在域无关分支也跑 ⇒ 「≤1 个例外」的漏判面仍在** ⇒ **现行态 = 仍生效（不变）**；核对日期 2026-10-30 | 否 |
 | `PIT-TASK-30` | 已闭环（不变） | `tools/check-ledger-selfcheck.py:1676`（测试类层）＋ `:2261`（**生产类层** `layer6_unmentioned_production`）⇒ 「只查测试类不够」已补生产类层 | 否 |
-| `PIT-TASK-31` | 已闭环（不变） | 同上文件的两层判据（**按编号 + 标题**匹配 ⇒ 占位符与重复登记都能逃过）⇒ 本轮机械复核**正是按编号口径**跑 ⇒ 形态在 | 否 |
-| `PIT-TASK-32` | 已闭环（不变） | 同上：判据机械 ＋ 机械化判据自带反向证据（本轮工具自身给出「歧义 / 落空」分档） | 否 |
-| `PIT-TASK-33` | 已闭环（不变） | 跨域共有的契约**本域各自守一次**的形态在：`service/task/task-rpc/src/test/java/com/rag/task/task/rpc/TaskGrpcInterceptorWiringTest.java`（本轮实测存在） | 否 |
-| `PIT-TASK-34` | 仍生效（不变） | 属 **bash 词法**（与 `PIT-TASK-15` 同族，本轮又踩一次）⇒ 与代码无关 | 否 |
+| `PIT-TASK-31` | 已闭环（不变） | 同上文件的两层判据（**按编号 + 标题**匹配 ⇒ 占位符与重复登记都能逃过）⇒ 本轮机械复核**正是按编号口径**跑 ⇒ 形态在<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/check-ledger-selfcheck.py:1676` = `def layer5_unmentioned(root, texts, domain):`（**测试类层**）＋ `:2261` = `def layer6_unmentioned_production(root, texts, domain):`（**生产类层**）⇒ **两层判据形态在** ⇒ **现行态 = 已闭环（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-32` | 已闭环（不变） | 同上：判据机械 ＋ 机械化判据自带反向证据（本轮工具自身给出「歧义 / 落空」分档）<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/check-ledger-selfcheck.py:1723` = `def layer0_selfcheck(root):`（**阳性对照层**）＋ 工具 `tools/difftest/ledger-claim-audit.py` 自身输出「🔴 落空 / ⚠️ 歧义 / 📦 jar 内第三方源码」三档 ⇒ **反向证据机制在** ⇒ **现行态 = 已闭环（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-33` | 已闭环（不变） | 跨域共有的契约**本域各自守一次**的形态在：`service/task/task-rpc/src/test/java/com/rag/task/task/rpc/TaskGrpcInterceptorWiringTest.java`（本轮实测存在）<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/TaskGrpcInterceptorWiringTest.java:110` = `class TaskGrpcInterceptorWiringTest {`（**本轮实测文件在位**）⇒ **「跨域共有的契约本域各自守一次」的形态在** ⇒ **现行态 = 已闭环（不变）**；核对日期 2026-10-30 | 否 |
+| `PIT-TASK-34` | 仍生效（不变） | 属 **bash 词法**（与 `PIT-TASK-15` 同族，本轮又踩一次）⇒ 与代码无关<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 短确认）**：RAG `tools/difftest/check-deadline-verdict.py:382` = `trap_re = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7f]")`（**与 `PIT-TASK-15` / `-21` 同一条 lint**）⇒ **机制在仓内；bash 3.2 的词法事实永远存在** ⇒ **现行态 = 仍生效（不变）**；核对日期 2026-10-30 | 否 |
 
 ### 二、仍未核到（**待核实**）
 
@@ -1563,3 +1563,60 @@ AGENTS.md 早就记过一个坑：**台账的 commit 清单「写成 4 行却只
 |---|---|---|
 | `PIT-TASK-04` / `-05` / `-11` / `-13` / `-15` / `-19` / `-21` / `-34`（8 条「仍生效」） | 这些的「仍生效」= **触发条件仍可能重现** ⇒ 需按条复现探针/脚本才能证伪 ⇒ 本轮**未逐条复现** | 机械核对了「所引仓内文件全部存在」（零缺失）＋ 核对了与仓内代码耦合的部分（`-05` 的触发条件由仍开放的 `DRIFT-TASK-API-004` 佐证）⇒ **状态沿用 2026-10-29 对齐 lane 的结论**，本轮**未独立改判** |
 | `PIT-TASK-09` / `-10` / `-17`（3 条「仍生效」） | 属 **Kafka / Nacos 客户端语义** ⇒ 与本仓代码无关 ⇒ 本轮**未复现** | 同上（机械核对文件存在） |
+
+---
+
+## 🆕 **2026-10-30 真实性复核回执**（follow+task lane · 「台账结论 ↔ 代码」逐条复核 · task 域 · 本文件）
+
+> **口径**：逐条核「被描述的那个行为现在还在不在」（Go 真源 + RAG 两侧）＋「证据指针那一行是不是真的在讲这件事」（**指针能解析 ≠ 结论为真**）。
+> **原值一律保留**；本轮**未改判任何一条**，只做**指针补齐（26 条）+ 1 处 Go 真源指针订正**（明细已追加在上表各行与 `PIT-TASK-09` 正文）。
+> **机器判据**：`python3 tools/difftest/ledger-claim-audit.py --domain task --strict` ⇒ **🔴 落空 = 0**。
+> ⚠️ **本轮额外做的机器判据抓不到的一层**：`ledger-claim-audit.py` 的 `_resolve()` 在**直连路径不存在**时会**退化成按 basename 匹配** ⇒
+> ⇒ 「**指错文件**」会被它判成 `resolved` ⇒ **机器绿灯 ≠ 指针指对文件**。本轮为此**逐条手工核了每个指针的目录与行内容** ⇒ **抓到 1 处「指错文件 + 指错行」**（`PIT-TASK-09` 的 Go 真源路径）。
+
+### 一、逐条结论表（编号 · 原状态 → 现行态 · 依据 · 是否改判 · 核对日期 2026-10-30）
+
+| 编号 | 原状态 → 现行态 | 依据（`文件:行号`） | 改判 |
+|---|---|---|---|
+| `PIT-TASK-01` | 已闭环 → 已闭环（不变） | RAG `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mapper/TaskProgressUpsertParityTest.java:71` = 「刻意**不加** `@EnabledIfDockerAvailable`」＋ `service/task/task-rpc/pom.xml:336-341` = surefire `configuration` ⇒ 「静默全跳」已消除 | 否 |
+| `PIT-TASK-02` | 已闭环 → 已闭环（不变） | RAG `service/task/task-rpc/src/main/java/com/rag/task/task/rpc/config/TaskSinkProperties.java:60` = `private Duration initTtl = Duration.ofDays(90);` ⇒ 与 yaml `init-ttl` 逐字对上（relaxed binding 不再失配） | 否 |
+| `PIT-TASK-03` | 已闭环 → 已闭环（不变） | RAG `service/task/task-rpc/src/main/java/com/rag/task/task/rpc/config/TaskSinkProperties.java:52-58`（注释）＋ `:60`（实现）⇒ **注释与实现一致** | 否（**补指针**） |
+| `PIT-TASK-04` | 仍生效 → 仍生效（不变） | RAG `tools/difftest/parity-task.py:17` = `import urllib.request` ＋ `:52` = `urllib.request.Request(...)` ⇒ **仓内探针仍用 `urllib`** ⇒ 触发条件仍在 | 否（**补指针**） |
+| `PIT-TASK-05` | 仍生效 → 仍生效（不变） | RAG `tools/difftest/diff.py:509` = `class Normalizer:` ⇒ 归一化步骤仍在；且 `DRIFT-TASK-API-004` 本轮复核**仍为 🟡 未修** ⇒ 触发条件仍在 | 否（**补指针**） |
+| `PIT-TASK-06` | 已闭环 → 已闭环（不变） | RAG `service/task/task-rpc/src/main/java/com/rag/task/task/rpc/service/RedisPipelines.java:98` = 「这里**绝不能**再调 `operations.exec()`」⇒ 两侧对 pipeline 的理解已一致 | 否 |
+| `PIT-TASK-07` | 已闭环 → 已闭环（不变） | RAG `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mq/RedisPipelinesRealRedisGateTest.java:86`（类在位）＋ `:202`（真 Redis 命令级错误用例）⇒ 真 Redis 覆盖已存在 | 否（**补指针**） |
+| `PIT-TASK-08` | 仍生效 → 仍生效（不变） | RAG `…/RedisPipelinesRealRedisGateTest.java:202`（正确姿势已在）· Go 真源 `service/task/rpc/internal/sink/like_sink.go:167` / `:210` = `c.rdb.Pipeline()` ⇒ 两侧同形；「`SET` 类型无关」是 Redis 事实 | 否（**补指针**） |
+| `PIT-TASK-09` | 仍生效 → 仍生效（不变） | Go 真源 `service/task/rpc/internal/Init/initGoKa.go:131` = `cfg.Consumer.Offsets.Initial = sarama.OffsetOldest`（**本轮逐行重核**）⇒ 前提未变；⚠️ **原指针 `internal/mq/initGoKa.go:134-135` = 指错文件 + 指错行 ⇒ 已订正** | 否（**指针订正**） |
+| `PIT-TASK-10` | 仍生效 → 仍生效（不变） | RAG `tools/difftest/docker-compose.task-kafka.yml:89` = `KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://…:59992,INTERNAL://localhost:19092` ⇒ 两个监听器并存 ⇒ 容器内必须选 `INTERNAL` | 否（**补指针**） |
+| `PIT-TASK-11` | 仍生效 → 仍生效（不变） | RAG `service/task/task-api/src/test/java/com/rag/task/task/api/TaskApiContentTypeTest.java:182-183` = 「multipart 开关必须真的被解析成 false（…写错即静默失效）」⇒ 「配置意图 ≠ 配置生效」的缝仍在 | 否（**补指针**） |
+| `PIT-TASK-12` | 仍生效 → 仍生效（不变） | RAG `service/task/task-rpc/src/main/java/com/rag/task/task/rpc/config/TaskSinkProperties.java:52-58` / `:60` ＋ `service/task/task-rpc/src/main/resources/application.yml:254` / `:260` ⇒ 「键名写错 ⇒ 静默失效」机制仍在 | 否（**补指针**） |
+| `PIT-TASK-13` | 仍生效 → 仍生效（不变） | RAG `service/task/task-api/src/test/java/com/rag/task/task/api/TaskApiContentTypeTest.java:182-183` ⇒ 当前仓内探针**没有** `available()` 自触发写法；但「探针写法」这一类形态仍可能重现 ⇒ 维持「仍生效」 | 否（**补指针**） |
+| `PIT-TASK-14` | 已闭环 → 已闭环（不变） | RAG `tools/difftest/run-task-kafka-e2e.sh:179`（db=1 隔离）＋ `tools/difftest/run-task-http-parity.sh:213`（db=0 共用）⇒ 机制仍在用 | 否（**补指针**） |
+| `PIT-TASK-15` | 仍生效 → 仍生效（不变） | RAG `tools/difftest/check-deadline-verdict.py:382` = `trap_re = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7f]")` ⇒ lint 形态在仓内；bash 3.2 词法事实永远存在 | 否（**补指针**） |
+| `PIT-TASK-16` | 已闭环 → 已闭环（不变） | RAG `tools/difftest/run-task-http-parity.sh:78` = `wait_port_free() {` ＋ `:89` = `wait_port_listen() {` ⇒ 「`pkill` 后只 `sleep 2`」已被等待函数替代 | 否 |
+| `PIT-TASK-17` | 仍生效 → 仍生效（不变） | RAG `tools/difftest/run-task-nacos-discovery.sh:42` = `NACOS_GRPC=50849  # = NACOS_HTTP + 1000，不能乱填` ＋ `:36-39`（推算规则注释）⇒ 与本仓代码无关、结论未变 | 否（**补指针**） |
+| `PIT-TASK-18` | 已闭环 → 已闭环（不变） | RAG `…/TaskUserCountConsumer.java:84` / `…/TaskArticleCountConsumer.java:80` / `…/TaskRawDiagnosticConsumer.java:54` = 三处**点分** `properties = "auto.offset.reset=…"` ⇒ 连字符写法已消除 | 否（**补全路径**） |
+| `PIT-TASK-19` | 仍生效 → 仍生效（不变） | RAG `tools/difftest/run-task-offset-oldest.sh:22-23`（阴性对照 = 探针有区分力）＋ `:428`（阶段 B）⇒ 反自欺装置在仓内；本轮未复现 ⇒ 维持「仍生效」 | 否（**补指针**） |
+| `PIT-TASK-20` | 已闭环 → 已闭环（不变） | RAG `tools/difftest/docker-compose.task-kafka.yml:39` = `name: taskprobe` ⇒ 显式项目名已声明 ⇒ 「从目录名推导」的形态已消除 | 否 |
+| `PIT-TASK-21` | 仍生效 → 仍生效（不变） | RAG `tools/difftest/check-deadline-verdict.py:382`（全角标点同被 `[^\\x00-\\x7f]` 命中）⇒ lint 在仓内；bash 3.2 词法事实永远存在 | 否（**补指针**） |
+| `PIT-TASK-22` | 已闭环 → 已闭环（不变） | RAG `tools/difftest/run-task-offset-oldest.sh:30` / `:428` / `:450` ⇒ 「先灌消息 → 再起消费者」的顺序对拍形态在仓内 | 否（**补指针**） |
+| `PIT-TASK-23` | 已闭环 → 已闭环（不变） | RAG `tools/check-ledger-selfcheck.py:1676` = `def layer5_unmentioned(root, texts, domain):` ⇒ 按类/前缀逐段匹配的形态在 | 否 |
+| `PIT-TASK-24` | 已闭环 → 已闭环（不变） | RAG `tools/check-ledger-selfcheck.py:2261` = `def layer6_unmentioned_production(root, texts, domain):` ⇒ 已区分生产类型 | 否（**补指针**） |
+| `PIT-TASK-25` | 已闭环 → 已闭环（不变） | RAG `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/config/TaskConfigKeyBindingContractTest.java:246` = `@DisplayName("白名单纪律 · 每条登记的前缀都必须真的盖住至少一个孤儿键（防止白名单写成空壳）")` ⇒ 反向纪律在 | 否 |
+| `PIT-TASK-26` | 仍生效 → 仍生效（不变） | RAG `tools/check-ledger-selfcheck.py:613` = `def layer2_claims(root, domain):` ⇒ 「已修断言」已被做成机械判据；但「过期断言不会自己报错」不会消失 | 否（**补指针**） |
+| `PIT-TASK-27` | 仍生效 → 仍生效（不变） | RAG `tools/check-ledger-selfcheck.py:844` = `def layer3_numbers(root, texts, domain):` ⇒ 「数字断言」已单列成一层；写死计数必然滞后这件事不变 | 否（**补指针**） |
+| `PIT-TASK-28` | 仍生效 → 仍生效（不变） | RAG `tools/check-ledger-selfcheck.py:770-792`（占位符 / 同 commit 多行判据段）⇒ 判据已锚定「只认表格行」；纯文本找登记的风险仍在 | 否（**补指针**） |
+| `PIT-TASK-29` | 仍生效 → 仍生效（不变） | RAG `tools/check-ledger-selfcheck.py:963` = 「① **域无关**（任何分支都跑）」⇒ 「≤1 个例外」的漏判面仍在 | 否（**补指针**） |
+| `PIT-TASK-30` | 已闭环 → 已闭环（不变） | RAG `tools/check-ledger-selfcheck.py:1676`（测试类层）＋ `:2261`（**生产类层** `layer6_unmentioned_production`）⇒ 「只查测试类不够」已补生产类层 | 否 |
+| `PIT-TASK-31` | 已闭环 → 已闭环（不变） | RAG `tools/check-ledger-selfcheck.py:1676` / `:2261` ⇒ 两层判据形态在 | 否（**补指针**） |
+| `PIT-TASK-32` | 已闭环 → 已闭环（不变） | RAG `tools/check-ledger-selfcheck.py:1723` = `def layer0_selfcheck(root):`（阳性对照层）＋ `tools/difftest/ledger-claim-audit.py` 自身的三档输出 ⇒ 反向证据机制在 | 否（**补指针**） |
+| `PIT-TASK-33` | 已闭环 → 已闭环（不变） | RAG `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/TaskGrpcInterceptorWiringTest.java:110` = `class TaskGrpcInterceptorWiringTest {` ⇒ 「跨域共有的契约本域各自守一次」的形态在 | 否（**补指针**） |
+| `PIT-TASK-34` | 仍生效 → 仍生效（不变） | RAG `tools/difftest/check-deadline-verdict.py:382`（与 `PIT-TASK-15` / `-21` 同一条 lint）⇒ 机制在仓内；bash 3.2 词法事实永远存在 | 否（**补指针**） |
+
+### 二、仍未核到（**待核实**，不默认「仍生效」也不默认「已闭环」）
+
+| 编号 | 为什么判不了 | 本轮做过什么 |
+|---|---|---|
+| `PIT-TASK-04` / `-05` / `-11` / `-13` / `-15` / `-19` / `-21` / `-34`（8 条「仍生效」） | 这些的「仍生效」= **触发条件仍可能重现** ⇒ 需按条复现探针/脚本才能证伪 ⇒ 本轮**未逐条复现** | 机械核对了「所引仓内文件全部存在」（**零缺失**）＋ **为本轮每条补上了可复算的 `文件:行号` 指针** ⇒ 状态沿用 2026-10-29 结论，本轮**未独立改判** |
+| `PIT-TASK-08` / `-09` / `-10` / `-17`（4 条「仍生效」，属 **Redis / Kafka / Nacos 语义**） | 属**外部组件语义** ⇒ 与本仓代码无关 ⇒ 本轮**未复现** | 核了 Go 真源行（`initGoKa.go:131`）+ 仓内配置行（`docker-compose.task-kafka.yml:89` · `run-task-nacos-discovery.sh:42`）⇒ 状态沿用 2026-10-29 结论 |
+| `PIT-TASK-01` / `-07` / `-22` / `-33` 的**活体计数**（真 PG / 真 Redis / 真 Kafka 跑了多少条） | 需**真容器** ⇒ 本轮**未跑** | 核了**源码与守门类在位**（`TaskProgressUpsertParityTest.java:71` · `RedisPipelinesRealRedisGateTest.java:86,202` · `run-task-offset-oldest.sh:428` · `TaskGrpcInterceptorWiringTest.java:110`）⇒ 未独立改判 |

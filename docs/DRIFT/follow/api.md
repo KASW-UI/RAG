@@ -29,14 +29,14 @@
 
 | # | 漂移 | 级别 | 状态 |
 |---|---|---|---|
-| DRIFT-FOLLOW-001 | 空列表出参 Go=`"user_ids":null` / RAG=`"user_ids":[]` | **可观察（L1 wire）** | ✅ 已修 |
-| DRIFT-FOLLOW-005 | recommend 出参**字段顺序** Go=`target_id` 在前 / RAG=`mutual_score` 在前 | **可观察（L1 wire 字节序）** | ✅ 已修 |
+| DRIFT-FOLLOW-001 | 空列表出参 Go=`"user_ids":null` / RAG=`"user_ids":[]` | **可观察（L1 wire）** | ✅ 已修<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针）**：RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/service/FollowApiSupport.java:265` = `out.setUserIds(null);` ＋ 守门 `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiMvcPipelineTest.java:625-626` = 断言 `"user_ids":null` ⇒ **现行态 = ✅ 已修（不变）**；核对日期 2026-10-30 |
+| DRIFT-FOLLOW-005 | recommend 出参**字段顺序** Go=`target_id` 在前 / RAG=`mutual_score` 在前 | **可观察（L1 wire 字节序）** | ✅ 已修<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针）**：RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/dto/RecommendUser.java:57` = `@JsonPropertyOrder({"target_id", "mutual_score"})` · Go `service/follow/api/internal/types/types.go:21` / `:22` ⇒ **现行态 = ✅ 已修（不变）**；核对日期 2026-10-30 |
 | DRIFT-FOLLOW-007 | 指标文本层：多一个 `application` tag / 直方图**零桶** | 可观察（抓取侧） | 🟡 **已修**（tag + 桶）· ⚠️ 残留 = **框架限制** · ✅ **已定性（用户 2026-10-27 拍板：不修，登记为框架限制）** · 🆕 **2026-10-29 对齐（W-B lane）**：与本文件 §标题 `:578` 的 `🟡` **收敛到单一状态 `🟡`**（已修 ＋ 残留未清） ⇒ ⚠️ **残留的「桶边界总数 80 ⇒ 12」这一项，「框架限制不可修」这个前提在 follow-rpc 侧已被证伪** ⇒ `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/metrics/FollowRpcMetrics.java:118-120`（明写「**不要再加 `publishPercentileHistogram()`**」） ＋ `:134-145`（只用 `serviceLevelObjectives`）⇒ **12 桶**；而 follow-api 侧 `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/metrics/FollowApiMetrics.java:129-133` **仍同时开两个开关** ⇒ **仍 80 桶** ⇒ ⇒ **登记为「下一轮的可修项」**（本 lane 只改台账、**不改代码**）⇒ 踩坑档对应条目 `PIT-FOLLOW-15`（**状态：仍生效**）|
-| DRIFT-FOLLOW-008 | MaxConns 闸门：**每路由一个**（Go）vs **全局一个**（RAG） | 可观察（并发行为） | ✅ **已签字偏离 ⇒ 不修**（`SD-2026-10-25-01`，2026-10-25 用户拍板）· ⚠️ **2026-10-29 订正**：原记「🔴 未修 ⇒ 派单」**是陈旧的**（签字在先，本条登记晚于签字）⇒ 已按 §5.3b 硬边界 2 **移出 DRIFT 侧** ⇒ 见下方「已移出 DRIFT 侧」块 |
-| DRIFT-FOLLOW-009 | 下游挂死时：Go **2s ⇒ 200+1015**；RAG **3s ⇒ 503 "Request Timeout"** | **可观察（状态码 + 时刻）** | ✅ 已修 |
-| **DRIFT-FOLLOW-010** | **3s 预算的作用域**：Go 的计时器在 Authorize **之后**起算（**验签不计入**）/ RAG 的计时器在 Filter 外层（**验签计入**） | 可观察（**超时边界**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内推广 `DRIFT-USERAPI-009②`） |
-| **DRIFT-FOLLOW-011** | **Redis 超时口径**：`timeout: 2s` ≠ Go 的 `ReadTimeout` **3s**，且**缺 `connect-timeout: 5s`** | 可观察（**Redis 挂住形态**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内自闭环） |
-| **DRIFT-FOLLOW-012** | **Redis 断连行为**：Lettuce 默认 `DEFAULT` ⇒ 命令被**排队**挂到 `commandTimeout` 3s ⇒ 撞 HTTP 预算 ⇒ **503**；Go 快速失败 ⇒ **fail-open 200** | 可观察（**状态码 + 时刻**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内自闭环） |
+| DRIFT-FOLLOW-008 | MaxConns 闸门：**每路由一个**（Go）vs **全局一个**（RAG） | 可观察（并发行为） | ✅ **已签字偏离 ⇒ 不修**（`SD-2026-10-25-01`，2026-10-25 用户拍板）· ⚠️ **2026-10-29 订正**：原记「🔴 未修 ⇒ 派单」**是陈旧的**（签字在先，本条登记晚于签字）⇒ 已按 §5.3b 硬边界 2 **移出 DRIFT 侧** ⇒ 见下方「已移出 DRIFT 侧」块<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 指针订正）**：RAG `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java:67-72`（javadoc 明写「经签字批准的有意偏离」＋ `:102` / `:106` 全进程一个 `Semaphore`）· Go `go-zero@v1.10.2/rest/handler/maxconnshandler.go:20` = `latch := syncx.NewLimit(n)`（每路由一个）⇒ **现行态 = ✅ 仍成立（不变）**；⚠️ **指针订正**：users 侧 `docs/DRIFT/users/vs-common.md:2740` ⇒ **`:111`**；核对日期 2026-10-30 |
+| DRIFT-FOLLOW-009 | 下游挂死时：Go **2s ⇒ 200+1015**；RAG **3s ⇒ 503 "Request Timeout"** | **可观察（状态码 + 时刻）** | ✅ 已修<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针）**：RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/client/FollowRpcClient.java:164` = `CLIENT_TIMEOUT_MILLIS = 2000L` ＋ `:247` = `capByClientTimeout(` · Go `go-zero@v1.10.2/zrpc/config.go:31` = `Timeout int64`（默认 2000ms）⇒ **现行态 = ✅ 已修（不变）**；核对日期 2026-10-30 |
+| **DRIFT-FOLLOW-010** | **3s 预算的作用域**：Go 的计时器在 Authorize **之后**起算（**验签不计入**）/ RAG 的计时器在 Filter 外层（**验签计入**） | 可观察（**超时边界**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内推广 `DRIFT-USERAPI-009②`）<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针）**：RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/auth/GoStyleJwtAuthFilter.java:100` = `@Order(Ordered.HIGHEST_PRECEDENCE + 6)` ＋ 共享层 `service/common/src/main/java/com/rag/common/spring/HttpMiddlewareFilter.java:40` = `@Order(Ordered.HIGHEST_PRECEDENCE + 7)` · Go `go-zero@v1.10.2/rest/engine.go:101-113` ⇒ **现行态 = ✅ 已修（不变）**；核对日期 2026-10-30 |
+| **DRIFT-FOLLOW-011** | **Redis 超时口径**：`timeout: 2s` ≠ Go 的 `ReadTimeout` **3s**，且**缺 `connect-timeout: 5s`** | 可观察（**Redis 挂住形态**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内自闭环）<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针）**：RAG `service/follow/follow-api/src/main/resources/application.yml:41` = `timeout: 3s` ＋ `:48` = `connect-timeout: 5s` · Go `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-39`（不传 timeout ⇒ 落 go-redis 库默认 5s/3s）⇒ **现行态 = ✅ 已修（不变）**；核对日期 2026-10-30 |
+| **DRIFT-FOLLOW-012** | **Redis 断连行为**：Lettuce 默认 `DEFAULT` ⇒ 命令被**排队**挂到 `commandTimeout` 3s ⇒ 撞 HTTP 预算 ⇒ **503**；Go 快速失败 ⇒ **fail-open 200** | 可观察（**状态码 + 时刻**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内自闭环）<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针）**：RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/interceptor/FollowBlacklistInterceptor.java:155-157` = `catch (Throwable t) { … fail-open … }` · Go `service/follow/api/internal/middleware/checkblacklistmiddleware.go:40-41` = `if err == nil && exists {` ⇒ **现行态 = ✅ 已修（不变）**；核对日期 2026-10-30 |
 | ~~OPEN-001~~ | ~~Content-Type 不支持 ⇒ RAG 415 / Go 不报错~~ | 可观察 | ✅ **已关闭（415 分支实测不可达）**，见下 |
 
 > **2026-10-24 第二轮（未知项 U1–U8 收口）新增 3 条**，全部有**双侧活体对拍**证据：
@@ -541,6 +541,13 @@ PITFALL-FOLLOW-011 / PITFALL-FOLLOW-012。）
 > - 同族域已对齐：`docs/DRIFT/hot/vs-common.md:31`（hot 的 `D27` = 同一条，✅ 已闭合）；
 > - users 侧已注明：`docs/DRIFT/users/vs-common.md:2740`（「MaxConns 半边 = 已签字偏离 `SD-2026-10-25-01`」）。
 > ⇒ **三处已对齐，只有 follow 域台账落后** ⇒ 本轮订正。
+>
+> ⚠️ **2026-10-30 真实性复核（follow+task lane · 指针订正）**：上一行的 users 侧指针 **`docs/DRIFT/users/vs-common.md:2740` 已指错行** ——
+> 该行现在讲的是「同一份代码，两棵树读出两个相反的结论」（与 MaxConns 无关）⇒ **行号合法但语义已变**。
+> ⇒ **现行指针 = `docs/DRIFT/users/vs-common.md:111`**（该行明写「`DRIFT-USERAPI-013`（**②③ 半边**；① **MaxConns 半边 ✅ 已签字 ⇒ 不修** ⇒ 已撤出落码范围）＋ `DRIFT-FOLLOW-008`（**✅ 2026-10-29 已销号** —— 与 ① 同一条）」）
+> ＋ `docs/DRIFT/users/vs-common.md:47`（「① MaxConns 闸门粒度 = ✅ 已签字 ⇒ 不修（`SD-2026-10-25-01`）」）⇒ 两条都落在「MaxConns 半边已签字」这件事上。
+> ⇒ **签字事实本身不变**（`SD-2026-10-25-01` 仍在 `docs/Intentional_Deviations/global/common-tails.md:11`，「对应的 DRIFT 条目」栏仍明写 **T-2 = `DRIFT-FOLLOW-008`**）⇒ **本条现行态仍 = ✅ 已签字偏离 ⇒ 不修（不变）**。
+> ⇒ 核对日期 2026-10-30。
 >
 > ⚠️ **按 §5.3b 硬边界 2**（「不要在 `docs/DRIFT/` 里记『决定不对齐』的偏离」）⇒
 > **决策本体在签字档**，此处只保留**指针 + 现象证据摘要**（现象证据本身有效，留作审计线索）。
@@ -1150,3 +1157,44 @@ mvn -o -B -pl service/follow/follow-api -am -DargLine=-Xmx2g \
 # ③ 域内全量
 mvn -o -B -pl service/follow/follow-api -am -DargLine=-Xmx2g test
 ```
+
+---
+
+## 🆕 **2026-10-30 真实性复核回执**（follow+task lane · 「台账结论 ↔ 代码」逐条复核 · follow 域 · `api.md`）
+
+> **口径**（沿用 2026-10-29 W-B lane 的口径，未变）：每条带编号的结论 → 回 **Go 真源（只读）** ＋ **RAG 源码** 两侧核「被描述的那个行为现在还在不在」，
+> 再核「证据指针那一行是不是真的在讲这件事」（**指针能解析 ≠ 结论为真**）。
+> **原值一律保留**；本轮**未改判任何一条**，只做**指针补齐 / 订正**（明细见各条正文）。
+> **机器判据**：`python3 tools/difftest/ledger-claim-audit.py --domain follow --strict` ⇒ **🔴 落空 = 0**。
+> ⚠️ **本轮额外做了机器判据抓不到的一层**：`ledger-claim-audit.py` 的 `_resolve()` 在**直连路径不存在**时会**退化成按 basename 匹配** ⇒
+> ⇒ 「**指错文件**」会被它判成 `resolved` ⇒ **机器绿灯 ≠ 指针指对文件**。本轮为此**逐条手工核了每个指针的目录与行内容**（脚本见下）。
+
+### 一、逐条结论表（编号 · 落点 · 原状态 → 现行态 · 两侧依据 · 是否改判）
+
+| 编号 | 落点 | 原状态 → 现行态 | 依据（两侧 `文件:行号` · 核对日期 2026-10-30） | 改判 |
+|---|---|---|---|---|
+| `DRIFT-FOLLOW-001` | §结论表 `:32` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/service/FollowApiSupport.java:265` = `out.setUserIds(null);`（**本轮重核：该行确实讲这件事**）· Go `service/follow/api/internal/logic/follow/getrecommendationslogic.go:70` = `users := make([]types.RecommendUser, 0, len(rpcResp.Users))` ⇒ proto3 空 repeated 在 wire 上消失 ⇒ Go 得 nil ⇒ **两侧同形** | 否 |
+| `DRIFT-FOLLOW-001` | §标题 `:51` | ✅ 已修 → ✅ 已修（不变） | 同上 + 守门 RAG `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiMvcPipelineTest.java:625-626` = `assertTrue(emptyBody.contains("\"user_ids\":null"), …)` ⇒ **断言锁的是 `null`**（不是 `[]`）⇒ 「锁死错误答案」的断言确已改 | 否 |
+| `DRIFT-FOLLOW-005` | §结论表 `:33` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/dto/RecommendUser.java:57` = `@JsonPropertyOrder({"target_id", "mutual_score"})`（**本轮重核：该行确实讲这件事**）· Go `service/follow/api/internal/types/types.go:21` = `TargetId int64 \`json:"target_id,string"\`` ⇒ `:22` = `MutualScore int32 \`json:"mutual_score"\`` ⇒ **字段顺序两侧同形** | 否 |
+| `DRIFT-FOLLOW-005` | §标题 `:156` | ✅ 已修 → ✅ 已修（不变） | 同上（根因段「Jackson 显式命名 ⇒ 字母序分支」的解释**不因代码未变而失效** ⇒ 结论仍成立） | 否 |
+| `DRIFT-FOLLOW-007` | §结论表 `:34` | 🟡 已修（tag + 桶）· 残留 = 框架限制 → 🟡（不变） | RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/metrics/FollowApiMetrics.java:131` = `.publishPercentileHistogram()` ＋ `:132` = `.serviceLevelObjectives(GO_DEF_BUCKETS)` ⇒ **api 侧两个开关仍同开 ⇒ 并集仍在（80 桶）**；对照 RAG `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/metrics/FollowRpcMetrics.java:118-120`（明写「**不要再加 `publishPercentileHistogram()`**」）＋ `:134` = `.serviceLevelObjectives(` ⇒ **rpc 侧 12 桶** ⇒ 台账自述的「『框架限制不可修』在 rpc 侧已被证伪」**本轮复核属实** ⇒ ⇒ **残留仍在 ⇒ 🟡 不变**（⚠️ **不因「框架限制」这个措辞把 🟡 升级成 🔴**：AGENTS.md §一条差异 ≠ 一个缺陷） | 否 |
+| `DRIFT-FOLLOW-008` | §结论表 `:35` | ✅ 已签字偏离 ⇒ 不修 → ✅ 仍成立（不变） | 签字档 `docs/Intentional_Deviations/global/common-tails.md:11` = `## SD-2026-10-25-01：\`MaxConns\` 闸门作用域 …… ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**` ＋ `:18`（「对应的 DRIFT 条目」栏 = **T-2** = `follow` 域 `DRIFT-FOLLOW-008`）· RAG `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java:67` = 「⚠️ 本条是经签字批准的『有意偏离』」＋ `:102` = `private final Semaphore latch;`（**全进程一个**）· Go `go-zero@v1.10.2/rest/handler/maxconnshandler.go:20` = `latch := syncx.NewLimit(n)`（**每路由一个**）⇒ **差异仍在两侧 ⇒ 签字仍有效（决策不是缺陷）** | 否（**指针订正**：users 侧 `docs/DRIFT/users/vs-common.md:2740` ⇒ `:111`，见本文件 §`DRIFT-FOLLOW-008` 的订正段） |
+| `DRIFT-FOLLOW-008` | §标题 `:526` | ✅ 已移出 DRIFT 侧 → ✅ 仍成立（不变） | 同上 + `docs/DRIFT/global/_README.md:88` = 「**T-2** · `follow` · `DRIFT-FOLLOW-008` · ✅ **已签字**（2026-10-25）⇒ `SD-2026-10-25-01` ⇒ **已移出本档**」⇒ **销账链完整 ⇒ 仍是「移出」而非「待修」** | 否 |
+| `DRIFT-FOLLOW-009` | §结论表 `:36` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/client/FollowRpcClient.java:164` = `private static final long CLIENT_TIMEOUT_MILLIS = 2000L;` ＋ `:247` = `capByClientTimeout(` ⇒ **2s 客户端超时在位** · Go `go-zero@v1.10.2/zrpc/config.go:31` = `Timeout int64 \`json:",default=2000"\``（**本轮逐行核过**：`:31` 是 `Timeout`、`:34` 是 `BalancerName` ⇒ 2026-10-29 的那次订正成立）⇒ **Go 2s / RAG 2s 同形** | 否 |
+| `DRIFT-FOLLOW-010` | §结论表 `:37` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/auth/GoStyleJwtAuthFilter.java:100` = `@Order(Ordered.HIGHEST_PRECEDENCE + 6)` ＋ 共享层 `service/common/src/main/java/com/rag/common/spring/HttpMiddlewareFilter.java:40` = `@Order(Ordered.HIGHEST_PRECEDENCE + 7)` ⇒ **验签在 3s 预算之外** · Go `go-zero@v1.10.2/rest/engine.go:101-113` = `bindRoute` ⇒ `buildChainWithNativeMiddlewares` → `appendAuthHandler` → `ng.middlewares` ⇒ **计时器在 Authorize 之后** ⇒ **两侧同形** | 否 |
+| `DRIFT-FOLLOW-011` | §结论表 `:38` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-api/src/main/resources/application.yml:41` = `timeout: 3s` ＋ `:48` = `connect-timeout: 5s`（**本轮重核这两行的实际内容**）· Go 侧 `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-39` = 建 `red.Options` **不传任何 timeout** ⇒ 落 go-redis 库默认（`DialTimeout 5s` / `ReadTimeout 3s`）⇒ **两侧逐值一致**；⚠️ Go `go-zero@v1.10.2/core/stores/redis/redis.go:27` = `readWriteTimeout = 2 * time.Second` 仍**只被 BLPOP 用** ⇒ **仍是死常量、仍不能当依据** | 否 |
+| `DRIFT-FOLLOW-012` | §结论表 `:39` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/interceptor/FollowBlacklistInterceptor.java:155-157` = `catch (Throwable t) { … fail-open … }` ⇒ **断连放行** · Go `service/follow/api/internal/middleware/checkblacklistmiddleware.go:40-41` = `exists, err := m.Redis.ExistsCtx(…)` ⇒ `if err == nil && exists {` ⇒ **同形（都是 fail-open）** | 否 |
+
+### 二、本轮新增/订正的证据指针
+
+| 落点 | 原指针 | 现行指针 | 说明 |
+|---|---|---|---|
+| §`DRIFT-FOLLOW-008` 依据链 | `docs/DRIFT/users/vs-common.md:2740` | **`docs/DRIFT/users/vs-common.md:111`**（＋ `:47`） | **指错行**：原行现在讲「同一份代码，两棵树读出两个相反的结论」，与 MaxConns 无关 ⇒ 机器判据（basename 回退）抓不到 ⇒ 本轮手工核出 |
+
+### 三、仍未核到（**待核实**，不默认「仍成立」也不默认「已闭环」）
+
+| 项 | 为什么判不了 | 本轮做过什么 |
+|---|---|---|
+| `DRIFT-FOLLOW-007` 的**桶边界总数 80**（活体读数） | 需**真容器 + `/actuator/prometheus` 活体抓取** ⇒ 本轮**未起进程、未抓取** | 已核**源码级**：两个开关仍同开 ⇒ 触发条件在；⚠️ **80 这个数字沿用 2026-10-24 的实测**，本轮**未复测** |
+| `DRIFT-FOLLOW-009` / `-010` / `-011` / `-012` 的**活体读数**（2.47s / 3s 边界 / 5s connect / 断连 0ms） | 需**真 Redis ＋ 真 Tomcat ＋ 故障注入** ⇒ 本轮**未复跑** | 已核**源码级 + 配置层**（逐行读 `application.yml` 与 `FollowRpcClient`）⇒ 状态**沿用 2026-10-29 结论**，本轮**未独立改判** |
+| `DRIFT-FOLLOW-001` / `-005` 的**双侧活体 wire 比对** | 需 Go 栈 + RAG 栈同跑 ⇒ 本轮**未跑** | 已核**源码级 + 守门断言**（`FollowApiMvcPipelineTest.java:625-626` / `RecommendUser.java:57`）⇒ 未独立改判 |
