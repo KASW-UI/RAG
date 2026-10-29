@@ -17,7 +17,25 @@ services:
     ports:
       - "49432:5432"   # Infrastructure.md §2: 49432
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # 🔴 2026-10-29 · R4·P0 #5：挂载点必须落在 **`/var/lib/postgresql`**（父目录），
+      #    **不是** `/var/lib/postgresql/data`。
+      #    起因：`image: postgres:latest` 是**浮动 tag** ⇒ 2026-10 起它解析到 **PostgreSQL 18.x**
+      #    （本机实测 `postgres:latest` = `sha256:86c951e0` · `PostgreSQL 18.6`）。
+      #    PG18 的数据目录改成了「按大版本分子目录」（`PGDATA=/var/lib/postgresql/18/docker`），
+      #    并且镜像自带 `VOLUME /var/lib/postgresql` ⇒ **同时**存在
+      #    「旧路径命名卷 `/var/lib/postgresql/data`」＋「镜像自带匿名卷 `/var/lib/postgresql`」
+      #    ⇒ 官方 entrypoint 直接拒绝启动：
+      #      "Error: in 18+, these Docker images are configured to store database data in a
+      #       format which is compatible with pg_ctlcluster …
+      #       there appears to be PostgreSQL data in: /var/lib/postgresql/data (unused mount/volume)"
+      #    ⇒ `docker compose up` **必然失败**（实测 2026-10-29）⇒
+      #      「第三方照 README 在**新机器**上起栈」这一条直接断 ⇒ **P0 #5 的真实拦路虎**。
+      #    修法（官方错误信息给出的）：**把命名卷挂到父目录 `/var/lib/postgresql`**，
+      #    让 PG 自己在大版本子目录里落数据。
+      #    ⚠️ 兼容性：PG < 18 的 `PGDATA` 仍是 `/var/lib/postgresql/data`
+      #    ⇒ 挂父目录时它会自动用 `data/` 子目录 ⇒ **新旧大版本都能跑**（不必改 image tag）。
+      #    📌 对照：`Sea-RideTheWind_java` 那套能跑的栈挂的也是 `/var/lib/postgresql`（匿名卷）。
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-admin} -d ${POSTGRES_DB:-first_db}"]
       interval: 5s
@@ -107,15 +125,28 @@ services:
   user-rpc:
     build:
       context: .
-      dockerfile: Dockerfile
-      # BuildKit cache mount：让 Docker 构建容器复用宿主机的 ~/.m2/repository，
-      # 否则每次构建都从 Maven Central 下载 protoc + grpc-java 二进制（很慢）
+      # ⚠️ 这里必须逐字写小写 `dockerfile` —— 仓里的文件名就是全小写（`git ls-files` ⇒ `dockerfile`）。
+      #    原写法 `Dockerfile` 只在 macOS（默认大小写不敏感）能过；Linux 上必挂：
+      #    "failed to solve: failed to compute cache key: dockerfile does not exist"
+      #    ⇒ 「第三方照 README 在 Linux 起栈」这一条直接断。
+      dockerfile: dockerfile
+      # 🔴 2026-10-29 · R4·P0 #5：删掉 `cache_from` / `cache_to`（原写法见 git log 29c2f094）。
+      #    原写法 `type=local,src=~/.m2/repository` **三重不成立**：
+      #      ① **没有可缓存的对象**：Dockerfile 里**没有 maven 步骤** —— jar 由 host 端
+      #         `manage.sh build` 用宿主网络跑 `mvn package` 打好，镜像只 `COPY` jar
+      #         （见 `dockerfile` 头部注释）⇒ buildkit 侧根本没有 maven 层可缓存。
+      #      ② **布局不兼容**：buildx 的 `type=local` cache 目录要求 `index.json`；
+      #         maven 仓布局没有这个文件 ⇒ `cache_from` **每次都失败**（实测告警
+      #         "local cache import at ~/.m2/repository not found ... no such file"）。
+      #      ③ **`~` 不展开**：buildx 把 `~/.m2/repository` 当**相对路径**处理
+      #         ⇒ 实落在 `<cwd>/~/.m2/repository` ⇒ **在仓根生成 `./~/.m2/` 垃圾目录**。
+      #    而 `cache_to` 副作用更大：user-rpc 与 user-api 是**两个 exporter 并发写同一个 dest**
+      #    ⇒ 互删对方 ingest 目录 ⇒ `rename tmp file ... no such file or directory`
+      #    ⇒ `docker compose build` 整轮失败（2026-10-29 实测连挂 2 次）。
+      #    真正的构建加速 = ① host 端 ~/.m2/repository（mvn 自己复用）
+      #    ② docker layer cache（本 Dockerfile 只有 FROM/WORKDIR/COPY/ENTRYPOINT 五步，足够）。
       args:
         SERVICE_NAME: user-rpc
-      cache_from:
-        - type=local,src=~/.m2/repository
-      cache_to:
-        - type=local,dest=~/.m2/repository
     image: sea/user-rpc:latest
     container_name: "${CONTAINER_PREFIX:-Sea}-user-rpc"
     environment:
@@ -168,14 +199,11 @@ services:
   user-api:
     build:
       context: .
-      dockerfile: Dockerfile
-      # 同 user-rpc：复用宿主机 Maven 缓存
+      dockerfile: dockerfile
+      # 同 user-rpc：删 `cache_from`/`cache_to`（无 maven 层可缓存 + 并发写同一 dest 会互删
+      # ingest 目录 ⇒ build 整轮失败）⇒ 理由与实测证据见上面 user-rpc 处的完整注释。
       args:
         SERVICE_NAME: user-api
-      cache_from:
-        - type=local,src=~/.m2/repository
-      cache_to:
-        - type=local,dest=~/.m2/repository
     image: sea/user-api:latest
     container_name: "${CONTAINER_PREFIX:-Sea}-user-api"
     environment:
