@@ -608,6 +608,24 @@ bash tools/difftest/run-task-grpc-xlang.sh                    # task 跨语言 g
 bash tools/difftest/run-task-kafka-e2e.sh                      # task Kafka 端到端
 bash tools/difftest/run-hot-rpc-difftest.sh                    # hot-rpc gRPC 逐字节
 
+# ── ⭐ 双侧活体探针（2026-10-29 落仓 · 各域私有目录 · 按域取）─────
+bash tools/api-full-parity-probe/article/run.sh               # article 双侧（3 场景 + 两侧播种同一行）
+bash tools/api-full-parity-probe/article/mutate-parity.sh     #   变异 ⇒ 精确转红
+bash tools/api-full-parity-probe/like/run.sh                  # like 双侧（A 9 case / B 970 B / C E60）
+bash tools/api-full-parity-probe/like/mutate-parity.sh        #   变异 ⇒ 精确转红
+bash tools/api-full-parity-probe/follow/run.sh                # follow 双侧（20 条三方逐字节）
+bash tools/api-full-parity-probe/users-common/run.sh          # users-common（176→260 可复算）
+bash tools/api-full-parity-probe/users-common/mutate-parity.sh#   变异 ⇒ 精确转红
+bash tools/api-full-parity-probe/favorite-rpc/run.sh          # favorite-rpc 整域（wire 层 25 案）
+bash tools/api-full-parity-probe/favorite-rpc/mutate-parity.sh#   变异 ⇒ 精确转红
+bash tools/errmsg-probe/<域>/run-parity.sh                    # 错误码逐字节（9 域：article/favorite/hot/
+                                                          #   like/users/comment/follow/message/task）
+bash tools/errmsg-probe/<域>/mutate-parity.sh                 #   退出码 0=全部精确转红=通过 1=守门失效 2=环境问题
+bash tools/proto-wire-probe/hot/run.sh                        # hot proto 消息体 wire 字节
+
+# ── ⭐ 产物可执行性（未构建 ⇒ 判红；永远打印「已检查 N/M」）──────
+bash tools/difftest/check-jar-executable.sh                   # 需先 mvn package
+
 # ── 域测试必须带 -am（否则解析 ~/.m2 过期 com.rag:common ⇒ 假红）──
 mvn -B -o -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end -pl <mods> -am test
 
