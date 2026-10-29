@@ -1,0 +1,37 @@
+Name: admincenter
+Host: 0.0.0.0
+Port: 18889
+
+Log:
+  ServiceName: admincenter
+  Mode: console          # difftest: 绝不写进冻结仓库
+
+AdminAuth:
+  AccessSecret : "yU-hCm)2*?NQmWG"
+  AccessExpire : 2592000
+
+BizRedis:
+  Host: 127.0.0.1:56379
+  Type: "node"
+  Pass: ""
+
+Telemetry:
+  Name: admin-api
+  Endpoint: jaeger:4317
+  Sampler: 1.0
+  Batcher: otlpgrpc
+
+DevServer:
+  Enabled: true
+  Host: 0.0.0.0
+  Port: 19096
+  MetricsPath: /metrics
+  HealthPath: /healthz
+  EnableMetrics: true
+  EnablePprof: true
+
+
+AdminRpc:
+  # difftest: 同 user-api，Endpoints 直连免 etcd
+  Endpoints:
+    - 127.0.0.1:18081

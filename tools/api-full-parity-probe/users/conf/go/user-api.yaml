@@ -1,0 +1,40 @@
+Name: usercenter
+Host: 0.0.0.0
+Port: 18888
+
+Log:
+  ServiceName: usercenter
+  Mode: console          # difftest: 绝不写进冻结仓库
+
+UserAuth:
+  AccessSecret: ae0536f9-6450-4606-8e13-5a19ed505da0
+  AccessExpire: 2592000
+
+DevServer:
+  Enabled: true
+  Host: 0.0.0.0
+  Port: 19095
+  MetricsPath: /metrics
+  HealthPath: /healthz
+  EnableMetrics: true
+  EnablePprof: true
+
+
+
+BizRedis:
+  Host: 127.0.0.1:56379
+  Type: "node"
+  Pass: ""
+
+
+Telemetry:
+  Name: user-api
+  Endpoint: jaeger:4317
+  Sampler: 1.0
+  Batcher: otlpgrpc
+
+UserRpc:
+  # difftest: 用 Endpoints 直连，BuildTarget() 对 Endpoints 短路 ⇒ 不需要 etcd
+  # Go 出处: go-zero v1.10.2 zrpc/config.go:91-95 RpcClientConf.BuildTarget()
+  Endpoints:
+    - 127.0.0.1:19004

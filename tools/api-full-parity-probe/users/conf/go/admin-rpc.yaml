@@ -1,0 +1,40 @@
+Name: admin.rpc
+ListenOn: 0.0.0.0:18081
+
+Log:
+  ServiceName: admin-rpc
+  Mode: console          # difftest: 绝不写进冻结仓库
+
+# difftest: Etcd 整块移除 —— zrpc/server.go:42 `if c.HasEtcd()` 不成立 ⇒ 不做注册
+
+# 真源写的是 postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_ADDR}:${POSTGRES_PORT}/${POSTGRES_DB}?...
+# 这里换成字面值，原因同 user-rpc.yaml：admin.go:30 的 conf.MustLoad 没带 conf.UseEnv()，
+# go-zero 不会展开 ${}，占位符会被原样当成 host/账号/密码。
+DataSource: "postgres://admin:difftest@127.0.0.1:55432/go_db?sslmode=disable&TimeZone=Asia/Shanghai"
+
+BizRedis:
+  Host: 127.0.0.1:56379
+  Type: "node"
+  Pass: ""
+
+Telemetry:
+  Name: admin-rpc
+  Endpoint: jaeger:4317
+  Sampler: 1.0
+  Batcher: otlpgrpc
+
+AdminAuth:
+  AccessSecret : "yU-hCm)2*?NQmWG"
+  AccessExpire : 2592000
+
+DevServer:
+  Enabled: true
+  Host: 0.0.0.0
+  Port: 19097
+  MetricsPath: /metrics
+  HealthPath: /healthz
+  EnableMetrics: true
+  EnablePprof: true
+
+System:
+  DefaultPassword : "123456"
