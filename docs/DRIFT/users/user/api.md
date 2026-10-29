@@ -1,5 +1,10 @@
 # 语义对照台账 · `service/users/user/user-api`
 
+> 🟥 **当前态指针（2026-10-29 · R4·T-4.2（G-12）回填）** —— 本文件按「轮次」追加，**历史各轮一条未删**（快照价值）。
+> ⚠️ **头部一度严重过期**（头部表仍写「核对日期：2026-10-24（第十轮）」＋「判定：SEMANTICALLY NOT EQUIVALENT —— 0 项 SEMANTIC MISMATCH + 3 项 OBSERVABLE DIFFERENCE + 0 项 UNRESOLVED」，而正文已到 2026-10-28）⇒ **当前状态一律以「📇 §7 条目总索引（2026-10-24 第十轮补）」一节为准**（其下计数已于 2026-10-27 订正为**当前 OPEN 实为 1 条**：`013`）⇒ ⚠️ 「10. 最终判定（§39 · 18 项 checklist + 三值结论）」的「结论」块仍是 2026-10-26 口径（3 条 OBSERVABLE DIFFERENCE）⇒ **不要**读作当前结论；最新一轮见文件末尾「🔴 `DRIFT-USERAPI-017` · **「OS 盲选口」族** · 本组件 **4 处**（2026-10-28 · G1 lane）」一节。
+> ⇒ 本文件里的 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环（AGENTS.md §0 证据强度分层）。
+> **本轮只回填头部口径；正文各轮的原始记录一条未删。**
+
 | | |
 |---|---|
 | **Go 侧** | `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/service/user/user/api`（含 `service/user/user/identity/`，该组件的一部分） |
