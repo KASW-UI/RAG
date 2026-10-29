@@ -139,7 +139,7 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 | 共享 Flyway 账本 | `message-rpc`↔`like-rpc`↔`article-rpc` | ✅ **配置层 + 运行时（真 PG 三进程并发同库）均已闭环**（L4）；⚠️ **`favorite-rpc` 例外**（缺 `baseline-version: 0`）⇒ 只记账 ⇒ 详见 §6.3 问题 4 |
 | 建表责任交叉 · client 契约 | `user-rpc`↔`admin-rpc` · api↔rpc proto | ✅ **已审完**（第九轮：交叉但无冲突 · client 契约 10 域零漂移） |
 | 事实投递链路 | `like` 的 api ↔ rpc ↔ 第三个仓库 | ✅ **已落地**（第二十轮 A5′ · 守门 22 条） |
-| `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | ✅ **已落地**（共享层修法 · favorite 零触碰） |
+| `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | 🟡 **主轴闭合 · 残留 1 段**（共享层修法 · favorite 零触碰） |
 | 🔴 **rpc 真进程可启动性** | **7 个 rpc 组件** | ✅ **已修** —— `discovery://<name>` 两斜杠 ⇒ fat jar 起不来 ⇒ 已改三斜杠 · `hot-rpc`/`task-rpc` 补 `Main-Class` ⇒ 🟢 **两守门缺口同批闭合**（**20/20 全绿**） |
 | DDL 双侧活体逐列对照 | 其余 5 域（favorite 只建库） | ✅ **已做**（L3 ⇒ **9 域**）⇒ 逐项见 §0 第 2 条 |
 

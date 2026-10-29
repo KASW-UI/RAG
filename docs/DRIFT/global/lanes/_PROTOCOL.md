@@ -17,7 +17,7 @@
 | **合计** | **221,405** | ⇒ 单轮 ≈ 6~7 万 token 的纯台账 |
 
 ⇒ **拆法必须是「按叶子文件切」，不是「按议题切」** ——
-议题会跨文件（`X-4` 同时碰 like/comment/common），**文件才是不冲突的单位**。
+议题会跨文件（`CD-4` 同时碰 like/comment/common），**文件才是不冲突的单位**。
 
 ## 二、三条硬规则
 
@@ -96,8 +96,8 @@
 
 | lane | 分支 | 议题 | 状态 |
 |---|---|---|---|
-| **L6** | `align/global-x5gate` | **X-5 轴**真 server 守门（admin-rpc / article-rpc）+ article slow 轴 + 缺口④ 复评 | ✅ 已合回 |
-| **L7** | `align/global-slowgate` | **X-5 轴** + **slow 轴**（comment-rpc / like-rpc） | ✅ 已合回 |
+| **L6** | `align/global-x5gate` | **CD-5 轴**真 server 守门（admin-rpc / article-rpc）+ article slow 轴 + 缺口④ 复评 | ✅ 已合回 |
+| **L7** | `align/global-slowgate` | **CD-5 轴** + **slow 轴**（comment-rpc / like-rpc） | ✅ 已合回 |
 | **L8** | `align/global-slowgate2` | **slow 轴**推广（user-rpc / message-rpc / hot-rpc） | ✅ 已合回 |
 | **L9** | `align/global-interrupt` | **slow 轴**（task-rpc / follow-rpc）+ **缺口③ 的定性**（打断维度） | ✅ 已合回 |
 | **L10** | `align/global-ddldeep` | **DDL 盲区**：触发器函数体逐条核对 + task/message DDL runner 重建 | ✅ 已合回 |
@@ -107,10 +107,10 @@
 
 | lane | 分支 | 议题 | 状态 |
 |---|---|---|---|
-| **L1** | `align/global`（**本体**） | **X-4** like 半边 + 共享层 `Dispatcher.runAsync` / OTel 全局 SDK / 超时响应单写者 | ✅ 已合回（= 集成目标分支） |
-| **L2** | `align/global-rpcgate` | **X-5** 残留（3 个 rpc 域守门复查 + slow threshold） | ✅ 已合回 `d7a126a` |
-| **L3** | `align/global-ddl` | **X-7** 残留（5 域 DDL 双侧活体逐列对照） | ✅ 已合回 `eee3bbb` |
-| **L4** | `align/global-flyway` | **X-1** 残留（三进程同库共存真 PG 验证） | ✅ 已合回 `8e6b7b2` |
+| **L1** | `align/global`（**本体**） | **CD-4** like 半边 + 共享层 `Dispatcher.runAsync` / OTel 全局 SDK / 超时响应单写者 | ✅ 已合回（= 集成目标分支） |
+| **L2** | `align/global-rpcgate` | **CD-5** 残留（3 个 rpc 域守门复查 + slow threshold） | ✅ 已合回 `d7a126a` |
+| **L3** | `align/global-ddl` | **CD-7** 残留（5 域 DDL 双侧活体逐列对照） | ✅ 已合回 `eee3bbb` |
+| **L4** | `align/global-flyway` | **CD-1** 残留（三进程同库共存真 PG 验证） | ✅ 已合回 `8e6b7b2` |
 | **L5** | `align/global-signoff` | **C 类登记** + T-7/T-11/T-12 定性 + A6 订正 | ✅ 已合回 `2076d42` |
 
 > ⚠️ **L2~L5 与在跑的 lane 有白名单重叠**（例如 L2 曾拥有 `user-rpc/src/test/**`，L8 现在也拥有它）⇒

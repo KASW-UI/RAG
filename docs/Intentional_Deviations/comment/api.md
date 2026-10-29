@@ -13,6 +13,16 @@
 > 🟡 **仍待签字 1 条**（CAND-05）；
 > ⛔ **已作废 1 条**（CAND-04 —— 其前提已被活体实测推翻，见该条的「⛔ 作废结论」）。
 
+> 📌 **2026-10-29 对齐复核（台账对齐 phase · W-D lane）—— 本文件 4 条逐条重核完毕**
+>
+> 判据 = [`../_INDEX.md`](../_INDEX.md)「被签字描述的那个行为**已不存在** ⇒ 签字自动失效」。
+> **4/4 条的状态全部不变**（CAND-04 仍作废 · CAND-05 仍待签字 · CAND-07 / CAND-08 仍已签字）⇒ **无一条需标「已失效」**。
+> **但有 2 处订正**（原句**一律保留**，新结论追加在后面）：
+> ① **CAND-08**：原条写 `GoStyleMaxBytesFilter` 的 `@Order` 是 `HIGHEST_PRECEDENCE + 6` ⇒ **实测是 `+ 8`**（`+6` 是同包的 `GoStyleCpuSheddingFilter`）；
+> ② **CAND-05**：原条写的实现路径需订正为**实际文件路径**（`service/users/users-common/.../BearerTokenExtractor.java:75`）。
+>
+> ⇒ 每条下方的「📌 2026-10-29 对齐复核」小节给出逐条结论 + 证据指针 + **唯一别名**。
+
 ---
 
 ## SD-2026-10-24-CAND-04：非 `application/json` 的 Content-Type ⇒ **415**，Go 是 **200 + `{code:5001}`**
@@ -47,6 +57,17 @@
 
 **签字人：Jason　签字日期：2026-10-24（作废裁定）**
 
+### 📌 2026-10-29 对齐复核（台账对齐 phase · W-D lane）
+
+| 项 | 结论 |
+|---|---|
+| **唯一别名** | `SD-2026-10-24-CAND-04@comment` |
+| **撞号检查** | 全仓 `grep -rln SD-2026-10-24-CAND-04 docs/` ⇒ **定义只此一处**（`docs/DRIFT/comment/api.md` 为**引用**）⇒ **无撞号** |
+| **撤销的那个行为现在是不是真的没了** | ✅ **是** —— 「RAG ⇒ 415」这个差异**至今不存在** ⇒ **本条的作废裁定仍成立，状态不变**（⛔ 已作废 ⇒ 按索引口径**不计入计数**） |
+| **核对日期** | 2026-10-29 |
+| **RAG 侧实测** | `service/comment/comment-api/src/main/java/com/rag/comment/comment/api/advice/CommentGlobalExceptionHandler.java:200-212`（javadoc 已写明「**2026-10-24 双侧活体实测后订正** … **非 `application/json` 的 Content-Type ⇒ 两侧都是 HTTP 200 + `{code:5001}` ⇒ 一致**」）· `:170-171`（`@ExceptionHandler(HttpMessageNotReadableException.class)` ⇒ `handleUnreadableBody` ⇒ 200 + 5001）· `:223-225`（`handleMediaTypeNotSupported` ⇒ 415 **仅在真的抛 `HttpMediaTypeNotSupportedException` 时**才走，而实测路径**不是**它）⇒ ⇒ **差异不存在，作废成立** |
+| **Go 侧实测** | `service/comment/rpc/internal/httpx/requests.go:153-154` 的 `withJsonBody` 假 ⇒ `UnmarshalJsonMap(nil, v)` ⇒ 必填缺失 ⇒ 200 + 5001 ⇒ **两侧仍逐字节相同** |
+
 ---
 
 ## SD-2026-10-24-CAND-05：Bearer 前缀剥离的长度边界 `> 7` vs Go 的 `> 6`
@@ -74,9 +95,18 @@
 
 **签字人：______　签字日期：______**
 
----
+### 📌 2026-10-29 对齐复核（台账对齐 phase · W-D lane）
 
-## SD-2026-10-24-CAND-07：**HS384 / HS512** 签名的 token ⇒ RAG **拒绝**，Go **接受**
+| 项 | 结论 |
+|---|---|
+| **唯一别名** | `SD-2026-10-24-CAND-05@comment` |
+| **撞号检查** | 全仓 `grep -rln SD-2026-10-24-CAND-05 docs/` ⇒ **只命中本文件** ⇒ **无撞号** |
+| **被描述的行为现在还存在吗** | ✅ **仍存在** ⇒ 本条**状态不变**（🟡 待签字 / 候选；也可直接改回，**行为等价**） |
+| **核对日期** | 2026-10-29 |
+| **RAG 侧实测** | `service/users/users-common/src/main/java/com/rag/users/common/jwt/BearerTokenExtractor.java:75`（`if (authHeader.length() > BEARER_PREFIX.length() && …` ⇒ `BEARER_PREFIX = "Bearer "`（`:35`，长度 **7**）⇒ 判据是 **`length() > 7`**）⇒ ⇒ **长度恰为 7 的头（`"Bearer "`）保留整串** ⇒ 解析失败 ⇒ **401** ⇒ **与 Go 的 `> 6` 仍有差异，且结局相同（都 401）** ⇒ **仍不可观察** |
+| **Go 侧实测** | golang-jwt/jwt/v4 `request/oauth2.go:8-14`：`len(tok) > 6 && strings.ToUpper(tok[0:7]) == "BEARER "` ⇒ **长度 7 的头被剥成空串** ⇒ 解析失败 ⇒ **401** |
+| **🔴 订正（实现路径 · 原句保留）** | 原条写「`users-common/.../BearerTokenExtractor.java:74-81`」⇒ **实测文件路径为** `service/users/users-common/src/main/java/com/rag/users/common/jwt/BearerTokenExtractor.java`，**判据所在行 = `:75`**（`:74-81` 的范围仍覆盖该行 ⇒ 不冲突）⇒ ⇒ **只订正完整路径，结论与措辞不变** |
+| **⚠️ 写权提示（本轮不改）** | 该类位于**共享层** `service/users/users-common` ⇒ **写权归 G4**（AGENTS.md §5.3f）⇒ 本 lane **只登记、不落码** |：**HS384 / HS512** 签名的 token ⇒ RAG **拒绝**，Go **接受**
 
 | 项 | 值 |
 |---|---|
@@ -122,7 +152,17 @@
 - **连带动作**：**代码零改动** —— `CommentJwtTokenMatrixGateTest`（11 例）**继续断言「RAG 拒绝」**，**该测试即为本条的行为锁**。
 - **后续影响**：对拍看到 HS384/HS512 上「Go 通过 / RAG 401」⇒ **不得当成新回归去「修」回 Go 侧行为**。
 
----
+### 📌 2026-10-29 对齐复核（台账对齐 phase · W-D lane）
+
+| 项 | 结论 |
+|---|---|
+| **唯一别名** | `SD-2026-10-24-CAND-07@comment` |
+| **撞号检查** | 全仓 `grep -rln SD-2026-10-24-CAND-07 docs/` ⇒ **定义只此一处**（`docs/DRIFT/comment/api.md` 为**引用**）⇒ **无撞号** |
+| **被描述的行为现在还存在吗** | ✅ **仍存在** ⇒ **签字有效，状态不变**（✅ 已签字） |
+| **核对日期** | 2026-10-29 |
+| **RAG 侧实测** | `service/comment/comment-api/src/main/java/com/rag/comment/comment/api/auth/CommentJwtSignatureVerifier.java:86-87`（`this.key = Keys.hmacShaKeyFor(JwtUtil.padToHmacKeySize(…));` ⇒ 32 字节 ⇒ 产出 **`HmacSHA256`**）· `:116-119`（`Jwts.parser().verifyWith(key).build().parseSignedClaims(token)` ⇒ **未设算法白名单** ⇒ 请求头写 `HS384`/`HS512` ⇒ **jjwt 抛 `WeakKeyException` ⇒ 拒绝**）⇒ ⇒ **「RAG 拒绝 / Go 接受」的差异仍在** |
+| **Go 侧实测** | go-zero 的 `rest/token/tokenparser.go` 用 `jwt.NewParser(jwt.WithJSONNumber())`、**无** `WithValidMethods` ⇒ golang-jwt/v4 的 `SigningMethodHMAC.Verify` **不限制 alg** ⇒ **HS384/HS512 一律接受** |
+| **连带动作核验** | 原条称「`CommentJwtTokenMatrixGateTest`（11 例）**继续断言「RAG 拒绝」**，**该测试即为本条的行为锁**」⇒ **2026-10-29 实测该测试类仍在**：`service/comment/comment-api/src/test/java/com/rag/comment/comment/api/interceptor/CommentJwtTokenMatrixGateTest.java`（`:42,54-72` 的矩阵注释仍把 HS384/HS512 标为「🔴 差异」）⇒ ⇒ **行为锁仍在 ⇒ 签字含义仍成立** |
 
 ## SD-2026-10-24-CAND-08：**保护层的覆盖范围** —— 未注册路径上 Go **从不**返回 413，RAG 返回 **413**
 
@@ -166,6 +206,18 @@
 - ⚠️ **给 `align/common` 的交接**：若将来要在共享面调整保护层覆盖范围，**必须**同时评估**六个域**的未注册路径行为 ⇒ 本条已签字 ⇒ 改动需重新征签。
 
 **签字人：Jason　签字日期：2026-10-24**
+
+### 📌 2026-10-29 对齐复核（台账对齐 phase · W-D lane）
+
+| 项 | 结论 |
+|---|---|
+| **唯一别名** | `SD-2026-10-24-CAND-08@comment` |
+| **撞号检查** | 全仓 `grep -rln SD-2026-10-24-CAND-08 docs/` ⇒ **定义只此一处**（`docs/DRIFT/comment/api.md` · `docs/DRIFT/comment/rpc.md` · `docs/DRIFT/comment/vs-common.md` · `docs/DRIFT/_cross/domain-common-lanes.md` 均为**引用**）⇒ **无撞号** |
+| **被描述的行为现在还存在吗** | ✅ **仍存在** ⇒ **签字有效，状态不变**（✅ 已签字） |
+| **核对日期** | 2026-10-29 |
+| **RAG 侧实测（差异仍在）** | `service/common/src/main/java/com/rag/common/protection/GoStyleMaxBytesFilter.java:82`（`@Component`）· `:83`（`@Order(Ordered.HIGHEST_PRECEDENCE + 8)`）· `:84`（`implements Filter`）⇒ **仍是全局 servlet Filter** ⇒ **未注册路径也会被它拦**；`:112`（`response.setStatus(HttpServletResponse.SC_REQUEST_ENTITY_TOO_LARGE)` ⇒ **裸 413**）⇒ ⇒ **「未注册路径上 RAG 返回 413 / Go 从不返回 413」的差异仍在** |
+| **🔴 订正（`@Order` 数值 · 原句保留）** | 原条写「`@Order(HIGHEST_PRECEDENCE + 6)`」⇒ **2026-10-29 实测是 `+ 8`**；**`+ 6` 是同包的 `GoStyleCpuSheddingFilter`**（`service/common/src/main/java/com/rag/common/protection/GoStyleCpuSheddingFilter.java:63`）⇒ ⇒ **数值订正为 `+ 8`**。⚠️ **但结论不变**：该类 javadoc（`GoStyleMaxBytesFilter.java:55-79`）已自记「**「在鉴权之外」靠的是它是 Filter，不是 `Order` 的数值**」—— Servlet 的**所有** Filter 都包在 `DispatcherServlet` **外面**，而 JWT 鉴权是 `HandlerInterceptor`（在 `DispatcherServlet` **内部**）⇒ ⇒ **Filter 与 Interceptor 的先后由容器结构决定，与 order 数值无关** ⇒ **「Go 200 / RAG 413」这条签字含义仍成立** |
+| **连带动作核验** | 原条称「**代码零改动**；DRIFT 的 **D6 关闭**」⇒ **2026-10-29 实测**：`docs/DRIFT/comment/api.md:134`（D6 行 = ✅ **已签字偏离**）· `:167`（§3.2 标题同）⇒ **D6 已关闭且仍以签字态登记** ⇒ 签字含义仍成立 |
 
 ---
 

@@ -19,6 +19,11 @@
 
 ### ⏳ SD-2026-10-23-08（候选）：响应 `Content-Type` 不带 `charset=utf-8`
 
+> **唯一别名**：`SD-2026-10-23-08@like`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/message/rpc.md`](../message/rpc.md)（CPU fail-open）与 [`docs/Intentional_Deviations/users/admin/api.md`](../users/admin/api.md)（黑名单 401 业务码）指向**三条完全不同**的偏离 ⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-23-08@like`** 为准）
+> **签字复核（核对日期 2026-10-29）**：**已失效（签字描述的行为已不存在）⇒ 不计入计数** —— 共享层 T-6 已给**全部 10 个 api** 的 JSON 响应补上 `charset=utf-8` ⇒ 「RAG 侧响应 `Content-Type` **不带** charset」这个行为**今天已不存在**。**现在是什么样**：RAG 侧返回 `Content-Type: application/json;charset=utf-8`（**分号后无空格**），Go 侧是 `application/json; charset=utf-8`（**分号后有空格**）⇒ **剩下的只是「分号后有没有空格」**（属**框架限制**，与 `DRIFT-MSGAPI-012` 同款，已在 DRIFT 台账单列）⇒ **本条应从「⏳ 待签字」中剔除**⇒ **索引计数由主线更新**（本 lane 不写共享索引）
+> **依据**：`service/common/src/main/java/com/rag/common/http/GoStyleJsonContentTypeAdvice.java:127`（常量 `GO_JSON_CONTENT_TYPE = "application/json;charset=utf-8"`）+ `:151`（消费点 `response.getHeaders().set(HttpHeaders.CONTENT_TYPE, GO_JSON_CONTENT_TYPE)`）· 生效链 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:2` → `service/like/like-api/pom.xml:63`（共享层 `common` 依赖）· 真 Tomcat 守门 `GoStyleJsonContentTypeCharsetTomcatTest` ⇒ **证据强度：源码行号 + 装配链 + 真 Tomcat 守门在仓**。
+
+
 | 项 | 值 |
 |---|---|
 | 状态 | ⏳ **待签字**（台账 §7.2 建议登记，尚未获批） |
@@ -48,6 +53,11 @@
 
 ### ⏳ SD-2026-10-23-09（候选）：worker 池饱和时的**裸 503**
 
+> **唯一别名**：`SD-2026-10-23-09@like`（⚠️ **撞号事实**：`SD-2026-10-23-09` 在 [`docs/Intentional_Deviations/common/deadline.md`](../common/deadline.md) 只是**引用本条**（不是另一条偏离）⇒ **不构成跨域撞号**；为唯一定位仍加域内别名）
+> **签字复核（核对日期 2026-10-29）**：**仍成立（候选仍待签字）** —— 被描述的行为**今天仍存在**：worker 池饱和时仍抛 `RejectedExecutionException` 并被转成**裸 503**（无业务码、无 envelope）
+> **依据**：`service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:154`（`static final int MAX_HTTP_WORKERS = 512`）+ `:369`（`catch (RejectedExecutionException saturated)`）+ `:193`（注释「饱和 ⇒ 抛 RejectedExecutionException，由调用点转成**裸 503**」）⇒ **证据强度：源码行号（静态）**。
+
+
 | 项 | 值 |
 |---|---|
 | 状态 | ⏳ **待签字**（台账 §7.2 建议登记，尚未获批） |
@@ -75,6 +85,11 @@
 ---
 
 ### ⏳ SD-2026-10-24-10（候选）：单次 RPC deadline 的**毫秒粒度**取整
+
+> **唯一别名**：`SD-2026-10-24-10@like`（无跨域撞号（该编号只出现在本文件）⇒ 为唯一定位仍加域内别名）
+> **签字复核（核对日期 2026-10-29）**：**仍成立（候选仍待签字）** —— 被描述的行为**今天仍存在**：`GoStyleRequestDeadline` 的公开 API 仍只暴露**毫秒**粒度，而 Go 的 `context` 是**纳秒** ⇒ 两侧的 deadline 传播精度仍不同
+> **依据**：`service/like/like-api/src/main/java/com/rag/like/like/api/client/LikeRpcClient.java:136`（类注释：「**ms 粒度**：`remainingMillis()` 是毫秒精度（Go 的 ctx 是纳秒）」）+ `:154`（`GoStyleRequestDeadline.remainingMillis()`）· 共享层 `service/common/.../GoStyleRequestDeadline.java`（公开 API 只有 `isPresent()` / `remainingMillis()`，**只读**）⇒ **证据强度：源码行号（静态）**。
+
 
 | 项 | 值 |
 |---|---|
@@ -117,6 +132,11 @@
 
 ### ⏳ SD-2026-10-24-11（候选）：网关层拒绝计数 —— **Java 侧比 Go 侧多暴露一个指标**
 
+> **唯一别名**：`SD-2026-10-24-11@like`（无跨域撞号（该编号只出现在本文件）⇒ 为唯一定位仍加域内别名）
+> **签字复核（核对日期 2026-10-29）**：**仍成立（候选仍待签字）** —— 被描述的行为**今天仍存在**：RAG 侧仍多暴露一个 Go 侧没有的 Prometheus 指标 `like_api_reject_total`（且 Prometheus 渲染成 `like_api_reject_total_total`）
+> **依据**：`service/like/like-api/src/main/java/com/rag/like/like/api/metrics/LikeApiMetrics.java:75`（`Counter.builder("like_api_reject_total")`）+ `:17-20`（注释说明渲染形态）⇒ **证据强度：源码行号（静态）**。
+
+
 | 项 | 值 |
 |---|---|
 | 状态 | ⏳ **待签字**（2026-10-24 台账审计时提出，尚未获批） |
@@ -156,11 +176,11 @@
 
 | 编号 | 内容 |
 |---|---|
-| SD-2026-10-23-05 | `like.proto` 的 proto `package` 由 `pb` 归一为 `like`（见 [`proto.md`](proto.md)） |
+| SD-2026-10-23-05@like | `like.proto` 的 proto `package` 由 `pb` 归一为 `like`（见 [`proto.md`](proto.md)） |
 
 ## ✅ 已签字（like-rpc 侧，见 [`rpc.md`](rpc.md)）
 
 | 编号 | 内容 | 性质 |
 |---|---|---|
-| SD-2026-10-23-06 | gRPC 业务码从 `grpc-status` 迁移到自定义 trailer `rag-like-biz-code` | **框架限制** |
-| SD-2026-10-23-07 | Nacos 注册失败时**不退出进程**（Go 是 `os.Exit(1)`） | **有意偏离** |
+| SD-2026-10-23-06@like | gRPC 业务码从 `grpc-status` 迁移到自定义 trailer `rag-like-biz-code` | **框架限制** |
+| SD-2026-10-23-07@like | Nacos 注册失败时**不退出进程**（Go 是 `os.Exit(1)`） | **有意偏离** |

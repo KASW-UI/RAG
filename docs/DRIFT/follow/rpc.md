@@ -19,10 +19,15 @@
 | DRIFT-FOLLOW-004 | `server-addr` 硬编码 `:8848`、忽略 `NACOS_PORT`，与 follow-api 语义冲突 ⇒ api/rpc 连到两台 Nacos | 运行时故障（业务码塌成 1015） | ✅ 已修 |
 | DRIFT-FOLLOW-006 | 5 个 `follow_rpc_*` 指标**无任何抓取出口**（Go 有 DevServer `/metrics`，RAG 的 follow-rpc 是纯 gRPC 进程） | **可观察（抓取侧）** | ✅ **已修（2026-10-29 · 编号 `S1-FOLLOW-001`）** —— 出口已落地（Tomcat + Actuator，**端口 16065 与 Go 一字不差**）⇒ 双侧 series 集合**逐条一致**（仅余 **P3/D 类**的 8 条 `_max` 增项）⇒ 详见下方 §「DRIFT-FOLLOW-006 的落地（2026-10-29）」 |
 
-> ⚠️ **三条都发生在「测试全绿」的状态下** —— 修复前 63 条测试 0 失败（现为 68 条），
+> ⚠️ **三条都发生在「测试全绿」的状态下** —— 修复前 63 条测试 0 失败（**原写「现为 68 条」，已过期** —— 🆕 **2026-10-29 实测 = 86 条**：`mvn -o -B -pl service/follow/follow-rpc test` ⇒ surefire XML `testsuite` 求和 = **86** / 0 failures / 0 errors / 0 skipped · **14 个测试类**），
 > 而 `java -jar` 起不来。根因见 [`docs/Pitfalls/follow/rpc.md`](../../Pitfalls/follow/rpc.md)。
 
-## DRIFT-FOLLOW-002 🔴 运行时 classpath 缺 `grpc-inprocess`（启动阻塞）
+## DRIFT-FOLLOW-002 ✅ 运行时 classpath 缺 `grpc-inprocess`（启动阻塞）
+
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— **原状态标记 `🔴`（2026-10-24 台账留痕，保留不改写）** ⇒
+> **现状态：✅ 已修**（与同文件 §结论表 `:17` 的 `✅ 已修` 收敛到同一状态）。
+> **依据**：`service/follow/follow-rpc/pom.xml:256-260` 的 `io.grpc:grpc-inprocess` **无 `<scope>test</scope>`**（compile 默认）
+> ＋ 同文件 `:236-254` 注释明写「scope 必须是 compile（默认），不能是 test」⇒ **L1 源码 + 运行时 classpath 装配**。
 
 **现象**
 
@@ -67,7 +72,12 @@ mvn -pl service/follow/follow-rpc dependency:tree -Dincludes=io.grpc:grpc-inproc
 > ⇒ 登记为**跨域待办**，待主会话派给对应域的工作树：
 > 把那 4 个模块的 `grpc-inprocess` 去掉 `<scope>test</scope>`（其余不动）。
 
-## DRIFT-FOLLOW-003 🔴 `discovery:` URI 必须是三斜杠（启动阻塞）
+## DRIFT-FOLLOW-003 ✅ `discovery:` URI 必须是三斜杠（启动阻塞）
+
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— **原状态标记 `🔴`（2026-10-24 台账留痕，保留不改写）** ⇒
+> **现状态：✅ 已修**（与同文件 §结论表 `:18` 的 `✅ 已修` 收敛到同一状态）。
+> **依据**：`service/follow/follow-rpc/src/main/resources/application.yml:163` `address: discovery:///user-rpc`（**三斜杠**）
+> ＋ 守门 `FollowRpcProductionAddressTest.java:87-95`（本轮 surefire 实测 **t=3 f=0 e=0 s=0**）⇒ **L1 源码 + L2 守门**。
 
 **现象**
 
@@ -115,7 +125,12 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
 > **调用 devh 的解析器并断言两斜杠被拒**，才证明**这条地址在运行时真的能被消费**。
 > ⇒ 这是 §3.3「两侧同时跑的探针」的单侧最小形态。
 
-## DRIFT-FOLLOW-004 🔴 `NACOS_ADDR` 在 api / rpc 两侧语义不一致
+## DRIFT-FOLLOW-004 ✅ `NACOS_ADDR` 在 api / rpc 两侧语义不一致
+
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— **原状态标记 `🔴`（2026-10-24 台账留痕，保留不改写）** ⇒
+> **现状态：✅ 已修**（与同文件 §结论表 `:19` 的 `✅ 已修` 收敛到同一状态）。
+> **依据**：`service/follow/follow-api/src/main/resources/application.yml:58` ＋ `service/follow/follow-rpc/src/main/resources/application.yml:95`
+> **两侧同为** `${NACOS_ADDR:nacos}:${NACOS_PORT:8848}` ⇒ **L1 源码**。
 
 **现象**：修完 002/003 后，follow-api 报
 `DiscoveryClientNameResolver: No servers found for follow-rpc`，

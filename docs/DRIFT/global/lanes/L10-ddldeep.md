@@ -41,7 +41,7 @@ L3 留下的两条盲区：
 
 ## 三、🔴 样板（**照抄，不要重新发明**）
 
-> ⚠️ **本 lane 不是 rpc 守门 lane** ⇒ 下面 §3.1~§3.3 的三个 rpc 样板（X-5 轴 / slow 轴 / latch 加固）与六条硬性要求
+> ⚠️ **本 lane 不是 rpc 守门 lane** ⇒ 下面 §3.1~§3.3 的三个 rpc 样板（CD-5 轴 / slow 轴 / latch 加固）与六条硬性要求
 > **对本 lane 不适用**（那是 L6~L9 的）⇒ **不要照抄任何 rpc 测试**。
 > ⇒ 本 lane 的真正样板是 **L3 留下的 `tools/difftest/check-ddl-static.py` + `tools/difftest/ddl-parity.sh`**
 > （第二十四轮，9 域预设 + `expected_tables` 闸门 + 退出码 3 = N/A）⇒ 做法见 §3.4 与
@@ -51,7 +51,7 @@ L3 留下的两条盲区：
 
 | 样板 | 路径 | 它示范什么 |
 |---|---|---|
-| **X-5 轴** | `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcGrpcInterceptorWiringTest.java` | **真 server + 真链 + 判别式断言**（服务端超时真的打断了在飞处理） |
+| **CD-5 轴** | `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcGrpcInterceptorWiringTest.java` | **真 server + 真链 + 判别式断言**（服务端超时真的打断了在飞处理） |
 | **slow 轴** | `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcSlowThresholdGateTest.java` | **真 OTel SDK + 收集型 exporter** ⇒ 断言导出的 span 上真的有 `sea.slow` |
 | **latch 加固版** | `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotGrpcInterceptorWiringTest.java` | `sleep` ⇒ `latch` 的改造形态 |
 
@@ -286,7 +286,7 @@ grep -rn "002_community_revision"      --include="*.go" --include="*.sh" .   ⇒
 | 域 | 遗留环境 | **runner 自管容器** | 差异明细 | 退出码 |
 |---|---|---|---|---|
 | `task` | `taskprobe-postgres` ⇒ `EXIT=0` | `ddl-task-pg` | 0 处（11 列 / 2 索引 / 2 约束逐条一致；主键名 `task_progress_pkey` ≡ `pk_task_progress` 属**命名形态差，不计失败**） | **0** |
-| `message` | `msg_ddl_pg` ⇒ `EXIT=1`（7 处） | `ddl-message-pg` | 同样 7 处（6 处 `DEFAULT CURRENT_TIMESTAMP` 残留 + 索引 `idx_notification_recipient_read` 列不同）⇒ 与 `DRIFT-MSG-V-020` / `SD-2026-10-23-06`（X-10）逐条一致 | **1** |
+| `message` | `msg_ddl_pg` ⇒ `EXIT=1`（7 处） | `ddl-message-pg` | 同样 7 处（6 处 `DEFAULT CURRENT_TIMESTAMP` 残留 + 索引 `idx_notification_recipient_read` 列不同）⇒ 与 `DRIFT-MSG-V-020` / `SD-2026-10-23-06`（CD-10）逐条一致 | **1** |
 
 ⇒ **退出码语义与其余 7 域统一**（`0` 一致 / `1` 有实质差异 / `2` 环境不满足 / `3` N/A）。
 
@@ -301,7 +301,7 @@ favorite EXIT=1 | == 实质差异合计 4 处 ⇒ 退出码 1 ==      # 2 DEFAUL
 users    EXIT=1 | == 实质差异合计 16 处 ⇒ 退出码 1 ==     # 1 可空性 + 8 DEFAULT + 7 索引形态（L3 §8.3 #16~#18）
 comment  EXIT=2 | （report_record 仅 RAG 有 ⇒ 已签字 SD-2026-10-24-CAND-02 ⇒ 列集合不一致）
 task     EXIT=0 | == 实质差异合计 0 处 ⇒ 退出码 0 ==      # ✅ 本 lane 重建到 ddl-task-pg
-message  EXIT=1 | == 实质差异合计 7 处 ⇒ 退出码 1 ==      # 6 DEFAULT + 1 索引（X-10 已签字）· ✅ 本 lane 重建到 ddl-message-pg
+message  EXIT=1 | == 实质差异合计 7 处 ⇒ 退出码 1 ==      # 6 DEFAULT + 1 索引（CD-10 已签字）· ✅ 本 lane 重建到 ddl-message-pg
 ```
 
 | 域 | 容器（本 lane 后） | 退出码 | 差异数 | 与 L3（2026-10-25）基线是否**逐条一致** |

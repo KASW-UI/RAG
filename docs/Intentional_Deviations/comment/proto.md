@@ -88,3 +88,16 @@ AGENTS.md §3.4 规定 proto 的改动**严格限定在 option 块与空白层�
 
 其余行为层（message 名 / 字段名 / 字段号 / 类型 / 枚举值 / service 与 rpc 签名）
 **逐行一致**：剥掉 `option` 行与空白后逐文件 diff，**仅 `package` 一行不同**（218 行中 217 行相同）。
+
+### 📌 2026-10-29 对齐复核（台账对齐 phase · W-D lane）
+
+| 项 | 结论 |
+|---|---|
+| **唯一别名** | `SD-2026-10-23-04@comment` |
+| **撞号检查** | 全仓 `grep -rln SD-2026-10-23-04 docs/` ⇒ **定义只此一处**（`docs/DRIFT/article/proto.md:70` · `docs/DRIFT/favorite/vs-common.md:305` · `docs/DRIFT/comment/{proto,rpc,vs-common}.md` 等**全部是引用**本条）⇒ **无撞号** |
+| **被描述的行为现在还存在吗** | ✅ **仍存在** ⇒ **签字有效，状态不变**（✅ 已签字） |
+| **核对日期** | 2026-10-29 |
+| **RAG 侧实测** | `service/comment/comment-proto/src/main/proto/comment.proto:3` = **`package comment;`**（`:5-6` = `option java_package` / `option java_multiple_files`） |
+| **Go 侧实测** | `Sea-RideTheWind_golang/proto/comment.proto:4` = **`package pb;`**（`:6` = `option go_package = "./pb"`）⇒ ⇒ **两侧 `package` 仍不一致 ⇒ 签字描述的行为仍在** |
+| **🔴 订正（行数口径 · 原句保留）** | 本条正文写「（218 行中 217 行相同）」⇒ **2026-10-29 实测两份 proto 都是 245 行**（`wc -l`：Go `proto/comment.proto` = 245 · RAG `service/comment/comment-proto/src/main/proto/comment.proto` = 245）⇒ ⇒ **「218 行」这个行数是旧口径（统计时点不同）**；**结论不变**（剥掉 `option` 行与空白后**仅 `package` 一行不同**），**只订正行数** |
+| **⚠️ 效力边界提醒** | AGENTS.md §3.4 规定 proto 的改动**严格限定在 option 块与空白层面** ⇒ 本条是**唯一**落在该边界之外的改动，且**已单独签字** ⇒ **不得「顺手改回去」，也不得「顺手再改别的」** |

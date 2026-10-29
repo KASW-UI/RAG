@@ -18,12 +18,26 @@
 | 撤销理由 | **同一条偏离早已被签字过一次**：message 域的 [`SD-2026-10-23-06`](../../Intentional_Deviations/message/rpc.md)（**2026-10-23 用户拍板**）**内容完全同条** —— 同一个索引 `idx_notification_recipient_read`、同一处根因（Go 侧 gorm tag 的 `priority:1` 写到了另一个索引名）、同一条保留理由（真实过滤是 `WHERE recipient_id = ? AND is_read = false`）⇒ 本条属**重复登记** ⇒ 按 §5.3b 硬边界 2「一条问题只在一个档落笔」撤销 |
 | ⚠️ **编号不可寻址** | `SD-2026-10-23-06` 在 **3 个域各有含义**（`like/rpc.md` / `message/rpc.md` / `users/admin/rpc.md`）⇒ **本条指的是 `message/rpc.md` 那一条**（索引列数）⇒ 引用时**必须带域限定**，别按编号盲查（见 [`docs/Intentional_Deviations/_INDEX.md` §编号不可寻址](../_INDEX.md)） |
 | 真实记录处 | [`docs/Intentional_Deviations/message/rpc.md` §SD-2026-10-23-06](../../Intentional_Deviations/message/rpc.md) |
-| 对应的 DRIFT 条目 | `docs/DRIFT/message/rpc.md` §7 `DRIFT-MSG-V-022`（**2026-10-23 已签字销账**，按该域惯例**保留原始差异记录**）⇒ global 侧的 X-10 同理**只留指针** |
+| 对应的 DRIFT 条目 | `docs/DRIFT/message/rpc.md` §7 `DRIFT-MSG-V-022`（**2026-10-23 已签字销账**，按该域惯例**保留原始差异记录**）⇒ global 侧的 CD-10 同理**只留指针** |
 | 行为层 | **索引定义**（列集合）⇒ **无 wire 差异**（索引不改变返回行） |
 | 证据强度 | ✅ **真 PG 活体双侧对读**（`msg_ddl_pg/go_db` vs `rag_db` 的 `pg_indexes`）—— 本轮 B3 复核，与 2026-10-23 结论**一致** |
 
-> **用户 2026-10-25 的原话「X-10 保留 RAG 的复合索引并签字」依然有效** ——
+> **用户 2026-10-25 的原话「X-10 保留 RAG 的复合索引并签字」依然有效** ——<br>⚠️ **原话里的 `X-10` 是 2026-10-25 当时的旧号 = 本档现号 `CD-10`**（2026-10-29 重编号：与 `docs/PhaseGoal-judge.md` §五 的 `X-n` 不是同一套编号 ⇒ 旧号一律保留不改写）。
 > 只是**签字早已存在**（`SD-2026-10-23-06`，2026-10-23）⇒ 本轮**无需再签**，只需把 global 侧的指针指对。
+
+### 🔴 逐条重核（核对日期 **2026-10-29** · W-F lane · 共享层台账面）
+
+| 项 | 值 |
+|---|---|
+| **唯一别名** | `SD-2026-10-25-03@global`（`SD-2026-10-25-03` 全仓**无撞号**；⚠️ 真正不可寻址的是 **`SD-2026-10-23-06`** —— 它在 **3 个域各有含义**，本条指的是 **`message/rpc.md` 那一条**） |
+| **撤销描述（保留）** | 「❌ **已撤销（重复登记）** —— **不是**一条新的签字偏离，**不产生第二条签字**」 |
+| **核「撤销的那个行为现在是不是真的没了」** | ✅ **仍成立** —— **重复登记这一事实没有变**：真实签字记录仍在 message 域，global 侧仍只留指针 ⇒ **不重复签字**这一处置依然正确 |
+| **证据（2026-10-29）** | `docs/Intentional_Deviations/message/rpc.md:141`（`### SD-2026-10-23-06 · idx_notification_recipient_read 的列数：Go 1 列 / RAG 2 列` ⇒ **真实签字记录仍在**）· 本档 §「真实记录处」行的指针**未变** ⇒ ⇒ **同一件事仍只有一处签字** |
+| **结论** | **撤销仍成立 · 状态不变**（❌ 已撤销 ⇒ **不计入计数**；`_INDEX.md` 的「`SD-` 族 40 条」口径**不变**） |
+| **描述完整性** | 描述**完整**（撤销理由 / 真实记录处 / 不可寻址性 / 行为层 / 证据强度俱在）⇒ 无需追加订正 |
+| **⚠️ 附带提醒（不属本条）** | 本档 B3 补充取证里「Go 侧 4 处查询形状逐条核实」用的是 `service/message/rpc/internal/model/message.go` 的行号 ⇒ 那是 **message 域**的文件 ⇒ **引用必须带域限定**（同 `docs/Pitfalls/global/cross-domain.md` §PIT-GLOBAL-022 的纪律） |
+
+---
 
 ### 本轮（B3）补充取证：真实查询形状逐条核实 —— 支撑 SD-06 的保留理由
 
@@ -44,7 +58,7 @@ Go 侧 `service/message/rpc/internal/model/message.go` 三个函数的过滤形�
 | # | 动作 | 落点 |
 |---|---|---|
 | ① | 迁移脚本里那条「对应 Go 端 Notification 上的 `@gorm:index:idx_notification_recipient_read,priority:2`」的注释**订正**（它会让人误以为 1:1）⇒ 改成**说明 Go 侧笔误 + 指向真实签字记录** | `service/message/message-rpc/src/main/resources/db/migration/V1__create_message_notification.sql:27-38` |
-| ② | 从 `docs/DRIFT/global/cross-domain.md` 侧**移除**该条（只留指针） | `docs/DRIFT/global/cross-domain.md` X-10 |
+| ② | 从 `docs/DRIFT/global/cross-domain.md` 侧**移除**该条（只留指针） | `docs/DRIFT/global/cross-domain.md` CD-10 |
 
 ### 守门
 
@@ -57,7 +71,7 @@ Go 侧 `service/message/rpc/internal/model/message.go` 三个函数的过滤形�
 
 - `docs/Intentional_Deviations/message/rpc.md` §`SD-2026-10-23-06`（**真实签字记录**）；
 - `docs/DRIFT/message/rpc.md` §7 `DRIFT-MSG-V-022`（**已销账**，保留原始记录）；
-- `docs/DRIFT/global/cross-domain.md` X-10（**已按 §5.3b 只留指针**）；
+- `docs/DRIFT/global/cross-domain.md` CD-10（**已按 §5.3b 只留指针**）；
 - `service/message/message-rpc/src/main/resources/db/migration/V1__create_message_notification.sql:27-38`（代码侧指针）。
 
 ---

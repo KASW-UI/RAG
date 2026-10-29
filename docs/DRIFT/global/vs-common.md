@@ -31,7 +31,7 @@
 | **E66** | Redis 写**不绑 deadline** | `service/common` | 🔴 **OPEN**（本轮转立项） | [`_README.md`](_README.md) |
 | **E68 / E69 / E70** | 共享复核器的「实体归属」判据 + 「假 FAIL 机器」三处真缺陷 | 共享工具 | ✅ **已落** | [`_README.md`](_README.md) |
 | **未修 28 项**（23 条编号 + 5 项未编号） | 5 个可比包 = communityfact / logger / observability / snowflake / response —— ⚠️ **基数歧义已订正（2026-10-29 · G-16）**：旧文写「**3 个** `NOT EQUIVALENT`」却**列了 4 个包** ⇒ 实为「**3 个已正式判定 + 4 个实际持开放项**」；本轮起**只报一个数**：**28 项未修**（其中 **23 条编号 + 5 项未编号**），逐条定级见 `alignment-2026-10-23.md` §十四 | `service/common` | 🟡 **未修但不再阻塞**（2026-10-29 R3 轮：逐条定级 **A 类 0 · B 类 0 · C 类 21 · D 类 6 · 证据缺口 1** ⇒ **域内硬阻塞 = 0** ⇒ 按 judge §1.1 ⑥ 第 4 条 C 类不计入 ⇒ **组件 R2 → R3 · 状态 🔴 → 🟡**；⚠️ `DRIFT-CF-018` 本轮已修） | [`alignment-2026-10-23.md`](../common/alignment-2026-10-23.md) |
-| **X-6** | `DRIFT-HOTAPI-030`（Tomcat 参数个数口径）⇒ 共享层 6 个类 + 每域一行 yaml | `service/common` | ✅ **已落地**（第十四轮） | [`cross-domain.md`](cross-domain.md) |
+| **CD-6** | `DRIFT-HOTAPI-030`（Tomcat 参数个数口径）⇒ 共享层 6 个类 + 每域一行 yaml | `service/common` | 🟡 **主轴已闭合 · 残留 1 段窗口**（第十四轮）⇒ 详见 `_cross/open-items.md` P2 行 | [`cross-domain.md`](cross-domain.md) |
 
 > ⚠️ **写死数字/状态的纪律**（AGENTS.md §6）：本表是**抽取快照**；每条**逐条证据**以「域台账」列指向的正文为准，
 > **状态必须带核对日期** ⇒ lane 复核后请就地更新本表并写入核对日期。
@@ -47,7 +47,7 @@
 | **E66** | 🔴 OPEN | 🔴 **仍 OPEN** ⇒ 本轮**转立项**（路线已探明：Lettuce `TimeoutOptions.TimeoutSource` 逐命令动态返回剩余 deadline ⇒ 零域侧改动；**硬约束**：Boot 4 `LettuceConnectionConfiguration.createClientOptions` 字节码顺序 = offset 146 **先**写 `timeoutOptions` → offset 151 **才**应用 customizer ⇒ customizer 再调 `timeoutOptions(...)` 会**覆盖运维配置**；🔴 **2026-10-27 订正（G2 独立核实 · 本层采纳）**：`offset 146` 写的是**硬编码 `TimeoutOptions.enabled()`**，**不是** `spring.data.redis.timeout` ⇒ ⇒ 后者走 `:173-174` 的 `builder.commandTimeout(...)` ⇒ 落 `LettuceClientConfiguration.getCommandTimeout()` ⇒ **RedisURI.timeout**（`ClientOptions` 上**没有** `getCommandTimeout()`）⇒ ⇒ ⇒ **顺序结论不变、归因订正**） | 🔴 **OPEN**（转立项 · 处方与回归口径已齐 ⇒ **待 Jason 拍板**） |
 | **E68 / E69 / E70** | ✅ 已落 | 本轮改动面**不涉及** ⇒ **未复核** ⇒ 维持 | 维持 ✅ |
 | **未修 28 项**（23 条编号 + 5 项未编号） | 🔴 未修（**旧快照的「27 条」已过期**） | ✅ **2026-10-29 R3 轮已复核**（`align/r3-service-common` · commit `cc5126ad`）—— ① **基数订正**：**28 项未修**（23 编号 + 5 未编号）· **G-16 的「3 个 vs 4 个包」矛盾已消解**（见 §1 表同名词条）② **逐条定级**：**A 类 0 · B 类 0 · C 类 21 · D 类 6 · 证据缺口 1** ⇒ **域内硬阻塞 = 0** ③ **真缺陷 `DRIFT-CF-018` 已修**（`Dispatcher` 阻塞重载交不出句柄 ⇒ 进程停不下来）＋ 变异验证 3 组精确转红 ④ **405 例 / 0F / 0E / 0S** ⇒ ⇒ **组件 R2 → R3 · 状态 🔴 → 🟡** | 🟡 **未修但不再阻塞**（C 类按 judge §1.1 ⑥ 第 4 条不计入） |
-| **X-6** | ✅ 已落地（第十四轮） | ✅ 维持（共享层 6 个类已落码；本轮另有 `GoStyleFormLimitMode` 判据改写 = FB-02，见 §4.6） | 维持 ✅ |
+| **CD-6** | ✅ 已落地（第十四轮） | ✅ 维持（共享层 6 个类已落码；本轮另有 `GoStyleFormLimitMode` 判据改写 = FB-02，见 §4.6） | 维持 ✅ |
 
 > ⇒ **重核的净结果**：**没有任何一条被推翻**（没有「✅ 其实还没修」的反转）；
 > **2 条口径过期已就地订正**（E38② 的 ① 层、E65 的附注）。
@@ -70,7 +70,7 @@
 | **A8** | DDL 时间列 / 类型 | 共享层**无 DDL / migration**（`service/common` 不建表）⇒ 本轴共享层落点 = `persistence/DeadlineQueryTimeoutInjector`（`default-statement-timeout` 的**运行时**语义，**不是** DDL） | **N/A**（共享层不建表）⚠️ DDL 双侧活体逐列对照 = **9 域**（类型/长度 **0 差异**；`DEFAULT CURRENT_TIMESTAMP` 残留 **16 处** = **刻意保留**；users 域缺 3 条非唯一索引 = **性能非行为**）⇒ 结论以各域台账为准 | **L3**（`tools/difftest/check-ddl-static.py` 双侧活体对拍） | 2026-10-27 |
 | **A9** | trace / otel | `observability/GoStyleOtelAutoConfiguration`（**`BeanFactoryPostProcessor`** 装配点）· `observability/GoStyleOtelAgent` · `observability/GoStyleOtelConfig` · `http/GoStyleTraceparentFilter` · `observability/GoStyleClientDisconnectProbe` | ✅ **全局 OTel 装配点已收口共享层**（`GlobalOpenTelemetry.set` 只能调一次，且**先 `get()` 会让后续 `set()` 抛 `IllegalStateException`** ⇒ 必须 BFPP ⇒ 理由与 4 个构造器抢跑点已写进 javadoc）<br>🟡 **域特有业务 span 不在共享层**（**comment 的 6 个已由 G3 修完** ⇒ `C-3` 落码 `d2d7268` ⇒ **本层登记的跨域线索闭环**；**favorite 的 16 个已落码** ⇒ `L-4` 落码 ⇒ **域侧自修完成** ⇒ ⇒ **共享层零改动**<br>🟢→🟡 **本层独立核（G3 报 ⇒ 本层读源码核，2026-10-28）**：`service/favorite/favorite-common/src/main/java/com/rag/favorite/favorite/common/span/FavoriteSpans.java`（**418 行**）⇒ span 名逐条点出 = **7 个 API**（`FavoriteAPI.*`）＋ **7 个 RPC**（`FavoriteRPC.*`）＋ **2 个 `Dependency.*`**（`Dependency.User.GetUser` / `Dependency.Article.GetArticle`）⇒ **合计 16** ⇒ 与 G3 报的数**一致** ⇒ ⇒ 落点在 **`favorite-common`**（api/rpc 共用）⇒ ⇒ **共享层零改动成立**<br>⚠️ **但仍不得读作已闭环** —— 🔴 **守门未写**（`FavoriteApiSpanWiringTest` / `FavoriteRpcSpanWiringTest` ＋ 变异待补）⇒ ⇒ **本轴结论 = 🟡 半闭环**（代码在 · 网未张）<br>⚠️ **一条对域内的警告**（§4.10.64 ⑤）：**Java `recordException` 不改 status** ⇒ ⇒ 域内 span 若只调 `recordException` ⇒ **status 恒 UNSET** ⇒ 与 Go 的 `RecordError`（会置 ERROR）**漂移** ⇒ ⇒ **域内写权 ⇒ G3 自查**（共享层自己是对的：`Observability.java:108-109` / `:131-132` = `recordException` ＋**显式** `setStatus(StatusCode.ERROR, msg)`））<br>🔴→🟢 **补（`853767b` · G2 反馈单 FB-04）**：本轴此前**缺一个子面 ——「业务 handler 执行期能拿到当前 server span」**。Go 侧 `tracinginterceptor.go:18-24` 把 span **放回 ctx** ⇒ 业务 `trace.SpanFromContext(l.ctx)` 取得到 ⇒ 属性真落；RAG 侧 handler **不接收 ctx** ⇒ 唯一等价物是 `Span.current()`，而拦截器此前**只在 `close()` / `onCancel()` 里 `makeCurrent()`** ⇒ **handler 执行期取到 invalid（no-op）span** ⇒ 属性**静默丢弃** ⇒ ⇒ 域侧若按 `Span.current().setAttribute(...)` 落码 ⇒ **跑绿但零效果**（与「假绿」同源）⇒ 已在 `onHalfClose()` 里把 `makeCurrent()` 的 scope **包住 handler 执行期**修好 ⇒ **本轴此前不是「全绿」，是「少验了一个面」** | **L3**（真容器 + `GoStyleOtelAgentGateTest`）＋ **L1**（域侧 span 清单由 G3 逐条核）<br>🆕 **FB-04 子面 = L3**（真 netty gRPC server + 真 OTel SDK + `InMemorySpanExporter`）＋ **变异 4/4 精确命中** | 2026-10-27 |
 
-> **A3 已预填一条实测锚点（2026-10-27 核）** —— X-6（`DRIFT-HOTAPI-030`）共享层 6 个类已落码
+> **A3 已预填一条实测锚点（2026-10-27 核）** —— CD-6（`DRIFT-HOTAPI-030`）共享层 6 个类已落码
 > （`GoStyleFormValues` / `GoStyleFormLimitMode` / `GoStyleFormLimitExceededException` /
 > `GoStyleFormValueLimitInterceptor` / `GoStyleFormLimitWebMvcConfig` / `GoStyleTomcatParameterLimitCustomizer`）；
 > **本 lane 就是共享层本身** ⇒ 「逐域 `go-form-limit.mode` ＋ Go 侧 `SetErrorHandler` 注册」的对照由本 lane 核：
@@ -340,7 +340,7 @@
 | 2 Go 侧出处 | N/A（配置层缺陷，非行为漂移） |
 | 3 RAG 侧现状 | `service/article/article-rpc/src/main/resources/application.yml`（有 `flyway:` 段 + `baseline-on-migrate: true` + `table:` + `schemas:`，**无 `baseline-version`**）｜`service/favorite/favorite-rpc/src/main/resources/application.yml`（同形）｜⚠️ 该脚本对**所有**模块都会算出 `baseline_version`（缺省 = `"1"`，`:93-100`）⇒ **它看得见 article 的 `baseline=1`**，只是**已知缺陷账里没登记** |
 | 4 证据强度 | **L3 静态实测**（9 个 rpc 组件逐个 `grep -n` ＋ 脚本 `:48-51` / `:93-100` 实读） |
-| 5 建议修法 | `KNOWN_BLOCKED` 增补 `article-rpc`（与 `favorite` 同形同因）⇒ **只补账，不改代码**（两个 yaml 的修法都在**域侧**，域侧自修）；⚠️ 顺带**统一消息**：两个 rpc 的 yaml 注释块都写着「2026-10-25 实测修掉的真缺陷 · global 收口域 X-1」⇒ 建议域侧照抄同一段 |
+| 5 建议修法 | `KNOWN_BLOCKED` 增补 `article-rpc`（与 `favorite` 同形同因）⇒ **只补账，不改代码**（两个 yaml 的修法都在**域侧**，域侧自修）；⚠️ 顺带**统一消息**：两个 rpc 的 yaml 注释块都写着「2026-10-25 实测修掉的真缺陷 · global 收口域 CD-1」⇒ 建议域侧照抄同一段 |
 | 6 影响面 | `check-flyway-concurrent.sh` 的已知缺陷账 ⇒ **AGENTS.md §6.3 问题 4 也只点了 favorite**（见建议项 3）⇒ 两处需同步订正 |
 | 7 是否阻塞本波 | **否** ⇒ 登记待合并收口执行者订正 |
 

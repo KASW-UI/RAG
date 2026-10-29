@@ -12,6 +12,11 @@
 
 ## SD-2026-10-23-06：gRPC 业务码的载体迁移（`grpc-status` → 自定义 trailer）
 
+> **唯一别名**：`SD-2026-10-23-06@like`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/message/rpc.md`](../message/rpc.md)（索引列数）与 [`docs/Intentional_Deviations/users/admin/rpc.md`](../users/admin/rpc.md)（`resetUserPassword` 空守卫）指向**三条完全不同**的偏离 ⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-23-06@like`** 为准）
+> **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：RAG 侧业务码仍走**自定义 trailer** `rag-like-biz-code`，不是 `grpc-status`
+> **依据**：`service/like/like-common/src/main/java/com/rag/like/like/common/errmsg/LikeGrpcError.java:78`（`BIZ_CODE_TRAILER_KEY = "rag-like-biz-code"`）+ `:140`（写 trailer）+ `:110`（`mapToGrpcCode`）⇒ **证据强度：源码行号（静态）**。
+
+
 | 项 | 值 |
 |---|---|
 | 状态 | ✅ 已签字（2026-10-23，修复轮定性） |
@@ -76,6 +81,11 @@ go-zero 客户端的 `codes.Acceptable` 把 `DeadlineExceeded / Internal / Unava
 
 ## SD-2026-10-23-07：Nacos 注册失败时**不退出进程**（有意偏离）
 
+> **唯一别名**：`SD-2026-10-23-07@like`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/message/rpc.md`](../message/rpc.md)（**已撤销**的 breaker/shedding）与 [`docs/Intentional_Deviations/users/admin/rpc.md`](../users/admin/rpc.md)（gRPC description 中文）指向**三条完全不同**的偏离 ⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-23-07@like`** 为准）
+> **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：Nacos 注册失败仍被 `catch` 住并**只记日志、不退出进程**
+> **依据**：`service/like/like-rpc/src/main/java/com/rag/like/like/rpc/bootstrap/NacosRegistration.java:90`（`catch (NacosException e)`）+ `:106`（`LOG.error("NacosRegistration.register failed for {}: {}", …)`，**之后不再 `exit`**）⇒ **证据强度：源码行号（静态）**。
+
+
 | 项 | 值 |
 |---|---|
 | 状态 | ✅ 已签字（2026-10-23，修复轮把错误断言 H 修正后定性） |
@@ -118,8 +128,8 @@ RAG 侧单 JVM 里 gRPC 已起来，**为一次注册失败杀掉整个进程**�
 
 | 编号 | 内容 | 与本文件 |
 |---|---|---|
-| SD-2026-10-23-05 | `like.proto` 的 proto `package` 由 `pb` 归一为 `like` | 独立（见 [`proto.md`](proto.md)） |
-| SD-2026-10-23-06 | gRPC 业务码载体迁移 | 本文件 |
-| SD-2026-10-23-07 | Nacos 注册失败不退出 | 本文件 |
+| SD-2026-10-23-05@like | `like.proto` 的 proto `package` 由 `pb` 归一为 `like` | 独立（见 [`proto.md`](proto.md)） |
+| SD-2026-10-23-06@like | gRPC 业务码载体迁移 | 本文件 |
+| SD-2026-10-23-07@like | Nacos 注册失败不退出 | 本文件 |
 
 ⚠️ `like` 域**没有** SD-2026-10-23-01/02/03（那三条属 `message` / `comment` / `like` 之外的批次，见 [`../_INDEX.md`](../_INDEX.md)）。

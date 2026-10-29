@@ -1,4 +1,4 @@
-# L4 · `align/global-flyway` —— X-1 残留（三进程同库共存真 PG 验证）
+# L4 · `align/global-flyway` —— CD-1 残留（三进程同库共存真 PG 验证）
 
 > 本文件既是**任务书**也是本 lane 的**台账片段**。协议见 [`_PROTOCOL.md`](_PROTOCOL.md)。
 
@@ -22,7 +22,7 @@
 
 | 读什么 | 在哪 | 读哪几段 |
 |---|---|---|
-| X-1 逐条取证 | `docs/DRIFT/global/cross-domain.md` | **§二·十二**（含 ① 取证「同库共存是常态」/ ② 缺陷形态 / ③ 逐模块判定 / ④ 修法+守门 / ⑤ favorite 同款缺陷 / **⑥ 残留**） |
+| CD-1 逐条取证 | `docs/DRIFT/global/cross-domain.md` | **§二·十二**（含 ① 取证「同库共存是常态」/ ② 缺陷形态 / ③ 逐模块判定 / ④ 修法+守门 / ⑤ favorite 同款缺陷 / **⑥ 残留**） |
 | 域待办 | `docs/DRIFT/global/_README.md` | §七之二 **B1** 行 |
 | 现有账本隔离检查 | `tools/difftest/check-flyway-ledger.py` | 全文（⚠️ 它只查**表名两两不同**，**不查运行时共存**） |
 | 已有真 PG 守门样板 | `service/like/like-rpc/src/test/.../LikeFlywaySharedSchemaGateTest.java`<br>`service/comment/comment-rpc/src/test/.../CommentFlywaySharedSchemaGateTest.java` | 逐字读（**真 PG 16 + 真 Flyway 引擎 + 配置取自模块自己的 yaml**） |

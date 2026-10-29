@@ -20,11 +20,38 @@ Go ↔ RAG 对照审计 `service/common` 全部 8 个 Go 非测试源文件与 R
 | A-1 | `Logger.doLogFatal` / `LoggerFactoryBean.logFatal` | **等价域收窄** | `logger.go:293-296` 输出 `fatal_error` 后无条件 `os.Exit(1)`，**永远终止** | 抛 `FatalError`，**仅在无人 catch 时**终止 | 用户 2026-10-21 拍板：`System.exit` 会绕过 Spring graceful shutdown 与 `@PreDestroy` | 若业务出现 `catch (FatalError)` 后继续运行的写法，等价性即被打破 |
 | A-2 | `Logger.isFiltered` / `LoggerFactoryBean.isFiltered` | **`call_chain` 内容比 Go 少框架帧** | `logger.go:53-58` 的 `github.com/zeromicro/go-zero/` 前缀**本身是死的**（`getFuncName` 同样剥掉包路径），只有 `runtime.`/`testing.` 生效 | 按该列表的**意图**执行，6 条前缀全部可命中 | Go 侧是 bug；Java 照抄会让「过滤」永远不生效。已在 javadoc 留档 | 若要求逐字复刻 Go 的**实际行为**（即不过滤），需回退本项 |
 
+##### 🔴 逐条重核（核对日期 **2026-10-29** · W-F lane · 共享层台账面）
+
+> **判据**：`docs/Intentional_Deviations/_INDEX.md:34` —— 「被签字描述的那个行为**已不存在** ⇒ 本条签字**自动失效**」。
+> ⇒ 本次对 A-1 / A-2 / B-1 / C-1 / D-1 / D-2 **逐条回 Go 真源 + 回 RAG 源码两侧核对**。
+
+| 编号 | **唯一别名** | 签字描述的行为**现在还存在吗** | 结论 | 证据（两侧 `文件:行号`，核对日期 2026-10-29） |
+|---|---|---|---|---|
+| **A-1** | `A-1@common` | ✅ **存在** —— Go 侧 `os.Exit(1)` **无条件终止**；RAG 侧抛 `FatalError`，**仅在无人 catch 时**终止 | **签字有效 · 状态不变** | Go `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/service/common/logger/logger.go:293-296`（`logx.WithContext(ctx).Errorw("fatal_error", fields...)` 之后**无条件 `os.Exit(1)`**）· RAG `service/common/src/main/java/com/rag/common/logger/Logger.java:374`（`doLogFatal`）→ `:443`（`throw new FatalError(...)`） |
+| **A-2** | `A-2@common` | ✅ **存在** —— Go 的 `github.com/zeromicro/go-zero/` 前缀**仍是死前缀**：`getFuncName` 只回末两段 ⇒ **不含包路径** ⇒ 该前缀永不命中 | **签字有效 · 状态不变** | Go `logger.go:53-58`（`filterPrefixes` 三条）＋ `:299-316`（`getFuncName` ⇒ `strings.Join(parts[len(parts)-2:], ".")`）· RAG `Logger.java:136-140`（`FILTER_PREFIXES` 六条）＋ `:542-553`（`isFiltered` 比 `declaringClass.getName()` ⇒ 6 条前缀全部可命中） |
+
+**撞号检查**：`A-x` / `B-x` / `C-x` / `D-x` 四族编号**全仓只在本文件使用**（实测 `grep -rlE '(^|[^A-Za-z0-9_-])([ABCD])-[0-9]+' docs/Intentional_Deviations/ --include='*.md'` ⇒ 命中文件 = 本文件 ＋ `_INDEX.md`（**仅计数行**））⇒ **无跨域撞号**。
+⇒ 仍为可寻址，给出唯一别名 `A-1@common` / `A-2@common` / `B-1@common` / `C-1@common` / `D-1@common` / `D-2@common`
+⇒ ⚠️ **别名不改变计数**（`_INDEX.md` 的口径是「`A/C/D-x` 族 **5 条**（A-1 / A-2 / C-1 / D-1 / D-2；B-1 已关闭）」—— 本轮**5 条全部维持原判**，故**计数不变**）。
+
+**描述完整性**：A-1 / A-2 的描述**完整**（两侧行为、理由、关闭条件俱在）⇒ **无需追加订正**。
+
 ##### B. 框架限制导致的已知不等价（**不是**有意偏离，无法靠改 `service/common` 消除）
 
 | # | 位置 | 差异 | 影响面 | 关闭条件 |
 |---|---|---|---|---|
 | B-1 | `HttpMiddleware` 超时分支 / `RpcInterceptor` 超时调度 | **超时无法取消在途 IO**。Go 的 `context.WithTimeout` 到点 ctx Done，所有 ctx-aware IO（`http.Client` / `sql.DB` / `grpc.Dial`）立即返回、连接池立刻释放；Java 只能 `Future.cancel(true)` 发 `InterruptedException`，而 **JDBC 驱动、grpc-java 阻塞 stub、`java.net.http.HttpClient` 均不响应线程 interrupt** —— 阻塞在 socket read 上的调用会挂到查询自行结束 | **✅ 已实测坐实并已修复（E-4 + issue #71187874，2026-10-21）**。**修前**：`exp-b1-timeout-cancel.sh` 用 ACCESS EXCLUSIVE 表锁造真阻塞、两侧同跑 `user.login`，客户端返回后 **Go 侧 PG 查询 203ms 消失、RAG 侧还存活 4657ms**。**修后**：`DeadlineQueryTimeoutInjector` 按 `DeadlineState.remainingMillis()` 给每条 SQL 设 `setQueryTimeout` ⇒ pgjdbc 发 CancelRequest，**RAG 侧查询 176ms 消失，与 Go 的 182ms 同量级**；响应体也从 `text/plain "Request Timeout"` 变成 Go 的 `{"code":1015,"msg":"服务繁忙"}`。完整三层证据（纯 JDBC / 端到端 / 手段定性）见 §3.4.1「B-1 补记」 | **✅ 已关闭**（本行原写「无法靠改 `service/common` 关闭」，该结论**已过时**）。① **字节码证据**：链路 MyBatis-Plus → MyBatis → Spring JDBC → pgjdbc → socket，逐层 `javap -c` 数 `isInterrupted` 命中**均为 0** —— interrupt 在整条数据访问路径上无人检查。② **行为级证据**（`tools/difftest/probe-jdbc-cancel.java`）：主动 interrupt 一条等锁查询，它**照常正常返回、耗时 11014ms**（比不 interrupt 还长 1s）。③ **修复路径**：拦 `StatementHandler.prepare` 注入 timeout —— 与 Go `database/sql` 的 ctx-aware 取消是**同一条服务端语义且连接保可用**；`socketTimeout` 会让连接报废，语义相反，不可用。⚠️ 修复过程中还暴露更大的前置缺陷：gRPC `ServerInterceptor` 从未挂到 server 上，`DeadlineState` 恒未设置 ⇒ **DRIFT-018 的 24 处守卫此前全部是死代码**，见 §6.4 的 H2 勘误 |
+
+
+##### 🔴 B-1 逐条重核（核对日期 **2026-10-29**）—— 「已关闭」的事实**是否真的还成立**
+
+| 项 | 值 |
+|---|---|
+| **原关闭声明（保留）** | 「✅ **已关闭**（本行原写『无法靠改 `service/common` 关闭』，该结论**已过时**）」—— 关闭依据 = E-4 + issue #71187874（2026-10-21） |
+| **核「关闭的那个事实现在是不是真的成立」** | ✅ **成立（限「SQL 载体」这一面）**<br>① 关闭所依赖的**两个产物仍在位**：`service/common/src/main/java/com/rag/common/persistence/DeadlineQueryTimeoutInjector.java` ＋ `service/common/src/main/java/com/rag/common/persistence/SqlTimeoutStatusTranslator.java`<br>② 关闭的**前提**「gRPC `ServerInterceptor` 真挂到 server 上」**仍成立** —— 实跑 `python3 tools/difftest/check-grpc-interceptor-wiring.py` ⇒ **EXIT=0**（10/10 rpc 进程 ① `@Import` ＋ ② `GrpcServerConfigurer` 齐备） |
+| **🔴 追加订正（原句保留，不抹掉）** | B-1 的「已关闭」**覆盖面止于「SQL 载体」**。<br>⇒ **「grpc 出向载体」不归 B-1**：2026-10-29 双侧活体实测（RAG 侧 `outgoing_carrier=absent` vs Go 侧 `present_expired`）⇒ **出向 gRPC 不继承请求 deadline** ⇒ 该面是 **`E65`**（🔴 **OPEN**，落点 `service/common`）⇒ ⇒ **不得**据 B-1 的「已关闭」推断「所有超时载体都已闭合」。<br>**证据**：`docs/PhaseGoal-judge.md` §五 X-6（2026-10-29 实跑 `tools/difftest/check-deadline-downstream.py`）＋ `docs/DRIFT/global/vs-common.md` §1.1（E65 行） |
+| **结论** | **B-1 的「已关闭」仍成立（限 SQL 载体）**；**追加一条覆盖面订正** —— 出向 gRPC 载体单列为 `E65`（🔴 OPEN） |
+| **唯一别名** | `B-1@common`（见上方「撞号检查」） |
 
 ##### B-1 补记：机制实验与缓解手段定性（2026-10-21 同日同场三组对照）
 
@@ -125,12 +152,37 @@ ACCESS EXCLUSIVE 表锁持 10s，三组对照：
 |---|---|---|
 | C-1 | `RpcInterceptor.goStyleStatusMessage` | gRPC Java 的 `Code.name()` 返回 `NOT_FOUND`，Go 的 `codes.Code.String()` 返回 `NotFound`。code 与 desc 均已保留（Go 出处 `rpc.go:95`），仅常量表示不同，不做臆造映射<br>**第四十三轮补全（users/admin 域 owner 回执带出 deadline 同款）**：deadline 场景**同款** —— gRPC Java `Code.name()` = **`DEADLINE_EXCEEDED`**（`RpcInterceptor.java:274` / `:486` 调 `goStyleStatusMessage(Code.DEADLINE_EXCEEDED, …)`）vs Go `codes.Code.String()` = **`DeadlineExceeded`**（Go 出处 `rpc.go:68`：`status.Error(codes.DeadlineExceeded, timeoutCtx.Err().Error())`⇒ `err.Error()` = `"rpc error: code = DeadlineExceeded desc = context deadline exceeded"`）⇒ ⇒ **两侧的 `sea.biz_msg` 只差这一个字符串的大小写风格**（Go 驼峰 · Java 全大写）<br>⚠️ **已核：差异只在「文本」，不在「码值」，也不在 wire** —— ① **wire 不含码名**（gRPC 只编码**数字 code + message**）② **两侧的遥测属性都存数字 code**（Go `rpc.go:116-121` `attribute.Int("rpc.grpc.status_code", int(code))`；RAG `RpcInterceptor.java:307` / `:384` / `:636` 全部用 `code.value()`）⇒ ⇒ **不是行为差异 ⇒ 属 ③ 表述差异（无需签字）** ⇒ **不做臆造映射、不为对齐它去改 grpc-java 的命名** |
 
+
+##### 🔴 C-1 逐条重核（核对日期 **2026-10-29**）
+
+| 项 | 值 |
+|---|---|
+| **性质** | **表述差异**（语义已对齐 · 仅字面不同 · **无需签字** ⇒ 不计入签字计数） |
+| **核「描述的行为现在还存在吗」** | ✅ **存在** —— gRPC Java `Code.name()` 返回**全大写**（`DEADLINE_EXCEEDED` / `NOT_FOUND`），Go `codes.Code.String()` 返回**驼峰**（`DeadlineExceeded` / `NotFound`）⇒ 两侧 `sea.biz_msg` 只差这一个字符串的大小写风格 |
+| **证据（2026-10-29）** | RAG `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:671-674`（`goStyleStatusMessage` ⇒ `"rpc error: code = " + code.name() + " desc = " + desc`）· Go `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/service/common/observability/rpc.go:69`（`status.Error(codes.DeadlineExceeded, timeoutCtx.Err().Error())` ⇒ code 名由 protobuf `String()` 渲染）＋ `:120`（`attribute.Int("rpc.grpc.status_code", int(code))` ⇒ **遥测侧两侧都存数字 code**） |
+| **🔴 追加订正（原句保留）** | 原档写的 Go 行号 **`rpc.go:68` / `rpc.go:95`** **已漂**（2026-10-29 实测：`:69` 才是 `status.Error(codes.DeadlineExceeded, …)`；`:95` 现在是 `MarkBusinessError(...)`）⇒ **本档的 Go 出处指针按上面的实测行号更新**，**结论不变** |
+| **结论** | **状态不变**（表述差异）· 唯一别名 `C-1@common`
+
 ##### D. UNRESOLVED（证据不足，**不得**按「已对齐」处理）
 
 | # | 项 | 未知点 | 需要什么才能定 |
 |---|---|---|---|
 | D-1 | `Wire.canonicalHash` 的 JCS 库 | ✅ **已关（2026-10-21）**。`service-common` 的 `JcsDifferentialTest`(5/5 通过)用 cyberphone 出版 testdata 作 oracle:**复制 6 对(input,expected-output)到 `src/test/resources/jcs-fixture/{input,output}/`,erdtman 跑同样输入,断言 byte-equal**。这是真正的 Go vs Java 差分 —— 期望值就是 cyberphone 自身的 canonical 字节输出。覆盖:6 个 KAT 文件(数组/法文字符/嵌套/Unicode/数值宽度/边界) + 4 条针对性(键序/空白/指数大小端/数值塌缩) + 锁住 `Wire.canonicalHash` 全链 JCS→SHA-256→hex 与 cyberphone hash path 一致。离线无外部依赖。**实质成果**:erdtman 与 cyberphone 在 RFC 8785 KAT 上 byte-equal —— 签发/校验链两端产同一 canonical,D-1 承诺实证成立。**留档**:erdtman 在 parse 阶段对未转义 ASCII 控制字符 fail-fast,cyberphone 不 fail —— 这是 erdtman 的额外输入校验质保,**不是** D-1 想要的 canonical 差异,见 `JcsDifferentialTest` 末尾注释 |
 | D-2 | `communityfact` 整体 | RAG 侧**零消费者**。代码层面已对齐，但**没有任何运行证据**，不能算行为对齐 | 接入 `comment` / `article` 等域后补集成测试 |
+
+
+##### 🔴 D-1 / D-2 逐条重核（核对日期 **2026-10-29**）
+
+| 编号 | **唯一别名** | 核 | 结论 |
+|---|---|---|---|
+| **D-1** | `D-1@common` | ✅ **关闭事实仍成立** —— `service/common/src/test/java/com/rag/common/communityfact/JcsDifferentialTest.java` 在位 ＋ 夹具 `service/common/src/test/resources/jcs-fixture/{input,output}/` 在位 | **状态不变（已关）** |
+| **D-2** | `D-2@common` | 🔴 **原描述的第一句已过期** —— 「RAG 侧**零消费者**」**不成立**：实测 `grep -rln 'com.rag.common.communityfact' service/ --include='*.java' \| grep '/src/main/'` ⇒ **20 个域侧生产文件**已引用（article 1 · comment 4 · favorite 10 · like 5）⇒ 「零消费者」是 **2026-10-21 的快照** | **保留原句 + 追加订正**（见下）；**状态不变** |
+
+**D-2 追加订正（2026-10-29 · 原句保留，不抹掉）**：
+> **原句（保留）**：「`communityfact` 整体 —— RAG 侧**零消费者**。代码层面已对齐，但**没有任何运行证据**，不能算行为对齐」
+> ⇒ **订正 ①**：「**零消费者**」**已不成立** —— 四个域（article / comment / favorite / like）**共 20 个生产源文件**已 import `com.rag.common.communityfact`（实测命令见上表）⇒ 那半句是 **2026-10-21 的快照**。
+> ⇒ **订正 ②**：**「没有任何运行证据 ⇒ 不得按『已对齐』处理」这一半仍成立** ⇒ 本条的**可行动内核不变** ⇒ **状态不变**。
+> ⇒ **订正 ③**：本条**不再承担逐条清单** —— 逐条证据已由 [`../../DRIFT/common/alignment-2026-10-23.md`](../../DRIFT/common/alignment-2026-10-23.md) §十三·一 的 **CF 族 15 条**（每条带 Go 侧 `文件:行号`）承担 ⇒ 本条只保留「无运行证据 ⇒ 不得声称已对齐」这一句。
 
 ##### 本节的效力边界
 

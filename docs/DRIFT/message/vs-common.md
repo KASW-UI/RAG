@@ -38,7 +38,7 @@
 | `DRIFT-MSGAPI-010` | 成功 / 错误响应 `Content-Type` 缺 `charset` | `service/common` | ✅ **已修**（**旧快照「OPEN」过期**）—— 共享层 T-6 第二十五轮已落码 | `GoStyleJsonContentTypeAdvice.java:127`（常量）+ **消费点** `:151`（`response.getHeaders().set(CONTENT_TYPE, ...)`）；生效链 `AutoConfiguration.imports:2` → `message-api/pom.xml:62-66` | [`api.md`](api.md) |
 | `DRIFT-MSGAPI-011` | 状态行缺 reason phrase | 🔴 **容器层**（Tomcat `Http11OutputBuffer`）—— **既非共享层也非本域**（旧列写 `service/common` = 错） | 🔴 **框架限制，不可修**；已登记 `SD-2026-10-25-CAND-14` | Go 标准库 `net/http/server.go:1602-1606`（`if text := StatusText(code); text != ""` → 写 code + 空格 + text）+ `net/http/status.go:81`（`func StatusText`）；RAG 侧 `HttpMiddleware.java:907-921`（`resp.setStatus(sc)`，**无 reason**）；⚠️ 实测 **Tomcat 11.0.24 的 `Response` 已移除 `setStatus(int,String)`**（`javap`：9.0.63 有、10.1.52 与 11.0.24 **只剩 `setStatus(int)`**）⇒ 应用层无路可走 | [`api.md`](api.md) · [`global/common-tails.md`](../global/common-tails.md) |
 | `DRIFT-MSGAPI-013` | 缺 `Traceparent` | `service/common` | ✅ **已修**（**旧快照「OPEN」过期**）—— 共享层 T-8 第十九轮已落码 | `GoStyleTraceparentFilter.java:188-191`（`@Component` + `@Order(+3)`）+ **消费点** `:270-283`（Extract→Start→Inject）；本域接线 `MessageApiApplication.java:63-66`（扫 `com.rag.common`）；Go 出处 `go-zero@v1.10.2/rest/handler/tracehandler.go:61` | [`api.md`](api.md) |
-| `DRIFT-MSG-V-029` | `like-rpc` 的 Flyway baseline 缺陷 | `service/like/like-rpc`（**别的域**） | ✅ **已修**（2026-10-25 global X-1）⇒ **本跨域待办可关闭** | `like-rpc/application.yml:78` `baseline-version: 0` + `:81` 独立账本表名 | [`rpc.md`](rpc.md) |
+| `DRIFT-MSG-V-029` | `like-rpc` 的 Flyway baseline 缺陷 | `service/like/like-rpc`（**别的域**） | ✅ **已修**（2026-10-25 global `CD-1`〔旧号 `X-1`〕）⇒ **本跨域待办可关闭** | `like-rpc/application.yml:78` `baseline-version: 0` + `:81` 独立账本表名 | [`rpc.md`](rpc.md) |
 
 ⇒ **§1 七条 ⇒ 新派 G4 反馈单 = 0 条**（3 条已修 / 2 条「已修但旧落点列写错」/ 2 条落点在容器层或他域）。
 
@@ -59,7 +59,7 @@
 | **A8** | DDL 时间列 / 类型 | `message-rpc/application.yml:66` `baseline-on-migrate` · `:102` **`baseline-version: 0`** · `:105` **`table: flyway_schema_history_message`** · `:103` `locations`<br>`V1__create_message_notification.sql:15-19`（`is_read BOOLEAN` / `extra JSONB` / `created_at TIMESTAMP`）· `V5__message_time_columns_timestamptz.sql:69-92`（8 列 → TIMESTAMPTZ + 5 列 DROP NOT NULL） | 🟡 **OBS**（时间列类型与可空性**已对齐**；🟡 `DEFAULT CURRENT_TIMESTAMP` 残留（Go 侧无默认）⇒ **已登记不修** —— 两侧 INSERT 均显式绑定该列 ⇒ 不可观测；本域 `extra` 是 jsonb ⇒ **jsonb⇒text 不适用**）<br>✅ 账本隔离：`check-flyway-ledger.py` **EXIT=0**（7 模块账本表名两两不同） | L1 / L3 | 2026-10-27 |
 | **A9** | trace / otel | `Traceparent`：`GoStyleTraceparentFilter.java:188-191`（装配）+ `:270-283`（消费点）· 全局 provider：`AutoConfiguration.imports:1-2` → `GoStyleOtelAutoConfiguration.java:58-61` → `GoStyleOtelAgent.java:146`（`GlobalOpenTelemetry.set`）<br>`audit.*` 属性：**本域 Go 侧无自定义 span ⇒ N/A** | ✅ 一致（Go `go-zero@v1.10.2/rest/handler/tracehandler.go:61` `propagator.Inject`）<br>🟡 残留 **T-12**：「405 方法不匹配」出口 RAG 多带一个 `Traceparent` ⇒ **出口层级不同**（Go 在 router 层 `patrouter.go:66-72`）⇒ 共享层改不动 ⇒ 已登记 `SD-2026-10-25-CAND-15`<br>⚠️ `GoStyleOtelAgent.java:133-137`（装配失败只记 ERROR 并继续启动）⇒ 「有 Traceparent 头」**不是无条件成立** | L1 / L3 | 2026-10-27 |
 
-> **A3 已预填锚点订正（2026-10-27 核）** —— 共享层 6 个 form 类已落码（X-6 第十四轮）；本域 `mode=envelope` 与 Go `messagecenter.go:53`（注册 `httpx.SetErrorHandler` ⇒ 200 + 业务信封）**同向** ✅。
+> **A3 已预填锚点订正（2026-10-27 核）** —— 共享层 6 个 form 类已落码（`CD-6`〔旧号 `X-6`〕第十四轮）；本域 `mode=envelope` 与 Go `messagecenter.go:53`（注册 `httpx.SetErrorHandler` ⇒ 200 + 业务信封）**同向** ✅。
 > ⚠️ **共享层已验 ≠ 本域已验** ⇒ 本域仍缺**真实请求**证据（envelope 拒绝形状 / 2049 参数 / `..` 路径）⇒ 已列 §5 待办。
 
 ## 3. 域侧能自修的（**本域直接修**，不甩给 G4）

@@ -17,6 +17,18 @@
 > ✅ **2026-10-24 用户已签字**：**CAND-02**（`report_record` 表）、**CAND-06**（`manage` 清位）。
 > 🟡 **仍待签字**：**CAND-01**（9 处时间列）、**CAND-03**（authority / dispatch 默认关闭）、**CAND-09**（RAG 的 DDL 比 Go 生产 DDL 更严：约束 / 索引 / 触发器层）。
 
+> 📌 **2026-10-29 对齐复核（台账对齐 phase · W-D lane）—— 本文件 5 条逐条重核完毕**
+>
+> 判据 = [`../_INDEX.md`](../_INDEX.md)「被签字描述的那个行为**已不存在** ⇒ 签字自动失效」。
+> **5/5 条的「被描述的行为」在 2026-10-29 实测下仍然存在 ⇒ 签字/登记状态全部不变**（无一条需标「已失效」）。
+> **但有 3 处订正**（原句**一律保留**，新结论追加在后面）：
+> ① **CAND-02**：原句「Go 侧**根本不存在**」**描述不完整** ⇒ 追加订正（Go 侧**有** model + **有**业务写入逻辑，只是 `AutoMigrate` 漏了它），
+>    且原条声称的「连带动作（V5 头部已改为『已签字』）」**实测未发生**；
+> ② **CAND-03**：原条引的 `application.yml` 行号**已漂移**（`:196` / `:178` ⇒ 实测 `:284` / `:266`）；
+> ③ **CAND-01**：「9 处」的口径**成立**，但实测 RAG 侧 `NOT NULL DEFAULT CURRENT_TIMESTAMP` 共 **10 处**（V6 那 1 处与 Go 一致 ⇒ 差 **9** 处）。
+>
+> ⇒ 每条下方的「📌 2026-10-29 对齐复核」小节给出逐条结论 + 证据指针 + **唯一别名**。
+
 ---
 
 ## SD-2026-10-24-CAND-01：9 处时间列的 `NOT NULL DEFAULT CURRENT_TIMESTAMP`（RAG 更严）
@@ -61,6 +73,18 @@
 ⚠️ 这是**第三条路**，比「照搬 Go」和「保持现状」都好 —— 但它**改变了 DDL**，需要单独决策。
 
 **签字人：______　签字日期：______**
+
+### 📌 2026-10-29 对齐复核（台账对齐 phase · W-D lane）
+
+| 项 | 结论 |
+|---|---|
+| **唯一别名** | `SD-2026-10-24-CAND-01@comment` |
+| **撞号检查** | 全仓 `grep -rln SD-2026-10-24-CAND-01 docs/` ⇒ **定义只此一处**；其余命中（`docs/DRIFT/comment/rpc.md` · `docs/DRIFT/comment/vs-common.md` · `docs/DRIFT/global/**` · `docs/Pitfalls/global/cross-domain.md` · `docs/Intentional_Deviations/_INDEX.md`）**均为引用** ⇒ **无撞号** |
+| **被描述的行为现在还存在吗** | ✅ **仍存在** ⇒ 本条**状态不变**（🟡 待签字 / 候选，建议签） |
+| **核对日期** | 2026-10-29 |
+| **RAG 侧实测** | `grep -c 'NOT NULL DEFAULT CURRENT_TIMESTAMP'` 逐文件 ⇒ **V1 2 · V2 2 · V3 2 · V4 2 · V5 1 · V6 1 = 10 处**（`service/comment/comment-rpc/src/main/resources/db/migration/V1..V6__*.sql`）⇒ 其中 **V6 的 1 处与 Go 一致**（Go `service/comment/rpc/internal/model/domain_fact.go:29` 的 tag **明写** `not null;default:CURRENT_TIMESTAMP`）⇒ ⇒ **与 Go 有差异的仍恰好 9 处** ⇒ **本条「9 处」的口径成立**（原句保留） |
+| **Go 侧实测** | `service/comment/rpc/internal/model/data_model.go` 的 `autoCreateTime` / `autoUpdateTime` tag **未变** ⇒ GORM 侧仍**不产生** `NOT NULL`、**不产生** DB 层 `DEFAULT` ⇒ **差异仍在** |
+| **🔴 订正（口径澄清，不改结论）** | 原条只说「9 处」，易被读成「RAG 侧只有 9 处 `DEFAULT CURRENT_TIMESTAMP`」⇒ **实际是 10 处**（V6 那处是**对齐**的）⇒ 本条覆盖的是**差异 9 处**，不是**绝对 9 处** |
 
 ---
 
@@ -116,6 +140,19 @@
 
 **签字人：Jason（用户）　签字日期：2026-10-24**
 
+### 📌 2026-10-29 对齐复核（台账对齐 phase · W-D lane）—— 🔴 **本条含一处「描述不完整」+ 一处「连带动作与实测不符」**
+
+| 项 | 结论 |
+|---|---|
+| **唯一别名** | `SD-2026-10-24-CAND-02@comment` |
+| **撞号检查** | 全仓 `grep -rln SD-2026-10-24-CAND-02 docs/` ⇒ **定义只此一处**（其余命中均为**引用**：`docs/DRIFT/comment/rpc.md` · `docs/DRIFT/comment/vs-common.md` · `docs/DRIFT/article/vs-common.md` · `docs/DRIFT/_cross/**` · `docs/CLOSEOUT-2026-10-29.md`）⇒ **无撞号** |
+| **被描述的行为现在还存在吗** | ✅ **仍存在（DB 层）** ⇒ **签字有效，状态不变**（✅ 已签字） |
+| **核对日期** | 2026-10-29 |
+| **DB 层实测（Go 侧）** | `service/comment/rpc/internal/model/db.go:15` 的 `db.AutoMigrate(&Subject{}, &CommentContent{}, &CommentIndex{}, &CommentLike{}, &CommentDomainFactOutbox{}, &CommentFactStream{})` ⇒ **名单不含 `ReportRecord`** ⇒ **Go 侧确实不建 `report_record`** ⇒ **本条「DB 层」签字成立** |
+| **🔴 订正（原句保留 + 追加）** | 原句写「`report_record` 表在 RAG 侧存在，Go 侧**根本不存在**」⇒ **描述不完整**：Go 侧**有** `ReportRecord` 结构体（`service/comment/rpc/internal/model/data_model.go:55-64`，8 列）+ `TableName()`（`:66-68` ⇒ `report_record`）**且有业务写入逻辑**（`service/comment/rpc/internal/logic/report_comment_logic.go:69` 构造 `&model.ReportRecord{…}` ⇒ `:79` 调 `CommentModel.InsertReport` ⇒ `service/comment/rpc/internal/model/comment.go:242-243` 的 `InsertReport` 用 `clause.OnConflict{DoNothing: true}` 插入 ⇒ `:90-91` 出错时发 `errmsg.ErrorDbInsert`(5004)）⇒ ⇒ **准确表述是「有 model ＋ 有业务逻辑，只是 `AutoMigrate` 漏了它 ⇒ Go 侧不建表 ⇒ 全新部署上 `ReportComment` 必 5004」**，而不是「Go 侧根本不存在这张表的东西」 |
+| **🔴 订正（连带动作与实测不符）** | 上方「连带动作」称 `V5` 脚本头部的「该决定留给用户签字，本文件不代签」**已改为「已签字（2026-10-24）」** ⇒ **2026-10-29 实测：该连带动作并未发生** —— `service/comment/comment-rpc/src/main/resources/db/migration/V5__create_comment_report_record.sql:5` 仍写「🔴 **本脚本是 RAG 相对 Go 的一处有意偏离（尚未签字）**」· `:24` 仍写「**该决定留给用户签字，本文件不代签。**」⇒ ⇒ **这正是 PIT-COMMENT-RPC-14（`docs/Pitfalls/comment/rpc.md`）记录的那次 checksum 事故的正解**：文件必须保持原始字节（checksum `733247998`）⇒ **签字记录只能落 Java javadoc + 台账**（`ReportRecordMapper.java`）⇒ ⇒ **原「连带动作」一句按「保留原值 + 加订正」处置，不抹除** |
+| **RAG 侧实测** | `V5__create_comment_report_record.sql:26-45` 建表（8 列 + `CREATE UNIQUE INDEX IF NOT EXISTS idx_user_comment_report ON report_record (user_id, comment_id)`）⇒ **RAG 侧多一张表 ⇒ 差异仍在** |
+
 ---
 
 ## SD-2026-10-24-CAND-09：RAG 的 DDL **比 Go 生产 DDL 更严**（约束 / 索引 / 触发器层）
@@ -164,6 +201,17 @@
 
 **签字人：______　签字日期：______**
 
+### 📌 2026-10-29 对齐复核（台账对齐 phase · W-D lane）
+
+| 项 | 结论 |
+|---|---|
+| **唯一别名** | `SD-2026-10-24-CAND-09@comment` |
+| **撞号检查** | 全仓 `grep -rln SD-2026-10-24-CAND-09 docs/` ⇒ **定义只此一处**（其余命中 `docs/DRIFT/comment/rpc.md` · `docs/DRIFT/comment/vs-common.md` · `docs/Stage1/05-差异与暂缓项清单.md` 均为**引用**）⇒ **无撞号** |
+| **被描述的行为现在还存在吗** | ✅ **仍存在** ⇒ 本条**状态不变**（🟡 待签字 / 候选，建议签） |
+| **核对日期** | 2026-10-29 |
+| **RAG 侧实测（多出来的对象仍在）** | `service/comment/comment-rpc/src/main/resources/db/migration/V6__create_comment_domain_fact_outbox.sql:63-64`（`ADD CONSTRAINT comment_new_fact_has_dc_wire … NOT VALID`）· `:42`（`idx_comment_legacy_fact_aggregate`）· `V7__create_comment_fact_stream.sql:31`（`CONSTRAINT comment_fact_stream_version_range CHECK (version BETWEEN 1 AND 9007199254740991)`）· `V8__align_comment_fact_delivery_with_go.sql:82`（`CREATE TRIGGER comment_fact_identity_immutable`）· `:47`（`idx_comment_fact_delivery`）⇒ ⇒ **RAG 生产库仍比 Go 生产库多这些约束/索引/触发器** ⇒ **差异仍在** |
+| **Go 侧实测（生产权威 DDL 仍未变）** | `service/comment/rpc/internal/model/db.go:15` 的 `AutoMigrate` 名单**仍是** 6 个 struct（`Subject` / `CommentContent` / `CommentIndex` / `CommentLike` / `CommentDomainFactOutbox` / `CommentFactStream`）⇒ **无触发器、无 CHECK、无那 3 个索引** ⇒ **根因（Go 生产 DDL = AutoMigrate 产物；`001/002/003` 只是测试夹具）仍未变** |
+
 ---
 
 ## SD-2026-10-24-CAND-03：authority / dispatch 两个子命令**默认关闭**
@@ -196,6 +244,18 @@
 - 开启 authority 端点需要**新增一个 HTTP 端口** ⇒ 属 **wire 面变更**，须人工拍板对外暴露面。
 
 **签字人：______　签字日期：______**
+
+### 📌 2026-10-29 对齐复核（台账对齐 phase · W-D lane）
+
+| 项 | 结论 |
+|---|---|
+| **唯一别名** | `SD-2026-10-24-CAND-03@comment` |
+| **撞号检查** | 全仓 `grep -rln SD-2026-10-24-CAND-03 docs/` ⇒ **只命中本文件** ⇒ **无撞号** |
+| **被描述的行为现在还存在吗** | ✅ **仍存在** ⇒ 本条**状态不变**（🟡 待签字 / 候选，建议签） |
+| **核对日期** | 2026-10-29 |
+| **RAG 侧实测** | `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/bootstrap/CommentAuthorityEndpointConfig.java:42`（`@ConditionalOnProperty(prefix = "comment.authority", name = "enabled", havingValue = "true")`）· `service/comment/comment-rpc/src/main/resources/application.yml:284`（`enabled: false`）· `service/comment/comment-rpc/src/main/resources/application.yml:266`（`dispatch-enabled: false`）· `service/comment/comment-rpc/pom.xml` **无** `spring-boot-starter-web` ⇒ ⇒ **「默认关闭 + 未引 web starter」的行为仍在** |
+| **Go 侧实测** | `service/comment/rpc/cmd/fact-authority/main.go` 与 `service/comment/rpc/cmd/fact-dispatch/main.go` **两个独立进程仍在**（一个监听端口、一个缺配置即退出）⇒ ⇒ **部署形态差异仍在** |
+| **🔴 订正（引用行号漂移 · 原句保留）** | 原条引 `application.yml:196`（authority 默认 `false`）与 `application.yml:178`（`dispatch-enabled: false`）⇒ **2026-10-29 实测这两处行号已漂移** ⇒ 实际为 **`:284`**（`authority.enabled: false`）与 **`:266`**（`fact.dispatch-enabled: false`）⇒ ⇒ **结论与措辞不变**，只订正引用指针 |
 
 ---
 
@@ -267,6 +327,17 @@
   以及 Go 侧缺 `report_record` 表（CAND-02）⇒ 均应向真源仓反馈。
 
 **签字人：Jason（用户）　签字日期：2026-10-24**
+
+### 📌 2026-10-29 对齐复核（台账对齐 phase · W-D lane）
+
+| 项 | 结论 |
+|---|---|
+| **唯一别名** | `SD-2026-10-24-CAND-06@comment` |
+| **撞号检查** | 全仓 `grep -rln SD-2026-10-24-CAND-06 docs/` ⇒ **定义只此一处**（其余命中 `docs/DRIFT/comment/rpc.md` · `docs/DRIFT/comment/vs-common.md` 均为**引用**）⇒ **无撞号** |
+| **被描述的行为现在还存在吗** | ✅ **仍存在** ⇒ **签字有效，状态不变**（✅ 已签字） |
+| **核对日期** | 2026-10-29 |
+| **Go 侧实测** | `service/comment/rpc/internal/model/comment.go` 的清位分支仍是 `gorm.Expr("attribute & ~?", val)`（`val` 为 `uint` ⇒ **未定型参数** ⇒ PG `operator is not unique: ~ unknown (SQLSTATE 42725)`）；同款写法在点赞路径（`:571`）**仍在** ⇒ ⇒ **「Go 侧取消置顶 / 取消精选 100% 失败」的真源缺陷未被修复** ⇒ **RAG 侧与 Go 的差异仍在** |
+| **RAG 侧实测** | `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/mapper/CommentIndexMapper.java:197`（`int clearAttributeBits(@Param("id") long id, @Param("mask") long mask);` ⇒ **mask 是有类型的 `long`** ⇒ PG 解析为 `~ bigint` ⇒ **成功**）⇒ ⇒ **RAG 侧「更对」的行为仍在 ⇒ 签字含义仍成立** |
 
 ---
 

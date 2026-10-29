@@ -5,7 +5,23 @@
 > **核对日期：2026-10-24** · 基线 commit：`8422116`
 > 本档只记「**为什么会这样**」，具体漂移条目在 [`docs/DRIFT/follow/`](../../DRIFT/follow/)。
 
-## PITFALL-FOLLOW-001 🔴🔴 测试把生产地址覆盖成 `static://` ⇒ 生产配置从未被跑过
+> 🆕 **2026-10-29 台账对齐（W-B lane · follow + task 域）**
+>
+> - **编号归一**：本档条目的**旧号** `PITFALL-FOLLOW-NNN` **原样保留**在每条的「旧号」行里；**新号** = `PIT-FOLLOW-NN`（与旧号后三位一一对应）⇒
+>   ⚠️ **旧号是检索用的历史标识** —— 仓内其它文档（DRIFT / Stage1 / 共享层 javadoc / `tools/`）按**旧号**检索，本档**两套号都在** ⇒ 旧号**不可删**。
+> - **每条补三字段**：**状态** · **核对日期（2026-10-29）** · **是否影响当前轮次**（填「否」时必须写明**不适用的具体原因**）。
+> - **状态判定口径**（本档统一）：
+>   - **已闭环** = 该坑在**本域的具体触发点已被消除**（代码 / 配置 / 脚本已改）**且有证据指针**（`文件:行号` 或守门的实测条数）⇒ **残留的通用教训不改变这个判定**（通用教训留在正文里）。
+>   - **仍生效** = 该坑的**触发条件本身**仍在（框架 / 语言 / 真源的事实，或本域的编排脚本仍未改）⇒ 今天照旧做法还会踩。
+>   - **已撤销** = 用户 / 决策撤销。**待核实** = 判不了（须写清缺什么）⇒ **不许默认任何一侧**。
+> - ⚠️ **状态标记取值域**：`✅` / `🟡` / `🔴` / `⚫`（与仓内既有取值域一致）。
+
+## PIT-FOLLOW-001 · 【已闭环】 测试把生产地址覆盖成 `static://` ⇒ 生产配置从未被跑过
+
+> **旧号**：`PITFALL-FOLLOW-001` ⇒ **新号**：`PIT-FOLLOW-001`
+> **原标题标记**（2026-10-24 台账留痕，保留不改写）：`🔴🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 生产地址已被独立守门钉住（不再靠「测试覆盖生产配置」来暴露问题）⇒ 本轮只核台账、不改配置 ⇒ 不影响本轮产出
+> **证据**：`service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/FollowRpcProductionAddressTest.java:87-95` 断言生产 yml 必须是 `discovery:///user-rpc`（本轮 surefire 实测 **t=3 f=0 e=0 s=0**） ＋ `service/follow/follow-rpc/src/main/resources/application.yml:163` `address: discovery:///user-rpc`
 
 **症状**：修复前 63 条测试全绿（现为 68 条）、`mvn package` 通过、Spring 上下文在测试里能起来，
 但 `java -jar` **起不来**（连续两条启动阻塞）。
@@ -40,7 +56,12 @@
 
 ---
 
-## PITFALL-FOLLOW-002 🔴 `test` scope 会顶掉 starter 的 `compile` 传递依赖
+## PIT-FOLLOW-002 · 【已闭环】 `test` scope 会顶掉 starter 的 `compile` 传递依赖
+
+> **旧号**：`PITFALL-FOLLOW-002` ⇒ **新号**：`PIT-FOLLOW-002`
+> **原标题标记**（2026-10-24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 依赖作用域已是 compile ⇒ 运行时 classpath 缺陷的触发条件已消除 ⇒ 本轮只核台账、不改 pom ⇒ 不影响本轮产出
+> **证据**：`service/follow/follow-rpc/pom.xml:256-260` 的 `io.grpc:grpc-inprocess` **无 `<scope>test</scope>`**（compile 默认）；同文件 `:236-254` 的注释明写「scope 必须是 compile（默认），不能是 test」
 
 **症状**：`NoClassDefFoundError: io/grpc/inprocess/InProcessChannelBuilder`
 ⇒ `UserRpcClient` Bean 创建失败 ⇒ **整个服务起不来**。
@@ -76,7 +97,12 @@ service/follow/follow-rpc/pom.xml
 
 ---
 
-## PITFALL-FOLLOW-003 🔴 devh 的 `discovery:` URI 必须**三斜杠**
+## PIT-FOLLOW-003 · 【已闭环】 devh 的 `discovery:` URI 必须**三斜杠**
+
+> **旧号**：`PITFALL-FOLLOW-003` ⇒ **新号**：`PIT-FOLLOW-003`
+> **原标题标记**（2026-10-24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— URI 已是三斜杠 ⇒ devh 的 `uri.getPath()` 判据不再触发 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`service/follow/follow-rpc/src/main/resources/application.yml:163` `address: discovery:///user-rpc` ＋ `FollowRpcProductionAddressTest.java:84-95`（三斜杠断言 · 本轮实测 t=3）
 
 **症状**：
 ```
@@ -101,7 +127,12 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
 
 ---
 
-## PITFALL-FOLLOW-004 🔴 同一域两个模块对**同一个环境变量**给出两种语义
+## PIT-FOLLOW-004 · 【已闭环】 同一域两个模块对**同一个环境变量**给出两种语义
+
+> **旧号**：`PITFALL-FOLLOW-004` ⇒ **新号**：`PIT-FOLLOW-004`
+> **原标题标记**（2026-10-24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 两个模块的 `NACOS_ADDR` 语义已一致 ⇒ 不存在「两台 Nacos」的触发条件 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`service/follow/follow-api/src/main/resources/application.yml:58` 与 `service/follow/follow-rpc/src/main/resources/application.yml:95` **两侧同为** `${NACOS_ADDR:nacos}:${NACOS_PORT:8848}`（`NACOS_PORT` 两侧都被消费）
 
 **症状**：follow-rpc 自己日志 `NacosRegistration registered: service=follow-rpc ...`，
 但 follow-api 一直报 `No servers found for follow-rpc`。
@@ -126,7 +157,12 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
 
 ---
 
-## PITFALL-FOLLOW-005 🔴 共享 `service/common` 在纯 gRPC 进程里缺 servlet-api
+## PIT-FOLLOW-005 · 【已闭环】 共享 `service/common` 在纯 gRPC 进程里缺 servlet-api
+
+> **旧号**：`PITFALL-FOLLOW-005` ⇒ **新号**：`PIT-FOLLOW-005`
+> **原标题标记**（2026-10-24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 共享层已把 HTTP 池回收挪进 `@ConditionalOnWebApplication(SERVLET)` 的独立 Bean ⇒ 纯 gRPC 进程的关闭路径不再加载 servlet 类 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`service/common/src/main/java/com/rag/common/spring/ObservabilityLifecycle.java:36`（rpc 进程不扫 `com.rag.common`） ＋ `:85-94`（destroy 只碰 `RpcInterceptor`，HTTP 池归 `HttpPoolLifecycle`） ＋ 守门 `service/common/src/test/java/com/rag/common/spring/HttpPoolShutdownWithoutServletGateTest.java` 存在
 
 **症状**：follow-rpc **启动失败后的关闭过程**里抛
 
@@ -146,7 +182,12 @@ WARN ... Destroy method on bean with name 'com.rag.common.spring.ObservabilityLi
 
 ---
 
-## PITFALL-FOLLOW-013 ⚠️ shell 的两处**词法**陷阱：`&` 未加引号 / `$var` 紧跟多字节字符
+## PIT-FOLLOW-013 · 【仍生效】 shell 的两处**词法**陷阱：`&` 未加引号 / `$var` 紧跟多字节字符
+
+> **旧号**：`PITFALL-FOLLOW-013` ⇒ **新号**：`PIT-FOLLOW-013`
+> **原标题标记**（2026-10-24 台账留痕，保留不改写）：`⚠️`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 这是 **bash 3.2 的词法事实**（本机 `bash --version` = 3.2.57）⇒ 触发条件永远存在 ⇒ 但本轮**不改任何脚本**（脚本不在本 lane 写权内）⇒ 不影响本轮台账产出
+> **证据**：本文件正文实测记录（`N=12; echo "$N，x"` ⇒ `x`；`${N}，x` ⇒ `12，x`） ＋ 同源条目 `docs/Pitfalls/task/rpc.md` 的 `PIT-TASK-15` / `PIT-TASK-21`
 
 **症状 1：路径里的 `&` 被当成后台操作符**
 
@@ -184,7 +225,12 @@ $ N=12; echo "${N}，x"
 
 ---
 
-## PITFALL-FOLLOW-014 ⚠️ 真源自身就有竞态：**检查黑名单**与**写入关注**不在同一事务
+## PIT-FOLLOW-014 · 【仍生效】 真源自身就有竞态：**检查黑名单**与**写入关注**不在同一事务
+
+> **旧号**：`PITFALL-FOLLOW-014` ⇒ **新号**：`PIT-FOLLOW-014`
+> **原标题标记**（2026-10-24 台账留痕，保留不改写）：`⚠️`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 缺陷在**冻结真源（Go）**里 ⇒ RAG 侧无从修 ⇒ 修它 = 改真源行为 ⇒ 属**产品决策**（需用户拍板）⇒ 不在本轮 scope ⇒ 不影响本轮台账产出
+> **证据**：Go `service/follow/rpc/internal/logic/followlogic.go:48`（`ExistsAnyBlock` SELECT）与 `:60`（`CreateFollow` INSERT）**不在同一事务**；对照 `service/follow/rpc/internal/logic/blocklogic.go:48`（单事务）
 
 **现象（U8 并发实测，各 40 轮）**
 

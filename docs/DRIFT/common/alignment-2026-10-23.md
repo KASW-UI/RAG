@@ -33,11 +33,11 @@
 
 | 范围 | 结论 |
 |---|---|
-| 5 个可比包（`communityfact` / `logger` / `observability` / `response` / `snowflake`） | 🔴 **3 个 NOT EQUIVALENT**，1 个（`response`）**逐条等价** |
+| 5 个可比包（`communityfact` / `logger` / `observability` / `response` / `snowflake`） | 🔴 **3 个 NOT EQUIVALENT**，1 个（`response`）**逐条等价** ⇒ ⚠️ **原表述的算术不成立（3 + 1 ≠ 5）** —— **2026-10-29 订正**：正确的口径是「**3 个已正式判定（NOT EQUIVALENT）+ 4 个实际持开放项**」（5 个包中**只有 `response` 一条给出逐条等价**；另外 4 个包 —— `communityfact` / `logger` / `observability` / `snowflake` —— 各自**另有开放项**，见 §十三·一 的逐条定级表）⇒ 与 [`../../DRIFT/global/vs-common.md`](../../DRIFT/global/vs-common.md) §1 同名词条**逐字一致** |
 | §3.3 机制接线（`spring/*`） | 🔴 1 条**可证伪的假框架断言**（已修）；**1 条 H2 形态在 `hot-rpc` 上复发（DRIFT-COMMON-004，未修，归属 `align/hot`）**；2 条常见担忧**已证伪** |
 | 跨组件不变量 | 🔴 `communityfact` 消费者两侧不一致（见 §四） |
 | 已修 | **3 条 SEMANTIC MISMATCH**（均配回归测试，147 tests / 0 failures）<br>+ DRIFT-COMMON-006 的**本域侧**（死代码标废弃） |
-| 已记录未修 | **28 条编号条目**（`DRIFT-COMMON` 3 + communityfact 15 + logger 7 + snowflake 3）<br>另补录 **5 项未编号的观察**（见 §六·六），含 1 条 `UNRESOLVED`、1 条 API 缺陷、2 条跨域归属 |
+| 已记录未修 | **28 条编号条目**（`DRIFT-COMMON` 3 + communityfact 15 + logger 7 + snowflake 3）<br>另补录 **5 项未编号的观察**（见 §六·六），含 1 条 `UNRESOLVED`、1 条 API 缺陷、2 条跨域归属<br>🔴 **2026-10-29 数字订正**：本行「**28 条编号条目**」**与同文件 §十二·一 的合计（**23**）不一致** ⇒ ⇒ **真实口径 = 「23 条编号 + 5 项未编号 = 28」** —— 「28」是**总数**、不是「编号条目数」⇒ ⇒ 读本行时**必须**按 §十二·一 / §十四·三 的 **23 + 5 = 28** 口径读 |
 | 2026-10-24 复验 | 🔴 **推翻了首版 1 条假结论**（「H2 已闭环」实为 9/10）；✅ 其余承重断言均仍成立（见 §六·五）<br>🔴 **新增 2 条**（DRIFT-COMMON-005 / -006），其中 -005 此前被**别的域签了字**却在本域无记录 |
 | 📌 决策与交接 | **2 条用户拍板**已记入 §八（守门脚本保留 / COMMON-005 先记账不改）<br>**9 项交接事项**列在 §九（本域一律不越界） |
 
@@ -782,6 +782,15 @@ service/users/user/user-rpc/.../UserDomainService.java:113   ← 这行 javadoc 
 
 ### 十三·一、逐条定级总表（25 条）
 
+> 🔴 **2026-10-29 口径订正（W-F lane · 共享层台账面）—— 本表的适用范围**：
+> **本表的 25 条 = `CF` 族 15 + `LOG` 族 7 + `SF` 族 3** ⇒ ⇒ **它**不覆盖** `E65` / `E66` 这两条 `E` 族条目
+> （落点同样在 `service/common`：`RpcInterceptor` / `GoStyleRequestDeadline` / `DeadlineState`）。
+> ⇒ ⇒ **因此「本表 A 类 = 0」≠「共享层 A 类硬阻塞 = 0」** —— 🔴 **`E65` 是 A 类且仍 OPEN**：
+> 2026-10-29 双侧活体实测（Go `outgoing_carrier=present_expired` vs RAG `absent`）⇒ **出向 gRPC 不继承请求 deadline**
+> ⇒ ⇒ **X-6 判据不满足 ⇒ C-3 破** ⇒ ⇒ **阶段一已改判为「❌ 未通过」**（`docs/PhaseGoal-judge.md` v5）。
+> **证据**：`docs/PhaseGoal-judge.md` §五 X-6 行 ＋ [`../../DRIFT/global/vs-common.md`](../../DRIFT/global/vs-common.md) §1.1 的 **E65 / E66** 两行。
+> ⇒ **本表 25 条的逐条定级本身不改**（原值保留）⇒ **只加这条范围说明**。
+
 > **字段对应 `twoStage.md` §5.3 的 11 项**：编号 · Go 出处 · 原始行为 · 阶段一当前行为 · 具体差异 ·
 > 暂缓理由 · 对业务正确性/安全性/数据一致性/可靠性的影响 · 是否阻断阶段一 · 阶段二恢复方案 · 阶段二测试场景与通过标准 · 当前证据及剩余缺口。
 > 表格里逐列给出；「剩余缺口」统一为 **「未做双侧活体对拍 ⇒ 证据强度停在 E2」**（除特别标注）。
@@ -963,7 +972,7 @@ service/users/user/user-rpc/.../UserDomainService.java:113   ← 这行 javadoc 
 
 | 分类 | 编号（本轮口径 = 24 条，**含本轮已修的 `CF-018`**）| 未编号 | 合计 | 说明 |
 |---|---|---|---|---|
-| **A**（阶段一准入阻断项） | **0** | 0 | **0** | `DRIFT-SF-001` 曾是 A 类 ⇒ **已修**（§十三·二）⇒ ⇒ **当前 A 类 = 0** |
+| **A**（阶段一准入阻断项） | **0** | 0 | **0** | `DRIFT-SF-001` 曾是 A 类 ⇒ **已修**（§十三·二）⇒ ⇒ **当前 A 类 = 0**<br>🔴 **2026-10-29 订正（口径范围）**：**本行的「A 类 = 0」只覆盖本表这 29 条**（`CF` / `LOG` / `SF` ＋ 5 项未编号）⇒ ⇒ **它**不覆盖** 落点同样在 `service/common` 的 **`E65`（出向 gRPC 不继承 deadline）** —— **`E65` 是 🔴 A 类且仍 OPEN**（2026-10-29 双侧活体实测：Go `outgoing_carrier=present_expired` vs RAG `absent`）⇒ ⇒ **「共享层 A 类硬阻塞 = 0 ⇒ 阶段一通过」这句话对 `E65` 不成立** ⇒ ⇒ **阶段一已改判为「❌ 未通过」**（`docs/PhaseGoal-judge.md` v5 · §五 X-6 · §8.2 C-3 破）<br>**证据**：`docs/PhaseGoal-judge.md` §五 X-6 行 ＋ [`../../DRIFT/global/vs-common.md`](../../DRIFT/global/vs-common.md) §1.1 E65 行 |
 | **B**（阶段一竞争力补强项） | **0** | 0 | **0** | 本层<b>没有</b>「竞争力补强」性质的条目（那些是 R2 阶段 5 的事） |
 | **C**（阶段二最终工程建设项） | **20** | 1（U-3） | **21** | ⇒ 按 §1.1 ⑥ 第 4 条 **不计入 R3 ⑥** ⇒ **但必须逐条保留在 §5.3 清单里（11 字段齐全）** |
 | **D**（经分析确认不实现 / 不适用） | **3**（CF-009 · CF-011 · LOG-004） | 3（U-1 · U-4 · U-5） | **6** | 每条都有**明确理由**（`twoStage.md` §10 要求） |
@@ -974,6 +983,15 @@ service/users/user/user-rpc/.../UserDomainService.java:113   ← 这行 javadoc 
 
 > ⚠️ **另一条已修、不在这 29 条里的**：`DRIFT-SF-001`（**A 类** · 墙钟回拨 ⇒ 重复 ID · P0 #3）
 > —— 2026-10-29 G4 lane 已修（§十三·二的 9 字段）⇒ ⇒ **当前 `service/common` 域内 A 类硬阻塞 = 0 条**。
+>
+> 🔴 **2026-10-29 订正（W-F lane · 共享层台账面）—— 这句话现在只对「本表 29 条」成立**：
+> **共享层还有一条 🔴 A 类未修项 —— `E65`**（出向 gRPC **不继承**请求 deadline；落点 `service/common` 的
+> `RpcInterceptor` / `GoStyleRequestDeadline`）⇒ ⇒ **共享层的 A 类硬阻塞 = 1（不是 0）** ⇒ ⇒
+> **「共享层 A 类硬阻塞 = 0 ⇒ 阶段一通过」这句话作废** ⇒ ⇒ **阶段一已改判为「❌ 未通过」**。
+> **证据**：`docs/PhaseGoal-judge.md` §五 **X-6**（2026-10-29 实跑 `tools/difftest/check-deadline-downstream.py` ⇒ EXIT=0，
+> 但该守门是**漂移形态门** ⇒ **PASS ⇒ 漂移仍在**）＋ [`../../DRIFT/global/vs-common.md`](../../DRIFT/global/vs-common.md) §1.1 **E65** 行。
+> ⇒ ⚠️ **口径纪律**：`E65` / `E66` **不在 §十三·一 的 25 条表内**（那是 `CF` / `LOG` / `SF` 三族）⇒ ⇒
+> **任何以「本表 A 类 = 0」为依据的「阶段一通过」推论，都必须先补上 `E65` 这一条**。
 
 > 🔴 **本节的诚实边界（AGENTS.md §0：「已改」≠「已验证」）**：
 > ① 全部为 **E2（源码级）** —— 本轮**未跑任何双侧活体探针** ⇒ 「分类」是**在该证据强度下**的分类；

@@ -207,11 +207,11 @@ Go 的 `DispatchFactOnce` 是**在事务里发 HTTP**：`Begin` → 行锁 → P
 | **DRIFT-LIKE-002** | 业务码对**未迁移的 Go like-api** 丢失：Go 直发 `grpc-status: 5003`；grpc-java `fromCodeValue(5003)` → `UNKNOWN(2)`（实测 `desc="Unknown code 5003"`，`Code.values().length == 17`），Java 改放自定义 trailer `rag-like-biz-code`，而 Go like-api 只读 `int(st.Code())` ⇒ 灰度期 envelope code 变 **2**、msg 因 `GetErrMsg(2)` 落表外而回落 `"FAIL"` | SEMANTIC MISMATCH | 🔴 |
 | DRIFT-LIKE-004 | Kafka 消费侧 Java 多 **9 次进程内重试**：`new DefaultErrorHandler(recoverer)` 内部即 `SeekUtils.DEFAULT_BACK_OFF = FixedBackOff(0,9)`；Go `kq` 的 `ForceCommit` 默认 true 且未注册 errorHandler ⇒ **0 次**，失败只不提交位点 | OBSERVABLE | 🟠 |
 | DRIFT-LIKE-005 | Kafka key/分区：Go `Push` 内部即 `PushWithKey(UnixNano)` 且用 `LeastBytes{}` 分区；Java `send(topic,null,payload)` 走默认分区器 | OBSERVABLE | 🟠 |
-| DRIFT-LIKE-006 | 模块**从未做过 Spring 上下文加载测试**（无 `@SpringBootTest` / `ApplicationContextRunner`），而 javadoc 点名的 4 个 wiring 测试**全部不存在** —— 与 §6.6.5 message-rpc 同型<br>🔴 **2026-10-23 修复轮更正：部分过期** —— 已新增 `LikeRpcSpringContextWiringTest`（7 条 / 真 PG）且实跑全绿；真实缺口缩到 2 处（`rpcInterceptorConfigurer` 未验证是否真挂上 gRPC 调用链、`@EnableScheduling` 无守门）。详见第三轮 §5 L-U11<br>🔴 **2026-10-24 第五轮再更正：真实缺口缩到 1 处** —— `@EnableScheduling` 那半**已补守门测试**（同一个 wiring 测试类，**9 条**）：① `ScheduledTaskHolder` **真的持有** relay 的 `@Scheduled` 任务 ② 那个任务**真的执行过**（`Task.getLastExecutionOutcome().status() != NONE`）。⇒ 剩下的**只有** `rpcInterceptorConfigurer`（见 §5 L-U11） | UNKNOWN | 🟠 |
+| DRIFT-LIKE-006 | 模块**从未做过 Spring 上下文加载测试**（无 `@SpringBootTest` / `ApplicationContextRunner`），而 javadoc 点名的 4 个 wiring 测试**全部不存在** —— 与 §6.6.5 message-rpc 同型<br>🔴 **2026-10-23 修复轮更正：部分过期** —— 已新增 `LikeRpcSpringContextWiringTest`（7 条 / 真 PG）且实跑全绿；真实缺口缩到 2 处（`rpcInterceptorConfigurer` 未验证是否真挂上 gRPC 调用链、`@EnableScheduling` 无守门）。详见第三轮 §5 L-U11<br>🔴 **2026-10-24 第五轮再更正：真实缺口缩到 1 处** —— `@EnableScheduling` 那半**已补守门测试**（同一个 wiring 测试类，**9 条**）：① `ScheduledTaskHolder` **真的持有** relay 的 `@Scheduled` 任务 ② 那个任务**真的执行过**（`Task.getLastExecutionOutcome().status() != NONE`）。⇒ 剩下的**只有** `rpcInterceptorConfigurer`（见 §5 L-U11） | UNKNOWN | 🟠 **2026-10-29 对齐：现行态 = ✅ 已闭合** —— `service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeRpcSpringContextWiringTest.java:64-84`（`@SpringBootTest(classes = LikeRpcApplication.class)` + 真 PG）⇒ 与 `docs/DRIFT/like/vs-common.md:37` 的 ✅ 一致 |
 | DRIFT-LIKE-007 | 未知字段从「忽略」变「丢弃」：`@JsonIgnoreProperties(ignoreUnknown=false)` 覆盖了 Jackson 3 的默认忽略 ⇒ 抛异常 ⇒ 记 `json_error` 并**提交位点**（永久丢失、不可恢复的消息黑洞） | SEMANTIC MISMATCH | 🟡 |
-| DRIFT-LIKE-008 | map 形式 `Updates` **会**刷新 `updated_at`（真 PG 实测：`2020-01-01 08:00` → `2026-10-22 19:48:54.598+08`）；Java `updateState` 不刷新 ⇒ `idx_user_list(user_id, updated_at)` 内容两侧不同 | OBSERVABLE | 🟡 |
-| DRIFT-LIKE-009 | 指标 label 漂移 4 处：`redis_read_error` 的 target_type 塞字面量且 action 恒 `"n/a"`；Go「字段不存在」也记指标而 Java 直接返回；Go `GetLikeState` 记 `redis_error` 而 Java 不记；Java 把序列化失败并入 `kafka_error` | OBSERVABLE | 🟡 |
-| DRIFT-LIKE-010~012 | `.trim()` 容忍空白（Go `ParseInt` 不忽略） / outbox `ON CONFLICT` 目标（Go 无目标、覆盖任意唯一约束冲突） / 可选 producer 开关粒度（Go 两个 pusher 独立判空，Java 合并为单个 `taskPushersEnabled`） | OBSERVABLE | 🟡 |
+| DRIFT-LIKE-008 | map 形式 `Updates` **会**刷新 `updated_at`（真 PG 实测：`2020-01-01 08:00` → `2026-10-22 19:48:54.598+08`）；Java `updateState` 不刷新 ⇒ `idx_user_list(user_id, updated_at)` 内容两侧不同 | OBSERVABLE | ✅ **2026-10-29 对齐：原判 🟡 ⇒ 现行态 = ✅ 已修** —— `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/mapper/LikeRecordMapper.java:196,241-246`（SQL 已改为与 Go 一致地推进 `updated_at`）⇒ 见本文件 `:1180` |
+| DRIFT-LIKE-009 | 指标 label 漂移 4 处：`redis_read_error` 的 target_type 塞字面量且 action 恒 `"n/a"`；Go「字段不存在」也记指标而 Java 直接返回；Go `GetLikeState` 记 `redis_error` 而 Java 不记；Java 把序列化失败并入 `kafka_error` | OBSERVABLE | ✅ **2026-10-29 对齐：原判 🟡 ⇒ 现行态 = ✅ 已修**（4 处 label 全改）⇒ 见本文件 `:1192` |
+| DRIFT-LIKE-010~012 | `.trim()` 容忍空白（Go `ParseInt` 不忽略） / outbox `ON CONFLICT` 目标（Go 无目标、覆盖任意唯一约束冲突） / 可选 producer 开关粒度（Go 两个 pusher 独立判空，Java 合并为单个 `taskPushersEnabled`） | OBSERVABLE | ✅ **2026-10-29 对齐：原判 🟡 ⇒ 现行态 = ✅ 已修** —— `-010` 见本文件 `:1205`（2 处，不止台账记的 1 处）· `-011` 见 `:1212` · `-012` 见 `:1220` |
 
 #### ⚠️ Java 侧 8 条错误断言（其中 5 条经真框架实测证伪，优先级等同缺陷）
 
@@ -1643,7 +1643,7 @@ global 第三十三轮的 **E47 原定性已被第三十六轮全面订正**：*
 
 ## 🟡 `DRIFT-LIKE-RPC-REDIS-POOL`（新登记 · 2026-10-27）**Redis 连接池数值未对齐**（形态已对齐，仅数值不同）🆕 **数值轴已修（`min-idle` 4 ⇒ **8** = Go 确切值）· 残留 = `max-active`（性能面）**
 
-> ⚠️ 与 [`task/rpc.md` 的 `DRIFT-TASK-RPC-008`](../task/rpc.md#🔴-drift-task-rpc-008新登记--2026-10-27redis-连接池维度未对齐--形态漂移rag-无池-vs-go-有池) **同源**（同一轮取证挖出）⇒ **详细取证在 task 域那份**，此处只记本域的差异与差异级别。
+> ⚠️ 与 [`task/rpc.md` 的 `DRIFT-TASK-RPC-008`](../task/rpc.md#✅-drift-task-rpc-008新登记--2026-10-27redis-连接池维度未对齐--形态漂移rag-无池-vs-go-有池) **同源**（同一轮取证挖出）⇒ **详细取证在 task 域那份**，此处只记本域的差异与差异级别。
 
 | 项 | 事实 |
 |---|---|
@@ -1776,7 +1776,7 @@ mvn -o -B -DargLine=-Xmx2g -pl service/like/like-rpc -am \
 
 | 原台账的说法 | 实测（2026-10-29，源码级） | 判定 |
 |---|---|---|
-| 投递侧（写库 + 认领 + 调度）＝ 骨架 | `LikeFactDispatchService`（275 行）· `LikeDeliveryValidator`（383 行）· `LikeFactDispatchScheduler`（138 行）—— **三个都已实现**（global 域**第二十轮 X-4** 落地，并配 **5 个专属守门测试**） | 🔴 **台账过时**（漏读了 X-4 那一轮） |
+| 投递侧（写库 + 认领 + 调度）＝ 骨架 | `LikeFactDispatchService`（275 行）· `LikeDeliveryValidator`（383 行）· `LikeFactDispatchScheduler`（138 行）—— **三个都已实现**（global 域**第二十轮 `CD-4`〔旧号 `X-4`〕** 落地，并配 **5 个专属守门测试**） | 🔴 **台账过时**（漏读了 X-4 那一轮） |
 | 剩余 3 个骨架 = 投递侧 | 实际剩下的 3 个骨架是 **`LikeFactProcessLogging`**（日志）· **`LikeAuthorityEndpointConfig`**（暴露形态）· **`LikeAuthorityLookupService`**（权威读语义）⇒ **没有一个是投递侧** | 🔴 **台账过时** |
 
 ⇒ **订正后的三段划分**（下表即本轮 §5.3 的登记主体）：
@@ -1788,7 +1788,7 @@ mvn -o -B -DargLine=-Xmx2g -pl service/like/like-rpc -am \
 | **① 唯一编号** | `DRIFT-LIKE-003-A` | `DRIFT-LIKE-003-B` | `DRIFT-LIKE-003-C` |
 | **② 原项目文件/契约** | Go `service/like/rpc/internal/logic/fact_delivery.go:52-126`（SKIP LOCKED 认领 / BLOCKED / FAILED） | Go `service/like/rpc/internal/model/fact_authority.go:12-146`（12 道全链路重放校验） | Go `service/like/rpc/cmd/fact-authority/main.go:52-80`（**独立进程**）+ `service/common/communityfact/authority_http.go`（`GET /internal/v1/community/facts` · Bearer token） |
 | **③ 原始行为** | 认领 → 投递 → 回写 `delivery_status` / `technical_*` | 按 `event_id` 重放校验，产出 `AuthorityFact`（含 `TechnicalReceipt`） | **独立 HTTP 进程**：`LIKE_DATABASE_URL` + `LIKE_FACT_AUTHORITY_LISTEN` + `LIKE_FACT_AUTHORITY_TOKEN`（**token 长度 ≥ 32**，否则启动失败）；`NewAuthorityHandler("rtw.like-mq", token, …)` |
-| **④ 阶段 1 当前行为** | ✅ **已实现**（X-4 落地 + 5 守门） | ✅ **本轮 Java 化**：`LikeAuthorityLookupService`（407 行）逐字翻译 12 道校验 | ⬜ **未做**（本轮只做语义层） |
+| **④ 阶段 1 当前行为** | ✅ **已实现**（`CD-4`〔旧号 `X-4`〕落地 + 5 守门） | ✅ **本轮 Java 化**：`LikeAuthorityLookupService`（407 行）逐字翻译 12 道校验 | ⬜ **未做**（本轮只做语义层） |
 | **⑤ 具体差异** | **无**（本轮未动） | 本轮**修复前**：`LikeAuthorityLookupService` 是 4 行骨架 ⇒ 权威读**返回不了事实** | RAG 侧**没有**独立进程 ⇒ **HTTP 端点不存在** ⇒ 「谁能问权威」无对应物 |
 | **⑥ 暂缓/简化理由** | — | — | ⬜ **不是「不想做」，是「做不了」**：① 共享层 `AuthorityHandler` / `AuthorityHandlerFactory` **依赖 servlet** ⇒ like-rpc classpath **无 servlet-api** ⇒ `implements AuthorityHandler.AuthorityLookup` 会让 Spring 上下文**起不来**；② 加 `spring-boot-starter-web` 会让本模块 **4 个未声明 `webEnvironment` 的 `@SpringBootTest`** 默认起 Tomcat ⇒ 为形态变更拿既有测试面冒险**不值**；③ 新建独立模块 `service/like/like-fact-authority/**` **不在 G2 写权白名单** ⇒ 须改共享面 `tools/difftest/check-wave-lane-ownership.py` + 根级 `docker-compose.yml` ⇒ **G2 不可写** ⇒ **转派** |
 | **⑦ 对业务正确性/安全性/数据一致性/可靠性的影响** | — | **正向**：权威读从「返回不了」变成「12 道校验逐条对齐」⇒ 事实校验面**闭合** | 🔴 **安全性方向 = RAG 更严**（**没有**一个未鉴权的 HTTP 端点 ⇒ 少一个越权面）⇒ **不是安全洞**；可靠性：调用方拿不到权威事实 ⇒ **受影响链路暂不可用** |

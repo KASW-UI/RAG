@@ -1104,7 +1104,7 @@ for { select { case <-ticker.C: …SendPending(…) } }
 |---|---|---|
 | `DRIFT-ARTICLE-RPC-006` 间隔兜底没接上 | ❌ OBSERVABLE DIFFERENCE（LOW） | ✅ 已修 + 真容器 + 变异验证 |
 | `DRIFT-ARTICLE-RPC-008` 首次触发时机 | ❌ OBSERVABLE DIFFERENCE（LOW） | ✅ 已修 + 真容器 + 变异验证 |
-| `DRIFT-ARTICLE-RPC-005` schema 门禁时机 | ❌ OBSERVABLE DIFFERENCE（MEDIUM） | 🔴 **OPEN**（需把门禁挪到 gRPC server 监听**之前**，非本轮范围） |
+| `DRIFT-ARTICLE-RPC-005` schema 门禁时机 | ❌ OBSERVABLE DIFFERENCE（MEDIUM） | 🔴 **OPEN**（需把门禁挪到 gRPC server 监听**之前**，非本轮范围）〔**本行为历史快照；现状见 §7 条目 = ✅ 已修（2026-10-24 第四轮 · FIX-07）**〕 |
 | `DRIFT-ARTICLE-RPC-007` 每通道独立 Kafka brokers | ❌ OBSERVABLE DIFFERENCE（LOW） | 🔴 **OPEN**（配置面误导，今天无行为差异）〔**本行为历史快照；现状见第九轮 + §7 条目**〕 |
 | 全部 `U-*` | 🔴 OPEN | 🔴 **OPEN** |
 | **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |

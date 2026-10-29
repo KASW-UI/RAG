@@ -26,7 +26,7 @@
 | 证据强度 | ✅✅✅ **Kafka 端到端活体对拍**（2026-10-23 23:4x，真 Kafka + 真 Redis + 真 PG，两侧同批消息比最终态，见 §四·三）· ✅✅✅ **Kafka 畸形消息活体对拍**（2026-10-24，五个用例，见 §四·五·二）· ✅✅ **gRPC 双向跨语言对拍**（2026-10-24，Java 客户端 + **Go 客户端**各打两端，见 §四·五·一）· ✅ 真启动 + 真 PG 16 容器 |
 | DDL 对拍 | ✅ **GORM AutoMigrate 产物 vs Flyway 产物逐列一致**（本轮实测，见 §四·二） |
 | ⚠️ 仍未覆盖 | ⓿ **「Kafka 写入 → task-api 读到」这条跨域闭环**未做活体对拍 —— 但两侧的读写 Redis key **本来就不一致**（Go 侧也读不到自己写的缓存），⇒ **不是 RAG 的缺陷**，见 §五 第 7 条；① ⚠️ **goka 的「表 topic」config（`cleanup.policy` / `retention.ms`）未做逐项对照** —— 但已实测「compact 不按时间删」且 Go 侧**不创建** topic（§四·七）⇒ 两侧**都不管** topic 生命周期 ⇒ 一致；② ⚠️ **yaml 里查出了三类「死配置」**（`spring.mybatis-plus.*` / `otel.*` / `spring.jpa.*`，§四·九）—— **零行为影响**（三处逐一核过），但 `otel.*` **与 Go 存在观测差异**（Go 真导出 span，Java 侧 no-op）⇒ **全部是跨域共性**（8~20 个模块同款），本域不单方面修 |
-| 测试 | **134 tests / 0 failures / 0 errors / 0 skipped**（**2026-10-27 G2 第八轮实测口径 = `mvn test`** —— 🆕 **第八轮 = Redis 断连活体探针**（新增 `TaskRedisDisconnectFastRejectGateTest` **2 条**）⇒ ⇒ **119 + 2 = 121**（**第四轮的原值 119 保留在下方那一段**）—— **第四轮实测口径 = `mvn test`** —— 🆕 **第四轮 = FB-03 守门升级**（合并 G4 共享层后按 §5.3e 升级）⇒ `TaskProtectionChainWiringTest` **新增 2 条**（① 链的层名列表 == `[recover, breaker, shedding]` ＋ **实际链 == 配置推出的构成** ② 关掉降载 ⇒ 层名列表变成 `[recover, breaker]`）⇒ ⇒ **117 + 2 = 119**（第四轮）⇒ ⇒ **119 + 2 = 121**（第八轮）；⚠️ **第三轮的原值 117 保留在下方订正行**（原口径 = `mvn test`）—— 🆕 第三轮 = 本轮 Redis **连接池**落码 ⇒ 守门 ⑤⑥ 新增 2 条 ⇒ **115 + 2 = 117**；⚠️ 旧行那条「第二轮订正链」把 **111** 标成了 `mvn test` 口径 ⇒ **标签错了**（111 实为「13 个类、不含守门类」的条数）⇒ **已由第三轮实测订正** ⇒ 见下条）；其中 **17 条真 PG**（`TaskProgressUpsertParityTest` 15 + `TaskRpcSlowThresholdGateTest` 2 · Testcontainers）、**9 条真 Redis**、**4 条真 gRPC server**（`TaskGrpcInterceptorWiringTest` 2 + `TaskRpcSlowThresholdGateTest` 2）；另 2 条**装配层**（mock `ServerBuilder`）+ **4 条产物层**（解包真 fat jar ⇒ 只在 `mvn verify` 阶段跑，`mvn test` 阶段 jar 还没生成）；task-api 另 **97** 条，合计 **218**）<br>🆕 **2026-10-27 订正**：原写「106 / 真 PG 15 / 真 gRPC 2 / 合计 196」⇒ **过期 8 条** —— `align/global` 的 **L12 / L13 / L15** 三个 lane 随 `4f839f9` 合入主干时给 task-rpc 加了 **3 个守门类 / 8 条用例**（`TaskProtectionChainWiringTest` 2 + `TaskRpcFatJarArtifactGateTest` 4 + `TaskRpcSlowThresholdGateTest` 2）⇒ **106 + 8 = 114**（那是 **`mvn verify`** 口径）<br>🆕 **2026-10-27 阶段 2 再订正（口径对齐）**：本行的数字**必须与 `check-ledger-selfcheck.py` 第 3 层的实测口径一致** —— 该层读的是 `target/surefire-reports` ⇒ 即 **`mvn test` 口径** ⇒ **`mvn verify` 才有的 4 条产物层（`TaskRpcFatJarArtifactGateTest`）不在其中** ⇒ 本行 **114 ⇒ 111**（阶段 2 给 `TaskProtectionChainWiringTest` 补了 1 条降载层断言：2 ⇒ 3）⇒ **`mvn verify` 口径 = 111 + 4 = 115**（`mvn test` 阶段 jar 还没生成）<br>⇒ 证据：**surefire XML 实测 14 个测试类 / 115 条 / 0 failures / 0 errors / 0 skipped**（2026-10-27 **G2 第二轮** · 三域六模块全量 `mvn test`：task-api **97** / task-rpc **115** / message-rpc **84** / message-api **98** / like-rpc **111** / like-api **89** ⇒ **BUILD SUCCESS**，0 failures / 0 errors / 0 skipped）<br>🆕 **2026-10-27 G2 第二轮订正（口径对齐）**：阶段 2 写 **111**（13 个测试类）⇒ 本轮新增 `TaskRedisCommandTimeoutGateTest` **4 条**（Redis 命令超时 3s ＋ 连接超时 5s · 见 [DRIFT-TASK-RPC-007](#🔴-drift-task-rpc-007--redis-命令超时未配--落-lettuce-默认-60s--断连时命令挂-60sgo-是-17s-快速失败)）⇒ **111 + 4 = 115**（14 个测试类）⇒ 同族 like-rpc 同步 **108 + 4 = 111**<br>⚠️ **取数口径的坑（本轮实测踩到）**：surefire 的 `-- in <类名>` 行里，**测试类的 `@DisplayName` 含中文时打印的是 DisplayName 而非 FQCN** ⇒ 用 `grep 'in com\.rag\.task\.'` 求和会**漏掉**中文 DisplayName 的那几条 ⇒ 明细求和（213）与 reactor 汇总（226）不符 ⇒ **必须按 reactor 汇总行为准**，或用「按模块段切分后逐类求和」交叉验 ⇒ 本轮两口径已对齐为 like-rpc **111** / task-rpc **115** |<br>🆕 **2026-10-27 第十七轮订正（产物层条数 + 口径）**：上面原写「**4 条产物层**」⇒ ⇒ **本轮 +1**（新增 `TaskRpcFatJarArtifactGateTest.fatJarMustCarrySharedLayerOrderingBridge`）⇒ ⇒ **5 条** ⇒ ⇒ ⚠️ **口径**：这 5 条**只在 `mvn verify` 阶段跑**（task-rpc pom 里第二个 surefire execution，绑 `verify`）⇒ ⇒ **本行的 121 仍是 `mvn test` 口径**（`check-ledger-selfcheck.py` 第 3 层读 `target/surefire-reports` ⇒ 那就是 `test` 阶段）⇒ ⇒ **`verify` 口径 = 121 + 5 = 126**（实测：`mvn -o -B -DargLine=-Xmx2g -am -pl service/task/task-rpc verify`⇒ EXIT=0 · BUILD SUCCESS ⇒ 121 + 5）⇒ ⇒ ⇒ **「4 条」原值保留不改写**，以本注记为准。⇒ ⇒ ⚠️ **同一个 `mvn test` 跑法会踩的坑**：`-Dtest=...` 会**覆盖 surefire 的 includes**⇒ ⇒ `*IT` 被拉到 **`test` 阶段**跑 ⇒ ⇒ 而 jar 还没生成 ⇒ ⇒ **5 条全红**（消息 = 「`target` 下没有 `*.jar` 产物」）⇒ ⇒ **那是调用姿势错，不是产品缺陷**⇒ ⇒ 正确调用 = `mvn verify` 且**不带** `-Dtest`。<br>🆕 **2026-10-27 第十八轮订正（池 `max-wait` 落码 ⇒ 守门 +1）**：本行 **121 ⇒ 122** ⇒ 新增 `TaskRedisCommandTimeoutGateTest.redisPoolMaxWaitMatchesGoPoolTimeout` **1 条**（Redis 池耗尽时的等待上限 = Go 的 `PoolTimeout` **4s**；不配 ⇒ commons-pool2 落 `DEFAULT_MAX_WAIT_MILLIS = -1` ⇒ 消费点走 `takeFirst()` ⇒ **永久阻塞** ⇒ **比 Go 更糟**）⇒ ⇒ ⚠️ **口径不变**：本行仍是 **`mvn test` 口径**（`check-ledger-selfcheck.py` 第 3 层读 `target/surefire-reports`）⇒ ⇒ **`verify` 口径 = 122 + 5 = 127** ⇒ ⇒ ⚠️ **上一条注记里的「121」与「126」已过期**（那是第十七轮的数）⇒ ⇒ **原值保留不改写**，以本注记为准。⇒ ⇒ 📌 连带：task-api 本轮实测 **102** 条 ⇒ ⇒ 两模块合计 **224**（上一条注记里的「97 / 218」已过期）。<br>🆕 **2026-10-27 第二十轮订正（Redis 池维度**活体对拍**探针 ⇒ +3 条）**：本行 **122 ⇒ 125** ⇒ 新增 `TaskRedisPoolExhaustionP99GateTest` **3 条**（真 Redis 容器 + 真 Spring 上下文 + 真装配 `LettuceConnectionFactory` ⇒ 三条断言分别是「普通命令绕池」「pipeline 走池」「池耗尽等连接上限」）⇒ ⇒ ⚠️ **口径不变**：本行仍是 **`mvn test` 口径**（`check-ledger-selfcheck.py` 第 3 层读 `target/surefire-reports`）⇒ ⇒ **`verify` 口径 = 125 + 5 = 130** ⇒ ⇒ ⚠️ **上一条注记里的「122」与「127」已过期**（那是第十八轮的数）⇒ ⇒ **原值保留不改写**，以本注记为准。⇒ ⇒ 📌 连带：task-api 本轮实测 **102** 条（未变）⇒ ⇒ 两模块合计 **227**（上一条注记里的「224」已过期）⇒ ⇒ 🆕 **9 模块口径 = 1007**（域侧 8 模块 **677** + 共享层 **330** · 本轮 9 模块 `clean test` **实测** · BUILD SUCCESS · 12:01 min · **逐模块双口径相等**）。<br>🆕 **2026-10-28 第二十一轮订正（Testcontainers 宿主口 · 层 2 落码 ⇒ 守门 +4 条）**：本行 **125 ⇒ 129** ⇒ 新增 `TaskPostgresFixedHostPortGateTest` **3 条**（真容器 · 钉「映射口 == 固定口」）＋ `TaskContainerFixedHostPortSegmentGateTest` **1 条**（源扫 · 钉「每个容器类都绑了本域段内的独占口」）⇒ ⇒ ⚠️ **口径不变**：仍是 **`mvn test` 口径**（`check-ledger-selfcheck.py` 第 3 层读 `target/surefire-reports`）⇒ ⇒ **`verify` 口径 = 129 + 5 = 134** ⇒ ⇒ ⚠️ **上一条注记里的「125 / 130」已过期** ⇒ ⇒ **原值保留不改写**，以本注记为准。⇒ ⇒ 📌 **9 模块口径尚未重测**（本轮只跑了 3 个 rpc 模块 ＋ 依赖）⇒ ⇒ **不做推算** ⇒ ⇒ 权威值仍等「四 lane 全合后的一次回归」。<br>🆕 **2026-10-28 第二十八轮订正（波末收口 9 模块 `clean test` 实测 ⇒ task-rpc 129 ⇒ 134）**：本行 **129 ⇒ 134** ⇒ 证据 = **r33**（起跑 HEAD `3423390` · 12:33:37 → 12:44:35 · 10 min 58 s）**9 模块 `clean test`**（`mvn -o -B -DargLine=-Xmx2g -am -pl <9 个目标模块> clean test` ⇒ BUILD SUCCESS · MVN_EXIT=0）⇒ ⇒ **三口径逐字相等**：① 日志**逐类用例行**求和 = 134 ② 日志**模块级汇总行** = 134 ③ surefire XML `testsuite` 求和 = 134 ⇒ ⇒ ⚠️ **旧注记里的「`verify` 口径 = 129 + 5 = 134」已过期**：本轮 `clean test` 里 `TaskRpcFatJarArtifactGateTest` **5 条真跑了**（日志逐类行可见）⇒ ⇒ **134 本身就是 `mvn test` 口径** ⇒ ⇒ 📌 连带：task-api 本轮实测 **102**（未变）⇒ ⇒ 两模块合计 **236**（上一条注记里的「227」已过期）⇒ ⇒ 📌 **9 模块口径 = 1034**（域侧 8 模块 **701** ＋ 共享层 **333** · r33 `clean test` **实测** · 逐模块三口径相等）⇒ ⇒ ⚠️ 上一条注记里的「**9 模块口径尚未重测 ⇒ 不做推算**」**已作废**（本轮已重测）⇒ ⇒ **原值保留不改写**，以本注记为准。
+| 测试 | **137 tests / 0 failures / 0 errors / 0 skipped**（**2026-10-29 W-B lane 实测口径 = `mvn test`** —— 🆕 **第八轮 = Redis 断连活体探针**（新增 `TaskRedisDisconnectFastRejectGateTest` **2 条**）⇒ ⇒ **119 + 2 = 121**（**第四轮的原值 119 保留在下方那一段**）—— **第四轮实测口径 = `mvn test`** —— 🆕 **第四轮 = FB-03 守门升级**（合并 G4 共享层后按 §5.3e 升级）⇒ `TaskProtectionChainWiringTest` **新增 2 条**（① 链的层名列表 == `[recover, breaker, shedding]` ＋ **实际链 == 配置推出的构成** ② 关掉降载 ⇒ 层名列表变成 `[recover, breaker]`）⇒ ⇒ **117 + 2 = 119**（第四轮）⇒ ⇒ **119 + 2 = 121**（第八轮）；⚠️ **第三轮的原值 117 保留在下方订正行**（原口径 = `mvn test`）—— 🆕 第三轮 = 本轮 Redis **连接池**落码 ⇒ 守门 ⑤⑥ 新增 2 条 ⇒ **115 + 2 = 117**；⚠️ 旧行那条「第二轮订正链」把 **111** 标成了 `mvn test` 口径 ⇒ **标签错了**（111 实为「13 个类、不含守门类」的条数）⇒ **已由第三轮实测订正** ⇒ 见下条）；其中 **17 条真 PG**（`TaskProgressUpsertParityTest` 15 + `TaskRpcSlowThresholdGateTest` 2 · Testcontainers）、**9 条真 Redis**、**4 条真 gRPC server**（`TaskGrpcInterceptorWiringTest` 2 + `TaskRpcSlowThresholdGateTest` 2）；另 2 条**装配层**（mock `ServerBuilder`）+ **4 条产物层**（解包真 fat jar ⇒ 只在 `mvn verify` 阶段跑，`mvn test` 阶段 jar 还没生成）；task-api 另 **97** 条，合计 **218**）<br>🆕 **2026-10-27 订正**：原写「106 / 真 PG 15 / 真 gRPC 2 / 合计 196」⇒ **过期 8 条** —— `align/global` 的 **L12 / L13 / L15** 三个 lane 随 `4f839f9` 合入主干时给 task-rpc 加了 **3 个守门类 / 8 条用例**（`TaskProtectionChainWiringTest` 2 + `TaskRpcFatJarArtifactGateTest` 4 + `TaskRpcSlowThresholdGateTest` 2）⇒ **106 + 8 = 114**（那是 **`mvn verify`** 口径）<br>🆕 **2026-10-27 阶段 2 再订正（口径对齐）**：本行的数字**必须与 `check-ledger-selfcheck.py` 第 3 层的实测口径一致** —— 该层读的是 `target/surefire-reports` ⇒ 即 **`mvn test` 口径** ⇒ **`mvn verify` 才有的 4 条产物层（`TaskRpcFatJarArtifactGateTest`）不在其中** ⇒ 本行 **114 ⇒ 111**（阶段 2 给 `TaskProtectionChainWiringTest` 补了 1 条降载层断言：2 ⇒ 3）⇒ **`mvn verify` 口径 = 111 + 4 = 115**（`mvn test` 阶段 jar 还没生成）<br>⇒ 证据：**surefire XML 实测 14 个测试类 / 115 条 / 0 failures / 0 errors / 0 skipped**（2026-10-27 **G2 第二轮** · 三域六模块全量 `mvn test`：task-api **97** / task-rpc **115** / message-rpc **84** / message-api **98** / like-rpc **111** / like-api **89** ⇒ **BUILD SUCCESS**，0 failures / 0 errors / 0 skipped）<br>🆕 **2026-10-27 G2 第二轮订正（口径对齐）**：阶段 2 写 **111**（13 个测试类）⇒ 本轮新增 `TaskRedisCommandTimeoutGateTest` **4 条**（Redis 命令超时 3s ＋ 连接超时 5s · 见 [DRIFT-TASK-RPC-007](#✅-drift-task-rpc-007--redis-命令超时未配--落-lettuce-默认-60s--断连时命令挂-60sgo-是-17s-快速失败)）⇒ **111 + 4 = 115**（14 个测试类）⇒ 同族 like-rpc 同步 **108 + 4 = 111**<br>⚠️ **取数口径的坑（本轮实测踩到）**：surefire 的 `-- in <类名>` 行里，**测试类的 `@DisplayName` 含中文时打印的是 DisplayName 而非 FQCN** ⇒ 用 `grep 'in com\.rag\.task\.'` 求和会**漏掉**中文 DisplayName 的那几条 ⇒ 明细求和（213）与 reactor 汇总（226）不符 ⇒ **必须按 reactor 汇总行为准**，或用「按模块段切分后逐类求和」交叉验 ⇒ 本轮两口径已对齐为 like-rpc **111** / task-rpc **115** |<br>🆕 **2026-10-27 第十七轮订正（产物层条数 + 口径）**：上面原写「**4 条产物层**」⇒ ⇒ **本轮 +1**（新增 `TaskRpcFatJarArtifactGateTest.fatJarMustCarrySharedLayerOrderingBridge`）⇒ ⇒ **5 条** ⇒ ⇒ ⚠️ **口径**：这 5 条**只在 `mvn verify` 阶段跑**（task-rpc pom 里第二个 surefire execution，绑 `verify`）⇒ ⇒ **本行的 121 仍是 `mvn test` 口径**（`check-ledger-selfcheck.py` 第 3 层读 `target/surefire-reports` ⇒ 那就是 `test` 阶段）⇒ ⇒ **`verify` 口径 = 121 + 5 = 126**（实测：`mvn -o -B -DargLine=-Xmx2g -am -pl service/task/task-rpc verify`⇒ EXIT=0 · BUILD SUCCESS ⇒ 121 + 5）⇒ ⇒ ⇒ **「4 条」原值保留不改写**，以本注记为准。⇒ ⇒ ⚠️ **同一个 `mvn test` 跑法会踩的坑**：`-Dtest=...` 会**覆盖 surefire 的 includes**⇒ ⇒ `*IT` 被拉到 **`test` 阶段**跑 ⇒ ⇒ 而 jar 还没生成 ⇒ ⇒ **5 条全红**（消息 = 「`target` 下没有 `*.jar` 产物」）⇒ ⇒ **那是调用姿势错，不是产品缺陷**⇒ ⇒ 正确调用 = `mvn verify` 且**不带** `-Dtest`。<br>🆕 **2026-10-27 第十八轮订正（池 `max-wait` 落码 ⇒ 守门 +1）**：本行 **121 ⇒ 122** ⇒ 新增 `TaskRedisCommandTimeoutGateTest.redisPoolMaxWaitMatchesGoPoolTimeout` **1 条**（Redis 池耗尽时的等待上限 = Go 的 `PoolTimeout` **4s**；不配 ⇒ commons-pool2 落 `DEFAULT_MAX_WAIT_MILLIS = -1` ⇒ 消费点走 `takeFirst()` ⇒ **永久阻塞** ⇒ **比 Go 更糟**）⇒ ⇒ ⚠️ **口径不变**：本行仍是 **`mvn test` 口径**（`check-ledger-selfcheck.py` 第 3 层读 `target/surefire-reports`）⇒ ⇒ **`verify` 口径 = 122 + 5 = 127** ⇒ ⇒ ⚠️ **上一条注记里的「121」与「126」已过期**（那是第十七轮的数）⇒ ⇒ **原值保留不改写**，以本注记为准。⇒ ⇒ 📌 连带：task-api 本轮实测 **102** 条 ⇒ ⇒ 两模块合计 **224**（上一条注记里的「97 / 218」已过期）。<br>🆕 **2026-10-27 第二十轮订正（Redis 池维度**活体对拍**探针 ⇒ +3 条）**：本行 **122 ⇒ 125** ⇒ 新增 `TaskRedisPoolExhaustionP99GateTest` **3 条**（真 Redis 容器 + 真 Spring 上下文 + 真装配 `LettuceConnectionFactory` ⇒ 三条断言分别是「普通命令绕池」「pipeline 走池」「池耗尽等连接上限」）⇒ ⇒ ⚠️ **口径不变**：本行仍是 **`mvn test` 口径**（`check-ledger-selfcheck.py` 第 3 层读 `target/surefire-reports`）⇒ ⇒ **`verify` 口径 = 125 + 5 = 130** ⇒ ⇒ ⚠️ **上一条注记里的「122」与「127」已过期**（那是第十八轮的数）⇒ ⇒ **原值保留不改写**，以本注记为准。⇒ ⇒ 📌 连带：task-api 本轮实测 **102** 条（未变）⇒ ⇒ 两模块合计 **227**（上一条注记里的「224」已过期）⇒ ⇒ 🆕 **9 模块口径 = 1007**（域侧 8 模块 **677** + 共享层 **330** · 本轮 9 模块 `clean test` **实测** · BUILD SUCCESS · 12:01 min · **逐模块双口径相等**）。<br>🆕 **2026-10-28 第二十一轮订正（Testcontainers 宿主口 · 层 2 落码 ⇒ 守门 +4 条）**：本行 **125 ⇒ 129** ⇒ 新增 `TaskPostgresFixedHostPortGateTest` **3 条**（真容器 · 钉「映射口 == 固定口」）＋ `TaskContainerFixedHostPortSegmentGateTest` **1 条**（源扫 · 钉「每个容器类都绑了本域段内的独占口」）⇒ ⇒ ⚠️ **口径不变**：仍是 **`mvn test` 口径**（`check-ledger-selfcheck.py` 第 3 层读 `target/surefire-reports`）⇒ ⇒ **`verify` 口径 = 129 + 5 = 134** ⇒ ⇒ ⚠️ **上一条注记里的「125 / 130」已过期** ⇒ ⇒ **原值保留不改写**，以本注记为准。⇒ ⇒ 📌 **9 模块口径尚未重测**（本轮只跑了 3 个 rpc 模块 ＋ 依赖）⇒ ⇒ **不做推算** ⇒ ⇒ 权威值仍等「四 lane 全合后的一次回归」。<br>🆕 **2026-10-28 第二十八轮订正（波末收口 9 模块 `clean test` 实测 ⇒ task-rpc 129 ⇒ 134）**：本行 **129 ⇒ 134** ⇒ 证据 = **r33**（起跑 HEAD `3423390` · 12:33:37 → 12:44:35 · 10 min 58 s）**9 模块 `clean test`**（`mvn -o -B -DargLine=-Xmx2g -am -pl <9 个目标模块> clean test` ⇒ BUILD SUCCESS · MVN_EXIT=0）⇒ ⇒ **三口径逐字相等**：① 日志**逐类用例行**求和 = 134 ② 日志**模块级汇总行** = 134 ③ surefire XML `testsuite` 求和 = 134 ⇒ ⇒ ⚠️ **旧注记里的「`verify` 口径 = 129 + 5 = 134」已过期**：本轮 `clean test` 里 `TaskRpcFatJarArtifactGateTest` **5 条真跑了**（日志逐类行可见）⇒ ⇒ **134 本身就是 `mvn test` 口径** ⇒ ⇒ 📌 连带：task-api 本轮实测 **102**（未变）⇒ ⇒ 两模块合计 **236**（上一条注记里的「227」已过期）⇒ ⇒ 📌 **9 模块口径 = 1034**（域侧 8 模块 **701** ＋ 共享层 **333** · r33 `clean test` **实测** · 逐模块三口径相等）⇒ ⇒ ⚠️ 上一条注记里的「**9 模块口径尚未重测 ⇒ 不做推算**」**已作废**（本轮已重测）⇒ ⇒ **原值保留不改写**，以本注记为准。 <br>🆕 **2026-10-29 对齐（W-B lane · 台账对齐）—— 本行的权威值 = **task-rpc 137** · **task-api 135** · **合计 272**（`mvn test` 口径）**。**原值保留不改写**：本行原写的 **134** 是 **2026-10-28 第二十八轮 r33 的 9 模块 `clean test` 快照**（⇒ 当时 task-rpc = 134 / task-api = 102）⇒ **已过期**。**本轮实测**：`mvn -o -B -DargLine=-Xmx2g -pl service/task/task-api,service/task/task-rpc test` ⇒ **BUILD SUCCESS** · **task-rpc = 137**（20 个测试类）· **task-api = 135**（10 个测试类）· **0 failures / 0 errors / 0 skipped** ⇒ **两个口径逐字相等**（① maven 模块级汇总行 ② surefire XML `testsuite` 求和）⇒ **task-rpc 的 137 与本文件「G2 收工轮（第二轮）」的域级回归独立复现一致**（两次独立 `clean test`）。⚠️ **task-api 由 102 ⇒ 135 的增量 = 33 条** ⇒ 来自 **2026-10-29 R2 新增的 `TaskApiFailurePathMatrixTest`**（1 端点 × 6 失败维度）⇒ 证据见 [`api.md:30`](api.md)。⇒ **本行历史注记里的「97 / 102 / 115 / 117 / 119 / 121 / 122 / 125 / 129 / 134」全部保留在正文**（各带自己的日期与口径）⇒ **读本行时以开头的 137 为准**。
 | 🆕 **2026-10-27 G2 第三轮订正（口径 · 本轮实测）** | 🔴 **旧行那条「第二轮订正链」把 `mvn test` 与 `mvn verify` 两个口径搞混了** ⇒ **数值本身没错、标签错了** ⇒ 逐条订正（**原值保留不改写**）：<br>**① 旧链写「`mvn test` = 111 / `mvn verify` = 115」** ⇒ 实测 **111 ＝「13 个测试类（不含 `TaskRedisCommandTimeoutGateTest`）」的条数**，而 **115 ＝「14 个类全跑」** ⇒ ⇒ **两个数都是 `mvn test` 口径**（`mvn test` 阶段 14 个类**全跑**）；<br>**② 旧链把那 4 条差归给了 `TaskRpcFatJarArtifactGateTest`（产物层）** ⇒ **实测不成立**：该 IT 类绑在 surefire 的**第二个 execution**（`task-rpc/pom.xml` 的 `artifact-gate`：`phase=verify` ＋ `includes=**/*IT.java`）⇒ **`mvn test` 阶段它根本不跑**，报告目录里**也没有它的 XML**（本轮目录实测 = **14 个类，无 IT 类**）⇒ ⇒ 那 4 条差**就是守门类自己的 4 条**；<br>**③ 订正后的口径**：`mvn test` = **115**（第二轮）⇒ **117**（第三轮，本轮 +2 条池断言 ⑤⑥）· `mvn verify` = `mvn test` **+ 4**（产物层 IT，`verify` 阶段才跑）= **119 / 121**（⚠️ **121 是推算，本轮未跑 `mvn verify`**）；<br>**④ 本轮实测**（`mvn -o -pl <8 模块> test` · BUILD SUCCESS · 6:06 min）：`message-common` 21 · `message-rpc` 84 · `message-api` 98 · `like-common` 18 · `like-api` 89 · `like-rpc` 111 · `task-api` 97 · `task-rpc` **117** ⇒ ⇒ **六模块合计 = 596**（上一轮同口径 594 ⇒ **+2** = 本轮新增的池断言 ⑤⑥）· **八模块合计 = 635** · **0 failures / 0 errors / 0 skipped**；<br>**⑤ 双口径交叉验算**：maven 模块汇总行 vs surefire `TEST-*.xml`（按 mtime 切本轮）⇒ **逐模块相等**（635 / 596 皆相等）✔ ⇒ ⚠️ like-rpc 目录里那 **1 个陈旧 XML**（`LikeRpcServerSpanCurrentProbeTest` · 源码已删的探针类）被 mtime 切分正确剔除 ⇒ **未污染求和**（旧坑仍在 ⇒ 判定式继续有效） |
 
 ### 〇·一、本组件的守门测试清单（2026-10-24 复核补登）
@@ -95,7 +95,10 @@
 
 ## 一、已修（6 条）
 
-### 🔴 DRIFT-TASK-RPC-001 · `TaskCountStore` 内存单例 ⇒ 两个 goka group 串号 + 重启归零
+### ✅ DRIFT-TASK-RPC-001 · `TaskCountStore` 内存单例 ⇒ 两个 goka group 串号 + 重启归零
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— **原状态标记 `🔴`（台账留痕，保留不改写）** ⇒ **现状态：✅ 已修**（与本文件 §〇 结论表「已修 N 条 / 未修 0 条语义漂移」收敛到同一状态）。
+> **依据**：service/task/task-rpc/src/main/java/com/rag/task/task/rpc/mq/TaskCountStore.java:42-43`（按 **group id** 命名空间隔离） ＋ `:59`（改用 Redis `INCR` · 原子 · 跨重启 · 跨实例共享） ＋ 守门 `TaskCountStoreRetentionContractTest`（**真 Redis** · 本轮 surefire 实测 **t=4 f=0 e=0 s=0**） ⇒ **L1 源码 + L2 守门**
+
 
 **性质**：SEMANTIC MISMATCH（行为层，两处）
 
@@ -148,7 +151,10 @@
 
 ---
 
-### 🔴 DRIFT-TASK-RPC-002 · `task.definitions` 的四个 TTL 键是**死配置**
+### ✅ DRIFT-TASK-RPC-002 · `task.definitions` 的四个 TTL 键是**死配置**
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— **原状态标记 `🔴`（台账留痕，保留不改写）** ⇒ **现状态：✅ 已修**（与本文件 §〇 结论表「已修 N 条 / 未修 0 条语义漂移」收敛到同一状态）。
+> **依据**：守门 `TaskSinkPropertiesBindingTest`（本轮 surefire 实测 **t=3 f=0 e=0 s=0** · 加载**真实** `application.yml`） ＋ `TaskConfigKeyBindingContractTest`（本轮 surefire 实测 **t=5 f=0 e=0 s=0** · 含「yaml 键不得静默失效」＋「孤儿键扫描器」的阳性对照） ⇒ **L2 配置层守门**
+
 
 **性质**：配置面失效（行为当前正确，但「配了不管事」）
 
@@ -192,7 +198,10 @@ Tests run: 3, Failures: 1
 
 ---
 
-### 🔴 DRIFT-TASK-RPC-003 · 15 条真 PG 用例静默全跳（证据缺失）
+### ✅ DRIFT-TASK-RPC-003 · 15 条真 PG 用例静默全跳（证据缺失）
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— **原状态标记 `🔴`（台账留痕，保留不改写）** ⇒ **现状态：✅ 已修**（与本文件 §〇 结论表「已修 N 条 / 未修 0 条语义漂移」收敛到同一状态）。
+> **依据**：`service/task/task-rpc/pom.xml:336-341` surefire 注入 `TESTCONTAINERS_RYUK_DISABLED=true` ＋ `TaskProgressUpsertParityTest.java:71` 注释明写「刻意**不加** `@EnabledIfDockerAvailable`（2026-10-23 移除）」 ⇒ **本轮 surefire 实测该类 t=15 f=0 e=0 s=0（skipped=0 ⇒ 15 条真 PG 真跑了）** ⇒ **L3 真 PG 活体**（坑位登记见 [`docs/Pitfalls/task/rpc.md`](../../Pitfalls/task/rpc.md) 的 `PIT-TASK-01`）
+
 
 **性质**：不是行为漂移，是**证据链断裂** —— 本域唯一能证明「Flyway 真跑 + MyBatis-Plus 真产出
 SqlSessionFactory + `ON CONFLICT`/`GREATEST`/`COALESCE` 真按 PG 语义执行」的 15 条用例，
@@ -209,7 +218,10 @@ SqlSessionFactory + `ON CONFLICT`/`GREATEST`/`COALESCE` 真按 PG 语义执行�
 
 ---
 
-### 🔴 DRIFT-TASK-RPC-004 · `RedisPipelines` 把 Go 的 pipeline 当成 MULTI/EXEC 事务 ⇒ **整条消息消费链路是死的**
+### ✅ DRIFT-TASK-RPC-004 · `RedisPipelines` 把 Go 的 pipeline 当成 MULTI/EXEC 事务 ⇒ **整条消息消费链路是死的**
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— **原状态标记 `🔴`（台账留痕，保留不改写）** ⇒ **现状态：✅ 已修**（与本文件 §〇 结论表「已修 N 条 / 未修 0 条语义漂移」收敛到同一状态）。
+> **依据**：`service/task/task-rpc/src/main/java/com/rag/task/task/rpc/service/RedisPipelines.java:98`（「这里**绝不能**再调 `operations.exec()`」）＋ 守门 `RedisPipelinesRealRedisGateTest`（**真 Redis** · 本轮 surefire 实测 **t=9 f=0 e=0 s=0**）⇒ **L1 源码 + L3 真 Redis 活体**
+
 
 **性质**：**行为漂移 + 静默失效**。不是「差一点」，是 RAG 侧的 task 消息处理链路**根本不工作**。
 
@@ -304,7 +316,10 @@ Go 侧同一批消息能正常落库，RAG 侧一条不落。
 
 ---
 
-### 🔴 DRIFT-TASK-RPC-005 · `pipelineHSet` 吞掉 Redis 错误，而 Go 是**向上抛**（终态分叉）
+### ✅ DRIFT-TASK-RPC-005 · `pipelineHSet` 吞掉 Redis 错误，而 Go 是**向上抛**（终态分叉）
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— **原状态标记 `🔴`（台账留痕，保留不改写）** ⇒ **现状态：✅ 已修**（与本文件 §〇 结论表「已修 N 条 / 未修 0 条语义漂移」收敛到同一状态）。
+> **依据**：与 -004 同源的守门 `RedisPipelinesRealRedisGateTest`（**真 Redis** · 本轮 surefire 实测 **t=9 f=0 e=0 s=0** · 断言「错误**向上抛**不吞」）⇒ **L3 真 Redis 活体**
+
 
 **性质**：行为漂移。与 005 同源（都在 Redis pipeline 错误处理上），但**方向相反**，单独开单。
 
@@ -328,7 +343,10 @@ Go 侧同一批消息能正常落库，RAG 侧一条不落。
 
 ⚠️ 这条**不是**「统一风格」：用错吞/抛就会分叉，所以两个 helper 的契约写进了 javadoc。
 
-### 🔴 DRIFT-TASK-RPC-006 · per-listener 的 offset-reset 写成了**连字符** ⇒ Kafka 直接忽略 ⇒ **earliest 从未生效**
+### ✅ DRIFT-TASK-RPC-006 · per-listener 的 offset-reset 写成了**连字符** ⇒ Kafka 直接忽略 ⇒ **earliest 从未生效**
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— **原状态标记 `🔴`（台账留痕，保留不改写）** ⇒ **现状态：✅ 已修**（与本文件 §〇 结论表「已修 N 条 / 未修 0 条语义漂移」收敛到同一状态）。
+> **依据**：三个 consumer 的 `properties` 全部改为**点分**（`TaskUserCountConsumer.java:80` / `TaskArticleCountConsumer.java:80` / `TaskRawDiagnosticConsumer.java:54`）＋ 守门 `TaskKafkaOffsetResetContractTest`（本轮 surefire 实测 **t=5 f=0 e=0 s=0** · 含阳性对照与「键名必须属 `ConsumerConfig.configNames()`」的通用断言）⇒ **L2 守门**
+
 
 **性质**：SEMANTIC MISMATCH（行为层，且**上一版台账记的是「配置意图一致」** ⇒ 结论本身就是错的）
 
@@ -382,7 +400,10 @@ goka 三处 `=earliest`、kq 三处 `=latest`。
    ✅ **变异测试已做**：把任一 listener 改回连字符 ⇒ **2 条变红**（报的正是「不是 Kafka 的合法配置名」）⇒ 非假绿。
 2. **运行证据**：`run-task-offset-oldest.sh` 的 A2/A4 —— 修复前 FAIL（`<absent>`），修复后 PASS（`5`）⇒ 见 §四·八。
 
-### 🔴 DRIFT-TASK-RPC-007 · Redis 命令超时**未配** ⇒ 落 Lettuce 默认 **60s** ⇒ 断连时命令挂 60s（Go 是 1.7s 快速失败）
+### ✅ DRIFT-TASK-RPC-007 · Redis 命令超时**未配** ⇒ 落 Lettuce 默认 **60s** ⇒ 断连时命令挂 60s（Go 是 1.7s 快速失败）
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— **原状态标记 `🔴`（台账留痕，保留不改写）** ⇒ **现状态：✅ 已修**（与本文件 §〇 结论表「已修 N 条 / 未修 0 条语义漂移」收敛到同一状态）。
+> **依据**：`service/task/task-rpc/src/main/resources/application.yml` 已配 `timeout: 3s` ＋ `connect-timeout: 5s` ＋ 守门 `TaskRedisCommandTimeoutGateTest`（本轮 surefire 实测 **t=7 f=0 e=0 s=0** · 含阳性对照「`RedisURI.create(...).getTimeout() == 60s`」与 3 条变异验证）＋ 共享层 `GoStyleRedisClientAutoConfiguration` 的 `REJECT_COMMANDS`（**断连 1ms 拒单**，替掉 60s 挂起） ⇒ **L2 配置层守门 + 装配层**（⚠️ 断连行为那一半的落点在**共享层** ⇒ 域侧只登记、不落码 —— 本条**不是**域侧未修）
+
 
 **性质**：SEMANTIC MISMATCH（行为层 · **配置面看不出差异** ⇒ 典型「跑绿 ≠ 对」）
 
@@ -446,7 +467,7 @@ goka 三处 `=earliest`、kq 三处 `=latest`。
 2. 同族一致：like-rpc 原本已有 `timeout: 3s`（✓ 对齐），但**缺** `connect-timeout` ⇒ 一并补 5s。
 
 **守门**：
-1. [`TaskRedisCommandTimeoutGateTest`](../../../service/task/task-rpc/src/test/java/com/rag/task/task/rpc/config/TaskRedisCommandTimeoutGateTest.java)（**6 条** —— 🆕 2026-10-27 本轮加 **⑤ 池已启用** ＋ **⑥ 池参数 64/16/0**，见 [DRIFT-TASK-RPC-008](#🔴-drift-task-rpc-008新登记--2026-10-27redis-连接池维度未对齐--形态漂移rag-无池-vs-go-有池)）
+1. [`TaskRedisCommandTimeoutGateTest`](../../../service/task/task-rpc/src/test/java/com/rag/task/task/rpc/config/TaskRedisCommandTimeoutGateTest.java)（**6 条** —— 🆕 2026-10-27 本轮加 **⑤ 池已启用** ＋ **⑥ 池参数 64/16/0**，见 [DRIFT-TASK-RPC-008](#✅-drift-task-rpc-008新登记--2026-10-27redis-连接池维度未对齐--形态漂移rag-无池-vs-go-有池)）
    ＋ [`LikeRpcRedisTimeoutsGateTest`](../../../service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeRpcRedisTimeoutsGateTest.java)（4 条）
    —— **起真 Spring 上下文**（用真应用类 ⇒ 加载真实 yml）、读**真的** `LettuceConnectionFactory` / `ClientOptions`，
    断言**消费点**：
@@ -623,7 +644,7 @@ goka 三处 `=earliest`、kq 三处 `=latest`。
 - ✅ `kq` 无重试循环 ⇒ RAG 的 `DefaultErrorHandler` 显式 `FixedBackOff(1000, 1)`（maxAttempts=1）+ `ackAfterHandle(false)` + `seekAfterError(false)`。
 - 🔴 **`goka` 的 `OffsetOldest` 只作用于「首次消费无位点」的 group** —— 本条**已做活体验证**（2026-10-24，见 §四·八），
   并且**验证过程中查出 RAG 侧一条真漂移**（`auto-offset-reset` 写成了连字符 ⇒ Kafka 直接忽略 ⇒ 实际是 `latest`），
-  ⇒ 已修（[DRIFT-TASK-RPC-006](#🔴-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)）。
+  ⇒ 已修（[DRIFT-TASK-RPC-006](#✅-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)）。
 
 ### DDL（`AutoMigrate` ↔ Flyway）
 
@@ -691,7 +712,7 @@ goka 三处 `=earliest`、kq 三处 `=latest`。
 8. ✅ **「首次消费无位点」这一分支已单独活体验证**（2026-10-24，见 §四·八）：
    全新 group + **预灌消息在消费者启动前** ⇒ 两侧的 goka 路都读到队头（计数 = 5、group 位点 = 7），
    两侧的 kq 路都跳过预灌消息（阴性对照）⇒ 且**验证过程中查出并修掉了一条真漂移**
-   （[DRIFT-TASK-RPC-006](#🔴-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)）。
+   （[DRIFT-TASK-RPC-006](#✅-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)）。
    ⚠️ **这条证据只覆盖「无位点」这一条分支**；「有位点」时两侧都是「从已提交位点继续」（Spring 的
    `AckMode.RECORD` ↔ Go 的 `CommitMessages`），已由 Kafka 端到端对拍（§四·三）与畸形消息对拍（§四·五·二）覆盖。
 9. ✅ **goka 表的「保留策略」已用实测定案**（2026-10-24，见 §四·七）：
@@ -898,8 +919,8 @@ Go 的 kq 消费者 `Offset` 硬编码 `latest`（`initUserFilter.go:47`），
 ### 🔴 这一轮顺带抓出并修掉了两条真缺陷
 
 对拍不是「跑一遍确认一致」而已 —— 它**抓出了两个此前无人发现的致命缺陷**：
-[DRIFT-TASK-RPC-004](#🔴-drift-task-rpc-004--redispipelines-把-go-的-pipeline-当成-multiexec-事务--整条消息消费链路是死的)（整条消息消费链路是死的）
-与 [DRIFT-TASK-RPC-005](#🔴-drift-task-rpc-005--pipelinehset-吞掉-redis-错误而-go-是向上抛终态分叉)（吞/抛方向相反导致终态分叉）。
+[DRIFT-TASK-RPC-004](#✅-drift-task-rpc-004--redispipelines-把-go-的-pipeline-当成-multiexec-事务--整条消息消费链路是死的)（整条消息消费链路是死的）
+与 [DRIFT-TASK-RPC-005](#✅-drift-task-rpc-005--pipelinehset-吞掉-redis-错误而-go-是向上抛终态分叉)（吞/抛方向相反导致终态分叉）。
 
 ---
 
@@ -1211,7 +1232,7 @@ org.apache.kafka.common.InvalidRecordException:
 ```
 
 ⇒ **Go 从队头读、RAG 从队尾读** ⇒ 行为分叉。
-⇒ 根因与修法见 [DRIFT-TASK-RPC-006](#🔴-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)。
+⇒ 根因与修法见 [DRIFT-TASK-RPC-006](#✅-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)。
 
 ### 四·八·四、⚠️ 本脚本固化了两个「环境级」坑
 
@@ -1234,7 +1255,7 @@ KEEP_UP=1 ./tools/difftest/run-task-offset-oldest.sh # 跑完保留服务与容�
 
 ## 四·九、🔴 配置键名扫描：yaml 里的「死配置」是怎么被查出来的（2026-10-24 实测）
 
-> 本节是 [DRIFT-TASK-RPC-006](#🔴-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)
+> 本节是 [DRIFT-TASK-RPC-006](#✅-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)
 > 的**家族性排查**：那一条是 Kafka 侧的键名写错（连字符 vs 点分）⇒ 静默失效。
 > 本节把同一失效家族在 **yaml 侧**扫了一遍，并固化成守门测试。
 
@@ -1459,7 +1480,7 @@ KEEP_UP=1 ./tools/difftest/run-task-offset-oldest.sh # 跑完保留服务与容�
 
 | 判据 | 抓什么 | 实测 |
 |---|---|---|
-| **编号连续性** | `PITFALL-TASK-RPC-01~32` 必须**无断号** | ✅ 连续（32 条） |
+| **编号连续性** | `PITFALL-TASK-RPC-01~33`（＋ `15·补`）必须**无断号** | ✅ 连续（**33 + 1 补 = 34 条**）<br>🆕 **2026-10-29 对齐（W-B lane）**：**原值保留不改写** —— 原写的「`01~32` / 连续（32 条）」是 **2026-10-24 复核时**的条数；其后新增了 `PITFALL-TASK-RPC-33` ⇒ 且 `15·补` 是**同文件内的重复编号** ⇒ ⇒ **实际 = 34 条**（旧号 `01~33` ＋ 1 条补） ⇒ 撞号已在 `docs/Pitfalls/task/rpc.md` 用新号 `PIT-TASK-34` 消解（旧号仍保留在每条的「旧号」行里） |
 | **悬空引用** | 台账里引用的 Pitfall / 签字偏离 **ID 必须真有定义** | ✅ 引用的 32 个 Pitfall + 2 个签字偏离全部有定义 |
 
 🔴 **另加两条**（本轮顺手补的判据盲区）：
@@ -1516,7 +1537,10 @@ KEEP_UP=1 ./tools/difftest/run-task-offset-oldest.sh # 跑完保留服务与容�
 
 ---
 
-## 🔴 `DRIFT-TASK-RPC-008`（新登记 · 2026-10-27）**Redis 连接池维度未对齐** —— 形态漂移（RAG **无池** vs Go **有池**）
+## ✅ `DRIFT-TASK-RPC-008`（新登记 · 2026-10-27）**Redis 连接池维度未对齐** —— 形态漂移（RAG **无池** vs Go **有池**）
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— **原状态标记 `🔴`（台账留痕，保留不改写）** ⇒ **现状态：✅ 已修**（与本文件 §〇 结论表「已修 N 条 / 未修 0 条语义漂移」收敛到同一状态）。
+> **依据**：已落码（`task-rpc/pom.xml` 加 `commons-pool2` ＋ `application.yml` 的 `lettuce.pool` 段 ＋ `max-wait: 4s`） ＋ 守门 `TaskRedisPoolExhaustionP99GateTest`（**真 Redis 容器** · 本轮 surefire 实测 **t=3 f=0 e=0 s=0**） ＋ `TaskRedisCommandTimeoutGateTest` 的 ⑤⑥ 池参数断言（**t=7**） ⇒ **L2 装配层守门 + L4 双侧活体对拍**（本条 §⑪ 已把证据强度升级到 L4）
+
 
 > ⚠️ **这条是上一轮 Redis 超时修复（`591ab0b`）的**遗漏维度** —— 上一轮只对齐了「超时」两项，**没对齐「连接池」**。
 > ⇒ 触发来源：G3 回执里的一条 grep 命中（`ReadTimeoutMs|DialTimeoutMs|TimeoutMs` 全仓只有 3 处、全在 Go 真源 `service/task/rpc/etc/task.yaml:42-44`）⇒ **顺着它核出池参数也被丢弃** ⇒ **顺手挖出这条新漂移**。
@@ -1630,7 +1654,7 @@ mvn -o -B -DargLine=-Xmx2g -pl service/task/task-rpc -am \
 |---|---|
 | **命令** | `mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end clean test -pl service/message/message-api,service/message/message-rpc,service/message/message-common,service/like/like-api,service/like/like-rpc,service/like/like-common,service/task/task-api,service/task/task-rpc -am` |
 | **退出状态** | **BUILD SUCCESS** · **09:03 min** · 23 个反应堆模块全 SUCCESS |
-| **条数（权威口径）** | 逐 `TEST-*.xml` 的 `testsuite` 属性求和 ⇒ **G2 三域 8 模块合计 = 730 tests / 0F / 0E / 0S**；其中本域 = `task-api` **102** · `task-rpc` **137** |
+| **条数（权威口径）** | 逐 `TEST-*.xml` 的 `testsuite` 属性求和 ⇒ **G2 三域 8 模块合计 = 730 tests / 0F / 0E / 0S**；其中本域 = `task-api` **102** · `task-rpc` **137**<br>🆕 **2026-10-29 对齐（W-B lane）**：**原值保留不改写** —— 本行的 `task-api` **102** 是**该轮 run 当时**的值；其后 **2026-10-29 R2** 给 task-api 新增了 `TaskApiFailurePathMatrixTest` **33** 条 ⇒ ⇒ **task-api 当前权威值 = 135**（`mvn test` 口径 · 2026-10-29 实测）· **task-rpc 的 137 本轮独立复测仍成立**（`mvn -o -B -pl service/task/task-rpc test` ⇒ **137** / 0F / 0E / 0S）⇒ ⇒ **本域当前权威值 = task-rpc 137 + task-api 135 = 合计 272** |
 | **本轮新增守门** | `TaskRpcKafkaListenerRegistryGateTest` **3/3**（在全量回归里**真实执行**，非跳过） |
 | **⚠️ 口径纪律** | ① 本轮**带 `clean`** ⇒ 报告已清空重写；② 条数在 **BUILD SUCCESS + maven 进程退出**两个条件都满足后采 ⇒ **不是**构建中途的半成品；③ **跨树比条数必须同口径** ⇒ 不可与 G1/G3/G4 的数直接相比 |
 | **⚠️ 与本域既有台账数字的关系** | 本域第二十四轮记的「task-rpc 测试数 = 129」是**上一轮**的数，且已自标「**已过期，待一次 `clean test` 全量复跑后替换**」⇒ ⇒ **本轮 = 该复跑的正式结果（137 tests / 0F / 0E / 0S）** ⇒ **两个数字并列，不删原值**（台账纪律）

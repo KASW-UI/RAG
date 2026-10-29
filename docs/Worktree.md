@@ -362,7 +362,7 @@ python3 tools/difftest/check-wave-lane-ownership.py     # ⇒ EXIT=0 是收口�
 
 | 规则 | 内容 |
 |---|---|
-| **切法** | **按「叶子文件」切**，⛔ 不是按议题切 —— 议题会跨文件（`X-4` 同时碰 like/comment/common），**文件才是不冲突的单位** |
+| **切法** | **按「叶子文件」切**，⛔ 不是按议题切 —— 议题会跨文件（`CD-4` 同时碰 like/comment/common），**文件才是不冲突的单位** |
 | **基线** | lane **从 `align/global` 的 HEAD 切**（⛔ 不是 `do-my-own-gh`）⇒ 否则看不到该域已完成的轮次，等于重做 |
 | **写权** | 每条 lane 只写自己任务书里的**白名单文件** ⇒ **文件级零重叠** ⇒ 永不冲突 |
 | **共享文件** | lane ⛔ 不写 `AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / 4 个规范台账文件 ⇒ **合并收口执行者在合并后统一更新** |

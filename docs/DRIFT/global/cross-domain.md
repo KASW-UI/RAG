@@ -14,23 +14,44 @@
 
 ---
 
+> 🔴 **2026-10-29 编号重整（W-F lane · 共享层台账面）—— 本档的 `X-n` 与 `docs/PhaseGoal-judge.md` §五 的 `X-n` **不是同一套编号**！
+> 
+> | 旧号（本档原编号） | 新号（本档现编号） | 主题 |
+> |---|---|---|
+> | `X-1` | **`CD-1`** | 共享 Flyway 账本 |
+> | `X-2` | **`CD-2`** | 建表责任交叉 · client 契约 |
+> | `X-3` | **`CD-3`** | 事实投递链路 |
+> | `X-4` | **`CD-4`** | 社区消费者差异 |
+> | `X-5` | **`CD-5`** | 裸 `ServerCallHandler` 不被 dispatch |
+> | `X-6` | **`CD-6`** | `DRIFT-HOTAPI-030`（Tomcat 参数个数口径） |
+> | `X-7` | **`CD-7`** | DDL 双侧活体逐列对照 |
+> | `X-8` | **`CD-8`** | 真源分层（L1 项目层 / L2 go-zero 框架层） |
+> | `X-9` | **`CD-9`** | 「Go 是否读 body」判据有 3 份生产复制品 |
+> | `X-10` | **`CD-10`** | `message` 域索引 `idx_notification_recipient_read` 两侧列不同 |
+> 
+> ⇒ **为什么必须重整**：`docs/PhaseGoal-judge.md` §五 的 **X-1~X-12** 是**跨组件不变量**矩阵（X-6 = **deadline 判据**）⇒
+> ⇒ 与本档的 `X-6`（= `DRIFT-HOTAPI-030`）**语义冲突** ⇒ ⇒ **两套 10 个号里只有 `X-1` 同物，其余 9 个全错位** ⇒
+> ⇒ ⇒ **本档重编号为 `CD-1`~`CD-10`**（`CD` = **C**ross-**D**omain），**旧号一律保留**（§〇 状态总表的「原 X-n」列 ＋ 本表）。
+> ⇒ ⚠️ **引用纪律**：**引用任何 `X-n` 必须带「文件 + 编号」** —— `docs/PhaseGoal-judge.md` 的 `X-n` 与本档的旧 `X-n` 不可混用。
+
 ## 〇、状态总表（2026-10-25 实测）
 
-| # | 不变量 | 涉及组件 | 状态（2026-10-25） | 本轮 |
-|---|---|---|---|---|
-| X-1 | 共享 Flyway 账本 | `message-rpc`↔`like-rpc`↔`article-rpc` | ✅ **第十五轮**：🔴 **7 个 Flyway rpc 模块全连同一个库 ⇒ 同库共存是常态** ⇒ 查出 **comment/follow/like 三个域缺 `spring.flyway.baseline-version: 0`** ⇒ 非空 schema 下 **V1 被整条跳过 ⇒ 首张表永远建不出来** ⇒ ✅ **三域已修 + 各配真 PG 守门**；⛔ **`favorite-rpc` 同款缺陷零触碰 ⇒ 记账 + 告知该域 owner**；✅ **「三进程并发」运行时形态已验（第二十四轮 L4 · 真 PG 16 三进程并发）⇒ 六域可安全并发同库** ⇒ 仅 `favorite-rpc` 例外（**起得来、首次查库才炸**） | ✅ **已闭环**（配置层 + 运行时；`favorite-rpc` 例外只记账） |
-| X-2 | 建表责任交叉 · client 契约 | `user-rpc`↔`admin-rpc` · api↔rpc proto | ✅ **已审完（第九轮）** —— 交叉但无冲突；client 契约 10 域零漂移；🟡 **产出 1 条新真漂移**（`users_user.extra_info` jsonb→text 漏改）⇒ 见 §二·九 | ✅ **已审完** |
-| X-3 | 事实投递链路 | `like`/`comment`/`favorite` 的 rpc ↔ **仓外 DC 平台** | ✅ **已闭合**（2026-10-25 B2）—— 末端不是「第三个仓库」，是仓外 `POST /v1/events`；仓内两侧 4↔4 对齐 | ✅ **已闭合** |
-| X-4 | 社区消费者差异 | Go 用 `like`，RAG 不用 | ✅ **已确证（第九轮实测）** —— like 侧 RAG **另起炉灶**（0 引用共享组件）· favorite/article **RAG 多出** ⇒ 一半可修、一半被 favorite 阻塞 ⇒ 见 §二·十 | ✅ **已确证** |
-| X-5 | 裸 `ServerCallHandler` 不被 dispatch | **task + follow**（2026-10-25 实测扩面） | ✅ **第十七轮已落地** —— grpc-java 不向裸 handler 派发 `onHalfClose` ⇒ 两个域的「造慢服务」测试**曾是空转的** ⇒ ✅ **两域已换 `ServerCalls.asyncUnaryCall` + 补「handler 真被调用过」与「取消时仍在跑」两条断言** ⇒ **M1/M2/M3 三条变异全部转红** ⇒ 🟢 **生产代码零改动**（超时机制本来就是真的，缺的是「在飞处理被打断」这一维从未被验证）⇒ 见 §二·八 | ✅ **已修**（见 §二·八 ⑤） |
-| X-6 | `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | ✅ **第十四轮已落地**（共享层 6 个类 + 9 个域一行 yaml）⇒ 🔴 **Go 的拒绝形状按域而异**（5 域注册 `SetErrorHandler` ⇒ 200+信封；4 域未注册 ⇒ 400+原文）⇒ 共享层按 `mode` 分派、**文案由各域自己的兜底 handler 渲染** ⇒ **favorite 缺省 = off ⇒ 零触碰** ⇒ 🟢 **真容器 + 真 MVC + 变异测试** | ✅ **已修**（见 §二·十一 ⑤） |
-| X-7 | DDL 双侧活体逐列对照 | `like` 域 + 其余 5 域 | 🟡 **部分闭合**（2026-10-25 B3）—— 4 个域已能活体逐列对照；其余 5 域**缺双侧库环境** | ✅ **已跑**（产出真结论 + 1 条新差异 X-10） |
-| **X-8** | 🆕 **真源分层（Go 出处一半在框架里）** | **全部域** | ✅ **本轮已查明并记账** | ✅ **本轮新增** |
-| **X-9** | 🆕 **「Go 是否读 body」判据有 3 份生产复制品** | favorite / hot / article | ✅ **第十六轮已收敛到只剩 1 份**（favorite）—— hot / article 两份已改为**调用**共享层唯一真源（判据 + 取输入一起收口）⇒ 🔴 **探针实测发现解析层还缺 Go 的第二道闸 `maxBodyLen = 8 MiB`**（RAG 整个读进堆里）⇒ ✅ 已在共享层 + hot 域补上 ⇒ ⚠️ **端到端今天不可达**（Go 的 MaxBytes 默认 1 MiB 全局生效 ⇒ 先拒成 413）⇒ ⛔ **favorite 那份永久残留**（零权限） | ✅ **已修**（见 §二·十三） |
+| # | **原 X-n** | 不变量 | 涉及组件 | 状态（2026-10-25） | 本轮 |
+|---|---|---|---|---|---|
+| **CD-1** | `X-1` | 共享 Flyway 账本 | `message-rpc`↔`like-rpc`↔`article-rpc` | ✅ **第十五轮**：🔴 **7 个 Flyway rpc 模块全连同一个库 ⇒ 同库共存是常态** ⇒ 查出 **comment/follow/like 三个域缺 `spring.flyway.baseline-version: 0`** ⇒ 非空 schema 下 **V1 被整条跳过 ⇒ 首张表永远建不出来** ⇒ ✅ **三域已修 + 各配真 PG 守门**；⛔ **`favorite-rpc` 同款缺陷零触碰 ⇒ 记账 + 告知该域 owner**；✅ **「三进程并发」运行时形态已验（第二十四轮 L4 · 真 PG 16 三进程并发）⇒ 六域可安全并发同库** ⇒ 仅 `favorite-rpc` 例外（**起得来、首次查库才炸**） | ✅ **已闭环**（配置层 + 运行时；`favorite-rpc` 例外只记账） |
+| **CD-2** | `X-2` | 建表责任交叉 · client 契约 | `user-rpc`↔`admin-rpc` · api↔rpc proto | ✅ **已审完（第九轮）** —— 交叉但无冲突；client 契约 10 域零漂移；🟡 **产出 1 条新真漂移**（`users_user.extra_info` jsonb→text 漏改）⇒ 见 §二·九 | ✅ **已审完** |
+| **CD-3** | `X-3` | 事实投递链路 | `like`/`comment`/`favorite` 的 rpc ↔ **仓外 DC 平台** | ✅ **已闭合**（2026-10-25 B2）—— 末端不是「第三个仓库」，是仓外 `POST /v1/events`；仓内两侧 4↔4 对齐 | ✅ **已闭合** |
+| **CD-4** | `X-4` | 社区消费者差异 | Go 用 `like`，RAG 不用 | ✅ **已确证（第九轮实测）** —— like 侧 RAG **另起炉灶**（0 引用共享组件）· favorite/article **RAG 多出** ⇒ 一半可修、一半被 favorite 阻塞 ⇒ 见 §二·十 | ✅ **已确证** |
+| **CD-5** | `X-5` | 裸 `ServerCallHandler` 不被 dispatch | **task + follow**（2026-10-25 实测扩面） | ✅ **第十七轮已落地** —— grpc-java 不向裸 handler 派发 `onHalfClose` ⇒ 两个域的「造慢服务」测试**曾是空转的** ⇒ ✅ **两域已换 `ServerCalls.asyncUnaryCall` + 补「handler 真被调用过」与「取消时仍在跑」两条断言** ⇒ **M1/M2/M3 三条变异全部转红** ⇒ 🟢 **生产代码零改动**（超时机制本来就是真的，缺的是「在飞处理被打断」这一维从未被验证）⇒ 见 §二·八 | ✅ **已修**（见 §二·八 ⑤） |
+| **CD-6** | `X-6` | `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | 🟡 **第十四轮主轴已落地 · 残留 1 段窗口**（共享层 6 个类 + 9 个域一行 yaml）⇒ 🔴 **Go 的拒绝形状按域而异**（5 域注册 `SetErrorHandler` ⇒ 200+信封；4 域未注册 ⇒ 400+原文）⇒ 共享层按 `mode` 分派、**文案由各域自己的兜底 handler 渲染** ⇒ **favorite 缺省 = off ⇒ 零触碰** ⇒ 🟢 **真容器 + 真 MVC + 变异测试** | ✅ **已修**（见 §二·十一 ⑤） |
+| **CD-7** | `X-7` | DDL 双侧活体逐列对照 | `like` 域 + 其余 5 域 | 🟡 **部分闭合**（2026-10-25 B3）—— 4 个域已能活体逐列对照；其余 5 域**缺双侧库环境** | ✅ **已跑**（产出真结论 + 1 条新差异 CD-10） |
+| **CD-8** | `X-8` | 🆕 **真源分层（Go 出处一半在框架里）** | **全部域** | ✅ **本轮已查明并记账** | ✅ **本轮新增** |
+| **CD-9** | `X-9` | 🆕 **「Go 是否读 body」判据有 3 份生产复制品** | favorite / hot / article | ✅ **第十六轮已收敛到只剩 1 份**（favorite）—— hot / article 两份已改为**调用**共享层唯一真源（判据 + 取输入一起收口）⇒ 🔴 **探针实测发现解析层还缺 Go 的第二道闸 `maxBodyLen = 8 MiB`**（RAG 整个读进堆里）⇒ ✅ 已在共享层 + hot 域补上 ⇒ ⚠️ **端到端今天不可达**（Go 的 MaxBytes 默认 1 MiB 全局生效 ⇒ 先拒成 413）⇒ ⛔ **favorite 那份永久残留**（零权限） | ✅ **已修**（见 §二·十三） |
+| **CD-10** | `X-10` | `message` 域索引 `idx_notification_recipient_read` 两侧列不同（Go 单列 `(is_read)` / RAG 复合 `(recipient_id, is_read)`） | `message-rpc`（**域内** ⇒ global 只记账） | ✅ **已签字认账**（2026-10-25 第六轮 · 用户「X-10 保留 RAG 的复合索引并签字」）⇒ ⚠️ **global 侧的 `SD-2026-10-25-03` 已撤销（重复登记）** ⇒ **真实记录处 = message 域的 `SD-2026-10-23-06`**（见 [`../../Intentional_Deviations/global/cross-domain.md`](../../Intentional_Deviations/global/cross-domain.md)）⇒ ⇒ **本条按 §5.3b 硬边界 2 只留指针，DRIFT 侧不搬内容** | ✅ **已签字认账**（见 §二·六） |
 
 ---
 
-## 一、X-8 🆕 **真源分两层**（2026-10-25 新发现，影响全部域）
+## 一、CD-8 🆕 **真源分两层**（2026-10-25 新发现，影响全部域）
 
 ### 1.1 事实
 
@@ -65,7 +86,7 @@ AGENTS.md §3.1 规定「任何行为一致性审查必须**以 Go 为唯一基�
 
 ---
 
-## 二、X-9 ✅ **第十六轮已收敛到只剩 1 份** —— 「Go 是否读 body」判据的生产复制品（2026-10-25 新发现 → 同日收敛）
+## 二、CD-9 ✅ **第十六轮已收敛到只剩 1 份** —— 「Go 是否读 body」判据的生产复制品（2026-10-25 新发现 → 同日收敛）
 
 ### 2.1 事实
 
@@ -117,7 +138,7 @@ Content-Type: Application/JSON
 
 ---
 
-## 二·五、X-7 🟡 **部分闭合** —— DDL 双侧活体逐列对照（2026-10-25 B3）
+## 二·五、CD-7 🟡 **部分闭合** —— DDL 双侧活体逐列对照（2026-10-25 B3）
 
 ### ① 先修一个更严重的问题：**已有的域预设本身已经失效**
 
@@ -136,11 +157,11 @@ Content-Type: Application/JSON
 | 域 | 容器 / 库 | 结论 |
 |---|---|---|
 | `task` | `taskprobe-postgres` | ✅ **11 列逐字相同**；类型/长度 0 差异、可空性 0 差异、DEFAULT 0 差异；索引 2≡2；约束逐条一致（**仅约束名不同**：`task_progress_pkey` vs `pk_task_progress` ⇒ 语义等价，属命名差异） |
-| `message` | `msg_ddl_pg` | ✅ **37 列逐字相同**；类型/长度 0、可空性 0；🔴 **DEFAULT 6 处差异**（Go 无 / RAG `CURRENT_TIMESTAMP`）⇒ **已知且刻意保留**（两侧 INSERT 都显式绑定 ⇒ AGENTS.md §0 已登记）；🔴 **索引列不同 1 处** ⇒ **新发现 X-10**；约束 3/3 一致 |
+| `message` | `msg_ddl_pg` | ✅ **37 列逐字相同**；类型/长度 0、可空性 0；🔴 **DEFAULT 6 处差异**（Go 无 / RAG `CURRENT_TIMESTAMP`）⇒ **已知且刻意保留**（两侧 INSERT 都显式绑定 ⇒ AGENTS.md §0 已登记）；🔴 **索引列不同 1 处** ⇒ **新发现 CD-10**；约束 3/3 一致 |
 | `users` | `uudifftest-postgres` | 🟡 **仅覆盖 `users` + `user_avatar_history`**：Go 侧**没有** admin 的表（`admins` / `admin_invites`，见 Go `service/user/admin/rpc/internal/model/data_model.go:17,32`）⇒ 那套库里 Go 侧 admin 表**未被 AutoMigrate** ⇒ **是环境缺口，不是漂移** |
 | `comment` | `cdifftest-postgres` | 🟡 两侧表名一致（Go 的 `TableName()` 与 RAG 迁移脚本同名）；⚠️ Go 侧 `report_record`（`service/comment/rpc/internal/model/data_model.go:66`）**未被 migrate** ⇒ 环境缺口 ⇒ 结论覆盖其余 6 张表 |
 
-⇒ **「未知项」的定性变了**：X-7 不再是「不知道差在哪」，
+⇒ **「未知项」的定性变了**：CD-7 不再是「不知道差在哪」，
 而是「**工具与 4 个域的环境已就绪，剩下 5 个域（article/like/hot/follow/favorite）缺双侧库**」
 ⇒ 缺口是**环境供给**，不是**审计方法**。
 
@@ -163,7 +184,7 @@ Content-Type: Application/JSON
 
 ---
 
-## 二·六、X-10 ✅ **已签字认账** —— `message` 域索引 `idx_notification_recipient_read` 两侧列不同
+## 二·六、CD-10 ✅ **已签字认账** —— `message` 域索引 `idx_notification_recipient_read` 两侧列不同
 
 ⚠️ **本条已按 §5.3b 硬边界 2 移出 DRIFT 档**（决定不对齐的差异只在签字档落笔）。
 
@@ -179,7 +200,7 @@ Content-Type: Application/JSON
 
 ---
 
-## 二·八、X-5 ✅ **已落地（2026-10-25 第十七轮）** —— 裸 `ServerCallHandler` 不被 dispatch ⇒「造慢服务」的测试**曾是空转的**
+## 二·八、CD-5 ✅ **已落地（2026-10-25 第十七轮）** —— 裸 `ServerCallHandler` 不被 dispatch ⇒「造慢服务」的测试**曾是空转的**
 
 > ⚠️ **本条由「仍未决 · 未展开」升级为「已确证」（第七轮）⇒ 再升级为「已落地」（第十七轮）**
 > —— 机制已用**一次性探针**实测清楚，**波及面从「task 域 1 处」扩到「task + follow 两个 rpc 域各 1 处」**，
@@ -312,7 +333,7 @@ RESULT startCall=true  onHalfClose=false  responded=false
 
 ---
 
-## 二·九、X-2 ✅ **已审完（第九轮，只读审计）** —— 建表责任交叉 **确实交叉但无冲突**；client 契约 **10 域全覆盖、零漂移**；🟡 **产出 1 条此前无人登记的真漂移**
+## 二·九、CD-2 ✅ **已审完（第九轮，只读审计）** —— 建表责任交叉 **确实交叉但无冲突**；client 契约 **10 域全覆盖、零漂移**；🟡 **产出 1 条此前无人登记的真漂移**
 
 | 组 | 结论 |
 |---|---|
@@ -362,7 +383,7 @@ follow-api 8/8 · task-api 1 · user-api 9 · admin-api 13/13 ⇒ **全部有实
 
 ---
 
-## 二·十、X-4 ✅ **已确证（第九轮实测复核）** —— `communityfact` **消费者集合两侧不一致**；一半可修，一半被 favorite 永久阻塞
+## 二·十、CD-4 ✅ **已确证（第九轮实测复核）** —— `communityfact` **消费者集合两侧不一致**；一半可修，一半被 favorite 永久阻塞
 
 ### ① 实测（`grep -rl`，两侧同口径）
 
@@ -395,7 +416,7 @@ RAG 的 like 域**有自己的**一套：`LikeFactDispatchScheduler` / `LikeFact
 | ⑤ 数据层已齐 | `LikeDomainFactOutboxEntity`(340 行) + `LikeFactStreamEntity` + 2 mapper + `LikeDomainFactService`(175 行) + V4/V5/V6 迁移 + `LikeDomainFactSchemaParityTest` | ⇒ 只差「把件送出去」那一段 |
 | ⑥ **样板现成** | comment 域：`CommentFactDispatchScheduler`(118 行) + `CommentAuthorityEndpointConfig`(90 行) | ⇒ 修法 = **照 comment 的接法**补齐 like 的两个骨架 ⇒ **共享层零改动** ⇒ ⛔ **不需拍板** |
 
-### ③ 🔴 我自己第四轮（B2 / X-3）的结论**有误，须订正**
+### ③ 🔴 我自己第四轮（B2 / CD-3）的结论**有误，须订正**
 
 ⇒ B2 写的是「`like` / `comment` / `favorite` 三域**都接了线**」⇒ **实测 `like` 域是 0 引用** ⇒ **该句作废**。
 ⇒ 准确表述：**`comment` 与 `favorite` 接了共享组件；`like` 域没有（它自己实现了一套）；`article` 多了一处 Go 侧没有的用法。**
@@ -407,11 +428,11 @@ RAG 的 like 域**有自己的**一套：`LikeFactDispatchScheduler` / `LikeFact
 | **like 缺共享组件接线** | 🟢 **可修，且定性已改**（第十九轮末实测：① 共享层形状已对齐 Go ② `DispatcherImpl` 是函数式接口 ⇒ 通用 ③ Go 侧 like 本来就有自己的表 ⇒ 数据层无问题 ④ 真正缺的只是**投递那段 4 行骨架**） | ✅ **照 comment 域的接法补齐 `LikeFactDispatchService` + `LikeFactDispatchScheduler`**（共享层零改动）⇒ **不需拍板**；⚠️ 这是**功能缺口** ⇒ **不能签字认账** |
 | **favorite / article 多出来的用法** | 🔴 **不是漂移**（Go 侧本来就没有 ⇒ RAG 多做了功能）⇒ 属「有意偏离」还是「多余实现」**待判** | ⛔ **favorite 一律不碰** ⇒ 这半边**被 favorite 永久阻塞** |
 
-⚠️ ⇒ **X-4 无法整体关闭**：**可修的一半（like）+ 永久阻塞的一半（favorite）** ⇒ 台账应拆成两条。
+⚠️ ⇒ **CD-4 无法整体关闭**：**可修的一半（like）+ 永久阻塞的一半（favorite）** ⇒ 台账应拆成两条。
 
 ---
 
-## 二·十一、X-6 🔴 **第十一轮已改判 ⇒ 不是 favorite 边界下的永久阻塞**（`DRIFT-HOTAPI-030`）
+## 二·十一、CD-6 🔴 **第十一轮已改判 ⇒ 不是 favorite 边界下的永久阻塞**（`DRIFT-HOTAPI-030`）
 
 > ⚠️ **第九轮结论已被本轮推翻**：第九轮写「修法必然要动 `favorite-api` ⇒ 永久阻塞」——
 > **那个结论只覆盖了「逐模块改 `application.yml`」这一条修法**，而**不是全部修法**。
@@ -475,7 +496,7 @@ RAG 的 like 域**有自己的**一套：`LikeFactDispatchScheduler` / `LikeFact
 | `favorite-api` | ✅ 有（**只含 2048 计数**，不含 `net/url` 解析层） | `favorite-api/.../service/FavoriteApiSupport.java:327-358` |
 | 其余 7 个 | ❌ **没有** | like / message / comment / follow / task / user-api / admin-api |
 
-⇒ ⇒ **X-6 的修法 = 共享层 2 处 ⇒ 10 个 api 模块零代码改动 ⇒ favorite 零触碰 ⇒ 不制造分叉**
+⇒ ⇒ **CD-6 的修法 = 共享层 2 处 ⇒ 10 个 api 模块零代码改动 ⇒ favorite 零触碰 ⇒ 不制造分叉**
 ⇒ **证据强度**：🟡 **源码级 + 配置级已逐条取证**（Tomcat 源码 / Boot 字节码 / 10 个模块的 pom 与扫描配置 / 3 个已有实现的分布）
 ⇒ ⚠️ **尚未做真容器实测**（§3.3：「配置/源码说得通」≠「框架真的采用了它」）⇒ **落地时必须配真 Tomcat 守门 + 变异测试**。
 
@@ -506,10 +527,10 @@ RAG 的 like 域**有自己的**一套：`LikeFactDispatchScheduler` / `LikeFact
 
 | 条目 | 修法是否要动 favorite | 处置 |
 |---|---|---|
-| **X-4**（社区消费者差异） | 🔴 **要** —— favorite 侧 RAG 多出 10 处 Go 没有的 `communityfact` 用法，删掉它们 = 改 favorite | ✅ 已在 §二·十 记为「**可修的一半（like）+ 永久阻塞的一半（favorite）**」⇒ 边界确认后**维持原判** |
-| **X-6**（本条 HOTAPI-030） | 🟢 **不用** —— `max-parameter-count` 虽是 per-app，但**上限可在运行期由共享层改**（`Connector.setMaxParameterCount`，`Connector.java:538`）⇒ 共享层 2 处 ⇒ **favorite 零触碰** | ✅ 本轮已改判为「**可修（共享层）**」⇒ 落 D 出路 ⇒ 下一轮落地（**非永久阻塞、非签字项**） |
-| **X-9**（3 份「Go 是否读 body」复制品） | 🟡 **部分要** —— 3 份分别在 favorite / hot / article；**hot + article 两份可收敛到唯一真源**，favorite 那份不能 | ✅ **本轮不动**（现状三份都取原始头值 ⇒ 行为正确）⇒ 但「3 份复制品」的风险**在 favorite 那份上永久存在** ⇒ 已在本节 §2.3 补记该限制 |
-| **X-7**（DDL 双侧活体对照） | ❌ **不要** —— 只读库、不改 favorite 代码 | ✅ **不受影响** —— favorite 域缺的是**双侧库环境**（runner），不是写权 ⇒ **仍可推进**（见 §二·五 ③） |
+| **CD-4**（社区消费者差异） | 🔴 **要** —— favorite 侧 RAG 多出 10 处 Go 没有的 `communityfact` 用法，删掉它们 = 改 favorite | ✅ 已在 §二·十 记为「**可修的一半（like）+ 永久阻塞的一半（favorite）**」⇒ 边界确认后**维持原判** |
+| **CD-6**（本条 HOTAPI-030） | 🟢 **不用** —— `max-parameter-count` 虽是 per-app，但**上限可在运行期由共享层改**（`Connector.setMaxParameterCount`，`Connector.java:538`）⇒ 共享层 2 处 ⇒ **favorite 零触碰** | ✅ 本轮已改判为「**可修（共享层）**」⇒ 落 D 出路 ⇒ 下一轮落地（**非永久阻塞、非签字项**） |
+| **CD-9**（3 份「Go 是否读 body」复制品） | 🟡 **部分要** —— 3 份分别在 favorite / hot / article；**hot + article 两份可收敛到唯一真源**，favorite 那份不能 | ✅ **本轮不动**（现状三份都取原始头值 ⇒ 行为正确）⇒ 但「3 份复制品」的风险**在 favorite 那份上永久存在** ⇒ 已在本节 §2.3 补记该限制 |
+| **CD-7**（DDL 双侧活体对照） | ❌ **不要** —— 只读库、不改 favorite 代码 | ✅ **不受影响** —— favorite 域缺的是**双侧库环境**（runner），不是写权 ⇒ **仍可推进**（见 §二·五 ③） |
 
 ### ⑤ ✅ **第十四轮已落地**（2026-10-25）—— 🔴 且**推翻了第十一轮修法草案的一个前提**
 
@@ -559,13 +580,13 @@ Go 的 `httpx.Parse` 失败后经 `httpx.ErrorCtx` → `httpx.SetErrorHandler` �
 
 | 守门 | 覆盖 | 结果 |
 |---|---|---|
-| `GoStyleParamLimitGateTest`（**真 Tomcat + 真 Spring MVC 拦截器链**，raw 模式） | 运行期容器上限 = 10001 · 2048 放行 · 2049 ⇒ 400 + Go 原文逐字 · **3000 个空值 ⇒ 200（X-6 的窗口）** · 10001 段 ⇒ 400 + 段数文案 | ✅ **5/5** |
+| `GoStyleParamLimitGateTest`（**真 Tomcat + 真 Spring MVC 拦截器链**，raw 模式） | 运行期容器上限 = 10001 · 2048 放行 · 2049 ⇒ 400 + Go 原文逐字 · **3000 个空值 ⇒ 200（CD-6 的窗口）** · 10001 段 ⇒ 400 + 段数文案 | ✅ **5/5** |
 | `GoStyleFormLimitEnvelopeGateTest`（**真 Tomcat + 真 MVC + 真 advice**，envelope 模式） | 2049 ⇒ **200 + 业务信封**（`code=5001` / msg 由**测试替身的域**提供 / `data:null`）· 2048 放行 · 3000 空值放行 · 容器上限 10001 | ✅ **4/4** |
 | `GoStyleFormLimitModeTest`（模式分派单测） | `off` 放行且不写响应 · `raw` 写 400 + Go 原文 · `envelope` 抛异常且**不写**响应 · 非法值构造期炸 | ✅ **8/8** |
 | **变异测试** | M1 `MAX_PARAMETER_COUNT` 10001→2048 ⇒ **3000 空值那条转红**；M2 非空值计数恒 0 ⇒ **2049 那条转红** | ✅ **两条机制都有判别力** |
 | `tools/difftest/check-tomcat-limits.py` | 新增第四旋钮「form-gate 模式」+ **favorite 无 mode 的零触碰守卫** | ✅ **EXIT=0** |
 
-⇒ **证据强度**：🟢 **真容器 + 真 MVC + 真 advice + 变异测试**（本条首次达到该强度；此前 X-6 只有源码级/配置级取证）。
+⇒ **证据强度**：🟢 **真容器 + 真 MVC + 真 advice + 变异测试**（本条首次达到该强度；此前 CD-6 只有源码级/配置级取证）。
 
 #### ⑤ 之四 连带影响（各域可观察行为）
 
@@ -594,7 +615,7 @@ Go 的 `httpx.Parse` 失败后经 `httpx.ErrorCtx` → `httpx.SetErrorHandler` �
 
 ---
 
-## 二·十二、X-1 ✅ **共享 Flyway 账本：配置层 + 运行时闭环 ⇒ 修掉 3 个域的真缺陷**（2026-10-25 第十五轮）
+## 二·十二、CD-1 ✅ **共享 Flyway 账本：配置层 + 运行时闭环 ⇒ 修掉 3 个域的真缺陷**（2026-10-25 第十五轮）
 
 > **本条的原状态**：「配置层 + 运行时已闭环；**三模块同库共存**仍 `unresolved`」（需真 PG + 三进程并发）。
 > ⇒ 本轮把它**拆成两半**：**配置层有一个此前没人登记的真缺陷**（本轮修掉），**运行时并发**留下一轮。
@@ -664,7 +685,7 @@ spring.flyway.baseline-version                ← 🔴 部分模块【没配】�
 |---|---|
 | 缺陷 | `service/favorite/favorite-rpc/src/main/resources/application.yml` 的 `spring.flyway` 块**缺 `baseline-version`** ⇒ 与 comment/follow/like **完全同款**（V1 = `favorite_folder`） |
 | 为什么 global 不能改 | favorite 域**零写权**（AGENTS.md §5.3c，用户重申「你没有 favorite 的所有权限」）⇒ **代码 / 配置 / 测试 / 台账一律不碰** |
-| 为什么共享层也代劳不了 | 这次**不是共享层的问题** —— 缺的是**该域自己 yaml 里的一行** ⇒ 共享层无法代劳（与第十四轮 X-6 不同：那条可以靠「共享层 + 缺省 off」规避） |
+| 为什么共享层也代劳不了 | 这次**不是共享层的问题** —— 缺的是**该域自己 yaml 里的一行** ⇒ 共享层无法代劳（与第十四轮 CD-6 不同：那条可以靠「共享层 + 缺省 off」规避） |
 | 后果（若不修） | 🔴 **2026-10-25 · L4 实测订正故障形态**：**不是「服务起不来」**，而是「**服务起得来、首次查库才炸**」<br>（L4-01：`baseline-version` 缺失 ⇒ V1 被跳过 ⇒ `favorite_folder` 建不出来；但**上下文本身能起来** ⇒ 启动探针/存活探针**全绿** ⇒ 故障推迟到第一次真实查库才暴露 ⇒ **比「起不来」更难被发现**）<br>⇒ 属**生产可用性**问题（不是形状漂移） |
 | **交给 favorite 域 owner 的修法** | 在 `spring.flyway:` 块下加 `baseline-version: 0`（与 comment/follow/like 完全同款）⇒ 建议照抄 `CommentFlywaySharedSchemaGateTest` 的守门思路 |
 | 记账位置 | 本档（global 台账）+ 本轮 spec §七「不做」⇒ **不静默** |
@@ -685,7 +706,7 @@ spring.flyway.baseline-version                ← 🔴 部分模块【没配】�
 
 ---
 
-## 二·十三、X-9 续 —— **解析层还缺 Go 的 `maxBodyLen`；端到端今天不可达**（2026-10-25 第十六轮）
+## 二·十三、CD-9 续 —— **解析层还缺 Go 的 `maxBodyLen`；端到端今天不可达**（2026-10-25 第十六轮）
 
 ### ① 怎么发现的：先建探针，再动代码
 
@@ -797,7 +818,7 @@ go-zero v1.10.2 rest/engine.go:163-164
 ## 二·十四、B10 ✅ **已落地（2026-10-25 第十八轮）** —— `users_user.extra_info` 写路径仍按 jsonb ⇒ Go 成功 / RAG 5001
 
 > ⚠️ 本条由**第九轮 §二·九 ③** 的只读审计产出 ⇒ **第十八轮修完**。
-> 🔴 **它不是「X-2（建表责任交叉）」的一部分** —— 属 users 域单域漂移，
+> 🔴 **它不是「CD-2（建表责任交叉）」的一部分** —— 属 users 域单域漂移，
 > 之所以落 global：① 修法落点跨 `users-common`（DDL 资源）+ `admin-rpc`（写路径）⇒ 同一次提交
 > ② §5.3b 规定 users 域台账不归 global 写 ⇒ 本档是**唯一**能记它的地方。
 
@@ -881,12 +902,12 @@ M2 首跑 **GREEN**（假阴性）—— 根因：`01_create_user.sql` 是 **`us
 
 ---
 
-## 二·十五、✅ **第二十七轮：X-5 轴 / slow 轴守门补齐（6 条 lane）** —— 逐域证据从「1 个样板」到「8 个域」
+## 二·十五、✅ **第二十七轮：CD-5 轴 / slow 轴守门补齐（6 条 lane）** —— 逐域证据从「1 个样板」到「8 个域」
 
 > 本轮把 L2 留下的 4 条缺口 + L3 的 2 条盲区 + L4 的 3 条边界**一次性打完**
 > ⇒ 6 条 lane（L6~L11）并行 ⇒ **全部生产代码零改动**（只有守门与脚本）。
 
-### ① L2 缺口①（X-5 轴真 server 守门）—— ✅ **4 个组件补齐**
+### ① L2 缺口①（CD-5 轴真 server 守门）—— ✅ **4 个组件补齐**
 
 | 组件 | 守门类 | 用例 / 断言 |
 |---|---|---|
@@ -895,7 +916,7 @@ M2 首跑 **GREEN**（假阴性）—— 根因：`01_create_user.sql` 是 **`us
 | `comment/comment-rpc` | `CommentRpcGrpcInterceptorWiringTest`（新增） | 3 / 14 |
 | `like/like-rpc` | `LikeRpcGrpcInterceptorWiringTest`（新增） | 3 / 14 |
 
-⇒ **9 个 rpc 组件**里，X-5 轴真 server 守门现已覆盖 **8 个**（user / message / hot / task / follow / admin / article / comment / like）
+⇒ **9 个 rpc 组件**里，CD-5 轴真 server 守门现已覆盖 **8 个**（user / message / hot / task / follow / admin / article / comment / like）
 ⇒ ⛔ **只剩 `favorite-rpc`**（域零写权 ⇒ 只能记账）。
 
 ⚠️ **一条不可外推的结论**：这 8 份守门证明的是「**RAG 侧的机制生效**」
@@ -989,19 +1010,19 @@ L9 只读分析（**未改 `service/common`**）：
 
 | # | 为什么本轮没动 |
 |---|---|
-| X-1 | 🔴 **第十五轮已部分消解** —— 取证发现 **7 个 Flyway rpc 模块全部连同一个库** ⇒ 同库共存是**常态** ⇒ 查出 **comment/follow/like 三域缺 `spring.flyway.baseline-version: 0`** ⇒ 非空 schema 下 **V1 被整条跳过 ⇒ 首张表建不出来 ⇒ 服务起不来** ⇒ ✅ **三域已修 + 各配真 PG 守门**（变异 6 条全红）；⛔ **`favorite-rpc` 同款缺陷零触碰 ⇒ 记账 + 告知 owner**；🟡 **「三进程并发」那个形态仍未验证** ⇒ 见 §二·十二 |
-| ~~X-2~~ | ✅ **已审完**（第九轮）⇒ 见 §二·九 |
-| ~~X-3~~ | ✅ **已闭合**（2026-10-25 B2）⇒ 见 §二·七（末端 = 仓外 DC 平台；仓内两侧 4↔4 对齐） |
-| ~~X-4~~ | ✅ **已确证**（第九轮）⇒ 见 §二·十（**可修的一半** = like 侧接线；**阻塞的一半** = favorite） |
-| ~~X-5~~ | ✅ **已落地**（2026-10-25 第十七轮）⇒ 见 §二·八 ⑤。机制第七轮已确证（探针实测）⇒ **task + follow 两个域的测试已改完**（换 `ServerCalls.asyncUnaryCall` + 补两条断言）⇒ **M1/M2/M3 三条变异全部转红** ⇒ 🟡 **slow threshold 分支仍无独立守门**；🟡 **其余 8 个 rpc 域的同名测试未逐一复查** |
-| ~~X-6~~ | ✅ **已展开 + 已改判 + 已落地**（第九轮展开 / 第十一轮改判 / **第十四轮落地**）⇒ 见 §二·十一（**不是 favorite 边界下的永久阻塞** —— 共享层修法存在 ⇒ **可修**、**不需签字**；🔴 第十四轮补：**Go 的拒绝形状按域而异** ⇒ 共享层按 `mode` 分派 ⇒ **favorite 缺省 off ⇒ 零触碰**） |
-| ~~X-7~~ | ✅ **已做**（2026-10-25 B3）⇒ 见 §二·五（4 个域可跑 + 产出 X-10） |
+| CD-1 | 🔴 **第十五轮已部分消解** —— 取证发现 **7 个 Flyway rpc 模块全部连同一个库** ⇒ 同库共存是**常态** ⇒ 查出 **comment/follow/like 三域缺 `spring.flyway.baseline-version: 0`** ⇒ 非空 schema 下 **V1 被整条跳过 ⇒ 首张表建不出来 ⇒ 服务起不来** ⇒ ✅ **三域已修 + 各配真 PG 守门**（变异 6 条全红）；⛔ **`favorite-rpc` 同款缺陷零触碰 ⇒ 记账 + 告知 owner**；🟡 **「三进程并发」那个形态仍未验证** ⇒ 见 §二·十二 |
+| ~~CD-2~~ | ✅ **已审完**（第九轮）⇒ 见 §二·九 |
+| ~~CD-3~~ | ✅ **已闭合**（2026-10-25 B2）⇒ 见 §二·七（末端 = 仓外 DC 平台；仓内两侧 4↔4 对齐） |
+| ~~CD-4~~ | ✅ **已确证**（第九轮）⇒ 见 §二·十（**可修的一半** = like 侧接线；**阻塞的一半** = favorite） |
+| ~~CD-5~~ | ✅ **已落地**（2026-10-25 第十七轮）⇒ 见 §二·八 ⑤。机制第七轮已确证（探针实测）⇒ **task + follow 两个域的测试已改完**（换 `ServerCalls.asyncUnaryCall` + 补两条断言）⇒ **M1/M2/M3 三条变异全部转红** ⇒ 🟡 **slow threshold 分支仍无独立守门**；🟡 **其余 8 个 rpc 域的同名测试未逐一复查** |
+| ~~CD-6~~ | ✅ **已展开 + 已改判 + 已落地**（第九轮展开 / 第十一轮改判 / **第十四轮落地**）⇒ 见 §二·十一（**不是 favorite 边界下的永久阻塞** —— 共享层修法存在 ⇒ **可修**、**不需签字**；🔴 第十四轮补：**Go 的拒绝形状按域而异** ⇒ 共享层按 `mode` 分派 ⇒ **favorite 缺省 off ⇒ 零触碰**） |
+| ~~CD-7~~ | ✅ **已做**（2026-10-25 B3）⇒ 见 §二·五（4 个域可跑 + 产出 CD-10） |
 
-⇒ **排期建议（2026-10-25 更新）**：~~X-7~~ **已做**（§二·五）→ **X-1**（真 PG 三进程）
-→ **X-2** → ~~X-3~~（**已闭合**）→ ~~X-5~~（**已落地**，§二·八 ⑤）
-→ **X-4**（like 半边可修 / favorite 半边**仍阻塞** —— 必须删 favorite 自己的 10 处调用）；
-→ **X-6 修法落地**（**共享层 2 处**：`service/common` 的 Tomcat 上限解除 + 共享 Filter 复刻 Go 判据 ⇒ **favorite 零触碰**）；
-~~X-10~~（**已签字认账**，真实记录 = message 域 `SD-2026-10-23-06`）。
+⇒ **排期建议（2026-10-25 更新）**：~~CD-7~~ **已做**（§二·五）→ **CD-1**（真 PG 三进程）
+→ **CD-2** → ~~CD-3~~（**已闭合**）→ ~~CD-5~~（**已落地**，§二·八 ⑤）
+→ **CD-4**（like 半边可修 / favorite 半边**仍阻塞** —— 必须删 favorite 自己的 10 处调用）；
+→ **CD-6 修法落地**（**共享层 2 处**：`service/common` 的 Tomcat 上限解除 + 共享 Filter 复刻 Go 判据 ⇒ **favorite 零触碰**）；
+~~CD-10~~（**已签字认账**，真实记录 = message 域 `SD-2026-10-23-06`）。
 
 ⚠️ **本表已无「等用户拍板」的技术项**（2026-10-25 第十一轮复核）——
 剩余待决项全部是**登记类**（候选签字等签），按用户既定偏好**不升级为拍板**：
@@ -1016,18 +1037,18 @@ L9 只读分析（**未改 `service/common`**）：
 | 日期 | 动作 |
 |---|---|
 | 2026-10-25 | ✅ **第十八轮（B10 落地）** —— ① 🔴 **真 PG 16 坐实漂移** —— 独立探针实测：`text` 列收下 Go 侧 `encoding/json` 产出的 14 字节 `{"k":"\u0000"}`（成功）；`CAST('{"k":"\u0000"}' AS jsonb)` **被拒** ⇒ **Go 成功 / RAG 5001** 坐实 ② 🔴 **顺手订正一个到处写错的 SQLSTATE** —— 台账与旧注释都写「PG 报 **22P02**」⇒ **错** ⇒ 实测是 **22P05**（`json_bad_unicode_escape`，`jsonfuncs.c:634`）⇒ 本域/共享层内 **5 处已改**；⛔ `docs/DRIFT/users/admin/rpc.md:488,732` 与 `docs/Pitfalls/users/admin/api.md:386` **不在 global 写权内** ⇒ 记账 + 交该域 owner ③ ✅ **三处改完** —— `AdminDomainService.updateUser` 去掉 `CAST({0} AS jsonb)` + `admin-rpc/domain/UserEntity` 的 typeHandler 换 `JsonTextTypeHandler` + **删除** `admin-rpc/mapper/JsonbTypeHandler.java`（它的全部存在理由「jsonb 列拒收 varchar 绑参」在该列变 text 后**不复存在** ⇒ 与 user-rpc 2026-10-23 的改名同型）④ ✅ **真 PG 守门 2 条**（列型查**库内真实 schema** + `\u0000` payload 自证敌意 + **逐字节落库**）⇒ **M1/M2/M3 三条变异全红且红在目标断言上** ⑤ 🔴 **变异脚本踩第三个坑**：M2 首跑 **GREEN 假阴性** —— `01_create_user.sql` 是 `users-common` 的**资源**，只跑 `admin-rpc` 时 Maven 从 `~/.m2` 解析**旧 jar** ⇒ 改动到不了运行代码 ⇒ 修法 = 把 `users-common` 拉进**同一 reactor**；顺带发现 surefire 参数换代：`-DfailIfNoTests=false` **管不住** `-Dtest` 模式，要加 **`-Dsurefire.failIfNoSpecifiedTests=false`** ⇒ 同族 §PIT-GLOBAL-016 ⑥ ⚠️ **边界**：Go 侧**未做活体对拍**；「键序」差异（Go 字典序 / Jackson 插入序）**不在本轮范围** |
-| 2026-10-25 | ✅ **第十七轮（X-5 落地）** —— ① 🔴 **第七轮只取证、这轮改完** —— `service/task/task-rpc` + `service/follow/follow-rpc` 两个域的 `*GrpcInterceptorWiringTest` 把**裸** `ServerCallHandler`（手写 `startCall` + `onHalfClose`）换成 grpc-java 的**标准派发入口** `ServerCalls.asyncUnaryCall(...)` ⇒ 处理函数**真的执行** ② 🔴 **补上原来缺的那一维** —— 两条新断言：「**handler 确实被调用过**」+「**取消发生时它仍在跑**」⇒ 并把 `Thread.sleep(10_000)` 换成 `probe.release.await(30, SECONDS)`（latch）⇒ 两条断言在 `sleep` 方案下**根本写不出来** ③ ✅ **生产代码一行没动**（`server.intercept(...)` 原样）⇒ **这不是行为修复，是守门修复**（超时机制本来就是真的，缺的只是「在飞处理被打断」这一维从未被验证）④ ✅ **三条变异全部转红** —— M1 去 `server.intercept` ⇒ `elapsed 5010/5009ms`；M2 换回裸 handler ⇒ 红在**新增**的 `entered` 断言；M3「完成但**不回包**」⇒ 红在**新增**的 `completed` 断言 ⑤ 🔴 **变异脚本踩了两个坑**（详见 ⑤·三 与 `docs/Pitfalls/global/cross-domain.md` PIT-GLOBAL-018）—— ① 首版 M1 写成**编译不过**的表达式 lambda ⇒ maven **压根没跑测试** ⇒ surefire 目录里留着**上一轮**的 XML ⇒ 脚本读旧结果 ⇒ **报成假绿**（靠「跑前删旧 XML + 看 maven 退出码 + 查 COMPILATION ERROR」三道闸才拦住）② 首版 M3 只做 `await(0)` 不去回包 ⇒ handler 秒完成**并正常回包** ⇒ 客户端拿到 OK ⇒ 红在**更早**的 `assertThrows` 上 ⇒ **目标断言压根没被执行到** ⇒ 变异要红在**目标断言**上 ⑥ ⚠️ **边界**：slow threshold 分支**仍无独立守门**；其余 8 个 rpc 域的同名测试**未逐一复查** ⇒ 「还有没有别的空转形态」**未穷尽** |
-| 2026-10-25 | ✅ **第十六轮（X-9 收敛 + 解析层补 `maxBodyLen`）** —— ① ✅ **新建双侧活体探针 `tools/json-body-probe/`**（Go 半边**真调** go-zero 的 `httpx.Parse` + Java 半边走 hot 域**真实实现** ⇒ **期望值不是人写的**；**无 known-dev 白名单** ⇒ 任一条不一致即 exit 1）② ✅ **首跑 19/20 一致，J20 不一致** ⇒ 坐实「RAG 整个读 body、Go 只读前 8 MiB」⇒ Go 侧错误详情长度 **8388643 = 8 MiB + 3** ⇒ 截断点精确 ⇒ ✅ **共享层补 `GO_MAX_BODY_LEN` + `goLimitedBody`（Go `io.LimitReader` 等价物）+ servlet 版判据重载**；✅ **hot 域补上并改用唯一真源**（改**流式**读 ⇒ 不会为一个小 JSON 等满 8 MiB）；✅ **article 域删本地判据改调唯一真源** ⇒ **3 份复制品 → 1 份** ③ 🔴 **澄清一条差点写错的话**：Go 的 `MaxBytes` **默认 1 MiB 且挂在引擎上全局生效**（`rest/config.go:53` + `rest/engine.go:163-164`）⇒ 9 MiB body **先被拦成裸 413** ⇒ **端到端那条漂移根本不存在** ⇒ 本次修的是**解析层**，端到端今天**零行为变化**（唯一可达的 article 段已被它自己的 filter 覆盖）⇒ 逐域可达性已列表 ④ ✅ **6 条守门**（真 Tomcat 裸 socket 验原始头值 / 8 MiB 边界卡 ±1 字节 / hot 端到端 413 + 解析层 5001 / article 判别式断言 / **新 tools 守卫 `check-go-json-body-predicate.py`**）+ **全部做过变异** ⑤ ⛔ **favorite 那份复制品永久残留**（零权限）⇒ 记账 + 写明修法与前提 ⑥ 📌 **新增 PIT-GLOBAL-015**（「探针测的层 ≠ 端到端跑的层」） |
-| 2026-10-25 | ✅ **第十五轮（X-1 取证与修复）** —— ① 🔴 **取证推翻「同库共存是边缘场景」** —— **7 个 Flyway rpc 模块的 DSN 默认值全部是同一个 `first_db`** ⇒ 「先启动者把 public schema 弄非空」是**必然** ⇒ 每个 V1 起始的模块都必须扛得住 ② 🔴 **查出 3 个域缺 `spring.flyway.baseline-version: 0`** —— `baseline-on-migrate=true` + 非空 schema + 无账本 ⇒ Flyway 在 **version 1** 处打 BASELINE ⇒ **V1 的 SQL 从未执行** ⇒ 首张表永远建不出来 ⇒ **服务起不来** ⇒ 同款缺陷 `message-rpc` **2026-10-24 已修并留了守门** ⇒ **同一个坑在另外 3 个域原封不动地留着** ③ ✅ **三域已修**（各一行 yaml）+ **各配一个真 PG 守门**（真 PG 16 + 真 Flyway 引擎 + **配置取自模块自己的 yaml** + **先把 schema 弄成非空**）⇒ **变异（删掉那行）⇒ 6 条全红** ④ ⚠️ **`article-rpc` 逐模块判定后排除**（最低迁移版本 **V8** > baseline 默认值 1 ⇒ 不受影响 ⇒ **差点误修一个不存在的缺陷**）⑤ ⛔ **`favorite-rpc` 同款缺陷零触碰** ⇒ 记账 + **明确告知该域 owner**（含修法与守门思路）⇒ **不静默** ⑥ 🟡 **「三进程并发」的运行时形态仍未验证** ⇒ 留一轮 |
-| 2026-10-25 | ✅ **第十四轮（X-6 落地）** —— ① 🔴 **推翻第十三轮修法草案的一个隐含前提**：草案假设「共享 Filter 统一写 Go 的 400 原文」⇒ **错** —— **Go 的拒绝形状按域而异**（5 域注册 `httpx.SetErrorHandler` ⇒ **200 + 业务信封**；article/user/task/favorite 未注册 ⇒ **400 + Go 原文**）⇒ 且各域 5001 **文案不同**（like/comment =「系统内部错误」，hot/follow/message = `"internal server error"`）⇒ ⇒ **共享层写不出信封** ⇒ 拒绝形状必须**由域自己渲染** ② 落地结构 = `service/common` **6 个类**（`GoStyleFormValues` 判据 / `GoStyleFormLimitMode` 模式 / `GoStyleFormLimitExceededException` / `GoStyleFormValueLimitInterceptor` / `GoStyleFormLimitWebMvcConfig` / `GoStyleTomcatParameterLimitCustomizer`）+ **9 个域各一行 yaml**（`rag.http.go-form-limit.mode: raw\|envelope`）⇒ **favorite 缺省 = off ⇒ 容器上限与闸门都不生效 ⇒ 零触碰、行为逐字节不变** ③ 🔴 **闸门是 `HandlerInterceptor` 不是 servlet `Filter`** —— Filter 在 DispatcherServlet **之外** ⇒ 抛的异常到不了 `@RestControllerAdvice` ⇒ envelope 模式无法渲染 ④ 顺带订正 `service/common/pom.xml` 的 **spring-web / spring-test 硬编码 7.0.0**（与 starter-web 的 7.0.9 错配 ⇒ `NoClassDefFoundError: ApiVersionHolder`）⇒ 改为跟随 BOM ⑤ 🟢 证据强度首次达 **真容器 + 真 Spring MVC + 真 advice + 变异测试**（raw 5/5 · envelope 4/4 · 模式 8/8 · 变异 M1/M2 均转红）· `check-tomcat-limits.py` 新增第四旋钮 + **favorite 零触碰守卫** ⇒ EXIT=0 ⑥ 残留（有界，修前已存在）：**鉴权与闸门的先后**（Go 先鉴权后解析 / RAG 先解析后鉴权）⇒ 记录不改 |
-| 2026-10-25 | ✅ **第十一轮（favorite 零权限重申 ⇒ 推翻第九轮的「永久阻塞」结论）** —— 用户重申：「**你没有 favorite 的所有权限**」⇒ ① 🔴 **推翻自己第九轮的结论** —— 那个结论只覆盖「逐模块改 `application.yml`」这一条修法；本轮实测**共享层修法存在**：① `service/common` 里一个 `WebServerFactoryCustomizer`（`@Order` > Boot 的 `TomcatWebServerFactoryCustomizer.getOrder()==0`）⇒ `connector.setMaxParameterCount(-1)`（`Connector.java:538`；`-1` = 不限 ⇒ `Parameters.java:79/247`）② 一个共享 Filter 复刻 go-zero `GetFormValues`（`net/url` 解析层 + **2048 个非空值**计数，可从 `article-api` 的 `GoStyleGetFormValuesFilter` 移植）⇒ **10 个 api 模块零代码改动 ⇒ favorite 零触碰**（前提已逐条实测：10/10 依赖 `service/common` + 10/10 扫 `com.rag.common`）⇒ ⇒ **X-6 不是永久阻塞，也不需签字认账** ⇒ 落 **出路 D** ② ✅ **连带影响面复核**（§二·十一 ④ 之二）—— X-4（favorite 半边）**仍阻塞**（必须删 favorite 自己的 10 处调用）· X-9（hot/article 两份可收敛、**favorite 那份永久留作复制品**）· X-7（**只读库不改代码 ⇒ 不受影响，仍可推进**）③ 本表**已无「等用户拍板」的技术项**；唯一真决策项 = T-6（需先撕 hot 域 `SD-HOT-API-006`） |
-| 2026-10-25 | ✅ **第九轮补（X-6 global 侧展开）** —— 两层限制语义精确化：Go **数非空值**（`httpx/util.go:15` `maxFormParamCount=2048` + `:44-45` 跳过空值 + `:48` `n < 2048` ⇒ 最多 2048 个非空值）vs Tomcat **数参数总数** ⇒ **残余窗口 = 总数 ≥ 2048 且 非空值 ≤ 2048**。🔴 **修法必然要动 `favorite-api`**（`max-parameter-count` 是 **per-app** 连接器设置，**无法在 `service/common` 统一改**；实测 **10 个 api 模块全部已配 2048、零遗漏**）⇒ ⇒ **X-6 不是「待拍板的技术项」，而是「favorite 写权边界」问题** ⇒ 登记等用户定（出路 A 放开 favorite / B 制造分叉 / C 签字认账）<br>⚠️ **2026-10-25 第十一轮已改判** —— 出路 A 撤下、出路 B 放弃、**出路 C（签字认账）也放弃** ⇒ 改判为「**存在共享层修法 ⇒ 可修，favorite 零触碰**」（见上一行）⇒ ⇒ **第九轮那句「修法必然要动 `favorite-api` ⇒ 永久阻塞」作废**
-| 2026-10-25 | ✅ **第九轮（X-2 审完 + X-4 确证）** —— ① **X-2**（建表责任交叉 + client 契约）**从「均未审」变成「已审完」**：A 组交叉但无冲突（Go 两侧 `User` struct 逐字段相同）；B 组 **10 域全覆盖零漂移**；🟡 **产出 1 条此前无人登记的真漂移** —— `users_user.extra_info` 写路径仍按 jsonb（`AdminDomainService.java:962` + `UserEntity.java:129`），但该列**早已是 TEXT**（`01_create_user.sql:41` + `:103`，且 admin-rpc 自己就在重放这份 DDL）⇒ **代码注释的前提已失效** ⇒ 含 `\u0000` 时 Go 成功 / RAG 5001 ② **X-4 实测确证**：`like` 域 Go 侧 6 个文件引用 `communityfact`、RAG 侧 **0**（**另起炉灶**）；`favorite` Go 0 / RAG 10（⛔ 不碰）③ ⚠️ **订正我自己第四轮 B2 的错误结论**（「like/comment/favorite 三域都接了线」**作废**）
-| 2026-10-25 | **第七轮（X-5 确证 + X-10 去重）**：① 🔴 **X-5 由「未展开」升级为「已确证」** —— 一次性探针实测：grpc-java 1.63 **会**调裸 handler 的 `startCall()`，但**不会**把 `onHalfClose` 派发给它返回的 `ServerCall.Listener` ⇒ 「处理函数睡 10 秒」**从未发生** ⇒ task + follow 两个域的同名测试**空转**（绿，但验证的是「取消一个空调用」而非「打断在飞处理」）⇒ 波及面由「task 域」扩到「task + follow 两个 rpc 域」⇒ 见 §二·八 ② ⚠️ **X-10 去重** —— 复查发现 X-10 早在 2026-10-23 已签为 message 域 `SD-2026-10-23-06` ⇒ **撤销本域重复登记的 `SD-2026-10-25-03`**（改为指针） |
-| 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 7 条跨域不变量状态；新增 **X-8 真源分层（L1 项目层 / L2 go-zero 框架层）** —— 本轮实测发现，影响全部域的对照方法 |
-| 2026-10-25 | **第四轮（B2 / X-3 闭合）**：**「第三个仓库」已定位** —— 链路末端**不是仓库**，是**仓外 DC 平台**的 `POST /v1/events`（`DC_PLATFORM_EVENT_URL` + `DC_PLATFORM_SERVICE_TOKEN`，路径必须以 `/v1/events` 结尾、token ≥ 32，见 Go `service/common/communityfact/wire.go:83-91`）。仓内两侧**都有**：`service/common/communityfact` **4 文件 ↔ 4 类**；authority 端点路径 1:1；调度形状 **1s / 16 / 10s / 单条失败即 break** 四项逐条对齐；`like` / `comment` / `favorite` 三域**都接了线**。⚠️ **2026-10-25 第九轮订正**：本条末句「`like` / `comment` / `favorite` 三域**都接了线**」⇒ **实测不成立** —— `like` 域 RAG 侧对 `com.rag.common.communityfact` 是 **0 引用**（它**另起炉灶**实现了自己的 outbox+stream+scheduler）⇒ 准确表述：**`comment` 与 `favorite` 接了共享组件；`like` 域没有；`article` 多了一处 Go 侧没有的用法** ⇒ 详见 §二·十（X-4）。⇒ ⚠️ **X-3 本身（末端 = 仓外 DC 平台 / 共享组件契约）仍成立** —— 订正的只是「哪些域接了线」这一句。 唯一差异 = **部署形态**（Go 独立 `cmd/fact-dispatch` vs RAG 进程内 `@Scheduled`）⇒ 表达层差异，不修。⇒ **X-3 关闭**（不是漂移，是架构事实 + 仓外边界） |
-| 2026-10-25 | **第三轮（B3 / X-7 部分闭合）**：① 查出**已有的域预设本身已失效**（users 容器改名、message 容器+库+用户三重失效）⇒ 修好并给脚本加按域的 `pg_user` ② **扩到 4 个域**（新增 `comment`）⇒ **可跑的域 1 → 4** ③ 跑出**真结论**：task ✅ 11 列逐字相同、message ✅ 37 列逐字相同（+ DEFAULT 6 处=已知刻意保留）、users/comment 各有**环境缺口**（Go 侧对应表未被 AutoMigrate）④ 🔴 **新增 X-10**：`message` 域索引 `idx_notification_recipient_read` **两侧列不同**（Go 单列 `is_read` / RAG 复合 `recipient_id,is_read`）⇒ 根因是 Go 侧 `priority:1` 写到了另一个索引名 ⇒ **落在 message 域的迁移脚本 ⇒ global 只记账不改别域代码，等用户拍板** ⑤ 仍缺 5 个域（article/like/hot/follow/favorite）的**双侧库环境** ⇒ 缺 runner ⇒ 登记为待办 |
-| 2026-10-25 | **第二轮**：新增 **X-9** —— 「Go 是否读 body」判据存在 **3 份生产复制品**（favorite / hot / article）。T-1 修复前 RAG **内部自相矛盾**（闸门说不读 / 解析器说要读）⇒ T-1 修复后已一致。⚠️ **根治需各域自己收敛**（调用唯一真源），global 只记账不改别域代码 |
+| 2026-10-25 | ✅ **第十七轮（CD-5 落地）** —— ① 🔴 **第七轮只取证、这轮改完** —— `service/task/task-rpc` + `service/follow/follow-rpc` 两个域的 `*GrpcInterceptorWiringTest` 把**裸** `ServerCallHandler`（手写 `startCall` + `onHalfClose`）换成 grpc-java 的**标准派发入口** `ServerCalls.asyncUnaryCall(...)` ⇒ 处理函数**真的执行** ② 🔴 **补上原来缺的那一维** —— 两条新断言：「**handler 确实被调用过**」+「**取消发生时它仍在跑**」⇒ 并把 `Thread.sleep(10_000)` 换成 `probe.release.await(30, SECONDS)`（latch）⇒ 两条断言在 `sleep` 方案下**根本写不出来** ③ ✅ **生产代码一行没动**（`server.intercept(...)` 原样）⇒ **这不是行为修复，是守门修复**（超时机制本来就是真的，缺的只是「在飞处理被打断」这一维从未被验证）④ ✅ **三条变异全部转红** —— M1 去 `server.intercept` ⇒ `elapsed 5010/5009ms`；M2 换回裸 handler ⇒ 红在**新增**的 `entered` 断言；M3「完成但**不回包**」⇒ 红在**新增**的 `completed` 断言 ⑤ 🔴 **变异脚本踩了两个坑**（详见 ⑤·三 与 `docs/Pitfalls/global/cross-domain.md` PIT-GLOBAL-018）—— ① 首版 M1 写成**编译不过**的表达式 lambda ⇒ maven **压根没跑测试** ⇒ surefire 目录里留着**上一轮**的 XML ⇒ 脚本读旧结果 ⇒ **报成假绿**（靠「跑前删旧 XML + 看 maven 退出码 + 查 COMPILATION ERROR」三道闸才拦住）② 首版 M3 只做 `await(0)` 不去回包 ⇒ handler 秒完成**并正常回包** ⇒ 客户端拿到 OK ⇒ 红在**更早**的 `assertThrows` 上 ⇒ **目标断言压根没被执行到** ⇒ 变异要红在**目标断言**上 ⑥ ⚠️ **边界**：slow threshold 分支**仍无独立守门**；其余 8 个 rpc 域的同名测试**未逐一复查** ⇒ 「还有没有别的空转形态」**未穷尽** |
+| 2026-10-25 | ✅ **第十六轮（CD-9 收敛 + 解析层补 `maxBodyLen`）** —— ① ✅ **新建双侧活体探针 `tools/json-body-probe/`**（Go 半边**真调** go-zero 的 `httpx.Parse` + Java 半边走 hot 域**真实实现** ⇒ **期望值不是人写的**；**无 known-dev 白名单** ⇒ 任一条不一致即 exit 1）② ✅ **首跑 19/20 一致，J20 不一致** ⇒ 坐实「RAG 整个读 body、Go 只读前 8 MiB」⇒ Go 侧错误详情长度 **8388643 = 8 MiB + 3** ⇒ 截断点精确 ⇒ ✅ **共享层补 `GO_MAX_BODY_LEN` + `goLimitedBody`（Go `io.LimitReader` 等价物）+ servlet 版判据重载**；✅ **hot 域补上并改用唯一真源**（改**流式**读 ⇒ 不会为一个小 JSON 等满 8 MiB）；✅ **article 域删本地判据改调唯一真源** ⇒ **3 份复制品 → 1 份** ③ 🔴 **澄清一条差点写错的话**：Go 的 `MaxBytes` **默认 1 MiB 且挂在引擎上全局生效**（`rest/config.go:53` + `rest/engine.go:163-164`）⇒ 9 MiB body **先被拦成裸 413** ⇒ **端到端那条漂移根本不存在** ⇒ 本次修的是**解析层**，端到端今天**零行为变化**（唯一可达的 article 段已被它自己的 filter 覆盖）⇒ 逐域可达性已列表 ④ ✅ **6 条守门**（真 Tomcat 裸 socket 验原始头值 / 8 MiB 边界卡 ±1 字节 / hot 端到端 413 + 解析层 5001 / article 判别式断言 / **新 tools 守卫 `check-go-json-body-predicate.py`**）+ **全部做过变异** ⑤ ⛔ **favorite 那份复制品永久残留**（零权限）⇒ 记账 + 写明修法与前提 ⑥ 📌 **新增 PIT-GLOBAL-015**（「探针测的层 ≠ 端到端跑的层」） |
+| 2026-10-25 | ✅ **第十五轮（CD-1 取证与修复）** —— ① 🔴 **取证推翻「同库共存是边缘场景」** —— **7 个 Flyway rpc 模块的 DSN 默认值全部是同一个 `first_db`** ⇒ 「先启动者把 public schema 弄非空」是**必然** ⇒ 每个 V1 起始的模块都必须扛得住 ② 🔴 **查出 3 个域缺 `spring.flyway.baseline-version: 0`** —— `baseline-on-migrate=true` + 非空 schema + 无账本 ⇒ Flyway 在 **version 1** 处打 BASELINE ⇒ **V1 的 SQL 从未执行** ⇒ 首张表永远建不出来 ⇒ **服务起不来** ⇒ 同款缺陷 `message-rpc` **2026-10-24 已修并留了守门** ⇒ **同一个坑在另外 3 个域原封不动地留着** ③ ✅ **三域已修**（各一行 yaml）+ **各配一个真 PG 守门**（真 PG 16 + 真 Flyway 引擎 + **配置取自模块自己的 yaml** + **先把 schema 弄成非空**）⇒ **变异（删掉那行）⇒ 6 条全红** ④ ⚠️ **`article-rpc` 逐模块判定后排除**（最低迁移版本 **V8** > baseline 默认值 1 ⇒ 不受影响 ⇒ **差点误修一个不存在的缺陷**）⑤ ⛔ **`favorite-rpc` 同款缺陷零触碰** ⇒ 记账 + **明确告知该域 owner**（含修法与守门思路）⇒ **不静默** ⑥ 🟡 **「三进程并发」的运行时形态仍未验证** ⇒ 留一轮 |
+| 2026-10-25 | ✅ **第十四轮（CD-6 落地）** —— ① 🔴 **推翻第十三轮修法草案的一个隐含前提**：草案假设「共享 Filter 统一写 Go 的 400 原文」⇒ **错** —— **Go 的拒绝形状按域而异**（5 域注册 `httpx.SetErrorHandler` ⇒ **200 + 业务信封**；article/user/task/favorite 未注册 ⇒ **400 + Go 原文**）⇒ 且各域 5001 **文案不同**（like/comment =「系统内部错误」，hot/follow/message = `"internal server error"`）⇒ ⇒ **共享层写不出信封** ⇒ 拒绝形状必须**由域自己渲染** ② 落地结构 = `service/common` **6 个类**（`GoStyleFormValues` 判据 / `GoStyleFormLimitMode` 模式 / `GoStyleFormLimitExceededException` / `GoStyleFormValueLimitInterceptor` / `GoStyleFormLimitWebMvcConfig` / `GoStyleTomcatParameterLimitCustomizer`）+ **9 个域各一行 yaml**（`rag.http.go-form-limit.mode: raw\|envelope`）⇒ **favorite 缺省 = off ⇒ 容器上限与闸门都不生效 ⇒ 零触碰、行为逐字节不变** ③ 🔴 **闸门是 `HandlerInterceptor` 不是 servlet `Filter`** —— Filter 在 DispatcherServlet **之外** ⇒ 抛的异常到不了 `@RestControllerAdvice` ⇒ envelope 模式无法渲染 ④ 顺带订正 `service/common/pom.xml` 的 **spring-web / spring-test 硬编码 7.0.0**（与 starter-web 的 7.0.9 错配 ⇒ `NoClassDefFoundError: ApiVersionHolder`）⇒ 改为跟随 BOM ⑤ 🟢 证据强度首次达 **真容器 + 真 Spring MVC + 真 advice + 变异测试**（raw 5/5 · envelope 4/4 · 模式 8/8 · 变异 M1/M2 均转红）· `check-tomcat-limits.py` 新增第四旋钮 + **favorite 零触碰守卫** ⇒ EXIT=0 ⑥ 残留（有界，修前已存在）：**鉴权与闸门的先后**（Go 先鉴权后解析 / RAG 先解析后鉴权）⇒ 记录不改 |
+| 2026-10-25 | ✅ **第十一轮（favorite 零权限重申 ⇒ 推翻第九轮的「永久阻塞」结论）** —— 用户重申：「**你没有 favorite 的所有权限**」⇒ ① 🔴 **推翻自己第九轮的结论** —— 那个结论只覆盖「逐模块改 `application.yml`」这一条修法；本轮实测**共享层修法存在**：① `service/common` 里一个 `WebServerFactoryCustomizer`（`@Order` > Boot 的 `TomcatWebServerFactoryCustomizer.getOrder()==0`）⇒ `connector.setMaxParameterCount(-1)`（`Connector.java:538`；`-1` = 不限 ⇒ `Parameters.java:79/247`）② 一个共享 Filter 复刻 go-zero `GetFormValues`（`net/url` 解析层 + **2048 个非空值**计数，可从 `article-api` 的 `GoStyleGetFormValuesFilter` 移植）⇒ **10 个 api 模块零代码改动 ⇒ favorite 零触碰**（前提已逐条实测：10/10 依赖 `service/common` + 10/10 扫 `com.rag.common`）⇒ ⇒ **CD-6 不是永久阻塞，也不需签字认账** ⇒ 落 **出路 D** ② ✅ **连带影响面复核**（§二·十一 ④ 之二）—— CD-4（favorite 半边）**仍阻塞**（必须删 favorite 自己的 10 处调用）· CD-9（hot/article 两份可收敛、**favorite 那份永久留作复制品**）· CD-7（**只读库不改代码 ⇒ 不受影响，仍可推进**）③ 本表**已无「等用户拍板」的技术项**；唯一真决策项 = T-6（需先撕 hot 域 `SD-HOT-API-006`） |
+| 2026-10-25 | ✅ **第九轮补（CD-6 global 侧展开）** —— 两层限制语义精确化：Go **数非空值**（`httpx/util.go:15` `maxFormParamCount=2048` + `:44-45` 跳过空值 + `:48` `n < 2048` ⇒ 最多 2048 个非空值）vs Tomcat **数参数总数** ⇒ **残余窗口 = 总数 ≥ 2048 且 非空值 ≤ 2048**。🔴 **修法必然要动 `favorite-api`**（`max-parameter-count` 是 **per-app** 连接器设置，**无法在 `service/common` 统一改**；实测 **10 个 api 模块全部已配 2048、零遗漏**）⇒ ⇒ **CD-6 不是「待拍板的技术项」，而是「favorite 写权边界」问题** ⇒ 登记等用户定（出路 A 放开 favorite / B 制造分叉 / C 签字认账）<br>⚠️ **2026-10-25 第十一轮已改判** —— 出路 A 撤下、出路 B 放弃、**出路 C（签字认账）也放弃** ⇒ 改判为「**存在共享层修法 ⇒ 可修，favorite 零触碰**」（见上一行）⇒ ⇒ **第九轮那句「修法必然要动 `favorite-api` ⇒ 永久阻塞」作废**
+| 2026-10-25 | ✅ **第九轮（CD-2 审完 + CD-4 确证）** —— ① **CD-2**（建表责任交叉 + client 契约）**从「均未审」变成「已审完」**：A 组交叉但无冲突（Go 两侧 `User` struct 逐字段相同）；B 组 **10 域全覆盖零漂移**；🟡 **产出 1 条此前无人登记的真漂移** —— `users_user.extra_info` 写路径仍按 jsonb（`AdminDomainService.java:962` + `UserEntity.java:129`），但该列**早已是 TEXT**（`01_create_user.sql:41` + `:103`，且 admin-rpc 自己就在重放这份 DDL）⇒ **代码注释的前提已失效** ⇒ 含 `\u0000` 时 Go 成功 / RAG 5001 ② **CD-4 实测确证**：`like` 域 Go 侧 6 个文件引用 `communityfact`、RAG 侧 **0**（**另起炉灶**）；`favorite` Go 0 / RAG 10（⛔ 不碰）③ ⚠️ **订正我自己第四轮 B2 的错误结论**（「like/comment/favorite 三域都接了线」**作废**）
+| 2026-10-25 | **第七轮（CD-5 确证 + CD-10 去重）**：① 🔴 **CD-5 由「未展开」升级为「已确证」** —— 一次性探针实测：grpc-java 1.63 **会**调裸 handler 的 `startCall()`，但**不会**把 `onHalfClose` 派发给它返回的 `ServerCall.Listener` ⇒ 「处理函数睡 10 秒」**从未发生** ⇒ task + follow 两个域的同名测试**空转**（绿，但验证的是「取消一个空调用」而非「打断在飞处理」）⇒ 波及面由「task 域」扩到「task + follow 两个 rpc 域」⇒ 见 §二·八 ② ⚠️ **CD-10 去重** —— 复查发现 CD-10 早在 2026-10-23 已签为 message 域 `SD-2026-10-23-06` ⇒ **撤销本域重复登记的 `SD-2026-10-25-03`**（改为指针） |
+| 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 7 条跨域不变量状态；新增 **CD-8 真源分层（L1 项目层 / L2 go-zero 框架层）** —— 本轮实测发现，影响全部域的对照方法 |
+| 2026-10-25 | **第四轮（B2 / CD-3 闭合）**：**「第三个仓库」已定位** —— 链路末端**不是仓库**，是**仓外 DC 平台**的 `POST /v1/events`（`DC_PLATFORM_EVENT_URL` + `DC_PLATFORM_SERVICE_TOKEN`，路径必须以 `/v1/events` 结尾、token ≥ 32，见 Go `service/common/communityfact/wire.go:83-91`）。仓内两侧**都有**：`service/common/communityfact` **4 文件 ↔ 4 类**；authority 端点路径 1:1；调度形状 **1s / 16 / 10s / 单条失败即 break** 四项逐条对齐；`like` / `comment` / `favorite` 三域**都接了线**。⚠️ **2026-10-25 第九轮订正**：本条末句「`like` / `comment` / `favorite` 三域**都接了线**」⇒ **实测不成立** —— `like` 域 RAG 侧对 `com.rag.common.communityfact` 是 **0 引用**（它**另起炉灶**实现了自己的 outbox+stream+scheduler）⇒ 准确表述：**`comment` 与 `favorite` 接了共享组件；`like` 域没有；`article` 多了一处 Go 侧没有的用法** ⇒ 详见 §二·十（CD-4）。⇒ ⚠️ **CD-3 本身（末端 = 仓外 DC 平台 / 共享组件契约）仍成立** —— 订正的只是「哪些域接了线」这一句。 唯一差异 = **部署形态**（Go 独立 `cmd/fact-dispatch` vs RAG 进程内 `@Scheduled`）⇒ 表达层差异，不修。⇒ **CD-3 关闭**（不是漂移，是架构事实 + 仓外边界） |
+| 2026-10-25 | **第三轮（B3 / CD-7 部分闭合）**：① 查出**已有的域预设本身已失效**（users 容器改名、message 容器+库+用户三重失效）⇒ 修好并给脚本加按域的 `pg_user` ② **扩到 4 个域**（新增 `comment`）⇒ **可跑的域 1 → 4** ③ 跑出**真结论**：task ✅ 11 列逐字相同、message ✅ 37 列逐字相同（+ DEFAULT 6 处=已知刻意保留）、users/comment 各有**环境缺口**（Go 侧对应表未被 AutoMigrate）④ 🔴 **新增 CD-10**：`message` 域索引 `idx_notification_recipient_read` **两侧列不同**（Go 单列 `is_read` / RAG 复合 `recipient_id,is_read`）⇒ 根因是 Go 侧 `priority:1` 写到了另一个索引名 ⇒ **落在 message 域的迁移脚本 ⇒ global 只记账不改别域代码，等用户拍板** ⑤ 仍缺 5 个域（article/like/hot/follow/favorite）的**双侧库环境** ⇒ 缺 runner ⇒ 登记为待办 |
+| 2026-10-25 | **第二轮**：新增 **CD-9** —— 「Go 是否读 body」判据存在 **3 份生产复制品**（favorite / hot / article）。T-1 修复前 RAG **内部自相矛盾**（闸门说不读 / 解析器说要读）⇒ T-1 修复后已一致。⚠️ **根治需各域自己收敛**（调用唯一真源），global 只记账不改别域代码 |
 
 ---
 
@@ -1093,3 +1114,5 @@ Caused by: java.net.UnknownHostException: postgres
 
 ⇒ **「测试全绿但进程起不来」的老形态已消除**（非 favorite 的 7 个 rpc 模块）。
 ⚠️ **favorite 的 2 处仍会起不来**（零写权 ⇒ 只记账）。
+> ⚠️ **本表里的 `X-n` 是本档的「旧号」**（2026-10-29 重编号为 `CD-1`~`CD-10`）⇒ ⇒ **对照列见 §〇 状态总表**；
+> ⚠️ **本表里的 `X-n` 与 `docs/PhaseGoal-judge.md` §五 的 `X-1`~`X-12` 不是同一套编号**（judge 的 X-6 = deadline 判据；本档的旧 X-6 = `DRIFT-HOTAPI-030`）⇒ ⇒ **引用必须带「文件 + 编号」**。

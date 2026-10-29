@@ -1,4 +1,4 @@
-# L6 · `align/global-x5gate` —— X-5 轴真 server 守门（admin-rpc / article-rpc）+ article slow 轴 + 缺口④ 复评
+# L6 · `align/global-x5gate` —— CD-5 轴真 server 守门（admin-rpc / article-rpc）+ article slow 轴 + 缺口④ 复评
 
 > 本文件既是**任务书**也是本 lane 的**台账片段**。协议见 [`_PROTOCOL.md`](_PROTOCOL.md)。
 > ⚠️ **本 lane 不产出「要用户拍板」的问题** —— 用户既定偏好：**登记类事项登记完就躺着**。
@@ -21,13 +21,13 @@
 
 ## 一、目标
 
-把 **X-5 轴**（「服务端超时真的打断了在飞处理」）的**真 server 守门**补到 **admin-rpc** 与 **article-rpc** 两个组件上，
+把 **CD-5 轴**（「服务端超时真的打断了在飞处理」）的**真 server 守门**补到 **admin-rpc** 与 **article-rpc** 两个组件上，
 并把 **article-rpc** 的 **slow threshold 轴**守门也补上；另外**复评 L2 留下的缺口④**。
 
 | 模块 | 要交付 |
 |---|---|
-| `service/users/admin/admin-rpc` | 🔴 **X-5 轴真 server 守门**（新建 1 个测试类）<br>⚠️ 本模块**已有** `AdminRpcSlowThresholdGateTest`（slow 轴样板）⇒ **不要重建**，只做 X-5 轴 |
-| `service/article/article-rpc` | 🔴 **X-5 轴真 server 守门**（新建 1 个测试类）<br>🔴 **slow threshold 轴守门**（新建 1 个测试类，照 admin-rpc 那份改） |
+| `service/users/admin/admin-rpc` | 🔴 **CD-5 轴真 server 守门**（新建 1 个测试类）<br>⚠️ 本模块**已有** `AdminRpcSlowThresholdGateTest`（slow 轴样板）⇒ **不要重建**，只做 CD-5 轴 |
+| `service/article/article-rpc` | 🔴 **CD-5 轴真 server 守门**（新建 1 个测试类）<br>🔴 **slow threshold 轴守门**（新建 1 个测试类，照 admin-rpc 那份改） |
 
 **缺口④（admin-rpc slow 守门的前提）** —— `AdminRpcSlowThresholdGateTest` 依赖
 「`GlobalOpenTelemetry` 在 Spring 上下文 refresh **之前**被替换」（`@BeforeAll` 早于上下文创建）。
@@ -44,7 +44,7 @@
 
 | 样板 | 路径 | 它示范什么 |
 |---|---|---|
-| **X-5 轴** | `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcGrpcInterceptorWiringTest.java` | **真 server + 真链 + 判别式断言**（服务端超时真的打断了在飞处理） |
+| **CD-5 轴** | `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcGrpcInterceptorWiringTest.java` | **真 server + 真链 + 判别式断言**（服务端超时真的打断了在飞处理） |
 | **slow 轴** | `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcSlowThresholdGateTest.java` | **真 OTel SDK + 收集型 exporter** ⇒ 断言导出的 span 上真的有 `sea.slow` |
 | **latch 加固版** | `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotGrpcInterceptorWiringTest.java` | `sleep` ⇒ `latch` 的改造形态 |
 
@@ -127,8 +127,8 @@
 
 | # | 组件 | 守门类 | 文件 | 用例数 | 断言数 | 真跑？ | 判定 |
 |---|---|---|---|---|---|---|---|
-| **G1** | `users/admin/admin-rpc` | 🔴 **X-5 轴**（真 server） | `src/test/java/com/rag/users/admin/rpc/AdminRpcGrpcInterceptorWiringTest.java`（**新增**） | 3 | **14** | ✅ `mvn -o test -pl service/users/admin/admin-rpc -am` · `Tests run: 3, Failures: 0, Errors: 0, Skipped: 0` | ✅ **非空转**（8 条变异中 3 条打在本守门上，全部红在目标断言） |
-| **G2** | `article/article-rpc` | 🔴 **X-5 轴**（真 server） | `src/test/java/com/rag/article/article/rpc/ArticleGrpcInterceptorWiringTest.java`（**新增**） | 3 | **14** | ✅ `mvn -o test -pl service/article/article-rpc -am` · `Tests run: 3, Failures: 0, Errors: 0, Skipped: 0` | ✅ **非空转**（8 条变异中 3 条打在本守门上） |
+| **G1** | `users/admin/admin-rpc` | 🔴 **CD-5 轴**（真 server） | `src/test/java/com/rag/users/admin/rpc/AdminRpcGrpcInterceptorWiringTest.java`（**新增**） | 3 | **14** | ✅ `mvn -o test -pl service/users/admin/admin-rpc -am` · `Tests run: 3, Failures: 0, Errors: 0, Skipped: 0` | ✅ **非空转**（8 条变异中 3 条打在本守门上，全部红在目标断言） |
+| **G2** | `article/article-rpc` | 🔴 **CD-5 轴**（真 server） | `src/test/java/com/rag/article/article/rpc/ArticleGrpcInterceptorWiringTest.java`（**新增**） | 3 | **14** | ✅ `mvn -o test -pl service/article/article-rpc -am` · `Tests run: 3, Failures: 0, Errors: 0, Skipped: 0` | ✅ **非空转**（8 条变异中 3 条打在本守门上） |
 | **G3** | `article/article-rpc` | 🔴 **slow threshold 轴** | `src/test/java/com/rag/article/article/rpc/ArticleRpcSlowThresholdGateTest.java`（**新增**） | 2 | **6** | ✅ 同上 · `Tests run: 2, Failures: 0, Errors: 0, Skipped: 0` | ✅ **非空转**（2 条变异打在本守门上：恒真 / 恒假） |
 
 **逐条用例判定**（G1 / G2 同构）：
@@ -278,7 +278,7 @@ M3 把超时状态改成 `INTERNAL` ⇒ 状态断言红（`status=INTERNAL`）�
 
 ## 7.4 缺口清单（**未覆盖 / 未穷尽**，不要读成「已全部对齐」）
 
-1. 🔴 **X-5 轴在全仓仍未穷尽**：本 lane 补了 **admin-rpc** 与 **article-rpc** 两个；
+1. 🔴 **CD-5 轴在全仓仍未穷尽**：本 lane 补了 **admin-rpc** 与 **article-rpc** 两个；
    L2 的 F 条快照里列的另外三个（`comment-rpc` / `like-rpc` / `favorite-rpc`）**仍缺** ⇒
    （`comment` / `like` 归 L1/L7 写权；`favorite` **全域零写权** ⇒ 它**没有人能补** ⇒ **须整合者决策**）。
 2. 🔴 **slow threshold 轴仍未穷尽**：本 lane 补了 **article-rpc**；`AdminRpcSlowThresholdGateTest` 是 L2 做的 admin-rpc；
@@ -307,8 +307,8 @@ M3 把超时状态改成 `INTERNAL` ⇒ 状态断言红（`status=INTERNAL`）�
 
 | 文件 | 改动 | 行数 |
 |---|---|---|
-| `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcGrpcInterceptorWiringTest.java` | **新增**：X-5 轴真 server 守门（3 用例 / **14 断言**） | 323 |
-| `service/article/article-rpc/src/test/java/com/rag/article/article/rpc/ArticleGrpcInterceptorWiringTest.java` | **新增**：X-5 轴真 server 守门（3 用例 / **14 断言**） | 332 |
+| `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcGrpcInterceptorWiringTest.java` | **新增**：CD-5 轴真 server 守门（3 用例 / **14 断言**） | 323 |
+| `service/article/article-rpc/src/test/java/com/rag/article/article/rpc/ArticleGrpcInterceptorWiringTest.java` | **新增**：CD-5 轴真 server 守门（3 用例 / **14 断言**） | 332 |
 | `service/article/article-rpc/src/test/java/com/rag/article/article/rpc/ArticleRpcSlowThresholdGateTest.java` | **新增**：slow threshold 轴独立守门（2 用例 / **6 断言**） | 291 |
 | `docs/DRIFT/global/lanes/L6-x5gate.md` | 本节（§七） | — |
 

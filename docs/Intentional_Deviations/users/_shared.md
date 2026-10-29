@@ -1,5 +1,6 @@
 <!-- @new 2026-10-25 · 由 `align/global-signoff` 工作树产出（第二十六轮 · L5 lane）· 2026-10-25 整合者从 `global/users-domain.md` fold 至此 -->
-<!-- 核对日期：2026-10-25 -->
+<!-- 核对日期：2026-10-25 · **2026-10-29 重核（台账对齐轮）**：两条候选逐条回 Go 真源 + 回 RAG 源码两侧复核，**描述的行为均仍存在** ⇒ 两条候选继续有效（仍为「未签字」）。 -->
+<!-- **最新核对日期：2026-10-29** -->
 
 # `users` 域签字档（`_shared`）
 
@@ -14,7 +15,15 @@
 
 ---
 
-## SD-2026-10-25-CAND-16 · 🏷 **待签字候选** —— users 域 **8 处**时间列 `DEFAULT CURRENT_TIMESTAMP`（Go 侧**无**默认）
+## SD-2026-10-25-CAND-16@users · 🏷 **待签字候选** —— users 域 **8 处**时间列 `DEFAULT CURRENT_TIMESTAMP`（Go 侧**无**默认）
+
+> **2026-10-29 重核（台账对齐轮）**：
+> - **签字状态**：仍是 **🏷 待签字候选（未签字）** ⇒ **不进「已签字」计数**，也不构成「已签字 ⇒ 不许质疑」。
+> - **被描述的行为是否仍存在**：**仍存在**（两侧逐条复核，见下）⇒ **本条不失效**。
+> - **两侧复核（证据）**：
+>   - RAG 侧 8 处 `DEFAULT CURRENT_TIMESTAMP` **逐行命中**：`service/users/users-common/src/main/resources/db/01_create_user.sql:42`/`:43` · `02_create_user_avatar_history.sql:30`/`:31` · `03_create_admin.sql:59`/`:60` · `04_create_admin_invite.sql:44`/`:45`（2026-10-29 实测 `grep -n "DEFAULT CURRENT_TIMESTAMP" service/users/users-common/src/main/resources/db/*.sql`）。
+>   - Go 侧 **无 `default`**：真源 `service/user/user/rpc/internal/model/data_model.go:14`/`:15`/`:30`/`:31` 与 `service/user/admin/rpc/internal/model/data_model.go:12`/`:13`/`:27`/`:28` 的 tag 只有 `autoCreateTime` / `autoUpdateTime`（2026-10-29 逐行核对，**行号与本条原文一致**）。
+> - **撞号检查**：本编号在本域**只出现于本文件**（3 处：标题 · 留痕位置 ×2）⇒ **无同域撞号**；为免与其它域的同名候选混淆，加**域内唯一别名 `SD-2026-10-25-CAND-16@users`**（原编号 `SD-2026-10-25-CAND-16` **原样保留**，不作废）。
 
 | 项 | 值 |
 |---|---|
@@ -98,7 +107,16 @@ Go 的 gorm tag **没有 `default`** ⇒ GORM `AutoMigrate` **不给**时间列 
 
 ---
 
-## SD-2026-10-25-CAND-17 · 🏷 **待签字候选** —— `users_user.status` 的**可空性**：Go **可空** / RAG `NOT NULL`
+## SD-2026-10-25-CAND-17@users · 🏷 **待签字候选** —— `users_user.status` 的**可空性**：Go **可空** / RAG `NOT NULL`
+
+> **2026-10-29 重核（台账对齐轮）**：
+> - **签字状态**：仍是 **🏷 待签字候选（未签字）** ⇒ 不进「已签字」计数。
+> - **被描述的行为是否仍存在**：**仍存在** ⇒ **本条不失效**。
+> - **两侧复核（证据）**：
+>   - RAG 侧：`service/users/users-common/src/main/resources/db/01_create_user.sql:39` = `status      BIGINT NOT NULL DEFAULT 0,`（2026-10-29 实测，行号与本条原文一致）。
+>   - Go 侧：真源 `service/user/user/rpc/internal/model/data_model.go:11` = `Status     int64             \`gorm:"column:status;default:0"\`` ⇒ **有 `default:0`、无 `not null`** ⇒ GORM `AutoMigrate` 建出**可空**列（**行号与本条原文一致**）；admin 半边同构处为 `service/user/admin/rpc/internal/model/data_model.go:41`（同款 tag，**已核对一致**）。
+> - **⚠️ 与本条的耦合项仍在**：`admin-rpc` 的 `status = 0L` 判据（`DRIFT-USERRPC-V-001`）**未闭合** ⇒ 本条签字**只认账「RAG 更严」这个事实**，**不关闭**该缺陷（与本条原文一致，2026-10-29 复核无变化）。
+> - **撞号检查**：本编号在本域**只出现于本文件**（2 处）⇒ **无同域撞号**；加**域内唯一别名 `SD-2026-10-25-CAND-17@users`**（原编号原样保留）。
 
 | 项 | 值 |
 |---|---|
@@ -180,3 +198,4 @@ Go 的 gorm tag **没有 `default`** ⇒ GORM `AutoMigrate` **不给**时间列 
 | 日期 | 动作 |
 |---|---|
 | 2026-10-25 | 🆕 **首版（第二十六轮 · L5 lane `align/global-signoff`）** —— 收录 **2 条待签字候选**（**均未签字，登记完就躺着，不升级为拍板**）⇒ ① **`SD-2026-10-25-CAND-16`**：users 域 **8 处**时间列 `DEFAULT CURRENT_TIMESTAMP`（Go 侧**无**默认）—— 性质 = **刻意保留**；Go 出处 = `service/user/user/rpc/internal/model/data_model.go:14/15/30/31` + `service/user/admin/rpc/internal/model/data_model.go:12/13/27/28`（tag 里**没有** `default`）⇒ RAG 出处 = `users-common/src/main/resources/db/{01,02,03,04}_*.sql` 的 8 处 ⇒ **真 PG 活体对照**（DEFAULT 恰好 8 处差异）② **`SD-2026-10-25-CAND-17`**：`users_user.status` 可空性（Go 可空 / RAG `NOT NULL`）—— 性质 = **RAG 更严**；Go 出处 = `service/user/user/rpc/internal/model/data_model.go:11`（`default:0` 但**无** `not null`）⇒ RAG 出处 = `01_create_user.sql:39` ⇒ ⚠️ **与 `admin-rpc` 的 `status = 0L` 耦合**（ADJ-01）⇒ 本条**不关闭**该缺陷 ⚠️ **本档是 global 代收的临时落点**（users 域档 `docs/Intentional_Deviations/users/_shared.md` 当前 0 字节，且**不在 L5 白名单内**）⇒ **整合者可把两条 fold 进该文件后删除本档** |
+| **2026-10-29** | 🆕 **台账对齐轮重核（只加不改）** —— ① 两条候选（`SD-2026-10-25-CAND-16@users` / `SD-2026-10-25-CAND-17@users`）逐条**回 Go 真源 + 回 RAG 源码两侧复核**：**被描述的行为均仍存在** ⇒ **两条不失效**，仍为 🏷 **未签字候选**（不进「已签字」计数）；② 加**域内唯一别名 `@users`**，并写明**同域撞号检查结论**（两条编号在本域各只出现于本文件 ⇒ **无撞号**）；③ 追加**逐行证据**（Go `data_model.go` 的 tag 行号 + RAG DDL 行号，2026-10-29 逐条核对一致）。⚠️ **上表 2026-10-25 那行末尾的「users 域档当前 0 字节」是当时的快照** ⇒ **该文件自 2026-10-25 起已有内容**（两条候选已 fold 至此），原句保留不删。 |

@@ -4,11 +4,29 @@
 
 > 记「**为什么会这样**」，不是记「哪条不一样」。不一致本身在 [`../../DRIFT/task/rpc.md`](../../DRIFT/task/rpc.md)。
 
+> 🆕 **2026-10-29 台账对齐（W-B lane · follow + task 域）**
+>
+> - **编号归一**：本档条目的**旧号** `PITFALL-TASK-RPC-NN` **原样保留**在每条的「旧号」行里；**新号** = `PIT-TASK-NN`（与旧号后两位一一对应）。
+>   ⚠️ **一处例外**：旧号 `PITFALL-TASK-RPC-15·补`（与 `-15` 同主题的**补充条目**，旧形态是**同文件内重复编号** —— 已登记在
+>   [`docs/Pitfalls/_INDEX.md` 的「编号撞号」表](../_INDEX.md)）⇒ **新号取 `PIT-TASK-34`** ⇒ 该撞号在本档**已消解**。
+>   ⚠️ **旧号是检索用的历史标识** —— 仓内其它文档（DRIFT / 共享层 / `tools/check-ledger-selfcheck.py` 的 `pit_prefix`）按**旧号**检索 ⇒ 旧号**不可删**。
+> - **每条补三字段**：**状态** · **核对日期（2026-10-29）** · **是否影响当前轮次**（填「否」时必须写明**不适用的具体原因**）。
+> - **状态判定口径**（本档统一）：
+>   - **已闭环** = 该坑在**本域的具体触发点已被消除**（代码 / 配置 / 脚本已改）**且有证据指针**（`文件:行号` 或守门的实测条数）⇒ **残留的通用教训不改变这个判定**（通用教训留在正文里）。
+>   - **仍生效** = 该坑的**触发条件本身**仍在（框架 / 语言 / 真源的事实，或本域的编排脚本仍未改）⇒ 今天照旧做法还会踩。
+>   - **已撤销** = 用户 / 决策撤销。**待核实** = 判不了（须写清缺什么）⇒ **不许默认任何一侧**。
+> - ⚠️ **状态标记取值域**：`✅` / `🟡` / `🔴` / `⚫`（与仓内既有取值域一致）。
+
 ---
 
-## 🔴 PITFALL-TASK-RPC-01 · `@EnabledIfDockerAvailable` 把「拉不到镜像」压成「Docker 不可用」，15 条真 PG 用例静默全跳
+## PIT-TASK-01 · 【已闭环】 `@EnabledIfDockerAvailable` 把「拉不到镜像」压成「Docker 不可用」，15 条真 PG 用例静默全跳
 
-> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-003`](../../DRIFT/task/rpc.md#🔴-drift-task-rpc-003--15-条真-pg-用例静默全跳证据缺失)
+> **旧号**：`PITFALL-TASK-RPC-01` ⇒ **新号**：`PIT-TASK-01`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 注解已删 + Ryuk 已禁用 ⇒ 「静默全跳」的触发条件已消除 ⇒ 本轮只核台账、不改 pom ⇒ 不影响本轮产出
+> **证据**：`service/task/task-rpc/pom.xml:336-341` surefire `environmentVariables` 注入 `TESTCONTAINERS_RYUK_DISABLED=true` ＋ 本轮 surefire 实测 `TaskProgressUpsertParityTest` **t=15 f=0 e=0 s=0**（skipped=0 ⇒ 真 PG 15 条真跑了）
+
+> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-003`](../../DRIFT/task/rpc.md#✅-drift-task-rpc-003--15-条真-pg-用例静默全跳证据缺失)
 > **核对日期**：2026-10-23　**基线**：`8422116`
 
 ### 现象
@@ -88,9 +106,14 @@ DockerClientFactory.instance().client();
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-02 · relaxed binding 键名对不上 ⇒ 配置键被静默丢弃
+## PIT-TASK-02 · 【已闭环】 relaxed binding 键名对不上 ⇒ 配置键被静默丢弃
 
-> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-002`](../../DRIFT/task/rpc.md#🔴-drift-task-rpc-002--taskdefinitions-的四个-ttl-键是死配置)
+> **旧号**：`PITFALL-TASK-RPC-02` ⇒ **新号**：`PIT-TASK-02`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 键名与字段已逐字对齐 ⇒ 「配置里写了也不生效」的触发条件已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`service/task/task-rpc/src/test/java/com/rag/task/task/rpc/config/TaskSinkPropertiesBindingTest.java`（本轮 surefire 实测 **t=3 f=0 e=0 s=0**）守「生效值 == Go 常量」＋「配置面是活的」
+
+> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-002`](../../DRIFT/task/rpc.md#✅-drift-task-rpc-002--taskdefinitions-的四个-ttl-键是死配置)
 
 ### 现象
 
@@ -135,9 +158,14 @@ when(ops.increment(anyString())).thenAnswer(...)   // redis-pipe-max → 1234 �
 
 ---
 
-## ⚠️ PITFALL-TASK-RPC-03 · 注释描述的是「代码没实现的契约」
+## PIT-TASK-03 · 【已闭环】 注释描述的是「代码没实现的契约」
 
-> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-001`](../../DRIFT/task/rpc.md#🔴-drift-task-rpc-001--taskcountstore-内存单例--两个-goka-group-串号--重启归零)
+> **旧号**：`PITFALL-TASK-RPC-03` ⇒ **新号**：`PIT-TASK-03`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`⚠️`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— javadoc 已改写为「现状 + 此前行为」双段 ⇒ 「注释描述没实现的契约」的触发条件已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`service/task/task-rpc/src/main/java/com/rag/task/task/rpc/mq/TaskCountStore.java:26-40`（「🔴🔴 2026-10-23 修正：本类此前是『内存单例』」—— 注释现在描述**已实现**的按 group 命名空间隔离，不再把「应有设计」写成「现状」）
+
+> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-001`](../../DRIFT/task/rpc.md#✅-drift-task-rpc-001--taskcountstore-内存单例--两个-goka-group-串号--重启归零)
 
 `TaskCountStore` 的 javadoc 原文写着：
 
@@ -162,7 +190,12 @@ when(ops.increment(anyString())).thenAnswer(...)   // redis-pipe-max → 1234 �
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-04 · 探针自己也会撒谎：Python `urllib` 会自动补 `Content-Type`
+## PIT-TASK-04 · 【仍生效】 探针自己也会撒谎：Python `urllib` 会自动补 `Content-Type`
+
+> **旧号**：`PITFALL-TASK-RPC-04` ⇒ **新号**：`PIT-TASK-04`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— Python `urllib` 的「自动补 `Content-Type`」是**库的事实** ⇒ 触发条件永远存在 ⇒ 但本轮**不改探针脚本**（脚本不在本 lane 写权内）⇒ 不影响本轮台账产出
+> **证据**：`tools/difftest/parity-task.py` 本轮实测仍含 `urllib`（grep 命中）⇒ 换新的对拍脚本时同样会踩
 
 > 场景：2026-10-23 `task` 域双侧活体对拍（见 [`../../DRIFT/task/api.md`](../../DRIFT/task/api.md) §二·五）
 
@@ -201,7 +234,12 @@ req = urllib.request.Request(url, data=b'{"id":1001}', method="POST")
 
 ---
 
-## ⚠️ PITFALL-TASK-RPC-05 · 对拍「红了 42/43」可能全是 header 格式，别淹没真正的差异
+## PIT-TASK-05 · 【仍生效】 对拍「红了 42/43」可能全是 header 格式，别淹没真正的差异
+
+> **旧号**：`PITFALL-TASK-RPC-05` ⇒ **新号**：`PIT-TASK-05`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`⚠️`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 「格式噪声掩盖真差异」是**对拍方法论** ⇒ 永远可能发生 ⇒ 但本轮**不跑双侧对拍** ⇒ 不影响本轮产出
+> **证据**：`tools/difftest/diff.py` 的 `Normalizer`（本轮实测存在）—— 归一化这一步**仍然必须做**，且做完也不能草率收工
 
 > 场景：2026-10-23 `task` 域对拍首跑：`MATCH 1 / DIFF 42`
 
@@ -225,7 +263,12 @@ req = urllib.request.Request(url, data=b'{"id":1001}', method="POST")
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-06 · Go 的 `Pipeline()` 不是事务，Spring 的 `executePipelined` 也不开 MULTI —— **两边都理解错了，于是整条链路静默死掉**
+## PIT-TASK-06 · 【已闭环】 Go 的 `Pipeline()` 不是事务，Spring 的 `executePipelined` 也不开 MULTI —— **两边都理解错了，于是整条链路静默死掉**
+
+> **旧号**：`PITFALL-TASK-RPC-06` ⇒ **新号**：`PIT-TASK-06`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 回调里已不再调 `operations.exec()` ⇒ 「整条链路静默死掉」的触发条件已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`service/task/task-rpc/src/main/java/com/rag/task/task/rpc/service/RedisPipelines.java:98`（「这里**绝不能**再调 `operations.exec()`」）＋ `:92`/`:121` 用 `executePipelined(SessionCallback)` ＋ 守门 `RedisPipelinesRealRedisGateTest`（本轮 surefire 实测 **t=9 f=0 e=0 s=0** · 真 Redis）
 
 > 场景：2026-10-23 Kafka 端到端对拍首跑。**整个 task 消息处理链路此前是死的**，而 81 条测试全绿。
 
@@ -278,7 +321,12 @@ SETNX 抛 ⇒ 穿出 lazyInit ⇒ 穿出 flushOnce ⇒ 被 flushTick catch ⇒ *
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-07 · 81 条测试**零真 Redis 覆盖** ⇒「跑绿」证明不了 Redis 路径
+## PIT-TASK-07 · 【已闭环】 81 条测试**零真 Redis 覆盖** ⇒「跑绿」证明不了 Redis 路径
+
+> **旧号**：`PITFALL-TASK-RPC-07` ⇒ **新号**：`PIT-TASK-07`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 真 Redis 覆盖已从 0 条补到 4 类 21 条 ⇒ 「跑绿证明不了 Redis 路径」的触发条件已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：本轮 surefire 实测（真 Redis）：`RedisPipelinesRealRedisGateTest` **9** ＋ `TaskRedisCommandTimeoutGateTest` **7** ＋ `TaskRedisPoolExhaustionP99GateTest` **3** ＋ `TaskRedisDisconnectFastRejectGateTest` **2** = **21 条**
 
 ### 现象
 
@@ -308,7 +356,12 @@ SETNX 抛 ⇒ 穿出 lazyInit ⇒ 穿出 flushOnce ⇒ 被 flushTick catch ⇒ *
 
 ---
 
-## ⚠️ PITFALL-TASK-RPC-08 · Redis 的 `SET` 是**类型无关**的 ⇒ 断言会「因为错误的原因而通过」
+## PIT-TASK-08 · 【仍生效】 Redis 的 `SET` 是**类型无关**的 ⇒ 断言会「因为错误的原因而通过」
+
+> **旧号**：`PITFALL-TASK-RPC-08` ⇒ **新号**：`PIT-TASK-08`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`⚠️`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— Redis 的 `SET` **类型无关**是**Redis 事实** ⇒ 写「错误路径断言」时仍可能选一个不触发错误的错误源 ⇒ 但**本域的断言已按正确姿势改写** ⇒ 不影响本轮产出
+> **证据**：`service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mq/RedisPipelinesRealRedisGateTest.java` 的 `execPropagatesCommandError`（用 **string 类型 key + `HGET`** 造错误源 ⇒ 注释已写明正确姿势）
 
 > 场景：2026-10-23 写真 Redis 守门测试时踩到。
 
@@ -338,7 +391,12 @@ WRONGTYPE 只发生在「用某类型的读/改命令去动另一种类型的 ke
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-09 · 删 Kafka topic **不会**删 `__consumer_offsets` 里的已提交位点
+## PIT-TASK-09 · 【仍生效】 删 Kafka topic **不会**删 `__consumer_offsets` 里的已提交位点
+
+> **旧号**：`PITFALL-TASK-RPC-09` ⇒ **新号**：`PIT-TASK-09`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 已提交位点存在 `__consumer_offsets` 是**Kafka 事实** ⇒ 删 topic 不会清位点 ⇒ 永远可能发生 ⇒ 但本轮**不跑 Kafka 对拍** ⇒ 不影响本轮产出
+> **证据**：Go `service/task/rpc/internal/mq/initGoKa.go:134-135` `cfg.Consumer.Offsets.Initial = sarama.OffsetOldest` 仍在 ⇒ 「`OffsetOldest` 只在无已提交位点时生效」的前提未变
 
 ### 现象
 
@@ -385,7 +443,12 @@ Topic task.rpc.consumer71-table, partition 0, hwm 0, local offset 23
 
 ---
 
-## ⚠️ PITFALL-TASK-RPC-10 · 容器内 Kafka CLI 必须用 **INTERNAL** 监听器
+## PIT-TASK-10 · 【仍生效】 容器内 Kafka CLI 必须用 **INTERNAL** 监听器
+
+> **旧号**：`PITFALL-TASK-RPC-10` ⇒ **新号**：`PIT-TASK-10`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`⚠️`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— `advertised.listeners` 与新镜像的 CLI 包名是**镜像/中间件事实** ⇒ 永远可能再踩 ⇒ 但本轮**不跑容器内 Kafka CLI** ⇒ 不影响本轮产出
+> **证据**：`tools/difftest/docker-compose.task-kafka.yml` 的 `KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://127.0.0.1:59992,INTERNAL://localhost:19092`（本轮实测仍在） ⇒ 容器内必须用 INTERNAL 监听器的结论未变
 
 ### 现象
 
@@ -424,7 +487,12 @@ broker 回头告知 `127.0.0.1:59992` ⇒ 在容器自己的 netns 里这个端�
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-11 · 方法签名对了 ≠ 方法会被调到；而且**调用时机**比签名更致命
+## PIT-TASK-11 · 【仍生效】 方法签名对了 ≠ 方法会被调到；而且**调用时机**比签名更致命
+
+> **旧号**：`PITFALL-TASK-RPC-11` ⇒ **新号**：`PIT-TASK-11`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 「消费点在更早环节 ⇒ 这一层改不动」是**框架事实**（body 在 `EmptyBodyCheckingHttpInputMessage` 构造期就被消费）⇒ 永远可能再踩 ⇒ 但**本域的缺陷已修并有守门** ⇒ 不影响本轮产出
+> **证据**：守门 `service/task/task-api/src/test/java/com/rag/task/task/api/TaskApiContentTypeTest.java`（本轮 surefire 实测 **t=13 f=0 e=0 s=0**）
 
 ### 现象
 
@@ -466,7 +534,12 @@ Boot 4 / Jackson 3 的 `AbstractJacksonHttpMessageConverter extends AbstractSmar
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-12 · 配置项**名字写错 = 静默失效**，而且用它「排除 Spring 侧」会得出**假阴性**
+## PIT-TASK-12 · 【仍生效】 配置项**名字写错 = 静默失效**，而且用它「排除 Spring 侧」会得出**假阴性**
+
+> **旧号**：`PITFALL-TASK-RPC-12` ⇒ **新号**：`PIT-TASK-12`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 「属性名写错 ⇒ 静默失效」是**Boot 的通病** ⇒ 永远可能再踩 ⇒ 但本域已加了「直接读 `Environment` 断言属性真被解析」的守门 ⇒ 不影响本轮产出
+> **证据**：`TaskApiContentTypeTest.java`（本轮 surefire 实测 t=13）—— 断言 `spring.servlet.multipart.enabled` 真被解析成目标值、且 `spring.mvc.servlet.multipart.enabled` 不存在
 
 ### 现象
 
@@ -504,7 +577,12 @@ Boot 4 的 `MultipartAutoConfiguration` 上是
 
 ---
 
-## ⚠️ PITFALL-TASK-RPC-13 · 探针里的一句 `getInputStream().available()`，**自己触发了**它要测的那个行为
+## PIT-TASK-13 · 【仍生效】 探针里的一句 `getInputStream().available()`，**自己触发了**它要测的那个行为
+
+> **旧号**：`PITFALL-TASK-RPC-13` ⇒ **新号**：`PIT-TASK-13`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`⚠️`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— Tomcat 对 form POST 的**惰性解析**是**容器事实** ⇒ 「探针自己触发了被测行为」永远可能再发生 ⇒ 但**本域的探针已整个删掉**、换成真 Tomcat 守门 ⇒ 不影响本轮产出
+> **证据**：守门 `TaskApiContentTypeTest.java`（真 Tomcat · 本轮实测 t=13）—— 探针 filter 已不在仓内
 
 ### 现象
 
@@ -541,7 +619,12 @@ Tomcat 对 `application/x-www-form-urlencoded` 的 POST **惰性解析表单**�
 
 ---
 
-## ⚠️ PITFALL-TASK-RPC-14 · 对拍两侧的 Redis **db 编号**要按「这一轮在测什么」来定，不是照抄别的脚本
+## PIT-TASK-14 · 【已闭环】 对拍两侧的 Redis **db 编号**要按「这一轮在测什么」来定，不是照抄别的脚本
+
+> **旧号**：`PITFALL-TASK-RPC-14` ⇒ **新号**：`PIT-TASK-14`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`⚠️`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 两个脚本的 Redis db 约定已分别写进脚本本身（隔离 / 共用）⇒ 「照抄配置」的触发条件已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`tools/difftest/run-task-kafka-e2e.sh:179` `--spring.data.redis.database=1`（**隔离**） ＋ `tools/difftest/run-task-http-parity.sh:213` `--spring.data.redis.database=0`（**共用**）—— 两个脚本各自写明理由
 
 ### 现象
 
@@ -575,7 +658,12 @@ Go 读出 `completionProgress` = 2 / -7 / 99，RAG **一律 0**。
 
 ---
 
-## ⚠️ PITFALL-TASK-RPC-15 · bash 里 `$var` 紧跟**多字节字符**，变量名会被吃掉首字节
+## PIT-TASK-15 · 【仍生效】 bash 里 `$var` 紧跟**多字节字符**，变量名会被吃掉首字节
+
+> **旧号**：`PITFALL-TASK-RPC-15` ⇒ **新号**：`PIT-TASK-15`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`⚠️`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— bash 3.2 把**多字节字符首字节**并进变量名是**shell 事实** ⇒ 永远可能再踩 ⇒ 但本轮**不改脚本**（脚本不在本 lane 写权内）⇒ 不影响本轮台账产出
+> **证据**：本文件正文的实测记录（`N=12; echo "$N，x"` ⇒ `x`）＋ 同源条目 `PIT-TASK-21`（全角标点） ＋ 域外同款 `docs/Pitfalls/follow/rpc.md` 的 `PIT-FOLLOW-013`
 
 ### 现象
 
@@ -608,7 +696,12 @@ UTF-8 首字节 `0xEF`）会被算进变量名** ⇒ 变量名变成 `g\xef` ⇒
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-16 · `pkill` 之后只 `sleep 2` ⇒ 新进程抢不到端口，而症状是「应用 503」
+## PIT-TASK-16 · 【已闭环】 `pkill` 之后只 `sleep 2` ⇒ 新进程抢不到端口，而症状是「应用 503」
+
+> **旧号**：`PITFALL-TASK-RPC-16` ⇒ **新号**：`PIT-TASK-16`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 编排脚本已改成「轮询等端口空闲 / 等端口开始监听」⇒ 「旧进程抢不到端口」的触发条件已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`tools/difftest/run-task-http-parity.sh:78` `wait_port_free()` ＋ `:89` `wait_port_listen()` ＋ `:183` 「端口没释放，放弃」＋ `:190`/`:193`/`:227` 三处调用
 
 ### 现象
 
@@ -649,7 +742,12 @@ Caused by: java.net.BindException: Address already in use
 
 ---
 
-## ⚠️ PITFALL-TASK-RPC-15·补 · bash 的 `$var` 紧跟多字节字符：**实测规则**（本轮又踩了一次）
+## PIT-TASK-34 · 【仍生效】 bash 的 `$var` 紧跟多字节字符：**实测规则**（本轮又踩了一次）
+
+> **旧号**：`PITFALL-TASK-RPC-15·补` ⇒ **新号**：`PIT-TASK-34`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`⚠️`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— bash 3.2 的变量名解析规则不会变 ⇒ 触发条件永远存在 ⇒ 但本轮**不改脚本** ⇒ 不影响本轮台账产出
+> **证据**：本文件正文的**实测规则表**（`set -u` 开 ⇒ 硬失败 `unbound variable`；`set -u` 关 ⇒ 静默展开成空串且首字节被吞） ＋ 机械检查正则（`grep -nP '\$[A-Za-z_][A-Za-z0-9_]*(?=[^\x00-\x7f])'`）
 
 > 补充 2026-10-24：这条写完的**当天**又踩了一次（写 Nacos 对拍脚本时），
 > 而且踩的还是同一种 ⇒ 值得把规则说准。
@@ -687,7 +785,12 @@ NACOS_NAME=xyz; echo "$NACOS_NAME，"   # ⇒ "??"
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-17 · Nacos 2.x 客户端按「HTTP 端口 + 1000」推算 gRPC 端口 ⇒ 映射错了会让**整个应用起不来**
+## PIT-TASK-17 · 【仍生效】 Nacos 2.x 客户端按「HTTP 端口 + 1000」推算 gRPC 端口 ⇒ 映射错了会让**整个应用起不来**
+
+> **旧号**：`PITFALL-TASK-RPC-17` ⇒ **新号**：`PIT-TASK-17`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 「Nacos 2.x 客户端按 HTTP 端口 + 1000 推算 gRPC 端口」是**客户端事实** ⇒ 永远可能再踩 ⇒ 但脚本已把端口关系写死并注释 ⇒ 不影响本轮产出
+> **证据**：`tools/difftest/run-task-nacos-discovery.sh:36-42`（`NACOS_GRPC=50849  # = NACOS_HTTP + 1000，不能乱填`）＋ `:81` 端口映射
 
 ### 现象
 
@@ -729,9 +832,14 @@ Nacos **2.x 的客户端用 gRPC 注册**（nacos-client 3.x 的 `NamingGrpcClie
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-18 · `@KafkaListener(properties=…)` **不走 Boot 松散绑定** ⇒ 连字符写法被 Kafka 静默忽略 ⇒ 「earliest 从未生效」而 326 条测试全绿
+## PIT-TASK-18 · 【已闭环】 `@KafkaListener(properties=…)` **不走 Boot 松散绑定** ⇒ 连字符写法被 Kafka 静默忽略 ⇒ 「earliest 从未生效」而 326 条测试全绿
 
-> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-006`](../../DRIFT/task/rpc.md#🔴-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)
+> **旧号**：`PITFALL-TASK-RPC-18` ⇒ **新号**：`PIT-TASK-18`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 六个 listener 全部改成点分键名 ⇒ 「连字符被 Kafka 静默忽略」的触发条件已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`service/task/task-rpc/src/main/java/com/rag/task/task/rpc/mq/TaskUserCountConsumer.java:80` / `TaskArticleCountConsumer.java:80` / `TaskRawDiagnosticConsumer.java:54` —— 三处均为 `properties = "auto.offset.reset=..."` ＋ 守门 `TaskKafkaOffsetResetContractTest`（本轮 surefire 实测 **t=5 f=0 e=0 s=0**）
+
+> 对应的 DRIFT 条目：[`DRIFT-TASK-RPC-006`](../../DRIFT/task/rpc.md#✅-drift-task-rpc-006--per-listener-的-offset-reset-写成了连字符--kafka-直接忽略--earliest-从未生效)
 
 ### 现象
 
@@ -798,7 +906,12 @@ AbstractConfig : These configurations '[auto-offset-reset]' were supplied but ar
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-19 · 探针自己会撒谎：**同一个实验连翻三次车**，前两次的「结论」全是假的
+## PIT-TASK-19 · 【仍生效】 探针自己会撒谎：**同一个实验连翻三次车**，前两次的「结论」全是假的
+
+> **旧号**：`PITFALL-TASK-RPC-19` ⇒ **新号**：`PIT-TASK-19`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 「探针的观测值 ≠ 被观测对象的状态」是**方法论** ⇒ 永远可能再踩 ⇒ 但本轮**不跑 Kafka topic 实验** ⇒ 不影响本轮产出
+> **证据**：本文件正文的三次翻车记录（v1 producer 输出被 `>/dev/null 2>&1` 吞掉 / v2 五个 topic 全是 compact / v3 compacted topic 拒收无 key 消息）
 
 ### 现象
 
@@ -843,7 +956,12 @@ AbstractConfig : These configurations '[auto-offset-reset]' were supplied but ar
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-20 · compose 的**项目名从目录名推导** ⇒ 同目录的两个 compose 文件撞成同一个 project ⇒ `up -d` 会**删掉别的域的容器**
+## PIT-TASK-20 · 【已闭环】 compose 的**项目名从目录名推导** ⇒ 同目录的两个 compose 文件撞成同一个 project ⇒ `up -d` 会**删掉别的域的容器**
+
+> **旧号**：`PITFALL-TASK-RPC-20` ⇒ **新号**：`PIT-TASK-20`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— compose 文件已显式声明独立项目名 ⇒ 「同目录两个 compose 撞成同一个 project」的触发条件已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`tools/difftest/docker-compose.task-kafka.yml:39` `name: taskprobe` ＋ `:36-38` 注释（「不是装饰 · 是项目名」） ＋ `:44`/`:63` 容器名 `taskprobe-postgres` / `taskprobe-redis`
 
 ### 现象
 
@@ -899,7 +1017,12 @@ name: taskprobe          # ← 不是装饰，是「项目名」
 
 ---
 
-## ⚠️ PITFALL-TASK-RPC-21 · bash 里 `$var` 紧跟**全角标点** ⇒ 标点被算进变量名 ⇒ `set -u` 下直接报错
+## PIT-TASK-21 · 【仍生效】 bash 里 `$var` 紧跟**全角标点** ⇒ 标点被算进变量名 ⇒ `set -u` 下直接报错
+
+> **旧号**：`PITFALL-TASK-RPC-21` ⇒ **新号**：`PIT-TASK-21`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`⚠️`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— bash 把**全角标点**并进变量名是**shell 事实** ⇒ 永远可能再踩 ⇒ 但本轮**不改脚本** ⇒ 不影响本轮台账产出
+> **证据**：本文件正文的实测记录（`retention-probe.sh: line 71: off?: unbound variable`）＋ 机械检查正则（`\$[A-Za-z_][A-Za-z0-9_]*(?=[^\x00-\x7f])`） ＋ 同源条目 `PIT-TASK-15`
 
 ### 现象
 
@@ -943,7 +1066,12 @@ bash 的变量名解析会把**非 ASCII 字节**也算进名字 ⇒ `$off，` �
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-22 · 「先起消费者、后灌消息」的对拍**测不出** `earliest` / `latest` 的差别 ⇒ 全绿是假绿
+## PIT-TASK-22 · 【已闭环】 「先起消费者、后灌消息」的对拍**测不出** `earliest` / `latest` 的差别 ⇒ 全绿是假绿
+
+> **旧号**：`PITFALL-TASK-RPC-22` ⇒ **新号**：`PIT-TASK-22`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 「先灌消息、再起消费者」已做成落仓探针 ⇒ 该对拍顺序的缺口已补 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`tools/difftest/run-task-offset-oldest.sh`（阶段 B「先灌消息」→ 阶段 C「再起消费者」· 本轮实测文件存在） ＋ 守门 `TaskKafkaOffsetResetContractTest`（t=5）
 
 ### 现象
 
@@ -970,7 +1098,12 @@ bash 的变量名解析会把**非 ASCII 字节**也算进名字 ⇒ `$off，` �
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-23 · 「按段前缀匹配元数据」会让配置键扫描器**形同虚设**
+## PIT-TASK-23 · 【已闭环】 「按段前缀匹配元数据」会让配置键扫描器**形同虚设**
+
+> **旧号**：`PITFALL-TASK-RPC-23` ⇒ **新号**：`PIT-TASK-23`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 元数据匹配已改成**精确名** + 阳性对照 ⇒ 「扫描器形同虚设」的触发条件已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`service/task/task-rpc/src/test/java/com/rag/task/task/rpc/config/TaskConfigKeyBindingContractTest.java:171-178`（阳性对照 · 框架元数据必须真的被读到）＋ `:195-208`（阳性对照 · 扫描器必须能识别「无人认领的键」） —— 本轮 surefire 实测 **t=5 f=0 e=0 s=0**
 
 ### 现象
 
@@ -1006,7 +1139,12 @@ bash 的变量名解析会把**非 ASCII 字节**也算进名字 ⇒ `$off，` �
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-24 · 用 `binder.bind(prefix + "." + subKey, Target.class)` 判「绑得上」**必然误判**
+## PIT-TASK-24 · 【已闭环】 用 `binder.bind(prefix + "." + subKey, Target.class)` 判「绑得上」**必然误判**
+
+> **旧号**：`PITFALL-TASK-RPC-24` ⇒ **新号**：`PIT-TASK-24`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 判定已改用 `BoundPropertiesTrackingBindHandler`（记录**真正被绑定的属性名**）⇒ 「必然误判」的触发条件已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`TaskConfigKeyBindingContractTest.java:195-208`（阳性对照先证明判定逻辑本身是对的，再让它去判别的键） ＋ `:274-296`（自有前缀的每个键都必须在 `@ConfigurationProperties` 类上找得到）
 
 ### 现象
 
@@ -1043,7 +1181,12 @@ binder.bind(prefix + "." + subKey, Target.class).isBound()
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-25 · 「白名单」必须带**反向纪律**，否则会变成逃生舱
+## PIT-TASK-25 · 【已闭环】 「白名单」必须带**反向纪律**，否则会变成逃生舱
+
+> **旧号**：`PITFALL-TASK-RPC-25` ⇒ **新号**：`PIT-TASK-25`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 白名单纪律已落成断言 + 变异验证 ⇒ 「白名单退化成逃生舱」的触发条件已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`TaskConfigKeyBindingContractTest.java:246-264`（白名单纪律 · 每条登记的前缀都必须真的盖住至少一个孤儿键 ＋ 原因不得为空）
 
 ### 现象
 
@@ -1064,7 +1207,12 @@ binder.bind(prefix + "." + subKey, Target.class).isBound()
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-26 · 台账的「已修」断言**过期时不会报错** ⇒ 必须能机械复核
+## PIT-TASK-26 · 【仍生效】 台账的「已修」断言**过期时不会报错** ⇒ 必须能机械复核
+
+> **旧号**：`PITFALL-TASK-RPC-26` ⇒ **新号**：`PIT-TASK-26`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— **本轮（台账对齐）就是这条的直接应用场景** —— 本 lane 正在把各域台账的「已修 / 未修」断言逐条对齐到实测状态 ⇒ ⇒ 本条**影响本轮**；但它**不要求本轮改产品代码**，只要求每条断言都带「核对日期 + 证据指针」⇒ 本档每条已按此落地
+> **证据**：机械化复核器 `tools/check-ledger-selfcheck.py`（第 2 层「已修断言」/ 第 3 层「数字断言」/ 第 5·6 层「覆盖缺口」） ＋ 本档每条的「核对日期 2026-10-29 · 证据」三字段即该纪律的落地形态
 
 ### 现象
 
@@ -1106,7 +1254,12 @@ binder.bind(prefix + "." + subKey, Target.class).isBound()
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-27 · 台账里「**写死计数**」必然滞后 ⇒ 改查**更强的不变式**
+## PIT-TASK-27 · 【仍生效】 台账里「**写死计数**」必然滞后 ⇒ 改查**更强的不变式**
+
+> **旧号**：`PITFALL-TASK-RPC-27` ⇒ **新号**：`PIT-TASK-27`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— **本轮 task 域的测试条数就是「写死计数」** —— 实测前 `docs/DRIFT/task/rpc.md:29` 写 134、`:1633` 写 137、`docs/DRIFT/task/vs-common.md:1433` 写 134、`:1525` 写 102、`docs/DRIFT/task/api.md:30` 写 135，**四处互相矛盾** ⇒ ⇒ 本条**直接影响本轮**；本轮已把四处收敛到**实测值**并标注口径与日期（判据从「写死数字」升级为「实测 + 口径标注」）
+> **证据**：本轮实测：`mvn -o -B -DargLine=-Xmx2g -pl service/task/task-api,service/task/task-rpc test` ⇒ **BUILD SUCCESS** · task-rpc **137** / task-api **135**（surefire XML `testsuite` 求和，与 maven 模块汇总行逐字相等）
 
 ### 现象
 
@@ -1126,7 +1279,12 @@ binder.bind(prefix + "." + subKey, Target.class).isBound()
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-28 · 用纯文本找「台账登记了什么」会**把正文引用当成登记**
+## PIT-TASK-28 · 【仍生效】 用纯文本找「台账登记了什么」会**把正文引用当成登记**
+
+> **旧号**：`PITFALL-TASK-RPC-28` ⇒ **新号**：`PIT-TASK-28`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 「用纯文本找登记会把正文引用当登记」是**扫描脚本的方法论缺陷** ⇒ 本轮**不动 `tools/check-ledger-selfcheck.py`**（工具不在本 lane 写权内）⇒ 不影响本轮台账产出
+> **证据**：`tools/check-ledger-selfcheck.py:669-671`（注释已把该坑写死：占位符既不算「已登记」也不算「漏登记」） ＋ `:783-790`（判据已按「只认表格行」锚定形态）
 
 ### 现象
 
@@ -1151,7 +1309,12 @@ binder.bind(prefix + "." + subKey, Target.class).isBound()
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-29 · 「允许 ≤1 个例外」的判定会**漏过**真正的漏登记
+## PIT-TASK-29 · 【仍生效】 「允许 ≤1 个例外」的判定会**漏过**真正的漏登记
+
+> **旧号**：`PITFALL-TASK-RPC-29` ⇒ **新号**：`PIT-TASK-29`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 「允许 ≤1 个例外」的判定形态仍可能漏过真正的漏登记 ⇒ 但本轮**不动该工具**⇒ 不影响本轮台账产出
+> **证据**：`tools/check-ledger-selfcheck.py:788`（「占位符行**不在 commit 清单的末尾** ⇒ 它不是『本轮』那一行」）—— 判据已限定到具体对象（末尾占位行）而非计数
 
 ### 现象
 
@@ -1174,7 +1337,12 @@ binder.bind(prefix + "." + subKey, Target.class).isBound()
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-30 · 「覆盖缺口」只查**测试类**不够 —— **生产类**里藏着启动阻塞项
+## PIT-TASK-30 · 【已闭环】 「覆盖缺口」只查**测试类**不够 —— **生产类**里藏着启动阻塞项
+
+> **旧号**：`PITFALL-TASK-RPC-30` ⇒ **新号**：`PIT-TASK-30`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 复核器已扩到「测试类 + 生产类」两层 ⇒ 「只查测试类」的覆盖缺口已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`tools/check-ledger-selfcheck.py:1676` `layer5_unmentioned`（测试类）＋ `:2261` `layer6_unmentioned_production`（生产类） ＋ `:1698`（「不只查 class」· `interface` / `enum` / `@interface` 同样算生产类型）
 
 ### 现象
 
@@ -1204,7 +1372,12 @@ binder.bind(prefix + "." + subKey, Target.class).isBound()
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-31 · 「集合覆盖」不等于「一一对应」—— **占位符**与**重复登记**会同时逃过「每个 commit 都登记过」这条不变式
+## PIT-TASK-31 · 【已闭环】 「集合覆盖」不等于「一一对应」—— **占位符**与**重复登记**会同时逃过「每个 commit 都登记过」这条不变式
+
+> **旧号**：`PITFALL-TASK-RPC-31` ⇒ **新号**：`PIT-TASK-31`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 判据已从「集合覆盖」升级为「一一对应」（占位符残留 / 同一个 commit 多行 / 行数守恒）⇒ 触发条件已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`tools/check-ledger-selfcheck.py:770-792`（① 占位符残留（只允许 1 个且必须在末尾）② 同一个 commit 被写成多行） ＋ `:963`（三档判据在**域无关**分支下也跑）
 
 > **核对日期**：2026-10-24　**基线**：`8422116`
 
@@ -1246,7 +1419,12 @@ binder.bind(prefix + "." + subKey, Target.class).isBound()
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-32 · 「同一个坑在同一处复发三次」= **靠人记不住**的证据 ⇒ 判据必须机械化，且**机械化判据自己要有反向证据**
+## PIT-TASK-32 · 【已闭环】 「同一个坑在同一处复发三次」= **靠人记不住**的证据 ⇒ 判据必须机械化，且**机械化判据自己要有反向证据**
+
+> **旧号**：`PITFALL-TASK-RPC-32` ⇒ **新号**：`PIT-TASK-32`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 机械化判据已进仓且自带反向证据（自检 + 变异测试）⇒ 「靠人记不住」的触发条件已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`tools/check-ledger-selfcheck.py:1723` `layer0_selfcheck`（阳性对照）＋ `:2059+` `--mutation-test` 段（变异样本：引用一个**仓内不存在的**旧号 `PITFALL-TASK-RPC-NN` / 把 `-32` 改成 `-33` ⇒ 判据须精确命中）<br>⚠️ **本行的写法坑（2026-10-29 对齐时当场踩到 · 即 `PIT-TASK-28` 本人）**：证据行里**若写出一个字面编号**（哪怕只是举例说「工具会构造一个不存在的编号」），复核器的第 3 层「编号连续性」判据是**全文正则扫** ⇒ ⇒ **它会把那个举例当成本档已定义的编号** ⇒ ⇒ **本档里凡提到旧号，一律只写本档真实存在的那 34 个**，不写假号 ⇒ **证据行用 `NN` 占位**。
 
 > **核对日期**：2026-10-24　**基线**：`8422116`
 
@@ -1284,7 +1462,12 @@ AGENTS.md 早就记过一个坑：**台账的 commit 清单「写成 4 行却只
 
 ---
 
-## 🔴 PITFALL-TASK-RPC-33 · 「别的域有守门测试」**不等于**「本域有」—— 跨域共有的契约，**每个域都要各自守一次**
+## PIT-TASK-33 · 【已闭环】 「别的域有守门测试」**不等于**「本域有」—— 跨域共有的契约，**每个域都要各自守一次**
+
+> **旧号**：`PITFALL-TASK-RPC-33` ⇒ **新号**：`PIT-TASK-33`
+> **原标题标记**（2026-10-23/24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 本域已自己守了「gRPC 拦截器注册链」这条跨域共有契约 ⇒ 触发条件已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`service/task/task-rpc/src/test/java/com/rag/task/task/rpc/TaskGrpcInterceptorWiringTest.java`（本轮 surefire 实测 **t=2 f=0 e=0 s=0** · 真 gRPC server + 真 PG）
 
 > **核对日期**：2026-10-24　**基线**：`8422116`
 

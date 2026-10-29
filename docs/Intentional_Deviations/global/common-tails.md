@@ -110,6 +110,16 @@ func MaxConnsHandler(n int) func(http.Handler) http.Handler {
 - `docs/DRIFT/global/_README.md` §三 T-2 / T-5（同步）；
 - 踩坑 ⇒ [`docs/Pitfalls/global/common-tails.md`](../../Pitfalls/global/common-tails.md) PIT-GLOBAL-002「档位错置」。
 
+
+##### 🔴 逐条重核（核对日期 **2026-10-29** · W-F lane · 共享层台账面）
+
+| 项 | 值 |
+|---|---|
+| **唯一别名** | `SD-2026-10-25-01@global`（`SD-2026-10-25-01` 在全仓**无撞号** —— 实测 `grep -rn 'SD-2026-10-25-01' docs/ --include='*.md'` ⇒ 命中集中在本文件与 `docs/DRIFT/global/**` 的指针） |
+| **核「被签字描述的那个行为现在还存在吗」** | ✅ **存在** —— Go 侧 `MaxConnsHandler` **每路由一个 latch**；RAG 侧 `GoStyleMaxConnsFilter` **全进程一个 `Semaphore`** |
+| **证据（2026-10-29）** | RAG `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java:102`（`/** 全进程共享的闸门 … */ private final Semaphore latch;`）＋ `:106`（构造期 `new Semaphore(maxConns)` ⇒ **只建一次**）＋ `:56-60`（javadoc 原文：「Go 也是每个 handler 一份 latch」）· Go `go-zero@v1.10.2/rest/handler/maxconnshandler.go`（**每路由 new 一个 latch**）<br>⚠️ Go 出处为 **L2 框架层**（`go-zero@v1.10.2/<路径>`）⇒ **不在项目树里**（见 `docs/Pitfalls/global/common-tails.md` PIT-GLOBAL-001） |
+| **结论** | **签字有效 · 状态不变**（不得「顺手修正回旧行为」） |
+| **描述完整性** | 描述**完整**（Go 行为 / RAG 行为 / 理由 / 守门俱在）⇒ 无需追加订正 |
 ---
 
 ## SD-2026-10-25-02 ❌ **已撤销（2026-10-25 第十轮）** —— 「框架限制」这个记录**不再成立**：T-4 资源面已被**方案⑤ 主动探测写**修掉 ⇒ **本条从未被签字，也不需再签**
@@ -181,6 +191,17 @@ func MaxConnsHandler(n int) func(http.Handler) http.Handler {
 
 ---
 
+
+##### 🔴 逐条重核（核对日期 **2026-10-29**）—— 「撤销的那个行为**现在**是不是真的没了」
+
+| 项 | 值 |
+|---|---|
+| **唯一别名** | `SD-2026-10-25-02@global` |
+| **撤销描述（保留）** | 「T-4 资源面已被**方案⑤ 主动探测写**修掉 ⇒ **本条从未被签字，也不需再签**」 |
+| **核「撤销的那个行为现在是不是真的没了」** | ✅ **确实没了（仍成立）** —— 「客户端断连后**在飞 gRPC 不被提前取消**」这个行为**今天已不成立** |
+| **证据（2026-10-29）** | `service/common/src/main/java/com/rag/common/observability/GoStyleClientDisconnectProbe.java`（**在位** · 30,493 B · `:234` 探针字节 `HTTP/1.1 103 Early Hints\r\n\r\n`）＋ `docs/Intentional_Deviations/global/common-tails.md` §`SD-2026-10-25-04` §①（「客户端断连 → 在飞 gRPC 取消」实测 **461ms**）＋ `docs/DRIFT/global/_README.md` §三 T-4 行（✅ **资源面已修**） |
+| **结论** | **撤销仍成立 · 状态不变**（❌ 已撤销 ⇒ **不计入计数**，与 `_INDEX.md` 的口径一致） |
+| **🔴 附带订正** | 本条被撤销后，**它原来的「差异描述」仍留在本档**（现位于 §`SD-2026-10-25-02` 的**遗留描述段**）⇒ 本轮**已把该段标为 ⚫ 已失效**并说明「保留 Go 出处、废弃 RAG 侧现状断言」⇒ ⇒ **原句保留、历史不抹掉**，但**不得再被当作当前差异引用** |
 ## SD-2026-10-25-04 ✅ **已签字（2026-10-25，用户拍板）** —— 方案⑤「主动探测写」带来的 **wire 偏离**：客户端先收到 N 行 `103 Early Hints`
 
 | 项 | 值 |
@@ -254,6 +275,17 @@ func MaxConnsHandler(n int) func(http.Handler) http.Handler {
 
 ---
 
+
+##### 🔴 逐条重核（核对日期 **2026-10-29**）
+
+| 项 | 值 |
+|---|---|
+| **唯一别名** | `SD-2026-10-25-04@global`（实测 `grep -rn 'SD-2026-10-25-04' docs/ --include='*.md'` ⇒ 命中集中在本文件 + `docs/DRIFT/global/**` 指针 ⇒ **无跨域撞号**） |
+| **核「被签字描述的那个行为现在还存在吗」** | ✅ **存在** —— 方案⑤ 的探针**仍在写 `103 Early Hints`** ⇒ wire 偏离（响应流最前面多出 1xx）**仍在** |
+| **证据（2026-10-29）** | `service/common/src/main/java/com/rag/common/observability/GoStyleClientDisconnectProbe.java:229`（javadoc「探针字节：`HTTP/1.1 103 Early Hints\r\n\r\n`」）＋ `:234`（常量定义 `PROBE_BYTES`） |
+| **结论** | **签字有效 · 状态不变**（不得「顺手修正回旧行为」—— 即**不得**为了消掉 1xx 而撤掉探针） |
+| **描述完整性** | 描述**完整**（偏离面 / 选型理由 / 设计取舍 / 已知风险 / 守门 / 留痕俱在）⇒ 无需追加订正 |
+| **⚠️ 证据边界（本轮未复测）** | 本轮**未重跑** `GoStyleClientDisconnectProbeGateTest`（真 Tomcat 3 条）⇒ 「守门仍非空转」这一条**沿用 2026-10-25 的实测**；本轮只做了**源码级**核对（探针字节常量在位）⇒ 标 **待核实（守门未复跑）** |
 ## SD-2026-10-25-04 附记 · 🟡 **官方路径记录（可选后续优化 —— 不是必选项）**
 
 > **用户 2026-10-25 06:40 指示**：「**先记录官方处理**」+「**把官方的处理列为后续优化选项，而不是必选项**」
@@ -320,7 +352,19 @@ if (!processor.isAsync()) {
 
 ---
 
-### 差异的实际面
+## ⚫ `SD-2026-10-25-02` 的**遗留描述段**（**已失效** —— 被签字描述的行为**已不存在**）
+
+> **2026-10-29 对齐（W-F lane · 共享层台账面）**：🔴 **本段描述的行为已不存在** ⇒ **原签字自动失效**
+> （判据：`docs/Intentional_Deviations/_INDEX.md:34`）⇒ ⇒ **本段只作历史留档，不得再被当作「当前差异」引用**。
+>
+> **为什么失效**：`SD-2026-10-25-02` 记录的是「客户端断连后**在飞 gRPC 不被提前取消**」⇒ 该行为已由
+> **方案⑤「主动探测写」修掉**（实测 **461ms**）⇒ ⇒ **本段正文里「RAG ❌ 不取消 / 仍要等到自己的 deadline」是 2026-10-25 之前的快照**。
+> **证据**：`service/common/src/main/java/com/rag/common/observability/GoStyleClientDisconnectProbe.java`（在位 · `:234` 的探针字节 `HTTP/1.1 103 Early Hints\r\n\r\n`）＋ `docs/Intentional_Deviations/global/common-tails.md` §`SD-2026-10-25-04` §①（「在飞 gRPC 取消」实测 461ms）＋ `docs/DRIFT/global/_README.md` §三 T-4 行（✅ 资源面已修）。
+>
+> ⚠️ **保留本段的原因**：它仍记着「Go 侧断连后 1~3ms 内取消」的**Go 出处**（`service/common/observability/http.go:53-56`），
+> 而**那条 Go 出处本身没有失效** ⇒ **保留 Go 出处、废弃 RAG 侧的现状断言** ⇒ 阅读时**只取 Go 出处那一半**。
+
+### 差异的实际面（**2026-10-25 之前的状态 · 已过期**）
 
 | 侧 | 客户端断连后，在飞的下游 gRPC 调用 |
 |---|---|
@@ -451,6 +495,17 @@ req := r.WithContext(ctx)
 
 ---
 
+
+##### 🔴 逐条重核（核对日期 **2026-10-29**）
+
+| 项 | 值 |
+|---|---|
+| **唯一别名** | `SD-2026-10-25-CAND-14@global` |
+| **状态** | 🏷 **候选 · 未签字**（登记完就躺着，**不升级为拍板**）—— 与 `_INDEX.md` 的「CAND 族 **14 条**」口径**一致**（本条不计入「已签字 48 条」） |
+| **核「被签字描述的那个行为现在还存在吗」** | 🟡 **源码级成立 · 运行时字节本轮未复测 ⇒ 待核实**<br>① **RAG 侧仍不产生 reason phrase** —— RAG 侧**没有任何代码**能补它（状态行由容器写）⇒ 源码级结论不变；② **容器层仍是省略**（Tomcat `Http11OutputBuffer` 的「The reason phrase is optional but the space before it is not. Skip sending the reason phrase」原文） |
+| **证据（2026-10-29）** | RAG 侧**零命中**：实测 `grep -rn 'reason phrase\|status_line\|StatusLine\|HTTP/1.1 200' tools/` ⇒ 仅命中 `tools/api-full-parity-probe/users/http1xx.py`（**该文件是 1xx interim 跳过器，与 reason phrase 无关**）⇒ ⇒ **仓内既无实现也无守门** · 容器侧出处沿用原档（`tomcat-embed-core 11.0.24` 的 `org/apache/coyote/http11/Http11OutputBuffer.java:358-374`） |
+| **🔴 缺口登记（待核实）** | ⚠️ **本条没有任何机器守门** ⇒ 「是否仍成立」**只能靠源码推理**⇒ 本轮**未跑真 Tomcat 取字节** ⇒ **不写「已复测」** ⇒ 标 **待核实（缺真容器字节复测）** |
+| **结论** | **状态不变**（仍是 🏷 候选 · 未签字）· 描述**完整** ⇒ 无需追加订正 |
 ## SD-2026-10-25-CAND-15 · 🏷 **待签字候选** —— 「方法不匹配」这个出口，RAG 比 Go **多带**一个 `Traceparent`
 
 | 项 | 值 |
@@ -461,6 +516,17 @@ req := r.WithContext(ctx)
 | 对应的 DRIFT 条目 | **T-12**（[`docs/DRIFT/global/common-tails.md`](../../DRIFT/global/common-tails.md) §一·T-12） |
 | 行为层 | **响应头**（`Traceparent` 多一个）⇒ **不影响任何业务语义** |
 | 证据强度 | ✅ Go 侧**控制流逐行取证**（**注册点** + 三条出口）；✅ RAG 侧**真 Tomcat 实测**（`ArticleApiAssemblyWiringTest`）<br>⚠️ **未做双侧活体对拍**（Go 侧未起进程）⇒ 「Go 的该响应无 `Traceparent`」目前是**源码级**结论 |
+
+##### 🔴 逐条重核（核对日期 **2026-10-29**）
+
+| 项 | 值 |
+|---|---|
+| **唯一别名** | `SD-2026-10-25-CAND-15@global` |
+| **状态** | 🏷 **候选 · 未签字**（不计入「已签字 48 条」） |
+| **核「被签字描述的那个行为现在还存在吗」** | 🟡 **源码级成立 · 运行时字节本轮未复测 ⇒ 待核实**<br>共享层自己的 javadoc **仍在逐条描述这个差异** ⇒ 该差异**今天仍被记录为「存在」**；且共享层**没有**把它修掉的改动 |
+| **证据（2026-10-29）** | `service/common/src/main/java/com/rag/common/http/GoStyleTraceparentFilter.java:142-144`（javadoc 原文：「🔴 **「方法不匹配」那个出口，RAG 比 Go 多带一个 `Traceparent`**」）＋ `:157-158`（「Go 的 204 预检响应没有 traceparent」⇒ 本类若排在 CORS 之前 ⇒ 预检响应会**多带**一个 traceparent）· ⚠️ **仓内无机器守门**：实测 `grep -rln 'Traceparent\|traceparent' tools/difftest/` ⇒ **0 命中** |
+| **🔴 缺口登记（待核实）** | 本轮**未跑真 HTTP 取 405 响应的头** ⇒ 「是否仍成立」**只有源码级依据** ⇒ 标 **待核实（缺真容器响应头复测）** |
+| **结论** | **状态不变**（仍是 🏷 候选 · 未签字）· 描述**完整** ⇒ 无需追加订正 |
 
 ### 差异的实际面
 

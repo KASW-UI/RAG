@@ -5,7 +5,22 @@
 
 ---
 
-## SD-2026-10-23-08 · 黑名单 401 的**业务码**为 `1006`（Go 是 `401`）
+## SD-2026-10-23-08@users · 黑名单 401 的**业务码**为 `1006`（Go 是 `401`）
+
+> **2026-10-29 重核（台账对齐轮）**：
+> - **别名**：`SD-2026-10-23-08@users`（域内唯一别名）。**撞号事实**：同一编号在本域被引用 **2 处** ——
+>   本文件（本小节 · 全文落点）与 [`_shared.md`](./_shared.md) 的「本域逐条签字」表（**只留指针**）
+>   ⇒ **指向的是同一处偏离，不是两条** ⇒ 别名只加在**全文落点**这一侧。
+> - **被签字描述的行为是否仍存在**：**仍存在** ⇒ **签字有效，不失效、不从计数中剔除**。
+> - **证据（两侧）**：RAG ⇒ `service/users/admin/admin-api/.../advice/GlobalExceptionHandler.java:59-70`
+>   （`@ExceptionHandler(AuthenticationException.class)` ⇒ `ResponseEntity.status(401).body(new Response(e.getCode(), e.getMessage(), null))`，
+>   `e.getCode()` = `ErrorCode.ERROR_TOKEN_RUNTIME` = **1006** ⇒ body = `{"code":1006,…,"data":null}`）；
+>   Go ⇒ `service/user/admin/api/internal/middleware/checkblacklistmiddleware.go:38`
+>   （**HTTP 401** + `{"code":401,"msg":"登录已失效,请重新登陆"}`，**无 `data`**）。
+>   ⇒ **两侧 HTTP 状态码都是 401**（本条只管 body 里的业务码）⇒ 差异确实仍在。
+> - **⚠️ 描述完整性**：本条原文只写了「黑名单 401 的业务码」，**未写 HTTP 状态码**；
+>   本轮补一句（**追加，不改原文**）：**状态码两侧一致（401），差异只在 body 的 `code` 字段** ⇒
+>   「看状态码的对拍永远发现不了本条」这一提醒仍然成立。
 
 | 项 | 内容 |
 |---|---|
@@ -60,7 +75,22 @@
 
 ---
 
-## SD-2026-10-23-01 · 身份解析**严格校验** JWT claim（转录自 `_cross`）
+## SD-2026-10-23-01@users · 身份解析**严格校验** JWT claim（转录自 `_cross`）
+
+> **2026-10-29 重核（台账对齐轮）**：
+> - **别名**：`SD-2026-10-23-01@users`（域内唯一别名）。**撞号事实**：同一编号在本域被引用 **2 处** ——
+>   本小节（全文落点）与 [`_shared.md`](./_shared.md) 的「本域逐条签字」表（**只留指针**，且指向 `_cross/signed-deviations.md`）
+>   ⇒ **同一处偏离的两个落点** ⇒ 别名只加在**全文落点**这一侧。
+> - **被签字描述的行为是否仍存在**：**仍存在** ⇒ **签字有效**。
+> - **证据（两侧）**：RAG ⇒ `service/users/admin/admin-api/.../service/IdentityResolver.java:100-103`
+>   （`uid <= 0` ⇒ `ErrInvalidClaimException`，**claim 无效即拒**）+ `:133-136`
+>   （`admin.getUid() != uid` ⇒ `ErrIdentityMismatchException`）；
+>   Go ⇒ `service/user/admin/rpc/internal/logic/banuserlogic.go:36-39`
+>   （`l.ctx.Value("uid")` 取不到 ⇒ `adminUid` **恒为 0**，**且不报错、不校验**）；
+>   写 ctx 的 key 是 **claim 名**（`service/user/common/jwt/jwt.go:8-11` 只签 `userId`）⇒ 差异仍在。
+> - **⚠️ 描述完整性（追加，不改原文）**：本条原文说「Go 恒 0 且不校验 claim」，**未写明「恒 0」的成因**；
+>   本轮补上：**Go 侧 ctx 里根本没有 `uid` 这个 key**（go-zero 注入的是 claim 名，而 token 里只有 `userId`）
+>   ⇒ 「Go 恒 0」不是「读到了 0」，而是「**取不到**」⇒ 二者对下游的可观察后果不同（见本文件下方的严重度下调说明）。
 
 `admin-api` 的 `operator_id`：Go 恒为 `0` 且**不校验** claim，RAG **严格校验**、缺失即拒绝。
 

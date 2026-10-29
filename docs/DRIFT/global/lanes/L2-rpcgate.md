@@ -1,4 +1,4 @@
-# L2 · `align/global-rpcgate` —— X-5 残留（rpc 拦截器守门复查 + slow threshold 独立守门）
+# L2 · `align/global-rpcgate` —— CD-5 残留（rpc 拦截器守门复查 + slow threshold 独立守门）
 
 > 本文件既是**任务书**也是本 lane 的**台账片段**。协议见 [`_PROTOCOL.md`](_PROTOCOL.md)。
 
@@ -26,7 +26,7 @@
 
 | 读什么 | 在哪 | 读哪几段 |
 |---|---|---|
-| 机制取证（为什么裸 `ServerCallHandler` 不被 dispatch） | `docs/DRIFT/global/cross-domain.md` | **§二·八**（X-5 落地那节，含 ① 机制 / ② 为什么测试空转 / ④ 修法 / ⑤ 落地） |
+| 机制取证（为什么裸 `ServerCallHandler` 不被 dispatch） | `docs/DRIFT/global/cross-domain.md` | **§二·八**（CD-5 落地那节，含 ① 机制 / ② 为什么测试空转 / ④ 修法 / ⑤ 落地） |
 | 波及面扫描结果 | `docs/DRIFT/global/cross-domain.md` | §二·八 ③ |
 | 域待办 | `docs/DRIFT/global/_README.md` | §七之二 **A3** 行 |
 | 坑 | `docs/Pitfalls/global/cross-domain.md` | **PIT-GLOBAL-018**（变异脚本坑）· 其它相关 |
@@ -85,7 +85,7 @@
 
 ---
 
-# 附录 · 第二十三轮（`align/global-rpcgate`）—— X-5 残留收尾：逐域判定 + 变异结果 + 缺口清单
+# 附录 · 第二十三轮（`align/global-rpcgate`）—— CD-5 残留收尾：逐域判定 + 变异结果 + 缺口清单
 
 > 本节是 **L2 lane 自己**的台账片段（2026-10-25 追加）。
 > ⚠️ 只写 L2 的结论；**跨域收口由整合者** fold 进 `docs/DRIFT/global/cross-domain.md`（本 lane 不写那 4 个规范台账）。
@@ -108,7 +108,7 @@
 
 | 域（组件） | 测试类 | 改造前形态（行号 = `git show HEAD:<file>`） | 判定 | 本轮处置 |
 |---|---|---|---|---|
-| users / **user-rpc** | `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/GrpcInterceptorWiringTest.java` | **纯 Mockito**：`mock(ServerBuilder.class)`（:70）+ `mock(ServerCall.class)`（:81）+ `mock(ServerCallHandler.class)`（:82）⇒ 只证明链的**拼装代码**；**无真 server、无任何超时断言** | 🔴 **缺测试**（X-5 轴零运行期证据；§3.3「纯 mock 单测不算」） | ✅ **新增** `UserRpcGrpcInterceptorWiringTest`（真 server + `asyncUnaryCall` + 两条判别式断言） |
+| users / **user-rpc** | `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/GrpcInterceptorWiringTest.java` | **纯 Mockito**：`mock(ServerBuilder.class)`（:70）+ `mock(ServerCall.class)`（:81）+ `mock(ServerCallHandler.class)`（:82）⇒ 只证明链的**拼装代码**；**无真 server、无任何超时断言** | 🔴 **缺测试**（CD-5 轴零运行期证据；§3.3「纯 mock 单测不算」） | ✅ **新增** `UserRpcGrpcInterceptorWiringTest`（真 server + `asyncUnaryCall` + 两条判别式断言） |
 | message / **message-rpc** | `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageGrpcInterceptorWiringTest.java` | 同款纯 mock（:95 / :106 / :107） | 🔴 **缺测试** | ✅ **新增** `MessageRpcTimeoutGateTest`（同构） |
 | hot / **hot-rpc** | `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotGrpcInterceptorWiringTest.java` | 真 server + `io.grpc.stub.ServerCalls.asyncUnaryCall`（:247）⇒ **handler 真的跑**；但用 `Thread.sleep(10_000)`（:256）且**没有**「handler 被调用过」/「取消时仍在跑」两条断言 | 🟡 **守门不严**（**不是**空转：handler 确实执行；但 **M2 变异下仍全绿** ⇒ 退化无人拦） | ✅ 原地加固：latch 取代 sleep + 补两条断言 |
 
@@ -197,7 +197,7 @@ user-rpc / message-rpc 是**缺测试**（连那条会空转的用例都没有�
 | hot-rpc | `HotGrpcInterceptorWiringTest`（真 server） | ✅（改造前**守门不严**） | 守门不严 | 原地加固（latch + 两条断言） |
 | task-rpc | `TaskGrpcInterceptorWiringTest` | ✅ | 正常（第十七轮） | 未动（禁区） |
 | follow-rpc | `FollowGrpcInterceptorWiringTest` | ✅ | 正常（第十七轮） | 未动（禁区） |
-| users / admin-rpc | ❌ 无（只有纯 mock 的 `AdminProtectionChainWiringTest`） | ❌ | 缺测试（X-5 轴） | 本轮只补了 **slow threshold 轴**（**不是** X-5 轴）⇒ X-5 轴仍缺，登记为缺口 |
+| users / admin-rpc | ❌ 无（只有纯 mock 的 `AdminProtectionChainWiringTest`） | ❌ | 缺测试（CD-5 轴） | 本轮只补了 **slow threshold 轴**（**不是** CD-5 轴）⇒ CD-5 轴仍缺，登记为缺口 |
 | article-rpc | ❌ 无（只有纯 mock 的 `ArticleProtectionChainWiringTest`） | ❌ | 缺测试 | 未动（禁区） |
 | comment-rpc | ❌ 无（只有纯 mock 的 `CommentProtectionChainWiringTest`） | ❌ | 缺测试 | 未动（L1 的） |
 | like-rpc | ❌ 无（只有纯 mock 的 `LikeProtectionChainWiringTest`；台账 F 条已登记 `LikeGrpcInterceptorWiringTest` 不存在） | ❌ | 缺测试 | 未动（L1 的） |
@@ -219,8 +219,8 @@ user-rpc / message-rpc 是**缺测试**（连那条会空转的用例都没有�
 
 ## G. 缺口清单（**未证成 / 未覆盖**，不要读成「已全部对齐」）
 
-1. **5 个 rpc 组件的 X-5 轴仍缺真 server 守门**：admin-rpc / article-rpc / comment-rpc / like-rpc / favorite-rpc。
-   本轮只补了 admin-rpc 的 **slow threshold 轴**（**不是** X-5 轴）⇒ **X-5 在全仓并未穷尽**。
+1. **5 个 rpc 组件的 CD-5 轴仍缺真 server 守门**：admin-rpc / article-rpc / comment-rpc / like-rpc / favorite-rpc。
+   本轮只补了 admin-rpc 的 **slow threshold 轴**（**不是** CD-5 轴）⇒ **CD-5 在全仓并未穷尽**。
 2. **slow threshold 只做了 1 个域的样板**（admin-rpc）⇒ 其余 9 个 rpc 组件的 slow 判定**没有逐域证据**。
    （缓解事实：slow 判定只在共享层 `RpcInterceptor` 一处实现 ⇒ 一处样板可覆盖大部分风险，但**不等于**逐域已验。）
 3. **没有做 Go ↔ RAG 双侧活体对拍**。本轮是 **RAG 侧守门修复**（把「没在验的」改成「在验」），

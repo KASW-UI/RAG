@@ -12,7 +12,10 @@
 
 ---
 
-## P-HOTRPC-01 🔴「不崩、不越界、静默算错」：Go 的 `uint64 % w` 在 Java 里没有等价写法
+## P-HOTRPC-01 🔴「不崩、不越界、静默算错」：Go 的 `uint64 % w` 在 Java 里没有等价写法 · 状态：**已闭环** · 核对日期：**2026-10-29** · 影响当前轮次：**否**
+
+> **旧号**：`P-HOTRPC-01` ⇒ **新号**：`PIT-HOT-26` —— ⚠️ **本轮不适用的原因**：触发条件已消除：无符号取模已改写 ⇒ `docs/DRIFT/hot/rpc.md:888`「**DRIFT-HOTRPC-001 已修**（`Long.remainderUnsigned`）」⇒ Java 的 `long` 不再因最高位为 1 而算错桶位 ⇒ 本轮不适用
+
 
 **现象**：所有测试全绿、所有变异被捕获、proto 逐字节一致、指标名逐字节一致 ——
 但双侧活体对拍一跑，**生产口径 Top-100 里有 16 条与 Go 不同**（各 16 条只在一侧）。
@@ -58,7 +61,10 @@ remainder < 0 ? remainder + width : remainder   // 补正一次
 
 ---
 
-## P-HOTRPC-02 🔴 Boot 4 把 Jackson 自动配置也搬走了 —— 而且**加官方依赖并不能解决它**
+## P-HOTRPC-02 🔴 Boot 4 把 Jackson 自动配置也搬走了 —— 而且**加官方依赖并不能解决它** · 状态：**已闭环** · 核对日期：**2026-10-29** · 影响当前轮次：**否**
+
+> **旧号**：`P-HOTRPC-02` ⇒ **新号**：`PIT-HOT-27` —— ⚠️ **本轮不适用的原因**：触发条件已消除：Jackson2 Bean 已补齐 ⇒ `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/config/Jackson2ObjectMapperConfiguration.java` 存在 ⇒ 上下文起得来 ⇒ 本轮不适用
+
 
 **现象**：把 `HotRpcApplication` 真的启动一次 ⇒
 ```
@@ -98,7 +104,10 @@ Parameter 0 of constructor in …HotEventConsumer required a bean of type
 
 ---
 
-## P-HOTRPC-03 🟠 Boot 4 的 `@Scheduled` 默认**单线程** —— 而 Go 侧是两个 goroutine
+## P-HOTRPC-03 🟠 Boot 4 的 `@Scheduled` 默认**单线程** —— 而 Go 侧是两个 goroutine · 状态：**已闭环** · 核对日期：**2026-10-29** · 影响当前轮次：**否**
+
+> **旧号**：`P-HOTRPC-03` ⇒ **新号**：`PIT-HOT-28` —— ⚠️ **本轮不适用的原因**：触发条件已消除：调度池已显式放大 ⇒ `service/hot/hot-rpc/src/main/resources/application.yml:142-144` `spring.task.scheduling.pool.size: 2` ⇒ 30s 快照与 10s 合并不再共用单线程 ⇒ 本轮不适用
+
 
 **现象**：代码里两条 `@Scheduled(fixedRate=…)`（30s 快照 + 10s 合并）看起来完全并行；
 Go 侧也确实是两个 goroutine。**实际上 Java 侧共用一个只有 1 个线程的调度器。**
@@ -118,7 +127,10 @@ Go 侧也确实是两个 goroutine。**实际上 Java 侧共用一个只有 1 �
 
 ---
 
-## P-HOTRPC-04 🟠 库默认值里的**重试**，两侧可以差 3 倍而没人看得出来
+## P-HOTRPC-04 🟠 库默认值里的**重试**，两侧可以差 3 倍而没人看得出来 · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-04` ⇒ **新号**：`PIT-HOT-29`
+
 
 **现象**：Redis 客户端的 `new` 语句两侧几乎一样（`Addr` + `Password` / `host` + `timeout`），
 看起来完全对齐。**但 Go 默认重试 3 次，Java 默认 0 次。**
@@ -138,7 +150,10 @@ Lettuce 侧没有对应默认。
 
 ---
 
-## P-HOTRPC-05 🟡 客户端默认值里的**位点提交节奏**，会改变崩溃后的数据
+## P-HOTRPC-05 🟡 客户端默认值里的**位点提交节奏**，会改变崩溃后的数据 · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-05` ⇒ **新号**：`PIT-HOT-30`
+
 
 **现象**：`enable-auto-commit: false` + `ack-mode: record` 看起来是「精确对齐 Go 的
 『消费完就 MarkMessage』」。但 Go 的 MarkMessage 之后还有一层：`AutoCommit.Interval = 1s` 的批量提交。
@@ -154,7 +169,10 @@ Kafka 侧 Go 是「标脏 + 每秒刷盘」，Java RECORD 是「每条刷盘」�
 
 ---
 
-## P-HOTRPC-06 🟠 消费侧的「永不外抛」契约，会**同时吞掉三类问题**
+## P-HOTRPC-06 🟠 消费侧的「永不外抛」契约，会**同时吞掉三类问题** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-06` ⇒ **新号**：`PIT-HOT-31`
+
 
 **现象**：三样东西叠在一起，让本轮的两条硬缺陷**完全没有症状**：
 1. `HotEventConsumer` 吞掉一切 `RuntimeException`（drop 契约）；
@@ -195,7 +213,10 @@ Kafka 侧 Go 是「标脏 + 每秒刷盘」，Java RECORD 是「每条刷盘」�
 | `@KafkaListener` 缺 `spring-boot-kafka` 会**静默失效** | 上一轮已修 `hot-rpc`；`like-rpc` **同类风险未查** | 补装配层测试（`KafkaListenerEndpointRegistry` 断言），别只查 pom |
 ---
 
-## P-HOTRPC-07 🔴 私有语义位（桶位）**行为测试永远测不出**，只能把真源算出的值固化成 fixture
+## P-HOTRPC-07 🔴 私有语义位（桶位）**行为测试永远测不出**，只能把真源算出的值固化成 fixture · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-07` ⇒ **新号**：`PIT-HOT-32`
+
 
 **现象**
 `HeavyKeeper` 的 46 条测试全绿、10/10 变异全红，
@@ -227,7 +248,10 @@ fixture 问的是「**绝对值对不对**」—— 把 Go 真源在同一输入
 
 ---
 
-## P-HOTRPC-08 🟠 库**不给你配置面**时，「不复刻」也要取证到「不可达」，不能只写「没空改」
+## P-HOTRPC-08 🟠 库**不给你配置面**时，「不复刻」也要取证到「不可达」，不能只写「没空改」 · 状态：**已闭环** · 核对日期：**2026-10-29** · 影响当前轮次：**否**
+
+> **旧号**：`P-HOTRPC-08` ⇒ **新号**：`PIT-HOT-33` —— ⚠️ **本轮不适用的原因**：触发条件已消除：取证已补齐并落成签字偏离 ⇒ `docs/Intentional_Deviations/hot/rpc.md` 的 **SD-HOT-RPC-002**（Lettuce 6.8.2 无命令级重试入口 ⇒ 不复刻）⇒ 「不复刻」已从「没空改」升级为「不可达 + 已签字」⇒ 本轮不适用
+
 
 **现象**
 DRIFT-HOTRPC-004（Go 的 Redis 命令重试 3 次 vs RAG 0 次）被前一轮写成
@@ -255,7 +279,10 @@ DRIFT-HOTRPC-004（Go 的 Redis 命令重试 3 次 vs RAG 0 次）被前一轮�
 2. 顺手把「**换一个依赖栈能不能对齐**」也写上（本次：换掉 Lettuce 或改用 Lettuce 原生 API 才可能），
    这决定它是一条**死条目**还是一条**待办**。
 
-## P-HOTRPC-09 🔴 静态读 Lua 脚本会把 `KEYS` 绑定读反 —— **台账写错比代码写错更危险**
+## P-HOTRPC-09 🔴 静态读 Lua 脚本会把 `KEYS` 绑定读反 —— **台账写错比代码写错更危险** · 状态：**已闭环** · 核对日期：**2026-10-29** · 影响当前轮次：**否**
+
+> **旧号**：`P-HOTRPC-09` ⇒ **新号**：`PIT-HOT-34` —— ⚠️ **本轮不适用的原因**：触发条件已消除：台账与代码注释的 `KEYS` 绑定已订正 ⇒ `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotRedisSnapshotStore.java:170-174`（「守卫查的是 `KEYS[1]=shadow`」）⇒ 本轮不适用
+
 
 **现象**
 `docs/DRIFT/hot/rpc.md` 的 Equivalence Matrix 第 25 行原本写着：
@@ -289,7 +316,10 @@ DRIFT-HOTRPC-004（Go 的 Redis 命令重试 3 次 vs RAG 0 次）被前一轮�
 3. 台账里凡是**结论性措辞**（「必丢」「恒为」「总是」），
    都要能指到一个**可复现的观测点**；指不到就降级成「未验证」。
 
-## P-HOTRPC-10 🟠 「等条件成立」≠「等终态」—— 轮询式断言会撞上**中间态**
+## P-HOTRPC-10 🟠 「等条件成立」≠「等终态」—— 轮询式断言会撞上**中间态** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-10` ⇒ **新号**：`PIT-HOT-35`
+
 
 **现象**
 `HotKafkaConsumerGateTest` 第一版的 drop 契约断言写成：
@@ -318,7 +348,10 @@ awaitCondition(() -> counterCount("like") == likeBefore + 1, "正常消息没进
 3. 变异验证是发现这类洞的**唯一可靠手段**：一条「本该红」的变异如果没红，
    先怀疑断言，别急着怀疑生产代码。
 
-## P-HOTRPC-11 🟠「指定的验证手段」本身要先自证可用 —— `CLIENT PAUSE` 只延迟、**不能**制造失败
+## P-HOTRPC-11 🟠「指定的验证手段」本身要先自证可用 —— `CLIENT PAUSE` 只延迟、**不能**制造失败 · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-11` ⇒ **新号**：`PIT-HOT-36`
+
 
 **现象**
 第四轮台账给 UNR-1（Go 侧 go-redis 重试面）指定的验证手段是：
@@ -364,7 +397,10 @@ awaitCondition(() -> counterCount("like") == likeBefore + 1, "正常消息没进
 ② ⚠️ 反向查出 **Go 会重发非幂等的 rename 脚本** ⇒ 可能「实际 RENAME 成功却记 fail」。
 ⇒ 详见 [`../../DRIFT/hot/rpc.md`](../../DRIFT/hot/rpc.md) 第五轮章节。
 
-## P-HOTRPC-12 🟠 返回 `Set` 的 API —— **mock 测不出「保序」**，而框架可能给你 `HashSet`
+## P-HOTRPC-12 🟠 返回 `Set` 的 API —— **mock 测不出「保序」**，而框架可能给你 `HashSet` · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-12` ⇒ **新号**：`PIT-HOT-37`
+
 
 **现象**
 `HotRankingQueryService` 的查询面此前只有 Mockito 单测，全部绿。
@@ -408,7 +444,10 @@ Mockito 给什么就是什么 ⇒ **「顺序对不对」这件事，mock 一个
 
 ---
 
-## P-HOTRPC-13 🔴「清 Redis」必须在旧进程**真死之后**——否则旧进程会把旧 sketch 写回来，热度**恰好翻倍**
+## P-HOTRPC-13 🔴「清 Redis」必须在旧进程**真死之后**——否则旧进程会把旧 sketch 写回来，热度**恰好翻倍** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-13` ⇒ **新号**：`PIT-HOT-38`
+
 
 > **发现轮次**：2026-10-24 第十一轮（hot-rpc D1 活体对拍）
 > **症状**：对拍时两侧**条目集合、顺序、条数全部一致**，唯独**每个文章的热度恰好是 Go 的 2 倍**
@@ -442,7 +481,10 @@ Mockito 给什么就是什么 ⇒ **「顺序对不对」这件事，mock 一个
 
 ---
 
-## P-HOTRPC-14 🔴 用**残缺的编译产物**启动 ⇒ 类根本没被加载 ⇒ 组件功能缺失且**零日志**
+## P-HOTRPC-14 🔴 用**残缺的编译产物**启动 ⇒ 类根本没被加载 ⇒ 组件功能缺失且**零日志** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-14` ⇒ **新号**：`PIT-HOT-39`
+
 
 > **发现轮次**：2026-10-24 第十一轮
 > **症状**：RAG hot-rpc 进程起来了、gRPC 端口在听、消费者在消费、
@@ -477,7 +519,10 @@ jcmd <pid> GC.class_histogram | grep 'com.rag.hot.hot.rpc'
 
 ---
 
-## P-HOTRPC-15 🟠 Kafka `console-producer` 的 `parse.key` 是 **reader 属性**——投错格式 ⇒ 消费者全丢 ⇒ 症状像「业务没跑」
+## P-HOTRPC-15 🟠 Kafka `console-producer` 的 `parse.key` 是 **reader 属性**——投错格式 ⇒ 消费者全丢 ⇒ 症状像「业务没跑」 · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-15` ⇒ **新号**：`PIT-HOT-40`
+
 
 > **发现轮次**：2026-10-24 第十一轮（D1 编排）
 
@@ -516,7 +561,10 @@ jcmd <pid> GC.class_histogram | grep 'com.rag.hot.hot.rpc'
 
 ---
 
-## P-HOTRPC-16 🔴「缺陷在别的域的台账里」：**跨域登记 ≠ 域内认领**，缺口能躺多久取决于谁的台账记了它
+## P-HOTRPC-16 🔴「缺陷在别的域的台账里」：**跨域登记 ≠ 域内认领**，缺口能躺多久取决于谁的台账记了它 · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-16` ⇒ **新号**：`PIT-HOT-41`
+
 
 **症状**：hot-rpc 的 gRPC 拦截器**从来没挂到 server 上** ——
 gRPC 无 span、**无 deadline 传播**（业务层 `checkDeadline()` 全是死代码）、
@@ -557,7 +605,10 @@ SQL 不注入 `queryTimeout`、gRPC 本身无超时。**全部静默、零报错
 
 ---
 
-## P-HOTRPC-17 🔴「裸 `ServerCallHandler` 注册到 unary 方法上，grpc-java 根本不会 dispatch」⇒ **超时类断言照样是绿的**
+## P-HOTRPC-17 🔴「裸 `ServerCallHandler` 注册到 unary 方法上，grpc-java 根本不会 dispatch」⇒ **超时类断言照样是绿的** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-17` ⇒ **新号**：`PIT-HOT-42`
+
 
 **症状**：想写一条「服务端超时真的把请求掐断」的测试，注册了一个「睡 10 秒」的服务，
 结果**方法体一次都没执行** —— 但**测试是绿的**。
@@ -592,7 +643,10 @@ SQL 不注入 `queryTimeout`、gRPC 本身无超时。**全部静默、零报错
 
 ---
 
-## P-HOTRPC-18 🔴 全量并行跑时 Testcontainers 容器「起来了但没到 RUNNING」⇒ reactor `BUILD FAILURE` ⇒ **看起来像回归，其实不是**
+## P-HOTRPC-18 🔴 全量并行跑时 Testcontainers 容器「起来了但没到 RUNNING」⇒ reactor `BUILD FAILURE` ⇒ **看起来像回归，其实不是** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-18` ⇒ **新号**：`PIT-HOT-43`
+
 
 **症状**：全量 `mvn -o -T1C test` 在 hot-rpc 中断：
 
@@ -620,7 +674,10 @@ Container startup failed for image apache/kafka:3.7.2
 
 ---
 
-## P-HOTRPC-19 🔴 **变异打在 `target/classes` 会被 `mvn test` 的资源拷贝覆盖 ⇒ 变异无效 ⇒ 守门「假绿」**
+## P-HOTRPC-19 🔴 **变异打在 `target/classes` 会被 `mvn test` 的资源拷贝覆盖 ⇒ 变异无效 ⇒ 守门「假绿」** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-19` ⇒ **新号**：`PIT-HOT-44`
+
 
 **症状**：给「容器配置类」的守门做变异验证时，摘掉旋钮后**测试照样全绿** ——
 而旋钮明明已经被摘掉了（脚本自己 grep 出来的配置是对的）。
@@ -652,7 +709,10 @@ trap 'cp "$BAK" "$YML"' EXIT        # ← 还原一定要挂 trap，变异脚本
 
 ---
 
-## P-HOTRPC-20 ⚠️ **「Go 的上限是个常量」是错的** —— `net/http` 的真实上限 = 常量 **+ bufio slop**
+## P-HOTRPC-20 ⚠️ **「Go 的上限是个常量」是错的** —— `net/http` 的真实上限 = 常量 **+ bufio slop** · 状态：**已闭环** · 核对日期：**2026-10-29** · 影响当前轮次：**否**
+
+> **旧号**：`P-HOTRPC-20` ⇒ **新号**：`PIT-HOT-45` —— ⚠️ **本轮不适用的原因**：触发条件已消除：上限已按「常量 + bufio slop」配 ⇒ `docs/DRIFT/hot/api.md:1237`「`max-http-request-header-size: **1028KB**（⚠️ **不是 1MB**：Go 真实上限 = `DefaultMaxHeaderBytes(1<<20)` **+ 4096 bufio slop**）」⇒ 本轮不适用
+
 
 **症状**：按 Go 源码里的 `DefaultMaxHeaderBytes = 1 << 20 // 1 MB` 配了 `1MB`，
 以为对齐了；实测两侧**阈值差 4096 字节**。
@@ -685,7 +745,10 @@ func (s *Server) initialReadLimitSize() int64 {
 
 ---
 
-## P-HOTRPC-21 🔴 **「把池打开」会引入比 Go 更糟的行为** —— 池耗尽的等待上限（`max-wait`）**不可省**
+## P-HOTRPC-21 🔴 **「把池打开」会引入比 Go 更糟的行为** —— 池耗尽的等待上限（`max-wait`）**不可省** · 状态：**已闭环** · 核对日期：**2026-10-29** · 影响当前轮次：**否**
+
+> **旧号**：`P-HOTRPC-21` ⇒ **新号**：`PIT-HOT-46` —— ⚠️ **本轮不适用的原因**：触发条件已消除：池已开且**等待上限没省** ⇒ `service/hot/hot-rpc/src/main/resources/application.yml:89-95`（`enabled: true` / `max-active: 64` / **`max-wait: 4s`**）⇒ 池耗尽不会变成无限等 ⇒ 本轮不适用
+
 
 **症状**：Go 侧 Redis 客户端**池耗尽时 4s 就失败**；RAG 侧改成「有池」之后，
 **池耗尽变成无限等** ⇒ 请求永久挂起（连超时都没有）⇒ **比改之前更糟**。
@@ -721,7 +784,10 @@ func (s *Server) initialReadLimitSize() int64 {
 
 ---
 
-## P-HOTRPC-22 🟠 **Boot 2/3 的行号在 Boot 4 上「对不上」** —— 真实消费点搬进了**内部类**
+## P-HOTRPC-22 🟠 **Boot 2/3 的行号在 Boot 4 上「对不上」** —— 真实消费点搬进了**内部类** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-22` ⇒ **新号**：`PIT-HOT-47`
+
 
 **症状**：照抄别域台账里的「`LettuceConnectionConfiguration:267-271` ⇒ `getPoolConfig` ⇒
 `setMaxTotal/setMaxIdle/setMinIdle`」去写守门的注释与证据 ⇒ **在 Boot 4.0.8 上那段行号根本不存在那个方法**。
@@ -744,7 +810,10 @@ func (s *Server) initialReadLimitSize() int64 {
 
 ---
 
-## P-HOTRPC-23 🟠 「全量跑红、隔离跑绿」= **瞬态**，别急着改代码；且**变异跑红的报告会留在 `target/`**
+## P-HOTRPC-23 🟠 「全量跑红、隔离跑绿」= **瞬态**，别急着改代码；且**变异跑红的报告会留在 `target/`** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-23` ⇒ **新号**：`PIT-HOT-48`
+
 
 **症状（本轮实测）**：hot-rpc 全量回归首轮 **101 条 / 4 failures**，4 条全在
 `HotKafkaConsumerGateTest`（日志：broker 端点连不上）⇒ 看起来像「我的改动搞坏了 Kafka 消费」。
@@ -762,7 +831,10 @@ func (s *Server) initialReadLimitSize() int64 {
    而 maven 汇总行是 123/0/0/0 ⇒ ⇒ **两者不一致时，先查报告新鲜度（mtime + 跑次）**，
    **别急着相信其中一个**。
 
-## P-HOTRPC-24 🔴 「Redis 断连」活体对拍的**配方** —— 三个地方做错，测出来的是**假对照**
+## P-HOTRPC-24 🔴 「Redis 断连」活体对拍的**配方** —— 三个地方做错，测出来的是**假对照** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`P-HOTRPC-24` ⇒ **新号**：`PIT-HOT-49`
+
 
 **背景**：要证明共享层那份 `REJECT_COMMANDS`「**在 hot-rpc 里真的生效**」⇒ ⇒ 光读配置项 / 光看
 `ClientOptions` 的声明都**不算证据**（AGENTS.md §3.3：「注解存在 ≠ 机制生效」）⇒ ⇒ 必须**活体断连**。
@@ -810,7 +882,10 @@ func (s *Server) initialReadLimitSize() int64 {
 ⇒ **完整机制与本域台账** ⇒ [`../../DRIFT/hot/rpc.md` §十二](../../DRIFT/hot/rpc.md)；
 ⇒ **comment 域变体** ⇒ [`../../Pitfalls/comment/rpc.md` 的 PIT-COMMENT-RPC-16](../../Pitfalls/comment/rpc.md)。
 
-## P-HOTRPC-25 🔴 守门的「守恒」判据**只写了一种合法出口** ⇒ 把**合规的类**判红 ⇒ 真代码没问题、守门有问题
+## P-HOTRPC-25 🔴 守门的「守恒」判据**只写了一种合法出口** ⇒ 把**合规的类**判红 ⇒ 真代码没问题、守门有问题 · 状态：**已闭环** · 核对日期：**2026-10-29** · 影响当前轮次：**否**
+
+> **旧号**：`P-HOTRPC-25` ⇒ **新号**：`PIT-HOT-50` —— ⚠️ **本轮不适用的原因**：触发条件已消除：守恒判据已重写为「**落在专用端口段内**」这一条可判出口 ⇒ `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/support/RealGrpcPortTest.java:198` `everyGrpcServerPortDeclarationStaysInsideTheDedicatedSegment` + `:228` `assertTrue(violations.isEmpty(), …)` ⇒ 合规类不再被误判红 ⇒ 本轮不适用
+
 
 ### 现象（2026-10-28 · G3 · 本轮端口治理）
 

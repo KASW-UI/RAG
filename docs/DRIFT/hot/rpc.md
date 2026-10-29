@@ -580,6 +580,9 @@ favorite `FavoriteApiRedisTimeoutContractTest`）⇒ ⇒ **不是新缺陷 ⇒ �
 > 编号从本域**未占用的最大编号继续**（本文件历史只有 `G-HOT-001/002/003`，无任何 `DRIFT-*`）⇒ 从 `DRIFT-HOTRPC-001` 起。
 
 ### DRIFT-HOTRPC-001 🔴 SEMANTIC MISMATCH · HIGH · 已实测
+
+> 📌 **2026-10-29 对齐（台账对齐 phase · W-E lane）**：本标题里的 **🔴 = 严重度**（差异本身的量级，**按 D5 原样保留**）⇒ ⇒ **当前状态 = ✅ 已修**（`Long.remainderUnsigned`；【双侧活体对拍】2025/2025 列号一致 + Top-100 集合与分数逐条一致；变异 **5/5 全红**）⇒ 权威条目见本文件下方 `## DRIFT-HOTRPC-001 ✅ 已修` 小节与「逐条处置」表。
+
 - **Component**：`HeavyKeeper`（`service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/domain/HeavyKeeper.java`）
 - **Operation**：`hash(key, seed)` → `Add` 的桶定位
 - **Category**：数值语义 / 无符号算术移植
@@ -613,6 +616,9 @@ favorite `FavoriteApiRedisTimeoutContractTest`）⇒ ⇒ **不是新缺陷 ⇒ �
   根因确认用 `fix2`（floorMod，错）与 `fix3`（`remainderUnsigned`，对）两份 /tmp 副本。
 
 ### DRIFT-HOTRPC-002 🔴 SEMANTIC MISMATCH · BLOCKING · 已实测（启动失败）
+
+> 📌 **2026-10-29 对齐（台账对齐 phase · W-E lane）**：本标题里的 **🔴 = 严重度 + 「已实测（启动失败）」= 历史事实**（按 D5 原样保留）⇒ ⇒ **当前状态 = ✅ 已修**（上一轮修复轮已补 Jackson 2 Bean ⇒ `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/config/Jackson2ObjectMapperConfiguration.java` 在；本轮 `HotRpcSpringContextWiringTest` **6/6** 仍绿；**2026-10-29 复核该类文件仍在**）⇒ 权威条目见本文件下方 `## DRIFT-HOTRPC-002 ✅ 已修` 小节与「逐条处置」表。
+
 - **Component**：进程 / Bean 装配
 - **Operation**：`SpringApplication.run` → 上下文启动
 - **Category**：框架依赖缺失 / Boot 4 模块化
@@ -649,6 +655,9 @@ favorite `FavoriteApiRedisTimeoutContractTest`）⇒ ⇒ **不是新缺陷 ⇒ �
   【静态源码 + 依赖树】`mvn dependency:tree` + `spring-boot-jackson-4.0.8.jar` 内 `JacksonAutoConfiguration` 源码。
 
 ### DRIFT-HOTRPC-003 🟠 OBSERVABLE DIFFERENCE · MEDIUM · 已取证（Boot 4 默认值）
+
+> 📌 **2026-10-29 对齐（台账对齐 phase · W-E lane）**：本标题里的 **🟠 = 严重度**（按 D5 原样保留）⇒ ⇒ **当前状态 = ✅ 已修**（`service/hot/hot-rpc/src/main/resources/application.yml:142-144` `spring.task.scheduling.pool.size: 2` + 装配层断言真实线程池 ≥ 2；**2026-10-29 复核该配置仍在**）⇒ 权威条目见本文件下方 `## DRIFT-HOTRPC-003 ✅ 已修` 小节与「逐条处置」表。
+
 - **Component**：定时任务调度
 - **Operation**：`periodicSync`（30s） / `periodicMerge`（10s）
 - **Go Behavior**：`hot_handler.go:76-77` `go h.periodicSync(...)` + `go h.periodicMerge(...)`
@@ -670,6 +679,9 @@ favorite `FavoriteApiRedisTimeoutContractTest`）⇒ ⇒ **不是新缺陷 ⇒ �
   而非文档或记忆（§3.3.1）。
 
 ### DRIFT-HOTRPC-004 🟠 OBSERVABLE DIFFERENCE · MEDIUM · 已取证
+
+> 📌 **2026-10-29 对齐（台账对齐 phase · W-E lane）**：本标题里的 **🟠 = 严重度**（按 D5 原样保留）⇒ ⇒ **当前状态 = 📝 已签字（不复刻）** ⇒ **不是「未修的缺陷」**：见 `docs/Intentional_Deviations/hot/rpc.md` 的 **`SD-HOT-RPC-002`**（Lettuce 6.8.2 连 `io/lettuce/core/retry` 包都没有 ⇒ Spring 侧**无配置入口** ⇒ 对齐 Go 等于把重试搬到错误的层）⇒ 权威条目见「逐条处置」表。<br>⚠️ **另有编号订正**：`docs/DRIFT/hot/vs-common.md` 的 **`U4`**（client breaker）**原被误记为 `DRIFT-HOTRPC-004`** ⇒ 已订正 ⇒ **本条只指 Redis 重试那一条**。
+
 - **Component**：Redis 访问
 - **Operation**：全部 Redis 命令
 - **Go Behavior**：`svc/service_context.go:17-20` `redis.NewClient(&redis.Options{Addr, Password})` —— **只给两项**，
@@ -934,6 +946,18 @@ hot 域台账多处说「剩余未闭合项全部落在域外（D14/D25/D27 + D2
 
 ## 逐条处置
 
+> 🆕 **2026-10-29 对齐（台账对齐 phase · W-E lane）—— 本表的「上一轮判定」列是【历史值】，不是【当前状态】**
+> 
+> ⚠️ **同一个编号在本域出现三种 emoji，各有各的字段含义** ⇒ **不是**台账自相矛盾，**别当新回归去「修」**：
+> | 位置 | 记的是什么 | 取值 |
+> |---|---|---|
+> | **上方 `###` 明细标题** | **严重度**（差异本身的量级 —— 「SEMANTIC MISMATCH · HIGH」/「BLOCKING」/「OBSERVABLE DIFFERENCE · MEDIUM」）⇒ **修复合灭它、差异本身仍在 ⇒ 严重度不变** | 🔴 / 🟠 |
+> | **下方 `##` 收口标题** | **当前状态** | ✅ 已修 / ⏸ / 📝 已签字 |
+> | **本表的第 2 列「上一轮判定」** | **历史值**（按 AGENTS.md D5「保留原值 + 加时间线指针」**原样保留**） | 🔴 / 🟠 / 🟡 |
+> | **本表的第 3 列「本轮处置」** | **当前状态**（**权威**） | ✅ / ⏸ / 📝 |
+> 
+> ⇒ ⇒ **判定「某个编号现在是什么状态」时，一律以「本轮处置」列与下方 `##` 收口标题为准** ⇒ ⇒ 本表**不构成**「同一编号两种状态」。
+> 
 | ID | 上一轮判定 | 本轮处置 | 证据 |
 |---|---|---|---|
 | **DRIFT-HOTRPC-001** | 🔴 SEMANTIC MISMATCH | ✅ **已修** | 【双侧活体对拍】2025/2025 列号一致 + Top-100 集合与分数逐条一致；变异 **5/5 全红** |

@@ -8,6 +8,24 @@
 
 > ✅ **2026-10-25 用户已签字**：**2 条**（DEV-FAV-COMMON-001 / DEV-FAV-COMMON-002）——
 > 「**保留现状，登记为签字偏离**」⇒ 审查时**不必重复质疑**，但**也不得「顺手修回 Go 行为」**。
+>
+> 🆕 **核对时间：2026-10-29**（台账对齐 phase · W-E lane 逐条重核）—— 结论见下表。
+
+## 🆕 2026-10-29 逐条重核结论（台账对齐 phase · W-E lane）
+
+> **判定口径**：`docs/Intentional_Deviations/_INDEX.md:34` ——「被签字描述的那个行为**已不存在** ⇒ 本条签字**自动失效** ⇒ 不计入计数」。
+> **方法**：**回 Go 真源 + 回 RAG 源码两侧核**（真源 = `Sea-RideTheWind_golang`，冻结只读；grpc-go 取 `v1.71.0` / `v1.65.0` 均可复核）。
+> **撞号检查**：`DEV-FAV-COMMON-001` / `DEV-FAV-COMMON-002` **全域唯一**
+> （`grep -rhoE "DEV-FAV-[A-Z]+-[0-9]+" docs/Intentional_Deviations/` ⇒ 本域 11 个编号**各对应一条**偏离）⇒ **无撞号** ⇒ **不需要** `SD-<编号>@<域>` 别名。
+
+| ID | 结论 | 证据（核对日期 2026-10-29） |
+|---|---|---|
+| `DEV-FAV-COMMON-001` | ✅ **仍成立** | Go 侧仍返回 **nil**：`service/favorite/common/errmsg.go:104-106` 的 `GRPCError` = `status.Error(grpcCode, GetErrMsg(bizCode))`；grpc-go `status/status.go:58-60` `func Error(c codes.Code, msg string) error { return New(c, msg).Err() }` ⇒ `codes.OK` 时 `Err()` 返回 **nil** ⇒ 上游 `if err != nil` 不成立 ⇒ 「当成功」。RAG 侧仍返回**非 nil** 的 `StatusException`（grpc-java `Status#asException()` 对 OK 也返回对象）⇒ 调用方的 `err != null` **成立** ⇒ 「当失败」。⇒ 差异未变 |
+| `DEV-FAV-COMMON-002` | ✅ **仍成立** | Go 侧仍**只认顶层**：`status.FromError(err)`（grpc-go）不沿 cause 链回溯 ⇒ 一个「被包过一层」的 `StatusException` 落 `ok=false` ⇒ `BizCodeFromError` 返回 **1015**。RAG 侧仍**刻意不回溯**：`service/favorite/favorite-common/src/main/java/com/rag/favorite/favorite/common/errmsg/FavoriteGrpcError.java:234-241`（`extractStatus` 只认 `StatusException` / `StatusRuntimeException` 两个具体类）⇒ 差异未变 |
+
+> ⚠️ **计数影响**：本域 **2 条全部仍成立** ⇒ **主线更新 `docs/Intentional_Deviations/_INDEX.md` 时本域无需减项**（本 lane 不写共享索引）。
+> ⚠️ **两条的「不可达」豁免依据本轮未重数**：原文写「favorite 域 **56 个** `GRPCError` 调用点没有一个传 `codes.OK`」与「actual error 全部来自 gRPC stub」⇒
+> ⇒ **本轮未重跑那次调用点普查**（**超出本 lane 的核对范围**）⇒ ⇒ **该数字按原句保留**，**不**据此改写任何一侧；若将来要引用，请先重数。
 
 ---
 

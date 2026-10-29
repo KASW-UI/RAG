@@ -31,7 +31,7 @@
 |---|---|---|---|
 | DRIFT-FOLLOW-001 | 空列表出参 Go=`"user_ids":null` / RAG=`"user_ids":[]` | **可观察（L1 wire）** | ✅ 已修 |
 | DRIFT-FOLLOW-005 | recommend 出参**字段顺序** Go=`target_id` 在前 / RAG=`mutual_score` 在前 | **可观察（L1 wire 字节序）** | ✅ 已修 |
-| DRIFT-FOLLOW-007 | 指标文本层：多一个 `application` tag / 直方图**零桶** | 可观察（抓取侧） | ✅ **已修**（tag + 桶）· ⚠️ 残留 = **框架限制** · ✅ **已定性（用户 2026-10-27 拍板：不修，登记为框架限制）** |
+| DRIFT-FOLLOW-007 | 指标文本层：多一个 `application` tag / 直方图**零桶** | 可观察（抓取侧） | 🟡 **已修**（tag + 桶）· ⚠️ 残留 = **框架限制** · ✅ **已定性（用户 2026-10-27 拍板：不修，登记为框架限制）** · 🆕 **2026-10-29 对齐（W-B lane）**：与本文件 §标题 `:578` 的 `🟡` **收敛到单一状态 `🟡`**（已修 ＋ 残留未清） ⇒ ⚠️ **残留的「桶边界总数 80 ⇒ 12」这一项，「框架限制不可修」这个前提在 follow-rpc 侧已被证伪** ⇒ `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/metrics/FollowRpcMetrics.java:118-120`（明写「**不要再加 `publishPercentileHistogram()`**」） ＋ `:134-145`（只用 `serviceLevelObjectives`）⇒ **12 桶**；而 follow-api 侧 `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/metrics/FollowApiMetrics.java:129-133` **仍同时开两个开关** ⇒ **仍 80 桶** ⇒ ⇒ **登记为「下一轮的可修项」**（本 lane 只改台账、**不改代码**）⇒ 踩坑档对应条目 `PIT-FOLLOW-15`（**状态：仍生效**）|
 | DRIFT-FOLLOW-008 | MaxConns 闸门：**每路由一个**（Go）vs **全局一个**（RAG） | 可观察（并发行为） | ✅ **已签字偏离 ⇒ 不修**（`SD-2026-10-25-01`，2026-10-25 用户拍板）· ⚠️ **2026-10-29 订正**：原记「🔴 未修 ⇒ 派单」**是陈旧的**（签字在先，本条登记晚于签字）⇒ 已按 §5.3b 硬边界 2 **移出 DRIFT 侧** ⇒ 见下方「已移出 DRIFT 侧」块 |
 | DRIFT-FOLLOW-009 | 下游挂死时：Go **2s ⇒ 200+1015**；RAG **3s ⇒ 503 "Request Timeout"** | **可观察（状态码 + 时刻）** | ✅ 已修 |
 | **DRIFT-FOLLOW-010** | **3s 预算的作用域**：Go 的计时器在 Authorize **之后**起算（**验签不计入**）/ RAG 的计时器在 Filter 外层（**验签计入**） | 可观察（**超时边界**，条件性） | ✅ **已修**（2026-10-27 · G1 lane · 域内推广 `DRIFT-USERAPI-009②`） |
@@ -48,7 +48,13 @@
 > **重建装置后的受控结论**：U4 ⇒ DRIFT-FOLLOW-009（已修）；
 > **U3 ⇒ 两侧熔断等价，无漂移**（见下方「U3 受控重测」节）。
 
-## DRIFT-FOLLOW-001 🔴 空列表出参：Go 是 `null`，RAG 是 `[]`（已修）
+## DRIFT-FOLLOW-001 ✅ 空列表出参：Go 是 `null`，RAG 是 `[]`（已修）
+
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— **原状态标记 `🔴`（2026-10-24 台账留痕，保留不改写）** ⇒
+> **现状态：✅ 已修**（与同文件 §结论表 `:32` 的 `✅ 已修` 收敛到同一状态）。
+> **依据**：`service/follow/follow-api/src/main/java/com/rag/follow/follow/api/service/FollowApiSupport.java:265` `out.setUserIds(null)`
+> ＋ `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiMvcPipelineTest.java:625-626` 断言 `"user_ids":null`
+> ⇒ **L1 源码 + L2 守门**（本轮 surefire 实测 `FollowApiMvcPipelineTest` **t=37 f=0 e=0 s=0**）。
 
 **现象（双侧活体对拍抓到）**
 
@@ -147,7 +153,12 @@ RAG 侧实现：`service/users/users-common/.../GoStyleStringInt64.java`（与 m
 
 两侧**共用同一个 PG**、**调用同一个下游 user-rpc**、**同一批探针脚本** ⇒ body 逐字节可比。
 
-## DRIFT-FOLLOW-005 🔴 recommend 出参**字段顺序**与 Go 相反（已修）
+## DRIFT-FOLLOW-005 ✅ recommend 出参**字段顺序**与 Go 相反（已修）
+
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— **原状态标记 `🔴`（2026-10-24 台账留痕，保留不改写）** ⇒
+> **现状态：✅ 已修**（与同文件 §结论表 `:33` 的 `✅ 已修` 收敛到同一状态）。
+> **依据**：`service/follow/follow-api/src/main/java/com/rag/follow/follow/api/dto/RecommendUser.java:57`
+> `@JsonPropertyOrder({"target_id", "mutual_score"})` ⇒ **L1 源码**。
 
 **现象（双侧活体对拍抓到）**
 
@@ -223,7 +234,11 @@ RAG 走 Spring 消息转换器 ⇒ **HTTP 415**；Go 侧 `withJsonBody` 只判 C
 ⇒ 本轮登记为 **DRIFT OPEN**，请用户签字后再迁到 `docs/Intentional_Deviations/follow/api.md`。
 （签字后的处理方式：把 415 改成「按 Go 规则丢弃 body」，与 `GoStyleJsonBodyConverter` 的既有行为统一。）
 
-## DRIFT-FOLLOW-009 🔴 下游挂死时的超时级联：Go 200+1015 vs RAG 503（已修）
+## DRIFT-FOLLOW-009 ✅ 下游挂死时的超时级联：Go 200+1015 vs RAG 503（已修）
+
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— **原状态标记 `🔴`（2026-10-24 台账留痕，保留不改写）** ⇒
+> **现状态：✅ 已修**（与同文件 §结论表 `:36` 的 `✅ 已修` 收敛到同一状态）。
+> **依据**：同域 §「U3 受控重测」节（`docs/DRIFT/follow/api.md:437`）的**受控重测**结论（首轮的「熔断几乎不生效」已撤回 ⇒ 两侧等价）＋ 同文件 §结论表登记的 `✅ 已修`。
 
 **现象（U4：黑洞下游实测）**
 
@@ -265,7 +280,9 @@ U3 的突发测试里抓到过 **`HTTP 200` + body `Request Timeout`** ——
 （`CLIENT_TIMEOUT_MILLIS` + `capByClientTimeout`）；
 实测：黑洞下游下 RAG 返回 `HTTP=200 elapsed=2.47s body={"code":1015,...}`。
 
-## DRIFT-FOLLOW-010 ✅ 3s 预算的作用域：Go 的计时器在 Authorize 之后（**验签不计入**）🟡 **已修（2026-10-27 · G1 lane）**
+## DRIFT-FOLLOW-010 ✅ 3s 预算的作用域：Go 的计时器在 Authorize 之后（**验签不计入**）**已修（2026-10-27 · G1 lane）**
+
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— 本行原有一个**与「已修」自相矛盾**的 `🟡` 标记（原值留痕：`✅ … 🟡 **已修（2026-10-27 · G1 lane）**`）⇒ **收敛为单一状态 `✅`**（与 §结论表「DRIFT-FOLLOW-010 → ✅ 已修」一致）⇒ **核对日期 2026-10-29**。**依据**：本域 §实施记录（`3s 预算的作用域` 的落码与真 Tomcat 活体复验）＋ §结论表。
 
 > **本条是 follow 域首次登记这一族差异** —— 推广 user-api 的 `DRIFT-USERAPI-009②` 时**顺手查出**。
 > ⚠️ 与 user-api 那条**同族但不是同一条**（编号各自独立；follow 侧此前**零记录**）。
@@ -314,7 +331,9 @@ U3 的突发测试里抓到过 **`HTTP 200` + body `Request Timeout`** ——
   ⇒ 但 Filter **不写响应** ⇒ 最终仍是 404 ⇒ **只是多一次 HMAC 计算，不影响任何响应**。
 - **真启动复验（L3 · 真 Tomcat）**：见 §11.4（10 条探针，**follow 侧 5 条全绿**）。
 
-## DRIFT-FOLLOW-011 ✅ follow-api 的 Redis 超时口径与 Go 不符（`timeout: 2s` ≠ Go 的 `ReadTimeout` 3s · 且缺 `connect-timeout`）🟡 **已修（2026-10-27 · G1 lane）**
+## DRIFT-FOLLOW-011 ✅ follow-api 的 Redis 超时口径与 Go 不符（`timeout: 2s` ≠ Go 的 `ReadTimeout` 3s · 且缺 `connect-timeout`）**已修（2026-10-27 · G1 lane）**
+
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— 本行原有一个**与「已修」自相矛盾**的 `🟡` 标记（原值留痕：`✅ … 🟡 **已修（2026-10-27 · G1 lane）**`）⇒ **收敛为单一状态 `✅`**（与 §结论表「DRIFT-FOLLOW-011 → ✅ 已修」一致）⇒ **核对日期 2026-10-29**。**依据**：本域 §实施记录（`Redis 超时口径` 的落码与真 Tomcat 活体复验）＋ §结论表。
 
 > 🆕 **本轮新立**（给 users 域对齐 Redis 超时时**顺手查出**）⇒ follow 域**首次**登记这一族（Redis 超时配置值）差异。
 > ⚠️ 与 `DRIFT-FOLLOW-010`（3s 预算作用域）**同族但不是同一条**：010 是「验签算不算进预算」，本条是「Redis 命令/连接超时值本身」。
@@ -384,7 +403,9 @@ U3 的突发测试里抓到过 **`HTTP 200` + body `Request Timeout`** ——
 
 ---
 
-## DRIFT-FOLLOW-012 ✅ follow-api 的 Redis **断连**行为与 Go 不符：命令被排队挂到 3s ⇒ **503**（Go 是 fail-open 200）🟡 **已修（2026-10-27 · G1 lane）**
+## DRIFT-FOLLOW-012 ✅ follow-api 的 Redis **断连**行为与 Go 不符：命令被排队挂到 3s ⇒ **503**（Go 是 fail-open 200）**已修（2026-10-27 · G1 lane）**
+
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— 本行原有一个**与「已修」自相矛盾**的 `🟡` 标记（原值留痕：`✅ … 🟡 **已修（2026-10-27 · G1 lane）**`）⇒ **收敛为单一状态 `✅`**（与 §结论表「DRIFT-FOLLOW-012 → ✅ 已修」一致）⇒ **核对日期 2026-10-29**。**依据**：本域 §实施记录（`Redis 断连行为` 的落码与真 Tomcat 活体复验）＋ §结论表。
 
 > 🆕 **本轮新立** ⇒ follow 域**首次**登记「Redis **断连**（≠ 挂住）」这一族差异。
 > ⚠️ 与 `DRIFT-FOLLOW-011`（超时**配置值**）**同族但不是同一条**：
@@ -555,6 +576,10 @@ PITFALL-FOLLOW-011 / PITFALL-FOLLOW-012。）
 > ⚠️ **不要**因为「Go 是 per-route」就把它当缺陷顺手改回（AGENTS.md §5.3b：签字偏离不重复质疑）。
 
 ## DRIFT-FOLLOW-007 🟡 指标文本层：多一个 tag + 直方图零桶（已修 + 框架限制残留）
+
+> 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— **原状态标记 `🟡`（台账留痕，保留不改写）** ⇒ **现状态：🟡（已修 tag + 桶 · 残留 = 80 桶未清）**（与 §结论表 `:34` **收敛到同一状态**）⇒ **核对日期 2026-10-29**。
+> **依据**：§结论表 `:34` ＋ 本节「⚠️ 残留（框架限制）」表 ⇒ **桶边界总数 Go 12 / RAG 80**。
+> ⚠️ **⚠️ 残留表里「桶边界总数」这一项的前提待复核**：**「框架限制不可修」在 follow-rpc 侧已被证伪** —— `FollowRpcMetrics.java:118-120`（明写「**不要再加 `publishPercentileHistogram()`**」）＋ `:134-145`（只用 `serviceLevelObjectives`）⇒ **12 桶**；而 follow-api 侧 `FollowApiMetrics.java:129-133` **仍同时开两个开关** ⇒ **仍 80 桶** ⇒ ⇒ **登记为「下一轮的可修项」**（本 lane **只改台账、不改代码**）⇒ 踩坑档对应条目 `PIT-FOLLOW-15`（**状态：仍生效**）。
 
 **现象（U1：两侧归零重测后抓 /metrics 对拍）**
 

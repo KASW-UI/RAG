@@ -34,8 +34,8 @@
 3. RAG 与 Go 是否**行为不一致**？若不一致 ⇒ 是「可修」还是「框架限制」？若可修 ⇒ **给出修法与代价**（但**不许改** `service/common` ⇒ 交整合者）
 4. L2 的 javadoc 自陈这是「DRIFT-018 框架限制」⇒ **核实这个自陈是否成立** ⇒ 若不成立 ⇒ 那是**一条新发现**，写清证据。
 
-⚠️ **task-rpc / follow-rpc 这两域在第十七轮做过 X-5 轴的修复**（`ServerCalls.asyncUnaryCall` + latch）⇒
-它们的 X-5 轴**已经有了** ⇒ 本 lane **只做 slow 轴**，不动已有的 X-5 修复。
+⚠️ **task-rpc / follow-rpc 这两域在第十七轮做过 CD-5 轴的修复**（`ServerCalls.asyncUnaryCall` + latch）⇒
+它们的 CD-5 轴**已经有了** ⇒ 本 lane **只做 slow 轴**，不动已有的 CD-5 修复。
 
 ---
 
@@ -45,7 +45,7 @@
 
 | 样板 | 路径 | 它示范什么 |
 |---|---|---|
-| **X-5 轴** | `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcGrpcInterceptorWiringTest.java` | **真 server + 真链 + 判别式断言**（服务端超时真的打断了在飞处理） |
+| **CD-5 轴** | `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcGrpcInterceptorWiringTest.java` | **真 server + 真链 + 判别式断言**（服务端超时真的打断了在飞处理） |
 | **slow 轴** | `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcSlowThresholdGateTest.java` | **真 OTel SDK + 收集型 exporter** ⇒ 断言导出的 span 上真的有 `sea.slow` |
 | **latch 加固版** | `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotGrpcInterceptorWiringTest.java` | `sleep` ⇒ `latch` 的改造形态 |
 

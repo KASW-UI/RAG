@@ -5,7 +5,23 @@
 > **核对日期：2026-10-24** · 基线 commit：`8422116`
 > 本档只记「**为什么会这样**」，具体漂移条目在 [`docs/DRIFT/follow/api.md`](../../DRIFT/follow/api.md)。
 
-## PITFALL-FOLLOW-006 🔴🔴 proto3 的空 repeated 字段在 wire 上**"消失"** ⇒ Go 得 nil、Java 得空 List
+> 🆕 **2026-10-29 台账对齐（W-B lane · follow + task 域）**
+>
+> - **编号归一**：本档条目的**旧号** `PITFALL-FOLLOW-NNN` **原样保留**在每条的「旧号」行里；**新号** = `PIT-FOLLOW-NN`（与旧号后三位一一对应）⇒
+>   ⚠️ **旧号是检索用的历史标识** —— 仓内其它文档（DRIFT / Stage1 / 共享层 javadoc / `tools/`）按**旧号**检索，本档**两套号都在** ⇒ 旧号**不可删**。
+> - **每条补三字段**：**状态** · **核对日期（2026-10-29）** · **是否影响当前轮次**（填「否」时必须写明**不适用的具体原因**）。
+> - **状态判定口径**（本档统一）：
+>   - **已闭环** = 该坑在**本域的具体触发点已被消除**（代码 / 配置 / 脚本已改）**且有证据指针**（`文件:行号` 或守门的实测条数）⇒ **残留的通用教训不改变这个判定**（通用教训留在正文里）。
+>   - **仍生效** = 该坑的**触发条件本身**仍在（框架 / 语言 / 真源的事实，或本域的编排脚本仍未改）⇒ 今天照旧做法还会踩。
+>   - **已撤销** = 用户 / 决策撤销。**待核实** = 判不了（须写清缺什么）⇒ **不许默认任何一侧**。
+> - ⚠️ **状态标记取值域**：`✅` / `🟡` / `🔴` / `⚫`（与仓内既有取值域一致）。
+
+## PIT-FOLLOW-006 · 【已闭环】 proto3 的空 repeated 字段在 wire 上**"消失"** ⇒ Go 得 nil、Java 得空 List
+
+> **旧号**：`PITFALL-FOLLOW-006` ⇒ **新号**：`PIT-FOLLOW-006`
+> **原标题标记**（2026-10-24 台账留痕，保留不改写）：`🔴🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 空集合语义已按 Go 的 nil 落码并被断言钉住 ⇒ 触发条件已消除 ⇒ 本轮只核台账、不改实现 ⇒ 不影响本轮产出
+> **证据**：`service/follow/follow-api/src/main/java/com/rag/follow/follow/api/service/FollowApiSupport.java:265` `out.setUserIds(null)` ＋ `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiMvcPipelineTest.java:625-626` 断言 `"user_ids":null`
 
 **症状（双侧活体对拍抓到的唯一一条真漂移）**
 
@@ -52,7 +68,12 @@ RAG 原注释（`FollowUserListResp`）写：
 
 ---
 
-## PITFALL-FOLLOW-007 🔴 测试可以**锁死错误答案**（绿测试比没有测试更危险）
+## PIT-FOLLOW-007 · 【已闭环】 测试可以**锁死错误答案**（绿测试比没有测试更危险）
+
+> **旧号**：`PITFALL-FOLLOW-007` ⇒ **新号**：`PIT-FOLLOW-007`
+> **原标题标记**（2026-10-24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 错误断言已改写（不再是「锁死错误答案」的守卫）⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`FollowApiMvcPipelineTest.java:625-626`（断言已从 `"user_ids":[]` 改为 `"user_ids":null`） ＋ `:614-615` 注释写明依据（Go 侧反序列化得 nil ⇒ `encoding/json` 输出 null）
 
 **症状**：`FollowApiMvcPipelineTest#userIdsAreSerializedAsNumbers` 里有一条断言：
 
@@ -83,7 +104,12 @@ assertTrue(emptyBody.contains("\"user_ids\":[]"), "空 user_ids 必须是 []，�
 
 ---
 
-## PITFALL-FOLLOW-009 🔴 `@JsonProperty` 显式命名的属性之间，Jackson 按**字母序**排
+## PIT-FOLLOW-009 · 【已闭环】 `@JsonProperty` 显式命名的属性之间，Jackson 按**字母序**排
+
+> **旧号**：`PITFALL-FOLLOW-009` ⇒ **新号**：`PIT-FOLLOW-009`
+> **原标题标记**（2026-10-24 台账留痕，保留不改写）：`🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 出参 DTO 已显式钉死字段顺序 ⇒ 本轮只核台账、不改 DTO ⇒ 不影响本轮产出
+> **证据**：`service/follow/follow-api/src/main/java/com/rag/follow/follow/api/dto/RecommendUser.java:57` `@JsonPropertyOrder({"target_id", "mutual_score"})`
 
 **症状（双侧活体对拍抓到）**
 
@@ -127,7 +153,12 @@ RAG : {"users":[{"mutual_score":20,"target_id":"4"}]}      ← 字段顺序反�
 
 ---
 
-## PITFALL-FOLLOW-008 ⚠️ `follow-api` 没有可执行 fat jar
+## PIT-FOLLOW-008 · 【已闭环】 `follow-api` 没有可执行 fat jar
+
+> **旧号**：`PITFALL-FOLLOW-008` ⇒ **新号**：`PIT-FOLLOW-008`
+> **原标题标记**（2026-10-24 台账留痕，保留不改写）：`⚠️`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 打包形态已改（fat jar 可执行）⇒ 触发条件已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出。⚠️ **原台账「处置：未改动 —— 仅登记」已过期**（2026-10-24 留痕，本次对齐按现状订正）
+> **证据**：`service/follow/follow-api/pom.xml:196` 已有 `spring-boot-maven-plugin`（`:193` 注释写明靠它打成可执行 jar） ＋ `service/common/src/test/java/com/rag/common/spring/HttpPoolShutdownWithoutServletGateTest.java` 同款产物层守门已在共享层
 
 **现象**：`mvn install` 产出的 `follow-api-0.0.1-SNAPSHOT.jar` 只有 **53 KB**（普通 jar），
 `java -jar` 跑不起来 ⇒ 必须用
@@ -144,7 +175,12 @@ RAG : {"users":[{"mutual_score":20,"target_id":"4"}]}      ← 字段顺序反�
 
 ---
 
-## PITFALL-FOLLOW-010 🔴🔴 探针用**固定** `-o` 文件 ⇒ 请求失败时读到的是**上一次的残留 body**
+## PIT-FOLLOW-010 · 【已闭环】 探针用**固定** `-o` 文件 ⇒ 请求失败时读到的是**上一次的残留 body**
+
+> **旧号**：`PITFALL-FOLLOW-010` ⇒ **新号**：`PIT-FOLLOW-010`
+> **原标题标记**（2026-10-24 台账留痕，保留不改写）：`🔴🔴`
+> **状态**：**已闭环** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 探针已改为「每请求一个唯一文件 + `http_code==000` 守卫」⇒ 残留 body 的触发条件已消除 ⇒ 本轮只核台账 ⇒ 不影响本轮产出
+> **证据**：`tools/api-full-parity-probe/follow/run.sh:529`（`out="$(mktemp "${WORK}/body.XXXXXX")"`） ＋ `run.sh:579-581`（`http_code == 000` 守卫） ＋ `tools/api-full-parity-probe/follow/mutate-parity.sh:161-173`（**M5** 专门把假绿复现出来）
 
 **症状**：一次「双侧逐字节一致 ✅」的对拍，**两侧其实都没发出一个请求**：
 
@@ -216,7 +252,12 @@ $ diff -q /tmp/fg-a.txt /tmp/fg-b.txt && echo "完全一致"
 
 ---
 
-## PITFALL-FOLLOW-011 🔴🔴 故障模拟器**不完成 HTTP/2 握手** ⇒ 测的是「连不上」，不是「挂住」
+## PIT-FOLLOW-011 · 【仍生效】 故障模拟器**不完成 HTTP/2 握手** ⇒ 测的是「连不上」，不是「挂住」
+
+> **旧号**：`PITFALL-FOLLOW-011` ⇒ **新号**：`PIT-FOLLOW-011`
+> **原标题标记**（2026-10-24 台账留痕，保留不改写）：`🔴🔴`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— **故障注入装置至今未落仓**（`tools/api-full-parity-probe/follow/` 只有 `run.sh` / `expected.txt` / `mint-jwt.py` / `mutate-parity.sh` / `README.md` 五件，无黑洞模拟器；旧的 `/tmp/blackhole3.py` 已不存在）⇒ 触发条件仍在 ⇒ 但本轮**只核台账、不建装置** ⇒ 不影响本轮台账产出
+> **证据**：`tools/api-full-parity-probe/follow/` 目录清单（2026-10-29 实测） ＋ `docs/DRIFT/follow/api.md:16-19`（「52/52 逐字节一致」已**降级为历史声明，不可复算**） ＋ `docs/DRIFT/follow/stage1-admission.md:361`（故障注入类仍**无落仓入口**）
 
 **症状**：U3（gRPC 客户端熔断）首轮实测得到「Go 5/5 快失败、RAG 1/5 快失败」，
 据此写下「RAG 的熔断几乎不生效」的结论。
@@ -255,7 +296,12 @@ $ diff -q /tmp/fg-a.txt /tmp/fg-b.txt && echo "完全一致"
 
 ---
 
-## PITFALL-FOLLOW-012 🔴 go-zero 的 etcd 键是「**前缀 + `/`**」⇒ 裸键解析到**零地址**
+## PIT-FOLLOW-012 · 【仍生效】 go-zero 的 etcd 键是「**前缀 + `/`**」⇒ 裸键解析到**零地址**
+
+> **旧号**：`PITFALL-FOLLOW-012` ⇒ **新号**：`PIT-FOLLOW-012`
+> **原标题标记**（2026-10-24 台账留痕，保留不改写）：`🔴`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 这是**真源（Go）侧的事实**（go-zero 的 etcd 键语义）⇒ RAG 侧无从修、也不该改 ⇒ 与本轮台账对齐无关 ⇒ 不影响本轮产出
+> **证据**：Go `go-zero@v1.10.2/core/discov/internal/registry.go:517` `makeKeyPrefix`（拼 `key + '/'`） ＋ `:309` `cli.Get(ctx, makeKeyPrefix(key), clientv3.WithPrefix())`
 
 **症状**：把 etcd 的键写成裸 `follow.rpc` 后，Go 侧每个请求都**立刻**返回 1015：
 
@@ -301,7 +347,12 @@ func makeKeyPrefix(key string) string {
 
 ---
 
-## PITFALL-FOLLOW-015 🔴 Micrometer 的 `serviceLevelObjectives` 是「**追加**」，不是「限定」
+## PIT-FOLLOW-015 · 【仍生效】 Micrometer 的 `serviceLevelObjectives` 是「**追加**」，不是「限定」
+
+> **旧号**：`PITFALL-FOLLOW-015` ⇒ **新号**：`PIT-FOLLOW-015`
+> **原标题标记**（2026-10-24 台账留痕，保留不改写）：`🔴`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— **follow-api 侧仍在同时开两个开关** ⇒ 桶数仍是并集 ⇒ 触发条件仍在 ⇒ 但本轮**只核台账、不改指标配置**（改配置属阶段 2 建设项）⇒ 不影响本轮产出
+> **证据**：`service/follow/follow-api/src/main/java/com/rag/follow/follow/api/metrics/FollowApiMetrics.java:129-133` **同时**开 `.publishPercentileHistogram()` 与 `.serviceLevelObjectives(GO_DEF_BUCKETS)` ⇒ 按 Micrometer `DistributionStatisticConfig.getHistogramBuckets()` 是**强制并集** ⇒ 桶边界总数 80（`docs/DRIFT/follow/api.md` 的 `DRIFT-FOLLOW-007` 残留表已记 12 vs 80；**本轮未复测桶数**，未跑 `/actuator/prometheus`） ⚠️ **同仓 follow-rpc 已修** ⇒ 「框架限制不可修」在 rpc 侧**已被证伪**：`service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/metrics/FollowRpcMetrics.java:118-120`（明写「不要再加 `publishPercentileHistogram()`」） ＋ `:134-145`（只用 `serviceLevelObjectives`）⇒ 12 桶
 
 **症状**：为了把 Prometheus 直方图的桶对齐到 Go 的 `prometheus.DefBuckets`（12 个边界），
 写下 `.publishPercentileHistogram().serviceLevelObjectives(GO_DEF_BUCKETS)` ——
@@ -350,7 +401,12 @@ true ⇒ 并集；false ⇒ **`_bucket` 根本不产生**）。
 
 ---
 
-## PITFALL-FOLLOW-016 🔴 对拍**装置**自身会骗人：端口撞车 / 时钟跳变 / 启动时序 / 端口未释放
+## PIT-FOLLOW-016 · 【仍生效】 对拍**装置**自身会骗人：端口撞车 / 时钟跳变 / 启动时序 / 端口未释放
+
+> **旧号**：`PITFALL-FOLLOW-016` ⇒ **新号**：`PIT-FOLLOW-016`
+> **原标题标记**（2026-10-24 台账留痕，保留不改写）：`🔴`
+> **状态**：**仍生效** · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 端口撞车 / 时钟跳变 / 启动时序 / 端口未释放是**环境面** ⇒ 永远可能发生 ⇒ 但本轮**不跑双侧对拍**（只核台账）⇒ 不影响本轮产出
+> **证据**：`docs/Pitfalls/follow/api.md` §`PIT-FOLLOW-010` 教训 3 的三种假绿形态表（本条为其总纲） ＋ `docs/DRIFT/follow/vs-common.md:59`（A5 轴「`RANDOM_PORT` 面仍是记账缺口」）
 
 **症状一：单测红了，但代码没动**
 

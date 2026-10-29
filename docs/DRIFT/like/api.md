@@ -465,7 +465,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Must Preserve** | 判据必须作用在**未经解析的原始头**上（`request.getHeader("Content-Type")`），而不是 `getContentType().toString()` |
 | **Recommended Verification** | 改 `GoStyleJsonBodyConverter.read` 传入 `((HttpServletRequest) …).getHeader("Content-Type")`（或 `inputMessage.getHeaders().getFirst("Content-Type")`）；加一条**走完整管线**（不能只测 `goReadsBody`）的用例钉死 `Content-Type: APPLICATION/JSON` |
 | **Evidence** | **双侧活体对拍**：Go A04 `Content-Type: APPLICATION/JSON` ⇒ `ERR field "target_type" is not set`；RAG A04/A08b ⇒ `200 {"code":200,…,"echo_ids":"[1]"}`。消费点：`go-zero@v1.10.2/rest/httpx/requests.go:153-155`（`r.Header.Get` 原始头）vs `GoStyleJsonBodyConverter.java:115-118`（`getContentType().toString()`） |
-| **状态** | 🔴 **仍未修** —— 修法落在 `service/common` 的 `GoStyleJsonBodyConverter`（**6 个域共用**）⇒ **须单域串行**。⚠️ 2026-10-24 审计更正：本条「各域都有 `*GoStyleBodyContentTypeTest`」**不准确**（实测只有 like / message / users×2 **4 个模块**有）；且**域内绕过已实测排除**（`OrderComparator` 同 order 无 tiebreak ⇒ 排序不可控）。 |
+| **状态** | ✅ **已修**（2026-10-29 对齐）—— 原判 🔴「仍未修」⇒ 现行态 = ✅ 已修；修法落在 `service/common` 的 `GoStyleJsonBodyConverter`（**6 个域共用**）⇒ **须单域串行**。
 
 ---
 
@@ -509,7 +509,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 
 ---
 
-#### **DRIFT-LIKEAPI-018** — 🔴 `LikeApiApplication` 的类 javadoc 仍在传播**已被推翻的 DRIFT-001 结论**
+#### **DRIFT-LIKEAPI-018** — ✅ `LikeApiApplication` 的类 javadoc 仍在传播**已被推翻的 DRIFT-001 结论** ｜ **2026-10-29 对齐：原判 🔴 ⇒ 现行态 = ✅ 已修（纯注释）**
 
 | 字段 | 内容 |
 |---|---|
@@ -529,7 +529,7 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 
 ---
 
-#### **DRIFT-LIKEAPI-019** — 🔴 `LikeReqGoStyleValidationTest` 类注释仍在写「Slice 永不计必填」
+#### **DRIFT-LIKEAPI-019** — ✅ `LikeReqGoStyleValidationTest` 类注释仍在写「Slice 永不计必填」 ｜ **2026-10-29 对齐：原判 🔴 ⇒ 现行态 = ✅ 已修（纯注释）**
 
 | 字段 | 内容 |
 |---|---|
@@ -986,10 +986,10 @@ Go 侧则**正常发出**。
 
 | ID | 内容 | 为什么没做 |
 |---|---|---|
-| **DRIFT-LIKEAPI-015** | `Content-Type` 大小写：Go 用**原始头**（`strings.Contains` 大小写敏感），RAG 用**已解析的 MediaType**（媒体类型已小写化） | ⚠️ **修法落在 `service/common` 的 `GoStyleJsonBodyConverter`**，该类被 **6 个域**共用（like / follow / message / users×2 / task / article），各域都有 `*GoStyleBodyContentTypeTest`。在**多域并发 worktree**（§5.3）下改共享组件会产生跨域冲突 ⇒ **须单域串行处理**，不在本 worktree 内做<br>🔴 **2026-10-24 审计更正：「各域都有 `*GoStyleBodyContentTypeTest`」这句不准确** —— 实测（`find service -name "*GoStyleBodyContentTypeTest.java"`）该测试类**只有 4 个模块**有：like-api / message-api / user-api / admin-api；follow / task / article **没有**这个类（它们覆盖的是 `FollowApiMvcPipelineTest` / `TaskApiMvcPipelineTest` / `TaskApiWiringTest` / `GetTaskReqParsingTest` 与 article 的 `GoStyleJsonBodyLimitFilter`）。<br>⇒ 「6 个域共用」**属实**；「各域都有该测试类」**高估了改动面** —— 真正需要**复核断言**的只有 **4 个模块**。<br>⚠️ **另经实测排除「域内绕过」这条路**：`OrderComparator.doCompare`（spring-core 7.0.9）在两个 config **order 相同**时**返回 0、无类名 tiebreak** ⇒ 排序退化为稳定排序、取决于 bean 注册顺序 ⇒ 「子类化 + 替换 common 插入的转换器」**顺序不可控** ⇒ 域内绕过不可靠，**确认须单域串行**。 |
+| **DRIFT-LIKEAPI-015** | **2026-10-29 对齐：现行态 = ✅ 已修**（共享层 T-1 已落码：`GoStyleJsonBodyConverter.java:331` `getFirst(CONTENT_TYPE)` 取原始头；守门 `LikeApiGoStyleBodyContentTypeTest.java:183`）｜ `Content-Type` 大小写：Go 用**原始头**（`strings.Contains` 大小写敏感），RAG 用**已解析的 MediaType**（媒体类型已小写化） | ⚠️ **修法落在 `service/common` 的 `GoStyleJsonBodyConverter`**，该类被 **6 个域**共用（like / follow / message / users×2 / task / article），各域都有 `*GoStyleBodyContentTypeTest`。在**多域并发 worktree**（§5.3）下改共享组件会产生跨域冲突 ⇒ **须单域串行处理**，不在本 worktree 内做<br>🔴 **2026-10-24 审计更正：「各域都有 `*GoStyleBodyContentTypeTest`」这句不准确** —— 实测（`find service -name "*GoStyleBodyContentTypeTest.java"`）该测试类**只有 4 个模块**有：like-api / message-api / user-api / admin-api；follow / task / article **没有**这个类（它们覆盖的是 `FollowApiMvcPipelineTest` / `TaskApiMvcPipelineTest` / `TaskApiWiringTest` / `GetTaskReqParsingTest` 与 article 的 `GoStyleJsonBodyLimitFilter`）。<br>⇒ 「6 个域共用」**属实**；「各域都有该测试类」**高估了改动面** —— 真正需要**复核断言**的只有 **4 个模块**。<br>⚠️ **另经实测排除「域内绕过」这条路**：`OrderComparator.doCompare`（spring-core 7.0.9）在两个 config **order 相同**时**返回 0、无类名 tiebreak** ⇒ 排序退化为稳定排序、取决于 bean 注册顺序 ⇒ 「子类化 + 替换 common 插入的转换器」**顺序不可控** ⇒ 域内绕过不可靠，**确认须单域串行**。 |
 | **DRIFT-LIKEAPI-012** | `target_ids` 里放 JSON 数字：Go **接受**（`fillSliceValue` 的 `case fmt.Stringer` 命中 `json.Number`），RAG **拒**（`LogicalType.Textual ← Integer = Fail`） | 修法需**元素级解析器**（setter 改 `Object` 入参）。⚠️ 台账已实测记录「Jackson 3 的 coercion **只有 LogicalType 级生效、类级无效**」，所以 `withCoercionConfig(SomeListClass, …)` 这条路走不通 —— 需新增一个显式的元素级解析组件，范围大于本轮 |
 | **DRIFT-LIKEAPI-016** | `weight: 1e400` ⇒ Go **拒**（`strconv.ParseFloat` 检查 `ErrRange`），RAG 收成 `Double.POSITIVE_INFINITY` ⇒ **真的发出一次 `weight=+Inf` 的写调用** | 修法明确（`setWeight` 改 `Object` 入参 + `isFinite()` 校验），但需与 012 共用同一套「元素级/字段级解析器」组件 ⇒ **与 012 合并做**，避免两次改动同一批 DTO |
-| **DRIFT-LIKEAPI-017** | 单次 RPC 超时：Go **固定 2000ms**（`go-zero@v1.10.2/zrpc/config.go:31` 的 struct tag 默认），RAG 取 **HTTP 剩余预算**（≤3000） | 需新增独立配置项 + 改 `GoStyleRequestDeadline` 的「无预算就原样返回」分支（单测里没有 HTTP 超时上下文时两侧语义会再次分叉）⇒ 需要连带审 `common` 的 deadline 组件，同样受 §4 的并发约束<br>🔴 **2026-10-23 第五轮更正：后半句整段是错的** —— **不需要改 `common`，也不受 §4 并发约束**：只**读** `GoStyleRequestDeadline` 已有的公开 `isPresent()` / `remainingMillis()` 即可拿到剩余预算，并在 like-api 侧自己算 `min(2000, 剩余)`（**不再调用 `applyTo`**）。理由见 §7.2 该条的更正。 |
+| **DRIFT-LIKEAPI-017** | 单次 RPC 超时：Go **固定 2000ms**（`go-zero@v1.10.2/zrpc/config.go:31` 的 struct tag 默认），RAG 取 **HTTP 剩余预算**（≤3000） | 需新增独立配置项 + 改 `GoStyleRequestDeadline` 的「无预算就原样返回」分支（单测里没有 HTTP 超时上下文时两侧语义会再次分叉）⇒ 需要连带审 `common` 的 deadline 组件，同样受 §4 的并发约束<br>🔴 **2026-10-23 第五轮更正：后半句整段是错的** —— **不需要改 `common`，也不受 §4 并发约束**：只**读** `GoStyleRequestDeadline` 已有的公开 `isPresent()` / `remainingMillis()` 即可拿到剩余预算，并在 like-api 侧自己算 `min(2000, 剩余)`（**不再调用 `applyTo`**）。理由见 §7.2 该条的更正。 **2026-10-29 对齐：现行态 = ✅ 已修** —— `service/like/like-api/src/main/java/com/rag/like/like/api/client/LikeRpcClient.java:157`（`Math.min(capMillis, remainingMillis)`）+ `:151`（`capMillis` 取 `properties.getLikeRpc().getTimeout()`）· 守门 `service/like/like-api/src/test/java/com/rag/like/like/api/LikeRpcTimeoutCapTest.java:233-238` |
 | **DRIFT-LIKEAPI-018/019/020** | 3 条**文档层**高危断言 | ⚠️ **纯注释修正**，无需运行期测试。本轮**未做**，留待下一轮（改动零风险，但需要逐条核对 Go 出处，不能凭印象改） |
 | **DRIFT-LIKEAPI-021/022** | 响应 `Content-Type` 无 `charset`（判语义等价）/ 裸 503（RAG 独有） | ✅ **已建档**为待签字候选：`Intentional_Deviations/like/api.md` 的 SD-…-08 / -09。⚠️ 标注为**待签字**而非已签字 —— 保留在案是为了让下一轮复核**不会把它们当新发现重提**，不是代替用户拍板 |
 

@@ -54,7 +54,7 @@ admin-api (HTTP :8889)   ──gRPC plaintext──▶  admin-rpc (:8081)  ─�
 | **2** | 参数校验 / 业务规则 / 身份认证 / 权限控制有效 | 身份**只**来自 JWT claim `userId`（Go `authhandler.go:72-79` 同款）；Go 显式忽略 `aud/exp/sub/...`，RAG 只读 `userId` ⇒ 一致。`admin-api` 的 4 条认证差异（`DRIFT-ADMINAPI-001~004`）**全部已签字** ⇒ RAG 侧**更严**（claim 无效 ⇒ 401 且不发 RPC） | ✅ 正确（差异均为**已签字偏离**，非缺陷） | ✅ L1 + L4 | [`admin/api.md`](admin/api.md) §6 表 · §12.9 签字复核（2026-10-24 订正「仍需用户裁决」是**错的**）· 签字档 [`Intentional_Deviations/users/_shared.md`](../../Intentional_Deviations/users/_shared.md) | ❌ 不影响 | ❌ 不需要 | — |
 | **3** | 关键数据正确持久化，事务边界合理 | `user-rpc` 头像链路事务在 mapper `default` 方法上，入口 `UserDomainService.uploadAvatar:648` / `.selectAvatar:584` **跨 Bean** ⇒ 经代理生效；`admin-rpc` 仅 `CreateAdmin` 有事务（4 步原子），其余 12 用例**两侧都无事务** ⇒ 一致 | ✅ 正确 | ✅ L4 真 PG（W3 撞 `UNIQUE(history_id)` ⇒ W2 的 UPDATE 真回滚） | [`user/rpc.md`](user/rpc.md) §6.4 事务对照表 · [`admin/rpc.md`](admin/rpc.md) §6 §15 行 | ⚠️ **有脆弱性**（见 §3 `S1-USERS-004`）：事务正确性依赖「调用方永远从别的 Bean 调进来」，改成同 Bean 自调用**不会报错** | 🟡 可加固（非阻断） | 🟡 可暂缓 |
 | **4** | 核心失败路径有明确行为，不无声吞异常 | 401 族（缺头 / 坏签名 / claim 无效）· 400 族（非 JSON / 缺必填）· 413（超限 body）· 503（下游挂死）· Redis 断连与超时 —— 逐条有断言 | ✅ 正确 | ✅ L4 真 Tomcat + 真 Redis | [`user/api.md`](user/api.md) §5.3 错误流 · §6.3 鉴权 · 各 `*RedisDisconnected*Test` / `*RedisTimeoutConfigTest` | ❌ 不影响 | ❌ 不需要 | — |
-| **5** | 能按**实际项目说明**完成构建 / 配置 / 启动 | **域内**：4 个组件可构建、可用 fat jar 起（2026-10-27 真启动 ✅ 6.4s/9.7s）。**项目级**：⚠️ `README.md` **只有 7 字节**（"本项目绑定spring"）⇒ **「实际项目说明」不存在**；`Infrastructure.md` 描述的 `api-gateway/`、`.env`、`service/user-rpc/` 路径**均已不存在**；compose 强制要求 `.env` 而**仓内无 `.env`、无 `.env.example`** | ❌ **域内正确 · 项目级不成立** | ❌ 项目级**无证据**（说明本身不存在） | 见 §3 `S1-USERS-001`（逐条实测清单） | 🔴 **是（项目级）** ⇒ 决定整个项目能否过阶段 1 | 🔴 **域外**（`README.md` / `Infrastructure.md` / `.env.example` / `.gitignore` **不在 G1 写权面**）⇒ **登记 + 上报** | ❌ **不可暂缓**（A 类） |
+| **5** | 能按**实际项目说明**完成构建 / 配置 / 启动 | **域内**：4 个组件可构建、可用 fat jar 起（2026-10-27 真启动 ✅ 6.4s/9.7s）。**项目级**：🟡 **2026-10-29 订正 —— 本行原记的三条事实（「`README.md` **只有 7 字节** ⇒『实际项目说明』不存在」/「compose 强制要求 `.env` 而**仓内无 `.env`、无 `.env.example`**」/「`Infrastructure.md` 描述的路径**均已不存在**」）已被 **2026-10-29 R4 轮推翻** ⇒ 现：`README.md` = **9815 字节**的完整说明书（含「5 分钟跑起来」/ 环境变量表 / 启动顺序 / 验证命令）· `.env.example` **已入库**（6626 字节）· `.gitignore` **实有 3 条 `.env` 规则**（`.env` / `.env.*` / `!.env.example`）。**残留**：根 `Infrastructure.md` §1 对照表与 §6 变量表仍引用**不存在的 `api-gateway/`**（仓内 10 个域里无该模块）与**旧库名 `sea_user` / 旧路径 `service/user-rpc/`**（实际 = `first_db` / `admin` / `service/users/user/user-rpc/`）⇒ 照它操作仍会走错（但**入口已是 README** ⇒ 不再阻断） | 🟡 **部分成立**（域内 ✅ · 项目级**说明已存在**，**残留文档 1 处待订正**） | ✅ **L1 静态可证**（`wc -c README.md` = 9815 · `.gitignore` 3 条规则 · `.env.example` 已入库）· ⚠️ 残留项**无独立守门** | 见 §3 `S1-USERS-001`（逐条实测清单 · 2026-10-29 订正块） | 🟡 **不再阻断**（原 🔴 A 类 ⇒ 说明已补，「按说明复现」不再无路可走） | 🔴 **域外**（残留落在根 `Infrastructure.md` ⇒ **不在 G1 写权面**）⇒ **只登记 + 上报** | 🟡 **残留部分可暂缓**（README 已能独立复现；残留项不影响启动路径） |
 | **6** | 核心业务有可执行自动化测试，且断言真实业务结果 | 测试文件 108 份（31+27+27+23）；**4 个变异实测变红** ⇒ 非假绿 | ✅ 正确 | ✅ 已执行 | [`user/rpc.md`](user/rpc.md) §6.4 变异表 · [`_shared.md`](_shared.md) 变异实测节 | ❌ 不影响 | ❌ 不需要 | — |
 | **7** | 模块职责清晰，核心调用链可追踪 | 4 组件职责边界清晰；台账有**逐文件对照索引** | ✅ | ✅ | [`user/api.md`](user/api.md) §5 · [`admin/rpc.md`](admin/rpc.md) §7 | ❌ 不影响 | ❌ 不需要 | — |
 | **8** | 关键配置和敏感信息无明显不安全处理 | 9 个 rpc 模块的 datasource 口令默认值**分裂成 2 种**（7×`password` + **2×`Sea-TryGo`**，两处都在本域）；JWT secret 的 fallback 与 Go 侧硬编码值**逐字一致**且可 env 覆盖 | 🟡 **部分不成立** | ✅ 静态可证 | 见 §3 `S1-USERS-002` | 🟡 **域内那 2 处可自修**；域外另有 `.gitignore` 未排除 `.env`（`S1-USERS-003`） | ✅ **域内修 2 行**（§4 任务 T2） | 🟡 域外部分登记 |
@@ -62,7 +62,7 @@ admin-api (HTTP :8889)   ──gRPC plaintext──▶  admin-rpc (:8081)  ─�
 
 ### 1.1 P0 判定小结
 
-- **P0#5 是本域唯一的 A 类阻断项**（且它在**项目级**，不在 G1 写权面）⇒ 见 §3 `S1-USERS-001` 与 §6 上报项。
+- 🟡 **2026-10-29 订正**：P0#5 原是本域唯一的 A 类阻断项（**项目级**，不在 G1 写权面）—— **该阻断已解除**（README / `.env.example` / `.gitignore` 三条已被 2026-10-29 R4 轮闭合 ⇒ §1 P0#5 行由 🔴 降为 🟡「部分成立」）⇒ **残留** = 根 `Infrastructure.md` 的 `api-gateway/` 与 `sea_user` 两处（B 类 · 域外上报）⇒ 见 §3 `S1-USERS-001` 与 §6 上报项。
 - **P0#2 的 4 条 admin 认证差异全部已签字** ⇒ 「Auth 维度 NOT EQUIVALENT」是**决策**不是缺陷（AGENTS.md §0 第 1 条：签字偏离**不重复质疑**）。
 - **P0#3 有一处脆弱性**（事务依赖跨 Bean 调用）⇒ 记为 B 类（`S1-USERS-004`），不阻断。
 - **P0#8 域内 2 行可自修** ⇒ §4 任务 T2。
@@ -88,21 +88,21 @@ admin-api (HTTP :8889)   ──gRPC plaintext──▶  admin-rpc (:8081)  ─�
 
 ## 3. 阶段 1C：差异与暂缓项清单（§5.3 十一项，逐条填满）
 
-### `S1-USERS-001` 🔴 **A 类** · 项目说明缺失 ⇒ P0#5 不成立
+### `S1-USERS-001` 🟡 **A 类（部分闭合）** · 项目说明缺失 ⇒ P0#5 不成立 —— **2026-10-29 订正：三条陈旧事实已被 R4 轮推翻，残留 1 处文档订正**
 
 | # | 项 | 内容 |
 |---|---|---|
 | 1 | 唯一编号 | `S1-USERS-001` |
 | 2 | 原始项目中的文件 / 方法 / 业务契约 | Go 侧无「说明文档」这一契约；**RAG 侧的对应义务来自 `twoStage.md` P0#5**（「项目能够按照**实际项目说明**完成构建、配置和启动」）· 契约落点 = 根 `README.md` |
 | 3 | 原始行为 | Go 真源仓的 `README.md` 描述了完整的构建/配置/启动流程（`Sea-RideTheWind_golang/README.md`） |
-| 4 | 阶段 1 当前行为 | `README.md` **只有 7 字节**（`本项目绑定spring`）⇒ **说明书实质不存在**；`Infrastructure.md` 自称「以 `docker-compose.yaml` / `application.yml` / `.env` / `manage.sh` 为唯一依据」，但它写的 `api-gateway/`、`.env`、`service/user-rpc/`、`service/admin-rpc/` **全部不存在**，端口（`49432`/`sea_user`/`sea`）与实际 compose（`5432`/`first_db`/`admin`）不符，「16 个服务里只有 3 个能跑」与现状（10 微服务 / 38 组件）矛盾 ⇒ **照它操作必然走错** |
-| 5 | 具体差异 | ① 无 README；② 基础设施文档与事实全面矛盾；③ compose 要求 `.env`（`${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}`）而**仓内既无 `.env` 也无模板** ⇒ 不知道该填什么；④ `manage.sh:37-46` 硬校验 `.env` 必须含 `POSTGRES_PASSWORD` + `USER_JWT_SECRET` ⇒ 同样无从得知 |
+| 4 | 阶段 1 当前行为 | 🔴 **2026-10-29 订正（本行原值保留于左）**：原记「`README.md` **只有 7 字节**（`本项目绑定spring`）⇒ **说明书实质不存在**；`Infrastructure.md` … `api-gateway/`、`.env`、`service/user-rpc/`、`service/admin-rpc/` **全部不存在**，端口（`49432`/`sea_user`/`sea`）与实际 compose（`5432`/`first_db`/`admin`）不符」—— **其中「README 只有 7 字节」「`.env` 不存在」两条已被 2026-10-29 R4 轮推翻**：现 `README.md` = **9815 字节**（`wc -c`，含「〇、5 分钟跑起来」/ 环境变量表 / `manage.sh up` 三步 / 验证命令）· `.env` 与 `.env.example` **均已存在**（`.env.example` **已入库**，6626 字节）· `Infrastructure.md` 头部已加「2026-10-29 现状订正（R1·T-1.1）」块并声明 §3/§4/§6/§7 已按实测现状重写。**残留（仍成立）**：`Infrastructure.md` §1 对照表 `:26` 仍写 `user-rpc / admin-rpc 用 ${POSTGRES_ADDR:localhost}:49432/sea_user`（实际 = `${POSTGRES_ADDR:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}` + `POSTGRES_USER:admin`，见 `service/users/user/user-rpc/src/main/resources/application.yaml:13-14`）· `:24`/`:33`/`:35`/`:163`/`:312` 仍引用**仓内不存在的 `api-gateway/`** ⇒ **照 `Infrastructure.md` 操作仍会走错**，但**照 README 操作不会** |
+| 5 | 具体差异 | 🔴 **2026-10-29 订正**：① **无 README ⇒ 已消除**（README 现为 9815 字节完整说明书）；② **基础设施文档与事实全面矛盾 ⇒ 已消除大半**（`Infrastructure.md` 已按现状重写，**残留** = `api-gateway/` 与 `sea_user` 两处，见上格）；③ **「仓内既无 `.env` 也无模板」⇒ 已消除**（`.env.example` **已入库**，`README.md` 的「三步」第 1 步即 `cp .env.example .env`）；④ `manage.sh:37-46` 硬校验 `.env` 必须含 `POSTGRES_PASSWORD` + `USER_JWT_SECRET` ⇒ **仍成立**，但**现在有模板可抄**（`.env.example`）⇒ 不再「无从得知」 |
 | 6 | 暂缓 / 简化理由 | **无法暂缓** —— 它不是「高级工程能力」，是 P0#5 定义的**准入条件本身** |
 | 7 | 对业务正确性 / 安全性 / 数据一致性 / 可靠性的影响 | 不影响运行时行为；影响**可评估性**：面试官/验收者按说明**无法复现启动** ⇒ 阶段 1「核心业务链路能够真实运行」**无法被外部复现**，只能靠内部台账自证 |
 | 8 | 是否阻断阶段 1 | 🔴 **是（A 类）** |
 | 9 | 阶段 2 的恢复或替换方案 | 阶段 1 先补**最小可复现说明书**（README：架构一句话 / 模块清单 / 环境变量表 / 启动顺序 / 验证命令 / 已知限制），阶段 2 再扩成完整运维手册 |
 | 10 | 阶段 2 的测试场景和通过标准 | 场景：全新克隆 ⇒ 只读 README ⇒ 能在**不询问作者**的前提下起 PG+Redis+Nacos+应用并打通一条核心链路；通过标准 = 另一人照做成功且无需口头补充 |
-| 11 | 当前证据及剩余证据缺口 | **证据**：`README.md` = 7 字节（`wc -c`）；`Infrastructure.md:74-88` 列的 16 服务中 5 个路径实测不存在（`ls` 逐条）；`docker-compose.yaml:15` 的 `:?` 强制；`manage.sh:37-46` 的硬校验；仓内 `find . -name '*.env*'` = 0 命中。**缺口**：README / `.env.example` / `.gitignore` 均**不在 G1 写权面** ⇒ 本 lane 只能登记与上报 |
+| 11 | 当前证据及剩余证据缺口 | **证据（原值保留）**：`README.md` = 7 字节（`wc -c`）；`Infrastructure.md:74-88` 列的 16 服务中 5 个路径实测不存在（`ls` 逐条）；`docker-compose.yaml:15` 的 `:?` 强制；`manage.sh:37-46` 的硬校验；仓内 `find . -name '*.env*'` = 0 命中。**缺口**：README / `.env.example` / `.gitignore` 均**不在 G1 写权面** ⇒ 本 lane 只能登记与上报。<br>🟢 **2026-10-29 复测（原证据已全部失效，改为当前值）**：`wc -c README.md` = **9815**（非 7）· `.env.example` **已入库**（6626 字节，`git ls-files \| grep -c '^\.env'` = **1**）· `.env` **存在且被忽略**（6849 字节，本地文件，`.gitignore` 实有 `.env` / `.env.*` / `!.env.example` 三条规则）· `find . -name '*.env*'` ≠ 0。**剩余缺口（唯一）**：根 `Infrastructure.md` 的 `api-gateway/` 与 `sea_user` 两处残留 ⇒ 该文件**仍不在 G1 写权面** ⇒ **只能登记 + 上报给主线/收口执行者** |
 
 ### `S1-USERS-002` 🟡 **B 类** · datasource 口令默认值全仓分裂（本域 2 处是少数派）
 
@@ -120,21 +120,21 @@ admin-api (HTTP :8889)   ──gRPC plaintext──▶  admin-rpc (:8081)  ─�
 | 10 | 阶段 2 的测试场景和通过标准 | 场景：9 个 rpc 模块在**不设** `POSTGRES_PASSWORD` 时**全部启动失败并给出明确的配置缺失错误**（不是 SQL 认证错误）；通过标准 = 缺 env 时的失败信息指向「缺配置」而非「口令错」 |
 | 11 | 当前证据及剩余证据缺口 | **证据**：`grep` 逐文件枚举 9 处（排除 `target/` 副本，见 §9 复现）；`go-zero@v1.10.2/core/conf/config.go:63`；`tools/difftest/run.sh:196` 导出 `POSTGRES_PASSWORD=difftest` ⇒ **装置不依赖 fallback**。**缺口**：取消 fallback 的跨域改动不在 G1 写权面 |
 
-### `S1-USERS-003` 🟡 **B 类** · `.env` 不在 `.gitignore` ⇒ 照说明做会把密钥提交进仓
+### `S1-USERS-003` ✅ **B 类（已闭合）** · `.env` 不在 `.gitignore` ⇒ 照说明做会把密钥提交进仓 —— **2026-10-29 订正：`.gitignore` 已实有 `.env` 规则、`.env.example` 已入库 ⇒ 本条已闭环**
 
 | # | 项 | 内容 |
 |---|---|---|
 | 1 | 唯一编号 | `S1-USERS-003` |
 | 2 | 原始项目中的文件 / 方法 / 业务契约 | Go 真源仓的 `.gitignore` 排除 `.env`（Go 侧 `.env` 是真源仓的一部分，**不进版本库**） |
 | 3 | 原始行为 | Go 侧 `git ls-files \| grep '^\.env'` = 0 命中 ⇒ 密钥文件**从未**进过版本库 |
-| 4 | 阶段 1 当前行为 | RAG 侧 `.gitignore` **不含任何 `.env` 规则**（实测 `grep -nE '\.env' .gitignore` = 0 命中；`git ls-files` 也 = 0 命中 ⇒ 只是**还没人提交过**，不是**被保护**） |
+| 4 | 阶段 1 当前行为 | 🔴 **2026-10-29 订正（本行原值保留于左）**：原记「RAG 侧 `.gitignore` **不含任何 `.env` 规则**（实测 `grep -nE '\.env' .gitignore` = 0 命中；`git ls-files` 也 = 0 命中 ⇒ 只是**还没人提交过**，不是**被保护**）」—— **该事实已被 2026-10-29 R4 轮推翻**：现 `.gitignore` 末尾「### 本地环境变量」段**实有 3 条规则**：`.env`（忽略本地密钥文件）· `.env.*`（忽略其余变体）· `!.env.example`（**放行模板**）⇒ 实测 `grep -nE '\.env' .gitignore \| wc -l` = **4**（3 条规则 + 1 行说明注释）、`grep -nE '^\.env$' .gitignore` = **1** ⇒ **`.env` 现已被保护**；且 `git ls-files \| grep -c '^\.env'` = **1**（**只有 `.env.example` 入库** ⇒ 密钥文件未入库） |
 | 5 | 具体差异 | `manage.sh:37-46` **强制**要求仓根存在 `.env` 且含 `POSTGRES_PASSWORD` + `USER_JWT_SECRET` ⇒ **照项目说明做**的人必然创建 `.env` ⇒ 而 `.gitignore` 不拦它 ⇒ `git add -A` 即把**真实口令与 JWT 签名密钥**提交进版本库 |
 | 6 | 暂缓 / 简化理由 | **无法暂缓**：一行 `.gitignore` + 一个 `.env.example` 即可根治 |
 | 7 | 对业务正确性 / 安全性 / 数据一致性 / 可靠性的影响 | **安全性**：这是 P0#8 唯一一条**「照说明做就会中招」**的缺陷 ⇒ 影响最直接 |
 | 8 | 是否阻断阶段 1 | 🟡 **否，但属 P0#8 面的强命中**（记为 B 类，**修法只差两行**） |
 | 9 | 阶段 2 的恢复或替换方案 | ① `.gitignore` 加 `.env`（+ `.env.*` 但放行 `.env.example`）；② 提交 `.env.example`（只含键名与占位，**不含值**）；③ `manage.sh` 在 `.env` 缺失时**自动从 `.env.example` 复制**并提示填写 |
 | 10 | 阶段 2 的测试场景和通过标准 | 场景：创建含真实口令的 `.env` ⇒ `git status` **不出现** `.env`；`.env.example` 存在且**不含任何真实值**；通过标准 = 两条断言同时成立 |
-| 11 | 当前证据及剩余证据缺口 | **证据**：`.gitignore` 实测无 `.env` 规则；`manage.sh:37-46` 实测强制要求；`git ls-files` 无 `.env`。**缺口**：`.gitignore` / `.env.example` **不在 G1 写权面** |
+| 11 | 当前证据及剩余证据缺口 | **证据（原值保留）**：`.gitignore` 实测无 `.env` 规则；`manage.sh:37-46` 实测强制要求；`git ls-files` 无 `.env`。**缺口**：`.gitignore` / `.env.example` **不在 G1 写权面**。<br>🟢 **2026-10-29 复测（原证据已失效，改为当前值）**：`.gitignore` **实有 3 条 `.env` 规则**（`.env` / `.env.*` / `!.env.example`）· `.env.example` **已入库**（6626 字节；`git ls-files \| grep -c '^\.env'` = **1**，且该 1 条**就是** `.env.example`）· 本地 `.env`（6849 字节）**被忽略**（`git check-ignore -q .env` 命中）⇒ **「照说明做会把密钥提交进仓」这一风险已消除** ⇒ **本条已闭环**。**剩余缺口**：`.gitignore` / `.env.example` **不在 G1 写权面**（本轮只做**复核与订正台账**，不改这两个文件） |
 
 ### `S1-USERS-004` 🟡 **B 类** · 头像链路的事务正确性**依赖调用方永远跨 Bean 调用**（无报错保护）
 
@@ -152,7 +152,7 @@ admin-api (HTTP :8889)   ──gRPC plaintext──▶  admin-rpc (:8081)  ─�
 | 10 | 阶段 2 的测试场景和通过标准 | 场景：把入口改成同 Bean 自调用 ⇒ 守门测试**必须变红**（变异验证）；通过标准 = 变异后红、还原后绿 |
 | 11 | 当前证据及剩余证据缺口 | **证据**：`users/user/rpc.md` §6.4 事务对照表（含「经代理 / 无 self-invocation 风险」逐条）+ 真 PG 回滚实测。**缺口**：现有 `AvatarTransactionWiringTest#userMapperIsNotProxied_butStillJoinsAmbientTransaction` **测不到**「入口必须经代理」这一条（它测的是 UserMapper 不被代理）⇒ 台账已明写此缺口 |
 
-### `S1-USERS-005` 🟡 **B 类** · `follow-rpc` 的 gRPC 端口**硬编码**，本机被占 ⇒ 无法并行真启动
+### `S1-USERS-005` ✅ **B 类（已闭合）** · `follow-rpc` 的 gRPC 端口**硬编码**，本机被占 ⇒ 无法并行真启动 —— **2026-10-29 订正：与 §6.3 表的「✅ 已修（`${FOLLOW_RPC_PORT:8082}`）」收敛为同一状态**
 
 | # | 项 | 内容 |
 |---|---|---|
@@ -216,7 +216,7 @@ admin-api (HTTP :8889)   ──gRPC plaintext──▶  admin-rpc (:8081)  ─�
 | **实际变更文件** | `service/users/user/user-api/src/main/resources/application.yml`（1 行）<br>`service/users/admin/admin-api/src/main/resources/application.yml`（1 行）<br>`service/users/user/user-rpc/src/main/resources/application.yaml`（1 行）<br>`service/users/admin/admin-rpc/src/main/resources/application.yml`（1 行 · 与 T2 同一文件） |
 | **测试场景和断言** | ① 静态：四处**默认端口逐字不变**（§9 R3）；② 运行：改 env 后**监听端口与 Nacos 注册端口一致**（见下条「已核」） |
 | **实际执行结果** | ✅ **默认端口已核为逐字不变**（§9 R3）；✅ **注册/监听不会脱钩**（已核：三个 rpc 组件的 `spring.cloud.nacos.discovery` **没有独立的 `port` 字段** ⇒ 注册端口随 `grpc.server.port` 走 ⇒ **env 覆盖两边同步** ⇒ 不存在「监听改了、注册没改」的断链）<br>⚠️ **「改 env 后真启动 + 注册地址一致」的行为级实测本轮未做**（要动到本机已被占的端口 + Nacos 注册表 ⇒ 属阶段 2 的验证手段）⇒ **按 L1 静态记，不按 L3 活体记** |
-| **尚未解决的问题** | 根级 `docker-compose.yaml` **没有**这 5 个 api 的服务定义 ⇒ compose 起不来 ⇒ 只能裸 jar 起（`S1-USERS-001` / `S1-FOLLOW-004`） |
+| **尚未解决的问题** | 根级 `docker-compose.yaml` **没有**这 5 个 api 的服务定义 ⇒ compose 起不来 ⇒ 只能裸 jar 起（`S1-FOLLOW-004`）<br>🟡 **2026-10-29 订正**：此处原并列引用 `S1-USERS-001` —— 但 **`S1-USERS-001` 的「说明缺失」已闭合**（README 已补）⇒ **本行残留的是「compose 编排缺 5 个 api 服务」这一独立事实**（归属 `S1-FOLLOW-004` / 根级 compose），**不再由 `S1-USERS-001` 承担** |
 | **对阶段 2 的影响** | 无冲突；阶段 2 可把端口治理统一成一份策略（含 `prometheus` / `Nacos` 注册端口的一致性检查） |
 
 ### 4.4 `T9` · `follow-api` 的 pom 补 `TESTCONTAINERS_RYUK_DISABLED`（**本轮落码 · 域侧自修**）
@@ -269,7 +269,7 @@ admin-api (HTTP :8889)   ──gRPC plaintext──▶  admin-rpc (:8081)  ─�
 | # | 没做 | 原因 |
 |---|---|---|
 | 1 | 取消 datasource 口令 fallback | **跨域**（9 个模块 / 8 个域）⇒ 不在 G1 写权面 ⇒ 登记 `S1-USERS-002` 第 9 项 |
-| 2 | 改 `README.md` / `Infrastructure.md` / `.gitignore` / 补 `.env.example` | **根级共享文件** ⇒ 不在 G1 写权面 ⇒ 登记 `S1-USERS-001` / `S1-USERS-003` + §6 上报 |
+| 2 | ~~改 `README.md` / `.gitignore` / 补 `.env.example`~~ ⇒ **2026-10-29 R4 轮已完成**（README 9815 字节 · `.gitignore` 3 条 `.env` 规则 · `.env.example` 已入库）<br>🟡 **剩余**：改 `Infrastructure.md`（`api-gateway/` + `sea_user` 两处） | **根级共享文件** ⇒ 不在 G1 写权面 ⇒ **只登记 + §6 上报**（`S1-USERS-001` 残留项 / `S1-USERS-003` 已闭合） |
 | 3 | 动 `service/common` / `users-common` | 共享层**写权唯一属 G4** ⇒ 本轮零改动，只登记反馈单（§6） |
 | 4 | 把头像链路的事务边界上移 / 加「入口必须经代理」守门 | 会改动**已验证**的事务边界 ⇒ 阶段 1 不动（`S1-USERS-004`） |
 | 5 | 任何 `docs/DRIFT/_INDEX.md` / `AGENTS.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/Worktree.md` 改动 | 合并收口执行者的事（AGENTS.md §5.3d / Worktree.md §1d） |
@@ -413,7 +413,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 ### 6.0 验收结论：**🟡 有条件通过**（域级）
 
 > **§5.6 的四种结论里选「有条件通过，但必须明确有限例外及其影响」** ⇒ 例外逐条列在 §6.2。
-> ⚠️ **不是「通过」** —— 因为存在 **A 类阻断项**（`S1-USERS-001`，**项目级**）：**「实际项目说明」不存在**
+> 🟡 **2026-10-29 订正**（原句保留于左）：~~⚠️ **不是「通过」** —— 因为存在 **A 类阻断项**（`S1-USERS-001`，**项目级**）：**「实际项目说明」不存在**~~ ⇒ **该 A 类阻断已解除**（2026-10-29 R4 轮已补 README 9815 字节完整说明书 · `.env.example` · `.gitignore` 的 `.env` 规则）⇒ **现在「按说明复现」的路径已通**；**残留** = `Infrastructure.md` 的 2 处陈旧引用（🟡 B 类 · 域外）
 > ⇒ 外部无法按说明复现启动。⚠️ **也不是「未通过」** —— 因为该阻断项**不在本域写权面**
 > （根级 `README.md` 无人拥有）⇒ **本域能做的都做完了**，剩下的是**移交**而不是**本域未完成**。
 
@@ -421,11 +421,11 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 |---|---|---|
 | P0 准入条件是否满足 | ✅ **域内 8/9 满足**（#1/#2/#3/#4/#6/#7/#8/#9）· 🔴 **#5 项目级不成立** | §1 的逐条判定 + §5.1~§5.3 的证据 |
 | P1 是否至少有两到三个代表性机制完成验证闭环 | ✅ **有**（RPC 超时/deadline · 事务与并发写入 · 鉴权与黑名单 fail-open · 错误码契约 · proto wire 契约） | 各域台账的 L3/L4 条目 + 本轮 `FollowProtoContractTest`（**本轮新增第 5 个闭环**）|
-| 核心业务是否能够实际运行 | 🟡 **域内能**（4 组件可构建可起）· **项目级按说明不能**（说明不存在） | `S1-USERS-001` |
+| 核心业务是否能够实际运行 | 🟡 **域内能**（4 组件可构建可起）· **项目级按说明**：~~不能（说明不存在）~~ ⇒ 🟢 **2026-10-29 已能**（README 9815 字节完整说明书） | `S1-USERS-001`（**残留**：`Infrastructure.md` 2 处）|
 | 测试是否真实断言业务结果 | ✅ **是**（1133 条 · 0F/0E/0S · **含变异实测**） | §5.1 + §5.2 + 域台账变异章节 |
 | 关键失败路径是否具有明确行为 | ✅ **是**（401/400/413/503/Redis 断连与超时逐条有断言） | §1 #4 + 域台账 |
 | 是否存在严重安全或数据正确性问题 | 🟡 **1 条**（空签名密钥可起栈 ⇒ **P0#8**）—— **域外**（根级 compose 缺 `:?`）+ 域内已收窄（口令默认值统一） | `S1-USERS-002` + 基线 §11.1 `D-01` |
-| 项目是否能够按实际步骤构建、配置和启动 | 🔴 **否（项目级）** | `S1-USERS-001` |
+| 项目是否能够按实际步骤构建、配置和启动 | 🟡 **是（2026-10-29 订正）** —— ~~🔴 否（项目级）~~ ⇒ README 已补齐「三步跑起来」；**残留** = `Infrastructure.md` 的 `api-gateway/` 与 `sea_user` 两处（照它操作会走错，照 README 不会） | `S1-USERS-001` |
 | 所有已知缺陷和关键风险是否已记录 | ✅ **是**（§3 差异清单 + §6.1 上报 + 域台账 + vs-common 9 轴） | §3 + §6 |
 | 暂缓项是否具备明确的阶段 2 处理方案 | ✅ **是**（每条都有第 9/10 项） | §3 |
 
@@ -440,7 +440,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 | **2** | 参数校验 / 业务规则 / 认证 / 权限**四项**有效 | **主责** | 🟢 **follow 域本轮闭合**（`T11`：**62 条**失败路径矩阵，真 Tomcat，8 端点 × 4 类失败 + 7 条单点）⇒ 域台账 §4.6 / §5.2.1<br>🟢 users 域既有域内断言链<br>🟡 `article`/`task`/`hot` **无独立失败路径矩阵** ⇒ **域外**（G3/G2） | ✅ **域内闭合**（follow 的缺口已补）· ⚠️ **P0#2 本身仍非 ✅**（其余 3 域未补 ⇒ 不因此判成 ✅） |
 | **3** | 持久化 / 事务边界 / 无数据丢失重复状态错误 | **主责** | 🟢 `check-ddl-static.py --domain users --indexes` ⇒ **16 处**（类型/长度 **0** · 可空性 1 · DEFAULT 8 · 索引 7）**逐项对得上** `AGENTS.md` §0 第 2 条 ⇒ **无新增漂移**；`--domain follow --indexes` ⇒ **0 处**<br>🟢 **约束集合两侧完全一致**（4 个唯一约束 ≡ 唯一索引，仅载体不同）<br>🟡 残余：该脚本比的是**活库**不是仓库 `.sql`（基线原话）⇒ **工具性质 ⇒ 域外** | ✅ **域内闭合**（索引/唯一约束/触发器三面已机器核过） |
 | **4** | 核心失败路径有明确行为，不无声吞异常 / 返回误导性成功 | 协作 | 🟢 follow 62 条矩阵（**含 Redis fail-open、404/405 逐字节、拦截器顺序**）⇒ §5.2.1 | ✅ **域内闭合** |
-| **5** | 项目能按**实际项目说明**构建、配置、启动 | —（收口） | 🔴 `README.md` 7 字节 · `Infrastructure.md` 与事实全面矛盾 · compose 要 `.env` 而仓内无 `.env`/`.env.example` ⇒ **项目级不成立** ⇒ **根级文件无人拥有** | 🔴 **域外**（`S1-USERS-001`） |
+| **5** | 项目能按**实际项目说明**构建、配置、启动 | —（收口） | 🟡 **2026-10-29 订正**：~~🔴 `README.md` 7 字节 · `Infrastructure.md` 与事实全面矛盾 · compose 要 `.env` 而仓内无 `.env`/`.env.example` ⇒ **项目级不成立**~~ ⇒ **三条均已被 2026-10-29 R4 轮推翻**（README 9815 字节完整说明书 · `.env.example` 已入库 · `.gitignore` 实有 3 条 `.env` 规则）⇒ **残留** = `Infrastructure.md` 的 `api-gateway/` 与 `sea_user` 两处 | 🟡 **域外残留**（`S1-USERS-001`） |
 | **6** | 核心业务有可执行自动化测试，且断言真实业务结果 | **主责** | 🟢 域级回归（**带 `clean`**）**两轮**：EXIT=0 · BUILD SUCCESS · 08:56 / 10:01 min · **1195 条 / 0F / 0E / 0S**（逐模块一致）<br>🟢 定向复验 7 条 + 矩阵 62 条全绿 + 域台账的**变异实测**记录 | ✅ **域内闭合** |
 | **7** | 清晰的主要模块职责，可追踪核心调用链 | —（收口） | — | —（收口判定） |
 | **8** | 关键配置与敏感信息无明显不安全处理 | **主责** | 🟡 **9 处 datasource 口令 fallback 未取消**（跨 8 域 ⇒ 收口统一改）<br>🟡 `.gitignore` **未排 `.env`**（根级 ⇒ 收口）<br>🟢 **本轮新守门 `check-no-prod-secrets.py`：我域未豁免命中 = 0**（25 条豁免在夹具面/javadoc 面/默认值面）<br>🔴 **口径订正**：取消 fallback ⇒ **RAG 比 Go 更严**（Go 真源 yaml 是**字面量默认值**，恒能起栈）⇒ 属**有意偏离**（需签字），**不是纯域侧自修** ⇒ 订正 `S1-USERS-002` 的归属表述 | 🟡 **域内无新增缺陷**（残余全在域外） |
@@ -454,9 +454,9 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 
 | 编号 | 事项 | 为什么必须域外 | 影响 |
 |---|---|---|---|
-| `S1-USERS-001` | 根 `README.md` 补**最小可复现说明书** | 根文件无人拥有（G1/G2/G3/G4 白名单都不含） | 🔴 **A 类 · 阻断阶段 1** |
-| `S1-USERS-001` | `Infrastructure.md` 与事实对齐（或标注「历史文档，已废」+ 指路 README） | 同上 | 🔴 **A 类** |
-| `S1-USERS-003` | `.gitignore` 加 `.env` + 提交 `.env.example` | 同上 | 🟡 B 类 · P0#8 强命中 |
+| `S1-USERS-001` | ~~根 `README.md` 补**最小可复现说明书**~~ ⇒ **2026-10-29 R4 轮已补**（9815 字节完整说明书，含 5 分钟跑起来 / 环境变量表 / 启动顺序 / 验证命令） | 根文件无人拥有（G1/G2/G3/G4 白名单都不含）⇒ **已由主线/收口执行者补齐** | 🟢 **已闭合**（原判为「A 类 · 阻断阶段 1」⇒ **本轮撤销该阻断**）|
+| `S1-USERS-001` | `Infrastructure.md` 与事实对齐 —— **2026-10-29 已重写大部**（§3/§4/§6/§7 按实测现状重写 + 头部加「现状订正」块）⇒ **残留 2 处**：`:26` 的 `sea_user`（实际 `first_db` / `admin`）与 `:24`/`:33`/`:35`/`:163`/`:312` 的 `api-gateway/`（**仓内无该模块**） | 同上（根文件无人拥有 ⇒ **不在 G1 写权面**） | 🟡 **B 类 · 不再阻断**（README 已可独立复现启动 ⇒ 残留只影响「照 Infrastructure.md 操作会走错」）|
+| ~~`S1-USERS-003`~~ | ~~`.gitignore` 加 `.env` + 提交 `.env.example`~~ ⇒ **2026-10-29 R4 轮已做**：`.gitignore` 实有 3 条 `.env` 规则（`.env` / `.env.*` / `!.env.example`）· `.env.example` **已入库** | ~~同上~~ ⇒ **已由主线/收口执行者做掉** | 🟢 **已闭合**（原 🟡 B 类 · P0#8 强命中）|
 | `S1-USERS-002` | 取消 9 处 datasource 口令 fallback（与 Go 的 fail-fast 对齐） | 跨 8 个域 ⇒ 需收口统一改 | 🟡 B 类 |
 | 🆕 `S1-USERS-006` | **`check-doc-links.py` 有 1 项既存锚点失效** —— `docs/PhaseGoal-judge.md:99` **自指**锚点 `#三矩阵-a终点指标与当前判定39-行` 与 §三 的实际标题不符 ⇒ **主工作区同样 FAIL** ⇒ **非本轮引入** | `docs/PhaseGoal-judge.md` 属**基线文件**（非 G1 写权面）⇒ 交收口 | 🟡 **B 类**（文档链接面；⚠️ **只影响锚点跳转，不影响任何判定**）|
 | 🆕 `S1-USERS-007` | **`docs/PhaseGoal-judge.md` 的 A-2 `follow-api` 行 + 机器生成的 `docs/PhaseGoal/g1.md` 仍把已签字偏离记成开放缺陷** ⇒ 照它执行会让 G4 去改掉用户已决定保留的行为 | 基线文件 + 机器生成物 ⇒ 交收口订正 + 重跑 `check-phasegoal-lanes.py --write` | 🔴 **A 类风险**（派单错误 ⇒ 共享层被改坏）· 详见 follow 档 `S1-FOLLOW-007` |
@@ -467,7 +467,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 
 | # | 例外 | 范围 | 影响 | 归属 |
 |---|---|---|---|---|
-| **E1** | **项目说明缺失**（`README.md` 7 字节 · `Infrastructure.md` 与事实全面矛盾 · compose 要 `.env` 而仓内无模板） | **项目级**（全 10 域） | **外部无法按说明复现启动** ⇒ 阶段 1「核心业务链路能真实运行」**只能靠内部台账自证**，不能被外部复现 | **A 类** · 收口 |
+| **E1** | 🟡 **项目说明缺失 ⇒ 已消除**（2026-10-29 订正：原记「`README.md` 7 字节 · `Infrastructure.md` 与事实全面矛盾 · compose 要 `.env` 而仓内无模板」—— **三条均已被 2026-10-29 R4 轮推翻**：README 现 9815 字节完整说明书 · `.env.example` 已入库 · `.gitignore` 已保护 `.env`）⇒ **残留** = `Infrastructure.md` 的 `api-gateway/` 与 `sea_user` 两处 | **项目级**（全 10 域） | 🟡 **外部已可按 README 复现启动**（原「只能靠内部台账自证」已不成立）⇒ 残留项只影响「照 `Infrastructure.md` 操作会走错」 | **B 类** · 收口（原 A 类 ⇒ **降级**，依据 = §1 P0#5 行的 2026-10-29 订正）|
 | **E2** | **空签名密钥可起栈**（10 处 yaml 带明文 JWT secret 默认值 + 根级 compose 缺 `:?`） | **跨域** | token 可伪造 ⇒ P0#8 强命中 | **B 类**（基线 `D-01`）· 收口（根级）＋ 各域（yaml） |
 | **E3** | **`follow-rpc` 的 5 个 `follow_rpc_*` 指标无抓取出口** | follow 域 | 可观察性缺一环 ⇒ **`follow-rpc` = 🟡** ⇒ **G1 lane 判定 = 🟡** | **C 类**（阶段 2 建设项）· ⚠️ **用户 2026-10-24 已定「本轮不落地」⇒ 本轮登记待重新拍板** |
 | **E4** | ~~**双侧活体对拍在本轮未复验**~~ → 🟢 **部分已复验**（2026-10-29） | users + follow | ✅ **user-rpc 43 场景本轮实跑**（39 等价 + 4 处已签字 N-2）⇒ **users 域证据强度提升**；🟡 其余 4 条（`run.sh`/`matrix.py`/`admin-errors`/`redis-blacklist`）**资产在库但本轮未跑** ⇒ 沿用原日期 | **B 类**（补跑手段）· **可解除**（跑一次即销）|
@@ -479,9 +479,9 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 
 | 编号 | 问题类型 | 严重程度 | **阶段归属** | 状态 |
 |---|---|---|---|---|
-| `S1-USERS-001` | 项目说明缺失 | **P0** | **A**（阶段 1 准入阻断） | 🔴 OPEN · **域外上报** |
+| `S1-USERS-001` | 项目说明缺失（**README 与 `.env.example` 已补**；残留 = `Infrastructure.md` 的 `api-gateway/` 与 `sea_user`） | **P0** | **A**（阶段 1 准入阻断） | 🟡 **部分闭合**（2026-10-29 订正）· 残留项 **域外上报**（根 `Infrastructure.md` 不在 G1 写权面）⇒ **不再阻断** |
 | `S1-USERS-002` | datasource 口令 fallback | P2 | **B**（竞争力补强） | 🟡 域内 2 行已改 · 全仓取消 fallback = 跨域 ⇒ 上报 |
-| `S1-USERS-003` | `.env` 未进 `.gitignore` | **P1** | **B** | 🔴 OPEN · 域外上报 |
+| `S1-USERS-003` | `.env` 未进 `.gitignore` | **P1** | **B** | 🟢 **已闭合**（2026-10-29 订正：`.gitignore` 实有 3 条 `.env` 规则 · `.env.example` 已入库）|
 | `S1-USERS-004` | 头像事务依赖跨 Bean 调用（无报错保护） | P2 | **B** | 🟡 登记（当前实现正确，缺防退化） |
 | `S1-USERS-005` | `follow-rpc` 端口硬编码 | P2 | **D**（已实现） | ✅ 已修（`${FOLLOW_RPC_PORT:8082}`）|
 | `S1-FOLLOW-001` | rpc 层指标无出口 | P1 | **C**（阶段 2 建设项） | 🟡 用户 2026-10-24 定不落地 ⇒ **待重新拍板** |
@@ -545,8 +545,8 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 | R1 | `grep -rnE 'TODO\|FIXME\|UnsupportedOperationException' service/users/user/*/src/main service/users/admin/*/src/main --include='*.java'` | **0 命中**（P0#1 无骨架） |
 | R2 | `find service -path '*/src/main/resources/application.y*ml' -not -path '*/target/*' -exec grep -hoE '\$\{POSTGRES_PASSWORD:[^}]*\}' {} + \| sort \| uniq -c` | **只有 1 种**（T2 后实测：`10 ${POSTGRES_PASSWORD:password}`，覆盖 9 个模块）<br>⚠️ **不要**写成 `grep -rhoE … \| grep -v target` —— `-o` 输出**不带文件名** ⇒ `grep -v target` **滤不掉** `target/` 下的旧副本（2026-10-28 实测：漏滤时读出 `2×Sea-TryGo` 的**假分裂**） |
 | R3 | `grep -n 'port:' service/follow/follow-rpc/src/main/resources/application.yml` | `${FOLLOW_RPC_PORT:8082}`（T3 后） |
-| R4 | `wc -c README.md` | **7**（`S1-USERS-001` 的证据） |
-| R5 | `grep -nE '\.env' .gitignore \| wc -l` | **0**（`S1-USERS-003` 的证据） |
+| R4 | `wc -c README.md` | ~~**7**（`S1-USERS-001` 的证据）~~ ⇒ 🟢 **2026-10-29 订正：现为 9815**（完整说明书）⇒ **本行期望值已变更**，复算时以现值为准 |
+| R5 | `grep -nE '\.env' .gitignore \| wc -l` | ~~**0**（`S1-USERS-003` 的证据）~~ ⇒ 🟢 **2026-10-29 订正：现为 4**（3 条规则 `.env` / `.env.*` / `!.env.example` ＋ 1 行说明注释）⇒ **本行期望值已变更**；只看规则条数请用 `grep -cE '^!?\.env' .gitignore` = **3** |
 | R6 | `git ls-files \| grep -c '^\.env'` | **0** |
 | R7 | `python3 tools/difftest/check-wave-lane-ownership.py` | `EXIT=0` |
 | **R8** | `grep -n 'port:' service/users/user/user-api/src/main/resources/application.yml service/users/admin/admin-api/src/main/resources/application.yml service/users/user/user-rpc/src/main/resources/application.yaml service/users/admin/admin-rpc/src/main/resources/application.yml` | 四个默认值**逐字不变**：`${USER_API_PORT:49900}` · `${ADMIN_API_PORT:8889}` · `${USER_RPC_PORT:49210}` · `${ADMIN_RPC_PORT:8081}`（T8）|

@@ -98,6 +98,19 @@ Spring Security 的 `BCryptPasswordEncoder.BCRYPT_PATTERN`
 若有人为了「与 Go 对齐」去放宽 `BCRYPT_PATTERN` 或改 `PasswordUtil`，
 `LoginMalformedHashDrift004Test` 应当变红。
 
+### 🔴 逐条重核（核对日期 **2026-10-29** · W-F lane · 共享层台账面 · users-common）
+
+| 项 | 值 |
+|---|---|
+| **唯一别名** | `SD-USERSCOMMON-001@users-common`（实测 `grep -rn 'SD-USERSCOMMON-[0-9]' docs/ --include='*.md'` ⇒ **只有 `-001` 一个编号**，定义处唯一 ⇒ **无撞号**；其余 9 处均为指针引用） |
+| **核「被签字描述的那个行为现在还存在吗」** | ✅ **存在** —— Go 侧 `decodeVersion` 仍用 **`>`**（严格大于）判 major ⇒ **major < `'2'` 的 `$0$` / `$1$` 一律放行**；minor 位**存下来但从不校验** ⇒ `$2x$` / `$2z$` 一律放行。RAG 侧仍走 Spring 的 `BCRYPT_PATTERN`（只认 `$2a$` / `$2y$` / `$2b$`）⇒ **两侧行为差异仍在** |
+| **证据（2026-10-29 · 两侧逐行）** | **Go**：`golang.org/x/crypto@v0.53.0/bcrypt/bcrypt.go:57`（`majorVersion = '2'`）＋ `:265-279`（`decodeVersion`：`if sbytes[1] > majorVersion { return -1, HashVersionTooNewError(...) }` ⇒ **只拒「严格大于」**；`:274-276` 存 minor 但**不校验**）<br>**RAG**：`service/users/users-common/src/main/java/com/rag/users/common/cryptx/PasswordUtil.java:37`（javadoc 载明 Spring 的 `BCRYPT_PATTERN` = `\A\$2(a\|y\|b)?\$(\d\d)\$[./0-9A-Za-z]{53}`）＋ `:49`（`ENCODER = new BCryptPasswordEncoder(STRENGTH)`）＋ `:101`（`ENCODER.matches(rawPassword, dbHash)` ⇒ **拒 `$1$` / `$2x$`** ⇒ 返回 `MISMATCHED`）<br>**Go 侧写入形态**：`Sea-RideTheWind_golang/service/user/common/cryptx/password.go:8`（`bcrypt.GenerateFromPassword(…, bcrypt.DefaultCost)` ⇒ **只产出 `$2a$`** ⇒ 「由本系统写入的 hash 永不触发该差异」这一前提**仍成立**） |
+| **守门网（复核在位）** | `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/service/LoginMalformedHashDrift004Test.java`（**在位**）⇒ 本条的「守住 RAG 现状」方向**仍有网** |
+| **结论** | **签字有效 · 状态不变**（**不得**为「与 Go 对齐」而放宽 `BCRYPT_PATTERN`） |
+| **🔴 追加订正（原句保留，不抹掉）** | 本条 §效力边界 第 2 条原文写「**不覆盖 `DRIFT-USERSCOMMON-001`**（`ErrorCode.getMsg(1017/1018)` 的中文文案）—— 那条是**潜伏差异**…需**跨域裁决**」⇒ 🔴 **该定性已过期**：域侧台账 2026-10-27 实测**已销号**（Go 侧 1017/1018 是**零调用点的死码**；RAG 侧 user-rpc 三处**仅日志**、admin-api 两处**在 HTTP 入口不可达** ⇒ **两侧都进不了 wire**）⇒ ⇒ **不再是「待跨域裁决的潜伏差异」**。<br>**保留原句 + 追加订正**（原句见上，本条不动）；新事实见 [`../../DRIFT/users/vs-common.md`](../../DRIFT/users/vs-common.md) §2 A6 行（**该文件属 users 域 lane，本 lane 只引用不改**）。⇒ **对本签字条本身无影响**（本条只签「保留 bcrypt 的 fail-closed」）。 |
+
+---
+
 ### 关闭条件
 
 本条**不设自动关闭条件** —— 它是长期决策。

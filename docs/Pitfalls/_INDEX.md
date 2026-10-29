@@ -119,8 +119,8 @@
 
 | 项 | 值 |
 |---|---|
-| **全域坑位条目** | **336 条** / **23 份编号式台账**（另 **14 份散文式台账**用散文标题、不计入条数 · **11 份 0 字节**坑位待填）⇒ **口径由 `tools/check-ledger-count.py` 写死**（标题文本以 `PIT-`/`PF-`/`P-` 开头且以 `-<数字>` 结尾）⇒ **数字是机器生成的，不是手抄的** |
-| **编号前缀族** | **18 个具体前缀**（实测 2026-10-27 · 口径同上）：`P-` · `P-ADMINAPI-` · `P-HOTAPI-` · `P-HOTRPC-` · `P-MSGAPI-` · `PF-ARTICLE-RPC-` · `PIT-COMMENT-API-` · `PIT-COMMENT-RPC-` · `PIT-FAV-API-` · `PIT-FAV-COMMON-` · `PIT-FAV-PROTO-` · `PIT-FAV-RPC-` · `PIT-GLOBAL-` · `PIT-LANE-` · `PIT-LIKE-RPC-` · `PIT-LIKEAPI-` · `PIT-USERS-SHARED-` · `PIT-USERSCOMMON-` |
+| **全域坑位条目** | **400 条** / **31 份编号式台账**（另 **17 份散文式台账**用散文标题、不计入条数 · **0 份 0 字节**坑位待填）⇒ **口径由 `tools/check-ledger-count.py` 写死**（标题文本以 `PIT-`/`PF-`/`P-` 开头且以 `-<数字>` 结尾）⇒ **数字是机器生成的，不是手抄的** |
+| **编号前缀族** | **21 个具体前缀**（实测 2026-10-27 · 口径同上）：`P-` · `P-HOTAPI-` · `P-HOTRPC-` · `P-MSGAPI-` · `PF-ARTICLE-RPC-` · `PIT-COMMENT-API-` · `PIT-COMMENT-RPC-` · `PIT-COMMON-` · `PIT-FAV-API-` · `PIT-FAV-COMMON-` · `PIT-FAV-PROTO-` · `PIT-FAV-RPC-` · `PIT-FOLLOW-` · `PIT-GLOBAL-` · `PIT-LANE-` · `PIT-LIKE-RPC-` · `PIT-LIKEAPI-` · `PIT-TASK-` · `PIT-USERS-` · `PIT-USERSADM-` · `PIT-USERSCOMMON-` |
 | **编号撞号** | **22 处** —— 见下方「编号撞号」 |
 
 > ⚠️ **2026-10-25 第二十五轮复核（口径已复现）**：本表原先写 **280 条 / 29 份 / 16 份 0 字节**，其中
@@ -130,6 +130,49 @@
 > ⚠️ **复现口径（供后续重扫照抄，否则数会飘）**：一条 = 一个 `##`/`###` 标题，
 > 标题在去掉 `##` 与前置装饰字符（emoji 等）后**以 `P` / `PIT` / `PF` / `PITFALL` 开头并紧跟数字或编号段**；
 > `## 🔴 PITFALL-TASK-RPC-01`（emoji 在前）与 `## P1 — …`（无分隔符）**都算** ⇒ 漏任一条都会少算 34（task）或 22（hot）。
+
+## 状态字段覆盖率（**唯一机器判据**）
+
+> **判据**：**每条** Pitfall 都带「**状态**（仍生效 / 已闭环 / 已撤销 / 待核实）· **核对日期** · **是否影响当前轮次**」三字段。
+> ⚠️ **「是否影响当前轮次」填「否」时必须写明不适用的具体原因**（规范 §12.3 第四种落点）—— **不许留空**。
+
+| 项 | 值 |
+|---|---|
+| **唯一机器判据** | `python3 tools/difftest/ledger-status-coverage.py` ⇒ **EXIT=0** 才算达标（**该工具不是 `check-*` ⇒ 不计入 §6.3 的 27 个守门计数** · 先例 `scan-bash-legacy-vars.py`） |
+| **条目识别口径** | **与 `tools/check-ledger-count.py` 同源**（标题 `^#{2,4}\s+(.+)$` ⇒ 去装饰字符后以 `PIT`/`PF`/`P` 开头并跟编号段）⇒ ⚠️ **不要用宽正则** —— 宽正则（`^#+ *P[A-Za-z0-9_-]*-[0-9]+`）会把同批条目**多算** ⇒ **判据永远对不上** |
+| **开工基线（2026-10-29）** | **336 条 / 74 条有状态 / 262 条无状态（77%）**；**0 字节坑位文件 11 个** |
+| **本轮收工（2026-10-29）** | ✅ **400 条 / 400 条有状态 / 0 条无状态（100%）**；**0 字节坑位文件 0 个**；分域：`_cross` 7/7 · `article` 38/38 · `comment` 19/19 · `common` 13/13 · `favorite` 61/61 · `follow` 16/16 · `global` 68/68 · `hot` 28/28 · `like` 30/30 · `message` 36/36 · `task` 34/34 · `users` 78/78 ⇒ **12 域全绿**（编号式条目 **400** 条；另有散文式台账 **17** 份不计入） |
+| 🔴 **计数器的已知口径缺口（2026-10-29 实测 · 未修）** | `tools/check-ledger-count.py` 的 `TOKEN_RE = ^(?:PIT|PF|P)(?:-[A-Za-z0-9]+)*-\d+\b` **认不出 `PITFALL-` 这类前缀**（`PIT` 后面没有 `-` ⇒ 整个 token 失配）⇒ **旧形态 `PITFALL-MSG-R-001` 等 28 条对计数器是隐形的**；而**该工具自己的 docstring 却写着「允许 `PITFALL-TASK-01`」** ⇒ **文档口径与实际口径不符**（工具自己的一类病）。⇒ 本轮各域已把 `PITFALL-*` 归一成 `PIT-*` ⇒ **当前隐形条目为 0**；但**工具 docstring 仍需主线订正**（本轮未改 `tools/`，超出「只改台账」范围） |
+| **「有状态」的判定** | 条目**正文段**（到下一条标题为止）出现 `仍生效` / `已闭环` / `已撤销` / `待核实` / `已失效` **任一**标记 |
+
+⚠️ **2026-10-29 的口径纠错（自己踩的坑，记在这里防止再犯）**：本轮对齐前曾用**宽正则**数出
+「**380 条 / 只有 1 条有状态 / 缺失率 99.7%**」⇒ 而守门 `check-ledger-count.py` 的口径是 **336 条** ⇒
+**同一批条目两个口径 ⇒ 判据不可执行** ⇒ ⇒ 已在 `tools/difftest/ledger-status-coverage.py` 里**直接复用守门口径**。
+
+## 编号形态统一（2026-10-29 起）
+
+> **现状**：仓内 **20 种编号形态并存**（`PIT-GLOBAL-*` · `PIT-FAV-*` · `PIT-LIKEAPI-*` · `PITFALL-FOLLOW-*` ·
+> `PF-ARTICLE-RPC-*` · `P-HOTRPC-*` · `P-MSGAPI-*` · `PIT-LANE-*` · `PIT-USERSCOMMON-*` · `PIT-USERS-SHARED-*` ·
+> `PIT-COMMENT-*` · `PIT-FAV-COMMON|PROTO|RPC` · `PIT-LIKE-RPC` · `P-ADMINAPI` · `P-HOTAPI` · `P-HOTRPC` ·
+> `PITFALL-MSG-R` …）⇒ **机器无法用单一模式枚举** ⇒ 引用时**必须同时给出「文件 + 域」**。
+
+| 域 | **新号形态** |
+|---|---|
+| `global` | `PIT-GLOBAL-<两位序号>` |
+| `common` | `PIT-COMMON-<两位序号>` |
+| `users` | `PIT-USERS-<两位序号>`（admin 子域 `PIT-USERSADM-<两位序号>`） |
+| `follow` | `PIT-FOLLOW-<两位序号>` |
+| `message` | `PIT-MESSAGE-<两位序号>` |
+| `like` | `PIT-LIKE-<两位序号>` |
+| `task` | `PIT-TASK-<两位序号>` |
+| `article` | `PIT-ARTICLE-<两位序号>` |
+| `comment` | `PIT-COMMENT-<两位序号>` |
+| `favorite` | `PIT-FAV-<两位序号>` |
+| `hot` | `PIT-HOT-<两位序号>` |
+
+⚠️ **旧号一律原样保留**（**不改写历史行**）⇒ 条目里加一行「**旧号**：`XXX` ⇒ **新号**：`PIT-XXX-01`」做对照
+⇒ ⇒ **旧引用仍然可用**，但**新引用一律用新号**。
+
 
 ⚠️ **与 `docs/Intentional_Deviations/` 同款缺陷**：两档的编号**都**跨文件复用 ⇒ **编号不可寻址**。
 ⇒ 引用坑位时**必须同时给出「文件 + 域」**，不能只写 `P-1`。

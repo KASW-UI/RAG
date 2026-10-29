@@ -861,7 +861,7 @@ Tomcat
 > 用户已逐条拍板「**保留 RAG 的字符串形态，不改 wire 契约**」（`SD-2026-10-23-03`）。
 > ⇒ **按 Go 改反而是制造未受控漂移**。探针把 `X1`/`X2` 放进 `known-dev` 白名单 ⇒ 对拍时必然为红但不计失败。
 > 详见下方「2026-10-23 第三轮」第五节。
-**🔴 本项目第二次「绿测试守卫错误答案」，形态与首轮 DRIFT-MSGAPI-003 完全同构**
+**🔴 本项目第二次「绿测试守卫错误答案」，形态与首轮 DRIFT-MSGAPI-003 完全同构**（⚠️ **2026-10-29 对齐**：`DRIFT-MSGAPI-003` **本身已 ✅ 已修**（见本文件 `:50`）⇒ 此处说的是**第二次复发**的**新**缺陷，**不是** `-003` 的状态）
 
 - **Component**：`message-api` 响应序列化
 - **Operation**：OP-13（`POST /message/v1/admin/notifications/send` 的响应）
@@ -909,7 +909,10 @@ Tomcat
 
 ---
 
-### 🔴 DRIFT-MSGAPI-010 🔴 **仍 OPEN，但 2026-10-24 已在真容器级确认并细化** 成功 / 错误响应的 `Content-Type` 缺 `charset`
+### ✅ DRIFT-MSGAPI-010 ✅ **仍 OPEN，但 2026-10-24 已在真容器级确认并细化** 成功 / 错误响应的 `Content-Type` 缺 `charset` ｜ **2026-10-29 对齐：原判 🔴「仍 OPEN」⇒ 现行态 = ✅ 已修（共享层 T-6 已落码）**
+
+> **2026-10-29 对齐 · 依据**：共享层 T-6 第二十五轮已落码 —— `service/common/src/main/java/com/rag/common/http/GoStyleJsonContentTypeAdvice.java:127`（常量 `GO_JSON_CONTENT_TYPE = "application/json;charset=utf-8"`）+ `:151`（消费点 `response.getHeaders().set(HttpHeaders.CONTENT_TYPE, GO_JSON_CONTENT_TYPE)`）· 生效链 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:2` → `service/message/message-api/pom.xml:64`（共享层 `common` 依赖）· 真 Tomcat 守门 `GoStyleJsonContentTypeCharsetTomcatTest` ⇒ 与 `docs/DRIFT/message/vs-common.md:38` 的 ✅ 一致 ⇒ **证据强度：源码行号 + 装配链 + 真 Tomcat 守门在仓**。
+
 
 > ⚠️ **2026-10-24 用户拍板：「保持登记，本轮不做」** —— **不是签字**。
 > 理由：补 charset 会让**全部 10 个 api** 的 JSON 响应头都变 ⇒ 属跨域共享面改动。
@@ -1148,7 +1151,7 @@ RAG 真实 DTO + 真实 coercion，两侧同时跑），足以支撑判定。
 | **`-010`** | 🟡 **仍 OPEN**（`Content-Type` 缺 charset）—— **用户 2026-10-24 拍板「保持登记，本轮不做」**（共享面影响全部 10 个 api）⇒ **不是签字**，是登记在册的待办 |
 | **`-011` / `-013`** | 🟡 **仍 OPEN**（状态行 reason phrase / 缺 `Traceparent`）—— 同上，**保持登记，后续修**（落点同为 `service/common`） |
 | **`-012`** | ⛔ **不可修**（Tomcat 序列化吃空格，实测无写法可达） |
-| **最终判定** | ⚠️ **仍写 `SEMANTICALLY NOT EQUIVALENT`，但支撑已换** ——<br>不再是「5 条解析漂移未修」，而是「**共享面三项响应头差异**（`-010`/`-011`/`-013`）+ **结构性差异**（MaxConns 作用域 / worker 池）」<br>🔴 2026-10-27：**「超时作用域」已从这份清单里划掉**（`DRIFT-MSGAPI-014` 修复后与 Go 一致）<br>⇒ 组件内的**解析与序列化语义已全部对齐** |
+| **最终判定** | **2026-10-29 对齐**：`-010`/`-013` 已由共享层 T-6/T-8 落码 ⇒ 本行所列「共享面三项响应头差异」现只剩 `-011`（🔴 框架限制 · 不可修）｜ ⚠️ **仍写 `SEMANTICALLY NOT EQUIVALENT`，但支撑已换** ——<br>不再是「5 条解析漂移未修」，而是「**共享面三项响应头差异**（`-010`/`-011`/`-013`）+ **结构性差异**（MaxConns 作用域 / worker 池）」<br>🔴 2026-10-27：**「超时作用域」已从这份清单里划掉**（`DRIFT-MSGAPI-014` 修复后与 Go 一致）<br>⇒ 组件内的**解析与序列化语义已全部对齐** |
 | **本轮实测（2026-10-24 19:50）** | `message-api` **88 例，0 failures / 0 errors / 0 skipped**；`message-rpc` 76 / `message-common` 21 / `common` 168 ⇒ 合计 **353 例，BUILD SUCCESS** |
 **为什么不是 `SEMANTICALLY EQUIVALENT`**：第 3 / 4 项不通过，且其中一条
 （`broadcast=1` 被当成 `true`）在业务上会造成**误发全量通知**。
@@ -1363,7 +1366,7 @@ MVC 那一层的作用是证明装配（规则没掉在 builder 上），两者�
 | `404 未知路径` | `HTTP/1.1 404 Not Found`<br>`Content-Type: text/plain; charset=utf-8`<br>`Traceparent`<br>`X-Content-Type-Options: nosniff` | `HTTP/1.1 404 `<br>`X-Content-Type-Options: nosniff`<br>`Content-Type: text/plain;charset=utf-8` | 🔴 状态行 + `Content-Type` 空格 + 缺 `Traceparent` |
 | `405 方法不匹配` | `HTTP/1.1 405 Method Not Allowed` | `HTTP/1.1 405 ` | 🔴 状态行 |
 | `415 Content-Type 不对` | 两侧都是 **401**（鉴权在 Content-Type 判定之前） | 同 | ✅ **一致**（且与 Go 的 chain 顺序一致） |
-| `200 正常 envelope` | `Content-Type: application/json; charset=utf-8` | `Content-Type: application/json` | 🔴 **= `DRIFT-MSGAPI-010`**（真容器级确认） |
+| `200 正常 envelope` | `Content-Type: application/json; charset=utf-8` | `Content-Type: application/json` | ✅ **= `DRIFT-MSGAPI-010`**（真容器级确认） **2026-10-29 对齐：现行态 = ✅ 已修**（共享层 T-6 · `GoStyleJsonContentTypeAdvice.java:127,151`） |
 
 ⇒ **body 逐字一致**：`{"code":200,"msg":"OK","data":{...}}` 两侧结构与取值一致
 （仅 JSON 对象的**键序**不同 —— Go 的 `map` 序列化按 key 排序，RAG 按声明序 ⇒ 见 `UNRESOLVED-005`，语义等价）。
@@ -1467,9 +1470,9 @@ Date: Fri, 23 Oct 2026 22:20:22 GMT
 > | # | 差异 | 归属 |
 > |---|---|---|
 > | 1 | **状态行缺 reason phrase** | `DRIFT-MSGAPI-011`（**容器层** · 框架限制 · 不可修 ⇒ 见下方 2026-10-27 订正） |
-> | 2 | **Content-Type 缺 charset**（200 档） | `DRIFT-MSGAPI-010`（共享层） |
+> | 2 | **Content-Type 缺 charset**（200 档） | `DRIFT-MSGAPI-010`（共享层） **✅ 已修**（2026-10-29 对齐 · 共享层 T-6） |
 > | 3 | **Content-Type 分号后空格**（404 档） | `DRIFT-MSGAPI-012`（Tomcat 限制，**不可修**） |
-> | 4 | **缺 `Traceparent`** | `DRIFT-MSGAPI-013`（共享层） |
+> | 4 | **缺 `Traceparent`** | `DRIFT-MSGAPI-013`（共享层） **✅ 已修**（2026-10-29 对齐 · 共享层 T-8） |
 >
 > ⇒ ✅ **首轮那张「待决策」表里判反的两行**（「404 body 空」「405 无 `Allow` 头」）**双双作废** ——
 > 两者在真容器下**两侧都一致**。⚠️ 这两条都是**静态读源码**得出的结论 ⇒ 见
@@ -1525,7 +1528,10 @@ RAG ： Content-Type: text/plain;charset=utf-8       （无空格）
 ⇒ **没有任何写法能产出带空格的 Content-Type** ⇒ 归 **框架限制**，**不可修**。
 ⇒ 连带：`DRIFT-MSGAPI-010` 即使补上 charset，也只能是 `application/json;charset=utf-8` ⇒ **与 Go 仍差一个空格**。
 
-#### 🆕 `DRIFT-MSGAPI-013` 🟡 **缺 `Traceparent` 响应头**
+#### 🆕 `DRIFT-MSGAPI-013` ✅ **缺 `Traceparent` 响应头** ｜ **2026-10-29 对齐：原判 🟡 ⇒ 现行态 = ✅ 已修（共享层 T-8 已落码）**
+
+> **2026-10-29 对齐 · 依据**：共享层 T-8 第十九轮已落码 —— `service/common/src/main/java/com/rag/common/http/GoStyleTraceparentFilter.java:188-191`（`@Component` + `@Order(Ordered.HIGHEST_PRECEDENCE + 3)`）+ `:270-283`（`PROPAGATOR.extract` → `start` → `PROPAGATOR.inject`）· 生效链 `service/message/message-api/src/main/java/com/rag/message/message/api/MessageApiApplication.java:65`（`@ComponentScan` 含 `"com.rag.common"`）⇒ 与 `docs/DRIFT/message/vs-common.md:40` 的 ✅ 一致 ⇒ **证据强度：源码行号 + 装配链**。
+
 
 ```
 Go  ： Traceparent: 00-<trace-id>-<span-id>-01     （每个响应都有）
@@ -1644,6 +1650,9 @@ Servlet Filter 在路由匹配**之前** ⇒ 本 Filter 会对 `/message/v1/**` 
 > 本条是 message 域的对应项；两条的 Go 侧依据**同源**（`DisableNativeRestTimeout` + `engine.go` 链序）。
 
 ### 4. `DRIFT-MSGAPI-010` 的修法（已定位，**本轮未实施**）
+
+> **2026-10-29 对齐**：本条**已实施** —— 共享层 T-6 第二十五轮落码（`service/common/src/main/java/com/rag/common/http/GoStyleJsonContentTypeAdvice.java:127,151`）⇒ **现行态 = ✅ 已修**；本节原文（修法定位过程）**保留作历史留档**。
+
 
 - **可修的一半**：「缺 charset」⇒ RAG 的 JSON 转换器 `defaultContentType` 就是 `application/json`
   ⇒ 给转换器补一个带 charset 的 media type 即可（落点在 api 侧的 `WebMvcConfig` 或共享的转换器配置）。

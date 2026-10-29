@@ -9,7 +9,19 @@
 
 ---
 
-## SD-USERAPI-001（2026-10-23 用户签字）—— 未捕获异常的 500 响应**带完整 envelope**，不复刻 Go 的空 body
+## SD-USERAPI-001@users（2026-10-23 用户签字）—— 未捕获异常的 500 响应**带完整 envelope**，不复刻 Go 的空 body
+
+> **2026-10-29 重核（台账对齐轮）**：
+> - **别名**：`SD-USERAPI-001@users`（域内唯一别名）。**撞号检查**：本编号在本域**只出现于本文件**（标题 + 守门表引用）⇒ **无同域撞号**；
+>   加别名只为与 `SD-USERAPI-002/003` 的域内写法一致（`@users` 后缀 = 域内唯一标识）。
+> - **被签字描述的行为是否仍存在**：**仍存在** ⇒ **签字有效**。
+> - **证据（两侧）**：RAG ⇒ `service/users/user/user-api/.../advice/GlobalExceptionHandler.java:334-342`
+>   （`handleAny` ⇒ `ResponseEntity.status(INTERNAL_SERVER_ERROR).body(new Response(ErrorCode.ERROR_SERVER_COMMON.getCode(), …, null))`
+>   ⇒ **HTTP 500 + `{"code":5001,"msg":"系统内部错误","data":null}`**）；
+>   Go ⇒ `go-zero@v1.10.2/rest/handler/recoverhandler.go:12-23`（`RecoverHandler` 只 `w.WriteHeader(500)`，
+>   **全函数无任何 `w.Write(...)`** ⇒ **HTTP 500 + 空 body**）⇒ 差异仍在。
+> - **⚠️ 描述完整性**：原文写「`GlobalExceptionHandler#handleAny:262-272`」——**行号已过期**（2026-10-29 实测在 `:334-342`）
+>   ⇒ **保留原行号**，本轮追加现行位置。
 
 | 项 | 值 |
 |---|---|
@@ -91,7 +103,27 @@ func RecoverHandler(next http.Handler) http.Handler {
 4. 在本文件追加一条「撤销记录」，保留历史。
 ---
 
-## SD-USERAPI-002（2026-10-24 用户签字）—— 接受「RAG 的观测面比 Go 大」：401 计入 access log / span / HTTP 指标
+## SD-USERAPI-002@users（2026-10-24 用户签字）—— 接受「RAG 的观测面比 Go 大」：401 计入 access log / span / HTTP 指标
+
+> **2026-10-29 重核（台账对齐轮）**：
+> - **别名**：`SD-USERAPI-002@users`（域内唯一别名）。**撞号检查**：本编号在本域**只出现于本文件** ⇒ **无同域撞号**。
+> - **被签字描述的行为是否仍存在**：**仍存在** ⇒ **签字有效**。
+> - **证据（两侧 · 结构性事实仍在）**：RAG ⇒ `service/common/.../spring/HttpMiddlewareFilter.java:41`
+>   （`public class HttpMiddlewareFilter implements Filter` ⇒ **Servlet Filter，在 DispatcherServlet 之外**）
+>   ＋ `service/users/user/user-api/.../interceptor/JwtAuthInterceptor.java:87`
+>   （`implements HandlerInterceptor` ⇒ **在 DispatcherServlet 之内**）
+>   ＋ `service/users/user/user-api/.../config/WebMvcConfig.java:56-57`（`registry.addInterceptor(jwtAuthInterceptor)`）；
+>   Go ⇒ `go-zero@v1.10.2/rest/engine.go:101-113`（`buildChainWithNativeMiddlewares` 索引 0 最外层 ⇒ `appendAuthHandler` 在其**内** ⇒
+>   **Authorize 产生的 401 不经过 observability**）⇒ 观测面差异仍在。
+> - 🔴 **⚠️ 描述不完整 · 锚点已漂移（保留原句 + 本轮订正）**：原文引 `HttpMiddlewareFilter.java:36-37` 且写作
+>   `@Order(Ordered.HIGHEST_PRECEDENCE + 5)`、以及执行序「… HttpMiddleware 3s **+5** → MaxBytes **+6**」——
+>   **2026-10-29 实测该类的 `@Order` 已是 `+7`**（`HttpMiddlewareFilter.java:40`），
+>   共享层当前的相对次序为 **PathNormalizing +2 → Traceparent +3 → MaxConns +4 → Breaker +5 → CpuShedding +6 → HttpMiddleware(3s) +7 → MaxBytes +8**
+>   ⇒ **「HttpMiddleware 在 MaxBytes 之外」这一相对关系未变**（`+7 < +8`）⇒ **本条的结论不受影响**；
+>   但**原写的具体序数值与行号已过期** ⇒ 本轮追加现行值（原文不删）。
+> - ⚠️ **本条的「适用范围前提」仍成立**：观测面在 DispatcherServlet **之外**、鉴权在**之内** ⇒
+>   「若有人把 `JwtAuthInterceptor` 改成 Filter（或把 `HttpMiddlewareFilter` 的 order 挪到 DispatcherServlet 之后），
+>   本条的差异存在前提就变了」——2026-10-29 复核：**两处形态都未变** ⇒ 前提成立。
 
 | 项 | 值 |
 |---|---|
@@ -191,7 +223,21 @@ public class HttpMiddlewareFilter implements Filter {
 
 ---
 
-## SD-USERAPI-003（2026-10-24 用户签字）—— **JWT 验签失败的 401 保持完整 envelope**，不复刻 Go 的空 body
+## SD-USERAPI-003@users（2026-10-24 用户签字）—— **JWT 验签失败的 401 保持完整 envelope**，不复刻 Go 的空 body
+
+> **2026-10-29 重核（台账对齐轮）**：
+> - **别名**：`SD-USERAPI-003@users`（域内唯一别名）。**撞号检查**：本编号在本域**只出现于本文件** ⇒ **无同域撞号**。
+> - **被签字描述的行为是否仍存在**：**仍存在** ⇒ **签字有效**。
+> - **证据（两侧）**：RAG ⇒ `service/users/user/user-api/.../advice/GlobalExceptionHandler.java:76-81`
+>   （`@ExceptionHandler(AuthenticationException.class)` ⇒ `ResponseEntity.status(UNAUTHORIZED).body(new Response(e.getCode(), e.getMessage(), null))`
+>   ⇒ **HTTP 401 + 完整 envelope**，业务码 `1006`「TOKEN已过期」）；
+>   Go ⇒ `go-zero@v1.10.2/rest/handler/authhandler.go:107-122`（`unauthorized()` 在无 callback 时**只** `WriteHeader(401)`、
+>   **不写 body** ⇒ **HTTP 401 + 空 body**）；且真源 `service/user/user/api/usercenter.go` **未注册** `rest.WithUnauthorizedCallback`
+>   ⇒ callback 为 nil ⇒ **确为空 body** ⇒ 差异仍在。
+> - **⚠️ 描述完整性**：原文写「`GlobalExceptionHandler.java:73-78`」——**行号已过期**（2026-10-29 实测在 `:76-81`）
+>   ⇒ **保留原行号**，本轮追加现行位置。
+> - ⚠️ **「适用范围扩展」那一段的前提未变**：改法 A（JWT 验签挪到 Filter）**至今未落地**（JWT 仍在 `JwtAuthInterceptor` 内）⇒
+>   本条当前**只覆盖现状**；但**用户 2026-10-24 的补充拍板（改法 A 落地后仍写 envelope）继续有效** ⇒ 不受落地与否影响。
 
 | 项 | 值 |
 |---|---|

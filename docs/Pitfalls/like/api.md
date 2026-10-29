@@ -9,7 +9,12 @@
 
 ---
 
-## PIT-LIKEAPI-001 — go-zero 自己的解析层是**不对称**的，只学一半必然漏
+## PIT-LIKEAPI-001 — go-zero 自己的解析层是**不对称**的，只学一半必然漏 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-LIKEAPI-001` ⇒ **新号**：`PIT-LIKE-01`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— go-zero 解析层「标量拒 / Slice 收」的**不对称**是语言层事实（真源冻结）⇒ 今天仍成立；本轮凡写 like-api 的解析类台账断言，仍须把「容器元素」与「标量」分两栏对照。
+> **依据**：Go `core/mapping/unmarshaler.go:648-661`（标量路径 `processFieldPrimitiveWithJSONNumber`）· `:227-231`（Slice 路径 `fillSliceValue`）⇒ **证据强度：Go 侧文件行号**。
 
 **现象**
 `{"target_type":"article","target_ids":[1,2]}` 在 Go 侧**解析成功**（`TargetIds == ["1","2"]`，
@@ -43,7 +48,12 @@
 
 ---
 
-## PIT-LIKEAPI-002 — `null` 元素在数组里：Go 会**填空串**，Jackson 会**留 null**，而 protobuf 会**炸**
+## PIT-LIKEAPI-002 — `null` 元素在数组里：Go 会**填空串**，Jackson 会**留 null**，而 protobuf 会**炸** ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PIT-LIKEAPI-002` ⇒ **新号**：`PIT-LIKE-02`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— 数组里的 `null` 元素已按 Go 语义处理（显式返回 Java `null`，交给下游 normalize）⇒ 本域触发条件消除；本轮只改 `docs/**`、不动反序列化器。
+> **依据**：`service/like/like-api/src/main/java/com/rag/like/like/api/dto/GoStyleRawStringListDeserializer.java:63`（显式返回 Java `null`，不再 NPE）⇒ **证据强度：源码行号**。
 
 **现象**
 `{"target_ids":["x",null,"y"]}`：
@@ -76,7 +86,12 @@ Go 的 `[]` 走 `:148-151` 提前返回，`[null]` 走 `:153-183` 的完整循�
 
 ---
 
-## PIT-LIKEAPI-003 — 「升级大版本」会**静默翻转默认值**：`FAIL_ON_TRAILING_TOKENS`
+## PIT-LIKEAPI-003 — 「升级大版本」会**静默翻转默认值**：`FAIL_ON_TRAILING_TOKENS` ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PIT-LIKEAPI-003` ⇒ **新号**：`PIT-LIKE-03`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— `FAIL_ON_TRAILING_TOKENS` 已在 like-api 显式关掉（Jackson 3 的默认被翻转）⇒ 触发条件消除；本轮只改 `docs/**`。
+> **依据**：`service/like/like-api/src/main/java/com/rag/like/like/api/config/LikeGoStyleCoercion.java:74,85`（`builder.disable(tools.jackson.databind.DeserializationFeature.FAIL_ON_TRAILING_TOKENS)`） ⇒ **证据强度：源码行号**。
 
 **现象**
 `{"target_type":"a","target_ids":["1"]} garbage`：
@@ -103,7 +118,12 @@ Go **接受**（只解第一个 JSON 值），RAG **拒绝**。
 
 ---
 
-## PIT-LIKEAPI-004 — 「字面串比较」vs「解析后比较」：判据的**输入**不同，结论就相反
+## PIT-LIKEAPI-004 — 「字面串比较」vs「解析后比较」：判据的**输入**不同，结论就相反 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PIT-LIKEAPI-004` ⇒ **新号**：`PIT-LIKE-04`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— 判据的输入已改成**原始头值**（不再用被规范化过的 `MediaType.toString()`）⇒ 触发条件消除；本轮只改 `docs/**`。
+> **依据**：共享层 `service/common/src/main/java/com/rag/common/http/GoStyleJsonBodyConverter.java:331`（`inputMessage.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE)`）+ `:79,241-244`（`goReadsBody` 判据）· 守门 `service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiGoStyleBodyContentTypeTest.java:183` ⇒ **证据强度：源码行号 + 守门在仓**。
 
 **现象**
 `Content-Type: APPLICATION/JSON`（合法的 HTTP 请求，媒体类型大小写不敏感）：
@@ -137,7 +157,12 @@ Go **接受**（只解第一个 JSON 值），RAG **拒绝**。
 
 ---
 
-## PIT-LIKEAPI-005 — 「应用入口类的 javadoc」是**最高杠杆的错误传播点**
+## PIT-LIKEAPI-005 — 「应用入口类的 javadoc」是**最高杠杆的错误传播点** ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PIT-LIKEAPI-005` ⇒ **新号**：`PIT-LIKE-05`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— 入口类 javadoc 里那句「Go 侧没配 Timeout ⇒ 刻意不配」的**方向反的**断言已订正 ⇒ 触发条件消除；本轮只改 `docs/**`。
+> **依据**：`docs/DRIFT/like/api.md` 的 `DRIFT-LIKEAPI-018` / `DRIFT-LIKEAPI-019`（均 ✅ 已修 · 纯注释订正） ⇒ **证据强度：台账状态**。
 
 **现象**
 `LikeApiApplication.java:25-29` 至今写着：
@@ -168,7 +193,12 @@ javadoc 不参与编译，不参与测试。**没有任何工具会告诉你「�
 
 ---
 
-## PIT-LIKEAPI-006 — 「引用了真实文件、但把行为读反了」：**同一个文件里会自相矛盾**
+## PIT-LIKEAPI-006 — 「引用了真实文件、但把行为读反了」：**同一个文件里会自相矛盾** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-LIKEAPI-006` ⇒ **新号**：`PIT-LIKE-06`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「引用了真实文件、但把行为读反了」今天仍会犯 —— 本仓注释密度极高，一条结论会被复述 N 遍 ⇒ 仍生效；本轮凡改 like 域任何 javadoc，仍须按 AGENTS.md §3.3.2 三条自查。
+> **依据**：AGENTS.md §3.3.2 · 本域复发样本 `service/like/like-api/src/test/java/com/rag/like/like/api/LikeReqGoStyleValidationTest.java` 的类注释与用例内注释矛盾 ⇒ **证据强度：仓库政策 + 源码行号**。
 
 **现象**
 `LikeReqGoStyleValidationTest.java`：
@@ -200,7 +230,12 @@ Javadoc 里的话**没有任何东西会验证它**。而且这类错误**看起
 
 ---
 
-## PIT-LIKEAPI-007 — 反直觉的默认值：**浮点溢出在两侧的处理相反**
+## PIT-LIKEAPI-007 — 反直觉的默认值：**浮点溢出在两侧的处理相反** ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PIT-LIKEAPI-007` ⇒ **新号**：`PIT-LIKE-07`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— 浮点字面量越出 float64 值域时现在**显式拒**（`isFinite` 闸门）⇒ 触发条件消除；本轮只改 `docs/**`。
+> **依据**：`service/like/like-api/src/main/java/com/rag/like/like/api/dto/GoStyleFloat64Deserializer.java:74`（`if (!Double.isFinite(parsed))`）⇒ **证据强度：源码行号**。
 
 **现象**
 `{"weight": 1e400}`：
@@ -228,7 +263,12 @@ Jackson 对溢出字面量**不报错**，直接按 IEEE 754 给无穷。
 
 ---
 
-## PIT-LIKEAPI-008 — 同一语义旋钮的**取值来源不同**：固定值 vs 父预算派生
+## PIT-LIKEAPI-008 — 同一语义旋钮的**取值来源不同**：固定值 vs 父预算派生 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PIT-LIKEAPI-008` ⇒ **新号**：`PIT-LIKE-08`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— 「单次调用上界」已实现为 `min(固定 2000ms, 剩余预算)`，两个旋钮都在 ⇒ 触发条件消除；本轮只改 `docs/**`。
+> **依据**：`service/like/like-api/src/main/java/com/rag/like/like/api/client/LikeRpcClient.java:157`（`Math.min(capMillis, remainingMillis)`）+ `:151`（`capMillis` 取自 `properties.getLikeRpc().getTimeout()`）· 守门 `service/like/like-api/src/test/java/com/rag/like/like/api/LikeRpcTimeoutCapTest.java:233-238` ⇒ **证据强度：源码行号 + 守门在仓**。
 
 **现象**
 「单次下游调用超时」：Go 是**固定 2000ms**，RAG 是**HTTP 超时的剩余预算（≤3000ms）**。
@@ -257,7 +297,12 @@ Jackson 对溢出字面量**不报错**，直接按 IEEE 754 给无穷。
 
 ---
 
-## PIT-LIKEAPI-009 — 「不存在某机制」与「两侧都实现了它」在台账上长得一样
+## PIT-LIKEAPI-009 — 「不存在某机制」与「两侧都实现了它」在台账上长得一样 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-LIKEAPI-009` ⇒ **新号**：`PIT-LIKE-09`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「台账里凡涉及某条中间件/某项保护，必须显式标注『不适用』并附 grep 证据，而不是打一个 ✅」这条**记录纪律**今天仍成立 ⇒ 仍生效；本轮改 like 域台账状态时同样适用。
+> **依据**：AGENTS.md §0（「勿凭本表下结论」补丁）· 本域实例：like 域**无**黑名单中间件（`grep -rni blacklist service/like/ service/common/` 零命中）⇒ **证据强度：仓库政策 + grep 实测**。
 
 **现象**
 本次任务的检查清单里有一条：「核实 **public 路径集合**逐条一致、**blacklist key 前缀**与
@@ -280,7 +325,12 @@ Jackson 对溢出字面量**不报错**，直接按 IEEE 754 给无穷。
 
 ---
 
-## PIT-LIKEAPI-010 — 「直接单测判据函数」会给你**一条永远绿的回归网**，而它守错了东西
+## PIT-LIKEAPI-010 — 「直接单测判据函数」会给你**一条永远绿的回归网**，而它守错了东西 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-LIKEAPI-010` ⇒ **新号**：`PIT-LIKE-10`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「判据函数的单测只能作补充、不能作该行为的主要回归网」这条**测试组织纪律**今天仍成立 ⇒ 仍生效；本轮若给 like 域任何判据补测试，仍须配一条走完整管线的用例。
+> **依据**：本域正确范式 `service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiRouterErrorRealTomcatTest.java`（字节级只守一次 · 真 Tomcat）· 补格建议见本条正文第 2 点 ⇒ **证据强度：仓内文件路径**。
 
 **现象（与 PIT-LIKEAPI-004 同源，这里记「测试组织方式」这一面）**
 `LikeApiGoStyleBodyContentTypeTest` 有 7 条 `goReadsBody(...)` 边界断言，全绿。
@@ -302,7 +352,12 @@ Jackson 对溢出字面量**不报错**，直接按 IEEE 754 给无穷。
    它的措辞精度就是风险 —— 本轮的 `application/*+json 在 Go 侧同样不算 JSON`
    就属于**过宽**（`application/json-patch+json` 在 Go 侧**是**算的）。
 
-## PIT-LIKEAPI-011 — 恒真断言：不是「写错了」，是**主动制造一条假绿**
+## PIT-LIKEAPI-011 — 恒真断言：不是「写错了」，是**主动制造一条假绿** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-LIKEAPI-011` ⇒ **新号**：`PIT-LIKE-11`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「恒真断言 = 用一条无意义的断言伪装成『已经验过了』」今天仍会犯 ⇒ 仍生效；本轮凡在台账里引用某条守门，必须能指出它**断言的是什么**，而不是「有个测试类」。
+> **依据**：AGENTS.md §3.3.3（「绿测试可能是错误答案的守卫」）· 本域样本 `LikeApiMvcPipelineTest` 的 `httpTimeoutIsActuallyConfigured`（三元两分支同字面量） ⇒ **证据强度：仓库政策 + 源码行号**。
 
 **现象（修复轮 2026-10-23）**
 给 `DRIFT-LIKEAPI-018` 补守门测试时，我顺手写了这么一条：
@@ -341,7 +396,12 @@ void httpTimeoutIsActuallyConfigured() {
 
 ---
 
-## PIT-LIKEAPI-012 — `Arrays.asList(null)`：单参数时那个 `null` 是**数组本身**
+## PIT-LIKEAPI-012 — `Arrays.asList(null)`：单参数时那个 `null` 是**数组本身** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-LIKEAPI-012` ⇒ **新号**：`PIT-LIKE-12`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— `Arrays.asList(T...)` 的单参数 `null` 语义是 **Java 语言事实**，不会消失 ⇒ 仍生效；本轮若给 like 域写「全 null 数组」类用例，仍须用 `Collections.singletonList(null)` 或显式数组。
+> **依据**：Java API 语义（`java.util.Arrays#asList` varargs）· 本域已按此改写用例 ⇒ **证据强度：语言/库语义**。
 
 **现象（修复轮 2026-10-23）**
 测「target_ids 全为 null」时写：
@@ -368,7 +428,12 @@ Arrays.asList(null)          // ❌ NullPointerException
 ⚠️ 而本轮修的 `DRIFT-LIKEAPI-013` 恰恰是「数组里允许 null」这件事 ——
 **测试数据构造方式与被测语义在同一处打架时，先确认构造 API 的契约**。
 
-## PIT-LIKEAPI-013 — 「测错对象」比「测不出来」更贵：先确认 classpath 上到底是哪一代
+## PIT-LIKEAPI-013 — 「测错对象」比「测不出来」更贵：先确认 classpath 上到底是哪一代 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-LIKEAPI-013` ⇒ **新号**：`PIT-LIKE-13`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「同一仓里 Jackson 2 与 Jackson 3 同时存在、注解包名又不区分版本」今天**仍然成立** —— like-rpc 至今仍注入 Jackson 2 的 `ObjectMapper` ⇒ 仍生效。
+> **依据**：`service/like/like-rpc/src/main/java/com/rag/like/like/rpc/config/Jackson2ObjectMapperConfiguration.java:4` · `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/mq/LikeUpdateKafkaListener.java:3` ⇒ **证据强度：源码行号**。
 
 **现象（修复轮 2026-10-23，修 012 时）**
 我写了 4 个探测类，用 `com.fasterxml.jackson.databind.ObjectMapper` 测「JSON 数字反序列化成
@@ -397,7 +462,12 @@ Arrays.asList(null)          // ❌ NullPointerException
 
 ---
 
-## PIT-LIKEAPI-014 — 「API 存在性」要查 jar，不要凭记忆
+## PIT-LIKEAPI-014 — 「API 存在性」要查 jar，不要凭记忆 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-LIKEAPI-014` ⇒ **新号**：`PIT-LIKE-14`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「否定式断言必须用检索证明、不能用记忆证明」今天仍成立 ⇒ 仍生效；本轮凡写「本仓没有 X」，仍须给出 jar / grep 证据。
+> **依据**：本域样本：Jackson 3 无 `tools.jackson.databind.DeserializationException`、`Token` 已迁到 `tools.jackson.core.JsonToken`（用 `unzip -l` / `javap` 确认）⇒ **证据强度：仓内检索**。
 
 **现象（同一个修复轮里连续发生两次）**
 ① 写了 `tools.jackson.databind.DeserializationException` —— **Jackson 3 里没有这个类**；
@@ -442,7 +512,12 @@ javap -cp <jar> <类名>                                        # 再看构造�
 
 # 2026-10-24 第五轮新增踩坑（DRIFT-LIKEAPI-017 修复过程）
 
-## PIT-LIKEAPI-015 —— 🔴 **`Deadline` 是不可变对象：`timeRemaining(...)` 是「调用那一刻」才算的**
+## PIT-LIKEAPI-015 —— 🔴 **`Deadline` 是不可变对象：`timeRemaining(...)` 是「调用那一刻」才算的** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-LIKEAPI-015` ⇒ **新号**：`PIT-LIKE-15`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— `io.grpc.Deadline` 不可变、`timeRemaining(...)` 是「调用那一刻」才求值 —— **grpc-java 语义不变** ⇒ 仍生效；本轮若给 like 域写任何「服务端观测到的 deadline」断言，仍须在观测点当场取值。
+> **依据**：本域守门 `service/like/like-api/src/test/java/com/rag/like/like/api/LikeRpcTimeoutCapTest.java:233`（在观测点当场取 `remainingMillis`）⇒ **证据强度：守门在仓**。
 
 ### 现象
 
@@ -483,7 +558,12 @@ serverObservedRemainingMillis.set(remaining);
 
 ---
 
-## PIT-LIKEAPI-016 —— 🔴 **台账里一句「错误的范围判断」，会让本来能修的项被无限期搁置**
+## PIT-LIKEAPI-016 —— 🔴 **台账里一句「错误的范围判断」，会让本来能修的项被无限期搁置** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-LIKEAPI-016` ⇒ **新号**：`PIT-LIKE-16`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「『这条要动共享模块』这句话本身就是一个需要被证伪的断言」—— 这条**台账层纪律**与本轮完全同型：本轮要给 message/like 两域的每条状态断言定「已修 / 未修」，而「它要动共享层所以改不了」正是本轮必须证伪的那类话 ⇒ **是**。
+> **依据**：AGENTS.md §3.3.3（「先改/删错误断言，再改实现」）· 本域实例 `DRIFT-LIKEAPI-017` 已按此修法闭环 ⇒ **证据强度：仓库政策 + 台账状态**。
 
 ### 现象
 

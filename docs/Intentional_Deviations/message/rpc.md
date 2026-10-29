@@ -29,6 +29,12 @@
 
 ### SD-2026-10-24-01 🆕 · `message_conversation` 两个索引的**名字**与 Go 不同（列完全相同）
 
+> **唯一别名**：`SD-2026-10-24-01@message`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/article/rpc.md`](../article/rpc.md) 指向**另一条**偏离（写路径的**全局锁序**）⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-24-01@message`** 为准）
+> **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：RAG 侧两个索引仍是**短名**，Go 侧仍是 GORM 的 `idx_<表名>_<列名>` 长名 ⇒ **名字差异未消除、列完全相同**
+> **依据**：`service/message/message-rpc/src/main/resources/db/migration/V2__create_message_conversation.sql:43,48`（`idx_conversation_last_message_at` / `idx_conversation_updated_at`）· Go `service/message/rpc/internal/model/data_model.go:62,64`（`LastMessageAt` / `UpdatedAt` 带**无名** `index` tag ⇒ GORM 建 `idx_message_conversation_last_message_at` / `idx_message_conversation_updated_at`）⇒ **证据强度：源码行号（静态）**。
+> **⚠️ 2026-10-29 对齐 · 订正（原描述保留）**：原签字正文把 Go 侧出处写成 `data_model.go:60,61` ⇒ **行号已漂移**（那两行现在是 `LastMessageID` / `LastMessagePreview`）⇒ 正确的行号是 `:62`（`LastMessageAt`）与 `:64`（`UpdatedAt`）⇒ **结论不变，仅出处订正**。
+
+
 | 项 | 内容 |
 |---|---|
 | **组件** | `message-rpc`（DDL 台账：[`DRIFT/message/rpc.md`](../../DRIFT/message/rpc.md) 的 `DRIFT-MSG-V-021`） |
@@ -45,6 +51,11 @@
 
 ### SD-2026-10-24-02 🆕 · `message_rpc_request_duration_seconds` 的直方图**桶边界零交集**
 
+> **唯一别名**：`SD-2026-10-24-02@message`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/article/rpc.md`](../article/rpc.md) 指向**另一条**偏离（Kafka 四个通道不能逐通道切 broker）⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-24-02@message`** 为准）
+> **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：RAG 侧仍是 Micrometer 的**指数默认桶**（`publishPercentileHistogram()`），与 Go 的 11 个 `prometheus.DefBuckets` **桶边界零交集**
+> **依据**：`service/message/message-rpc/src/main/java/com/rag/message/message/rpc/metrics/MessageMetrics.java:87,90`（`Timer.builder(RPC_REQUEST_DURATION)` + `.publishPercentileHistogram()`）· Go `service/message/rpc/internal/metrics/metrics.go:23`（`Buckets: prometheus.DefBuckets`）⇒ **证据强度：源码行号（静态）**。
+
+
 | 项 | 内容 |
 |---|---|
 | **组件** | `message-rpc`（DRIFT 台账：[`DRIFT/message/rpc.md`](../../DRIFT/message/rpc.md) 的 `DRIFT-MSG-V-009`） |
@@ -60,6 +71,11 @@
 ---
 
 ### SD-2026-10-24-03 🆕 · 嵌在 cause 链里的 `CodeError`：Go `errors.As` **穿透** / RAG `instanceof` **不穿透**
+
+> **唯一别名**：`SD-2026-10-24-03@message`（无跨域撞号（该编号只出现在本文件）⇒ 为与本域其它 `@message` 别名保持一致，仍加域内别名）
+> **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：RAG 侧 `bizCodeFromError` 仍用 `instanceof`（**不穿透**），Go 侧 api 全局错误处理器仍用 `errors.As`（**穿透**）⇒ 差异未消除（仍是 latent）
+> **依据**：`service/message/message-common/src/main/java/com/rag/message/message/common/errmsg/MessageGrpcError.java:230`（`if (err instanceof CodeError)`）· api 侧消费点 `service/message/message-api/src/main/java/com/rag/message/message/api/service/MessageApiSupport.java:140`（`MessageGrpcError.bizCodeFromError(err)`）· Go `service/message/api/messagecenter.go:57`（`errors.As(err, &codeErr)`）· Go `service/message/common/errmsg.go:104,108`（`err.(*CodeError)` 不穿透 / `status.FromError(err)` 穿透）⇒ **证据强度：两侧源码行号**。
+
 
 | 项 | 内容 |
 |---|---|
@@ -79,6 +95,11 @@
 
 ### SD-2026-10-24-04 🆕 · 6 个时间列的 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧**多出来的**（Go 侧无默认）
 
+> **唯一别名**：`SD-2026-10-24-04@message`（无跨域撞号（该编号只出现在本文件）⇒ 为与本域其它 `@message` 别名保持一致，仍加域内别名）
+> **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：那 **6 个**列仍带 `DEFAULT CURRENT_TIMESTAMP`，Go 侧仍无默认 ⇒ 差异未消除（当前仍不可观测）
+> **依据**：`service/message/message-rpc/src/main/resources/db/migration/V1__create_message_notification.sql:18,19` · `V2__create_message_conversation.sql:20,21,22` · `V3__create_message_conversation_message.sql:17`（**逐条数过 = 6 列**）· `V5__message_time_columns_timestamptz.sql:58`（明写「本文件**不删** `DEFAULT CURRENT_TIMESTAMP`」）· Go `service/message/rpc/internal/model/data_model.go` 的 `Notification` / `Conversation` / `ConversationMessage`（只写 `autoCreateTime` / `autoUpdateTime`，**无 DEFAULT**）⇒ **证据强度：源码行号 + 当场计数**。
+
+
 | 项 | 内容 |
 |---|---|
 | **组件** | `message-rpc`（DDL 台账：[`DRIFT/message/rpc.md`](../../DRIFT/message/rpc.md) 的 `DRIFT-MSG-V-031`） |
@@ -97,6 +118,11 @@
 
 ### SD-2026-10-23-08 · CPU 采样读不到时 **fail-open**（不降载）
 
+> **唯一别名**：`SD-2026-10-23-08@message`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/like/api.md`](../like/api.md)（响应 Content-Type）与 [`docs/Intentional_Deviations/users/admin/api.md`](../users/admin/api.md)（黑名单 401 业务码）指向**三条完全不同**的偏离 ⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-23-08@message`** 为准）
+> **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：RAG 侧 CPU 读不到时仍 **fail-open**（视作「未过载」⇒ 不降载），Go 侧 `stat.CpuUsage()` 永远不返回 -1 ⇒ 差异未消除
+> **依据**：`service/common/src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java:165,167`（`int cpu = readCpuPermille();` → `// fail-open：读不到 ⇒ 视作未过载`）+ `:271`（`readCpuPermille()`）· Go `core/stat/usage.go:51`（`atomic.LoadInt64(&cpuUsage)`，取值 **0..1000**，**永不返回 -1**）⇒ **证据强度：源码行号（静态）**。
+
+
 | 项 | 内容 |
 |---|---|
 | **组件** | `message-rpc`（**实现落在共享模块** `service/common/.../protection/GoStyleAdaptiveShedder.java`） |
@@ -112,6 +138,11 @@
 ---
 
 ### SD-2026-10-23-07 🗄️ **已撤销（2026-10-24）** · 服务端熔断 / CPU 自适应降载：原「本轮不实施（挂起式签字）」
+
+> **唯一别名**：`SD-2026-10-23-07@message`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/like/rpc.md`](../like/rpc.md)（Nacos 注册失败不退出）与 [`docs/Intentional_Deviations/users/admin/rpc.md`](../users/admin/rpc.md)（gRPC description 中文）指向**三条完全不同**的偏离 ⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-23-07@message`** 为准）
+> **签字复核（核对日期 2026-10-29）**：**撤销有效 ⇒ 撤销的那个行为「今天真的没了」已核实 ⇒ 不计入计数**（记录保留）：服务端 breaker / CPU shedding **确已实施**（链已接到 gRPC server 上）⇒ 原「本轮不实施（挂起）」的状态**确已消失**
+> **依据**：`service/message/message-rpc/src/main/java/com/rag/message/message/rpc/MessageRpcApplication.java:115`（`@Bean GrpcServerConfigurer rpcInterceptorConfigurer(...)`）+ `:134`（`GoStyleRpcProtectionChain.build(rpcUnaryServerInterceptor, protectionProps)`）· 共享链 `service/common/src/main/java/com/rag/common/protection/GoStyleRpcProtectionChain.java` · 守门 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcBreakerWiringTest.java` 与 `MessageProtectionChainWiringTest.java`（均取**容器里那个** `GrpcServerConfigurer` 装配真实 server）⇒ **证据强度：源码行号 + 守门在仓**。
+
 
 > **撤销时间**：2026-10-24 —— breaker / shedding **已实施**
 > （见 [`DRIFT/message/rpc.md`](../../DRIFT/message/rpc.md) 的 `DRIFT-MSG-V-016`）。
@@ -140,6 +171,11 @@
 
 ### SD-2026-10-23-06 · `idx_notification_recipient_read` 的列数：Go 1 列 / RAG 2 列
 
+> **唯一别名**：`SD-2026-10-23-06@message`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/like/rpc.md`](../like/rpc.md)（gRPC 业务码迁 trailer）与 [`docs/Intentional_Deviations/users/admin/rpc.md`](../users/admin/rpc.md)（`resetUserPassword` 空守卫）指向**三条完全不同**的偏离 ⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-23-06@message`** 为准）
+> **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：RAG 侧该索引仍是 **2 列**，Go 侧仍只有 **1 列**
+> **依据**：`service/message/message-rpc/src/main/resources/db/migration/V1__create_message_notification.sql:43,44`（`CREATE INDEX IF NOT EXISTS idx_notification_recipient_read` / `ON message_notification (recipient_id, is_read)` ⇒ **2 列**）· Go `service/message/rpc/internal/model/data_model.go:32,38`（`recipient_id` 挂 `idx_notification_recipient_time,priority:1`；`is_read` 挂 `idx_notification_recipient_read,priority:2` ⇒ 该索引**没有 priority:1 成员** ⇒ GORM 只建 **1 列**）⇒ **证据强度：两侧源码行号**。
+
+
 | 项 | 内容 |
 |---|---|
 | **组件** | `message-rpc`（DDL 台账：[`DRIFT/message/rpc.md`](../../DRIFT/message/rpc.md) §7 的 `DRIFT-MSG-V-022`） |
@@ -153,6 +189,11 @@
 | **⚠️ 不得做的事** | 不要为了让 DDL 对拍变绿而把它改回单列。若日后 `ListNotifications` 的查询形态变化（`recipient_id` 不再总是等值过滤），本条应**重新评估**，而不是当作既成决策继承下去 |
 
 ### `DRIFT-MSG-V-003` 签字范围收窄（2026-10-24 第八轮 · 不是撤销）
+
+> **唯一别名**：`DRIFT-MSG-V-003@message`（无 `SD-` 编号（是收窄记录）⇒ 不参与撞号；为唯一定位补一个域内别名）
+> **签字复核（核对日期 2026-10-29）**：**仍成立（收窄后的范围）⇒ 签字有效** —— 收窄保留的那一半「**不回显原始错误文本**」今天仍存在：RAG 侧只回码表文案，Go 侧 envelope 会把 gRPC description 原文（SQL 错误文本）塞进 `msg` ⇒ **信息泄露防护这一半未被销号**；另一半（业务码）已在 2026-10-24 与 Go 对齐
+> **依据**：`service/message/message-api/src/main/java/com/rag/message/message/api/service/MessageApiSupport.java:140`（`MessageGrpcError.bizCodeFromError(err)` ⇒ 只认**最外层**的 `CodeError`，不取原始错误文本）· `service/message/message-common/src/main/java/com/rag/message/message/common/errmsg/MessageGrpcError.java:230`⇒ **证据强度：源码行号（静态）**。
+
 
 | 判据 | 原签字时的状态（2026-10-22） | **本轮之后（2026-10-24）** | 处置 |
 |---|---|---|---|

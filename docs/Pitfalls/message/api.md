@@ -8,7 +8,12 @@
 
 ---
 
-## P-MSGAPI-001 🔴 同一个组件、同一种形态，**第二次**「绿测试守卫错误答案」
+## P-MSGAPI-001 🔴 同一个组件、同一种形态，**第二次**「绿测试守卫错误答案」 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-MSGAPI-001` ⇒ **新号**：`PIT-MESSAGE-01`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 触发条件（DTO javadoc 手抄 Go tag + 绿测试把错误答案断言成规范）**今天仍在**：message 域仍有 1 处「Go 无 `,string`、RAG 加了 `@JsonFormat(STRING)`」的**已签字偏离**未销号 ⇒ 本轮凡改 DTO 注解、或改 `MessageApiMvcPipelineTest` 里 `affected` 那条断言，必须先回 Go `types.go` 核 tag，不能凭 javadoc 判定。
+> **依据**：`service/message/message-api/src/main/java/com/rag/message/message/api/dto/AdminSendNotificationResp.java:43`（`@JsonFormat(shape = JsonFormat.Shape.STRING)`）· Go `service/message/api/internal/types/types.go:22`（`Affected int64` + `json:"affected"` tag，**无** `,string`）· 签字条目 `docs/Intentional_Deviations/message/api.md`（`SD-2026-10-23-03`）⇒ **证据强度：源码行号（静态）**。
 
 **对应**：`DRIFT-MSGAPI-009` · **性质**：注解级类型转换（运行时**不报错**，只是值变了）
 
@@ -59,7 +64,12 @@ RAG 侧 `dto/AdminSendNotificationResp.java:13` 的 javadoc 手抄成了
 
 ---
 
-## P-MSGAPI-002 🔴 Jackson 的 `FAIL_ON_NULL_FOR_PRIMITIVES` 默认为 `true`，go-zero 的 `,optional` 对显式 null 是**放行**
+## P-MSGAPI-002 🔴 Jackson 的 `FAIL_ON_NULL_FOR_PRIMITIVES` 默认为 `true`，go-zero 的 `,optional` 对显式 null 是**放行** ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`P-MSGAPI-002` ⇒ **新号**：`PIT-MESSAGE-02`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— 本条在 message 域的触发条件（Jackson 3 的 `FAIL_ON_NULL_FOR_PRIMITIVES` 默认 `true` 打中 `,optional` 标量字段）**已被消除**，且全局关闭的副作用已逐字段核过（必填字段全是引用类型，不靠这个开关拒 null）⇒ 本轮**只改 `docs/**`**、零 `service/**` 改动 ⇒ 不会出现「改反序列化开关 / 新增 primitive 可空字段」的动作。
+> **依据**：修法落点 `service/message/message-api/src/main/java/com/rag/message/message/api/config/MessageGoStyleCoercion.java:94`（`builder.disable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)`）· 守门 `service/message/message-api/src/test/java/com/rag/message/message/api/MessageApiGoStyleCoercionWiringTest.java`（真 MVC 6 例，含「关掉之后必填 + 显式 null 仍 5001」的反向守门）⇒ **证据强度：源码行号 + 守门测试在仓**。
 
 **对应**：`DRIFT-MSGAPI-008`
 
@@ -100,7 +110,12 @@ Go 走的是 tag 的 optional」**。只测其中一半，结论必然是错的�
 
 ---
 
-## P-MSGAPI-003 ⚠️ `CoercionAction` 是**白名单式的 Fail 补丁**，漏一个形状就是一条静默漂移
+## P-MSGAPI-003 ⚠️ `CoercionAction` 是**白名单式的 Fail 补丁**，漏一个形状就是一条静默漂移 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`P-MSGAPI-003` ⇒ **新号**：`PIT-MESSAGE-03`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— 本条的具体缺口（`Boolean ← Integer` 输入形状没被 Fail）已补；message 域的 coercion 规则集现覆盖 `LogicalType.Boolean` 的 `String` 与 `Integer` 两个输入形状 ⇒ 本轮不改 `service/**`、不新增 DTO 字段 ⇒ 不触发。⚠️ 「枚举判据而非枚举补丁」这条**方法论**仍适用（见下条 PIT-MESSAGE-06）。
+> **依据**：`service/message/message-api/src/main/java/com/rag/message/message/api/config/MessageGoStyleCoercion.java:101,119`（`LogicalType.Boolean` 的 `CoercionInputShape.String` 与 `CoercionInputShape.Integer` 均配 `CoercionAction.Fail`）· 守门同 PIT-MESSAGE-02 ⇒ **证据强度：源码行号**。
 
 **对应**：`DRIFT-MSGAPI-005`
 
@@ -133,7 +148,12 @@ builder.withCoercionConfig(LogicalType.Boolean, cfg -> cfg.setCoercion(CoercionI
 
 ---
 
-## P-MSGAPI-004 ⚠️ Go 对 **map 元素**的类型判据与 **顶层标量字段**不是同一段代码
+## P-MSGAPI-004 ⚠️ Go 对 **map 元素**的类型判据与 **顶层标量字段**不是同一段代码 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`P-MSGAPI-004` ⇒ **新号**：`PIT-MESSAGE-04`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— map 元素级与顶层标量级两条判据的差异，已在 message 域**逐字段**落成（字段上的 `contentUsing`），探针也补了 map 元素格 ⇒ 本条在 message 域的触发条件已消除；本轮只改 `docs/**` ⇒ 不触发。
+> **依据**：台账 `docs/DRIFT/message/api.md` 的 `DRIFT-MSGAPI-006` / `DRIFT-MSGAPI-007`（均 ✅ 已修）· 探针 `tools/semantic-probe/README.md:50`（用例清单 56 例，含 map 元素格）⇒ **证据强度：台账状态 + 探针清单行号**。
 
 **对应**：`DRIFT-MSGAPI-006` / `DRIFT-MSGAPI-007`
 
@@ -170,7 +190,12 @@ builder.withCoercionConfig(LogicalType.Boolean, cfg -> cfg.setCoercion(CoercionI
 
 ---
 
-## P-MSGAPI-005 ⚠️ MockMvc 的 `.contentType(MediaType.APPLICATION_JSON)` 对 **charset 完全不敏感**
+## P-MSGAPI-005 ⚠️ MockMvc 的 `.contentType(MediaType.APPLICATION_JSON)` 对 **charset 完全不敏感** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-MSGAPI-005` ⇒ **新号**：`PIT-MESSAGE-05`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— 「MockMvc 的 `isCompatibleWith` 对 charset 免疫」是**框架事实**，不会消失 ⇒ 本条作为**测试方法论**仍生效；但 message 域**实例已修**（共享层 T-6 统一给 10 个 api 补 `charset=utf-8`）⇒ 本轮只改 `docs/**`、不动转换器与断言 ⇒ 本轮不触发。
+> **依据**：实例已修：共享层 `service/common/src/main/java/com/rag/common/http/GoStyleJsonContentTypeAdvice.java:127`（常量 `GO_JSON_CONTENT_TYPE`）+ `:151`（消费点 `response.getHeaders().set(...)`）· 生效链 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:2` → `service/message/message-api/pom.xml:64`（共享层 `common` 依赖）· 真 Tomcat 守门 `GoStyleJsonContentTypeCharsetTomcatTest` ⇒ **证据强度：源码行号 + 装配链**。
 
 **对应**：`DRIFT-MSGAPI-010`
 
@@ -203,7 +228,12 @@ response 已 committed 后 `setHeader` 被静默忽略 ⇒ text/plain 400 丢 Co
 
 ---
 
-## P-MSGAPI-006 ⚠️ 探针的用例是**人工枚举**的，而字段数远大于用例数
+## P-MSGAPI-006 ⚠️ 探针的用例是**人工枚举**的，而字段数远大于用例数 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-MSGAPI-006` ⇒ **新号**：`PIT-MESSAGE-06`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「用例按『我修了什么』列、不按『Go 拒绝什么』列」今天仍在 —— 探针的用例清单仍是**人工枚举**，README 自己列着「已知边界」 ⇒ 本轮**任何**往探针/测试里加断言的动作都可能再犯 ⇒ 本轮若动探针，必须按「字段 × 形状」矩阵补格，而不是按缺陷列表补条。
+> **依据**：`tools/semantic-probe/README.md:50`（「用例清单（56 例）」）· `:10`（当前 56 例 = 一致 54 · 已签字偏离 2 · 不一致 0）⇒ **证据强度：仓内文件行号**。
 
 **对应**：`DRIFT-MSGAPI-005` ~ `-009` 全部五条的共同成因
 
@@ -230,7 +260,12 @@ response 已 committed 后 `setHeader` 被静默忽略 ⇒ text/plain 400 丢 Co
 
 ---
 
-## P-MSGAPI-007 ⚠️ 否定式断言 + 「默认值藏在 tag 里」：本组件已被咬过两次
+## P-MSGAPI-007 ⚠️ 否定式断言 + 「默认值藏在 tag 里」：本组件已被咬过两次 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-MSGAPI-007` ⇒ **新号**：`PIT-MESSAGE-07`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— Go 真源**已冻结** ⇒「Go 侧有没有 X / 默认值是多少」这类**否定式断言**的举证负担**不会下降** ⇒ 本轮凡在台账里写「Go 侧…」的断言，仍必须给**消费点**行号，否则等于把「没找到」写成「不存在」。
+> **依据**：Go 真源冻结只读（AGENTS.md §一）· 本条正文的 4 次复发记录（Go `rest/config.go:12-22,52-56` · `zrpc/internal/config.go:14` · `rest/config.go:55` · `rest/engine.go:101-116`）⇒ **证据强度：Go 侧文件行号**。
 
 **对应**：`DRIFT-MSGAPI-004`（首轮）与本轮 §9 的多条 UNRESOLVED
 
@@ -258,7 +293,12 @@ response 已 committed 后 `setHeader` 被静默忽略 ⇒ text/plain 400 丢 Co
 
 ---
 
-## P-MSGAPI-008 ⚠️ 「Bean 存在 / 注解在 / 依赖有」仍不等于「机制生效」——本轮再次触发
+## P-MSGAPI-008 ⚠️ 「Bean 存在 / 注解在 / 依赖有」仍不等于「机制生效」——本轮再次触发 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-MSGAPI-008` ⇒ **新号**：`PIT-MESSAGE-08`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 本轮**要改的正是台账里的状态断言** ⇒「类在 / 注解在 / 依赖在 ⇒ 机制生效」这条推理链今天仍会骗人 ⇒ 本轮每条状态断言都必须落到**消费点行号**或**守门真实退出码**，否则一律标「待核实」。
+> **依据**：AGENTS.md §3.3 / §3.3.1 · 本域范式 `service/message/message-api/src/test/java/com/rag/message/message/api/MessageApiGoStyleCoercionWiringTest.java`⇒ **证据强度：仓库政策 + 守门在仓**。
 
 **对应**：UNRESOLVED-002（`MessageGoStyleCoercion` 是否真的作用在 MVC 的 mapper 上）
 

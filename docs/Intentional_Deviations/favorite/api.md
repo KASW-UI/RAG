@@ -14,8 +14,26 @@
 > ⚠️ **DEV-FAV-API-001 的反面理由仍需拍板后与其它域收敛**：`follow` 域选择了**逐条对齐 Go** ⇒ 本仓两种做法都存在。
 >
 > **核对时间：2026-10-25**（Go 冻结版 `Sea-RideTheWind_golang/service/favorite/api`）
+> 🆕 **核对时间：2026-10-29**（台账对齐 phase · W-E lane 逐条重核）—— 结论见下表。
 > ⚠️ **本文件是「明知与 Go 不同」的登记册** —— 每条都是**决策**，不是缺陷。
 > ⇒ **不要**把这里的差异当新回归去「顺手修回 Go 行为」（AGENTS.md §0 的共性提醒）。
+
+## 🆕 2026-10-29 逐条重核结论（台账对齐 phase · W-E lane）
+
+> **判定口径**：`docs/Intentional_Deviations/_INDEX.md:34` ——「被签字描述的那个行为**已不存在** ⇒ 本条签字**自动失效** ⇒ 不计入计数」。
+> **方法**：**回 Go 真源 + 回 RAG 源码两侧核**（真源 = `Sea-RideTheWind_golang`，冻结只读；go-zero 取 `v1.10.2`）。
+> **撞号检查**：`DEV-FAV-API-001` / `DEV-FAV-API-002` **全域唯一**
+> （`grep -rhoE "DEV-FAV-[A-Z]+-[0-9]+" docs/Intentional_Deviations/` ⇒ 本域 11 个 `DEV-FAV-*` 编号**各对应一条**偏离；
+> `api.md` / `common.md` / `proto.md` 之间的相互引用都指向**同一条**）⇒ **无撞号** ⇒ **不需要** `SD-<编号>@<域>` 别名。
+
+| ID | 结论 | 证据（核对日期 2026-10-29） |
+|---|---|---|
+| `DEV-FAV-API-001` | ✅ **仍成立** | Go 侧**验签失败**仍写**空 body**：`/Users/pr/go/pkg/mod/github.com/zeromicro/go-zero@v1.10.2/rest/handler/authhandler.go:106-122` 的 `unauthorized(...)` 只 `writer.WriteHeader(http.StatusUnauthorized)`，**一个字节都不写**；**黑名单命中**仍是**两字段** JSON（`service/favorite/api/internal/middleware/checkblacklist_middleware.go:39-45`）⇒ RAG 侧**仍是三字段** envelope：`service/favorite/favorite-api/src/main/java/com/rag/favorite/favorite/api/advice/GlobalExceptionHandler.java:110-117`（`handleAuthentication` ⇒ 401 + `new Response(e.getCode(), e.getMessage(), null)`）⇒ 差异未变（状态码 401 与业务码 5004 两侧仍一致） |
+| `DEV-FAV-API-002` | ✅ **仍成立** | Go 侧**默认中间件**仍写**空 body**：go-zero v1.10.2 `rest/handler/recoverhandler.go:12-21` 的 `RecoverHandler` 只 `w.WriteHeader(http.StatusInternalServerError)`（**不** `http.Error`）⇒ RAG 侧仍是**500 + JSON envelope**：`service/favorite/favorite-api/src/main/java/com/rag/favorite/favorite/api/advice/GlobalExceptionHandler.java:253-261`（`handleAny` ⇒ 500 + `new Response(5001, "系统内部错误", null)`）⇒ 差异未变 |
+
+> ⚠️ **计数影响**：本域 **2 条全部仍成立** ⇒ **主线更新 `docs/Intentional_Deviations/_INDEX.md` 时本域无需减项**（本 lane 不写共享索引）。
+> ⚠️ **一条仍然悬着的对比项（本轮不升级为拍板）**：`DEV-FAV-API-001` 的「反面理由」写「`follow` 域选择了**逐条对齐 Go** ⇒ 本仓两种做法都存在」
+> ⇒ **本轮未复核 `follow` 域的现状**（**不在本 lane 的写权范围**）⇒ ⇒ **该条「两域做法不一致」的现状描述按原句保留**，本轮**不**据此改写任何一侧。
 
 ---
 

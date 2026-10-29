@@ -26,6 +26,16 @@
 >
 > 🟢 **2026-10-24 对拍轮**：起真源才发现的 **4 个真实缺陷**（此前单测全绿也测不出来）已就地修掉 —— 见 §4.6.2。
 
+> 📌 **编号口径（2026-10-29 · 台账对齐 phase · W-D lane）** —— 本文件的 `D1~D10` / `U1~U16` 是**按组件**编号
+> ⇒ ⇒ **`comment/api.md` 的 `D1` / `D2` / `D6` 与本文件的 `D1` / `D2` / `D6` 是完全不同的条目**
+> （本文件 D1 = **`comment_domain_fact_outbox.created_at` 的取值来源**；api.md D1 = **非 JSON Content-Type ⇒ 415**；
+> 本文件 D2 = **时间精度**；api.md D2 = **Bearer 前缀剥离的长度边界**；
+> 本文件 D6 = **Redis 错误的指标 label 与打点次数**；api.md D6 = **保护层的覆盖范围**）
+> ⇒ ⇒ **跨文件引用必须带组件前缀**：本文件 = `D1@comment-rpc` · `U1@comment-rpc`；api 侧 = `D1@comment-api` · `U1@comment-api`。
+> ⇒ 依据（可复算）：`grep -rn 'D6' docs/DRIFT/comment/` ⇒ **同一个标签在两个文件指向不同条目**；
+> 且本文件 §4.6.2 实测矩阵里有 **3 处**引用的是**api.md** 的 D 编号（T21 → `D1` · T22 → `D2` · T20 → `D6`）
+> ⇒ ⇒ **本轮已在那 3 处加组件前缀**（见 §4.6.2）⇒ **原文保留，只加前缀**。
+
 ---
 
 ## 0. 结论摘要
@@ -538,9 +548,9 @@
 | 缺失 Authorization / 坏 JWT ⇒ **401** | ✅ 两侧一致 |
 | **未注册路径 ⇒ 404**（不被鉴权遮蔽成 401） | ✅ **T18** 一致 |
 | **已注册路径 + 错方法 ⇒ 405** | ✅ **T19** 一致 |
-| **Bearer 前缀长度边界**（`"Bearer "` 恰好 7 字符 ⇒ 两侧都 401） | ✅ **T22** 一致 ⇒ 证实「D2 当前不可观察」 |
+| **Bearer 前缀长度边界**（`"Bearer "` 恰好 7 字符 ⇒ 两侧都 401） | ✅ **T22** 一致 ⇒ 证实「`D2@comment-api` 当前不可观察」（⚠️ **2026-10-29 加组件前缀**：本文件 §3 的 `D2` 是**时间精度**，与本行引用的 api 侧 `D2`（Bearer 前缀长度边界）**不是同一条**） |
 | **`iat` 在未来 ⇒ 401** | ✅ **T23** 一致 ⇒ **D4 的修复被活体确认**（不只是单测绿） |
-| **非 JSON Content-Type ⇒ 两侧都 200 + `{code:5001}`** | ✅ **T21** 一致 ⇒ **D1 撤销**（详见 [`api.md` §3.3](./api.md)） |
+| **非 JSON Content-Type ⇒ 两侧都 200 + `{code:5001}`** | ✅ **T21** 一致 ⇒ **`D1@comment-api` 撤销**（详见 [`api.md` §3.3](./api.md)）<br>⚠️ **2026-10-29 加组件前缀**：本文件 §3 的 `D1` 是 **`comment_domain_fact_outbox.created_at` 的取值来源**（§3.1 · **已撤销**），与本行引用的 api 侧 `D1` **不是同一条** |
 
 ### 4.6.5 ⚠️ 对拍 harness 的两个坑（**不是**产品缺陷，但会制造假差异）
 
@@ -580,7 +590,7 @@
 | **U11** | ⚠️ **Go 侧潜伏缺陷**：`comment.go:571`（点赞的 `attribute & ~?`）与 `comment.go:165` 同款 ⇒ **Go 侧「作者取消自己的赞」也会 5002**。本轮矩阵 `user 1001 ≠ owner 2002` ⇒ 未触发 ⇒ 两侧一致。⇒ **Go 侧缺陷**，RAG 侧已正确 | ⚠️ 真源侧缺陷（记录，不修 RAG） |
 | **U12** | ✅ **跨栈 gRPC 路径前缀**（未知项 #5）：Go `package pb;` ⇒ `/pb.CommentService/*`，RAG `package comment;` ⇒ `/comment.CommentService/*`。**新增 `PbCommentServiceAlias`**（`@GrpcService` + `BindableService`，用 `MethodDescriptor.toBuilder().setFullMethodName()` 改名 + 复用 `getServerCallHandler()`）⇒ **只增不改**（`comment.` 路径原样保留）⇒ **不推翻**已签字的 `SD-2026-10-23-04`。守门网 `PbCommentServiceAliasGateTest` 6 例（真 in-process server，两条路径都通、同一实现、方法集合对应、未注册方法仍 UNIMPLEMENTED） | ✅ 已闭环（**半修**，见 U13） |
 | **U13** | 🔴 **U12 的伴生阻塞（不可修）**：`io.grpc.Status` **只有 17 个常量** ⇒ grpc-java **发不出** `grpc-status: 1012` ⇒ RAG 的业务码在**自定义 trailer** 里 ⇒ **Go 侧读不到** ⇒ 跨栈错误码必然退化成 `UNKNOWN(2)`。⇒ **结论：混跑必须同栈配对，别名只是兜底** | 🔴 跨栈限制（**协议层**，非本域可修） |
-| **U14** | ~~T20 保护层覆盖范围差异~~ | ✅ **已闭环**（2026-10-24 活体实测 T20 ⇒ 登记为 D6 ⇒ **用户已签字** `SD-2026-10-24-CAND-08`：**接受 RAG 更严/更安全的一侧** ⇒ **代码零改动** ⇒ 共享面 `service/common/protection` **不动**） |
+| **U14** | ~~T20 保护层覆盖范围差异~~ | ✅ **已闭环**（2026-10-24 活体实测 T20 ⇒ 登记为 **`D6@comment-api`** ⇒ **用户已签字** `SD-2026-10-24-CAND-08`：**接受 RAG 更严/更安全的一侧** ⇒ **代码零改动** ⇒ 共享面 `service/common/protection` **不动**） |
 | **U15** | 🔴 **D8（= global E65）出向 gRPC 调用不继承请求 deadline** —— `ArticleRpcClient.java:65` 是**裸 stub**（Go `subject_fallback.go:17` 吃 `ctx` ⇒ deadline 到点立刻中止，RAG 照跑不误）。**本域已独立核实成立**（2026-10-26）⇒ 详见 **§3.5**。<br>⚠️ **完整闭环跨共享层**：`GoStyleRequestDeadline.begin()` 只在 HTTP 路径（`HttpMiddleware.java:263`）绑定 ⇒ gRPC 服务端路径上 `applyTo` 是 **no-op** ⇒ **共享层那半归 global**（`service/common` 单写权）⇒ **本域那半待修法拍板后落地**。<br>💡 **本域那半其实不必等共享层**：`DeadlineState` 在 gRPC 路径**已绑定**（`RpcInterceptor.java:281/372`）⇒ 可用 `DeadlineState.remainingMillis()` 直接闭环（同仓先例：`users/admin/AdminDomainService.java:140`）⇒ **两条路各有代价（会让 global 的门禁 `check-deadline-downstream.py` 变红）** ⇒ **待 Jason 拍板，本域不擅自选边**。<br>⚠️ **本域现在不写守门网**：`applyTo` 在共享层落地前是 no-op ⇒ 守门网**测不出任何东西** ⇒ 属 §3.3「绿测试可能是错误答案的守卫」⇒ **不写假绿网** | 🔴 **待修法拍板 + 待共享层**（§3.5） |
 | **U16** | 🔴 **D9（= global E66）Redis 调用不感知 deadline** —— Go 侧 `service/comment/rpc/internal/cache/*.go` **全部**带 `ctx`（`rdb.Get/Set/Scan`）⇒ deadline 到点缓存操作立即中止；RAG 侧 `CommentCacheService.java` **全部** `redis.opsForValue()…`（**含写**：`:279`/`:331`/`:433`/`:528` 的 `set`、`:619` 的 `delete`）**零 deadline 检查**（全文件 grep `deadline`/`remaining`/`timeout` ⇒ 零命中）⇒ **写路径照写不误**。**本域已独立核实成立**（2026-10-26）⇒ 详见 **§3.6**。<br>🔴 **本域单方面无法闭环**：`service/common` **无任何 Redis 相关期限载体**（`DeadlineState` 只覆盖 SQL · `GoStyleRequestDeadline` 只覆盖 HTTP + 出向 stub）⇒ ⇒ **必须等 global 的共享层那半**（global 第四十六轮的判断：共同根因是「RAG 没有 ctx 传播」⇒ 共享层补**统一载体**比逐点打补丁更对味）⇒ **本域不擅自加临时机制**（那会引入第三种载体，与统一方向相反）<br>⚠️ **证据强度**：🟡 **源码级**（全量扫描）—— global 已如实标注「未经双侧活体验证」，**本域也未做活体验证** | 🔴 **待共享层**（§3.6） |
 

@@ -1,4 +1,4 @@
-# L1 · `align/global`（本体）—— X-4 like 半边（社区事实投递链路）
+# L1 · `align/global`（本体）—— CD-4 like 半边（社区事实投递链路）
 
 > 本文件既是**任务书**也是本 lane 的**台账片段**：开工前读它，做完把结论追加在本文件末尾。
 > 协议见 [`_PROTOCOL.md`](_PROTOCOL.md)。
@@ -46,7 +46,7 @@ RAG 的 like 域**另起炉灶**写了一套 outbox + stream + scheduler，与 G
 |---|---|---|
 | 域定义 + 纪律 | `docs/DRIFT/global/_README.md` | §〇 / §七 |
 | 本域待办清单 | `docs/DRIFT/global/_README.md` | §七之二 的 **A5** / **B4** 两行 |
-| X-4 逐条取证 | `docs/DRIFT/global/cross-domain.md` | **§二·十**（X-4 已确证那节） |
+| CD-4 逐条取证 | `docs/DRIFT/global/cross-domain.md` | **§二·十**（CD-4 已确证那节） |
 | like 侧已确证的漂移 | `docs/DRIFT/global/cross-domain.md` | §二·十 ②「RAG 的 like 域另起炉灶」 |
 | 坑 | `docs/Pitfalls/global/cross-domain.md` | 全部（不长） |
 | Go 真源 | `Sea-RideTheWind_golang/service/common/communityfact/`（`wire.go` / `process.go` / `logging.go`）+ `cmd/fact-dispatch/main.go` | 逐字读 |
@@ -154,9 +154,9 @@ M6 的目标用例是 `<error>`（合法事实被判 BLOCKED ⇒ 收到 `FrozenE
 
 | # | 未证成项 | 原因 | 归属 |
 |---|---|---|---|
-| ① | **Go 侧未活体对拍** | 本轮 Go 事实全部来自**逐行读源码**（`fact_delivery.go` / `domain_fact.go` / `main.go` / `process.go`）⇒ **没有**真跑 Go 进程投递 | 与 X-1「三进程并发」同批 |
+| ① | **Go 侧未活体对拍** | 本轮 Go 事实全部来自**逐行读源码**（`fact_delivery.go` / `domain_fact.go` / `main.go` / `process.go`）⇒ **没有**真跑 Go 进程投递 | 与 CD-1「三进程并发」同批 |
 | ② | **DC 侧（仓外平台）未接触** | 回执形状靠 `Wire.validateReceipt` 与 Go `ValidateReceipt` 逐条对照判定 ⇒ 假 DC 是**自制的 HTTP 服务器**，不是真 DC | 不可在本仓闭合 |
-| ③ | **多副本并发投递未验** | `SKIP LOCKED` ＋ 前序屏障的**并发**语义靠**单实例**测试覆盖 | X-1 |
+| ③ | **多副本并发投递未验** | `SKIP LOCKED` ＋ 前序屏障的**并发**语义靠**单实例**测试覆盖 | CD-1 |
 | ④ | **应用与数据库时钟漂移**这一维不可观测 | 同机同钟 ⇒ 只验了「应用时钟 vs 事务开始时刻」（2 秒慢 sender 区分） | 环境限制 |
 | ⑤ | **DC → like 的入向权威读端点** | `LikeAuthorityEndpointConfig` 仍是**未实现骨架**；自带说明「监听地址与端口 UNKNOWN，需给 like-rpc 新增 HTTP connector」⇒ **wire 面变更 ⇒ 待拍板** | ⛔ 本轮不碰 |
 | ⑥ | **投递的端到端** | 验的是「事实 → 冻结信封 → 校验 → 投递调用 → 回执落库」，**不含** DC 真实接收 | 同 ② |

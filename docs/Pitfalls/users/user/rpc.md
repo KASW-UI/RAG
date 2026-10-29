@@ -7,7 +7,24 @@
 
 ---
 
-## P-01 「`!= null &&` 这个防御写法，在 Go 那边对应的是**相反**的分支
+> **📌 2026-10-29 台账对齐轮 · 编号与状态口径**（本轮新增；**只增不删**，旧内容一律保留）
+>
+> - **新号段**：`PIT-USERS-32 … PIT-USERS-38`（旧号 `P-01 … P-07`）⇒ **逐条对照**写在每个条目首的「**旧号** ⇒ **新号**」行里。
+> - **状态字段**：每个条目标题行尾以 `· **状态：X**` 标注（取值域：`仍生效` / `已闭环` / `已撤销` / `待核实`），
+>   条目首的引用块给出 **核对日期（2026-10-29）** · **是否影响当前轮次**（填「否」时写明不适用的具体原因）· **证据**（`文件:行号` 或守门退出码）。
+> - **判定口径**：`仍生效` ＝ 该坑描述的错误做法**今天仍可能发生**（触发条件仍存在）；
+>   `已闭环` ＝ **本条记录的那个具体实例**已被消除且**有证据指针**；
+>   `待核实` ＝ 判不了（**不许默认「仍生效」也不许默认「已闭环」**）。
+> - ⚠️ **本轮只改台账**（`docs/**`），**未复跑**任何代码侧守门 ⇒ 「已闭环」类条目的证据指向**上一次实测**，本轮只做「该实例是否仍在」的存在性复核。
+
+---
+
+## PIT-USERS-32 「`!= null &&` 这个防御写法，在 Go 那边对应的是**相反**的分支 · **状态：仍生效**
+
+> **旧号**：`P-01` ⇒ **新号**：`PIT-USERS-32`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核 user-rpc 的 null 防御分支时直接适用
+> **证据**：`service/users/user/user-rpc/.../service/UserDomainService.java` 里 `getUser` 的 null 守卫与 `login` 的 `status != null &&` 仍是**两种方向相反**的防御写法（Go 侧 `Status int64` 是值类型 ⇒ 扫 NULL 直接失败）⇒ 形态不变
+
 
 **现象**：`UserDomainService.getUser` 有一段显式守卫，注释写着
 
@@ -40,7 +57,12 @@ Java 侧 `Long` 是**引用类型**，扫不出问题，于是「防御 null」�
 
 ---
 
-## P-02 `@Transactional` 挂在 **mapper 接口的 `default` 方法**上，靠的是一件很容易被误读的事
+## PIT-USERS-33 `@Transactional` 挂在 **mapper 接口的 `default` 方法**上，靠的是一件很容易被误读的事 · **状态：仍生效**
+
+> **旧号**：`P-02` ⇒ **新号**：`PIT-USERS-33`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核 user-rpc 的事务边界时直接适用
+> **证据**：`UserAvatarHistoryMapper` 的 `@Transactional` 仍在**接口 default 方法**上，入口仍靠「调用方是另一个 Bean」（`UserDomainService.uploadAvatar()`）⇒ 「入口一旦被改成同 Bean 自调用就静默失效、零异常」仍成立
+
 
 **现象**：`UserAvatarHistoryMapper` 的 `createAvatarHistory` / `selectAvatarHistory`
 把 `@Transactional` 标在 **接口的 default 方法**上。这在直觉上是「肯定不生效」的那一类 ——
@@ -80,7 +102,12 @@ UserDomainService.uploadAvatar()            ← 不同 Bean
 
 ---
 
-## P-03 依赖是否真的被移除，**要查 classpath 而不是读 pom 的注释**
+## PIT-USERS-34 依赖是否真的被移除，**要查 classpath 而不是读 pom 的注释** · **状态：已闭环**
+
+> **旧号**：`P-03` ⇒ **新号**：`PIT-USERS-34`
+> **状态**：已闭环 · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 本轮不碰任何 pom / 依赖 ⇒ 触发面不落地
+> **证据**：**实例已闭环**：`service/users/admin/admin-rpc/pom.xml:99-110` 的注释明确记录 Flyway 三件套（`flyway-core` + `spring-boot-flyway` + `flyway-database-postgresql`）已**整体**移除（并写明「必须连 `spring-boot-flyway` 一起删」）⇒ users 域两个 rpc 的 classpath 上无 Flyway
+
 
 **现象**：`AGENTS.md` §6.3 问题 1 记「users 域把 Flyway 丢掉了，两个 rpc 的 Flyway 三件套全部从 pom 移除」，
 并且反复警告「**只删 `flyway-core` 不够**，只要 `spring-boot-flyway` 还在 classpath 上，
@@ -103,7 +130,12 @@ mvn -o -pl <module> dependency:list | grep -i flyway     # 必须零命中
 
 ---
 
-## P-04 「真 PG 测试跑绿了」和「这段行为与 Go 一致」是**两句话**
+## PIT-USERS-35 「真 PG 测试跑绿了」和「这段行为与 Go 一致」是**两句话** · **状态：仍生效**
+
+> **旧号**：`P-04` ⇒ **新号**：`PIT-USERS-35`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮写台账结论时直接适用
+> **证据**：绿测试只证明 RAG 一侧 ⇒ 每条结论仍须标**证据强度**（真 PG / 纯 Mockito / 静态源码 / 双侧活体对拍）并写明「双侧活体对拍 = 缺」
+
 
 **现象**：本轮 `mvn -o -pl service/users/user/user-rpc test` 出 **91/91 全绿**，
 其中 12 条跑在 Testcontainers `postgres:16-alpine` 上。作为「组件已验证」的证据看起来非常充分。
@@ -124,7 +156,12 @@ mvn -o -pl <module> dependency:list | grep -i flyway     # 必须零命中
 
 ---
 
-## P-05 「Go 源码里的错误文案是乱码」—— 拿它当基准之前，先把字节打印出来
+## PIT-USERS-36 「Go 源码里的错误文案是乱码」—— 拿它当基准之前，先把字节打印出来 · **状态：仍生效**
+
+> **旧号**：`P-05` ⇒ **新号**：`PIT-USERS-36`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核 Go 侧乱码文案时直接适用
+> **证据**：Go 真源 `service/user/user/rpc/internal/logic/` 下 3 个文件的 9 条 `status.Error` message 在**源码里**就是 GBK 双重编码乱码（真源冻结，不可改）⇒ 判定仍须按字节打印 hex
+
 
 **现象**：`internal/logic/` 下 3 个文件（`uploadavatarlogic.go` / `selectavatarlogic.go` /
 `getavatarhistorylogic.go`）的 9 条 `status.Error` message 在**源码里就是 GBK 双重编码乱码**，
@@ -153,7 +190,12 @@ python3 -c "print('鐢ㄦ埛涓嶅瓨鍦?'.encode('gbk').decode('utf-8','replace
 
 ---
 
-## P-06 「无出处 idiomatization」的**更贵形态**：给了一个**不存在的** Go 出处
+## PIT-USERS-37 「无出处 idiomatization」的**更贵形态**：给了一个**不存在的** Go 出处 · **状态：仍生效**
+
+> **旧号**：`P-06` ⇒ **新号**：`PIT-USERS-37`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮读任何「对应 Go 的 XXX」式注释时直接适用
+> **证据**：「假出处比无出处更贵」这形态不变（编译器不报、静态扫描不报，只有 grep 调用点能发现）⇒ 零调用点的类 + 解释性 javadoc 仍须逐一 grep
+
 
 **现象**：`UserExceptions.TokenBlacklistedException` 的 javadoc 写着
 
@@ -187,7 +229,12 @@ grep -rn 'PasswordMismatchException\|UsernameExistsException\|TokenBlacklistedEx
 
 ---
 
-## P-07 本组件的「不要动」清单（避免下一个 agent 制造新漂移）
+## PIT-USERS-38 本组件的「不要动」清单（避免下一个 agent 制造新漂移） · **状态：仍生效**
+
+> **旧号**：`P-07` ⇒ **新号**：`PIT-USERS-38`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮任何改动前都要回查这张表
+> **证据**：「不要动」清单 8 条仍全部有效（真源冻结 ⇒ 与 Go 一致的行为不得「顺手修掉」）⇒ 这张表是本组件改动的第一道查表
+
 
 以下是**看起来像缺陷、实际是与 Go 一致**的点。改动它们会**新增**漂移，不是修复。
 

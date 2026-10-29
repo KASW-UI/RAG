@@ -24,6 +24,27 @@
 > · **🏷 候选** —— 同上，但**尚未签字**（登记即交付物，**不占用拍板额度**）—— **本档现无候选**；
 > · **撤销记录** —— 原条目**前提被实测证伪** ⇒ 它**不是**偏离，见下方「撤销记录」。
 
+## 🆕 2026-10-29 逐条重核结论（台账对齐 phase · W-E lane）
+
+> **判定口径**：`docs/Intentional_Deviations/_INDEX.md:34` ——「被签字描述的那个行为**已不存在** ⇒ 本条签字**自动失效** ⇒ 不计入计数」。
+> **方法**：**回 Go 真源 + 回 RAG 源码两侧核**（真源 = `Sea-RideTheWind_golang`，冻结只读）。
+> **撞号检查**：`DEV-FAV-RPC-001..007` **全域唯一**（`grep -rhoE "DEV-FAV-[A-Z]+-[0-9]+" docs/Intentional_Deviations/` ⇒ 每个编号只对应**一条**偏离；
+> 跨文件引用都指向同一条）⇒ **无撞号** ⇒ **不需要** `SD-<编号>@<域>` 别名。
+> ⚠️ **注意 `DEV-FAV-RPC-002` / `-005` 各出现两次**（一次在顶部「撤销记录」节、一次在正文标题）—— **同一条撤销记录的两个落点**，**不是**两条不同偏离 ⇒ **不构成撞号**。
+
+| ID | 结论 | 证据（核对日期 2026-10-29） |
+|---|---|---|
+| `DEV-FAV-RPC-001` | ✅ **仍成立** | Go 侧指标名仍是 `favorite_request_seconds_counter`（`service/favorite/rpc/internal/metrics/metrics.go:25` `Name: "request_seconds_counter"` + `Subsystem: "favorite"`）⇒ Prometheus 渲染 `favorite_request_seconds_counter`；RAG 侧仍用 Micrometer `Counter` ⇒ 渲染成 `favorite_request_seconds_counter_total`（`service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/metrics/FavoriteRpcMetrics.java:21` 的表格行 + `FavoriteRpcMetricsResultTagTest.java:143` 钉住 counter 名）⇒ 差异未变 |
+| `DEV-FAV-RPC-003` | ✅ **仍成立** | RAG 侧仍**不调 `System.exit`**：`service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/fact/FavoriteLegacyPreflightRunner.java:53`（「**刻意不调 `System.exit`**：那会连带杀掉同一个 JVM 里的 gRPC 服务」）⇒ 改为结构化日志；Go 侧 `cmd/fact-legacy-preflight/main.go` 仍是独立进程 + 退出码 ⇒ 差异未变 |
+| `DEV-FAV-RPC-004` | ✅ **仍成立** | RAG 侧仍由**配置项**门禁整个端点：`service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/fact/FavoriteAuthorityEndpointConfig.java:118` `@ConditionalOnProperty(prefix = "favorite.fact.authority", name = "enabled", havingValue = "true")` ⇒ 默认**零 HTTP 端口**、配置不完整时**不注册端点但进程照常跑**；Go 侧 `cmd/fact-authority/main.go` 仍是独立进程、配置不满足即 **exit 1** ⇒ 差异未变 |
+| `DEV-FAV-RPC-006` | ✅ **仍成立** | 12 处**标识符**差异仍在：`tools/ddl-parity-probe/favorite/expected.txt` 的 OBS 段共 **13 行**，其中 **`OBS\tname\t…` 恰 12 行**（3 索引 + 9 约束），另 1 行是 `OBS\tsemantic\t…`（= `-007` 那条）⇒ 与「12 处命名差异」的口径**逐条对上**；RAG 侧仍是**显式命名**（`service/favorite/favorite-rpc/src/main/resources/db/migration/V6__align_favorite_schema_with_go.sql:74` `CHECK (aggregate_version IN (1, 2))`、`:133` `ADD CONSTRAINT favorite_legacy_marker_favorite_id_positive …` 等）⇒ 差异未变 |
+| `DEV-FAV-RPC-007` | ✅ **仍成立** | RAG 侧仍**多一道** CHECK：`service/favorite/favorite-rpc/src/main/resources/db/migration/V6__align_favorite_schema_with_go.sql:57-61`（`ADD CONSTRAINT favorite_item_target_revision_scope CHECK (target_revision IS NULL OR (target_type = 'article' AND target_revision <> ''))`）；Go 侧 `favorite_item` 仍**无任何 CHECK**（同语义的复合 CHECK 只在 `service/favorite/rpc/internal/model/004_favorite_legacy_fact_marker.sql` 的 marker 表上）⇒ 差异未变（探针 OBS 段的 `OBS\tsemantic\tcon\tfavorite_item\t…` 一行即这条） |
+| ~~`DEV-FAV-RPC-002`~~ | ❌ **撤销成立**（撤销的那个行为**现在**确实没了） | 原结论「Go 侧 `create_favorite_logic.go:89` 与 `get_favorites_by_folder_logic.go:68` 在 **item** 流程里用了 `folderModule` ⇒ Go 写错」—— **实测仍被证伪**：`service/favorite/rpc/internal/logic/create_favorite_logic.go:79` 是 `FindFolderByFolderId`、其失败分支 `:89` 记 `folderModule` ⇒ **正确**（该行仍长这样）⇒ ⇒ **Go 侧 label 仍自洽** ⇒ **两侧仍一致** ⇒ 本条**仍然不是偏离** ⇒ 维持撤销 |
+| ~~`DEV-FAV-RPC-005`~~ | ❌ **撤销成立**（撤销的那个行为**现在**确实没了） | 原结论「权威读的单次 lookup 3s 超时未接到 DB 查询」—— **实测该行为已消失**：RAG 侧仍把 3s 预算绑到 SQL —— `service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/fact/FavoriteAuthorityEndpointConfig.java:135` `GO_LOOKUP_TIMEOUT_MILLIS = 3_000L` + `:276` `DeadlineState.bindToCurrent(System.currentTimeMillis() + GO_LOOKUP_TIMEOUT_MILLIS)`；守门 `service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/fact/FavoriteAuthorityLookupTimeoutTest.java` 在 ⇒ ⇒ **不再是偏离** ⇒ 维持撤销 |
+| ~~原 U5~~ | ❌ **撤销成立**（撤销的那个行为**现在**确实没了） | 原结论「Go 侧 **21 处**错误返回因未赋值命名返回值 `err` 被记成 `success`」—— **实测仍被证伪**：① Go 的命名返回值确实存在（`service/favorite/rpc/internal/logic/create_favorite_logic.go:38` 的签名 `(resp *favoritepb.CreateFavoriteResp, err error)`）⇒ `return nil, favoritecommon.GRPCError(...)` **会**把 `err` 赋上 ⇒ defer 里的 `ObserveRPC` 看到**非 nil** ⇒ 记 `fail`；② 那个「21」实测是 **22 处**（`grep -c "return nil, favoritecommon.GRPCError" service/favorite/rpc/internal/logic/*.go` ⇒ **22**）⇒ ⇒ **两侧本来就一致** ⇒ 维持撤销 |
+
+> ⚠️ **计数影响**：本域 **5 条已签字全部仍成立** ⇒ **主线更新 `docs/Intentional_Deviations/_INDEX.md` 时本域无需减项**（本 lane 不写共享索引）。
+
 ---
 
 ## 撤销记录 · 原 U5（`ObserveRPC` 的 `result` 标签）· ❌ **撤销**

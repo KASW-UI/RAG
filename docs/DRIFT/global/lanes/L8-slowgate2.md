@@ -31,7 +31,7 @@
 | `service/message/message-rpc` | 🔴 **slow threshold 轴守门**（新建 1 个测试类） |
 | `service/hot/hot-rpc` | 🔴 **slow threshold 轴守门**（新建 1 个测试类） |
 
-⚠️ **user-rpc / message-rpc 已经有 X-5 轴的守门**（L2 建的 `UserRpcGrpcInterceptorWiringTest` / `MessageRpcTimeoutGateTest`）
+⚠️ **user-rpc / message-rpc 已经有 CD-5 轴的守门**（L2 建的 `UserRpcGrpcInterceptorWiringTest` / `MessageRpcTimeoutGateTest`）
 ⇒ **不要动它们** ⇒ 本 lane 只**新建** slow 轴的测试类。
 ⚠️ **hot-rpc 的 `HotGrpcInterceptorWiringTest` 已被 L2 加固过**（latch 取代 sleep）⇒ 同样**不要动**。
 
@@ -46,7 +46,7 @@
 
 | 样板 | 路径 | 它示范什么 |
 |---|---|---|
-| **X-5 轴** | `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcGrpcInterceptorWiringTest.java` | **真 server + 真链 + 判别式断言**（服务端超时真的打断了在飞处理） |
+| **CD-5 轴** | `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcGrpcInterceptorWiringTest.java` | **真 server + 真链 + 判别式断言**（服务端超时真的打断了在飞处理） |
 | **slow 轴** | `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcSlowThresholdGateTest.java` | **真 OTel SDK + 收集型 exporter** ⇒ 断言导出的 span 上真的有 `sea.slow` |
 | **latch 加固版** | `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotGrpcInterceptorWiringTest.java` | `sleep` ⇒ `latch` 的改造形态 |
 
@@ -216,7 +216,7 @@
 
 | # | 未覆盖的部分 | 卡在哪 | 代价估算 |
 |---|---|---|---|
-| ① | **超时轴（X-5）本 lane 完全没做** | 三域已有守门（`UserRpcGrpcInterceptorWiringTest` / `MessageRpcTimeoutGateTest` / `HotGrpcInterceptorWiringTest`）⇒ 任务书要求**不要动** | — （已由既有守门覆盖） |
+| ① | **超时轴（CD-5）本 lane 完全没做** | 三域已有守门（`UserRpcGrpcInterceptorWiringTest` / `MessageRpcTimeoutGateTest` / `HotGrpcInterceptorWiringTest`）⇒ 任务书要求**不要动** | — （已由既有守门覆盖） |
 | ② | **`sea.timeout` 与 `sea.slow` 互斥**（Go `rpc.go:86-89`：只有 `err == nil` 才走 slow 判定） | 本 lane 两个用例**都走 OK 分支** ⇒ 「超时的调用**不**带 `sea.slow`」**没有**逐域证据 | **低-中**：在同一模块加第 2 个 `@SpringBootTest` 类（`rpc-timeout=50ms` + 占用 300ms ⇒ 服务端超时 ⇒ 断言 span 上**无** `sea.slow`）⇒ 每域多一次上下文启动（≈ 40~60s） |
 | ③ | **`RpcInterceptor.handle(...)` 这条非 gRPC Server 的入口** | 它走同一个 `markRpcResult` ⇒ 共享层同一处实现 ⇒ 本 lane 的三个 gRPC 守门**不能**证明它被走到 | **低**：直接调用 `handle(...)` 即可（不需真 server）⇒ 但它**不在** grpc server 链上 ⇒ 属**共享层**维度 ⇒ 归 `global/common-tails`，**不归本 lane** |
 | ④ | **env var 兜底路径**（`SEA_OBSERVABILITY_SLOW_THRESHOLD[_MS]`） | 本 lane 走的是 Spring 配置路径（`observability.slow-threshold`）⇒ env 兜底**没有**逐域证据 | **低**：同一条守门加一个 `SEA_OBSERVABILITY_SLOW_THRESHOLD` 环境变量的 `@SpringBootTest` 变体即可（env 变量在 surefire 侧需另配） |
@@ -243,5 +243,5 @@
 **slow 判定这一个轴，user-rpc / message-rpc / hot-rpc 三域各自都拿到了「逐域证据」** ——
 每个域都能证明「**本域的链真的走到了 slow 分支**」，且 3 个变异（恒真 / 恒假 / 忽略本域配置）
 在每个域都**红在目标断言上** ⇒ 这三份守门**非空转**。
-⚠️ **但这不等于「已全部对齐」**：超时轴（X-5）本 lane 没做、slow 与 timeout 的互斥关系、
+⚠️ **但这不等于「已全部对齐」**：超时轴（CD-5）本 lane 没做、slow 与 timeout 的互斥关系、
 `handle(...)` 入口、env 兜底、逐方法穷尽、并发形态 —— 见 §7.6。

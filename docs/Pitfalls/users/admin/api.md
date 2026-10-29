@@ -8,7 +8,24 @@
 
 ---
 
-## P-ADMINAPI-001 · 断言「ctx 里的某个值是什么」必须把**写入侧**也读完
+> **📌 2026-10-29 台账对齐轮 · 编号与状态口径**（本轮新增；**只增不删**，旧内容一律保留）
+>
+> - **新号段**：`PIT-USERSADM-01 … PIT-USERSADM-17`（旧号 `P-ADMINAPI-001 … 017`）⇒ **逐条对照**写在每个条目首的「**旧号** ⇒ **新号**」行里。
+> - **状态字段**：每个条目标题行尾以 `· **状态：X**` 标注（取值域：`仍生效` / `已闭环` / `已撤销` / `待核实`），
+>   条目首的引用块给出 **核对日期（2026-10-29）** · **是否影响当前轮次**（填「否」时写明不适用的具体原因）· **证据**（`文件:行号` 或守门退出码）。
+> - **判定口径**：`仍生效` ＝ 该坑描述的错误做法**今天仍可能发生**（触发条件仍存在）；
+>   `已闭环` ＝ **本条记录的那个具体实例**已被消除且**有证据指针**；
+>   `待核实` ＝ 判不了（**不许默认「仍生效」也不许默认「已闭环」**）。
+> - ⚠️ **本轮只改台账**（`docs/**`），**未复跑**任何代码侧守门 ⇒ 「已闭环」类条目的证据指向**上一次实测**，本轮只做「该实例是否仍在」的存在性复核。
+
+---
+
+## PIT-USERSADM-01 · 断言「ctx 里的某个值是什么」必须把**写入侧**也读完 · **状态：仍生效**
+
+> **旧号**：`P-ADMINAPI-001` ⇒ **新号**：`PIT-USERSADM-01`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核 users/admin 域的鉴权与身份来源时直接适用
+> **证据**：Go 侧 `service/user/common/jwt/jwt.go:8-11` 只签 `userId` 一个 claim、go-zero `rest/handler/authhandler.go:72-78` 把 **claim 名**写进 ctx ⇒ 「ctx 里有什么 = token 里有什么」不变 ⇒ 断言 ctx 值必须回读写入侧
+
 
 - **现象**：第一遍读 Go 时，`banuserlogic.go:36-39` 看着像「取当前管理员 uid」：
   ```go
@@ -42,7 +59,12 @@
 
 ---
 
-## P-ADMINAPI-002 · 「更严格的校验」是最难自查的一类漂移，因为它写得太自然
+## PIT-USERSADM-02 · 「更严格的校验」是最难自查的一类漂移，因为它写得太自然 · **状态：仍生效**
+
+> **旧号**：`P-ADMINAPI-002` ⇒ **新号**：`PIT-USERSADM-02`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核 admin-api 身份层时直接适用
+> **证据**：`service/users/admin/admin-api/.../service/IdentityResolver.java:100-103`（`uid <= 0` 抛错）与 `:133-136`（`admin.getUid() != uid` 抛错）两道 **Go 侧没有**的检查仍在 ⇒ 「更严格的校验」这一类漂移仍会复现
+
 
 - **现象**：`IdentityResolver.resolveAdmin` 里有两道检查，注释齐全、命名规范、单元测试友好：
   ```java
@@ -70,7 +92,12 @@
 
 ---
 
-## P-ADMINAPI-003 · 读 `json:",omitempty"` 时不能只看 tag 名：它对 struct 无效
+## PIT-USERSADM-03 · 读 `json:",omitempty"` 时不能只看 tag 名：它对 struct 无效 · **状态：仍生效**
+
+> **旧号**：`P-ADMINAPI-003` ⇒ **新号**：`PIT-USERSADM-03`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核响应体字段存在性时直接适用
+> **证据**：Go `service/user/admin/api/internal/types/types.go:72` 的 `json:"user,omitempty"` 不变（Go 的 omitempty 对 struct 永远不生效）；RAG 侧仍 `if (hasUser())` 才 set ⇒ 字段整体消失的形态仍在
+
 
 - **现象**：`types.go:72` 写着 `User UserInfo \`json:"user,omitempty"\``，
   RAG 侧照着写了 `@JsonInclude(NON_NULL)` + `if (hasUser()) setUser(...)`。
@@ -93,7 +120,12 @@
 
 ---
 
-## P-ADMINAPI-004 · `standaloneSetup` 测 advice，**测不到 Filter 与容器时序** —— 而本组件的测试全是 `MOCK`
+## PIT-USERSADM-04 · `standaloneSetup` 测 advice，**测不到 Filter 与容器时序** —— 而本组件的测试全是 `MOCK` · **状态：仍生效**
+
+> **旧号**：`P-ADMINAPI-004` ⇒ **新号**：`PIT-USERSADM-04`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮若给 admin-api 补守门时直接适用
+> **证据**：admin-api 的 `@SpringBootTest` 仍是 `webEnvironment = MOCK`；真 Tomcat 证据靠 `AdminApiRealTomcatResponseBytesTest`（2026-10-28 新增）⇒ 「standaloneSetup / MOCK 测不到容器时序」的形态仍在
+
 
 - **现象**：本组件 5 个 `@SpringBootTest` 全部是 `webEnvironment = SpringBootTest.WebEnvironment.MOCK`，
   而 `AdminResponseEnvelopeAdviceTest` 更早一层，用的是 `MockMvcBuilders.standaloneSetup`。
@@ -122,7 +154,12 @@
 
 ---
 
-## P-ADMINAPI-005 · 「统一异常类型」会把业务码一起统一掉
+## PIT-USERSADM-05 · 「统一异常类型」会把业务码一起统一掉 · **状态：仍生效**
+
+> **旧号**：`P-ADMINAPI-005` ⇒ **新号**：`PIT-USERSADM-05`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核 admin-api 鉴权失败响应时直接适用
+> **证据**：`service/users/admin/admin-api/.../advice/GlobalExceptionHandler.java:59-70` 仍把 `AuthenticationException` 统一成 401 + envelope（业务码取 `e.getCode()`）⇒ 「统一异常类型会把业务码一起统一掉」仍在
+
 
 - **现象**：黑名单命中时，Go 输出 `401` + `{"code":401,"msg":"登录已失效,请重新登陆"}`；
   RAG 输出 `401` + `{"code":1006,"msg":"TOKEN已过期","data":null}`。
@@ -146,7 +183,12 @@
 
 ---
 
-## P-ADMINAPI-006 · 台账里的**计数**（几个 client / 几个 Service）也要 grep 复核
+## PIT-USERSADM-06 · 台账里的**计数**（几个 client / 几个 Service）也要 grep 复核 · **状态：仍生效**
+
+> **旧号**：`P-ADMINAPI-006` ⇒ **新号**：`PIT-USERSADM-06`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮写本域台账里的「N 个 client / N 个 Service」类计数时直接适用
+> **证据**：「注释和 yaml 只是声明、不是证据」不变（本条点名的 `grpc.client.user-rpc` 死配置段仍需重核是否已清）⇒ 资产计数仍须 `grep` 复核
+
 
 - **现象**：任务简报里写「本组件有 **2 个 client**：admin-rpc **和** user-rpc，这**两个 rpc 都在被并行审查**」，
   依据是 `AGENTS.md` §4.2 Phase 4。实测：
@@ -172,7 +214,12 @@
 
 ---
 
-## P-ADMINAPI-007 · 「401 空 body」这类**已签字**条目，签字范围要按**维度**拆开写
+## PIT-USERSADM-07 · 「401 空 body」这类**已签字**条目，签字范围要按**维度**拆开写 · **状态：仍生效**
+
+> **旧号**：`P-ADMINAPI-007` ⇒ **新号**：`PIT-USERSADM-07`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核签字档与新发现的归属时直接适用
+> **证据**：本域签字现已**按维度拆开**（N-1 签 body 形状 · SD-2026-10-23-08 签黑名单业务码 · SD-2026-10-23-01 签 claim 校验 · N-4 签取值）⇒ 但「同一条按代码位置签 ⇒ 盖不住触发条件维度」的形态仍在，每条新发现仍须问「落在我已签字那条的哪个维度」
+
 
 - **现象**：`admin/_shared.md` 的 **N-1** 签的是「鉴权短路统一成 HTTP 401 + 完整 envelope」。
   它确实覆盖了：Go 的 `authhandler.go:121` 写 401（body 空）⇢ RAG 写 401（body envelope）。
@@ -193,7 +240,12 @@
 
 ---
 
-## P-ADMINAPI-008 · 「多一层设计」的代价要**在层边界**上记账，而不是在实现文件里
+## PIT-USERSADM-08 · 「多一层设计」的代价要**在层边界**上记账，而不是在实现文件里 · **状态：仍生效**
+
+> **旧号**：`P-ADMINAPI-008` ⇒ **新号**：`PIT-USERSADM-08`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核中间件顺序类结论时直接适用
+> **证据**：`service/common/.../spring/HttpMiddlewareFilter.java:41`（Servlet Filter，容器外）与 `JwtAuthInterceptor`（HandlerInterceptor，容器内）仍是**两层容器** ⇒ 相对顺序事实不变
+
 
 - **现象**：`HttpMiddlewareFilter`（servlet Filter）在 `AdminJwtAuthInterceptor`（HandlerInterceptor）**外层**；
   Go 的对应关系是 observability 中间件在 Authorize **内层**（`rest/engine.go:108-112` 的 append 顺序）。
@@ -217,7 +269,12 @@
      不要伪装成待办 —— 否则台账会被「看起来像缺陷的等价差异」淹没。
 ---
 
-## P-ADMINAPI-009 · 🔴 **最小上下文 ≠ 生产装配**：全局 client 拦截器会把 gRPC channel「包掉」
+## PIT-USERSADM-09 · 🔴 **最小上下文 ≠ 生产装配**：全局 client 拦截器会把 gRPC channel「包掉」 · **状态：仍生效**
+
+> **旧号**：`P-ADMINAPI-009` ⇒ **新号**：`PIT-USERSADM-09`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核 gRPC client 装配时直接适用
+> **证据**：当前修法走 devh 的 `grpc.client.<name>.immediate-connect-timeout`（不摸 channel 具体类型）⇒ 但生产仍有全局 client 拦截器（`service/common/.../protection/GoStyleGrpcClientBreakerInterceptor`）⇒ 「最小上下文 ≠ 生产装配」的形态对新断言仍成立
+
 
 > 本轮（2026-10-24）ADMINAPI-009 的 **v1 修法被真栈推翻**，代价是「admin-api 在任何环境下都起不来」。
 > 这是本仓至今最贵的一次假绿，**根因不是写错了，是「测的装配 ≠ 生产的装配」**。
@@ -261,7 +318,12 @@
 
 ---
 
-## P-ADMINAPI-010 · 「503 + 空 body」在 `service/common` 里有**三个来源** ⇒ 光看 503 归不了因
+## PIT-USERSADM-10 · 「503 + 空 body」在 `service/common` 里有**三个来源** ⇒ 光看 503 归不了因 · **状态：仍生效**
+
+> **旧号**：`P-ADMINAPI-010` ⇒ **新号**：`PIT-USERSADM-10`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核 503 归因时直接适用
+> **证据**：`service/common` 三条「503 + 空 body」路径仍在（worker-pool 饱和 / `GoStyleCpuSheddingFilter` 自适应 CPU  shedding / `GoStyleMaxConnsFilter`）⇒ 「光看 503 归不了因」不变
+
 
 - **现象**：300 并发压测 admin-api，观察到 **100 次「503 + 空 body」**
   ⇒ 直觉结论：「worker-pool 饱和分支触发了」。
@@ -290,7 +352,12 @@
 
 ---
 
-## P-ADMINAPI-011 · bash：`$VAR` 后面紧跟**全角标点**，全角字符会被并进变量名
+## PIT-USERSADM-11 · bash：`$VAR` 后面紧跟**全角标点**，全角字符会被并进变量名 · **状态：仍生效**
+
+> **旧号**：`P-ADMINAPI-011` ⇒ **新号**：`PIT-USERSADM-11`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 本轮不改任何 `.sh` 脚本 ⇒ 触发面不落地
+> **证据**：**本条实例已闭环**：本条点名的 `tools/difftest/run.sh` 两处已修（2026-10-29 实测 `\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7F]` 命中 = 0，原 `$a（` / `$j，` 已改 `${a}` / `${j}`）⇒ bash + UTF-8 locale 的通用形态仍在
+
 
 - **现象**：脚本里 `echo "退出码 = $RC（期望 ...）"` 在 `set -u` 下直接
   `RC（: unbound variable` ⇒ 脚本在**最该给出结论的那一行**崩掉。
@@ -322,7 +389,12 @@
 
 ---
 
-## P-ADMINAPI-012 · `docker exec` 不带 `-i` ⇒ **heredoc 里的 SQL 根本没进去**，而且**不报错**
+## PIT-USERSADM-12 · `docker exec` 不带 `-i` ⇒ **heredoc 里的 SQL 根本没进去**，而且**不报错** · **状态：仍生效**
+
+> **旧号**：`P-ADMINAPI-012` ⇒ **新号**：`PIT-USERSADM-12`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 本轮不写也不跑夹具复位脚本 ⇒ 触发面不落地
+> **证据**：`docker exec` 默认不接 stdin ⇒ `psql <<SQL` 不进容器且 exit 0 的形态不变；仓内 `tools/difftest/reset-admin-fixtures.sh` 一类脚本仍是这一形态
+
 
 - **现象**：写了个「复位 admin 夹具」的脚本（`tools/difftest/reset-admin-fixtures.sh`），
   跑完打印「✓ 密码已复位」，**数据库里的值却一个字没变**。
@@ -345,7 +417,12 @@
 
 ---
 
-## P-ADMINAPI-013 · 差分脚本的**夹具不是幂等的** ⇒ 第二轮跑出来的全是假 DIFF
+## PIT-USERSADM-13 · 差分脚本的**夹具不是幂等的** ⇒ 第二轮跑出来的全是假 DIFF · **状态：仍生效**
+
+> **旧号**：`P-ADMINAPI-013` ⇒ **新号**：`PIT-USERSADM-13`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 本轮不跑 `diff.py --scenario admin` 差分 ⇒ 触发面不落地
+> **证据**：`tools/difftest/diff.py` 的 admin 场景表仍含会改状态的动作（改密码 / 固定用户名 / 注销写黑名单）⇒ 夹具不幂等 ⇒ 第二轮全红是假 DIFF 的形态不变
+
 
 - **现象**：`diff.py --scenario admin` 第一轮 22 步里 12 步逐字相同；
   第二轮**几乎全红**（Go 侧 `admin.login` 直接 1002「用户名或密码错误」）。
@@ -376,7 +453,12 @@
 
 ---
 
-## P-ADMINAPI-014 · 🔴 跑模块测试**不带 `-am`** ⇒ 依赖模块从**共享 `~/.m2`** 取 jar ⇒ 可能测的是**别的 worktree 的代码**
+## PIT-USERSADM-14 · 🔴 跑模块测试**不带 `-am`** ⇒ 依赖模块从**共享 `~/.m2`** 取 jar ⇒ 可能测的是**别的 worktree 的代码** · **状态：仍生效**
+
+> **旧号**：`P-ADMINAPI-014` ⇒ **新号**：`PIT-USERSADM-14`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮跑 users 域模块测试即依赖该纪律
+> **证据**：`service/users/users-common` 仍是独立模块 + 本仓并发多 worktree 共用同一个 `~/.m2` ⇒ 不带 `-am` 仍可能测到别的 worktree 的 jar
+
 
 - **现象**：本轮跑 admin-rpc 测试，得到 4 条**红**：
   ```
@@ -422,7 +504,12 @@
 
 ---
 
-## P-ADMINAPI-015 · `baseline-on-migrate: true` + 默认 `baseline-version=1` ⇒ **V1 迁移被静默吞掉**
+## PIT-USERSADM-15 · `baseline-on-migrate: true` + 默认 `baseline-version=1` ⇒ **V1 迁移被静默吞掉** · **状态：已闭环**
+
+> **旧号**：`P-ADMINAPI-015` ⇒ **新号**：`PIT-USERSADM-15`
+> **状态**：已闭环 · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 本轮不碰任何 Flyway 配置 ⇒ 触发面不落地
+> **证据**：**实例已闭环**：启用 Flyway 的模块已显式钉 `baseline-version: 0`（如 `service/comment/comment-rpc/src/main/resources/application.yml:89-99`、`service/article/article-rpc/src/main/resources/application.yml:55-76`）⇒ V1 不再被 baseline 静默吞；⚠️ 残留风险：新增模块仍可能忘钉（本条形态即为此而写）
+
 
 - **现象**：`difftest` 栈起来后，`assert_tables` 报 `rag_db.message_notification 不存在`
   ⇒ 但 message-rpc 的迁移文件 `V1__create_message_notification.sql` **明明在**，
@@ -456,7 +543,12 @@
 
 ---
 
-## P-ADMINAPI-016 · 🔴 读框架源码推中间件顺序时，**漏掉 `Disable*` 开关** ⇒ 把「真实存在的差异」误判成「不成立」
+## PIT-USERSADM-16 · 🔴 读框架源码推中间件顺序时，**漏掉 `Disable*` 开关** ⇒ 把「真实存在的差异」误判成「不成立」 · **状态：仍生效**
+
+> **旧号**：`P-ADMINAPI-016` ⇒ **新号**：`PIT-USERSADM-16`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮读 Go 侧中间件链序时直接适用
+> **证据**：Go 侧 `observability.DisableNativeRestTimeout(&c.RestConf)`（`service/user/admin/api/internal/admincenter.go:34` → `observability/http.go:32`）仍是个「签名看不出它改了配置」的开关 ⇒ 推链序仍须先 grep `Disable`/`With`/`Enable`
+
 
 - **场景**：2026-10-24「台账 vs 实际」复核轮，要核实台账里
   `DRIFT-ADMINAPI-006 ②`（Go 的 3s 超时计时器从哪起算）。
@@ -502,7 +594,12 @@
 
 ---
 
-## P-ADMINAPI-017 · 🔴 「假订正」比「漏订正」更危险 —— 它会**静默覆盖一条本来正确的事实**
+## PIT-USERSADM-17 · 🔴 「假订正」比「漏订正」更危险 —— 它会**静默覆盖一条本来正确的事实** · **状态：仍生效**
+
+> **旧号**：`P-ADMINAPI-017` ⇒ **新号**：`PIT-USERSADM-17`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮改台账里的行号引用时直接适用
+> **证据**：「范围类引用要先算包含关系再决定改不改」+「订正必须留原文」两条纪律不变 ⇒ 本轮所有订正一律保留原值并追加 2026-10-29 结论
+
 
 - **场景**：2026-10-24 复核轮，台账 `rpc.md` 的 H-2 行写着
   「`.last("FOR UPDATE")`（`AdminCreateAtomicService.java:116-120`）」。

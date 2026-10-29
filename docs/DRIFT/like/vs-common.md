@@ -32,11 +32,11 @@
 
 | 编号 | 摘要 | 落点（**读消费点后判定**） | 状态（**2026-10-27 核对**） | 证据 | 域台账 |
 |---|---|---|---|---|---|
-| 🔴 `DRIFT-LIKEAPI-015` | `Content-Type` **大小写**判据 | `service/common`（`GoStyleJsonBodyConverter`） | ✅ **已修**（**旧快照「未修」过期**）—— 共享层 T-1（2026-10-25）已落码 | `GoStyleJsonBodyConverter.java:331`（`getFirst(CONTENT_TYPE)` = **原始头值**）→ `:334` → `:241-245`（`contentType.contains("application/json")` = **大小写敏感**）；Go `go-zero@v1.10.2/rest/httpx/requests.go:153-154`（`strings.Contains(r.Header.Get(...))`，**同样大小写敏感**） | [`api.md`](api.md) |
+| ✅ `DRIFT-LIKEAPI-015` | `Content-Type` **大小写**判据 | `service/common`（`GoStyleJsonBodyConverter`） | ✅ **已修**（**旧快照「未修」过期**）—— 共享层 T-1（2026-10-25）已落码 | `GoStyleJsonBodyConverter.java:331`（`getFirst(CONTENT_TYPE)` = **原始头值**）→ `:334` → `:241-245`（`contentType.contains("application/json")` = **大小写敏感**）；Go `go-zero@v1.10.2/rest/httpx/requests.go:153-154`（`strings.Contains(r.Header.Get(...))`，**同样大小写敏感**） | [`api.md`](api.md) |
 | `DRIFT-LIKEAPI-017` | 单次 RPC 超时：Go 固定 2000ms | ⚠️ **本域** `service/like/like-api/**`（**旧列写 `service/common` = 错**） | ✅ **已修**（**旧快照「未修」过期**；第五轮已改判为域内可修） | `LikeRpcClient.java:135-146`（`min(capMillis, remainingMillis)`）+ `LikeApiProperties.java:125`（默认 2000ms）+ 守门 `LikeRpcTimeoutCapTest.java:82`；Go `go-zero@v1.10.2/zrpc/config.go:31` | [`api.md`](api.md) |
 | `DRIFT-LIKE-006` | 模块从未做 Spring 上下文加载测试 | 域侧测试 | ✅ **已闭合**（**旧快照「部分过期」应更新为已闭合**） | `LikeRpcSpringContextWiringTest.java:64-84`（`@SpringBootTest(classes=LikeRpcApplication.class)` + 真 PG Testcontainers `:87-91` + `@DynamicPropertySource` `:93-98`）⇒ **真能触发上下文加载** | [`rpc.md`](rpc.md) |
 | `DRIFT-LIKE-013`~`016` | 「服务起不来」族 | 域侧（各条落点各异，均在本域） | ✅ **全部已修**（**旧快照过期**） | 013 `application.yml:183` `discovery:///message-rpc`（三斜杠）+ 守门 `LikeRpcProductionAddressTest.java:104-114`；014 `config/MybatisPlusOrderingBridgeAutoConfiguration.java` + `AutoConfiguration.imports`；015 `like-rpc/pom.xml:156-159` `spring-boot-kafka`；016 `config/Jackson2ObjectMapperConfiguration.java` + `LikeRpcApplication.java:98` | [`rpc.md`](rpc.md) |
-| ✅ `DRIFT-HOTAPI-030` | Tomcat 参数个数口径 | `service/common`（X-6 已落码 6 类） | ✅ **已落地**（本域只确认 `mode` 与 Go 同向） | 共享层 6 类在位；本域消费点 `application.yml:125` `mode: envelope`；Go `service/like/api/likecenter.go:48` 注册 `httpx.SetErrorHandler` ⇒ **同向** ✅ | [`api.md`](api.md) |
+| ✅ `DRIFT-HOTAPI-030` | Tomcat 参数个数口径 | `service/common`（`CD-6`〔旧号 `X-6`〕已落码 6 类） | ✅ **已落地**（本域只确认 `mode` 与 Go 同向） | 共享层 6 类在位；本域消费点 `application.yml:125` `mode: envelope`；Go `service/like/api/likecenter.go:48` 注册 `httpx.SetErrorHandler` ⇒ **同向** ✅ | [`api.md`](api.md) |
 
 ⇒ **§1 五条 ⇒ 新派 G4 反馈单 = 0 条**（4 条已修/已闭合 + 1 条已落地）。
 ⇒ **跨域待办关闭**：`DRIFT-MSG-V-029`（`like-rpc` 缺 `baseline-version: 0`）⇒ **已修**（`like-rpc/application.yml:78` `baseline-version: 0` + `:81` 独立账本表名 + 守门 `LikeFlywaySharedSchemaGateTest.java:159-163`）⇒ message 域台账里「🟡 留给 like 域」的挂账 **可以关掉**。
@@ -291,7 +291,7 @@ G4 回执 ④ 声称「共享层 `Observability.mark*` 是**显式传 ctx** ⇒ 
    - 🔴 **FB-S2 · `tools/difftest/check-wave-coupling.py`**：我树 **EXIT=1**（6 条 `common_radiation` 漂移）；主干与 G4 树 **EXIT=0**
      ⇒ **其中 2 条与本域相关**：`GoStyleGrpcClientBreakerInterceptor` 增 `like`（**生产代码** `LikeRpcClient`）· `MqConsumer` 增 `like`（**生产代码** `LikeUpdateKafkaListener`）
      ⇒ ⇒ 另 4 条是 **task 域**的（`GoStyleFormLimitMode` / `GoStyleFormValueLimitInterceptor` / `GoStyleRpcBreakerInterceptor` / `GoStyleRpcSheddingInterceptor` ⇒ **全部来自 `src/test/` 的 import**，**本域与 task 生产代码对这些类的 import = 0**）
-     ⇒ ⇒ **根因 = 快照过期，不是代码回退**：`docs/DRIFT/_cross/cross-domain-coupling.md`（**744 行 · 三棵树逐字相同**）的 `<!-- wave-coupling-snapshot -->` 块**未含 X-6(task) 与 A9(like) 的接入** ⇒ ⇒ **文档三棵树一致 + 主干/G4 树绿 ⇒ 差异全部来自域侧接线代码**
+     ⇒ ⇒ **根因 = 快照过期，不是代码回退**：`docs/DRIFT/_cross/cross-domain-coupling.md`（**744 行 · 三棵树逐字相同**）的 `<!-- wave-coupling-snapshot -->` 块**未含 `CD-6`〔旧号 `X-6`〕(task) 与 A9(like) 的接入** ⇒ ⇒ **文档三棵树一致 + 主干/G4 树绿 ⇒ 差异全部来自域侧接线代码**
      ⇒ ⇒ **修法在 global 写权 ⇒ G4**：用 `python3 tools/difftest/check-wave-coupling.py --print` 的输出更新快照块（目标值已取到 = `/tmp/g2-coupling-target.json`）
 
 ⚠️ **E66 的硬约束（G4 已探明，落地前必须解决）**：

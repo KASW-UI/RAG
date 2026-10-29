@@ -7,7 +7,12 @@
 
 ---
 
-## PITFALL-MSG-R-001 「测试全绿」与「一次没起过」可以同时成立
+## PITFALL-MSG-R-001 「测试全绿」与「一次没起过」可以同时成立 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PITFALL-MSG-R-001` ⇒ **新号**：`PIT-MESSAGE-09`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「测试全绿」与「一次没起过」可以同时成立 —— 纯 Mockito 单测**不装配 Spring 上下文** ⇒ 该形态今天仍在 ⇒ 本轮凡以「测试全绿」当证据写进台账的状态，仍属无效证据（AGENTS.md §3.3.3 第 ② 条）。
+> **依据**：范式 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageTransactionWiringTest.java`（真 PG 8 例 · 删 `setConversationId` 会红）· 修法落点 `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/service/MessageAtomicService.java:106,138` ⇒ **证据强度：源码行号 + 真 PG 守门在仓**。
 
 **现象**：`message-rpc` 曾有 **21 条测试且全绿**，而这个模块**当时根本启动不了**。
 三条「起不来」级缺陷（Bean 名撞车 / Mapper 未注册 / Flyway 未加载）同时存在，
@@ -39,7 +44,12 @@ Mockito 替换掉 `NotificationMapper` / `ConversationMapper` 这些 Bean 之后
 
 ---
 
-## PITFALL-MSG-R-002 「断言 Bean 存在」≠「断言机制生效」——本模块的完整样本
+## PITFALL-MSG-R-002 「断言 Bean 存在」≠「断言机制生效」——本模块的完整样本 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PITFALL-MSG-R-002` ⇒ **新号**：`PIT-MESSAGE-10`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「断言 Bean 存在 ≠ 断言机制生效」今天仍在 ⇒ 本轮写「已接线 / 已生效」的结论，必须给**消费点**行号，不能给「Bean 拿得到」这类弱断言。
+> **依据**：拦截器侧 `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/MessageRpcApplication.java:115`（`@Bean GrpcServerConfigurer rpcInterceptorConfigurer(...)`）+ `:134`（消费 `GoStyleRpcProtectionChain.build(...)`）· 事务侧 `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/service/MessageAtomicService.java:102,130`（`@Transactional`）· 共享层说明 `service/common/src/main/java/com/rag/common/spring/RpcServerInterceptorFactory.java:30-38` ⇒ **证据强度：源码行号**。
 
 **现象**：一次修复涉及**两个**同款陷阱，形态一模一样。
 
@@ -72,7 +82,12 @@ Mockito 替换掉 `NotificationMapper` / `ConversationMapper` 这些 Bean 之后
 
 ---
 
-## PITFALL-MSG-R-003 MyBatis 的 `#{...}` 与 MP 的 `Entity::method` 用**两套**属性名规则
+## PITFALL-MSG-R-003 MyBatis 的 `#{...}` 与 MP 的 `Entity::method` 用**两套**属性名规则 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PITFALL-MSG-R-003` ⇒ **新号**：`PIT-MESSAGE-11`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— 本域两个布尔字段已统一改名 `read` + 显式 `@TableField("is_read")`，lambda 与手写 `#{...}` 两条属性名路径都已有守门 ⇒ 触发条件消除；本轮只改 `docs/**`、不动实体。
+> **依据**：`service/message/message-rpc/src/main/java/com/rag/message/message/rpc/domain/ConversationMessageEntity.java:64`（`@TableField("is_read")`，字段名 `read`）· 守门 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageIsReadLambdaWiringTest.java` ⇒ **证据强度：源码行号 + 守门在仓**。
 
 **现象（同一模块内，两个方向各踩一次）**：
 
@@ -112,7 +127,12 @@ Mockito 替换掉 `NotificationMapper` / `ConversationMapper` 这些 Bean 之后
 
 ---
 
-## PITFALL-MSG-R-004 注释里的**默认行为**必须读到消费点，不能只贴 struct 定义行
+## PITFALL-MSG-R-004 注释里的**默认行为**必须读到消费点，不能只贴 struct 定义行 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PITFALL-MSG-R-004` ⇒ **新号**：`PIT-MESSAGE-12`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— Go 真源的默认值仍藏在 struct tag 里且**已冻结** ⇒ 本轮凡写「Go 侧默认值是 X」的台账断言，仍须给出**消费点**行号，不能贴 struct 定义行。
+> **依据**：Go `service/message/rpc/message.go:34`（`DisableNativeRpcTimeout` 把 Timeout 清 0）· `zrpc/config.go:46`（`Timeout int64` + `json:",default=2000"`）· `zrpc/server.go:164-167`（第二个消费点 `if c.Timeout > 0`）⇒ **证据强度：Go 侧文件行号**。
 
 **现象**：判断「Go 侧 gRPC 超时到底是多少」，只看 `zrpc/config.go` 的 struct 定义是不够的 ——
 真正的答案是三个位置的组合：
@@ -138,7 +158,12 @@ Mockito 替换掉 `NotificationMapper` / `ConversationMapper` 这些 Bean 之后
 
 ---
 
-## PITFALL-MSG-R-005 「关掉一个框架开关」不等于「关掉这个框架」
+## PITFALL-MSG-R-005 「关掉一个框架开关」不等于「关掉这个框架」 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PITFALL-MSG-R-005` ⇒ **新号**：`PIT-MESSAGE-13`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— Go 侧「`DisableNativeRpcTimeout` **只清 `Timeout` 一个字段**、其余中间件仍装配」这一事实**不变**（真源冻结） ⇒ 本轮凡评估 RAG 侧保护链覆盖面，仍须逐条对表，不能按「Go 关掉了中间件」的印象。
+> **依据**：Go `zrpc/server.go:131-167`（装配消费点）· RAG 侧链定义 `service/common/src/main/java/com/rag/common/protection/GoStyleRpcProtectionChain.java` · 链序钉死在 `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/MessageRpcApplication.java:126-134` ⇒ **证据强度：Go 侧 + RAG 侧行号**。
 
 **现象**：`message.go:34` 的一行
 `observability.DisableNativeRpcTimeout(&c.RpcServerConf)` 看起来像
@@ -165,7 +190,12 @@ Mockito 替换掉 `NotificationMapper` / `ConversationMapper` 这些 Bean 之后
 
 ---
 
-## PITFALL-MSG-R-006 Spring Boot 4 把自动配置拆模块后，**依赖在 ≠ 能力在**，且**不报错**
+## PITFALL-MSG-R-006 Spring Boot 4 把自动配置拆模块后，**依赖在 ≠ 能力在**，且**不报错** ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PITFALL-MSG-R-006` ⇒ **新号**：`PIT-MESSAGE-14`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— message-rpc 缺的 `spring-boot-flyway` 已补；且 **message-rpc 的 `pom.xml` 内 `kafka` 零命中**（本模块根本不引 Kafka）⇒ 本条在 message 域的两个触发条件都不再存在 ⇒ 本轮只改 `docs/**` ⇒ 不触发。
+> **依据**：`service/message/message-rpc/pom.xml:168`（`org.springframework.boot:spring-boot-flyway`）· `service/message/message-rpc/pom.xml` 内 `kafka` **零命中**（grep 实测）⇒ **证据强度：pom 文本（静态）**。
 
 **现象**：`message-rpc` 缺 `org.springframework.boot:spring-boot-flyway`，
 **启动日志里连一行 Flyway 都没有** —— 不是报错，是根本没被加载。
@@ -198,7 +228,12 @@ MP **先于** DataSource 求值 ⇒ `@ConditionalOnSingleCandidate(DataSource)` 
 
 ---
 
-## PITFALL-MSG-R-007 自动配置的排序是一条**有向图**，不是「谁先扫到谁先生效」
+## PITFALL-MSG-R-007 自动配置的排序是一条**有向图**，不是「谁先扫到谁先生效」 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PITFALL-MSG-R-007` ⇒ **新号**：`PIT-MESSAGE-15`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— MP 自动配置的排序桥已落到**共享层**并登记进 `AutoConfiguration.imports` ⇒ 那条悬空的排序边已消除 ⇒ 本轮只改 `docs/**` ⇒ 不触发。
+> **依据**：桥 `service/common/src/main/java/com/rag/common/persistence/MybatisPlusOrderingBridgeAutoConfiguration.java` · 登记 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:4` · 守门 `service/common/src/test/java/com/rag/common/persistence/MybatisPlusInterceptorChainGateTest.java` ⇒ **证据强度：源码行号 + 守门在仓**。
 
 **现象**：单看任何一个自动配置的注解都看不出问题；
 只有把「谁声明了 after/before」连成图，才知道最终的求值顺序。
@@ -219,7 +254,12 @@ MybatisPlusAutoConfiguration:
 
 ---
 
-## PITFALL-MSG-R-008 变异测试会先证明「你自己的新测试也是假绿」
+## PITFALL-MSG-R-008 变异测试会先证明「你自己的新测试也是假绿」 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PITFALL-MSG-R-008` ⇒ **新号**：`PIT-MESSAGE-16`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「变异测试不是可选项、每条写路径各破坏一次」这条**元规则**今天仍成立（message 域有 4 条写路径：新建 / 追加 / 批量 / 更新）⇒ 本轮若把任何「已修」写进台账，仍须能指出**哪条守门在哪种变异下会红**。⚠️ 本条的**具体实例已闭环**（`setConversationId` 已落进两个 `@Transactional` 方法）。
+> **依据**：实例已闭环：`service/message/message-rpc/src/main/java/com/rag/message/message/rpc/service/MessageAtomicService.java:106,138`（`msg.setConversationId(conv.getId())`）· 守门 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageTransactionWiringTest.java` ⇒ **证据强度：源码行号 + 真 PG 守门在仓**。
 
 **现象**：修完 P0 后做变异验证（把刚改好的代码改回缺陷态，确认新测试变红）。
 **第一刀就翻车**：
@@ -250,7 +290,12 @@ MybatisPlusAutoConfiguration:
 
 ---
 
-## PITFALL-MSG-R-009 「分页接口的 `total` 与 `items` 必须成对断言」
+## PITFALL-MSG-R-009 「分页接口的 `total` 与 `items` 必须成对断言」 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PITFALL-MSG-R-009` ⇒ **新号**：`PIT-MESSAGE-17`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— 本条的两个实例都已消除：① `total` 现在与 `items` **共用同一个带过滤的 query**；② `offset <= 0` 的 guard 已落到共享分页 helper（Go 侧「两段各自有条件」）⇒ 本轮只改 `docs/**`。
+> **依据**：`service/message/message-rpc/src/main/java/com/rag/message/message/rpc/mapper/NotificationMapper.java:79,88`（`countByRecipient` 内同样带 `if (unreadOnly)`）· `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/mapper/GoStylePagination.java:6,12`（`offset <= 0` 时整段 OFFSET 被跳过，对齐 Go）⇒ **证据强度：源码行号**。
 
 **现象**：`listNotifications(unread_only=true)` 时，列表带了 `is_read=false` 过滤、
 **计数没带** ⇒ `total` 恒等于全部条数 ⇒ 前端分页器按它算总页数会多翻空页。
@@ -271,7 +316,12 @@ RAG 写成了无条件拼接 `w.last("LIMIT n OFFSET m")` —— **负数直接�
 
 ---
 
-## PITFALL-MSG-R-010 跨组件不变量**无法单侧验完**（Flyway 账本）
+## PITFALL-MSG-R-010 跨组件不变量**无法单侧验完**（Flyway 账本） ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PITFALL-MSG-R-010` ⇒ **新号**：`PIT-MESSAGE-18`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— message 域这一条已闭环：独立账本表名已配、三进程同库并发实测已跑 ⇒ 本轮只改 `docs/**`。
+> **依据**：`service/message/message-rpc/src/main/resources/application.yml:105`（`table: flyway_schema_history_message`）· `:102`（`baseline-version: 0`）· 守门 `tools/difftest/check-flyway-ledger.py`（账本隔离，EXIT=0）· 运行时同库共存 `tools/difftest/check-flyway-concurrent.sh` ⇒ **证据强度：配置行号 + 守门脚本在仓**。
 
 **现象**：`spring.flyway.table: flyway_schema_history_message` 是**共享 schema 级**问题
 （`message-rpc` / `like-rpc` / `article-rpc` 同库 `first_db`、同 schema `public`）。
@@ -292,7 +342,12 @@ RAG 写成了无条件拼接 `w.last("LIMIT n OFFSET m")` —— **负数直接�
 
 ---
 
-## PITFALL-MSG-R-011 附带的稳健性缺口：`TIMESTAMP` 不自描述瞬时
+## PITFALL-MSG-R-011 附带的稳健性缺口：`TIMESTAMP` 不自描述瞬时 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PITFALL-MSG-R-011` ⇒ **新号**：`PIT-MESSAGE-19`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— 根治迁移已落地（8 列全改 `TIMESTAMPTZ`），双侧活体 DDL 对拍实测两侧 `data_type` **0 差异** ⇒ 触发条件消除；本轮只改 `docs/**`。
+> **依据**：`service/message/message-rpc/src/main/resources/db/migration/V5__message_time_columns_timestamptz.sql`（8 列全部 `TIMESTAMPTZ`）· 对拍脚本 `tools/difftest/run-message-ddl-parity.sh` ⇒ **证据强度：迁移文件在仓 + 对拍脚本在仓**。
 
 **现象**：真源列类型是 `timestamptz`，DSN 钉 `TimeZone=Asia/Shanghai` ⇒ `.Unix()` 与时区无关。
 RAG 侧列是 `TIMESTAMP`（无时区），读侧改用 `atZone(ZoneId.systemDefault())` 后**自洽**了 ——
@@ -379,7 +434,12 @@ RAG message_notification.created_at | timestamp   | NOT NULL | DEFAULT CURRENT_T
 
 <!-- @new 2026-10-23 23:5x 第六轮（V-016 recover）新增 2 条 -->
 
-## PITFALL-MSG-R-012 grpc-java 的 unary 响应**必须** `onNext` + `onCompleted` 成对 —— 漏了会**挂死**而不是失败
+## PITFALL-MSG-R-012 grpc-java 的 unary 响应**必须** `onNext` + `onCompleted` 成对 —— 漏了会**挂死**而不是失败 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PITFALL-MSG-R-012` ⇒ **新号**：`PIT-MESSAGE-20`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— grpc-java 的 unary 响应「`onNext` + `onCompleted` 必须成对」是**框架硬约束**，不会消失 ⇒ 仍生效；本轮若写任何 gRPC 侧的实现/测试结论，仍须先核这条。
+> **依据**：`service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcRecoverInterceptorWiringTest.java`（真 in-process gRPC server · 含 class 级 `@Timeout` 与 stub deadline 两道护栏） ⇒ **证据强度：守门在仓**。
 
 **现象**：本轮新写 `MessageRpcRecoverInterceptorWiringTest`（真 in-process gRPC server），
 第一次跑 —— **不报失败、不报错，整轮 surefire 挂死 4 分钟**（只能 `jstack` 找到）。
@@ -428,7 +488,12 @@ panic / error 路径靠 recover 兜住时尤其容易漏 —— 因为那条路�
 
 ---
 
-## PITFALL-MSG-R-013 判「有没有等价实现」必须 grep **实现**，不是 grep **依赖**
+## PITFALL-MSG-R-013 判「有没有等价实现」必须 grep **实现**，不是 grep **依赖** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PITFALL-MSG-R-013` ⇒ **新号**：`PIT-MESSAGE-21`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「判『有没有等价实现』要 grep **实现**、不是 grep 依赖清单」今天仍成立（本仓既定策略就是「不引依赖、自己逐行复刻」）⇒ 本轮凡在台账里写「本仓没有 X / 只能引 Y」的论断，仍必须先 grep 实现。
+> **依据**：复刻实现 `service/common/src/main/java/com/rag/common/protection/GoStyleBreaker.java` 与 `service/common/src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java` · 守门 `service/common/src/test/java/com/rag/common/protection/GoStyleRpcProtectionChainTest.java:91,152,184` ⇒ **证据强度：源码行号 + 守门在仓**。
 
 **现象**：本轮写 V-016 处置方案时，对 breaker / shedding 下了这个判断：
 
@@ -474,7 +539,12 @@ forcePassDuration=1s`）与 `accept()` 的同构运算顺序，还专门标出�
 
 <!-- @new 2026-10-24 00:0x 第七轮（V-016 breaker/shedding）新增 3 条 -->
 
-## PITFALL-MSG-R-014 串拦截器链时**不能把 `next` 直接透传** —— 那样内层 interceptor 永远不被调用
+## PITFALL-MSG-R-014 串拦截器链时**不能把 `next` 直接透传** —— 那样内层 interceptor 永远不被调用 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PITFALL-MSG-R-014` ⇒ **新号**：`PIT-MESSAGE-22`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「每加一层拦截器，都要问内层那个 interceptor 的 `interceptCall` 被调到了吗」这条**契约**今天仍成立 —— 共享链 `GoStyleRpcProtectionChain` 会被 10 个 rpc 域共用，任何一层新加都要重验 ⇒ 仍生效。
+> **依据**：共享链 `service/common/src/main/java/com/rag/common/protection/GoStyleRpcProtectionChain.java` · 守门 `service/common/src/test/java/com/rag/common/protection/GoStyleRpcProtectionChainTest.java:184`（`buildChainReachesBusinessInterceptor`）⇒ **证据强度：源码行号 + 守门在仓**。
 
 **现象**：给 message-rpc 补服务端熔断/降载时，把链的定义点做进共享模块
 （`GoStyleRpcProtectionChain`），第一版把 `breakerThen` / `sheddingThen` 写成：
@@ -513,7 +583,12 @@ return breaker.interceptCall(call, headers, delegateToInner);
 
 ---
 
-## PITFALL-MSG-R-015 拒绝必须关「**本层包装过的** call」—— 关原始 call ⇒ 外层看不到
+## PITFALL-MSG-R-015 拒绝必须关「**本层包装过的** call」—— 关原始 call ⇒ 外层看不到 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PITFALL-MSG-R-015` ⇒ **新号**：`PIT-MESSAGE-23`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「拒绝必须关本层包装过的 call」这条**契约**今天仍成立（Go 与 grpc-java 的执行模型差异是既成事实）⇒ 仍生效。
+> **依据**：守门 `service/common/src/test/java/com/rag/common/protection/GoStyleRpcProtectionChainTest.java:91`（`sheddingRejectionIsVisibleToTheOuterBreaker`）⇒ **证据强度：守门在仓**。
 
 **现象**：降载拦截器拒绝请求时，第一版写 `call.close(...)`（原始 call）。
 结果：**外层的熔断器永远开不了路**。
@@ -541,7 +616,12 @@ Go 的 `defer` 是在 `Allow()` 成功**之后**才注册的（`sheddingintercep
 
 ---
 
-## PITFALL-MSG-R-016 被 recover 兜住的异常，会让链路看起来「没被调用」
+## PITFALL-MSG-R-016 被 recover 兜住的异常，会让链路看起来「没被调用」 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PITFALL-MSG-R-016` ⇒ **新号**：`PIT-MESSAGE-24`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「『零交互』有两种成因：链没接上 / 链里抛了异常被 recover 吞了」这条**判读规则**今天仍成立 ⇒ 本轮若以「零交互」为据写任何结论，必须同时给出 recover 的 ERROR 日志判据。
+> **依据**：守门 `service/common/src/test/java/com/rag/common/protection/GoStyleRpcProtectionChainTest.java:152`（`recoverIsOutermostSoItCatchesInnerPanics`）⇒ **证据强度：守门在仓**。
 
 **现象**：装配层用例报 `Wanted but not invoked ... there were zero interactions with this mock`
 —— 业务 interceptor **一次都没被调到**。
@@ -567,7 +647,12 @@ Go 的 `defer` 是在 `Allow()` 成功**之后**才注册的（`sheddingintercep
 
 ---
 
-## PITFALL-MSG-R-017 `set -euo pipefail` + 命令替换里的 `lsof` ⇒ **脚本静默消失**
+## PITFALL-MSG-R-017 `set -euo pipefail` + 命令替换里的 `lsof` ⇒ **脚本静默消失** ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PITFALL-MSG-R-017` ⇒ **新号**：`PIT-MESSAGE-25`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— 共享 harness 里那处 `lsof` 管道已兜成 0 ⇒ 触发条件消除；本轮只改 `docs/**`、不动脚本。
+> **依据**：`tools/difftest/run.sh:156`（`who="$( { lsof … ; } || true )"`） ⇒ **证据强度：脚本行号**。
 
 **现象**：`tools/difftest/run.sh` 跑着跑着就没了，日志停在某一行，**一个字都不报错**，
 进程也没留下，日志文件是空的。
@@ -588,7 +673,12 @@ Go 的 `defer` 是在 `Allow()` 成功**之后**才注册的（`sheddingintercep
 
 ---
 
-## PITFALL-MSG-R-018 占位符名字**跨模块不统一** ⇒ 一整类模块在测试环境里**根本起不来**
+## PITFALL-MSG-R-018 占位符名字**跨模块不统一** ⇒ 一整类模块在测试环境里**根本起不来** ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PITFALL-MSG-R-018` ⇒ **新号**：`PIT-MESSAGE-26`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— harness 现在**同时导出** `POSTGRES_ADDR` 与 `POSTGRES_HOST` 两个别名 ⇒ 7 个 rpc 模块的占位符不再起不来 ⇒ 本轮只改 `docs/**`。
+> **依据**：`tools/difftest/run.sh:195`（`export POSTGRES_ADDR=127.0.0.1 POSTGRES_HOST=127.0.0.1 …`） ⇒ **证据强度：脚本行号**。
 
 **现象**：`message-rpc` 在 difftest 环境里报
 `java.net.UnknownHostException: postgres` ⇒ Spring 连的是容器里的 `postgres` 主机名，
@@ -612,7 +702,12 @@ Go 的 `defer` 是在 `Allow()` 成功**之后**才注册的（`sheddingintercep
 
 ---
 
-## PITFALL-MSG-R-019 `baseline-on-migrate: true` 会**顶掉 V1** ⇒ 核心表永远建不出来
+## PITFALL-MSG-R-019 `baseline-on-migrate: true` 会**顶掉 V1** ⇒ 核心表永远建不出来 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PITFALL-MSG-R-019` ⇒ **新号**：`PIT-MESSAGE-27`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— message-rpc 已显式钉 `baseline-version: 0` ⇒ baseline 打在 V1 之下 ⇒ V1..V5 全部照常执行 ⇒ 触发条件消除；本轮只改 `docs/**`。
+> **依据**：`service/message/message-rpc/src/main/resources/application.yml:102`（`baseline-version: 0`）· `:105`（独立账本表名）· 迁移从 V1 起步（`db/migration/V1__create_message_notification.sql`） ⇒ **证据强度：配置行号 + 迁移清单**。
 
 **现象**：`message-rpc` 在共享库（非空 schema）里启动失败：
 `Migration of schema "public" to version "5 …" failed` ⇒ `relation "message_notification" does not exist`。
@@ -646,7 +741,12 @@ Go 的 `defer` 是在 `Allow()` 成功**之后**才注册的（`sheddingintercep
 
 ---
 
-## PITFALL-MSG-R-020 `mvn package` 成功 ≠ **产物可运行**
+## PITFALL-MSG-R-020 `mvn package` 成功 ≠ **产物可运行** ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PITFALL-MSG-R-020` ⇒ **新号**：`PIT-MESSAGE-28`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— message-api 的 pom 已补 `<build>` 段与 `spring-boot-maven-plugin`，产物已是可执行 jar ⇒ 触发条件消除；本轮只改 `docs/**`。
+> **依据**：`service/message/message-api/pom.xml:169`（`<build>`）+ `:190`（`spring-boot-maven-plugin`）· 守门 `service/message/message-api/src/test/java/com/rag/message/message/api/MessageApiJarExecutableWiringTest.java` ⇒ **证据强度：pom 行号 + 守门在仓**。
 
 **现象**：`message-api` 的 jar 只有 **76 KB**（而 `message-rpc` 的可执行 jar 是 **69 MB**）
 ⇒ `java -jar message-api-*.jar` 报「**中没有主清单属性**」。
@@ -665,7 +765,12 @@ Go 的 `defer` 是在 `Allow()` 成功**之后**才注册的（`sheddingintercep
 
 ---
 
-## PITFALL-MSG-R-021 多工作树**共用同一个 `~/.m2`** ⇒ 共享模块的 SNAPSHOT 会被**别人**覆盖 ⇒ 单模块测试随机报 `NoClassDefFoundError`
+## PITFALL-MSG-R-021 多工作树**共用同一个 `~/.m2`** ⇒ 共享模块的 SNAPSHOT 会被**别人**覆盖 ⇒ 单模块测试随机报 `NoClassDefFoundError` ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PITFALL-MSG-R-021` ⇒ **新号**：`PIT-MESSAGE-29`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「`~/.m2` 里的 SNAPSHOT 是『最后写入者赢』的共享可变状态」今天**仍然成立** —— AGENTS.md §5.3d 的多工作树并发形态没变 ⇒ 本轮任何 `mvn` 命令仍须带 `-am` 从本工作树源码构建 ⇒ 仍生效。
+> **依据**：AGENTS.md §5.3d（波次工作树 G1~G4，均从 `do-my-own-gh` 切 · 并发 `mvn install` 共享 `~/.m2`）· 判别式 `unzip -l ~/.m2/repository/com/rag/common/0.0.1-SNAPSHOT/common-0.0.1-SNAPSHOT.jar | grep -c GoStyleRpcProtectionChain` ⇒ **证据强度：仓库政策 + 源码路径在仓**。
 
 **现象**：`mvn -o -B -pl service/message/message-rpc test`（**故意不带 `-am`**）
 ⇒ 几乎所有 `@SpringBootTest` 用例报 `Failed to load ApplicationContext` ⇒ 最内层 cause：
@@ -715,7 +820,12 @@ unzip -l ~/.m2/repository/com/rag/common/0.0.1-SNAPSHOT/common-0.0.1-SNAPSHOT.ja
 
 ---
 
-## PITFALL-MSG-R-022 「Go 侧有 X 指标」这句话本身**要核到 Go 源码的消费点** —— 否则会照抄出一套 Go 没有的能力
+## PITFALL-MSG-R-022 「Go 侧有 X 指标」这句话本身**要核到 Go 源码的消费点** —— 否则会照抄出一套 Go 没有的能力 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PITFALL-MSG-R-022` ⇒ **新号**：`PIT-MESSAGE-30`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「台账里描述 Go 行为的那句话，本身是需要被核实的一手材料」这条**取证纪律**今天仍成立 ⇒ 仍生效。⚠️ 本条的**具体实例已闭环**（`DRIFT-MSG-V-025` 的错误结论已更正、指标未新增）。
+> **依据**：实例已闭环：`docs/DRIFT/message/rpc.md` 的 `DRIFT-MSG-V-025`（✅ 已修）· 出处订正见 `service/common/src/main/java/com/rag/common/protection/GoStyleProtectionProperties.java` 的类注释 ⇒ **证据强度：台账状态**。
 
 **背景**：`DRIFT-MSG-V-025` 原记写「Go 侧可以在 `/metrics` 里看到『这个 rpc 降载丢了多少』
 『熔断拒了多少』」⇒ 照这句话去实现，结论会是「给 `service/common` 加 micrometer、
@@ -746,7 +856,12 @@ unzip -l ~/.m2/repository/com/rag/common/0.0.1-SNAPSHOT/common-0.0.1-SNAPSHOT.ja
 
 ---
 
-## PITFALL-MSG-R-023 **给别的组件挂熔断/降载之前，必须先核它的兜底码口径**
+## PITFALL-MSG-R-023 **给别的组件挂熔断/降载之前，必须先核它的兜底码口径** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PITFALL-MSG-R-023` ⇒ **新号**：`PIT-MESSAGE-31`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— Go 的熔断失败判据（6 码白名单）**已冻结不变** ⇒ 「挂 breaker 前必须先核组件兜底码口径」这条今天仍成立 ⇒ 仍生效。
+> **依据**：Go `zrpc/internal/codes/accept.go:9-17`（6 码白名单）· `service/like/like-common/src/main/java/com/rag/like/like/common/errmsg/LikeGrpcError.java:110`（`mapToGrpcCode`，`5003` 越界 ⇒ `UNKNOWN`，与 Go 同）⇒ **证据强度：Go 侧 + RAG 侧行号**。
 
 **形态**：熔断的「失败判据」是 **status code**（Go `zrpc/internal/codes/accept.go:9-17` 的 6 码白名单
 `{DEADLINE_EXCEEDED, INTERNAL, UNAVAILABLE, DATA_LOSS, UNIMPLEMENTED, RESOURCE_EXHAUSTED}`）。
@@ -775,7 +890,12 @@ unzip -l ~/.m2/repository/com/rag/common/0.0.1-SNAPSHOT/common-0.0.1-SNAPSHOT.ja
 
 ---
 
-## PITFALL-MSG-R-024 用**字符串下标**断言 XML / YAML 结构 ⇒ 会被**注释里提到的同名字符串**打败
+## PITFALL-MSG-R-024 用**字符串下标**断言 XML / YAML 结构 ⇒ 会被**注释里提到的同名字符串**打败 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PITFALL-MSG-R-024` ⇒ **新号**：`PIT-MESSAGE-32`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— 该守门已改成**先剥注释再取下标** ⇒ 触发条件消除；本轮只改 `docs/**`。
+> **依据**：`service/message/message-api/src/test/java/com/rag/message/message/api/MessageApiJarExecutableWiringTest.java:78`（`stripXmlComments(readPom())`）+ `:101`（`stripXmlComments` 实现）⇒ **证据强度：源码行号**。
 
 **形态**：想断言「pom 的 `<build><plugins>` 里真的有 `spring-boot-maven-plugin`」，
 于是写：
@@ -809,7 +929,12 @@ private static String stripXmlComments(String xml) {
 
 ---
 
-## PITFALL-MSG-R-025 变异验证后用 `shutil.copy2` 还原源码 ⇒ **保留旧 mtime** ⇒ maven 增量编译跳过 ⇒ 后续跑的是**变异过的 class**
+## PITFALL-MSG-R-025 变异验证后用 `shutil.copy2` 还原源码 ⇒ **保留旧 mtime** ⇒ maven 增量编译跳过 ⇒ 后续跑的是**变异过的 class** ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PITFALL-MSG-R-025` ⇒ **新号**：`PIT-MESSAGE-33`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— 仓内的变异/还原脚本已改用 `copyfile` + `os.utime` 刷 mtime ⇒ 触发条件消除；本轮只改 `docs/**`。
+> **依据**：`tools/check-ledger-selfcheck.py:2483,2614,2657`（`os.utime(..., None)`，注释标 `PIT-GLOBAL-037`） ⇒ **证据强度：脚本行号**。
 
 **现象（本轮真实踩中）**：
 变异验证（改坏代码 → 跑守门 → 还原）跑完之后，接着跑**同模块**的守门，
@@ -854,7 +979,12 @@ private static String stripXmlComments(String xml) {
 
 ---
 
-## PITFALL-MSG-R-026 `pg_isready` **不是**「Postgres 可以用了」的判据 —— 它会在 initdb 的临时服务上**返回 0**
+## PITFALL-MSG-R-026 `pg_isready` **不是**「Postgres 可以用了」的判据 —— 它会在 initdb 的临时服务上**返回 0** ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PITFALL-MSG-R-026` ⇒ **新号**：`PIT-MESSAGE-34`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— 就绪判据已换成「真能建库」的那条命令（`psql … select 1`），不再是 `pg_isready` ⇒ 触发条件消除；本轮只改 `docs/**`。
+> **依据**：`tools/difftest/run-message-ddl-parity.sh:92,97`（`docker exec "$CONTAINER" psql -U admin -d postgres -tAc 'select 1'`） ⇒ **证据强度：脚本行号**。
 
 **场景**：本轮写「双侧活体 DDL 对拍」脚本，第一版用
 `docker exec <容器> pg_isready -U admin` 当就绪判据。
@@ -903,7 +1033,12 @@ docker exec "$CONTAINER" psql -U admin -d postgres -tAc 'select 1' >/dev/null 2>
 
 ---
 
-## PITFALL-MSG-R-027 bash 里 `$VAR` 后面紧跟**中文标点** ⇒ 变量名被吞进去 ⇒ `unbound variable`
+## PITFALL-MSG-R-027 bash 里 `$VAR` 后面紧跟**中文标点** ⇒ 变量名被吞进去 ⇒ `unbound variable` ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PITFALL-MSG-R-027` ⇒ **新号**：`PIT-MESSAGE-35`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— 中文文案里的变量引用已全部改用 `${VAR}` 形式 ⇒ 触发条件消除；本轮只改 `docs/**`。
+> **依据**：`tools/difftest/run-message-ddl-parity.sh:81`（`echo "=== 1. 起 PG（${CONTAINER}，端口 ${PG_PORT}）==="`） ⇒ **证据强度：脚本行号**。
 
 **实测翻车**：
 ```bash
@@ -939,7 +1074,12 @@ echo "=== 1. 起 PG（${CONTAINER}，端口 ${PG_PORT}）==="
 
 ---
 
-## PITFALL-MSG-R-028 「RAG 侧**少了**某个响应头 / 响应体」—— **静态读源码极容易判反**
+## PITFALL-MSG-R-028 「RAG 侧**少了**某个响应头 / 响应体」—— **静态读源码极容易判反** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PITFALL-MSG-R-028` ⇒ **新号**：`PIT-MESSAGE-36`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「『缺失类』断言的默认状态应该是 `UNKNOWN`、不是『没有』」这条**判据纪律**今天仍成立 ⇒ 仍生效；本轮凡写「某侧缺 X」的台账结论，仍须先问「X 是不是框架自动产生的」。
+> **依据**：反例已闭环（message 域的 404 body / 405 `Allow` 头真容器实测两侧一致）· 真容器脚本 `tools/difftest/exp-http-headers-message.sh` ⇒ **证据强度：脚本在仓**。
 
 **场景**：message 域 api 台账的第一轮审计里，有两行结论是这么写的：
 

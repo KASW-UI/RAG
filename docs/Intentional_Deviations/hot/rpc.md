@@ -27,6 +27,26 @@
 > hot-api 的注册失败是「**启动失败**」（`SD-HOT-API-008`），hot-rpc 是「**存活 + NOT_SERVING**」（`SD-HOT-RPC-004`）
 > ⇒ 两侧可用性口径不一致，改动需 `service/common` 的 `HealthIndicator` 能力 ⇒ **跨域**。
 
+## 🆕 2026-10-29 逐条重核结论（台账对齐 phase · W-E lane）
+
+> **判定口径**：`docs/Intentional_Deviations/_INDEX.md:34` ——「被签字描述的那个行为**已不存在** ⇒ 本条签字**自动失效** ⇒ 不计入计数」。
+> **方法**：**回 Go 真源 + 回 RAG 源码两侧核**（真源 = `Sea-RideTheWind_golang`，冻结只读；go-zero 取 `v1.10.2`；go-redis 取 `v9.20.0`）。
+> **撞号检查**：`SD-HOT-RPC-001..004` 与第一轮旧编号 `SD-1` / `SD-2` / `SD-3` **全域唯一**
+> （`grep -rn "SD-1\b\|SD-2\b\|SD-3\b" docs/Intentional_Deviations/` ⇒ **只有本文件**命中，`_INDEX.md` 里只是把它们列进族名）
+> ⇒ ⇒ **本域 7 条编号互不撞号、也不与其它域撞号** ⇒ **不需要** `SD-<编号>@<域>` 别名。
+
+| ID | 结论 | 证据（核对日期 2026-10-29） |
+|---|---|---|
+| `SD-HOT-RPC-001` | ✅ **仍成立** | RAG 侧仍**不外抛**：`service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotEventConsumer.java:118-123` 仍是 `try { return consumeMessage(...); } catch (RuntimeException e) { return e; }` ⇒ 消费异常**降级成 drop**；Go 侧 `service/hot/rpc/internal/mqs/hot_handler.go:105-107` + `service/common/observability/mq.go:30`（**裸** `err := fn(consumeCtx)`，**无 recover**）⇒ panic 直接崩进程 ⇒ 差异未变 |
+| `SD-HOT-RPC-002` | ✅ **仍成立** | Go 侧仍默认重试 3 次：go-redis `v9.20.0` `options.go` 的 `init()`（**消费点**）`if opt.MaxRetries == 0 { opt.MaxRetries = 3 }`；RAG 侧 Lettuce 仍**无命令级重试入口**（Spring Data Redis 4.0.7 的 `connection/lettuce` 包内 `RetryPolicy` 引用数 = 0；Lettuce 6.8.2 jar 内**无** `io/lettuce/core/retry` 包）⇒ 差异未变 |
+| `SD-HOT-RPC-003` | ✅ **仍成立** | RAG 侧 `@KafkaListener` 仍**无** `concurrency` 属性 ⇒ 取默认 **1**：`service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotEventConsumer.java:98-100`（`@KafkaListener(topics=…, groupId=…, containerFactory=…)`，**无** `concurrency=`）；Go 侧仍是 sarama **每分区一个 goroutine** ⇒ 单实例多分区时两侧不等价、3 副本部署时等价 ⇒ 差异未变 |
+| `SD-HOT-RPC-004` | ✅ **仍成立** | RAG 侧仍**存活 + NOT_SERVING**：`service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/bootstrap/NacosRegistration.java:125-126`（注册失败 ⇒ `LOG.error` + `markHealth(ServingStatus.NOT_SERVING)`）+ `:165` `markHealth(...)`；Go 侧仍是 `zrpc/server.go:88-93` 的 `panic(err)` ⇒ 进程退出 ⇒ 差异未变 |
+| `SD-1` | ✅ **仍成立** | RAG 侧仍是「**锁内取引用 → 锁外 Redis I/O**」：`service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotPartitionSketchRegistry.java:136-149` `detachWithinWriteLock(...)`（写锁内建引用、锁外落盘）+ `:155-169` 独立的读锁方法 ⇒ 没有在持写锁时再取读锁 ⇒ Go 的**必然自死锁**未被搬过来 ⇒ 差异未变 |
+| `SD-2` | ✅ **仍成立** | RAG 侧仍**跳过**非字符串 member：`service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotRedisSnapshotStore.java:219-221`（`if (!(member instanceof String articleId)) { … continue; }`）；Go 侧仍是**裸类型断言** `scoreMap[z.Member.(string)]` ⇒ panic ⇒ 差异未变 |
+| `SD-3` | ✅ **仍成立** | Go 侧仍**误报成「lock lost」**：`service/hot/rpc/internal/mqs/hot_handler.go:311-315`（`result, _ := renewScript.Run(...).Int()` ⇒ **错误被丢弃** ⇒ result=0 ⇒ 走 `logx.Errorf("[Lock] %s lost lock")` 分支）；RAG 侧**照抄**：`service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotMergeScheduler.java:184`（「这是 Go 既有缺陷，`hot_handler.go:311` 原样如此」）+ `:210` `LOG.error("[Lock] {} lost lock", instanceId)` ⇒ **两边一样错** ⇒ 差异未变 |
+
+> ⚠️ **计数影响**：本域 **7 条全部仍成立** ⇒ **不计入「已失效」** ⇒ **主线更新 `docs/Intentional_Deviations/_INDEX.md` 时本域无需减项**（本 lane 不写共享索引）。
+
 ---
 
 ## SD-HOT-RPC-001 · 消费异常降级成 drop（Go 会崩进程）

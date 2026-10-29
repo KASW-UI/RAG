@@ -188,7 +188,10 @@ MessageRpcServiceImpl.invoke(→ domain.sendChatMessage(req))     ← 走代理�
   3. **并发同对用户首发**：两边都有 `uk_conversation_pair` 唯一索引，但只有 Go 的唯一约束冲突会
      连带回滚整个事务；Java 侧第一个 INSERT 成功、第二个冲突时 `@Transactional` 已失效 ⇒ 会话行无法回滚。
 
-##### 🔴 DRIFT-MSG-002：`message_conversation_message.conversation_id` 恒为 0
+##### ✅ DRIFT-MSG-002：`message_conversation_message.conversation_id` 恒为 0 ｜ **2026-10-29 对齐：原判 🔴 ⇒ 现行态 = ✅ 已修**
+
+> **2026-10-29 对齐 · 依据**：两条写路径都在**事务内** `msg.setConversationId(conv.getId())` —— `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/service/MessageAtomicService.java:102,106`（`@Transactional` + 赋值）与 `:130,138` ⇒ 与本文件 `:36` / `:133` 的 ✅ 一致 ⇒ **证据强度：源码行号**。
+
 
 **分类：`SEMANTIC MISMATCH`　业务可接受性：`UNACCEPTABLE`　风险：HIGH**
 
@@ -212,7 +215,10 @@ Java: ConversationMessageEntity.conversationId 是 primitive long（未设置 �
 - **为何长期未暴露** `[CODE]`：`message-rpc` 现有测试仅 2 个类 9 条，**全部是纯 Mockito 单测**，
   不装配 Spring 上下文、不执行 SQL（§3.3 纪律）。9 个 RPC 端到端路径**零覆盖**。
 
-##### 🔴 DRIFT-MSG-003：gRPC 2000ms 超时从未生效（`ServerInterceptor` 未挂到 server）
+##### ✅ DRIFT-MSG-003：gRPC 2000ms 超时从未生效（`ServerInterceptor` 未挂到 server） ｜ **2026-10-29 对齐：原判 🔴 ⇒ 现行态 = ✅ 已修**
+
+> **2026-10-29 对齐 · 依据**：拦截器已真挂到 server —— `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/MessageRpcApplication.java:115`（`@Bean GrpcServerConfigurer rpcInterceptorConfigurer(...)`）+ `:134`（`GoStyleRpcProtectionChain.build(rpcUnaryServerInterceptor, protectionProps)`）· 共享层 `service/common/src/main/java/com/rag/common/spring/RpcServerInterceptorFactory.java:30-38`（机制说明）⇒ 与本文件 `:37` / `:134` 的 ✅ 一致 ⇒ **证据强度：源码行号**。
+
 
 **分类：`SEMANTIC MISMATCH`　业务可接受性：`UNACCEPTABLE`　风险：HIGH**
 
@@ -2406,7 +2412,7 @@ breaker 的「失败判据」是 **status code**（Go `go-zero@v1.10.2/zrpc/inte
 
 ---
 
-### 4. 🔴 `DRIFT-MSG-V-030`（新挖出 · **跨域待办**）：**6 个 api 模块的 jar 根本不可执行**
+### 4. ✅ `DRIFT-MSG-V-030`（新挖出 · **跨域待办**）：**6 个 api 模块的 jar 根本不可执行** ｜ **2026-10-29 对齐：原判 🔴（2026-10-23 新挖出时）⇒ 现行态 = ✅ 已关闭（2026-10-25 · 见本文件第 6 节）**
 
 **这是 V-028 的同款缺陷，但不在 message 域。**
 
@@ -2592,7 +2598,7 @@ bash tools/difftest/run-message-ddl-parity.sh     # 建库 + 对拍
 |---|---|
 | **列类型 / 长度** | ✅ **0 差异**（37 列逐字相同：bigint / integer / text / varchar(255) / boolean / jsonb / **timestamptz**） |
 | **NOT NULL（可空性）** | ✅ **0 差异**（V-020 的 `DROP NOT NULL` 精确命中：Go 侧 `created_at`/`updated_at`/`read_at`/`extra` 可空、`last_message_at` NOT NULL，两侧一致） |
-| **DEFAULT** | 🔴 **6 处差异**（见下方第 5 节 ⇒ 新登记 `DRIFT-MSG-V-031`） |
+| **DEFAULT** | ✅ **6 处差异**（见下方第 5 节 ⇒ 新登记 `DRIFT-MSG-V-031`） **2026-10-29 对齐：现行态 = ✅ 已签字**（`SD-2026-10-24-04@message`） |
 | **索引** | 🔴 **3 处差异**：`idx_notification_recipient_read`（Go 1 列 / RAG 2 列 ⇒ **V-022，已签字 SD-06**）＋ `idx_conversation_*` ×2 名字不同（⇒ **V-021，本轮签字 SD-2026-10-24-01**）<br>⇒ 其余 **9 个索引逐条一致**（含 `uk_conversation_pair` 的 4 列与 `unique=True`） |
 | **约束（`pg_constraint`）** | ✅ **两侧完全一致**（各 3 行，都是主键）<br>⇒ **V-023 的修复双向确认**：两侧的 `uk_conversation_pair` 都是**唯一索引**而非表约束（`pg_constraint` 里都没有 `contype='u'` 那一行） |
 

@@ -10,7 +10,12 @@
 
 | SD 编号 | 一句话 | 正本 |
 |---|---|---|
-| `SD-2026-10-23-03` | `AdminSendNotification` 的 `affected`：Go 返 `int64`（JSON **数字**），RAG 输出**字符串** | [`_cross/signed-deviations.md`](../_cross/signed-deviations.md) |
+| `SD-2026-10-23-03@message` | `AdminSendNotification` 的 `affected`：Go 返 `int64`（JSON **数字**），RAG 输出**字符串** | [`_cross/signed-deviations.md`](../_cross/signed-deviations.md) |
+
+> **唯一别名**：`SD-2026-10-23-03@message`（⚠️ **撞号事实**：同一编号在 [`_cross/signed-deviations.md`](../_cross/signed-deviations.md) 是**正本**、在本文件是**域内索引** ⇒ 两者指向**同一条**偏离（不构成跨域撞号）；但 `comment` / `like` 域另有 `SD-2026-10-23-04@comment` / `SD-2026-10-23-05@like` ⇒ 为跨域唯一定位，本条加域内别名）
+> **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：RAG 侧 `AdminSendNotificationResp` 仍带 `@JsonFormat(shape = JsonFormat.Shape.STRING)` ⇒ 出参是 JSON **字符串** `"3"`；Go 侧出参是 JSON **数字** `3` ⇒ wire 契约差异**未消除**
+> **依据**：`service/message/message-api/src/main/java/com/rag/message/message/api/dto/AdminSendNotificationResp.java:43`（`@JsonFormat(shape = JsonFormat.Shape.STRING)`）· Go `service/message/api/internal/types/types.go:22`（`Affected int64` + `json:"affected"` tag，**无** `,string`）⇒ **证据强度：源码行号（静态）**。
+
 
 ### 对本域审查者的三条提醒
 

@@ -40,7 +40,7 @@ L4 留下的三条「未覆盖」，全部在**并发验证**这条线上：
 
 ## 三、🔴 样板（**照抄，不要重新发明**）
 
-> ⚠️ **本 lane 不是 rpc 守门 lane** ⇒ 下面 §3.1~§3.3 的三个 rpc 样板（X-5 轴 / slow 轴 / latch 加固）与六条硬性要求
+> ⚠️ **本 lane 不是 rpc 守门 lane** ⇒ 下面 §3.1~§3.3 的三个 rpc 样板（CD-5 轴 / slow 轴 / latch 加固）与六条硬性要求
 > **对本 lane 不适用**（那是 L6~L9 的）⇒ **不要照抄任何 rpc 测试**。
 > ⇒ 本 lane 的真正样板是 **L4 留下的 `tools/difftest/check-flyway-concurrent.sh` + `flyway-concurrent-boot.java` +
 > `flyway-concurrent-verify.py`**（第二十四轮，真 PG 三进程并发同库）⇒ 做法见 §3.4 与
@@ -50,7 +50,7 @@ L4 留下的三条「未覆盖」，全部在**并发验证**这条线上：
 
 | 样板 | 路径 | 它示范什么 |
 |---|---|---|
-| **X-5 轴** | `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcGrpcInterceptorWiringTest.java` | **真 server + 真链 + 判别式断言**（服务端超时真的打断了在飞处理） |
+| **CD-5 轴** | `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcGrpcInterceptorWiringTest.java` | **真 server + 真链 + 判别式断言**（服务端超时真的打断了在飞处理） |
 | **slow 轴** | `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcSlowThresholdGateTest.java` | **真 OTel SDK + 收集型 exporter** ⇒ 断言导出的 span 上真的有 `sea.slow` |
 | **latch 加固版** | `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotGrpcInterceptorWiringTest.java` | `sleep` ⇒ `latch` 的改造形态 |
 

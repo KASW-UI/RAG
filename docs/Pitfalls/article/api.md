@@ -8,7 +8,12 @@
 
 ---
 
-## P-1 「没有 error handler ⇒ 一律 400」是一条**只走了一半**的推理
+## P-1 「没有 error handler ⇒ 一律 400」是一条**只走了一半**的推理 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-1` ⇒ **新号**：`PIT-ARTICLE-01`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 触发条件（Go `httpx.ErrorCtx` 的**三分支** fallback 链仍在真源里；RAG 侧仍要自己写「错误对象类型 → 分支」的映射）**未消除** ⇒ 本轮任何「错误码 → HTTP 状态码」映射的改动仍须把三分支读完，并按 AGENTS.md §3.3.2 自查带「Go: …」前缀的断言。
+> **依据**：本域实例**已修**：`DRIFT-ARTICLE-API-001` ✅ 已修（上传失败按 gRPC 码映射状态码 + 3/3 变异转红）⇒ `docs/DRIFT/article/api.md:558,1185,1196` ⇒ **证据强度：真容器 + 变异**。
 
 **现象**
 `POST /v1/upload` 在下游 article-rpc 失败时：Go 返回 **HTTP 503/500/504**（按 gRPC 码映射），
@@ -54,7 +59,12 @@ gRPC-Go 的 `status.Error` **恰好实现**它，且 `articleservice.UploadFile`
 
 ---
 
-## P-2 「配置里没写」≠「没设」：Go 的默认值藏在 struct tag 里，且**同一个 yaml 内可以不一致**
+## P-2 「配置里没写」≠「没设」：Go 的默认值藏在 struct tag 里，且**同一个 yaml 内可以不一致** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-2` ⇒ **新号**：`PIT-ARTICLE-02`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— Go 的默认值仍藏在 struct tag 里、且**同一个 yaml 内逐段不一致**这一形态**未消除** ⇒ 本轮对齐任何 Go 配置时仍须逐段（每个 `XxxRpcConf` 单独看）取真实生效值，不能按「rpc 超时 = 70s」一锅端。
+> **依据**：本域实例**已修**：`DRIFT-ARTICLE-API-002` ✅ 已修（`user-rpc` 单次调用超时作用域）⇒ `docs/DRIFT/article/api.md:583` ⇒ **证据强度：静态 + 真容器**。
 
 **现象**
 `GET /v1/article/:id` 与 `GET /v1/articles` 里的「作者昵称补全」调用 `user-rpc`。
@@ -99,7 +109,12 @@ RAG 侧只对齐了显式的 `ArticleRpcConf.Timeout=70000`，
 
 ---
 
-## P-3 框架的「单值化」规则要连**数组塌缩**那一行一起看
+## P-3 框架的「单值化」规则要连**数组塌缩**那一行一起看 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-3` ⇒ **新号**：`PIT-ARTICLE-03`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— Go 侧 query 解析的「数组塌缩」那一步仍在真源里（`WithFromArray` 的消费点）⇒ **Spring 侧 `@RequestParam String` 对多值会逗号拼接**这一形态未变 ⇒ 本轮任何自实现参数解析都必须补齐「缺席 / 空值 / **多值**」三类输入。
+> **依据**：本域实例**已修**：`DRIFT-ARTICLE-API-003` ✅ 已修（重复 query key）⇒ `docs/DRIFT/article/api.md:608` ⇒ **证据强度：真容器**。
 
 **现象**
 `?page=1&page=2`：Go 返回 **200，page=1**；RAG 返回 **400**。
@@ -138,7 +153,12 @@ Spring 侧 `@RequestParam String` 对多值走 `RequestParamMethodArgumentResolv
 
 ---
 
-## P-4 「注解存在」≠「机制生效」：本组件的 50 条测试恰好把要验证的那一段替换掉了
+## P-4 「注解存在」≠「机制生效」：本组件的 50 条测试恰好把要验证的那一段替换掉了 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`P-4` ⇒ **新号**：`PIT-ARTICLE-04`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条的现象是「**本组件的 50 条测试恰好把要验证的那一段替换掉了**（两个 client 全被 `@MockitoBean` 换掉）」—— 该现象**已在本域消除**：装配层测试已补且改用真容器（`RANDOM_PORT`），`UNRESOLVED-003`（Filter 链实际 `@Order` 全序）/ `-004`（`@GrpcClient` 真装配 + Nacos 寻址）/ `-006`（共享层真被扫到）**三条均已关闭** ⇒ 本轮不再需要为「装配层不可见」另立防错约束。
+> **依据**：`service/article/article-api/src/test/java/com/rag/article/article/api/ArticleApiAssemblyWiringTest.java`（`webEnvironment = RANDOM_PORT`）· `docs/DRIFT/article/api.md:969,981,1003`（三条 ✅ 已关闭 · 2026-10-24 第二轮 · 变异 4/4 转红）⇒ **证据强度：真容器 + 变异**。
 
 **现象**
 `ArticleRpcClient` / `UserRpcClient` 用 `@GrpcClient("...")` 字段注入；
@@ -168,7 +188,12 @@ Spring 侧 `@RequestParam String` 对多值走 `RequestParamMethodArgumentResolv
 
 ---
 
-## P-5 「代码里写了」与「客户端收到」之间隔着一次容器提交
+## P-5 「代码里写了」与「客户端收到」之间隔着一次容器提交 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`P-5` ⇒ **新号**：`PIT-ARTICLE-05`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条的现象是「50 条 MockMvc 测试测不到容器的 header 规范化与 commit 时序」—— **已在本域消除**：真 Tomcat 探针已落（`UNRESOLVED-001` / `-005` ✅ 已关闭，第二轮变异 4/4 转红）⇒ 本域的「响应头确切字节」已有真容器证据，故不再为本条单列防错约束。
+> **依据**：`docs/DRIFT/article/api.md:940`（UNRESOLVED-001 ✅ 已关闭）· `:994`（UNRESOLVED-005 ✅ 已关闭）· 真容器测试存在：`service/article/article-api/src/test/java/com/rag/article/article/api/ArticleApiAssemblyWiringTest.java`（`RANDOM_PORT`）⇒ **证据强度：真 Tomcat**。
 
 **现象**
 上游把这条教训写进了代码注释（`DRIFT-005`）：
@@ -198,7 +223,12 @@ Spring 侧 `@RequestParam String` 对多值走 `RequestParamMethodArgumentResolv
 
 ---
 
-## P-6 台账里的「实测计数」会**在同一天内**过期
+## P-6 台账里的「实测计数」会**在同一天内**过期 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-6` ⇒ **新号**：`PIT-ARTICLE-06`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「实测计数会**在同一天内**过期」是**台账维护**的固有风险 —— 任何一次新写入都会让上一次的计数再次过期 ⇒ 本轮每一次写入台账都必须带「核对日期 + 此后是否仍有写入」，否则同一坑会再踩一次。
+> **依据**：本条的三处实测（36 文件 / 4,275 行 → 38 文件 / 4,666 行）都是真实执行产出、间隔不到一天 ⇒ **证据强度：文件 mtime + 行数实测**。
 
 **现象**
 本文件所在台账的 §0 记录了一次真实执行：`src/main/java` **36 个文件** / **4,275 行**。
@@ -224,7 +254,12 @@ Spring 侧 `@RequestParam String` 对多值走 `RequestParamMethodArgumentResolv
 
 ---
 
-## P-7 「它有这个配置项」≠「它有消费者」：先证明零消费，再决定不实现
+## P-7 「它有这个配置项」≠「它有消费者」：先证明零消费，再决定不实现 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-7` ⇒ **新号**：`PIT-ARTICLE-07`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「它有这个配置项」≠「它有消费者」这一区分**今天仍然必须做** —— 尤其当结论要依赖 Go 的 tag 默认值（`NonBlock`）时 ⇒ 本轮任何「不实现某个依赖」的论证仍须分「响应层面（零消费者？）」与「生命周期层面（装配它会不会改变启动结果？）」两层写。
+> **依据**：本域结论**已收口**：`docs/DRIFT/article/api.md` §1.3（`SecurityRpc` 判定 EQUIVALENT）· `UNRESOLVED-007` ✅ 已关闭（`docs/DRIFT/article/api.md:1015`）⇒ 但**纪律未消除** ⇒ **证据强度：静态（Go 真源 grep 零消费 + tag 默认值消费点）**。
 
 **现象**
 Go 的 `ServiceContext` 装配了**三个** gRPC client，其中 `SecurityRpc`
@@ -263,7 +298,12 @@ zrpc/internal/client.go:78-80
 
 ---
 
-## P-8 「业务上显然该有的规则」在真源里可能不存在 —— 而直觉会把它加回去
+## P-8 「业务上显然该有的规则」在真源里可能不存在 —— 而直觉会把它加回去 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-8` ⇒ **新号**：`PIT-ARTICLE-08`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— Go 的「路由级开关（`rest.WithJwt` 是 `AddRoutes` 的 option）」与 Spring 的「路径级拦截器（`addPathPatterns`）」之间的**结构性差异未消除** ⇒ 本轮任何新增端点都必须重建「method × path」二维约束，否则要么过度拦截、要么过度放行（两个方向都是静默的）。
+> **依据**：本域已用「**带 method 的**受保护路由表」精确排除公开端点（`ArticleController` 类注释 + `JwtAuthInterceptor.PROTECTED_ROUTES`）⇒ 但**结构差异不变** ⇒ **证据强度：静态（Go `routes.go` 逐段 option + RAG 路由表）**。
 
 **现象**
 `POST /v1/upload` —— 「上传图片必须登录」是任何人凭直觉都会加的规则。
@@ -299,7 +339,12 @@ POST /v1/article/123     Spring: 拦截器 → 401（无 token）
 
 ---
 
-## P-9 响应成形层的「放行分支」比包装逻辑本身更容易出错
+## P-9 响应成形层的「放行分支」比包装逻辑本身更容易出错 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-9` ⇒ **新号**：`PIT-ARTICLE-09`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 五条放行分支的判定是**运行期**的（`HttpEntityMethodProcessor` 处理 `@ExceptionHandler` 返回的 `ResponseEntity` 时会继续查 advice chain）⇒ 漏一条不会报错、只会让响应**形状**悄悄变 ⇒ 本轮任何改动 `GlobalResponseAdvice` 的动作都必须逐条有用例覆盖。
+> **依据**：本域第一版实现就漏了 `byte[]` 那条（5 条断言 400 text/plain 的用例全部失败）⇒ **证据强度：真容器用例**。
 
 **现象**
 `GlobalResponseAdvice.beforeBodyWrite` 需要**五条**放行分支才能既包信封又不误包错误响应。
@@ -338,7 +383,12 @@ POST /v1/article/123     Spring: 拦截器 → 401（无 token）
 
 ---
 
-## P-10 「同一语义的错误映射」不要合并成「一个 mapper」
+## P-10 「同一语义的错误映射」不要合并成「一个 mapper」 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-10` ⇒ **新号**：`PIT-ARTICLE-10`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— Go 侧「读（鉴权那次 `GetArticle`）4 分支 / 写（`UpdateArticle`）3 分支 / `DELETE` 读写各 4 分支」的契约**未变** ⇒ 「两处结构相近 ⇒ 抽成一个函数」的重构直觉仍会诱导人合并 ⇒ 本轮合并前必须逐条列两处的分支集合。
+> **依据**：Go 真源 `internal/logic/get_article_logic.go` / `update_article_logic.go` / `delete_article_logic.go` 的错误映射集合（RAG 侧刻意保留两份）⇒ **证据强度：静态（Go 真源行号）**。
 
 **现象**
 `PUT /v1/article/:id` 的**读**（鉴权那次 `GetArticle`）有 4 个分支，
@@ -363,7 +413,12 @@ POST /v1/article/123     Spring: 拦截器 → 401（无 token）
 
 ---
 
-## P-11 「从 status 文案里抠 ID」：脆弱协议必须逐字复刻，不能顺手「改进」
+## P-11 「从 status 文案里抠 ID」：脆弱协议必须逐字复刻，不能顺手「改进」 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-11` ⇒ **新号**：`PIT-ARTICLE-11`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「从 gRPC status 的消息文本里抠 article_id」这条**约定优于契约**的协议仍在两侧（api 侧解析 + rpc 侧拼装）⇒ 它是**跨组件不变量**：任何一侧改动都会破 ⇒ 本轮若要改成结构化传递（metadata / 新字段），必须两侧同批改并登记为已签字的有意偏离。
+> **依据**：Go 侧 `create_article_logic.go` 的 `strings.LastIndex(message, ":")` 取值形态未变 · RAG 侧 `ArticleCreateService` 逐字复刻（含「无冒号返回空串」「冒号在末尾返回空串」两个边界）⇒ **证据强度：静态（两侧源码行号）**。
 
 **现象**
 `create_article_logic.go:82-92` 从 gRPC status 的**消息文本**里，
@@ -391,7 +446,12 @@ RAG 侧逐字复刻了它（`ArticleCreateService.java:144-153`），包括
 
 ---
 
-## P-12 域专属补强要**局部叠加**，不要污染已验证的共享层
+## P-12 域专属补强要**局部叠加**，不要污染已验证的共享层 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-12` ⇒ **新号**：`PIT-ARTICLE-12`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 共享层 `GoStyleCoercion` 的「String → 整数字段保持接受」豁免**仍在**（它的前提是 users 域的 `,string`）⇒ article 域仍须**局部叠加** `GoStyleStringFields` ⇒ 本轮任何「改共享层以收紧」的冲动都会把已验证域的行为退回去，且退得很安静。
+> **依据**：article 域 `types.go` 全文仍无 `,string` option（⇒ Go 侧 `type mismatch` ⇒ 400）· 域内补强见 `GoStyleStringFields` ⇒ **证据强度：静态（Go 真源 + RAG 源码）**。
 
 **现象**
 共享的 `GoStyleCoercion` 保留了一条豁免：「String → 整数字段保持接受」，
@@ -420,7 +480,12 @@ Jackson 的 coercion 要作用在**声明的目标类型**上，形参是 `Objec
 3. 每条 coercion 规则配一条「该形状必须被拒」的用例 —— 尤其检查**形参是 `Object` 的字段**。
 ---
 
-## P-13 grpc-java 的 `withDeadline` 是**覆盖**，不是「取最小」
+## P-13 grpc-java 的 `withDeadline` 是**覆盖**，不是「取最小」 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-13` ⇒ **新号**：`PIT-ARTICLE-13`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— grpc-java 的 `CallOptions.withDeadline(deadline)` **仍是直接覆盖**（不是 Go `context.WithTimeout` 的「父子取小」）⇒ 本轮任何新增的「请求级 deadline + per-client 上限」并存处，都必须**显式算 `min`** ⇒ 回归网必须包含「HTTP 预算更短」与「预算已耗尽」两个场景。
+> **依据**：本域**已显式取 min** 并有专门用例：`service/article/article-api/src/test/java/com/rag/article/article/api/UserRpcClientDeadlineTest.java` ⇒ 但**框架语义未变** ⇒ **证据强度：字节码实测（grpc-api 1.66.0）+ 单元测试**。
 
 > ⚠️ **本条对所有域适用**（凡同时用「请求级 deadline」+「per-client 超时上限」的地方）。
 > 合并时建议搬到 `docs/Pitfalls/_cross/`。
@@ -472,7 +537,12 @@ grpc-java 的 `withDeadlineAfter` 是「**新的覆盖旧的**」。**语义不�
 
 ---
 
-## P-14 Go 的 `codes.Code.String()` 是 CamelCase，Java 的 `Status.Code.name()` 是 SCREAMING_SNAKE
+## P-14 Go 的 `codes.Code.String()` 是 CamelCase，Java 的 `Status.Code.name()` 是 SCREAMING_SNAKE ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-14` ⇒ **新号**：`PIT-ARTICLE-14`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— Go 的 `codes.Code.String()`（CamelCase）与 Java 的 `Status.Code.name()`（SCREAMING_SNAKE）是**语言级枚举命名约定差异**，不会变 ⇒ 本轮任何「复刻 Go 的错误文案」都必须显式维护规范名映射表，不能用 `name()` / `toString()` 顶替。
+> **依据**：Go `status.Status.String()` 的 `fmt.Sprintf("rpc error: code = %s desc = %s", …)` 形态未变 · RAG 侧 `extractArticleIDFromStatusMessage` 正是依赖这段文案的协议 ⇒ **证据强度：静态（Go 标准库 + RAG 源码）**。
 
 **现象**
 把 gRPC 错误映射成 HTTP 状态码后，还要复刻 Go 的**错误文案**。
@@ -513,7 +583,12 @@ grpc-java 把它编进 `Status.toString()`，`StatusRuntimeException.getMessage(
 
 ---
 
-## P-15 变异验证：被变异的模块**没被重编** ⇒ 会产出**假的「仍全绿」**
+## P-15 变异验证：被变异的模块**没被重编** ⇒ 会产出**假的「仍全绿」** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-15` ⇒ **新号**：`PIT-ARTICLE-15`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 构建机制未变（`mvn -pl <模块>` 不带 `-am` ⇒ 被变异的模块**不参与本次构建** ⇒ 用的是本地仓库里的旧 jar）⇒ 本轮任何变异验证仍必须带 `-am`（或先 install 被变异模块）并补 `-Dsurefire.failIfNoSpecifiedTests=false`，且**必须三态判定**。
+> **依据**：本条实证：`service/common` 的 `GoStyleCpuSheddingFilter` 的 `@Order` 变异 ⇒ 不带 `-am` 判「仍全绿」· 带 `-am` 立刻转红 ⇒ **证据强度：实测（变异前后对照）**。
 
 **现象**
 变异 `service/common` 里的 `GoStyleCpuSheddingFilter` 的 `@Order`（+3 → +9），
@@ -544,7 +619,12 @@ mvn -pl service/article/article-api test          # ❌ 不带 -am
 
 ---
 
-## P-16 「我写的那个字节」到不了客户端 —— 框架的**归一化**会覆盖它
+## P-16 「我写的那个字节」到不了客户端 —— 框架的**归一化**会覆盖它 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-16` ⇒ **新号**：`PIT-ARTICLE-16`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— Spring `ServletServerHttpResponse.writeHeaders()` 会用 `MediaType.toString()` **覆盖**刚 `addHeader` 进去的原值（`MediaType.toString()` 不在 `;` 后加空格）⇒ **框架的归一化机制未变** ⇒ 本轮任何「响应头字节」契约仍必须用真容器 + JDK `HttpClient` 断言**客户端收到的那一份**。
+> **依据**：本域已用真容器把这条钉住（`ArticleApiFailurePathMatrixTest` 等，`RANDOM_PORT` / 专用端口段）⇒ 但**机制未消除** ⇒ **证据强度：真 Tomcat**。
 
 **现象**
 为了对齐 Go 的 `http.Error`，RAG 侧写的是**逐字相同**的
@@ -590,7 +670,12 @@ MockMvc **不经过 Tomcat 的 header 规范化** ⇒ 50 条 MockMvc 测试全�
 
 ---
 
-## P-17 「两侧排序一致」的用例若只用 ASCII ⇒ 它**测不出**任何排序差异
+## P-17 「两侧排序一致」的用例若只用 ASCII ⇒ 它**测不出**任何排序差异 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-17` ⇒ **新号**：`PIT-ARTICLE-17`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「两侧排序/比较/编码/精度/边界值」类契约**随手写的用例几乎必然落在『两侧碰巧一致』的区域**这一形态未变 ⇒ 本轮任何「已对齐」的断言都必须问一句「它到底测的是哪一面」，并在用例里放一个**专门挑出来的分歧点**。
+> **依据**：本域实例**已修**：`DRIFT-ARTICLE-API-007` ✅ 已修（`ext_info` key 按码点序）⇒ `docs/DRIFT/article/api.md:696` · 配套 `ArticleGoStrconvQuoteParityTest` ⇒ 但**纪律未消除** ⇒ **证据强度：双侧探针 + 变异**。
 
 **现象**
 `ext_info` 的 key 要按 Go 的顺序输出。RAG 侧本来就用 `TreeMap`（会排序），
@@ -644,7 +729,12 @@ Java TreeMap 码点比较器 : a, 中, U+E000, U+FFFD, 😀      ← ✅ 与 Go 
 
 ---
 
-## P-18 「你的代码里没写」≠「运行时没有」：RAG 跑在**容器**里，容器自带一堆上限
+## P-18 「你的代码里没写」≠「运行时没有」：RAG 跑在**容器**里，容器自带一堆上限 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-18` ⇒ **新号**：`PIT-ARTICLE-18`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「RAG 跑在容器里 ⇒ 容器自带一堆上限、且比业务代码更早触发」这一事实**未变** ⇒ 本轮凡登记「RAG 侧缺少某个上限/校验」的条目，都必须先用真容器量一次，否则极可能把一条**更严的**现实误判成「缺失」。
+> **依据**：本域实例**已结案**：容器旋钮对齐（请求行 1028KB + 参数 2048）⇒ 闸门真正可达 ⇒ body 与 Go **逐字节一致** ⇒ `docs/DRIFT/article/api.md:1378,1604`（`DRIFT-ARTICLE-API-005` ✅ 已结案 · 2026-10-25 第十三轮）⇒ 但**纪律未消除** ⇒ **证据强度：真容器**。
 
 **现象**
 台账写「`DRIFT-005` query 参数总数上限 2048 ⇒ Go 有上限，**RAG 无上限**」。
@@ -703,7 +793,12 @@ Java TreeMap 码点比较器 : a, 中, U+E000, U+FFFD, 😀      ← ✅ 与 Go 
 
 ---
 
-## P-19 域内编号跨域会撞号：「查无此编号」可能是**搜窄了**，不是"不存在"
+## P-19 域内编号跨域会撞号：「查无此编号」可能是**搜窄了**，不是"不存在" ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-19` ⇒ **新号**：`PIT-ARTICLE-19`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— `DRIFT-0xx` / `UNRESOLVED-0xx` 仍是**域内编号**、每域各自从 001 开始 ⇒ **本域自己就有两套同形不同义的编号空间** ⇒ 跨域检索「查不到」仍极可能是**搜窄了**而不是「不存在」⇒ 本轮凡写「查无此编号」必须先全仓 + 全部工作树一起搜。
+> **依据**：本域实例**已关闭**：`UNRESOLVED-008` ✅ 已关闭（`DRIFT-024` 在 users 域 `docs/DRIFT/users/_shared.md:103`，本域不受影响）⇒ `docs/DRIFT/article/api.md:1040` · 本域两套编号空间的对照表见 `docs/DRIFT/article/api.md:837-845` ⇒ 但**编号形态未变** ⇒ **证据强度：全仓 grep**。
 
 **现象**
 `UNRESOLVED-008` 记的是：`GlobalExceptionHandler.java:118` 的注释引用了「DRIFT-024」，
@@ -735,7 +830,12 @@ Java TreeMap 码点比较器 : a, 中, U+E000, U+FFFD, 😀      ← ✅ 与 Go 
 
 ---
 
-## P-20 「错误被记录了」≠「错误被上报了」：复刻 Go 的解析，**必须复刻它失败时怎么办**
+## P-20 「错误被记录了」≠「错误被上报了」：复刻 Go 的解析，**必须复刻它失败时怎么办** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-20` ⇒ **新号**：`PIT-ARTICLE-20`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「复刻一个**会失败**的函数时，『失败时怎么办』不是细节，是它的可观察行为」这一纪律**未变** ⇒ 本轮任何复刻 Go 解析/校验函数的改动，都必须把它的**所有 return 路径**（成功 / 各种失败）逐条列出来对，并**刻意挑一条会让 Go 失败的输入**做用例。
+> **依据**：本域实例**已修**：`DRIFT-ARTICLE-API-009` ✅ 已修（三条 `net/url` query 解析行为 · body 逐字一致）⇒ `docs/DRIFT/article/api.md:718` ⇒ 但**纪律未消除** ⇒ **证据强度：真容器 + 变异**。
 
 **现象（本轮实际发生的一件事）**
 本轮把 `GoStyleFormParamCountFilter` 改成复刻 Go 的 `net/url` 解析规则。
@@ -786,7 +886,12 @@ go-zero@v1.10.2/rest/httpx/util.go:23-25  GetFormValues（ParseForm 的 error �
 
 ---
 
-## P-21 「仍全绿」的第一嫌疑是「**变异没打中**」，不是「测试测不到」
+## P-21 「仍全绿」的第一嫌疑是「**变异没打中**」，不是「测试测不到」 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-21` ⇒ **新号**：`PIT-ARTICLE-21`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「仍全绿」有**两种含义相反**的来源（测不到 / 变异无效），且**变异无效**有四类来源（打错分支 / 相对量没变 / 产物没重编 / 变异脚本自身写错）⇒ 本轮任何「仍全绿」都不得直接判成「回归网无效」，必须先排除「变异没打中」。
+> **依据**：本条实证：B₁（只删 key 分支的错误上报）与 D₁（挪段数上限但相对顺序没变）两次「仍全绿」**都是变异无效** ⇒ **证据强度：实测（变异前后对照）**。
 
 **现象（本轮实际发生的一件事）**
 本轮给新写的三条 query 解析用例做变异验证，两次拿到「仍全绿」：
@@ -827,7 +932,12 @@ go-zero@v1.10.2/rest/httpx/util.go:23-25  GetFormValues（ParseForm 的 error �
    （例如改 key 分支却测 value）⇒ 那就是变异打偏了。
 3. 脚本判定「仍全绿」时，**必须同时打印变异内容**，让「没打中」当场可见。
 
-## P-22 「端到端测不到」是**两个问题**；「javadoc 写了 Go 出处」是**待核实的断言**，不是证据
+## P-22 「端到端测不到」是**两个问题**；「javadoc 写了 Go 出处」是**待核实的断言**，不是证据 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`P-22` ⇒ **新号**：`PIT-ARTICLE-22`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「javadoc 里写了 Go 出处」**只是待核实的断言** —— 而本仓在 **2026-10-29 的 article-rpc 第十二轮又撞到同款**（`ContentSecurityAutoConfiguration` 的类注释声称「锁死用例：`ArticleContentSecurityWiringTest`」，实测该类**全仓不存在**）⇒ **本轮凡新增/改动带「Go: …」或「锁死用例：X」的注释，都必须抽样回查行号与类名**。
+> **依据**：本域实例**已修**：`DRIFT-ARTICLE-API-010` ✅ 已修（`isGoPrintable` 对齐 Go `IsPrint` · 4/4 变异转红）⇒ `docs/DRIFT/article/api.md:746` · 配套 `service/article/article-api/src/test/java/com/rag/article/article/api/ArticleGoStrconvQuoteParityTest.java` · ⚠️ **同款新实例**见 `docs/DRIFT/article/rpc.md` §12.1 ⇒ **证据强度：Go 标准库探针 + 变异（实例已修）**。
 
 **现象（2026-10-24 台账审计时实际挖到的一件事）**
 

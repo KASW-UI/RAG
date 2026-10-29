@@ -7,6 +7,11 @@
 
 ---
 
+## PIT-COMMON-13 · 保护层在测试里「按 CPU 关门」：并行构建会造出看起来像回归的假失败  ·  🔴 **仍生效**  ·  核对日期 **2026-10-29**  ·  本轮影响：**否**
+
+> **2026-10-29 对齐**：🔴 **仍生效**（核对日期 **2026-10-29**）· **本轮影响：否** —— 本轮**不跑并行构建** ⇒ 「保护层按 CPU 关门 ⇒ 造出假失败」本轮不触发。
+> **旧号**：`（本文件原无编号 · 单篇记录）` ⇒ **新号**：`PIT-COMMON-13`（本域统一编号 `PIT-COMMON-<两位序号>`；**旧号原样保留**）。
+> **证据**：`service/common/src/main/java/com/rag/common/protection/GoStyleCpuSheddingFilter.java`（机制仍在 ⇒ **触发条件仍在**）＋ 本条 §现象（`mvn -o -T1C test` 并行 + 全量 testcontainers 真 PG ⇒ `UserApiGoStyleBodyContentTypeTest` 报 503 假失败）
 ## 现象
 
 全仓 `mvn -o -T1C test`（并行 + 全量 testcontainers 真 PG）跑出**一条**失败：

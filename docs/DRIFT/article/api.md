@@ -1376,15 +1376,15 @@ return userServiceBlockingStub.withDeadlineAfter(effective, TimeUnit.MILLISECOND
 | 条目 | 状态 | 说明 |
 |---|---|---|
 | `DRIFT-ARTICLE-API-005` query 参数总数上限 2048 | ✅ **已结案**（2026-10-25 第十三轮：容器旋钮对齐后 body 与 Go **逐字节一致**；⚠️ 残余窗口见 `DRIFT-HOTAPI-030`） | 2026-10-24 补应用层闸门；**2026-10-25 第十三轮**把请求行上限抬到 1028KB ⇒ 闸门首次真正可达 ⇒ 400 + Go 的 text/plain body；两条 characterization 断言已按 §3.3 改写为断言 Go 的形态 |
-| `DRIFT-ARTICLE-API-006` 8–10 MiB body 文案 | 🔴 OPEN（LOW） | 本轮未动 |
-| `DRIFT-ARTICLE-API-007` `ext_info` key 排序（非 BMP） | 🔴 OPEN（极低） | 本轮未动 |
-| `UNRESOLVED-001` / `-005` 真实 Tomcat 下的 400/401/404 响应头 | 🔴 OPEN | MockMvc 测不到，**必须真容器** |
-| `UNRESOLVED-003` Filter 链实际 `@Order` 全序 | 🔴 OPEN | 同为容器级 |
-| `UNRESOLVED-004` `@GrpcClient` 真装配 + Nacos 寻址 | 🔴 OPEN | 本轮 60 条测试仍**全部**用 `@MockitoBean` 把 client 换掉了 —— **恰好把要验证的那一段替换掉了** |
-| `UNRESOLVED-006` 共享层 `com.rag.common` 真被扫到 | 🔴 OPEN | 同上 |
+| `DRIFT-ARTICLE-API-006` 8–10 MiB body 文案 | 🔴 OPEN（LOW） | 本轮未动 〔**本行为历史快照；现状见 §7 当前状态表 = 🟡 已确认 LOW、不修**〕 |
+| `DRIFT-ARTICLE-API-007` `ext_info` key 排序（非 BMP） | 🔴 OPEN（极低） | 本轮未动 〔**本行为历史快照；现状见 §7 当前状态表 = ✅ 已修（2026-10-24）**〕 |
+| `UNRESOLVED-001` / `-005` 真实 Tomcat 下的 400/401/404 响应头 | 🔴 OPEN | MockMvc 测不到，**必须真容器** 〔**本行为历史快照；现状见 §9 = ✅ 已关闭（2026-10-24，第二轮）**〕 |
+| `UNRESOLVED-003` Filter 链实际 `@Order` 全序 | 🔴 OPEN | 同为容器级 〔**本行为历史快照；现状见 §9 = ✅ 已关闭（2026-10-24，第二轮）**〕 |
+| `UNRESOLVED-004` `@GrpcClient` 真装配 + Nacos 寻址 | 🔴 OPEN | 本轮 60 条测试仍**全部**用 `@MockitoBean` 把 client 换掉了 —— **恰好把要验证的那一段替换掉了** 〔**本行为历史快照；现状见 §9 = ✅ 已关闭（2026-10-24，第二轮）**〕 |
+| `UNRESOLVED-006` 共享层 `com.rag.common` 真被扫到 | 🔴 OPEN | 同上 〔**本行为历史快照；现状见 §9 = ✅ 已关闭（2026-10-24，第二轮）**〕 |
 | `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | 本轮**已在 rpc 侧**核对 `public_only` / `status` 的消费方式（见 [`rpc.md`](./rpc.md) 与 [`proto.md`](./proto.md)） |
-| `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | 🔴 OPEN | 仍查无对应台账 |
-| `UNRESOLVED-009` `UpdateArticleReq.java:8` 的 Go 行号引用有误 | 🔴 OPEN | 本轮**只读不写**该文件；建议下一轮顺手改 |
+| `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | 🔴 OPEN | 仍查无对应台账 〔**本行为历史快照；现状见 §9 = ✅ 已关闭（2026-10-24）—— 原结论作废：`DRIFT-024` 在 **users 域** `docs/DRIFT/users/_shared.md:103`，本域不受影响**〕 |
+| `UNRESOLVED-009` `UpdateArticleReq.java:8` 的 Go 行号引用有误 | 🔴 OPEN | 本轮**只读不写**该文件；建议下一轮顺手改 〔**本行为历史快照；现状见 §9 = ✅ 已关闭（2026-10-24，第二轮）**〕 |
 
 ### 判定变化
 
@@ -1512,7 +1512,7 @@ chn = chn.Append(GunzipHandler)          // ⑪
 > ⇒ **教训：变异一个非目标模块的源码时，必须确认它被重编了**，否则会产出一条**假的「仍全绿」**。
 > ⇒ 已记入 [`docs/Pitfalls/article/api.md`](../../Pitfalls/article/api.md)。
 
-### 4. 🔴 `UNRESOLVED-001` / `-005` 已关闭 —— **并首次确认一条真漂移**
+### 4. ✅ `UNRESOLVED-001` / `-005` 已关闭 —— 🔴 **并首次确认一条真漂移**
 
 真 Tomcat 实测结果：
 
@@ -1575,8 +1575,8 @@ chn = chn.Append(GunzipHandler)          // ⑪
 | `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | 🟡 部分关闭（本轮在 rpc 侧核对了 `public_only`/`status` 的消费方式） |
 | `UNRESOLVED-007` `SecurityRpc` 的 `NonBlock:false` 差异 | 🔴 OPEN | ✅ **已关闭**（2026-10-24，零新代码）：已读到消费点（`zrpc/config.go:30` tag 默认 true → `client.go:65-69` → `internal/client.go:147-151` → `MustNewClient` panic）⇒ **条件性差异，当前不可达** |
 | `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | 🔴 OPEN | ✅ **已关闭**（2026-10-24，零新代码）：已定位到 users 域台账条目 + 共享层已修 + 本域真 Tomcat 用例已断言 400 响应头 |
-| `UNRESOLVED-009` `UpdateArticleReq.java:8` 的 Go 行号引用有误 | 🔴 OPEN | 🔴 OPEN（本轮只读不写该文件） |
-| `DRIFT-005~007` | 🔴 OPEN | 🔴 OPEN |
+| `UNRESOLVED-009` `UpdateArticleReq.java:8` 的 Go 行号引用有误 | 🔴 OPEN | ✅ **已关闭**（2026-10-24，第二轮）〔**2026-10-29 订正**：原「修复后」格写「🔴 OPEN（本轮只读不写该文件）」⇒ **与紧邻的 §6「✅ `UNRESOLVED-009` 已关闭」直接矛盾** ⇒ 已按实测收敛为 ✅；**原文保留于「修复前」格**〕 |
+| `DRIFT-005~007` | 🔴 OPEN | 🔴 OPEN〔**2026-10-29 订正**：本行是**第二轮当时**的快照 ⇒ **现状见 §7 当前状态表** —— `DRIFT-ARTICLE-API-005` ✅ **已结案**（2026-10-25 第十三轮）· `DRIFT-ARTICLE-API-006` 🟡 **已确认 LOW、不修**（2026-10-24）· `DRIFT-ARTICLE-API-007` ✅ **已修**（2026-10-24）〕 |
 | **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
 
 ⚠️ **判定不变的理由**：本轮关掉的是 **5 条「从未验证」的 UNRESOLVED**（证据强度提升），
@@ -1601,10 +1601,12 @@ chn = chn.Append(GunzipHandler)          // ⑪
 
 | 条目 | 状态 | 说明 |
 |---|---|---|
-| `DRIFT-005` query 参数总数上限 2048 | 🟡 **部分关闭**（2026-10-24） | 🔴 **原定性（「RAG 无上限」）已被真容器实测推翻**：Tomcat 的 `server.max-http-request-header-size`（默认 8 KB）**更早**触发 ⇒ **状态码两侧都是 400**，且 RAG 阈值**更严**（≈2040 < Go 的 2049）⇒ 不存在 DoS 暴露。已**补应用层 Go 语义闸门**（`GoStyleFormParamCountFilter`，**2026-10-24 第八轮已改名** `GoStyleGetFormValuesFilter`），真容器实测 body 与 Go **逐字节一致**（2/2 变异验证）。✅ **2026-10-25 第十三轮已闭合**：容器旋钮（请求行 1028KB + 参数 2048）落地 ⇒ 闸门真正可达 ⇒ body 与 Go **逐字节一致**（原「残留」关闭）。⚠️ 残余窗口见 `DRIFT-HOTAPI-030` |
-| `DRIFT-006` 8–10 MiB body 文案 | ✅ **已确认 LOW，不修**（2026-10-24） | 可观察契约相同（400 + text/plain + nosniff），差异仅在 body 文案：Go 侧 Go 1.25 探针实测 = `"unexpected EOF"`（`json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode` 解析半个文档）；RAG 侧 = `"request entity too large"` ⇒ 已用 characterization test 锁住实测现状 |
-| `DRIFT-007` `ext_info` key 排序（非 BMP） | ✅ **已修**（2026-10-24） | 已按**码点序**比较（= Go 的 UTF-8 字节序），见本文件末尾「第三轮」节 |
-| `DRIFT-009` Go `net/url` 的三条 query 解析行为 | ✅ **已修**（2026-10-24） | 修前 ②**静默放过**（200）、③**500 空 body**、①**顺序反了** ⇒ 已按 Go 的顺序复刻（段数上限 → 分段解析（错误上报）→ 2048 计数），真容器实测 **body 逐字一致** ⇒ 见本文件末尾「第八轮」节 |
+| `DRIFT-ARTICLE-API-005` query 参数总数上限 2048 | ✅ **已结案**（2026-10-25 第十三轮） | 🔴 **原定性（「RAG 无上限」）已被真容器实测推翻**：Tomcat 的 `server.max-http-request-header-size`（默认 8 KB）**更早**触发 ⇒ **状态码两侧都是 400**，且 RAG 阈值**更严**（≈2040 < Go 的 2049）⇒ 不存在 DoS 暴露。已**补应用层 Go 语义闸门**（`GoStyleFormParamCountFilter`，**2026-10-24 第八轮已改名** `GoStyleGetFormValuesFilter`），真容器实测 body 与 Go **逐字节一致**（2/2 变异验证）。✅ **2026-10-25 第十三轮已闭合**：容器旋钮（请求行 1028KB + 参数 2048）落地 ⇒ 闸门真正可达 ⇒ body 与 Go **逐字节一致**（原「残留」关闭）。⚠️ 残余窗口见 `DRIFT-HOTAPI-030`（**跨域面 ⇒ 由 `global` / G4 写权，本表不重复登记**）<br>⚠️ **2026-10-29 对齐**：状态格原写「🟡 **部分关闭**（2026-10-24）」⇒ **与同行说明自相矛盾**（说明已写「已闭合」）且与 §7.5 条目「✅ 已修（2026-10-24）」+ 本文件 `:1378` 的「✅ **已结案**」不一致 ⇒ **本轮收敛为单一状态 ✅ 已结案**；**原行号 `DRIFT-005` 亦已改为权威编号** `DRIFT-ARTICLE-API-005` |
+| `DRIFT-ARTICLE-API-006` 8–10 MiB body 文案 | 🟡 **已确认 LOW，不修**（2026-10-24） | 可观察契约相同（400 + text/plain + nosniff），差异仅在 body 文案：Go 侧 Go 1.25 探针实测 = `"unexpected EOF"`（`json.NewDecoder(io.LimitReader(r.Body, 8<<20)).Decode` 解析半个文档）；RAG 侧 = `"request entity too large"` ⇒ 已用 characterization test 锁住实测现状<br>⚠️ **2026-10-29 对齐**：编号由 `DRIFT-006` 改为权威编号 `DRIFT-ARTICLE-API-006`；**状态格不变**（🟡 = 本仓取值域里的「已确认不修」，与 §7.5 `:682` 的「🟡 **LOW，确认不修**」一致） |
+| `DRIFT-ARTICLE-API-007` `ext_info` key 排序（非 BMP） | ✅ **已修**（2026-10-24） | 已按**码点序**比较（= Go 的 UTF-8 字节序），见本文件末尾「第三轮」节<br>⚠️ **2026-10-29 对齐**：编号由 `DRIFT-007` 改为权威编号 `DRIFT-ARTICLE-API-007`；**状态格不变**（与 §7.5 `:696`「✅ **已修**」一致） |
+| `DRIFT-ARTICLE-API-009` Go `net/url` 的三条 query 解析行为 | ✅ **已修**（2026-10-24） | 修前 ②**静默放过**（200）、③**500 空 body**、①**顺序反了** ⇒ 已按 Go 的顺序复刻（段数上限 → 分段解析（错误上报）→ 2048 计数），真容器实测 **body 逐字一致** ⇒ 见本文件末尾「第八轮」节<br>⚠️ **2026-10-29 对齐**：编号由 `DRIFT-009` 改为权威编号 `DRIFT-ARTICLE-API-009`；**状态格不变**（与 §7.5 `:718`「✅ **已修（2026-10-24）**」一致） |
+| `DRIFT-ARTICLE-API-011` `application.yml` 少 `auth:` 一层 ⇒ **组件起不来** | ✅ **已修**（2026-10-29 · G3） | 启动阻断类 ⇒ 修前 `article-api` **根本起不来** ⇒ 见 §7 条目 `:774` · 探针副产品（实跑才暴露）<br>⚠️ **2026-10-29 对齐**：本条**本轮有变动** ⇒ 按本表读法（「只登记仍有讨论价值 / **本轮有变动**的条目」）**补登记**（此前只出现在 §7 条目，未进活状态表） |
+| `DRIFT-ARTICLE-API-012` JSON **字段顺序**漂移 | ✅ **已修**（2026-10-29 · G3） | Go 按 struct 声明序 / Jackson 按字母序 ⇒ 见 §7 条目 `:806`<br>⚠️ **2026-10-29 对齐**：同上 ⇒ **补登记**到活状态表 |
 | `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | rpc 侧已核过 `public_only` / `status` 的消费方式（见 [`proto.md`](./proto.md)）；仍缺**跨栈活体对拍** |
 | `UNRESOLVED-007` `SecurityRpc` 的 `NonBlock:false` | ✅ **已关闭**（2026-10-24） | 结论依赖 go-zero 的 tag 默认值，不是设计对齐 ⇒ 已读到消费点确认为**条件性差异、当前不可达**（详见 §9） |
 | `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | ✅ **已关闭**（2026-10-24） | 🔴 **原结论作废**：`DRIFT-024` 在 **users 域** `docs/DRIFT/users/_shared.md:103`，common 域与 `_cross` 快照都在引用它；本域**不受影响**（共享层已修 + 真 Tomcat 已断言） |
@@ -1682,7 +1684,7 @@ $GOROOT/src/encoding/json/encode.go:805-807
 | `DRIFT-ARTICLE-API-007` `ext_info` key 排序（非 BMP） | ❌ OBSERVABLE DIFFERENCE（极低） | ✅ **已修** + 双侧探针 + 变异验证 |
 | `DRIFT-005` query 参数总数上限 2048 | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
 | `DRIFT-006` 8–10 MiB body 文案 | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
-| `UNRESOLVED-002` / `007` / `008` | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
+| `UNRESOLVED-002` / `007` / `008` | 🔴 OPEN | 🔴 **OPEN**（本轮未动）〔**2026-10-29 订正**：本行是**第三/四轮当时**的快照 ⇒ **现状见 §9** —— `UNRESOLVED-007` ✅ **已关闭**（2026-10-24，零新代码）· `UNRESOLVED-008` ✅ **已关闭**（2026-10-24，零新代码）· `UNRESOLVED-002` 🟡 **部分关闭**（仍缺跨栈活体对拍）〕 |
 | `Content-Type` 空格（已确认不修） | 🟡 LOW OBSERVABLE DIFFERENCE | 🟡 **不变**（已用 characterization test 锁住） |
 | **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
 
@@ -1812,7 +1814,7 @@ go-zero@v1.10.2/rest/httpx/util.go:22-65  GetFormValues（下面摘录的是其�
 | 应用层的 Go 2048 判据 | 🔴 无 | ✅ **已实现**（`GoStyleFormParamCountFilter`，真容器实测 body 与 Go 逐字节一致） |
 | 默认部署下的 400 **body** | Tomcat 的 HTML 错误页 | Tomcat 的 HTML 错误页（**不变**）⇒ 🟡 **LOW OBSERVABLE DIFFERENCE，决定不修** |
 | `DRIFT-006` 8–10 MiB body 文案 | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
-| `UNRESOLVED-002` / `007` / `008` | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
+| `UNRESOLVED-002` / `007` / `008` | 🔴 OPEN | 🔴 **OPEN**（本轮未动）〔**2026-10-29 订正**：本行是**第三/四轮当时**的快照 ⇒ **现状见 §9** —— `UNRESOLVED-007` ✅ **已关闭**（2026-10-24，零新代码）· `UNRESOLVED-008` ✅ **已关闭**（2026-10-24，零新代码）· `UNRESOLVED-002` 🟡 **部分关闭**（仍缺跨栈活体对拍）〕 |
 | **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
 
 #### ⚠️ 为什么默认部署下的 **body 差异不修**
@@ -1877,8 +1879,8 @@ article-api 的真 Tomcat 用例已断言 400 带 `Content-Type` + `nosniff`）�
 | `UNRESOLVED-007` `SecurityRpc` 的 `NonBlock:false` | 🔴 OPEN | ✅ **已关闭**（条件性差异，当前不可达） |
 | `UNRESOLVED-008` `DRIFT-024` 查无台账 | 🔴 OPEN | ✅ **已关闭**（已定位到 users 域条目；本域不受影响） |
 | `UNRESOLVED-002` 跨栈活体对拍 | 🟡 部分关闭 | 🟡 **部分关闭**（仍缺跨栈活体对拍） |
-| `UNRESOLVED-010` Go `net/url` 的三条相邻行为 | 🔴 OPEN | 🔴 **OPEN**（本轮登记） |
-| `DRIFT-006` 8–10 MiB body 文案 | 🔴 OPEN | 🔴 **OPEN**（本轮未动） |
+| `UNRESOLVED-010` Go `net/url` 的三条相邻行为 | 🔴 OPEN | ✅ **已关闭**（2026-10-24 第八轮 · Go 侧真包探针 + 真 Tomcat 实测 + 3/3 有效变异转红）〔**2026-10-29 订正**：原「修复后」格写「🔴 **OPEN**（本轮登记）」⇒ **与本文件第八轮节「`UNRESOLVED-010` 关闭」直接矛盾** ⇒ 已按实测收敛为 ✅；**原文保留于「修复前」格**〕 |
+| `DRIFT-006` 8–10 MiB body 文案 | 🔴 OPEN | 🟡 **已确认 LOW、不修**（2026-10-24 第六轮 · characterization test + 变异验证）〔**2026-10-29 订正**：原「修复后」格写「🔴 **OPEN**（本轮未动）」⇒ **与 §7 当前状态表不一致** ⇒ 已收敛为 🟡；**原文保留于「修复前」格**〕 |
 | **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
 
 ⚠️ **判定不变的理由**：本轮关闭的两条**都没有改变任何运行时行为**
@@ -1978,7 +1980,7 @@ assertEquals("request entity too large\n", response.getContentAsString(), …);
 | `DRIFT-005` query 参数总数上限 2048 | 🟡 部分关闭 | 🟡 **部分关闭（不变）** |
 | `DRIFT-007` `ext_info` key 排序 | ✅ 已修 | ✅ **已修（不变）** |
 | `UNRESOLVED-002` 跨栈活体对拍 | 🟡 部分关闭 | 🟡 **部分关闭（不变）** |
-| `UNRESOLVED-010` Go `net/url` 三条相邻行为 | 🔴 OPEN | 🔴 **OPEN（不变）** |
+| `UNRESOLVED-010` Go `net/url` 三条相邻行为 | 🔴 OPEN | ✅ **已关闭**（2026-10-24 第八轮）〔**2026-10-29 订正**：原「修复后」格写「🔴 **OPEN（不变）**」⇒ **与第八轮节的关闭结论直接矛盾** ⇒ 已按实测收敛为 ✅；**原文保留于「修复前」格**〕 |
 | **组件判定** | `NOT EQUIVALENT` | **`NOT EQUIVALENT`（不变）** |
 
 ⚠️ **判定不变的理由**：本轮**没有改变任何运行时行为**（只把一条待定性的漂移定性为 LOW 并锁住），

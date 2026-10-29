@@ -40,7 +40,24 @@ issue #71187874 用脚本往两个 DomainService 插了 46 处
 
 ---
 
-## PIT-USERS-SHARED-001 🔴 固定 gRPC 端口 + 并行会话 ⇒ 整个 ApplicationContext 起不来，用例显示为「errors」而非「端口冲突」
+> **📌 2026-10-29 台账对齐轮 · 编号与状态口径**（本轮新增；**只增不删**，旧内容一律保留）
+>
+> - **新号段**：`PIT-USERS-01 … PIT-USERS-24`（旧号 `PIT-USERS-SHARED-001 … 024`）⇒ **逐条对照**写在每个条目首的「**旧号** ⇒ **新号**」行里。
+> - **状态字段**：每个条目标题行尾以 `· **状态：X**` 标注（取值域：`仍生效` / `已闭环` / `已撤销` / `待核实`），
+>   条目首的引用块给出 **核对日期（2026-10-29）** · **是否影响当前轮次**（填「否」时写明不适用的具体原因）· **证据**（`文件:行号` 或守门退出码）。
+> - **判定口径**：`仍生效` ＝ 该坑描述的错误做法**今天仍可能发生**（触发条件仍存在）；
+>   `已闭环` ＝ **本条记录的那个具体实例**已被消除且**有证据指针**；
+>   `待核实` ＝ 判不了（**不许默认「仍生效」也不许默认「已闭环」**）。
+> - ⚠️ **本轮只改台账**（`docs/**`），**未复跑**任何代码侧守门 ⇒ 「已闭环」类条目的证据指向**上一次实测**，本轮只做「该实例是否仍在」的存在性复核。
+
+---
+
+## PIT-USERS-01 🔴 固定 gRPC 端口 + 并行会话 ⇒ 整个 ApplicationContext 起不来，用例显示为「errors」而非「端口冲突」 · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-001` ⇒ **新号**：`PIT-USERS-01`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮跑 users 域守门时若不把端口临时化，仍可能被并行会话的容器占掉端口
+> **证据**：`service/users/user/user-rpc/src/main/resources/application.yaml:118` = `port: ${USER_RPC_PORT:49210}` ⇒ 端口仍钉死，触发条件在
+
 
 **症状**：新建的 `UserRpcPrimaryKeySourceParityTest` 4 条用例全部报
 
@@ -84,7 +101,12 @@ IllegalState: ApplicationContext failure threshold (1) exceeded:
 
 ---
 
-## PIT-USERS-SHARED-002 🔴 Docker 内存配额只有 7.65 GiB ⇒ 小容器也起不来，**别把它当成代码信号**
+## PIT-USERS-02 🔴 Docker 内存配额只有 7.65 GiB ⇒ 小容器也起不来，**别把它当成代码信号** · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-002` ⇒ **新号**：`PIT-USERS-02`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮若跑 Testcontainers 类守门，仍会撞本机 Docker 内存配额
+> **证据**：`docker info` → Total Memory 7.653 GiB（机器级约束，仓内不可复现）⇒ 触发条件随本机 Docker 资源而定
+
 
 **症状**：`mvn test` 偶发
 ```
@@ -126,7 +148,12 @@ Neo4j 399 MiB、Grafana 362 MiB …… 已吃掉大半。
 
 ---
 
-## PIT-USERS-SHARED-003 🔴 探真源 `internal` 包会撞 Go 的 internal 规则 ⇒ 用 `go run -overlay` 虚拟注入，别复制源码
+## PIT-USERS-03 🔴 探真源 `internal` 包会撞 Go 的 internal 规则 ⇒ 用 `go run -overlay` 虚拟注入，别复制源码 · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-003` ⇒ **新号**：`PIT-USERS-03`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 本轮只改台账、不写任何 Go 探针 ⇒ 触发面不落地
+> **证据**：Go 真源 `service/user/user/rpc/internal/` 仍在 `internal` 下（真源冻结只读）⇒ 探针仍须 `go run -overlay`
+
 
 **症状**：想在 `/tmp` 建探针模块、`replace sea-try-go => <真源路径>`，
 直接 import 真源的 model 包：
@@ -186,7 +213,12 @@ cd <真源> && CGO_ENABLED=0 \
 
 ---
 
-## PIT-USERS-SHARED-004 🔴 改了跨模块的**资源文件**后跑下游测试，**不带 `-am` ⇒ 测的是 `~/.m2` 里的旧副本**
+## PIT-USERS-04 🔴 改了跨模块的**资源文件**后跑下游测试，**不带 `-am` ⇒ 测的是 `~/.m2` 里的旧副本** · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-004` ⇒ **新号**：`PIT-USERS-04`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮跑 users 域模块测试即依赖该纪律（不带 `-am` 会测到 `~/.m2` 旧副本）
+> **证据**：`service/users/users-common/pom.xml` 仍是独立模块 ⇒ `mvn -pl … test` 不带 `-am` 仍从 `~/.m2` 的已安装 jar 解析
+
 
 **症状**：改了 `users-common/src/main/resources/db/01_create_user.sql`（DDL），
 `target/classes` 里也确认是新的，**但 user-rpc 的集成测试仍报**
@@ -232,7 +264,12 @@ mvn -o -pl service/users/user/user-rpc test
 
 ---
 
-## PIT-USERS-SHARED-005 🔴 二阶后果会**掩盖真凶** —— 看到 503 别急着找「谁短路了」，要找「谁把它喂成 500 的」
+## PIT-USERS-05 🔴 二阶后果会**掩盖真凶** —— 看到 503 别急着找「谁短路了」，要找「谁把它喂成 500 的」 · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-005` ⇒ **新号**：`PIT-USERS-05`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核 user-api 异常映射时仍会撞「观测码 ≠ 真凶」
+> **证据**：`service/users/user/user-api/.../advice/GlobalExceptionHandler.java:334` `handleAny` 仍是兜底分支；`:140` 只拆出 `GoStyleCircuitOpenException` 一支 ⇒ 其余链路仍可能二阶掩盖真凶
+
 
 **症状**：给 user-api 补 `GoStyleGrpcClientBreakerE2ETest`（客户端熔断的端到端守网），
 **首跑就红**：
@@ -289,7 +326,12 @@ GlobalExceptionHandler : unhandled exception
 
 ---
 
-## PIT-USERS-SHARED-006 🔴 变异验证脚本把「**没跑**」当成「**红了**」⇒ 三个「全红」全是假的
+## PIT-USERS-06 🔴 变异验证脚本把「**没跑**」当成「**红了**」⇒ 三个「全红」全是假的 · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-006` ⇒ **新号**：`PIT-USERS-06`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮复用守门脚本判红绿时直接适用
+> **证据**：`tools/difftest/exp-*.sh` 一族仍在 ⇒「靠 surefire 报告内容判红绿」的脚本形态未消除
+
 
 **症状**：给 `DRIFT-USERAPI-012`（降载 RT 统计口径）写变异验证脚本，
 逐个变异 → 跑测试 → 读 surefire 报告 → 判定。
@@ -339,7 +381,12 @@ red = "Failures: 0" not in summary          # ← summary 是所有测试类的�
 
 ---
 
-## PIT-USERS-SHARED-007 🔴 对拍脚本**不清状态** ⇒ 第二次跑出来的「漂移」是假的
+## PIT-USERS-07 🔴 对拍脚本**不清状态** ⇒ 第二次跑出来的「漂移」是假的 · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-007` ⇒ **新号**：`PIT-USERS-07`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 本轮不跑双侧活体对拍
+> **证据**：`tools/difftest/grpc-user9-dual-port-runner.java` 的 `resetState()`（跑前清两侧业务表）仍在 ⇒ 对拍形态不变
+
 
 **症状**：给 `user-rpc` 补 9 个 RPC 的双侧活体对拍（`tools/difftest/exp-difftest-grpc-user9.sh`）。
 第一轮跑出 43 场景 / **6 处**差异，其中 2 处看起来是**货真价实的新产品漂移**：
@@ -387,7 +434,12 @@ red = "Failures: 0" not in summary          # ← summary 是所有测试类的�
 
 ---
 
-## PIT-USERS-SHARED-008 🔴 bash + UTF-8 locale ⇒ **全角括号会被算进变量名**
+## PIT-USERS-08 🔴 bash + UTF-8 locale ⇒ **全角括号会被算进变量名** · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-008` ⇒ **新号**：`PIT-USERS-08`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 本轮不改任何 `.sh` 脚本 ⇒ 触发面不落地
+> **证据**：**本条实例已闭环**：本条点名的 `tools/difftest/run.sh` 3 处已修（2026-10-29 实测 `grep -nE '\$[A-Za-z_][A-Za-z0-9_]*[^\x00-\x7F]' tools/difftest/run.sh` = 0 命中，原 L51/L162/L212 已改 `${a}` 形式）⇒ 但「bash + UTF-8 locale 把全角标点并进变量名」的通用形态仍在
+
 
 **症状**：`exp-difftest-grpc-user9.sh` 跑到第 4 步直接挂：
 
@@ -429,7 +481,12 @@ PY
 
 ---
 
-## PIT-USERS-SHARED-009 🔴 共享的 difftest 容器会被**别的会话回收** ⇒ 对拍脚本要自带容器
+## PIT-USERS-09 🔴 共享的 difftest 容器会被**别的会话回收** ⇒ 对拍脚本要自带容器 · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-009` ⇒ **新号**：`PIT-USERS-09`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 本轮不跑对拍 ⇒ 不起共享容器
+> **证据**：`tools/difftest/run.sh` 仍管理共享的 `difftest-postgres` / `difftest-redis` ⇒ 共享容器仍在，别的会话仍可能回收
+
 
 **症状**：`exp-difftest-grpc-user9.sh` 第一次跑成功，几分钟后重跑就挂：
 
@@ -464,7 +521,12 @@ Error response from daemon: No such container: difftest-postgres
 
 ---
 
-## PIT-USERS-SHARED-010 🔴 「端口在监听」≠「这是我刚起的进程」⇒ `wait_port` 会**误判 OK**
+## PIT-USERS-10 🔴 「端口在监听」≠「这是我刚起的进程」⇒ `wait_port` 会**误判 OK** · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-010` ⇒ **新号**：`PIT-USERS-10`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 本轮不跑并发建表实验
+> **证据**：`tools/difftest/exp-difftest-concurrent-schema.sh` 仍在用「起进程 → 判端口在监听」的形态 ⇒ 误判 OK 的面仍在
+
 
 **症状**：跑「两个 rpc 并发对同一个空库启动」的对拍脚本（`exp-difftest-concurrent-schema.sh`），
 第 2 轮出现一个**自相矛盾**的结果：
@@ -512,7 +574,12 @@ Error response from daemon: No such container: difftest-postgres
 
 ---
 
-## PIT-USERS-SHARED-011 🔴 函数名里的「Must」**不构成证据** —— Go 的 struct tag 默认值会**静默改写**行为
+## PIT-USERS-11 🔴 函数名里的「Must」**不构成证据** —— Go 的 struct tag 默认值会**静默改写**行为 · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-011` ⇒ **新号**：`PIT-USERS-11`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮读 Go 侧配置语义（struct tag 默认值）时直接适用
+> **证据**：go-zero `core/stores/redis/conf.go` 的 `RedisConf.NonBlock` 默认 `true`（`MustNewRedis` 因此不 ping）⇒ 真源冻结 ⇒ 该事实不变，函数名仍不构成证据
+
 
 **症状**：台账里有一条写了好几轮的结论：
 
@@ -570,7 +637,12 @@ Go 的 `conf` 包会按 struct tag 施加默认值（`default=` / `options=`）�
 
 ---
 
-## PIT-USERS-SHARED-012 🔴 故障注入的「**断连形态**」决定测不测得到目标分支 —— `container.stop()` 发 RST ⇒ **假守卫**
+## PIT-USERS-12 🔴 故障注入的「**断连形态**」决定测不测得到目标分支 —— `container.stop()` 发 RST ⇒ **假守卫** · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-012` ⇒ **新号**：`PIT-USERS-12`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核 Redis 断连行为（`REJECT_COMMANDS`）时仍会撞「注入形态决定测不测得到」
+> **证据**：各域 `application.yml` 的 Lettuce 断连行为仍在（`REJECT_COMMANDS` 已落地）⇒ 但「`container.stop()` 发 RST ≠ `docker stop` 发 FIN」这形态本身不变
+
 
 > 2026-10-24 第九轮（user-api 的 `DRIFT-USERAPI-014` 守门网）实测。
 
@@ -617,7 +689,12 @@ Lettuce 的 `DisconnectedBehavior` 决定「断连期间的命令」是**排队*
 
 ---
 
-## PIT-USERS-SHARED-013 🔴 只测「有效 token」的 200 是**假绿** —— 必须有「**被拉黑 token**」对照组
+## PIT-USERS-13 🔴 只测「有效 token」的 200 是**假绿** —— 必须有「**被拉黑 token**」对照组 · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-013` ⇒ **新号**：`PIT-USERS-13`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核鉴权层（黑名单 fail-open）时直接适用
+> **证据**：`service/users/user/user-api/.../interceptor/JwtAuthInterceptor.java:50` 仍走 Redis 黑名单 ⇒ 「只测有效 token 的 200」仍是假绿形态
+
 
 > 2026-10-24 第九轮实测。
 
@@ -639,7 +716,12 @@ Lettuce 的 `DisconnectedBehavior` 决定「断连期间的命令」是**排队*
 
 ---
 
-## PIT-USERS-SHARED-014 🔴 「暖机」探针不能用「**返回 200**」判 —— 断连秒拒也是 200
+## PIT-USERS-14 🔴 「暖机」探针不能用「**返回 200**」判 —— 断连秒拒也是 200 · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-014` ⇒ **新号**：`PIT-USERS-14`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 本轮不跑 Redis 故障注入实验
+> **证据**：同上：黑名单读路径仍在 ⇒ 「暖机探针不能用 200 判」的形态不变
+
 
 > 2026-10-24 第九轮实测。
 
@@ -654,7 +736,12 @@ Lettuce 断连时会**秒拒**命令（fail-open ⇒ **200**），
 
 ---
 
-## PIT-USERS-SHARED-015 🔴 串行探测会把**故障窗口**吃光 ⇒ 第二侧测到的是「正常」
+## PIT-USERS-15 🔴 串行探测会把**故障窗口**吃光 ⇒ 第二侧测到的是「正常」 · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-015` ⇒ **新号**：`PIT-USERS-15`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 本轮不跑 `CLIENT PAUSE` 故障窗口实验
+> **证据**：`tools/difftest/exp-difftest-redis-neverup.sh` 一类仍在用全局 PAUSE 窗口 ⇒ 串行探测吃掉窗口的形态不变
+
 
 > 2026-10-24 第九轮实测（首轮与第二轮都踩到）。
 
@@ -674,7 +761,12 @@ RAG 探测：t=4.19 起 → PAUSE 早已结束 → 0.042s 返回「正常」
 
 ---
 
-## PIT-USERS-SHARED-016 🔴 `surefire-reports/*.xml` 里有**陈旧报告** ⇒ 求和会**多算**测试数
+## PIT-USERS-16 🔴 `surefire-reports/*.xml` 里有**陈旧报告** ⇒ 求和会**多算**测试数 · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-016` ⇒ **新号**：`PIT-USERS-16`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮跑守门并统计测试条数时直接适用
+> **证据**：构建产物 `target/surefire-reports/*.xml` 仍随每次构建产生 ⇒ 对目录求和仍会多算陈旧报告
+
 
 > 2026-10-24 第九轮实测。
 
@@ -693,7 +785,12 @@ RAG 探测：t=4.19 起 → PAUSE 早已结束 → 0.042s 返回「正常」
 
 ---
 
-## PIT-USERS-SHARED-017 🔴 **代码注释**给了与实现矛盾的安全保证 ⇒ 审阅者据此漏掉真实缺陷
+## PIT-USERS-17 🔴 **代码注释**给了与实现矛盾的安全保证 ⇒ 审阅者据此漏掉真实缺陷 · **状态：已闭环**
+
+> **旧号**：`PIT-USERS-SHARED-017` ⇒ **新号**：`PIT-USERS-17`
+> **状态**：已闭环 · **核对日期**：2026-10-29 · **是否影响当前轮次**：否 —— 本轮只改 users 域台账；本条的修复面在 `service/common`（共享层）⇒ 触发面不落地
+> **证据**：**实例已闭环**：`service/common/src/main/java/com/rag/common/protection/GoStyleBreakerFilter.java` 现按**注册期路由模板**建 key（`routeKey` / `resolveRoute`，2026-10-27 改）且**未命中路由不建 breaker**（`doFilter` 判定「确定未命中 ⇒ 本层完全不参与」）⇒ 原注释「含未匹配路径不会建 key」现为**真**；键基数断言已补：`service/common/src/test/java/com/rag/common/protection/GoStyleBreakerRouteTemplateGateTest.java:93-102`
+
 
 > 2026-10-24 用户提问（`DRIFT-USERAPI-013` 归属）触发的复核，实测。
 
@@ -736,7 +833,12 @@ RAG 探测：t=4.19 起 → PAUSE 早已结束 → 0.042s 返回「正常」
 
 ---
 
-## PIT-USERS-SHARED-018 🔴 「mock 没生效」在**有超时的链路**上是个不可靠的结论 —— 先看耗时与 Content-Type 两个指纹
+## PIT-USERS-18 🔴 「mock 没生效」在**有超时的链路**上是个不可靠的结论 —— 先看耗时与 Content-Type 两个指纹 · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-018` ⇒ **新号**：`PIT-USERS-18`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮若补/读 users 域 mock 守门时直接适用
+> **证据**：`@MockitoBean` 默认 `MockReset.AFTER` + 鉴权链存在超时预算（`spring.data.redis.timeout`）⇒ 「mock 没生效」仍不可靠
+
 
 > 2026-10-24 写 `UserApiProtectionMvcTest`（user-api 保护层守网）时实测踩到。
 
@@ -815,7 +917,12 @@ UserApiProtectionMvcTest.normalRequestReachesBusinessLogic
 
 ---
 
-## PIT-USERS-SHARED-019 🔴 机器复核工具的「路径存在性」层会**误判** ⇒ 先分类再动手，别为迎合工具改台账
+## PIT-USERS-19 🔴 机器复核工具的「路径存在性」层会**误判** ⇒ 先分类再动手，别为迎合工具改台账 · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-019` ⇒ **新号**：`PIT-USERS-19`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮全部结论都靠机器复核产出 ⇒ 这条纪律直接适用
+> **证据**：**工具侧缺陷已闭环**：`tools/check-ledger-selfcheck.py` 已在主仓（`git log` 最新 `9037a2be`「层 4 提取器修死代码」+ `139b428d`）⇒ 本域第 1/3/4 层已归零；但「机器输出是待分类候选、不是缺陷清单」这条纪律本身仍适用
+
 
 > 2026-10-26 · 跨域修法（`global` 域销 V-007）后，用 `tools/check-ledger-selfcheck.py --domain users`
 > 复核本域台账，报出 **60 处不一致** —— 实测 **59 处是误判**，只有 1 处是真问题。
@@ -977,7 +1084,12 @@ UserApiProtectionMvcTest.normalRequestReachesBusinessLogic
 
 ---
 
-## PIT-USERS-SHARED-020 🔴 收方给的「commit SHA 清单」要**逐个核实主题**，不能整包照抄
+## PIT-USERS-20 🔴 收方给的「commit SHA 清单」要**逐个核实主题**，不能整包照抄 · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-020` ⇒ **新号**：`PIT-USERS-20`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮引用跨域 commit 时直接适用
+> **证据**：跨域回执仍以 SHA 清单形式送达（如 `align/global` 的 `49808ad` / `af416d9`）⇒ 整包照抄的形态仍在
+
 
 > 2026-10-26 · V-007 销账回写时，`global` 域回了一串 SHA，我直接照抄进台账的「提交（SHA）」行。
 > 事后自查时逐个 `git show --stat` ⇒ **其中一个 SHA 的主题与台账写的完全不是一回事**。
@@ -1031,7 +1143,12 @@ git log --oneline --all --diff-filter=A -- "tools/semantic-probe/rpc-timeout/*"
 
 ---
 
-## PIT-USERS-SHARED-021 🔴 装配层**覆盖缺口**：「声明点写着」不等于「消费点真装了」—— 而且**同一个机制往往有两个独立的失效面**
+## PIT-USERS-21 🔴 装配层**覆盖缺口**：「声明点写着」不等于「消费点真装了」—— 而且**同一个机制往往有两个独立的失效面** · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-021` ⇒ **新号**：`PIT-USERS-21`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核装配层（声明点 vs 消费点）时直接适用
+> **证据**：消费点断言仍是唯一判据：`AdminRpcContainerWiringTest` 断言 `sqlSessionFactory.getConfiguration().getInterceptors()`（真 PG + 真容器）⇒ 该形态仍在每个新装配点上复现
+
 
 > 2026-10-26 · `users/admin` 域回信指出本域 **B-1 的放行守卫只挡 SQL 路径**
 > （用 `javap` 读字节码得出 `QueryTimeoutException` / `RedisConnectionFailureException` 的继承链
@@ -1120,7 +1237,12 @@ B-1 这条链的失效面：
 
 ---
 
-## PIT-USERS-SHARED-022 🔴 台账里**引述一个「已知是错的路径」**时，工具对它有两种失效形态 —— 哪一种是**假阴性**
+## PIT-USERS-22 🔴 台账里**引述一个「已知是错的路径」**时，工具对它有两种失效形态 —— 哪一种是**假阴性** · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-022` ⇒ **新号**：`PIT-USERS-22`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮写台账里的路径引用时直接适用
+> **证据**：工具的 N13「状态叙述」去噪仍靠**措辞**猜（`tools/check-ledger-selfcheck.py`）⇒ 「错路径 + 叙述词同行 ⇒ 假阴性」的形态仍在
+
 
 > 2026-10-26 · `global` 域第三十七轮（`45067ce`）把它作为**方向性提醒**给了我们域，
 > 而**我们域正好命中**（自查出 4 处），当场改掉。
@@ -1184,7 +1306,12 @@ B-1 这条链的失效面：
 
 ---
 
-## PIT-USERS-SHARED-023 🔴 修法**在别的分支、尚未合回**时，主仓上的旧串是**分支差异**，不是「修复没做对」
+## PIT-USERS-23 🔴 修法**在别的分支、尚未合回**时，主仓上的旧串是**分支差异**，不是「修复没做对」 · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-023` ⇒ **新号**：`PIT-USERS-23`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核对「已修 / 已销账」类断言时直接适用
+> **证据**：跨分支修法仍存在（如 `align/global` 的 E30 `49808ad` 曾长期「已修未合回」）⇒ 「主仓旧串 ≠ 修复没做对」的形态仍在
+
 
 > 2026-10-26 · `global` 域第三十七 / 三十九轮（`45067ce` / `85c4588`）转达的**跨域陷阱**，
 > 而**我们域是它的第一个受害者**（第 37 轮机器复核实测）。
@@ -1231,7 +1358,12 @@ B-1 这条链的失效面：
 
 ---
 
-## PIT-USERS-SHARED-024 🔴 「先验一个候选修法」时，判据是**两侧是否仍同形**，不是「RAG 侧有没有变好」
+## PIT-USERS-24 🔴 「先验一个候选修法」时，判据是**两侧是否仍同形**，不是「RAG 侧有没有变好」 · **状态：仍生效**
+
+> **旧号**：`PIT-USERS-SHARED-024` ⇒ **新号**：`PIT-USERS-24`
+> **状态**：仍生效 · **核对日期**：2026-10-29 · **是否影响当前轮次**：是 —— 本轮核任何候选修法时直接适用
+> **证据**：判据「两侧是否仍同形」仍是候选修法的唯一判据（`DRIFT-USERAPI-015` 的候选②即因此被否决）⇒ 形态不变
+
 
 > 2026-10-26 · 为 `DRIFT-USERAPI-015` 做**候选②（`spring.data.redis.connect-timeout=1s`）先验**时踩到。
 > ⇒ 同一条里还带出两个更小的坑：**负缓存污染先验** · **「不可复现」≠「不存在」**。

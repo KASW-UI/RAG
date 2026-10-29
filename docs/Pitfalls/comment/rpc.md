@@ -11,7 +11,12 @@
 
 ---
 
-## PIT-COMMENT-RPC-01 🔴 · Spring 的回滚规则会**吃掉 Go 的显式 `tx.Commit()`**
+## PIT-COMMENT-RPC-01 🔴 · Spring 的回滚规则会**吃掉 Go 的显式 `tx.Commit()`** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-COMMENT-RPC-01` ⇒ **新号**：`PIT-COMMENT-04`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— Go 真源里「置状态 → `tx.Commit()` → 返回错误」的两段式形态**未变**，Spring `@Transactional` 的默认回滚规则**也未变** ⇒ 任何**新增**的投递/投递失败路径若照搬 `@Transactional`，仍会把「必须落盘」变成「绝不落盘」⇒ 本轮新增同类写路径时必须用 `TransactionTemplate`。
+> **依据**：本域实例**已修**：MISMATCH-01 / MISMATCH-02 ✅ 已修（2026-10-24 · `TransactionTemplate`）· 守门 `CommentRpcGoSemanticsGateTest`（11 例 · 真 PG）+ 10 条变异全红 ⇒ `docs/DRIFT/comment/rpc.md:67,80,89` 与 `docs/DRIFT/comment/rpc.md:570-571`（U1/U2 ✅ 已闭环）⇒ **证据强度：真 PG + 变异（守门网存在）**。
 
 ### 一句话
 
@@ -66,7 +71,12 @@ Go 侧的这个形态在本仓有**明确同款先例**：
 
 ---
 
-## PIT-COMMENT-RPC-02 🔴 · javadoc 里「对应 Go xxx.go:行号」的断言**本身可能与真源相反**
+## PIT-COMMENT-RPC-02 🔴 · javadoc 里「对应 Go xxx.go:行号」的断言**本身可能与真源相反** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-COMMENT-RPC-02` ⇒ **新号**：`PIT-COMMENT-05`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「javadoc 里『对应 Go xxx.go:行号』的断言可能与真源相反」这一形态**今天仍在** ⇒ AGENTS.md §3.3.2 点名的「Go: … 措辞是高危项」在本轮仍须逐条回查。
+> **依据**：本域实例**已修**：MISMATCH-API-02 ✅ 已修 ⇒ `docs/DRIFT/comment/api.md:99`（RAG 侧已按 `json.Number` 真路径改成报错 1006 而非截断/回绕）⇒ **证据强度：静态 + 双侧探针（台账已记）**。
 
 ### 一句话
 
@@ -121,7 +131,12 @@ grep -rn "WithJSONNumber\|jwt.NewParser" \
 
 ---
 
-## PIT-COMMENT-RPC-03 · 「类级注解覆盖了框架级配置」—— 严格性是被自己关掉的
+## PIT-COMMENT-RPC-03 · 「类级注解覆盖了框架级配置」—— 严格性是被自己关掉的 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PIT-COMMENT-RPC-03` ⇒ **新号**：`PIT-COMMENT-06`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条描述的具体形态（「类级 `@JsonIgnoreProperties(ignoreUnknown=true)` 覆盖掉 mapper 级的 `FAIL_ON_UNKNOWN_PROPERTIES`」）**在本域已被消除** —— 类级注解已于 2026-10-24 移除、`CommentDeliveryValidator` 已改用自带严格 mapper ⇒ **本域再写同类代码时也不会复现该形态**，故本轮不需要为它再落防错约束（通用纪律仍见 AGENTS.md §3.3.3）。
+> **依据**：`service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentDomainFactService.java:267`（「🔴 2026-10-24 移除 `@JsonIgnoreProperties(ignoreUnknown = true)`」）· `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentDeliveryValidator.java:94`（自带 `STRICT_MAPPER`）· 台账 `docs/DRIFT/comment/rpc.md:570-571`（U2 ✅ 已闭环 · MISMATCH-04/05/06）⇒ **证据强度：源码行号（静态）**。
 
 ### 一句话
 
@@ -157,7 +172,12 @@ RAG 侧有**两个** ObjectMapper：
 
 ---
 
-## PIT-COMMENT-RPC-04 · 「Go 故意留零 / Go 故意不填」是**契约**，不是待修的 bug
+## PIT-COMMENT-RPC-04 · 「Go 故意留零 / Go 故意不填」是**契约**，不是待修的 bug ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-COMMENT-RPC-04` ⇒ **新号**：`PIT-COMMENT-07`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 本条的**结论本身就是一条持续生效的约束**（「刻意保留、不得修」）⇒ 只要 Go 侧仍不填 `owner_id` / `subject_count` / `like_count`，RAG 侧就必须继续留零/不填 ⇒ **任何「顺手补上」都是新增可观察行为**（`owner_id` 还会把 up 主 ID 暴露给所有读者）。
+> **依据**：Go 真源形态未变：`service/comment/rpc/internal/logic/get_comment_logic.go`（逐字段赋值、无 `owner_id`）· `create_comment_logic.go`（`subject_count` 恒 0）· `like_comment_logic.go`（只设 `Success: true`）⇒ RAG 侧对应留零见 `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentDomainService.java` 类级 javadoc ⇒ **证据强度：静态（Go 真源行号）**。
 
 ### 一句话
 
@@ -189,7 +209,12 @@ RAG 侧有**两个** ObjectMapper：
 
 ---
 
-## PIT-COMMENT-RPC-05 🔴 · 「因错误原因而绿」的假守卫 —— 断言对了，路径错了
+## PIT-COMMENT-RPC-05 🔴 · 「因错误原因而绿」的假守卫 —— 断言对了，路径错了 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-COMMENT-RPC-05` ⇒ **新号**：`PIT-COMMENT-08`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「守门网断言对了结果、却是因为一条与被守行为无关的路径 ⇒ 恒绿」这一形态今天仍可能发生 ⇒ **任何新写的守门网都必须过一遍变异三态判定**，否则绿灯只是「错误答案的守卫」。
+> **依据**：本域实例**已修**：MISMATCH-06 的守门网已改写（改用「数字化之后仍合法」的 `target_type` 字段）⇒ `docs/DRIFT/comment/rpc.md:570-571`（U2 ✅ 已闭环）⇒ 但**形态未消除** ⇒ **证据强度：真 PG + 变异**。
 
 ### 一句话
 
@@ -251,7 +276,12 @@ assertThatThrownBy(...).isInstanceOf(Wire.FrozenEnvelopeBlockedException.class);
 
 ---
 
-## PIT-COMMENT-RPC-06 🔴 · 「编程式事务」的守门网必须让 mapper **真的**参与那个事务
+## PIT-COMMENT-RPC-06 🔴 · 「编程式事务」的守门网必须让 mapper **真的**参与那个事务 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-COMMENT-RPC-06` ⇒ **新号**：`PIT-COMMENT-09`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 触发条件（测试夹具里 mapper 走另一条连接 ⇒ 「事务提交了没有」在测试里根本不成立）**未消除**；mybatis-spring 4.x 的包名迁移（`org.mybatis.spring`）也仍在本仓依赖里 ⇒ 本轮任何新写的「事务语义」断言仍必须先证明 SQL 与事务同连接。
+> **依据**：本域实例**已修**（MISMATCH-01/02 改用 `TransactionTemplate` + 真 PG 守门）⇒ `docs/DRIFT/comment/rpc.md:570-571`；但**形态未消除** ⇒ **证据强度：真 PG + 变异**。
 
 ### 一句话
 
@@ -290,7 +320,12 @@ assertThatThrownBy(...).isInstanceOf(Wire.FrozenEnvelopeBlockedException.class);
 
 ---
 
-## PIT-COMMENT-RPC-07 🔴 · 对拍 harness 必须**等异步落库**，否则会把**时序**当成**语义差异**
+## PIT-COMMENT-RPC-07 🔴 · 对拍 harness 必须**等异步落库**，否则会把**时序**当成**语义差异** ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PIT-COMMENT-RPC-07` ⇒ **新号**：`PIT-COMMENT-10`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条描述的形态（「harness 用固定 sleep 等异步落库 ⇒ 把时序当语义差异」）**已在本域 harness 消除** —— 对拍脚本已改为**轮询到期望状态为止**（40s / 15s 上限）⇒ 本轮跑对拍不会再因「还没落库」产出假差异，故不需要再为本条落额外防错约束。
+> **依据**：`tools/difftest/comment/diff_comment.py:141`（`def settle(base, token, comment_id, want_visible=True, timeout=40.0)`）· `:144-147`（「为什么必须轮询而不是固定 sleep」）· `:188,191`（create/delete 两处调用，delete 用 `timeout=15.0`）⇒ **证据强度：脚本行号（静态）**。
 
 ### 一句话
 
@@ -329,7 +364,12 @@ T12-delete             go=200 rag=1013
 
 ---
 
-## PIT-COMMENT-RPC-08 🔴 · Kafka topic **不预建** ⇒ 消费者组 rebalance 退避 ⇒ 迟到 19 秒
+## PIT-COMMENT-RPC-08 🔴 · Kafka topic **不预建** ⇒ 消费者组 rebalance 退避 ⇒ 迟到 19 秒 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PIT-COMMENT-RPC-08` ⇒ **新号**：`PIT-COMMENT-11`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条描述的形态（「harness 启动前把 topic 删掉 ⇒ 消费者组 rebalance 指数退避 ⇒ 迟到 19 秒」）**已在本域 harness 消除** —— 对拍脚本已改「先删后建」，消费者订阅时 topic 已存在 ⇒ 本轮不会再因 rebalance 退避产生假差异。
+> **依据**：`tools/difftest/comment/run_diff.sh:45-51`（注释写明「必须『先删后建』」与 19s 的实测）· `:52-58`（`--delete` 后 `--create --partitions 1`）⇒ **证据强度：脚本行号（静态）**。
 
 ### 一句话
 
@@ -373,7 +413,12 @@ Kafka 4.x 的组协调在 JoinGroup 阶段拿不到 topic 元数据 ⇒ **指数
 
 ---
 
-## PIT-COMMENT-RPC-09 🔴 · Boot 4 的三连坑：**编译通过 ≠ 能启动**，且**报错点离病根很远**
+## PIT-COMMENT-RPC-09 🔴 · Boot 4 的三连坑：**编译通过 ≠ 能启动**，且**报错点离病根很远** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-COMMENT-RPC-09` ⇒ **新号**：`PIT-COMMENT-12`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 三个触发条件**全部仍在**：① Boot 4 把 `DataSourceAutoConfiguration` 挪到 `org.springframework.boot.jdbc.autoconfigure` ⇒ MP 的 `@AutoConfigureAfter` 悬空；② 纯 gRPC 模块若把 `jakarta.servlet-api`（provided）打进 `BOOT-INF/lib` ⇒ `WebApplicationType` 误判为 SERVLET；③ pom 里显式声明 test 作用域依赖会按 Maven「最近者优先」顶掉传递依赖。⇒ **新模块 / 新依赖仍会踩**，本轮凡新增 rpc 模块或改 pom 仍须逐条对。
+> **依据**：本域三个阻塞**已修**：`service/comment/comment-rpc/src/main/resources/application.yml:39`（`spring.main.web-application-type: none`）· MP 排序桥已落在**共享层** `service/common/src/main/java/com/rag/common/persistence/MybatisPlusOrderingBridgeAutoConfiguration.java:98`（并由 `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/CommentRpcApplication.java` 的 `@Import` 引入）· `service/comment/comment-rpc/pom.xml` 已无 `grpc-inprocess` 的 test 作用域声明 ⇒ **证据强度：源码行号（静态）**。
 
 ### 一句话
 
@@ -405,7 +450,12 @@ Kafka 4.x 的组协调在 JoinGroup 阶段拿不到 topic 元数据 ⇒ **指数
 
 ---
 
-## PIT-COMMENT-RPC-10 🔴 · GORM 的 `default:` 标签会**吃掉** `autoCreateTime` ⇒ 看 struct 定义会得出**相反**的结论
+## PIT-COMMENT-RPC-10 🔴 · GORM 的 `default:` 标签会**吃掉** `autoCreateTime` ⇒ 看 struct 定义会得出**相反**的结论 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-COMMENT-RPC-10` ⇒ **新号**：`PIT-COMMENT-13`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— Go 侧的 `default:` tag 与 GORM 的 `autoCreateTime` 互相覆盖这一形态**未变**（真源 `domain_fact.go:29` 的 tag 仍在，GORM 的 `callbacks/create.go` 消费规则也未变）⇒ **只贴 struct 定义行仍会得出相反结论** ⇒ 本轮任何「时间列取值来源」的论断仍须读到消费点。
+> **依据**：Go 真源 `service/comment/rpc/internal/model/domain_fact.go:29`（`gorm:"column:created_at;not null;default:CURRENT_TIMESTAMP"`）· 本域 D1 **已撤销**（⇒ `docs/DRIFT/comment/rpc.md:159,171`：Go 侧同样走 DB 默认）⇒ **不得**据此改 RAG 代码 ⇒ **证据强度：真源行号 + 活体时间戳比对（台账已记）**。
 
 ### 一句话
 
@@ -459,7 +509,12 @@ Go 的 `DeleteCommentTx` 里 `comment_index` 的 `state=2` UPDATE（`comment.go:
 
 ---
 
-## PIT-COMMENT-RPC-11 🔴 · **已应用的 Flyway 迁移文件连注释都不能改** —— 签字记录写进去 = 校验失败
+## PIT-COMMENT-RPC-11 🔴 · **已应用的 Flyway 迁移文件连注释都不能改** —— 签字记录写进去 = 校验失败 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PIT-COMMENT-RPC-11` ⇒ **新号**：`PIT-COMMENT-14`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条描述的形态（「给**已应用**的 Flyway 迁移文件加一行签字说明 ⇒ checksum 校验失败 ⇒ 组件起不来」）**已在本域消除** —— V5 已恢复原始字节（文件头仍是「尚未签字 / 该决定留给用户签字」⇒ 与已落库 checksum 733247998 一致）⇒ 本轮再动已应用迁移仍会踩，但**该形态在本域无残留**，故不单列防错约束（通用纪律见本条「正确做法」表）。
+> **依据**：`service/comment/comment-rpc/src/main/resources/db/migration/V5__create_comment_report_record.sql:5`（「本脚本是 RAG 相对 Go 的一处有意偏离（**尚未签字**）」，**原文保留**、未被追加签字行）· 本条「活体双向实验」两行（正向 733247998 起得来 / 反向 1073033367 起不来）⇒ ⚠️ **连带订正**：`docs/Intentional_Deviations/comment/rpc.md` 的 CAND-02 声称「V5 头部已改为『已签字（2026-10-24）』」**与实测不符**（该连带动作未发生）⇒ **证据强度：源码行号 + 活体双向实验**。
 
 ### 一句话
 
@@ -521,7 +576,12 @@ def to_int(v):                            # PG 存的是有符号 int32
 
 ---
 
-## PIT-COMMENT-RPC-12 🔴 · 基础设施挂掉时，**对拍报告会把故障当成语义差异**
+## PIT-COMMENT-RPC-12 🔴 · 基础设施挂掉时，**对拍报告会把故障当成语义差异** ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PIT-COMMENT-RPC-12` ⇒ **新号**：`PIT-COMMENT-15`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条描述的形态（「基础设施挂掉 ⇒ 对拍报告把故障当成语义差异」）**已在本域 harness 消除** —— 对拍脚本在跑矩阵**之前**做前置健康检查，任一不过即 `exit 4` 中止 ⇒ 本轮跑对拍不会产出「假差异」，故不需要再为本条落额外防错约束。
+> **依据**：`tools/difftest/comment/run_diff.sh:70-84`（三个容器状态 + PG 可达 + Redis `PING` + Kafka `comment-audit-topic*` 数 ≥2 ⇒ 任一不过 `exit 4`）⇒ **证据强度：脚本行号（静态）**。
 
 ### 一句话
 
@@ -560,7 +620,12 @@ def to_int(v):                            # PG 存的是有符号 int32
 
 ---
 
-## PIT-COMMENT-RPC-13 🔴 · 「某域把异常改写了」这类登记，**必须逐条核 Go 侧** —— 否则会让**本来正确的代码去改本来正确的代码**
+## PIT-COMMENT-RPC-13 🔴 · 「某域把异常改写了」这类登记，**必须逐条核 Go 侧** —— 否则会让**本来正确的代码去改本来正确的代码** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-COMMENT-RPC-13` ⇒ **新号**：`PIT-COMMENT-16`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 触发条件（「看到 RAG 侧有一堆 `catch → 改写成业务码` 就登记成漂移」）今天仍会发生 ⇒ **本轮任何新的「异常改写」类登记都必须先回 Go 侧核它自己的 catch-all**，否则会让本来正确的代码去改本来正确的代码。
+> **依据**：本域**已销案**（10 处 catch 与 Go 的 catch-all 逐字同款 ⇒ 代码零改动）⇒ `docs/DRIFT/comment/rpc.md` §4.6.6（只读指针 · 归属 global 的 E47）⇒ **证据强度：Go 真源行号逐条对照**。
 
 ### 一句话
 
@@ -611,7 +676,12 @@ Go 侧**每一条 DB 错误路径都改写成业务码**，**不区分 deadline*
 
 ---
 
-## PIT-COMMENT-RPC-14 🔴 · 「Go 侧某文件里零命中」**推不出「整条链路不用 X」** —— 链路的另一半在**共享层**
+## PIT-COMMENT-RPC-14 🔴 · 「Go 侧某文件里零命中」**推不出「整条链路不用 X」** —— 链路的另一半在**共享层** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-COMMENT-RPC-14` ⇒ **新号**：`PIT-COMMENT-17`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 触发条件**未消除**：链路的另一半仍收口在**共享层**（`service/common/.../communityfact/Dispatcher.java`），且共享层仍是「span 放进 Context 而从不 `makeCurrent`」⇒ 域内 `setAttribute` 仍写不进去 ⇒ **假依据仍会掩盖真回归** ⇒ 本轮任何「整条链路零 X」的断言仍须把链路的每一段核过（含共享层）。
+> **依据**：Go 侧 span 建在共享层 `service/common/communityfact/process.go:26` · RAG 侧等价 span 在 `service/common/.../communityfact/Dispatcher.java:186`（同名同 tracer）· 本域 D10 结论见 `docs/DRIFT/comment/rpc.md` §3.7（依据已整条换掉）⇒ **证据强度：静态（两侧源码行号）**。
 
 ### 一句话
 
@@ -670,7 +740,12 @@ attempt, span := otel.Tracer("sea.rtw.communityfact").Start(ctx, "community.fact
 
 ---
 
-## PIT-COMMENT-RPC-15 🔴 · **「把池打开」会引入比 Go 更糟的行为** —— 池耗尽的等待上限（`max-wait`）**不可省**
+## PIT-COMMENT-RPC-15 🔴 · **「把池打开」会引入比 Go 更糟的行为** —— 池耗尽的等待上限（`max-wait`）**不可省** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-COMMENT-RPC-15` ⇒ **新号**：`PIT-COMMENT-18`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— commons-pool2 的 `DEFAULT_MAX_WAIT = -1ms` **默认值没变** ⇒ 「打开一个池」而不配 `max-wait` ⇒ 池耗尽时**无限等**（命令超时要到写命令才起算）这一形态**仍会发生** ⇒ 本轮任何域开 Redis 池都必须同时配 `max-wait`。
+> **依据**：本域**已落码**：`service/comment/comment-rpc/src/main/resources/application.yml:165`（`max-wait: 4s`，与 Go 的 `PoolTimeout = ReadTimeout + 1s = 4s` 对齐）· 同段 `:150-158` 记录了 Go/RAG 两侧的出处 ⇒ **证据强度：配置行号（静态）**。
 
 **症状**：本域 Go 侧 Redis 客户端**池耗尽时 4s 就失败**；RAG 侧改成「有池」之后，**池耗尽变成无限等**
 ⇒ 请求永久挂起（连超时都没有）⇒ **比改之前更糟**。
@@ -704,7 +779,12 @@ attempt, span := otel.Tracer("sea.rtw.communityfact").Start(ctx, "community.fact
 📌 **同款机制在 G3 的另一域已落码**（`hot-rpc`：形态对齐 + `max-wait` + 守门 4 条 + 变异 5 条全红）
 ⇒ **完整机制与坑档** ⇒ [`../../Pitfalls/hot/rpc.md` 的 P-HOTRPC-21](../../Pitfalls/hot/rpc.md)。
 
-## PIT-COMMENT-RPC-16 🔴 · **Redis 断连活体对拍**在本域的**适配点** —— 照抄别的域的配方 ⇒ **上下文起不来**
+## PIT-COMMENT-RPC-16 🔴 · **Redis 断连活体对拍**在本域的**适配点** —— 照抄别的域的配方 ⇒ **上下文起不来** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-COMMENT-RPC-16` ⇒ **新号**：`PIT-COMMENT-19`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 本条记的是「同一个活体对拍配方在不同模块的适配点不同」⇒ 配方形态未变；且本条原文列的「⚠️ **仍待验**：**gRPC 响应层**（断连时客户端到底看到什么 ⇒ 要真发一次 gRPC 调用）」**至今未验** ⇒ 本轮凡在 comment 域做断连对拍，仍必须先按本条的适配表逐项处理。
+> **依据**：本域 Redis 层**已实测通过**：RAG 腿 A(REJECT_COMMANDS)=1ms vs B(DEFAULT)=3005ms · Go 腿 1708–1776ms ⇒ 两侧都「快速失败」、语义等价；守门 `CommentRedisDisconnectFastRejectGateTest`（2 条）· 本域台账 `docs/DRIFT/comment/rpc.md` §十二 ⇒ ⚠️ **Go 探针未入仓**（`tools/**` 属 G4 写权面）⇒ **证据强度：L4-一次性（仓内不可复现）**。
 
 **背景**：本域要证明共享层那份 `REJECT_COMMANDS`「**在 comment-rpc 里真的生效**」⇒ ⇒ 必须**活体断连**。
 ⇒ **配方本体（三处易错点）见 [`../../Pitfalls/hot/rpc.md` 的 P-HOTRPC-24](../../Pitfalls/hot/rpc.md)**，

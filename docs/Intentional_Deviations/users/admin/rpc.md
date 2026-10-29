@@ -5,7 +5,21 @@
 
 ---
 
-## SD-2026-10-23-06 · `resetUserPassword` 保留空 `default-password` 守卫
+## SD-2026-10-23-06@users · `resetUserPassword` 保留空 `default-password` 守卫
+
+> **2026-10-29 重核（台账对齐轮）**：
+> - **别名**：`SD-2026-10-23-06@users`（域内唯一别名）。**撞号事实**：同一编号在本域被引用 **2 处** ——
+>   本小节（全文落点）与 [`_shared.md`](./_shared.md) 的「本域逐条签字」表（**只留指针**）⇒ **同一处偏离**，别名只加在全文落点。
+> - **被签字描述的行为是否仍存在**：**仍存在** ⇒ **签字有效**。
+> - **证据（两侧）**：RAG ⇒ `service/users/admin/admin-rpc/.../service/AdminDomainService.java:1150-1151`
+>   （`defaultPassword == null || defaultPassword.isEmpty()` ⇒ 抛 INTERNAL「密码加密失败」，见 `:1171`）；
+>   Go ⇒ `service/user/admin/rpc/internal/logic/resetuserpasswordlogic.go:55-56`（`var password string` ⇒
+>   `cryptx.PasswordEncrypt(l.svcCtx.Config.System.DefaultPassword)`，**无空值判断**）
+>   + `service/user/common/cryptx/password.go:7-13`（bcrypt 只在 `len > 72` 时报错 ⇒ **空串合法、返回哈希、err == nil**）
+>   ⇒ Go 会把空串哈希写进库，**该用户之后可用空密码登录** ⇒ 该差异仍在。
+> - **⚠️ 描述完整性（追加，不改原文）**：原文说「默认配置下两侧都不触发」，本轮复核该前提**仍然成立** ——
+>   真源 `service/user/admin/rpc/etc/admin.yaml:41` = `DefaultPassword : "123456"` ⇒
+>   **须显式配成空串**才可见 ⇒ 对拍默认配置下看不到本条，属**预期**。
 
 | 项 | 内容 |
 |---|---|
@@ -55,7 +69,22 @@
 
 ---
 
-## SD-2026-10-23-07 · gRPC `status.description` 保留正常中文，不复刻 Go 的乱码字节
+## SD-2026-10-23-07@users · gRPC `status.description` 保留正常中文，不复刻 Go 的乱码字节
+
+> **2026-10-29 重核（台账对齐轮）**：
+> - **别名**：`SD-2026-10-23-07@users`（域内唯一别名）。**撞号事实**：同一编号在本域被引用 **2 处** ——
+>   本小节（全文落点）与 [`_shared.md`](./_shared.md) 的「本域逐条签字」表（**只留指针**）⇒ **同一处偏离**。
+> - **被签字描述的行为是否仍存在**：**仍存在** ⇒ **签字有效**。
+> - **证据（两侧 · 2026-10-29 按字节复核 Go 真源）**：Go 侧 **4 个文件 / 12 处**乱码仍在 ——
+>   `service/user/admin/rpc/internal/logic/getselflogic.go`（1 处 `鐢ㄦ埛涓嶅瓨鍦?`）·
+>   `updateselflogic.go`（3 处，含 `璇ョ敤鎴峰悕宸茶<UE766>浣跨敤`）·
+>   `createinvitecodelogic.go`（3 处，含 `绠＄悊鍛樀個璇风爜鐢熸垚澶辫触`）·
+>   `createadminlogic.go`（5 处，含 `绠＄悊鍛樀個璇风爜閿欒`）；
+>   RAG 侧仍是**正常中文** ⇒ `service/users/admin/admin-rpc/.../service/AdminDomainService.java:212`/`:296`/`:332`
+>   （「用户不存在」）· `:347`（「该用户名已被使用」）⇒ **签字描述的行为仍在**。
+> - **⚠️ 描述完整性（追加，不改原文）**：原文写「4 个文件、12 处」，本轮**逐文件重数**仍是 **1+3+3+5 = 12 处** ⇒
+>   **计数与原文一致**；但**文件路径**在原文里只给了文件名（`internal/logic/{…}.go`），本轮补全为
+>   `service/user/admin/rpc/internal/logic/{…}.go`（便于机器复核路径存在性）。
 
 | 项 | 内容 |
 |---|---|

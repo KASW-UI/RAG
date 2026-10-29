@@ -21,13 +21,17 @@
 
 | 编号族 | 条数 | 状态 |
 |---|---|---|
-| `SD-` 族（含 `SD-HOT-*` / `SD-USERAPI-*` / `SD-USERSCOMMON-*` / `SD-*-TASK-*` / 早期 `SD-1/2/3`） | **40 条** | ✅ 已签字（⚠️ **2026-10-25 减 1**：`SD-HOT-API-006` **已撤销** ⇒ 被它签字描述的行为「RAG 的 JSON 响应不带 `charset=utf-8`」**已不存在** ⇒ 按本档口径「**已撤销 / 已关闭的不计**」⇒ 剔除） |
+| `SD-` 族（含 `SD-HOT-*` / `SD-USERAPI-*` / `SD-USERSCOMMON-*` / `SD-*-TASK-*` / 早期 `SD-1/2/3`） | **39 条** | ✅ 已签字（⚠️ **2026-10-25 减 1**：`SD-HOT-API-006` **已撤销** ⇒ 被它签字描述的行为「RAG 的 JSON 响应不带 `charset=utf-8`」**已不存在** ⇒ 按本档口径「**已撤销 / 已关闭的不计**」⇒ 剔除）<br>⚠️ **2026-10-29 再减 1**：`SD-HOT-API-004` **已失效** ⇒ 它签字描述的行为「**Go 注册了 5 个 collector 但无端点暴露 ⇒ RAG 单向增强**」**已不存在** —— 实测 Go 侧**确实暴露** `/metrics`（`service/hot/api/etc/hotcenter.yaml:16-23` `DevServer{Enabled:true, MetricsPath:/metrics, EnableMetrics:true}` ⇒ go-zero **v1.10.2**（真源 `go.mod:17` pin）`core/service/serviceconf.go:77` `devserver.StartAgent(sc.DevServer)` ⇒ `internal/devserver/server.go:45-48` `s.handleFunc(s.config.MetricsPath, promhttp.Handler().ServeHTTP)` ⇒ 暴露的正是那 5 个 `hot_api_*`）⇒ 按同一口径剔除 ⇒ **40 → 39**） |
 | `N-x` 族（`users/admin/_shared.md`，2026-10-21 用户拍板） | **3 条**（N-1 / N-4 / N-5） | ✅ 已签字 —— ⚠️ **原「41 条」没把它算进去** |
 | `A/C/D-x` 族（`common/_signed-deviations.md`） | **5 条**（A-1 / A-2 / C-1 / D-1 / D-2；B-1 已关闭） | ✅ 已签字 —— ⚠️ **原「41 条」也没算进去** |
-| **✅ 已签字合计** | **48 条** | |
+| **✅ 已签字合计** | **47 条** | ⚠️ **2026-10-29 再减 1**（`SD-HOT-API-004` 失效）⇒ 48 → 47 |
 | `CAND` 族（`SD-2026-10-24-CAND-01..09` + `SD-2026-10-25-CAND-10` + `SD-2026-10-25-CAND-11..17`） | **14 条** | ⏳ **未签字** —— ⚠️ **2026-10-25 第二十六轮新增 4 条**：`CAND-14`（T-7 状态行缺 reason phrase）· `CAND-15`（T-12 方法不匹配出口多带 `Traceparent`）· `CAND-16`（users 域 8 处 `DEFAULT CURRENT_TIMESTAMP`）· `CAND-17`（`users_user.status` 可空性）⇒ **全部「🏷 候选，建议签」**（登记完就躺着，**不升级为拍板**）<br>⚠️ `CAND-13` **已回收**（`docs/DRIFT/global/cross-domain.md:492`「编号已回收，勿引用」）⇒ 本轮从 **CAND-14** 起编 |
-| `like/api.md` 的「⏳（候选）」4 条（`SD-2026-10-23-08` / `-09` / `SD-2026-10-24-10` / `-11`） | **4 条** | ⏳ **未签字** —— ⚠️ **编号成 `SD-` 而非 `CAND-` ⇒ 原计数漏掉** |
-| **⏳ 未签字候选合计** | **18 条** | |
+| `like/api.md` 的「⏳（候选）」4 条（`SD-2026-10-23-08` / `-09` / `SD-2026-10-24-10` / `-11`） | **3 条** | ⏳ **未签字** —— ⚠️ **编号成 `SD-` 而非 `CAND-` ⇒ 原计数漏掉**<br>⚠️ **2026-10-29 减 1**：`SD-2026-10-23-08@like`（响应 `Content-Type` **不带** `charset=utf-8`）**已失效** ⇒ 被它描述的行为**已不存在** —— 共享层 `GoStyleJsonContentTypeAdvice` 已进 `AutoConfiguration.imports`（`service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:2`）⇒ 写 `application/json;charset=utf-8`（`GoStyleJsonContentTypeAdvice.java:31`）· `like-api` 依赖 `common`（`service/like/like-api/pom.xml:63`）⇒ 该 advice 对 like-api 生效 ⇒ **4 → 3**（⚠️ 同号的 `SD-2026-10-23-08@users` 是**另一条**已签字偏离，**不受影响**） |
+| **⏳ 未签字候选合计** | **17 条** | ⚠️ **2026-10-29 减 1**（`SD-2026-10-23-08@like` 失效）⇒ 18 → 17 |
+
+⚠️ **2026-10-29 订正**：`SD-HOT-API-004`（hot 域「5 个 `hot_api_*` 指标**真的被暴露**（Go 注册了但无端点暴露）⇒ RAG 单向增强」）**已失效** ⇒
+⇒ 被签字描述的那个行为**已不存在**（Go 侧**确实暴露** `/metrics`，证据链见上表 `SD-` 族行）⇒ 按本档口径「**已撤销 / 已关闭的不计**」⇒ `SD-` 族 **40 → 39** · 已签字合计 **48 → 47**。
+⚠️ **证据强度**：**L3 静态逐层取证**（go-zero **v1.10.2** 源码 + 真源 `go.mod:17` pin + `hotcenter.yaml`）—— **未真跑一次 Go hot-api 去 curl `http://0.0.0.0:16067/metrics`** ⇒ 若要把它彻底销号，建议补一次活体确认。
 
 ⚠️ **2026-10-25 第二十五轮订正**：`SD-HOT-API-006`（hot 域「`Content-Type` 不带 `charset=utf-8`」）**已撤销**
 ⇒ 用户拍板撤销 + `service/common` 新增 `GoStyleJsonContentTypeAdvice` ⇒ RAG 侧 JSON 响应**现在带** `charset=utf-8`
@@ -54,8 +58,8 @@
 | 编号 | 撞号处 | 各处内容 |
 |---|---|---|
 | `SD-2026-10-23-01` | `_cross/signed-deviations.md` / `users/admin/api.md` | **同一件事的两处转录**（admin-api `OperatorId` + 严格校验 claim）⇒ 计数只算 **1** 条 |
-| `SD-2026-10-23-06` | `like/rpc.md` / `message/rpc.md` / `users/admin/rpc.md` | 3 条不同：gRPC 业务码载体迁移 / `idx_notification_recipient_read` 列数 / `resetUserPassword` 空守卫 |
-| `SD-2026-10-23-07` | `like/rpc.md` / `message/rpc.md`（**已撤销**）/ `users/admin/rpc.md` | 2 条有效 + 1 条撤销 |
+| `SD-2026-10-23-06` | `like/rpc.md` / `message/rpc.md` / `users/admin/rpc.md`　**＋ `like/api.md`** | 3 条不同：gRPC 业务码载体迁移 / `idx_notification_recipient_read` 列数 / `resetUserPassword` 空守卫<br>⚠️ **2026-10-29 补**：原表漏 `like/api.md`（该处是 `like/rpc.md` 那条的**转录**，按计数口径 ② 不另计一条 ⇒ **条数仍是 3**，但**文件清单要全**） |
+| `SD-2026-10-23-07` | `like/rpc.md` / `message/rpc.md`（**已撤销**）/ `users/admin/rpc.md`　**＋ `like/api.md`** | 2 条有效 + 1 条撤销<br>⚠️ **2026-10-29 补**：原表漏 `like/api.md`（同上，是 `like/rpc.md` 那条的**转录**） |
 | `SD-2026-10-23-08` | `like/api.md`（⏳候选）/ `message/rpc.md` / `users/admin/api.md` | 3 条不同：`Content-Type` / CPU 采样 fail-open / 黑名单 401 业务码 |
 | `SD-2026-10-24-01` | `message/rpc.md` / `article/rpc.md` | 2 条不同：索引名 / 全局锁序 |
 | `SD-2026-10-24-02` | `message/rpc.md` / `article/rpc.md` | 2 条不同：直方图桶边界 / Kafka 切 broker |

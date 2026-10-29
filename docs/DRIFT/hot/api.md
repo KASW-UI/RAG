@@ -884,6 +884,18 @@ SEMANTICALLY NOT EQUIVALENT
 
 ## 逐条处置
 
+> 🆕 **2026-10-29 对齐（台账对齐 phase · W-E lane）—— 本表的「上一轮判定」列是【历史值】，不是【当前状态】**
+> 
+> ⚠️ **同一个编号在本域出现三种 emoji，各有各的字段含义** ⇒ **不是**台账自相矛盾，**别当新回归去「修」**：
+> | 位置 | 记的是什么 | 取值 |
+> |---|---|---|
+> | **上方 `###` 明细标题** | **严重度**（差异本身的量级 —— 「SEMANTIC MISMATCH · HIGH」/「BLOCKING」/「OBSERVABLE DIFFERENCE · MEDIUM」）⇒ **修复合灭它、差异本身仍在 ⇒ 严重度不变** | 🔴 / 🟠 |
+> | **下方 `##` 收口标题** | **当前状态** | ✅ 已修 / ⏸ / 📝 已签字 |
+> | **本表的第 2 列「上一轮判定」** | **历史值**（按 AGENTS.md D5「保留原值 + 加时间线指针」**原样保留**） | 🔴 / 🟠 / 🟡 |
+> | **本表的第 3 列「本轮处置」** | **当前状态**（**权威**） | ✅ / ⏸ / 📝 |
+> 
+> ⇒ ⇒ **判定「某个编号现在是什么状态」时，一律以「本轮处置」列与下方 `##` 收口标题为准** ⇒ ⇒ 本表**不构成**「同一编号两种状态」。
+> 
 | ID | 上一轮判定 | 本轮处置 | 证据 |
 |---|---|---|---|
 | **DRIFT-HOTAPI-011** | 🔴 SEMANTIC MISMATCH | ✅ **已修** | Go 活体探针 + 真实 MVC 管线 4 例 |
@@ -1234,7 +1246,7 @@ RAG 侧却是 **info 级 + 无这些字段** ⇒ **级别、字段集、字段�
 | **Nacos 服务注册**（DRIFT-HOTAPI-020） | ✅ **第六轮已签字** | 用户 2026-10-24 拍板「保持」⇒ `SD-HOT-API-008`。⚠️ 签字即接受残留风险：「Nacos 不可达 ⇒ hot-api 起不来」（实测 `ErrCode:-401`）；缓解手段 = `register-enabled=false` |
 | **日志面已对齐的部分** | ✅ **本轮闭合** | `DRIFT-HOTAPI-016` 已修（`CodeError.Error()` 整串 + 日志级别 + 字段集），3 条变异全红 |
 | **容器输入上限三旋钮**（D21/D22/D23 ⇒ `DRIFT-HOTAPI-021/022/023`） | ✅ **第十三轮已闭合并已修（跨域落地 10/10）** | 10 个 api 模块的 `application.yml` 统一配 `relaxed-query-chars: ["[", "]"]` / `max-parameter-count: 2048` / `max-http-request-header-size: **1028KB**`（⚠️ **不是 1MB**：Go 真实上限 = `DefaultMaxHeaderBytes(1<<20)` **+ 4096 bufio slop**）。**双侧活体复测**：`?page[]=5` 两侧 **200 且响应体逐字节相同**；值个数首个翻转 n **两侧都是 2049**；请求行首个翻转长度 **两侧都是 1052536 字节（差 0）**。守门 = `tools/difftest/check-tomcat-limits.py`（静态 10/10 ✅）＋ `HotApiRealTomcatGateTest` 3 条**真 Tomcat**运行时断言（**MUT-A/B/C 变异全红** ✅） |
-| ↳ **残余 ①**（`DRIFT-HOTAPI-030`） | 🔴 **未修（跨域 · 待拍板）** | Tomcat 数「**总参数个数**」、Go 数「**非空值个数**」⇒ 语义不同 ⇒ **2049~10000 段且非空值 ≤2048** 时 **Go 200 / RAG 5001**。彻底修需「② 改 `-1` ＋ 每个 api 模块补 Go 的 `net/url` 10000 段上限」⇒ 涉及 10 个域（`favorite` 域台账还是 0 字节）⇒ 本轮不越界改 |
+| ↳ **残余 ①**（`DRIFT-HOTAPI-030`） | 🔴 **未修（跨域 · 待拍板）** | Tomcat 数「**总参数个数**」、Go 数「**非空值个数**」⇒ 语义不同 ⇒ **2049~10000 段且非空值 ≤2048** 时 **Go 200 / RAG 5001**。彻底修需「② 改 `-1` ＋ 每个 api 模块补 Go 的 `net/url` 10000 段上限」⇒ 涉及 10 个域（`favorite` 域台账还是 0 字节）⇒ 本轮不越界改<br>📌 **2026-10-29 对齐（台账对齐 phase · W-E lane）—— 原值保留 + 追加**：这一格的**描述**（2049~10000 窗口）**已被共享层的落码消掉** ⇒ **主轴 ✅ 已闭合**（共享层 `GoStyleTomcatParameterLimitCustomizer.MAX_PARAMETER_COUNT = 10001` 且 `customize(...)` **无 `mode` 分支** ⇒ 无条件抬上限 ⇒ 2026-10-29 复核代码仍如此）⇒ **本行原写的「未修」指的是「主轴未修」，现已不成立**。<br>⇒ **当前仍 🔴 的只有「后续格（段数轴）」**：共享层 `MAX_PARAMETER_COUNT` **至今 = 10001**（未改 10000）⇒ **RAG 翻转点 = 10002 段 / Go = 10001 段**（Go 上限 = `net/url/url.go:1001` `defaultMaxParams = 10000`）⇒ 差一格 ⇒ **修法 = 共享层 `10001 → 10000`**（共享面 ⇒ 本域无权改）⇒ 逐格状态 ⇒ 见本文件 `DRIFT-HOTAPI-030` 条目的「2026-10-29 对齐」块 |
 | ↳ **残余 ②**（`DRIFT-HOTAPI-031`） | 🟡 **未修（框架限制）** | 超长请求行：Go **431 + `text/plain`** vs RAG **400 + Tomcat HTML**（Tomcat 在**连接器层**就拒 ⇒ Spring 的 `GlobalExceptionHandler` 没机会介入）⇒ Tomcat 无对应开关 ⇒ 建议登记为签字偏离候选 `SD-2026-10-25-CAND-10`（**未签字**）。触发条件是请求行 > 1 MiB+4 KiB（病态输入） |
 
 ---
@@ -2168,6 +2180,19 @@ go-zero 的 `maxFormParamCount` 数的是**非空值个数** ⇒ **两层语义�
 ---
 
 ## DRIFT-HOTAPI-030 —— 🔴 OBSERVABLE DIFFERENCE：Tomcat 数「总参数个数」、Go 数「非空值个数」⇒ 中间一段区间两侧行为不一致（**跨域 · 待拍板**）
+
+> ### ✅🟡 2026-10-29 对齐（台账对齐 phase · W-E lane）：本条**拆成两格**，两格状态**不同** —— 别再把它当「一条」
+>
+> **原标题（🔴 OBSERVABLE DIFFERENCE · 跨域 · 待拍板）原样保留不改写**（D5）⇒ 下面是**追加**的当前状态。
+>
+> | 格 | 内容 | **当前状态** | 依据（核对日期 2026-10-29） |
+> |---|---|---|---|
+> | **主轴** | 「Tomcat 数**总参数个数**（含空值）」vs「Go 数**非空值个数**」⇒ 区间 **2049~10000 且非空值 ≤2048** 时 Go 放行 / RAG 拒 | ✅ **已闭合** | 共享层 `service/common/src/main/java/com/rag/common/http/GoStyleTomcatParameterLimitCustomizer.java` —— `MAX_PARAMETER_COUNT = 10001` 且 `customize(...)` 里**无任何 `mode` 判断**（**无条件**抬上限）⇒ 容器不再比 Go 更早拒 ⇒ 该窗口 Go 放行 / RAG 也放行。落码 = G4 `cd893d1`（2026-10-27）<br>⇒ **2026-10-29 复核代码：该常量至今仍是 10001、`customize` 仍无 `mode` 分支 ⇒ 主轴仍闭合** |
+> | **后续格（段数轴）** | 总**段数** > Go 的 `net/url` 上限 `defaultMaxParams = 10000`（Go 1.25.11 `src/net/url/url.go:1001`）⇒ Go 解析失败 / RAG 放行 | 🔴 **仍 OPEN** | 共享层 `MAX_PARAMETER_COUNT` **至今 = 10001**（未改 10000）⇒ Tomcat 的运行期上限仍比 Go 的段数上限多 1 ⇒ **RAG 侧首个翻转点 = 10002 段 / Go 侧 = 10001 段** ⇒ 差一格<br>⇒ 域内实测记录 ⇒ `docs/DRIFT/favorite/api.md` §18（favorite 域 L4 真 Tomcat 实测：Go 10001 段 / RAG 10002 段）<br>⇒ **修法 = 共享层 `MAX_PARAMETER_COUNT` `10001 → 10000`**（**共享面 ⇒ 本域无权改** ⇒ 归 `global` / G4） |
+>
+> ⚠️ **本条的状态取值（2026-10-29 起）**：**主轴 = ✅ 已闭合**；**后续格 = 🔴 仍 OPEN** ⇒ **同一个编号下两格状态不同是「有意为之」**（不是台账不一致）⇒ 对拍时**先看落在哪一格**。
+> ⚠️ **本域不擅自改**：共享层属 `service/common`（AGENTS.md §5.3c）⇒ ⇒ 本条**不**在本域改代码，只把两格状态分开记清。
+> ⚠️ **跨域台账**（`docs/DRIFT/_cross/open-items.md` · `docs/DRIFT/global/**`）**不是本 lane 的写权范围** ⇒ 由主线 / G4 统一改。
 
 ### 现象（2026-10-25 双侧活体实测，hot 域）
 

@@ -583,7 +583,10 @@ Recommended:   在 AdminSchemaBootstrap 的 javadoc 里明确写「本模块比 
                02_create_user_avatar_history.sql，是共用脚本集的设计结果」
 ```
 
-### DRIFT-ARPC-006 —— 无 gRPC span：Go 逐 Logic 手写 `tracer.Start`，RAG 侧业务方法无 span 属性
+### DRIFT-ARPC-006 —— 无 gRPC span：Go 逐 Logic 手写 `tracer.Start`，RAG 侧业务方法无 span 属性 —— ✅ **已修（2026-10-23 实施轮 §2 · 8 处 span）**
+
+> 🟢 **2026-10-29 收敛订正（同一编号只有一种状态）**：本条标题**原文不带状态**，而同一文件 `:1377` / `:1588` 两处状态表均记 **「✅ 已修（8 处，非 13 处）」**，`vs-common.md:35` 亦记 **✅ 已修** ⇒ **本轮以「已修」为准**并把状态**写进标题**（原文一律保留）。
+> ⚠️ **配套订正**：同文件 `:1871` 那行「ARPC-006 零手写 span │ 需 `service/common` 的 OTel 装配，不在本域」是**首轮快照、已被推翻** —— 实施轮已改为**在 `admin-rpc` 内**补齐（`admin-rpc` 自己的 `pom.xml` 已引 `opentelemetry-bom`，`GlobalOpenTelemetry.getTracer` 与 Go `otel.Tracer` 同一套 API）⇒ **不动 `service/common`**。
 
 ```
 Component:   admin-rpc / 全部 13 个用例（可观测性副作用）
@@ -1868,7 +1871,7 @@ Required Confirm 是「跑 `exp-difftest-grpc-errors.sh`」。
 | # | 项 | 原因 |
 |---|---|---|
 | 1 | 🔴 `users_user.extra_info` jsonb→text | 跨域，DDL 归 users/user 域。**复核确认该漂移仍在**（`01_create_user.sql:41` 仍 `JSONB`），§5 第 1 项**继续有效** |
-| 2 | ARPC-006 零手写 span | 需 `service/common` 的 OTel 装配，不在本域 |
+| 2 | ARPC-006 零手写 span | ~~需 `service/common` 的 OTel 装配，不在本域~~ ⇒ 🟢 **2026-10-23 实施轮已推翻**：改为**在 `admin-rpc` 内**补齐（8 处 span，不动 `service/common`）⇒ **本行是首轮快照，已过时** |
 | 3 | UNRESOLVED-ARPC-002 / -003 / -005 | 未做故障注入 / 需 user-rpc 侧结论 |
 | 4 | `updateuser.ok` gRPC 对拍用例 | `tools/` 共享资产，按 §5.3 不在本 worker 所有权内 |
 | 5 | **给 `AGENTS.md` §0 销账** | 共享索引/政策文件，须合并时统一更新；已把依据备在本节 |

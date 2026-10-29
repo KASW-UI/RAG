@@ -10,6 +10,11 @@
 
 ## SD-2026-10-23-05：`like.proto` 的 proto `package` 由 `pb` 归一为 `like`
 
+> **唯一别名**：`SD-2026-10-23-05@like`（⚠️ **撞号事实**：同一编号在 `docs/Intentional_Deviations/like/api.md` 与 `.../like/rpc.md` 各被**引用一次**（指向**同一条**偏离，**正本在本文件**）⇒ 域内三处引用**不构成撞号**；但为跨域唯一定位仍加域内别名）
+> **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：RAG 侧 `like.proto` 的 proto `package` 仍是 `like`，Go 侧仍是 `pb` ⇒ 差异未消除（**表达层**归一，不改 message 名 / 字段号 / 字段名 / 枚举值）
+> **依据**：RAG `service/like/like-proto/src/main/proto/like.proto`（proto `package like;`）· Go `service/like/rpc/etcd/like.proto`（proto `package pb;`）⇒ **证据强度：两侧源码行号（静态）**。
+
+
 | 项 | 值 |
 |---|---|
 | 状态 | ✅ 已签字（2026-10-23，用户指令，与 `comment` 同批） |

@@ -1,4 +1,9 @@
 <!-- @move AGENTS.md L1719-L1753 · §3.3.3 E-1 案例：text/plain 400 丢 Content-Type —— 「代码里写了」≠「客户端收到」 -->
+## PIT-COMMON-08 · 「代码里写了」≠「客户端收到」 —— `text/plain` 400 丢 `Content-Type`（E-1 案例）  ·  🔴 **仍生效**  ·  核对日期 **2026-10-29**  ·  本轮影响：**是**
+
+> **2026-10-29 对齐**：🔴 **仍生效**（核对日期 **2026-10-29**）· **本轮影响：是** —— 「代码里写了 ≠ 客户端收到」正是本轮读 E65 / 守门结论时用的判据 ⇒ 直接适用。**修复已在位**（`setHeader` / `addHeader` / `setContentType` 三处都改成实时 propagate），但**形态**未闭环 ⇒ 仍生效。
+> **旧号**：`（本文件原无编号 · `@move` 搬移段）` ⇒ **新号**：`PIT-COMMON-08`（本域统一编号 `PIT-COMMON-<两位序号>`；**旧号原样保留**）。
+> **证据**：修复在位：`service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:1054`（`setHeader` 实时 propagate）/ `:1076`（`addHeader`）/ `:1092`（`setContentType`）；守门 `tools/difftest/check-plaintext400-headers.sh` 在位；⚠️ 原类名 `ObservabilityResponseWriter` **已不存在**（现为 `HttpMiddleware` 内的 `GoStyleStatusCapturingResponse`）⇒ 本条「出处」段的类名是**旧名**。
 `GlobalExceptionHandler.goStylePlainTextBadRequest` 里明明写着
 `headers.setContentType(TEXT_PLAIN)` + `set("X-Content-Type-Options","nosniff")`，
 而 `ObservabilityResponseWriter.setHeader` 只把 header 收进 `capturedHeaders`、

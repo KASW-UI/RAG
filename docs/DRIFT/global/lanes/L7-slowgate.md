@@ -1,4 +1,4 @@
-# L7 · `align/global-slowgate` —— X-5 轴真 server 守门（comment-rpc / like-rpc）+ 两域 slow 轴
+# L7 · `align/global-slowgate` —— CD-5 轴真 server 守门（comment-rpc / like-rpc）+ 两域 slow 轴
 
 > 本文件既是**任务书**也是本 lane 的**台账片段**。协议见 [`_PROTOCOL.md`](_PROTOCOL.md)。
 > ⚠️ **本 lane 不产出「要用户拍板」的问题** —— 用户既定偏好：**登记类事项登记完就躺着**。
@@ -21,16 +21,16 @@
 
 ## 一、目标
 
-把 **X-5 轴**（服务端超时真的打断在飞处理）的**真 server 守门**补到 **comment-rpc** 与 **like-rpc**，
+把 **CD-5 轴**（服务端超时真的打断在飞处理）的**真 server 守门**补到 **comment-rpc** 与 **like-rpc**，
 并把这两个域的 **slow threshold 轴**守门也补上。
 
 | 模块 | 要交付 |
 |---|---|
-| `service/comment/comment-rpc` | 🔴 **X-5 轴真 server 守门**（新建 1 个测试类）<br>🔴 **slow threshold 轴守门**（新建 1 个测试类） |
-| `service/like/like-rpc` | 🔴 **X-5 轴真 server 守门**（新建 1 个测试类）<br>🔴 **slow threshold 轴守门**（新建 1 个测试类） |
+| `service/comment/comment-rpc` | 🔴 **CD-5 轴真 server 守门**（新建 1 个测试类）<br>🔴 **slow threshold 轴守门**（新建 1 个测试类） |
+| `service/like/like-rpc` | 🔴 **CD-5 轴真 server 守门**（新建 1 个测试类）<br>🔴 **slow threshold 轴守门**（新建 1 个测试类） |
 
 ⚠️ **like-rpc 特别注意**：该模块已有 `LikeFactDispatchContractGateTest` / `LikeFactDispatchSchedulerStartupTest`
-（第二十轮 A5′ 建的）⇒ **不要动它们**（那是另一条线），本 lane 只**新建** X-5 / slow 两个测试类。
+（第二十轮 A5′ 建的）⇒ **不要动它们**（那是另一条线），本 lane 只**新建** CD-5 / slow 两个测试类。
 ⚠️ like-rpc 的 `LikeFactDispatchContractGateTest` **第二十六轮刚修过调度器句柄泄漏** ⇒ 你新建的测试类**不要复用它的 `startDispatcher` 写法**。
 
 ---
@@ -41,7 +41,7 @@
 
 | 样板 | 路径 | 它示范什么 |
 |---|---|---|
-| **X-5 轴** | `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcGrpcInterceptorWiringTest.java` | **真 server + 真链 + 判别式断言**（服务端超时真的打断了在飞处理） |
+| **CD-5 轴** | `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcGrpcInterceptorWiringTest.java` | **真 server + 真链 + 判别式断言**（服务端超时真的打断了在飞处理） |
 | **slow 轴** | `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcSlowThresholdGateTest.java` | **真 OTel SDK + 收集型 exporter** ⇒ 断言导出的 span 上真的有 `sea.slow` |
 | **latch 加固版** | `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotGrpcInterceptorWiringTest.java` | `sleep` ⇒ `latch` 的改造形态 |
 
@@ -118,9 +118,9 @@
 
 | # | 文件 | 域 | 轴 | 用例数 | 断言调用数 | 真跑形态 |
 |---|---|---|---|---|---|---|
-| ① | `service/comment/comment-rpc/src/test/java/com/rag/comment/comment/rpc/CommentRpcGrpcInterceptorWiringTest.java` | comment | **X-5** | 3 | 14 | 真 gRPC server + 真链 + 真 PG(Testcontainers) + 真超时 |
+| ① | `service/comment/comment-rpc/src/test/java/com/rag/comment/comment/rpc/CommentRpcGrpcInterceptorWiringTest.java` | comment | **CD-5** | 3 | 14 | 真 gRPC server + 真链 + 真 PG(Testcontainers) + 真超时 |
 | ② | `service/comment/comment-rpc/src/test/java/com/rag/comment/comment/rpc/CommentRpcSlowThresholdGateTest.java` | comment | **slow threshold** | 2 | 6 | 真 gRPC server + 真链 + **真 OTel SDK** + 收集型 exporter + 真 PG |
-| ③ | `service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeRpcGrpcInterceptorWiringTest.java` | like | **X-5** | 3 | 14 | 真 gRPC server + 真链 + 真 PG(Testcontainers) + 真超时 |
+| ③ | `service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeRpcGrpcInterceptorWiringTest.java` | like | **CD-5** | 3 | 14 | 真 gRPC server + 真链 + 真 PG(Testcontainers) + 真超时 |
 | ④ | `service/like/like-rpc/src/test/java/com/rag/like/like/rpc/LikeRpcSlowThresholdGateTest.java` | like | **slow threshold** | 2 | 6 | 真 gRPC server + 真链 + **真 OTel SDK** + 收集型 exporter + 真 PG |
 
 **样板来源（照抄结构，只换模块相关名字）**：
@@ -132,7 +132,7 @@
 
 ### 7.2 逐条判定表（§3.1 六条硬性要求 + §3.3 slow 额外要求，逐条对照）
 
-| # | 硬性要求 | ① comment X-5 | ③ like X-5 | ② comment slow | ④ like slow |
+| # | 硬性要求 | ① comment CD-5 | ③ like CD-5 | ② comment slow | ④ like slow |
 |---|---|---|---|---|---|
 | ① | 必须用 `ServerCalls.asyncUnaryCall(...)` 注册慢服务（不能用裸 `ServerCallHandler`） | ✅ `CommentRpcGrpcInterceptorWiringTest.java:283`（`slowCommentService`） | ✅ `LikeRpcGrpcInterceptorWiringTest.java:285`（`slowLikeService`） | ✅ `CommentRpcSlowThresholdGateTest.java:269`（`slowCommentService`） | ✅ `LikeRpcSlowThresholdGateTest.java:268`（`slowLikeService`） |
 | ② | 必须断言「handler 真的被调用过」（`probe.entered.await(...)`） | ✅ `:189` + `:230`（两个用例各一处） | ✅ `:191` + `:232`（两个用例各一处） | n/a（慢服务用 `sleep`，由「导出 span 存在」间接证明 handler 跑过） | n/a（同左） |
@@ -278,28 +278,28 @@ FILE: TEST-com.rag.comment.comment.rpc.CommentRpcSlowThresholdGateTest.xml
 - `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/bootstrap/CommentFactDispatchScheduler.java:44` 是 `@Component`，
   而 `CommentRpcApplication` **没有** `@EnableScheduling`（全模块 `grep EnableScheduling` 零命中）⇒ 该 scheduler 的定时方法**在本进程里不会被调度**。
 - **本 lane 不判定这是不是缺陷**（Go 侧 `rpc/cmd/fact-dispatch/main.go` 是**独立 main**，本仓把四个 main 合进单 JVM ⇒ 「合进单 JVM 后是否应当默认不跑投递」属**行为层问题**）⇒ **只登记，不定性、不修**。
-- ⚠️ 这条**超出本 lane 任务书范围**（本 lane 只做 X-5 轴 + slow 轴的守门）⇒ **交整合者**判断是否单开一条 lane。
+- ⚠️ 这条**超出本 lane 任务书范围**（本 lane 只做 CD-5 轴 + slow 轴的守门）⇒ **交整合者**判断是否单开一条 lane。
 
 ## 十、未覆盖 / 未穷尽的部分（**不许写「已全部对齐」**）
 
 | # | 未覆盖的部分 | 卡在哪 | 代价多大 |
 |---|---|---|---|
 | ① | **Go ↔ RAG 双侧活体对拍**：本 lane 的 4 个守门**只跑了 RAG 一侧**（真 server / 真链 / 真 PG / 真 OTel）。按 AGENTS.md §3.3「凡写「与 Go 一致」，必须有**两侧同时跑的探针**」⇒ 本 lane **没有**做 Go 侧活体对拍 | Go 侧 `service/comment/rpc/comment.go` / `service/like/rpc/like.go` 需要**独立进程 + 独立 DB + 独立 Redis** 才能起；`tools/semantic-probe/` 的现成探针**不覆盖** comment/like 的 gRPC 拦截器链 | 中：需新增一套 Go 侧 harness（估 1~2 天）；**但**本 lane 的判据全是「RAG 侧机制是否生效」+「配置的 2s 是否等于 go-zero 默认 2000ms」（后者由 `productionTimeoutMatchesGoZeroDefault` 静态断言覆盖）⇒ **Go 侧只用于确认「Go 真的注册了这个拦截器」**这一条已被 `comment.go:54` / `like.go:41` 逐字取证 |
-| ② | **服务端超时时「业务线程被真的打断」的语义**：Go 侧 `ctx.Done()` 会让**业务 ctx-aware 操作立即中断**；RAG 侧 grpc-java **不会**主动 interrupt handler 线程（本仓已知框架限制，`RpcInterceptor` 的类注释已登记为 DRIFT-018）⇒ 本 lane 的 X-5 守门验的是「**call 被关闭 + deadline 传播到 handler 线程**」，**不是**「handler 线程被中断」 | grpc-java 框架限制 ⇒ **改不了** | 大：属**框架限制**（不是本仓缺陷）⇒ 需要业务层主动读 `DeadlineState` ⇒ **本 lane 的 `deadlineIsPropagatedToHandlerThread` 只证明「值可见」**，**没证明「业务真的读了它」** |
+| ② | **服务端超时时「业务线程被真的打断」的语义**：Go 侧 `ctx.Done()` 会让**业务 ctx-aware 操作立即中断**；RAG 侧 grpc-java **不会**主动 interrupt handler 线程（本仓已知框架限制，`RpcInterceptor` 的类注释已登记为 DRIFT-018）⇒ 本 lane 的 CD-5 守门验的是「**call 被关闭 + deadline 传播到 handler 线程**」，**不是**「handler 线程被中断」 | grpc-java 框架限制 ⇒ **改不了** | 大：属**框架限制**（不是本仓缺陷）⇒ 需要业务层主动读 `DeadlineState` ⇒ **本 lane 的 `deadlineIsPropagatedToHandlerThread` 只证明「值可见」**，**没证明「业务真的读了它」** |
 | ③ | **`comment-rpc` / `like-rpc` 的**其余** gRPC 方法**（各 7 / 6 个）**没有逐方法守门 | 本 lane 只挑了 1 个代表方法（`GetComment` / `GetLikeCount`）⇒ 链路是**方法无关**的（拦截器挂在 `server.intercept` 上 ⇒ 对所有方法生效）⇒ 但**未逐方法实证** | 小：链是全方法共享的 ⇒ 逐方法跑一遍是**冗余**；**但**「每个方法的消息契约」不在本 lane 范围 |
-| ④ | **slow 轴只覆盖「成功返回」这一条出口** | Go 的 `markRPCResult` 有**三条分支**（`err == nil` ⇒ slow 判定；`ctx.Err() == DeadlineExceeded` ⇒ timeout；否则 ⇒ error）⇒ 本 lane 只验了**第一条**（OK ⇒ 打 `sea.slow`）。**timeout 分支**由 X-5 轴间接覆盖（§8.2 的 M1/M2）；**error 分支**（业务错误 ⇒ `sea.error.kind=business`）**本 lane 未覆盖** | 中：`markBusinessError` / `markSystemError` 两条分支的 `sea.*` 属性**无守门** ⇒ 但 `service/common` 侧已有 `ObservabilityTest` / `RpcInterceptorTimeoutSpanTest` 等单测覆盖**函数级**行为 ⇒ 缺的是**组件级真链**那一层 |
+| ④ | **slow 轴只覆盖「成功返回」这一条出口** | Go 的 `markRPCResult` 有**三条分支**（`err == nil` ⇒ slow 判定；`ctx.Err() == DeadlineExceeded` ⇒ timeout；否则 ⇒ error）⇒ 本 lane 只验了**第一条**（OK ⇒ 打 `sea.slow`）。**timeout 分支**由 CD-5 轴间接覆盖（§8.2 的 M1/M2）；**error 分支**（业务错误 ⇒ `sea.error.kind=business`）**本 lane 未覆盖** | 中：`markBusinessError` / `markSystemError` 两条分支的 `sea.*` 属性**无守门** ⇒ 但 `service/common` 侧已有 `ObservabilityTest` / `RpcInterceptorTimeoutSpanTest` 等单测覆盖**函数级**行为 ⇒ 缺的是**组件级真链**那一层 |
 | ⑤ | **CPU 自适应降载（shedding）在本 lane 的四个类里被**显式关掉**（`rag.protection.cpu-shedding.enabled=false`） | 关掉它是**为了不盖判据**（shedding 命中会先返回 `RESOURCE_EXHAUSTED`）⇒ 这条链上的 shedding 层**在本 lane 的四个类里没有被实证** | 小：shedding 由 `service/common` 的 `GoStyleRpcSheddingInterceptorTest` 单独覆盖；本 lane 只需「别让它盖判据」 |
 | ⑥ | **熔断（breaker）层**同样只是「链上存在」的形态被跳过 | 同上 ⇒ breaker 的**行为**不在本 lane 范围 | 小：breaker 由 `service/common` 侧覆盖 |
 | ⑦ | **多模块同库共存的 Flyway 账本**（§6.3 问题 4 的 `unresolved` 项）**未受本 lane 影响也未推进** | 本 lane 只在**独立 Testcontainers 容器**里跑（每个类一个独立库名）⇒ 「三模块同库共存」这条**仍 unresolved** | 无（本 lane 未触碰） |
 | ⑧ | **`like-rpc` 的 `LikeFactDispatchContractGateTest` / `LikeFactDispatchSchedulerStartupTest`**（另一条线）**未复核** | 本 lane 只**避开**它们（零改动、零复用其 dispatcher 写法）⇒ **没有**顺带验证它们仍然绿 | 无（另两轮/另一条线负责） |
-| ⑨ | **变异只做了 4 条**（共享层 4 个变异点），**没有**穷举 `service/common` 的其它行为面 | 本 lane 只对「X-5 轴 + slow 轴」这 2 条路径做变异 ⇒ 其它路径（error 分支 / span 导出 / breaker / shedding）**不在本 lane 范围** | 无（范围外） |
+| ⑨ | **变异只做了 4 条**（共享层 4 个变异点），**没有**穷举 `service/common` 的其它行为面 | 本 lane 只对「CD-5 轴 + slow 轴」这 2 条路径做变异 ⇒ 其它路径（error 分支 / span 导出 / breaker / shedding）**不在本 lane 范围** | 无（范围外） |
 
 ## 十一、交接整合者清单（本 lane 越权做不了的事）
 
 | # | 事项 | 为什么本 lane 做不了 |
 |---|---|---|
 | ① | **`LikeRpcApplication.java:117-119` 的注释订正**（类名 `LikeGrpcInterceptorWiringTest` ⇒ `LikeRpcGrpcInterceptorWiringTest`；「目前没有」⇒「已有，2026-10-26 · global L7 lane」） | `service/*/src/main/**` ⇒ **生产代码零改动**（§四·1） |
-| ② | **`CommentFactDispatchScheduler` 无 `@EnableScheduling` ⇒ 定时方法不跑**（§九·③）是否属缺陷的**定性** | 超出本 lane 任务书范围（X-5 / slow 两轴）⇒ 需**单开一条 lane** 或交 `align/like` / `align/comment` |
+| ② | **`CommentFactDispatchScheduler` 无 `@EnableScheduling` ⇒ 定时方法不跑**（§九·③）是否属缺陷的**定性** | 超出本 lane 任务书范围（CD-5 / slow 两轴）⇒ 需**单开一条 lane** 或交 `align/like` / `align/comment` |
 | ③ | **共享索引同步**（`docs/DRIFT/_INDEX.md` / `_MANIFEST.json` / `docs/Pitfalls/_INDEX.md`）—— 本 lane **未新增**共享文件 ⇒ **无需同步**（除整合者把本 lane 片段 fold 进规范台账） | 协议 §五·3：共享索引由整合者统一更新 |
 | ④ | **`align/global-slowgate` ⇒ `align/global` 的合并** | 由 Jason / 整合者决定时机（**本 lane 不 push、不 merge**） |
 

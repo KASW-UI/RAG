@@ -1,4 +1,4 @@
-# L3 · `align/global-ddl` —— X-7 残留（5 个域的 DDL 双侧活体逐列对照）
+# L3 · `align/global-ddl` —— CD-7 残留（5 个域的 DDL 双侧活体逐列对照）
 
 > 本文件既是**任务书**也是本 lane 的**台账片段**。协议见 [`_PROTOCOL.md`](_PROTOCOL.md)。
 
@@ -28,7 +28,7 @@
 
 | 读什么 | 在哪 | 读哪几段 |
 |---|---|---|
-| X-7 的逐条实测 | `docs/DRIFT/global/cross-domain.md` | **§二·五**（含「① 已有域预设本身已失效」/「④ 工具改动」） |
+| CD-7 的逐条实测 | `docs/DRIFT/global/cross-domain.md` | **§二·五**（含「① 已有域预设本身已失效」/「④ 工具改动」） |
 | 域待办 | `docs/DRIFT/global/_README.md` | §七之二 **B2** 行 |
 | 工具现状 | `tools/difftest/check-ddl-static.py` | 全文（**脚本头注释就是使用说明**，含 `--domain` / `--indexes` / 容器参数） |
 | runner 样板 | `tools/difftest/run-message-ddl-parity.sh` | 全文（message 域的专用基建怎么拉起来的） |
@@ -136,7 +136,7 @@ Go 侧 `service/like/rpc/internal/model/migrations/001~003` 与 **comment 域那
 | 17 | `users`（复核） | 8 处时间列 DEFAULT `CURRENT_TIMESTAMP` | 🟢 **已知、刻意保留**（待裁决） | 与 [`docs/DRIFT/_cross/ddl-type-divergences.md`](../../_cross/ddl-type-divergences.md) §2.2 **逐条一致** |
 | 18 | `users`（复核） | Go 独有 3 条索引 / RAG 独有 4 条索引 | 🟢 **只记不修（性能非行为）** | 与同文件 §2.3.1 / §2.3.2 **逐条一致** |
 | 19 | `comment`（复核） | `report_record` 表 **仅 RAG 有** | ✅ **已签字** `SD-2026-10-24-CAND-02`（2026-10-24，用户 Jason） | Go：`service/comment/rpc/internal/model/db.go:15` 的 AutoMigrate 列表**不含** `ReportRecord`，全仓无任何 `.sql` 建它 ⇒ Go 生产侧**根本没有这张表** |
-| 20 | `message`（复核） | 6 处 DEFAULT + 索引 `idx_notification_recipient_read` 列不同 | ✅ **已签字** `DRIFT-MSG-V-020` / `SD-2026-10-23-06`（= **X-10**） | 本轮**复现**，未重复登记 |
+| 20 | `message`（复核） | 6 处 DEFAULT + 索引 `idx_notification_recipient_read` 列不同 | ✅ **已签字** `DRIFT-MSG-V-020` / `SD-2026-10-23-06`（= **CD-10**） | 本轮**复现**，未重复登记 |
 | 21 | `task`（复核） | — | ✅ **五维全等（11 列 / 2 索引 / 2 约束，仅主键名不同）** | 退出码 **0**（改口径后，见 §8.4） |
 
 ### 8.4 ⚠️ 工具改动（`check-ddl-static.py`）—— 改了「什么算差异」的口径，退出码语义因此变了
@@ -217,7 +217,7 @@ favorite EXIT=1 | == 实质差异合计 4 处 ⇒ 退出码 1 ==      # 2 DEFAUL
 users    EXIT=1 | == 实质差异合计 16 处 ⇒ 退出码 1 ==     # 1 可空性 + 8 DEFAULT + 7 索引形态
 comment  EXIT=2 | （report_record 仅 RAG 有 ⇒ 已签字 SD-2026-10-24-CAND-02）
 task     EXIT=0 | == 实质差异合计 0 处 ⇒ 退出码 0 ==
-message  EXIT=1 | == 实质差异合计 7 处 ⇒ 退出码 1 ==      # 6 DEFAULT + 1 索引（X-10 已签字）
+message  EXIT=1 | == 实质差异合计 7 处 ⇒ 退出码 1 ==      # 6 DEFAULT + 1 索引（CD-10 已签字）
 ```
 
 ⚠️ **`EXIT=1` ≠ 「有 bug」** —— users / message 的 1 是**已登记的已知差异**（与

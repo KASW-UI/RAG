@@ -14,6 +14,18 @@
 
 **签字状态**：✅ 已签字（本轮登记）。**性质**：RAG 做了**更合理**的那一侧。
 
+> 🆕 **2026-10-29 重核（W-B lane · 台账对齐）—— 签字仍然成立**（被签字描述的那个行为**两侧都还在** ⇒ 按
+> [`docs/Intentional_Deviations/_INDEX.md:34`](../_INDEX.md) 的口径，**本条不因本轮对齐而失效、仍计入「已签字」计数**）。
+>
+> | 核什么 | 结论 | 证据（核对日期 2026-10-29）|
+> |---|---|---|
+> | Go 侧「**30 纳秒**」这个行为**现在还存在吗**？ | ✅ **存在** | 真源 `service/task/rpc/internal/svc/service_context.go:45` 仍是 `sqlDB.SetConnMaxLifetime(time.Duration(c.Postgres.ConnMaxLifetimeMinutes))`（**少乘 `* time.Minute`**）＋ `service/task/rpc/etc/task.yaml:53` 仍是 `ConnMaxLifetimeMinutes: 30` ⇒ 生效值仍 = `time.Duration(30)` = **30 纳秒** |
+> | RAG 侧「**30 分钟**」这个行为**现在还存在吗**？ | ✅ **存在** | RAG `service/task/task-rpc/src/main/resources/application.yml:37` 仍是 `max-lifetime: 1800000`（ms = 30 分钟） |
+> | 签字**描述**是否完整？ | ✅ **完整** ⇒ **不追加订正** | 原句给出的两侧出处（Go 两处 ＋ RAG 一处）本轮**逐条回真源核过，行号仍然对得上**；「RAG 不照抄」的两条理由（HikariCP 硬拒 `maxLifetime < 30s` · 30ns 的语义是「连接池永不命中」）也仍成立 ⇒ **无缺项** |
+> | **撞号检查** | ✅ **无撞号** ⇒ **不需要唯一别名** | 实测 `grep -rhoE 'SD-2026-10-[0-9]{2}-TASK-[0-9]{2}' --include='*.md' .` ⇒ 全仓只有 `SD-2026-10-23-TASK-01`（**9 处引用**）与 `SD-2026-10-24-TASK-01`（**7 处引用**），**各只有 1 处定义**（本文件）⇒ 与 `_INDEX.md`「编号撞号」表列出的 6 组（`SD-2026-10-23-01/06/07/08` · `SD-2026-10-24-01/02`）**无交集** ⇒ **不需要 `SD-<编号>@task` 别名** |
+>
+> ⇒ **计数口径**：**不变**（仍计入已签字条数）⇒ 共享索引的计数由**主线**统一更新。
+
 ### 两侧取值
 
 | | 值 | 出处 |
@@ -100,6 +112,19 @@ done 标记的段序点赞路 uid 在前、文章路 taskId 在前。
 ## SD-2026-10-24-TASK-01 · topic 缺失时：Go **进程退出** vs RAG **服务存活**
 
 **签字状态**：✅ 已签字（2026-10-24 登记）。**性质**：RAG 做了**更可用**的那一侧。
+
+> 🆕 **2026-10-29 重核（W-B lane · 台账对齐）—— 签字仍然成立**（被签字描述的那个行为**两侧都还在** ⇒ 按
+> [`docs/Intentional_Deviations/_INDEX.md:34`](../_INDEX.md) 的口径，**本条不因本轮对齐而失效、仍计入「已签字」计数**）。
+>
+> | 核什么 | 结论 | 证据（核对日期 2026-10-29）|
+> |---|---|---|
+> | Go 侧「topic 缺失 ⇒ **进程退出**」现在还存在吗？ | ✅ **存在** | 真源 `service/task/rpc/internal/Init/initGoKa.go:138-145` 仍是 `p, err := goka.NewProcessor(...)` ⇒ `if err != nil { log.Fatal(err) }`（**进程直接退出**）⇒ 原句引用的 `:138-145` **行号仍然对得上** |
+> | RAG 侧「**服务存活** · listener 持续重试」现在还存在吗？ | ✅ **存在** | RAG 三个 listener 仍是 `@KafkaListener`（`service/task/task-rpc/src/main/java/com/rag/task/task/rpc/mq/TaskUserCountConsumer.java:72` / `TaskArticleCountConsumer.java:70` / `TaskRawDiagnosticConsumer.java:44`）＋ **全仓 `missingTopicsFatal` 零命中**（实测 `grep -rn 'missingTopicsFatal' service/ --include='*.java' --include='*.yml'` ⇒ **rc=1 / 0 命中**）⇒ Spring Kafka 默认 `false` ⇒ topic 缺失**不 fail-fast**、listener 持续重试 |
+> | 原签字引用的**运行证据**还成立吗？ | ✅ **成立**（且**更强**） | `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mapper/TaskProgressUpsertParityTest.java:64` 仍是 `"spring.kafka.bootstrap-servers=127.0.0.1:1"`（**完全不可达**）＋ `:71` 注释明写「刻意**不加** `@EnabledIfDockerAvailable`（2026-10-23 移除）」⇒ **本轮 surefire 实测该类 t=15 f=0 e=0 s=0**（**不是 skip**）⇒ 「**完全不可达的 broker 也能起完整 Spring 上下文并跑绿 15 条**」今天仍然成立 |
+> | 签字**描述**是否完整？ | ✅ **完整** ⇒ **不追加订正** | 原句已同时写明 Go 侧的**根因链**（goka `ensureCopartitioned` ⇒ `tm.Partitions(topic)` 失败 ⇒ `EnsureStreamExists` 从未被调用 ⇒ goka 的「建 topic」路径是死的）＋ RAG 侧「不引入组件负责 topic 生命周期」的理由 ⇒ **两侧依据都在**；并已显式声明「本条**不涉及** topic 的 config（`cleanup.policy` / `retention.ms`）」⇒ **无缺项** |
+> | **撞号检查** | ✅ **无撞号** ⇒ **不需要唯一别名** | 同上 grep ⇒ `SD-2026-10-24-TASK-01` 全仓 **7 处引用、仅 1 处定义**（本文件）⇒ **无撞号** |
+>
+> ⇒ **计数口径**：**不变**（仍计入已签字条数）⇒ 共享索引的计数由**主线**统一更新。
 
 ### 两侧取值
 

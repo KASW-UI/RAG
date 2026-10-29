@@ -8,7 +8,10 @@
 
 ---
 
-## PIT-FAV-API-001 · 🕳️ **javadoc 里的「Go: …」断言会变成免检通道**
+## PIT-FAV-API-001 · 🕳️ **javadoc 里的「Go: …」断言会变成免检通道** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-API-001` ⇒ **新号**：`PIT-FAV-01`
+
 
 ### 现象
 
@@ -51,7 +54,10 @@ AGENTS.md §3.3.2 点名的形态：注释写得很完整、很像是核对过�
 
 ---
 
-## PIT-FAV-API-002 · 🕳️ **「Bean 存在」证明不了「机制生效」—— 这次靠读注解就会判错**
+## PIT-FAV-API-002 · 🕳️ **「Bean 存在」证明不了「机制生效」—— 这次靠读注解就会判错** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-API-002` ⇒ **新号**：`PIT-FAV-02`
+
 
 ### 现象
 
@@ -86,7 +92,10 @@ assertTrue(registry.getClientInterceptors().contains(interceptor));
 
 ---
 
-## PIT-FAV-API-003 · 🕳️ **Go 侧有两层超时预算时，Java 侧只补一层就够了吗？**
+## PIT-FAV-API-003 · 🕳️ **Go 侧有两层超时预算时，Java 侧只补一层就够了吗？** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-API-003` ⇒ **新号**：`PIT-FAV-03`
+
 
 ### 现象
 
@@ -117,7 +126,10 @@ RAG 侧原本**只**套了 ctx 预算（3s）⇒ 下游挂死时一路顶到 HTT
 
 ---
 
-## PIT-FAV-API-004 · 🕳️ **MockMvc 不走 servlet filter 链**
+## PIT-FAV-API-004 · 🕳️ **MockMvc 不走 servlet filter 链** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-API-004` ⇒ **新号**：`PIT-FAV-04`
+
 
 ### 现象
 
@@ -147,7 +159,10 @@ MaxBytes → **413 + 空 body + 无 Content-Type**、413 **压过** 401、未超
 
 ---
 
-## PIT-FAV-API-005 · 🕳️ **「,string」既是出参形态，也是入参解析器**
+## PIT-FAV-API-005 · 🕳️ **「,string」既是出参形态，也是入参解析器** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-API-005` ⇒ **新号**：`PIT-FAV-05`
+
 
 ### 现象
 
@@ -170,7 +185,10 @@ RAG 侧的出参用「getter 返回 `String`」实现 ✅；
 
 ---
 
-## PIT-FAV-API-006 · 🕳️ **容器的「参数过多」异常不在 `IllegalArgumentException` 家族 ⇒ 直接绕过 handler**
+## PIT-FAV-API-006 · 🕳️ **容器的「参数过多」异常不在 `IllegalArgumentException` 家族 ⇒ 直接绕过 handler** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-API-006` ⇒ **新号**：`PIT-FAV-06`
+
 
 ### 现象
 
@@ -224,7 +242,10 @@ Spring 的 `@ExceptionHandler(IllegalArgumentException.class)` **只按类型匹
 
 ---
 
-## PIT-FAV-API-007 · 🕳️ **「读源码判定」不是「已验」—— 一条判错、另一条碰巧判对**
+## PIT-FAV-API-007 · 🕳️ **「读源码判定」不是「已验」—— 一条判错、另一条碰巧判对** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-API-007` ⇒ **新号**：`PIT-FAV-07`
+
 
 ### 现象
 
@@ -268,7 +289,10 @@ Spring 的 `@ExceptionHandler(IllegalArgumentException.class)` **只按类型匹
 
 ---
 
-## PIT-FAV-API-008 · 🔴 **`RANDOM_PORT` 挑的端口可能根本不是你的**（同号端口被别的会话的容器抢走 ⇒ 请求打到 PostgreSQL 上）
+## PIT-FAV-API-008 · 🔴 **`RANDOM_PORT` 挑的端口可能根本不是你的**（同号端口被别的会话的容器抢走 ⇒ 请求打到 PostgreSQL 上） · 状态：**已闭环** · 核对日期：**2026-10-29** · 影响当前轮次：**否**
+
+> **旧号**：`PIT-FAV-API-008` ⇒ **新号**：`PIT-FAV-08` —— ⚠️ **本轮不适用的原因**：触发条件已消除：本域已改用 `RealTomcatPort` 显式取端口（`service/favorite/favorite-api/src/test/java/com/rag/favorite/favorite/api/FavoriteApiRealTomcatGateTest.java:155-157` 明写「为什么不用 `RANDOM_PORT`」），并由 `.../api/support/RealTomcatPortTest.java:18` 守门 ⇒ 本轮（只改台账、不改测试）不适用
+
 
 ### 现象
 
@@ -363,7 +387,10 @@ RealTomcatPortTest.skipsPortHeldOnWildcard » BindException: Address already in 
 
 ---
 
-## PIT-FAV-API-009 · 🔴 **守门网断言了「共享层的绝对值」⇒ 共享层一次合法调整就把它打成假红**
+## PIT-FAV-API-009 · 🔴 **守门网断言了「共享层的绝对值」⇒ 共享层一次合法调整就把它打成假红** · 状态：**已闭环** · 核对日期：**2026-10-29** · 影响当前轮次：**否**
+
+> **旧号**：`PIT-FAV-API-009` ⇒ **新号**：`PIT-FAV-09` —— ⚠️ **本轮不适用的原因**：触发条件已消除：`FavoriteApiProtectionWiringTest.java:57-72` 已把断言从「共享层 `@Order` 绝对值」改成「**相对**次序」（`:158` maxConns&lt;breaker · `:169` breaker&lt;shedding · `:180` shedding&lt;maxBytes）⇒ 共享层一次合法调整不再把本域打成假红 ⇒ 本轮不适用（⚠️ `:136-140` 仍断言 `10000`/`1048576L`/`900L`，那是 **Go 侧** `rest/config.go` 的常量语义，不是共享层实现值）
+
 
 **触发**：2026-10-26 第三十一轮（合并当天）—— 把 `align/favorite` 合进 `do-my-own-gh`
 （`global` 的合并 `4f839f9` **已先落地**）⇒ 合并树全量 `mvn test` 在 `favorite-api` 红：
@@ -430,7 +457,10 @@ FavoriteApiProtectionWiringTest.serverSideProtectionFiltersAreBeansInGoChainOrde
 
 ---
 
-## PIT-FAV-API-010 · 🔴 **共享层一改，本域守门的「变异守护」就哑了**（0 例转红 ⇒ 那条断言其实已无人守护）
+## PIT-FAV-API-010 · 🔴 **共享层一改，本域守门的「变异守护」就哑了**（0 例转红 ⇒ 那条断言其实已无人守护） · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-API-010` ⇒ **新号**：`PIT-FAV-10`
+
 
 **触发**：2026-10-27 第十八轮 —— 合并 G4 的 `cd893d1`（容器上限**无条件**抬到 10001）之后，
 复验 `FavoriteApiRealTomcatGateTest` 的变异表（台账 §2.1），发现：
@@ -487,7 +517,10 @@ FavoriteApiProtectionWiringTest.serverSideProtectionFiltersAreBeansInGoChainOrde
 
 ---
 
-## PIT-FAV-API-011 · 🔴 **yaml 里没写 `lettuce.pool.enabled` ≠ 池没开** —— Boot 4 的判据是 **classpath**，不是配置
+## PIT-FAV-API-011 · 🔴 **yaml 里没写 `lettuce.pool.enabled` ≠ 池没开** —— Boot 4 的判据是 **classpath**，不是配置 · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-API-011` ⇒ **新号**：`PIT-FAV-11`
+
 
 > 登记于 2026-10-27（G2 挖出「Lettuce 池形态」· 本域独立复核）⇒ 权威面 = [`docs/DRIFT/favorite/api.md` §15](../../DRIFT/favorite/api.md#15-🔴-redis-连接池形态漂移go-有池-vs-rag-无池-2026-10-27-登记g2-挖出--本域独立复核--只登记不落码)
 
@@ -542,7 +575,10 @@ Boot **4.0.8** 的 `spring-boot-data-redis-4.0.8.jar`：
 
 ---
 
-## PIT-FAV-API-012 · 🔴 **守门断言的期望值若引用「被测代码的常量」⇒ 那条守门是哑的**（实测 0 红）
+## PIT-FAV-API-012 · 🔴 **守门断言的期望值若引用「被测代码的常量」⇒ 那条守门是哑的**（实测 0 红） · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-API-012` ⇒ **新号**：`PIT-FAV-12`
+
 
 > **一句话**：断言的期望值**不能与被测代码同源** ⇒ 改常量 ⇒ 业务代码与断言**一起变** ⇒ 断言恒成立 ⇒ **守门看着全绿，实际什么都没守住**。
 
@@ -594,7 +630,10 @@ assertEquals(PROBE_USER_ID, longAttr(span, FavoriteSpans.ATTR_USER_ID));
 
 ---
 
-## PIT-FAV-API-013 · 🔴 **JDK `HttpClient` 的 1xx 上限是 8 条且硬编码** ⇒ 撞上 Tomcat 11 的 `103 Early Hints` ⇒ **测试整体失明**
+## PIT-FAV-API-013 · 🔴 **JDK `HttpClient` 的 1xx 上限是 8 条且硬编码** ⇒ 撞上 Tomcat 11 的 `103 Early Hints` ⇒ **测试整体失明** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-API-013` ⇒ **新号**：`PIT-FAV-13`
+
 
 > **一句话**：`ProtocolException: Too many interim responses received: 9 > 8` **不是**「服务端行为异常」，
 > **也不是**「请求没打到」⇒ ⇒ **是客户端自己的 1xx 容忍度用完了** ⇒ ⇒ **测试读不到应用层的任何响应**。
@@ -643,7 +682,10 @@ GET /favorite/v1/item/list?folderId=0&…（2049 个参数）
   本条是「**打到了、但自己先死了**」⇒ ⇒ **两类都是「请求没到达被测逻辑」** ⇒ ⇒ 症状相似、根因完全不同 ⇒
   ⇒ **判据要能分开它们**（本条的分界 = 异常类型：`ProtocolException` vs `IOException` 且「读到 0 字节」）。
 
-## PIT-FAV-API-014 · 🔴 **守门类 `import` 了被测依赖 ⇒ 抽依赖的变异只能拿到「编译失败」** ⇒ ⇒ 那**不是**「运行时退化」的证据
+## PIT-FAV-API-014 · 🔴 **守门类 `import` 了被测依赖 ⇒ 抽依赖的变异只能拿到「编译失败」** ⇒ ⇒ 那**不是**「运行时退化」的证据 · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-API-014` ⇒ **新号**：`PIT-FAV-14`
+
 
 ### 现象（2026-10-28 · 给 favorite-api 落池时实测）
 
@@ -714,7 +756,10 @@ GET /favorite/v1/item/list?folderId=0&…（2049 个参数）
   那条讲「**classpath 决定池开不开**」；本条讲「**classpath 上的类被 `import` 进来，
   会把「classpath 缺了」这件事挡在编译期**」⇒ ⇒ **同一个 classpath 事实，两种观测面**。
 
-## PIT-FAV-API-015 · 🔴 **真 Tomcat 守门挂了几百秒 ⇒ 先用【同一个请求】换传输层复跑，再判「代码有 bug」还是「环境假挂死」**
+## PIT-FAV-API-015 · 🔴 **真 Tomcat 守门挂了几百秒 ⇒ 先用【同一个请求】换传输层复跑，再判「代码有 bug」还是「环境假挂死」** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-API-015` ⇒ **新号**：`PIT-FAV-15`
+
 
 > 登记日期 **2026-10-28** · 发生域 **favorite-api** · 类型 **环境 flake（假红）**
 > · 证据强度 **L4（同一 JVM 里三种传输层同时跑）**
@@ -790,7 +835,10 @@ java.net.http.HttpTimeoutException: request timed out
 
 ---
 
-## PIT-FAV-API-016 · 🔴 **拿到「U+FFFD 受保护名单」⇒ 先分两类、再核前提**：**「题材/被测对象」要留真字节，「台账引述的损坏样本」必须换成可见记号**
+## PIT-FAV-API-016 · 🔴 **拿到「U+FFFD 受保护名单」⇒ 先分两类、再核前提**：**「题材/被测对象」要留真字节，「台账引述的损坏样本」必须换成可见记号** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-API-016` ⇒ **新号**：`PIT-FAV-16`
+
 
 > 触发场景：2026-10-28 参与 G2 牵头的**全仓 U+FFFD 全域扫**（G2 给出「受保护名单 19 处」+ 「4 条树间读数」）。
 
@@ -833,7 +881,10 @@ java.net.http.HttpTimeoutException: request timed out
 - 与「**你以为的现状 ≠ 实际现状**」「**零命中是假信号**」**同源** —— 别人给你的读数是**它那棵树在它那刻**的读数。
 - 与「**行号是快照不是锚点**」**同族** ⇒ ⇒ 引用必须带**树 + commit** 限定。
 
-## PIT-FAV-API-017 · 🔴 **「全仓 grep 零命中」⇒ 坐实「不是 X 干的」—— 模式选错时，零命中什么也不证明**（本域台账因此写错了一条根因）
+## PIT-FAV-API-017 · 🔴 **「全仓 grep 零命中」⇒ 坐实「不是 X 干的」—— 模式选错时，零命中什么也不证明**（本域台账因此写错了一条根因） · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-API-017` ⇒ **新号**：`PIT-FAV-17`
+
 
 ### 现象（本域台账 `docs/DRIFT/favorite/api.md` §16.8 事实③ · 原值保留不改写）
 

@@ -10,7 +10,12 @@
 
 ---
 
-## PF-ARTICLE-RPC-001 —— `@Select` 没有 `@ResultMap`，jsonb 列**静默变 null**
+## PF-ARTICLE-RPC-001 —— `@Select` 没有 `@ResultMap`，jsonb 列**静默变 null** ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PF-ARTICLE-RPC-001` ⇒ **新号**：`PIT-ARTICLE-23`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条的现象（「自定义 `@Select` 没有 `@ResultMap` ⇒ jsonb 列**静默变 null**」）**已在本域消除** —— 三处返回实体的自定义 `@Select` 全部已挂 `@ResultMap`，且已有关于 jsonb 非空内容的真 PG 守门 ⇒ 本轮不会再因缺 `@ResultMap` 丢列，故不单列防错约束（通用规则见本条「下次怎么防」）。
+> **依据**：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mapper/ArticleMapper.java:81,202,224`（`@ResultMap("articleEntityResultMap")`）· `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mapper/ArticlePublicMapper.java:92,193` · `.../ArticleRevisionMapper.java:220` · 台账 `docs/DRIFT/article/rpc.md:365`（`DRIFT-ARTICLE-RPC-001` ✅ 已修 · FIX-01 · 真 PG 守门 + 变异验证）⇒ **证据强度：真 PG + 变异**。
 
 ### 现象
 
@@ -66,7 +71,12 @@ MyBatis 有**两套**互不相通的结果映射机制：
 
 ---
 
-## PF-ARTICLE-RPC-002 —— "ORM 会自动维护 `updated_at`"是**没有**的默认能力
+## PF-ARTICLE-RPC-002 —— "ORM 会自动维护 `updated_at`"是**没有**的默认能力 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PF-ARTICLE-RPC-002` ⇒ **新号**：`PIT-ARTICLE-24`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条的现象（「`updated_at` 自创建后再不变化」）**已在本域消除** —— 实体已挂 `@TableField(fill = FieldFill.INSERT_UPDATE)` 且已补 `MetaObjectHandler` ⇒ 本轮不会再出现「ORM 不会自动维护时间戳」的形态，故不单列防错约束。
+> **依据**：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/domain/ArticleEntity.java:151`（`@TableField(fill = FieldFill.INSERT_UPDATE)`）· `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/config/ArticleMetaObjectHandler.java`（已存在）· 台账 `docs/DRIFT/article/rpc.md:390`（`DRIFT-ARTICLE-RPC-002` ✅ 已修 · FIX-02 · 含 SkipHooks 反向断言 + 变异验证）⇒ **证据强度：真 PG + 变异**。
 
 ### 现象
 
@@ -105,7 +115,12 @@ Go 侧 `UpdatedAt time.Time \`gorm:"autoUpdateTime"\``（`model/article.go:31`�
 
 ---
 
-## PF-ARTICLE-RPC-003 —— 「Go 显式 `status.Error` 的分支」对齐了，**「Go 用一段 catch 统一映射」的分支**漏了
+## PF-ARTICLE-RPC-003 —— 「Go 显式 `status.Error` 的分支」对齐了，**「Go 用一段 catch 统一映射」的分支**漏了 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PF-ARTICLE-RPC-003` ⇒ **新号**：`PIT-ARTICLE-25`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条的现象（「Go 用一段 catch 统一映射的分支整类漏掉」）**已在本域对齐** ⇒ 本轮不会再出现「只有显式 `status.Error` 分支被对齐、归一映射分支整类漏掉」的形态，故不单列防错约束。
+> **依据**：台账 `docs/DRIFT/article/rpc.md:409`（`DRIFT-ARTICLE-RPC-003` ✅ 已修 · FIX-04 · 真 PG + 变异验证）⇒ **证据强度：真 PG + 变异**。
 
 ### 现象
 
@@ -148,7 +163,12 @@ if err != nil { return Internal("read publication failed") }   // ← 一整类�
 
 ---
 
-## PF-ARTICLE-RPC-004 —— 不开 `@TableLogic`，就要把「哪些写需要软删过滤」写进 SQL
+## PF-ARTICLE-RPC-004 —— 不开 `@TableLogic`，就要把「哪些写需要软删过滤」写进 SQL ｜ **状态（核对日期 2026-10-29）：已撤销**
+
+> **旧号**：`PF-ARTICLE-RPC-004` ⇒ **新号**：`PIT-ARTICLE-26`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条赖以成立的**前提**（「Go 的 `Save` 会追加 `deleted_at IS NULL`、已软删行会被拒绝」）经复核**不成立** ⇒ 对应的漂移条目已**撤销** ⇒ 按「撤销的不计」的口径，本条**不再作为坑位存在**，本轮不落防错约束。
+> **依据**：台账 `docs/DRIFT/article/rpc.md:430`（`DRIFT-ARTICLE-RPC-004` 当前状态 = 🔴 **撤销** · 2026-10-23 第二轮：「复核发现台账的 **Go 侧描述有误** ⇒ 该条不是漂移，照台账修反而会制造新漂移 ⇒ 不修」）· 其**相邻差异**（`Save` 的 `Selects="*"` vs MP `NOT_NULL`）已在**第十轮**单独展开并关闭（差异真实但**不可观察**）⇒ **证据强度：Go 真源复核（静态）+ 活体对拍**。
 
 ### 现象
 
@@ -180,7 +200,12 @@ Go 的 `Save` 会追加 `deleted_at IS NULL`，命中 0 行后退化成 `Create`
 
 ---
 
-## PF-ARTICLE-RPC-005 —— 「依据被证伪」和「结论被推翻」是两回事，必须分开记录
+## PF-ARTICLE-RPC-005 —— 「依据被证伪」和「结论被推翻」是两回事，必须分开记录 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PF-ARTICLE-RPC-005` ⇒ **新号**：`PIT-ARTICLE-27`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「照抄框架某个开关值来对齐真源」时，必须同时回答 ① 框架源码里**消费**该值的控制流在哪 ② 该开关在本项目**实际可达**吗 —— 这两个问题今天仍会同时出现 ⇒ 本轮凡改 kafka/spring 的开关对齐，仍须逐条走这两问。
+> **依据**：本域**已订正归因**（2026-10-29 第十二轮 §12.3.2：`U-4` 的结论成立但**原归因只覆盖一半**）⇒ `docs/DRIFT/article/rpc.md` §12.3；新增守门 `ArticleKafkaForceCommitGateTest`（真 Kafka 容器 + 真 PG · **行为断言**：失败位点推进到 `offset+1`）⇒ **证据强度：L4（真 broker 位点 + 投递计数）**。
 
 ### 现象（本轮实际发生的一件事）
 
@@ -213,7 +238,12 @@ S-3 的修复**结论**（对齐 Go 的 `ForceCommit=true`，失败即提交位�
 
 ---
 
-## PF-ARTICLE-RPC-006 —— 「方向相反」的注释会让后来者去修一个**已经正确**的实现
+## PF-ARTICLE-RPC-006 —— 「方向相反」的注释会让后来者去修一个**已经正确**的实现 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PF-ARTICLE-RPC-006` ⇒ **新号**：`PIT-ARTICLE-28`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 本条的结论（「机制方向相反、但可观察结果相同 ⇒ **什么都不改**」）**仍然成立**，且「注释里『⚠️ 方向相反』这类措辞必须同时给出判定结论」这条规则今天仍适用 ⇒ 本轮凡出现这类措辞，仍须补「等价的 / 不等价的 + 证据」。
+> **依据**：本域结论已被真 Kafka 行为断言钉死（失败消息**被丢弃**、不进程内重投；失败位点**推进到该消息自己的 offset+1**）⇒ `docs/DRIFT/article/rpc.md` §12.3.1 ⇒ **证据强度：L4（真 broker 位点）**。
 
 ### 现象
 
@@ -241,7 +271,12 @@ S-3 的修复**结论**（对齐 Go 的 `ForceCommit=true`，失败即提交位�
 
 ---
 
-## PF-ARTICLE-RPC-007 —— javadoc 里写的「锁死用例」可能**根本不存在**
+## PF-ARTICLE-RPC-007 —— javadoc 里写的「锁死用例」可能**根本不存在** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PF-ARTICLE-RPC-007` ⇒ **新号**：`PIT-ARTICLE-29`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— **2026-10-29 的 article-rpc 第十二轮又撞到同款** —— `ContentSecurityAutoConfiguration` 的类注释声称「锁死用例：`ArticleContentSecurityWiringTest`」，实测该类**全仓不存在**（`find service -name "ArticleContentSecurityWiringTest.java"` ⇒ 0 命中）⇒ **本轮凡新增「锁死用例：X」的注释，都必须 `ls` 一次 `src/test`**。
+> **依据**：本轮已把该处注释改为真实的 `ArticleSpringContextWiringTest#contentSecurityPortIsExactlyOneAndFailsLoud` ⇒ `docs/DRIFT/article/rpc.md` §12.1（末段「🔴 顺带修掉一处 §3.3.2 形态的『不存在的证据』」）⇒ **证据强度：全仓 find + 源码行号**。
 
 ### 现象
 
@@ -287,7 +322,12 @@ S-3 的修复**结论**（对齐 Go 的 `ForceCommit=true`，失败即提交位�
    归一到某个 code 的写法，逐个 `return` 点对照是**对不完的**（PF-ARTICLE-RPC-003）。
 ---
 
-## PF-ARTICLE-RPC-008 —— 「改的是 bean，读的是 Environment」：一种不会变红的假绿
+## PF-ARTICLE-RPC-008 —— 「改的是 bean，读的是 Environment」：一种不会变红的假绿 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PF-ARTICLE-RPC-008` ⇒ **新号**：`PIT-ARTICLE-30`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「改的是 bean、读的是 Environment」这条**两条数据通路并存**的事实未变（`@Scheduled` / `@Value` / SpEL 几乎总是读 `Environment`）⇒ 本轮凡写「某个配置值生效」的测试，仍须先确认被测代码**从哪条通路取值**，再决定改哪里；且变异档必须包含「把框架注解改回原样」。
+> **依据**：本域实例**已修**：`DRIFT-ARTICLE-RPC-008` ✅ 已修（FIX-05 · 真容器 + 变异验证）⇒ `docs/DRIFT/article/rpc.md:528` ⇒ 但**形态未消除** ⇒ **证据强度：真容器 + 变异**。
 
 **现象**
 给 outbox 中继的 `@Scheduled` 补「配置 ≤ 0 ⇒ 兜底 1s」的语义时，
@@ -342,7 +382,12 @@ S-3 的修复**结论**（对齐 Go 的 `ForceCommit=true`，失败即提交位�
 
 ---
 
-## PF-ARTICLE-RPC-009 —— 「某个判据 ⇒ 两者必相等」：这种句式写进台账，会让漂移**看起来已经被证明过**
+## PF-ARTICLE-RPC-009 —— 「某个判据 ⇒ 两者必相等」：这种句式写进台账，会让漂移**看起来已经被证明过** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PF-ARTICLE-RPC-009` ⇒ **新号**：`PIT-ARTICLE-31`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「某个判据 ⇒ 两者必相等」这种**空推论句式**今天仍会被写进台账（它长得像一条严谨的证明）⇒ 本轮凡写「A 与 B 等价」进台账，必须先问：**我依据的那个判据，比对的是不是 A 和 B 本身**；判不准就写 `UNKNOWN`，别写 IMPLEMENTATION DIFFERENCE。
+> **依据**：本域实例**已修**：`DRIFT-ARTICLE-RPC-009` ✅ 已修（FIX-06 · 真 PG + 变异）⇒ `docs/DRIFT/article/rpc.md:1123` —— 但**教训的第二个来源**（Go 侧同一语义点有多个源：冻结 payload vs 当前行）**在本轮仍然有效** ⇒ **证据强度：真 PG + 变异**。
 
 **现象**
 2026-10-24 补 `U-5`（`acceptSyncResult` 成功路径的真 PG 用例）时，
@@ -431,7 +476,12 @@ assertEquals("作者改过的标题", outcome.title());      // Go :147
 
 ---
 
-## PF-ARTICLE-RPC-010 —— 启动期校验挂在哪个钩子上：Spring 的「启动后钩子」比「刷新前钩子」**晚了一个生命周期阶段**
+## PF-ARTICLE-RPC-010 —— 启动期校验挂在哪个钩子上：Spring 的「启动后钩子」比「刷新前钩子」**晚了一个生命周期阶段** ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PF-ARTICLE-RPC-010` ⇒ **新号**：`PIT-ARTICLE-32`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条描述的具体形态（「schema 门禁挂在 `ApplicationReadyEvent` ⇒ 失败之前 gRPC server 已绑端口、已对外服务过」）**已在本域消除** —— 门禁已改挂 `SmartInitializingSingleton`（落在 `SmartLifecycle` 启动**之前**）⇒ 本轮不再出现「校验晚了一个生命周期阶段」的形态。
+> **依据**：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/bootstrap/ArticleSchemaGate.java:5,82,113`（`implements SmartInitializingSingleton` · `afterSingletonsInstantiated()`）· 台账 `docs/DRIFT/article/rpc.md:448`（`DRIFT-ARTICLE-RPC-005` ✅ 已修 · FIX-07 · 真进程实测 + 变异验证）⇒ ⚠️ 同域另有 `MinioBucketBootstrap` / `SnowflakeBootstrap` 仍挂 `ApplicationReadyEvent`（**只记日志、不做门禁** ⇒ 不属本条形态）⇒ **证据强度：真进程实测 + 变异**。
 
 **现象**
 `ArticleSchemaGate` 原本用 `@EventListener(ApplicationReadyEvent.class)` 做启动期校验。
@@ -497,7 +547,12 @@ assertEquals("作者改过的标题", outcome.title());      // Go :147
 
 ---
 
-## PF-ARTICLE-RPC-011 —— `publishPercentileHistogram()` **不是**"用我给的桶"，而是"**额外**塞一整套默认桶"
+## PF-ARTICLE-RPC-011 —— `publishPercentileHistogram()` **不是**"用我给的桶"，而是"**额外**塞一整套默认桶" ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PF-ARTICLE-RPC-011` ⇒ **新号**：`PIT-ARTICLE-33`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条描述的具体形态（「`publishPercentileHistogram()` 会**额外**塞一整套默认桶 ⇒ RAG 77 桶 vs Go 9 桶」）**已在本域消除** —— 代码只写 `serviceLevelObjectives`、不加 `publishPercentileHistogram()` ⇒ 本轮不会再出现桶数被并集放大的形态。
+> **依据**：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/metrics/ArticleRpcMetrics.java:152`（javadoc「不要加 `.publishPercentileHistogram()`：它与 serviceLevelObjectives 取**并集**」）· 台账 `docs/DRIFT/article/rpc.md`（`DRIFT-ARTICLE-RPC-010` ✅ 已修 · FIX-08 · 真 scrape 实测 + 变异验证）⇒ **证据强度：真 scrape（exposition 逐行读 `le=`）**。
 
 **现象**
 给 MinIO 耗时的直方图对齐 Go 的分桶时，代码里同时写了：
@@ -562,7 +617,12 @@ if (serviceLevelObjectives != null) {
 
 ---
 
-## PF-ARTICLE-RPC-012 —— 并发用例**只对结果敏感**，它测不出锁序
+## PF-ARTICLE-RPC-012 —— 并发用例**只对结果敏感**，它测不出锁序 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PF-ARTICLE-RPC-012` ⇒ **新号**：`PIT-ARTICLE-34`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「并发用例只对**结果**敏感 ⇒ 测不出**机制**（锁序 / 隔离级别 / 可见性）」是**测试设计的固有事实**，不会消失 ⇒ 本轮凡写并发用例，仍须问「我要让它转红，得改坏什么」；改不出东西 ⇒ 这条用例没在测你以为的东西。
+> **依据**：本域已补机制探针（`ArticleTransactionWiringTest#lockOrderIsArticleThenPublication`）⇒ 但**机制用例与结果用例仍须分开写、分开变异**这条纪律未消除 ⇒ **证据强度：真 PG + 变异（锁序探针已钉死）**。
 
 ### 现象（本轮实际发生的一件事）
 
@@ -637,7 +697,12 @@ if (serviceLevelObjectives != null) {
 
 ---
 
-## PF-ARTICLE-RPC-013 —— 「配置面与生效面不一致」**永远不会**让任何行为测试变红
+## PF-ARTICLE-RPC-013 —— 「配置面与生效面不一致」**永远不会**让任何行为测试变红 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PF-ARTICLE-RPC-013` ⇒ **新号**：`PIT-ARTICLE-35`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「配置声明与实际生效不一致、但不改变运行结果的差异 ⇒ 行为测试**在原理上**就抓不到它」这一事实未变 ⇒ 本轮凡有此类差异，仍只能靠「启动即失败」的守卫守，且守卫要挂在**对外收流量之前**的钩子上。
+> **依据**：本域**已装守卫**：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/config/ArticleKafkaChannelValidator.java:118`（`@PostConstruct`）· `:131`（抛 `IllegalStateException`）⇒ 台账 `docs/DRIFT/article/rpc.md:494`（`DRIFT-ARTICLE-RPC-007` → 🟡 已处置 · 落签字偏离 `SD-2026-10-24-02`）⇒ **证据强度：真上下文 + 变异（6/6 有效变异全红）**。
 
 ### 现象（本轮实际发生的一件事）
 
@@ -733,7 +798,12 @@ if (s != null && !s.trim().isEmpty()) { out.add(s.trim()); }
 
 ---
 
-## PF-ARTICLE-RPC-014 —— 「ORM 的字段策略」属于**只能实测**的层，读文档必然推错
+## PF-ARTICLE-RPC-014 —— 「ORM 的字段策略」属于**只能实测**的层，读文档必然推错 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PF-ARTICLE-RPC-014` ⇒ **新号**：`PIT-ARTICLE-36`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「哪些列进了 SET」属于**只能实测**的层（声明点只告诉你策略叫什么，不告诉你这次 UPDATE 实际写了什么）⇒ 本轮凡涉及 ORM 字段策略的论断，仍必须在真 PG 上「写一行 → 读回来」，并区分「SQL NULL / jsonb `'null'` / jsonb `'[]'`」三种形态。
+> **依据**：本条实证：Go 侧 gorm **v1.31.1**（台账原引 v1.31.2 ⇒ 行号全错）· 探针 C 与用例 1 实测两侧零值一致 ⇒ **证据强度：Go 真 PG 探针 + RAG 真 PG 对拍**。
 
 ### 现象（本轮实际发生的一件事）
 
@@ -809,7 +879,12 @@ MP 的 `@ResultMap` 缺失时**静默跳过该属性**。
 
 ---
 
-## PF-ARTICLE-RPC-015 —— 「同一列」在两侧可能存着**不同的物理形态**，而 wire 层会**自动抹平**它
+## PF-ARTICLE-RPC-015 —— 「同一列」在两侧可能存着**不同的物理形态**，而 wire 层会**自动抹平**它 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PF-ARTICLE-RPC-015` ⇒ **新号**：`PIT-ARTICLE-37`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「两侧的『空』表示不同（Go nil vs RAG 空集合）⇒ 落库形态不同」以及「proto3 `repeated`/`map` **无 presence** ⇒ wire 层自动抹平」这两条事实**都未变** ⇒ 本轮凡跨栈写同一张表，仍须先把「两侧的空怎么表示」列出来，并追到最外层（wire 字节）才判「是否可观察」。
+> **依据**：本域事实仍成立（Go `SecondaryTags: model.StringArray(...)` 直接类型转换 ⇒ nil slice ⇒ `'null'`；RAG `new ArrayList<>(...)` ⇒ `'[]'`）⇒ **证据强度：真 PG + 字节级断言**。
 
 ### 现象（本轮实际发生的一件事）
 
@@ -872,7 +947,12 @@ Go 与 RAG 写**同一张** `article` 表，但**同一列**的落库形态不�
 
 ---
 
-## PF-ARTICLE-RPC-016 🔴 `EOFException` 出现在 `PGStream.receiveChar` / `ConnectionFactoryImpl.enableSSL` ⇒ **不是「PG 挂了」**，是「**回应我的那个端口上不是我要的那个 PG**」
+## PF-ARTICLE-RPC-016 🔴 `EOFException` 出现在 `PGStream.receiveChar` / `ConnectionFactoryImpl.enableSSL` ⇒ **不是「PG 挂了」**，是「**回应我的那个端口上不是我要的那个 PG**」 ｜ **状态（核对日期 2026-10-29）：已闭环**
+
+> **旧号**：`PF-ARTICLE-RPC-016` ⇒ **新号**：`PIT-ARTICLE-38`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条描述的形态（「Testcontainers 抢的随机宿主口落进 OS 临时端口段 ⇒ 与手工起的对拍容器撞口 ⇒ `EOFException`」）的**结构条件已在本域消除** —— 本域四段已钉口（`22850–22969` 全在 `49152–65535` 之外）⇒ 本轮跑批不会再因端口错位产生该 flake，故不单列防错约束（⚠️ 复发概率仍不能由「跑绿」证明，判据是结构事实）。
+> **依据**：本条「📌 订正注记（2026-10-28 02:4x）」：本域探针已实测坐实 `withCreateContainerCmdModifier` + `HostConfig.withPortBindings` 下 `getMappedPort()` **返回那个固定口** ✔ · 落码清单见 `docs/DRIFT/article/rpc.md`「二十三、🔴🟢 Testcontainers 宿主口钉口」一节 ⇒ **证据强度：L4（本域活体）**。
 
 > **来源**：2026-10-28 · G1 lane 通报 ⇒ G3 本域独立复核后登记。
 > ⚠️ **本域暴露面**：`article-rpc` 有 **9** 个测试文件用 Testcontainers PG ·

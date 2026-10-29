@@ -8,7 +8,12 @@
 
 ---
 
-## PIT-COMMENT-API-01 🔴 · 跨模块的自定义 trailer：**两端都「写对了」，链路却是断的**
+## PIT-COMMENT-API-01 🔴 · 跨模块的自定义 trailer：**两端都「写对了」，链路却是断的** ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-COMMENT-API-01` ⇒ **新号**：`PIT-COMMENT-01`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 「跨模块的自定义错误通道必须两侧同时实现」这一形态今天仍在：comment-rpc 生产端写 trailer（`CommentGrpcError.java:141`）、comment-api 消费端读 trailer（`CommentApiSupport.java:210`）—— **本域这一处已修**，但**新增**同类通道时两侧仍可能只实现一端 ⇒ 本轮若新增跨模块错误码通道，必须同步落一条「起真 server + 真 client」的链路测试。
+> **依据**：本域实例**已修**：`service/comment/comment-api/src/main/java/com/rag/comment/comment/api/service/CommentApiSupport.java:210`（`int bizCode = CommentGrpcError.bizCodeFromError(err);`）· 生产端 `service/comment/comment-common/src/main/java/com/rag/comment/comment/common/errmsg/CommentGrpcError.java:72,141,214` · 台账 `docs/DRIFT/comment/api.md:44`（MISMATCH-API-01 ✅ 已修）⇒ **证据强度：源码行号（静态）**。
 
 > ✅ **本条已于 2026-10-24 修复并配变异验证**（详见 [`../../DRIFT/comment/api.md`](../../DRIFT/comment/api.md) 的 §0.1 与 §2）。
 > 修法**不是发明新方案**，而是**照抄同仓已有正确范式** `like-api/.../LikeApiSupport.java:179-186`
@@ -63,7 +68,12 @@
 
 ---
 
-## PIT-COMMENT-API-02 · 第三方库的**默认值**常常和你的直觉相反
+## PIT-COMMENT-API-02 · 第三方库的**默认值**常常和你的直觉相反 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-COMMENT-API-02` ⇒ **新号**：`PIT-COMMENT-02`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— Go 的默认值藏在 struct tag 里、第三方库源码在 `~/go/pkg/mod/` 可读 —— 这两个前提都没变 ⇒ 任何新引入的 Go 依赖（zrpc / go-zero rest / golang-jwt）都会再触发一次「默认值与直觉相反」⇒ 本轮仍须把「Go 侧某个框架特性默认开/关」的论断逐条核到消费点。
+> **依据**：本域三处断言**已订正**（`docs/DRIFT/comment/api.md:99` MISMATCH-API-02 ✅ 已修；`docs/DRIFT/comment/api.md` §0.1 已修清单）⇒ 但**触发条件未消除**：Go 真源侧 `zrpc` 的 tag 默认值仍在依赖里 ⇒ **证据强度：静态**。
 
 ### 一句话
 
@@ -98,7 +108,12 @@ grep -rn "WithJSONNumber\|jwt.NewParser" $D/rest/                     # 看解�
 
 ---
 
-## PIT-COMMENT-API-03 🔴 · **自己的 javadoc 会成为「证据」** ⇒ 一条被推翻的漂移，靠的是读异常处理类
+## PIT-COMMENT-API-03 🔴 · **自己的 javadoc 会成为「证据」** ⇒ 一条被推翻的漂移，靠的是读异常处理类 ｜ **状态（核对日期 2026-10-29）：仍生效**
+
+> **旧号**：`PIT-COMMENT-API-03` ⇒ **新号**：`PIT-COMMENT-03`
+> **核对日期**：2026-10-29
+> **是否影响当前轮次**：**是** —— 触发条件（RAG 源码里带「Go: …」措辞的 javadoc 断言会被人当成既成事实继承）**今天仍在** ⇒ 本轮任何新增/改动 javadoc 的动作都可能再犯 ⇒ 「以 Go 措辞写下的断言 = 待核实项」这条约束仍须落进本轮防错。
+> **依据**：本条点名的两处（U5/U6）**已订正**：`service/comment/comment-common/src/main/java/com/rag/comment/comment/common/errmsg/CommentGrpcError.java:97`（已写「原措辞『若未来引入熔断器』**已过时**」）· U6 见 `docs/DRIFT/comment/api.md:339` ⇒ ⚠️ **本条正文「⚠️ 同类风险仍在：… ⇒ 待订正」一句已过期**（订正见本条追加段）⇒ **证据强度：源码行号（静态）**。
 
 ### 一句话
 
@@ -144,6 +159,9 @@ RAG 自己异常处理类里的一句 javadoc；撤销时，活体实测证明�
 - ✅ **已订正** `CommentGlobalExceptionHandler.java` 的那段 javadoc（写明实测结论 + 机制未查实）。
 - 🟢 **已撤销** `docs/DRIFT/comment/api.md` 的 D1（并同步 §0 计数）。
 - ⚠️ **同类风险仍在**：`CommentGrpcError.java:97-103` / `:150-162` 的两段论证也带着「若未来 …」的措辞（见 `DRIFT/comment/api.md` 的 U5 / U6）⇒ **待订正**。
+- 📌 **2026-10-29 订正（台账对齐 phase · W-D lane）**：上一行的「**待订正**」**已过期** —— 本条点名的两处**都已订正**：
+  `service/comment/comment-common/src/main/java/com/rag/comment/comment/common/errmsg/CommentGrpcError.java:97`（已写「原措辞『若未来引入熔断器』**已过时**」）·
+  U6 见 `docs/DRIFT/comment/api.md:339`（✅ 已订正 2026-10-24）⇒ ⇒ **原文保留**（不抹除一次真实执行的记录），**订正追加在上**。
 
 ### 对应本轮的漂移
 

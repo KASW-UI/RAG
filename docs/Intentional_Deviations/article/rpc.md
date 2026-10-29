@@ -12,6 +12,13 @@
 > ✅ **签字状态：本文两条 SD（`SD-2026-10-24-01` / `SD-2026-10-24-02`）已于 2026-10-24 由用户签字批准。**
 > ⇒ 「🟡 待签字」的临时状态**已终结**：审查时**直接把它当既定决策**，
 > **不得**再把它当「待定」重新质疑，也**不得**「顺手修正回 Go 的旧行为」。
+>
+> 📌 **2026-10-29 对齐复核（台账对齐 phase · W-D lane）—— 本文件 2 条逐条重核完毕**
+>
+> 判据 = [`../_INDEX.md`](../_INDEX.md)「被签字描述的那个行为**已不存在** ⇒ 签字自动失效」。
+> **2/2 条的「被描述的行为」在 2026-10-29 实测下仍然存在 ⇒ 签字状态全部不变**（无一条需标「已失效」）。
+> **但有 2 处撞号必须处理** ⇒ 见下方两条的「唯一别名 / 撞号检查」行：
+> `SD-2026-10-24-01` 与 `SD-2026-10-24-02` **各与 message 域的同名条目指向完全不同的偏离** ⇒ ⇒ 本文件两条**加唯一别名** `SD-2026-10-24-01@article` / `SD-2026-10-24-02@article`。
 
 ## SD-2026-10-24-01：写路径的**全局锁序**统一为 `article → publication`
 
@@ -142,7 +149,17 @@ RAG 侧四条路径**统一**（`service/article/article-rpc/.../service/Article
   「2026-10-24 第七轮」节（U-2 关闭记录）。
 - 台账里的 `U-2`（锁顺序反转）**已关闭** ⇒ 它的结论落在这里，**不在 DRIFT 里重复记**。
 
----
+### 📌 2026-10-29 对齐复核（台账对齐 phase · W-D lane）
+
+| 项 | 结论 |
+|---|---|
+| **唯一别名** | `SD-2026-10-24-01@article`（原编号 `SD-2026-10-24-01` **撞号** ⇒ 见下行） |
+| **撞号检查** | 🔴 **同一编号在两个域指向两条完全不同的偏离** ⇒ `docs/Intentional_Deviations/message/rpc.md:30`（**`message_conversation` 两个索引的**名字**与 Go 不同**）与**本条**（**写路径的全局锁序**）⇒ ⇒ 本条**加唯一别名** `SD-2026-10-24-01@article`；**message 域那条**由其 owner 处理（本 lane **不碰** `docs/Intentional_Deviations/message/**`）⇒ ⇒ **本条从本日起应以别名为准** |
+| **被描述的行为现在还存在吗** | ✅ **仍存在** ⇒ **签字有效，状态不变**（✅ 已签字） |
+| **核对日期** | 2026-10-29 |
+| **Go 侧实测（两种锁序仍在）** | `service/article/rpc/internal/model/community_revision.go:81-89`（`WithArticleTx` ⇒ **先** `FOR UPDATE` article）· `service/article/rpc/internal/mqs/community_article_event.go:110-114`（`RetractPublicationTx` ⇒ **先** `FOR UPDATE` publication）⇒ ⇒ **Go 自身的锁序反转未被修复** ⇒ **签字的前提条件仍在** |
+| **RAG 侧实测（四条路径仍统一）** | `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/service/ArticleAtomicService.java:127`（`retractAndUpdate` ⇒ `selectByIdForUpdate`）· `:162`（`retractAndDelete`）· `:268`（`queueSyncOutboxWithLock`）· `:339`（`acceptSyncResult`）· `:208`（`publicationMapper.selectForUpdate`）· `:506`（`publicationMapper.upsert`）⇒ ⇒ **RAG 侧仍是 `article → publication` 单一顺序 ⇒ 差异仍在** |
+| **⚠️ 自失效条件（原文保留）** | 本条原文已写明「⚠️ **若真源日后自己统一了锁序**（Go 侧也改成 article → publication）⇒ ⇒ 本条**自动失效**」⇒ ⇒ **2026-10-29 实测：真源尚未统一** ⇒ **本条仍然有效** |
 
 ## SD-2026-10-24-02：Kafka 四个通道**不能逐通道切 broker**（RAG 侧是全局单例）
 
@@ -230,3 +247,15 @@ RAG 侧四条路径**统一**（`service/article/article-rpc/.../service/Article
 - 完整取证过程 ⇒ [`../../DRIFT/article/rpc.md`](../../DRIFT/article/rpc.md) 的
   「2026-10-24 第九轮」节（FIX-14）。
 - 元教训 ⇒ [`../../Pitfalls/article/rpc.md`](../../Pitfalls/article/rpc.md) 的 **PF-ARTICLE-RPC-013**。
+
+### 📌 2026-10-29 对齐复核（台账对齐 phase · W-D lane）
+
+| 项 | 结论 |
+|---|---|
+| **唯一别名** | `SD-2026-10-24-02@article`（原编号 `SD-2026-10-24-02` **撞号** ⇒ 见下行） |
+| **撞号检查** | 🔴 **同一编号在两个域指向两条完全不同的偏离** ⇒ `docs/Intentional_Deviations/message/rpc.md:46`（**`message_rpc_request_duration_seconds` 的直方图**桶边界零交集**）与**本条**（**Kafka 四通道不能逐通道切 broker**）⇒ ⇒ 本条**加唯一别名** `SD-2026-10-24-02@article`；**message 域那条**由其 owner 处理（本 lane **不碰** `docs/Intentional_Deviations/message/**`）⇒ ⇒ **本条从本日起应以别名为准** |
+| **被描述的行为现在还存在吗** | ✅ **仍存在** ⇒ **签字有效，状态不变**（✅ 已签字） |
+| **核对日期** | 2026-10-29 |
+| **RAG 侧实测（仍是全局单例 + 启动即失败守卫）** | `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/config/ArticleKafkaChannelValidator.java:118`（`@PostConstruct`）· `:131`（不一致即抛 `IllegalStateException` ⇒ **启动失败**）⇒ ⇒ **「静默忽略 → 启动即失败」的处置仍在** |
+| **能力差异仍在（不变式）** | `service/article/article-rpc/src/main/resources/application.yml:86`（全局 `spring.kafka.bootstrap-servers` = `${KAFKA_BROKERS:kafka:9092}`）· `:178,184,193,199`（四个通道的 `brokers` **全部** = `${KAFKA_BROKERS:kafka:9092}`）⇒ ⇒ **四通道仍共用全局 `KafkaTemplate` / `ProducerFactory` / `ConsumerFactory` ⇒ 仍不能逐通道切 broker ⇒ 差异仍在**；但**今天仍无行为差异**（四值同源）⇒ **签字含义（能力差异保留、但不允许静默）仍成立** |
+| **Go 侧实测** | Go 的 `kq.KqConf.Brokers` **逐通道**声明（`go-queue@v1.2.2/kq/config.go:12`）⇒ **Go 侧可以逐通道切 broker** ⇒ ⇒ **能力差异的根源仍在** |

@@ -77,7 +77,7 @@ Controller 侧 `if (req == null) req = new XxxReq()`（对齐 Go 的零值 struc
 | `双侧活体对拍` | 两套真实进程同时跑同一请求并比对 | ❌ **本轮未跑**（引用既有成果时单独标注「非本轮」） |
 | `真 PG` | 真实 PostgreSQL 参与 | ❌ 不适用（api 层无 SQL） |
 | `真容器 + MockMvc` | 真 Spring 上下文 + 真 Filter/Interceptor/advice，但**非真 Tomcat** | ❌ **本轮未跑**（引用既有 `AdminApiMvcPipelineTest` 等时标注） |
-| `真 Tomcat` | 真实 servlet 容器 | ❌ 本轮未跑；且 **admin-api 当前无此守门**（见 §9 UNRESOLVED-002） |
+| `真 Tomcat` | 真实 servlet 容器 | ❌ 本轮未跑；且 **admin-api 当前无此守门**（见 §9 UNRESOLVED-ADMINAPI-002） |
 
 > ⚠️ **引用他人已跑的证据不等于本轮验证**。本文件凡出现「已由 X 验证」，均指**既有台账记录的
 > 2026-10-21/22 成果**，本轮未复跑。按 AGENTS.md 硬约束 1，这些结论不得升级为「本轮已闭环」。
@@ -329,7 +329,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 |---|---|---|---|---|---|---|
 | M-01 | ALL | 响应信封形状 | `{code,msg,data}` | `{code,msg,data}` | EQUIVALENT | `response.go:3-7` vs `Response.java:14-18`（无 `@JsonInclude` ⇒ `data:null` 恒出现） |
 | M-02 | ALL | 业务失败的 HTTP 状态 | 恒 **200** | 恒 **200** | EQUIVALENT | 13 个 handler 全走 `httpx.OkJson`；`GlobalExceptionHandler:231-233` `decideStatus` 无条件 `OK` |
-| M-03 | ALL | 请求解析失败的响应 | `400` + text/plain + nosniff + 尾换行 | `400` + text/plain + nosniff + 尾换行（**MockMvc 层**） | EQUIVALENT（**真实 Tomcat 未验**） | `doHandleError` 的 `http.Error` vs `GlobalExceptionHandler:176-182`；**缺口见 UNRESOLVED-002** |
+| M-03 | ALL | 请求解析失败的响应 | `400` + text/plain + nosniff + 尾换行 | `400` + text/plain + nosniff + 尾换行（**MockMvc 层**） | EQUIVALENT（**真实 Tomcat 未验**） | `doHandleError` 的 `http.Error` vs `GlobalExceptionHandler:176-182`；**缺口见 UNRESOLVED-ADMINAPI-002** |
 | M-04 | ALL | 401 状态码 | 401（两处短路） | 401 | EQUIVALENT | `authhandler.go:106-121` / `checkblacklistmiddleware.go:38` vs `handleAuthentication:66-68` |
 | M-05 | 鉴权 | 验签失败 / 缺头的 401 **body** | **空 body** | 完整 envelope `{code:1006}` | OBSERVABLE DIFFERENCE | 已在 `AuthenticationException:20-39` 与 `_shared.md` N-1 留档（**已签字**） |
 | M-06 | 鉴权 | 黑名单 401 的**业务码** | **`code:401`** + `msg:"登录已失效,请重新登陆"` + `Content-Type: appliaction/json`（Go 拼写错误） | **`code:1006`** + `msg:"TOKEN已过期"` + `application/json` | **OBSERVABLE DIFFERENCE** | → **DRIFT-ADMINAPI-004** |
@@ -364,12 +364,12 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | M-35 | ALL | 标量强转 / 浮点截断 | number/bool→String **拒**；float→int **拒**（含 `1.0`） | 同（`GoStyleCoercion` 全局生效） | EQUIVALENT | R1 已修；⚠️ Jackson 3 类级 coercion 实测无效 ⇒ 只能全局（`GoStyleCoercion` 类注释「第三个坑」） |
 | M-36 | ALL | 超时时长 | **3000ms**（yaml 未写，来自 `go-zero@v1.10.2/rest/config.go:55` 的 `json:",default=3000"`） | `observability.http-timeout: 3s` | EQUIVALENT | **消费点**：`TimeoutFromMillis(conf.Timeout)`；`application.yml:131-132` |
 | M-37 | ALL | 超时的**包含范围** | 计时器在 Authorize **之后**起算 ⇒ **JWT 验签不计入** | 计时器在 `HttpMiddlewareFilter`(**+7**) 起算；验签在 `GoStyleJwtAuthFilter`(**+6**) ⇒ 同样**不计入** | **EQUIVALENT**（**2026-10-27 已闭环**） | → DRIFT-ADMINAPI-006 的 **② 半已修**：验签搬出预算 ⇒ 见 §12.2。黑名单 Redis 两侧都在预算**之内**（Go = route 级中间件最内层；RAG = interceptor 段）⇒ 本行**整体**等价 |
-| M-38 | ALL | 超时响应 | `503` + `text/plain; charset=utf-8` + `nosniff` + 尾换行 | `503` + `text/plain; charset=utf-8` + `nosniff` + 尾换行 | **EQUIVALENT**（**2026-10-28 已闭环 · 真 Tomcat L4**） | → DRIFT-ADMINAPI-007（**代码在 `service/common`**）**已闭合**：共享层 `HttpMiddleware.writeTimeoutResponse:728` 的 `nosniff` 已在我树 ⇒ **wire 实测 503 响应确实带 `nosniff`**（`AdminApiRealTomcatResponseBytesTest`，见 §14）<br>〔**2026-10-24 完整性复核补记 ①**：上表两边写的都是**源码字面量**；**线上字节** Tomcat 会把 `Content-Type` 重渲染成 `text/plain;charset=utf-8`（**分号后无空格**）⇒ 与 Go 的 `text/plain; charset=utf-8`（**有空格**）**逐字节不同**（归一化后相同）。**499/503 都走这条**；400 的同款残差已记在 §UNRESOLVED-002<br>〔**2026-10-24 完整性复核补记 ②**：**nosniff 已被 `align/message` 分支跨域修掉**（`HttpMiddleware.writeTimeoutResponse` 加了 `setHeader("X-Content-Type-Options","nosniff")`）⇒ **已合入我树并经真 Tomcat L4 实测** —— 见 §14<br>〔**2026-10-28 实测补记**：真实栈上 503 的 `Content-Length` = **16**（`"Request Timeout"` 15 字符 + 尾随换行 1 字节）⇒ 与 Go 的 net/http 按缓冲内容算出的长度**逐字节相同**；**且 503 响应带 `nosniff`、200 JSON 响应不带**（Go 的 `httpx.OkJson` 也不设 nosniff）⇒ 两侧一致〕 |
+| M-38 | ALL | 超时响应 | `503` + `text/plain; charset=utf-8` + `nosniff` + 尾换行 | `503` + `text/plain; charset=utf-8` + `nosniff` + 尾换行 | **EQUIVALENT**（**2026-10-28 已闭环 · 真 Tomcat L4**） | → DRIFT-ADMINAPI-007（**代码在 `service/common`**）**已闭合**：共享层 `HttpMiddleware.writeTimeoutResponse:728` 的 `nosniff` 已在我树 ⇒ **wire 实测 503 响应确实带 `nosniff`**（`AdminApiRealTomcatResponseBytesTest`，见 §14）<br>〔**2026-10-24 完整性复核补记 ①**：上表两边写的都是**源码字面量**；**线上字节** Tomcat 会把 `Content-Type` 重渲染成 `text/plain;charset=utf-8`（**分号后无空格**）⇒ 与 Go 的 `text/plain; charset=utf-8`（**有空格**）**逐字节不同**（归一化后相同）。**499/503 都走这条**；400 的同款残差已记在 §UNRESOLVED-ADMINAPI-002<br>〔**2026-10-24 完整性复核补记 ②**：**nosniff 已被 `align/message` 分支跨域修掉**（`HttpMiddleware.writeTimeoutResponse` 加了 `setHeader("X-Content-Type-Options","nosniff")`）⇒ **已合入我树并经真 Tomcat L4 实测** —— 见 §14<br>〔**2026-10-28 实测补记**：真实栈上 503 的 `Content-Length` = **16**（`"Request Timeout"` 15 字符 + 尾随换行 1 字节）⇒ 与 Go 的 net/http 按缓冲内容算出的长度**逐字节相同**；**且 503 响应带 `nosniff`、200 JSON 响应不带**（Go 的 `httpx.OkJson` 也不设 nosniff）⇒ 两侧一致〕 |
 | M-39 | ALL | 中间件外层顺序 / 遥测面 | 签名无效的请求：**Sea 侧 `markHTTPResult` 观测数据不产生**（`Authorize` 短路 ⇒ 内层中间件不执行）；但 go-zero native `TraceHandler` 在**链首**，**仍产生 OTel server span** | 会产生（401 的观测数据与 span 都产生） | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-006 的 **① 半**（**2026-10-27 复核：原写「完全不产生 observability span」口径过宽；验签搬到 +6 后 **span 侧仍等价**（`Traceparent(+3)` 在其外层），但**观测数据侧仍不等价**）） |
 | M-40 | 全部外部调用 | Retry | **无** | **无** | EQUIVALENT | 两侧 `application.yml` / `admincenter.yaml` 均无重试配置 |
 | M-41 | 启动 | 下游依赖不可达 | `zrpc.MustNewClient` **启动即失败**（进程不启动） | Nacos + devh 懒连接，**进程能起**、每请求失败 | OBSERVABLE DIFFERENCE | → DRIFT-ADMINAPI-009 |
-| M-42 | 全部 | 并发语义 | 无状态，goroutine-per-request | 无状态，**但**多一个 worker-pool 饱和 → `setStatus(503)` 无 body 分支 | UNKNOWN | Go 侧无对应分支；见 UNRESOLVED-004 |
-| M-43 | 全部 | Prometheus 指标 | `admin_api_intercept_total{path,result}`：**2 个 label 名**（`path` / `result`）、**16 个组合**（login 3 + banuser 2 + unbanuser 2 + delete 2 + resetuserpassword 2 + updateuser 2 + invite/create 3） | Micrometer 同名 Counter + 同 2 个 tag，**16 个组合逐条一致**；但 exposition 上**多一个 `application` label** | IMPLEMENTATION DIFFERENCE | 〔**2026-10-24 复核订正**：原写「17 个具名 label」——**label 名是 2 个、组合数是 16**；且原注「`_total` 命名归一化未实测」已被 UNRESOLVED-005 ② 关掉（实测同名）。**剩下的真实差异是 RAG 多一个 `application` tag**（`application.yml` 的 `management.metrics.tags`）〕 |
+| M-42 | 全部 | 并发语义 | 无状态，goroutine-per-request | 无状态，**但**多一个 worker-pool 饱和 → `setStatus(503)` 无 body 分支 | UNKNOWN | Go 侧无对应分支；见 UNRESOLVED-ADMINAPI-004 |
+| M-43 | 全部 | Prometheus 指标 | `admin_api_intercept_total{path,result}`：**2 个 label 名**（`path` / `result`）、**16 个组合**（login 3 + banuser 2 + unbanuser 2 + delete 2 + resetuserpassword 2 + updateuser 2 + invite/create 3） | Micrometer 同名 Counter + 同 2 个 tag，**16 个组合逐条一致**；但 exposition 上**多一个 `application` label** | IMPLEMENTATION DIFFERENCE | 〔**2026-10-24 复核订正**：原写「17 个具名 label」——**label 名是 2 个、组合数是 16**；且原注「`_total` 命名归一化未实测」已被 UNRESOLVED-ADMINAPI-005 ② 关掉（实测同名）。**剩下的真实差异是 RAG 多一个 `application` tag**（`application.yml` 的 `management.metrics.tags`）〕 |
 | M-44 | ALL | 事务边界 | api 层无事务 | api 层无事务 | EQUIVALENT | 13 个 logic / 13 个 Service 均无事务注解 |
 
 ---
@@ -420,7 +420,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | **Cache**（§13） | N/A（无缓存层）；Redis 仅用于黑名单 EXISTS，语义已对齐 | M-10 |
 | **Auth**（§14） | **NOT EQUIVALENT** | DRIFT-ADMINAPI-001/002/003/004 |
 | **Transaction**（§15） | N/A（api 层无事务） | M-44 |
-| **Concurrency**（§16） | 基本等价 + 1 个 RAG 独有分支 | M-42 / UNRESOLVED-004 |
+| **Concurrency**（§16） | 基本等价 + 1 个 RAG 独有分支 | M-42 / UNRESOLVED-ADMINAPI-004 |
 | **Timeout**（§17） | 时长等价、**范围已等价**（2026-10-27：验签移出 3s 预算） | M-36 / M-37 / DRIFT-ADMINAPI-006 |
 | **Retry**（§18） | EQUIVALENT（两侧都无） | M-40 |
 | **Serialization**（§19） | 大部分等价，2 处 OBSERVABLE | M-30~M-35 / DRIFT-ADMINAPI-005 / M-20 |
@@ -499,9 +499,9 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
   一个普通 Spring 开发者会自然地加上这两道一致性检查，而 Go 侧根本没有这个层。
 - **Evidence strength**：`静态源码·双侧`
 - **Recommended Verification**：取决于 admin-rpc 是否可能返回空 `Admin` 或 uid 不一致
-  ⇒ 见 §9 UNRESOLVED-001。**在该点确定前不得改任一侧。**
+  ⇒ 见 §9 UNRESOLVED-ADMINAPI-001。**在该点确定前不得改任一侧。**
 
-> 🟢 **2026-10-27 降级订正（§2 结论回填）**：UNRESOLVED-001 已由 admin-rpc 侧答复 ⇒
+> 🟢 **2026-10-27 降级订正（§2 结论回填）**：UNRESOLVED-ADMINAPI-001 已由 admin-rpc 侧答复 ⇒
 > **「admin-rpc 会不会返回未 set 的 `Admin`」＝ 不会**（Go `getselflogic.go:44-51` 总是构造 `Admin: &pb.AdminInfo{…}`；
 > RAG `AdminServiceGrpcImpl.toProtoAdmin` 同样总是 set）⇒
 > ⇒ **本条的前提不可达 ⇒ 实际无可观察差异** ⇒
@@ -614,10 +614,10 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 - **Why It Matters**：这正是 spec §19 点名的 `null` vs `empty` vs `missing` 跨语言偏差；
   与 §3.3.3 的「`@TableField(typeHandler)`」不同类，但机理相同——**tag/注解名 ≠ 实际语义**。
 - **Evidence strength**：`静态源码·双侧`（`omitempty` 对 struct 无效这一条是 Go 语言层事实，
-  **本轮未跑探针实证**，一并记入 §9 UNRESOLVED-003）
-- **触发条件依赖** admin-rpc 是否会返回未 set 的 `user` ⇒ §9 UNRESOLVED-001。
+  **本轮未跑探针实证**，一并记入 §9 UNRESOLVED-ADMINAPI-003）
+- **触发条件依赖** admin-rpc 是否会返回未 set 的 `user` ⇒ §9 UNRESOLVED-ADMINAPI-001。
 
-> 🟢 **2026-10-27 降级订正（§2 结论回填）**：UNRESOLVED-001 已由 admin-rpc 侧答复 ⇒
+> 🟢 **2026-10-27 降级订正（§2 结论回填）**：UNRESOLVED-ADMINAPI-001 已由 admin-rpc 侧答复 ⇒
 > **「`GetUser` / `UpdateUser` 会不会返回未 set 的 `user`」＝ 不会**
 > （Go `getuserlogic.go:42-50` / `updateuserlogic.go:106-113` 总是构造 `User: &pb.UserInfo{…}`；
 > RAG `toProtoUser` 同样总是 set）⇒
@@ -628,7 +628,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 > 订正以本注记形式留痕）⇒ **读本条时以本注记为准**。
 > ⇒ 证据强度：前提不可达这一点有**双侧活体对拍**背书（gRPC 18 用例的 payload 归一化含 `hasUser` / `hasAdmin`）
 > ⇒ **不是静态推导**。
-> ⇒ 🟡 **连带**：`UNRESOLVED-003`（Go 的 `omitempty` 对 struct 无效这一条）已于 2026-10-24 **单独关闭**
+> ⇒ 🟡 **连带**：`UNRESOLVED-ADMINAPI-003`（Go 的 `omitempty` 对 struct 无效这一条）已于 2026-10-24 **单独关闭**
 > ⇒ 那个语言层事实本身是**已证**的 ⇒ **本条不再是「前提待定」，而是「前提不可达」**。
 
 ---
@@ -695,7 +695,13 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 
 ---
 
-### DRIFT-ADMINAPI-007 · 503 超时响应缺 `X-Content-Type-Options: nosniff`
+### DRIFT-ADMINAPI-007 · 503 超时响应缺 `X-Content-Type-Options: nosniff` —— ✅ **已闭合（2026-10-28 · G1 lane · 真 Tomcat L4）**
+
+> 🟢 **2026-10-29 收敛订正（同一编号只有一种状态）**：本条原标题**不带状态**，且 `vs-common.md` 的派单表里另有一行把它记成「🔴 G4 · 半修 ⇒ **需重开一条**」（指的是 charset 分号后空格的**残差**）⇒ **两处状态不一致**。
+> **本轮实测裁决**：
+> - ① **原条（缺 `nosniff`）已闭合** —— `nosniff` 已落地于 `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:728`，且经**真 Tomcat L4** 实测（`AdminApiRealTomcatResponseBytesTest`，见 §14）⇒ 503 响应确实带 `nosniff`。
+> - ② **残差（`Content-Type` 分号后空格）已定性为「框架限制、不改」** —— 同文件 `:718-727` 的注释明写：Tomcat 的 `setContentType` 会把 `Content-Type` 解析成 MediaType 再序列化 ⇒ **吃掉空格**；实测 `setHeader("Content-Type", …)` 同样会被 Tomcat 转手调 `setContentType` ⇒ **该空格在 Tomcat 上无任何写法能产出** ⇒ 归「框架限制」⇒ **不另开条目**（原「需重开一条」的处置作废）。
+> ⇒ **本条当前唯一状态 = ✅ 已闭合**（含残差的定性结论）。
 
 - **Component**：admin-api / 超时与客户端断连分支（**实现落在 `service/common`**）
 - **Category**：Serialization / Response Headers
@@ -741,7 +747,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 > Go 的 `http.Error` 逐字写死 `text/plain; charset=utf-8`（**分号后有空格**）；
 > RAG 的 `writeTimeoutResponse` 源码写的也是同一个字符串（**逐字相同**），
 > 但 **Tomcat 会把它重渲染成 `text/plain;charset=utf-8`（无空格）** ⇒ **线上字节不同**。
-> ⇒ 400 的同款残差已在 §UNRESOLVED-002 实测并记录（归一化后一致、逐字节不一致），
+> ⇒ 400 的同款残差已在 §UNRESOLVED-ADMINAPI-002 实测并记录（归一化后一致、逐字节不一致），
 > **503/499 这条本轮补上**（证据：同一 Tomcat 的同一条重渲染路径 + `align/message` 分支在
 > **同一个 `writeTimeoutResponse` 方法**上的实测结论）。
 > ⚠️ **归类**：这是**框架限制**（Tomcat 的 `setContentType` 会解析成 `MediaType` 再序列化），
@@ -798,7 +804,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
   Go 全部落 `default→1015`。
 - **Difference**：4 种 gRPC code 的业务码不同。
 - **Evidence strength**：`静态源码·双侧`
-- **需合并判读**：admin-rpc 的 `GetSelf` 实际会抛哪几种 code（§9 UNRESOLVED-001）。
+- **需合并判读**：admin-rpc 的 `GetSelf` 实际会抛哪几种 code（§9 UNRESOLVED-ADMINAPI-001）。
   **在 admin-rpc 侧未确认前不得改通用表**（改通用表会波及 12 个已对齐的端点）。
 
 > #### ⚠️ 2026-10-24 完整性复核补记：本条之外还有**第 5 种** code，且它是 panic 路径上真实会出现的
@@ -814,7 +820,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 > [`DRIFT-ARPC-009`](./rpc.md)（在 `rpc.md` 的「2026-10-24 完整性复核轮」§1）。
 > ⚠️ `align/message` 分支已修（recover 精确复刻 Go 的 `INTERNAL + "panic: "`）⇒ **合并后自动消失**。
 
-> 🟢 **2026-10-27 降级订正（§2 结论回填）**：UNRESOLVED-001 已由 admin-rpc 侧答复 ⇒
+> 🟢 **2026-10-27 降级订正（§2 结论回填）**：UNRESOLVED-ADMINAPI-001 已由 admin-rpc 侧答复 ⇒
 > **`GetSelf` 实际只会抛 `NOT_FOUND` 与 `INTERNAL`**
 > （Go `getselflogic.go:36-41` 只有这两个分支；RAG `AdminDomainService.getSelf:243-258` 同）
 > ⇒ ⇒ **那 4 种 code（`ALREADY_EXISTS` / `PERMISSION_DENIED` / `UNAUTHENTICATED` / `INVALID_ARGUMENT`）不可达**
@@ -843,7 +849,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 - **Difference**：就绪探针语义。K8s 里 Go 表现为「Pod 起不来」，RAG 表现为「Pod Ready 但 100% 请求失败」。
 - **Evidence strength**：`静态源码·双侧`
 - **Note**：这与 AGENTS.md 已记录的「Spring Cloud 启动顺序 / 优雅停机」类问题同族，
-  但**本组件未验证过真实启动序列** ⇒ 见 §9 UNRESOLVED-005。
+  但**本组件未验证过真实启动序列** ⇒ 见 §9 UNRESOLVED-ADMINAPI-005。
 
 ---
 
@@ -884,7 +890,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | CASE-10 | 签名有效但无 `userId` claim | `200 + 1006` | `401 + 1006` | ❌ | **缺**（→ DRIFT-ADMINAPI-003）⇒ **已签字 SD-01，此处必红是预期** |
 | CASE-11 | `userId = 0`，调 banuser | 发 RPC，`OperatorId=0` | `1006`，不发 RPC | ❌ | **缺**（→ DRIFT-ADMINAPI-001） |
 | CASE-12 | Redis 宕机 | 放行（fail-open） | 放行 | ✅ | 已有（非本轮）：`AdminSemanticDriftApiRegressionTest#redisFailureFailOpen` |
-| CASE-13 | `getself`，下游返回空 Admin | `200` + 零值 admin | `1003` | ❌ | **缺**（→ DRIFT-ADMINAPI-002，依赖 UNRESOLVED-001） |
+| CASE-13 | `getself`，下游返回空 Admin | `200` + 零值 admin | `1003` | ❌ | **缺**（→ DRIFT-ADMINAPI-002，依赖 UNRESOLVED-ADMINAPI-001） |
 | CASE-14 | `getuser`，下游未 set user | `user` 零值对象 | 无 `user` 键 | ❌ | **缺**（→ DRIFT-ADMINAPI-005） |
 | CASE-15 | `getuserlist` 空结果 | `"list": null` | `"list": null` | ✅ | 已有（非本轮）：`AdminApiMvcPipelineTest` + `AdminSemanticDriftApiRegressionTest` |
 | CASE-16 | `page=0` | 透传（下游按 Go 的 GORM 抑制规则算） | 透传 | ✅ | 已有（非本轮）：`AdminSemanticDriftApiRegressionTest` 2 条 |
@@ -898,15 +904,25 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | CASE-24 | **真实 Tomcat 下** 400 的 Content-Type / nosniff | `text/plain` + `nosniff` | 同 | ✅ **已闭合**（**2026-10-28 · G1 lane · 真 Tomcat L4**） | 🆕 `AdminApiRealTomcatResponseBytesTest#missingRequiredFieldYieldsGoPlainText400OnRealTomcat`（RANDOM_PORT + 真 `HttpClient`）⇒ 实测 `400` + `text/plain;charset=utf-8` + `nosniff` + `Content-Length: 28` + body `field "username" is not set\n`（**与 Go 逐字节相同**）⇒ 见 §14 |
 | CASE-25 | 405 / 415 | Go 无对应端点（404） | `405` / `415`，body 为空 | ⚠️ 语义不同 | **缺**（`body == null` 守卫分支无断言） |
 | CASE-26 | 3s 超时 | `503` + nosniff | `503` + nosniff | ✅ **已闭合**（**2026-10-28 · G1 lane · 真 Tomcat L4**） | 🆕 `AdminApiRealTomcatResponseBytesTest#slowDownstreamYieldsGoTimeout503OnRealTomcat` ⇒ 实测 `503` + `text/plain;charset=utf-8` + `nosniff` + `Content-Length: 16` + body `Request Timeout\n`（耗时 3585ms）⇒ **DRIFT-ADMINAPI-007 已闭合** ⇒ 见 §14 |
-| CASE-27 | 并发调用（同一端点 N 次） | 无状态 | 无状态，但 worker pool 饱和有独有 503 分支 | UNKNOWN | **缺**（→ UNRESOLVED-004） |
+| CASE-27 | 并发调用（同一端点 N 次） | 无状态 | 无状态，但 worker pool 饱和有独有 503 分支 | UNKNOWN | **缺**（→ UNRESOLVED-ADMINAPI-004） |
 
 ---
 
 ## 9. Unresolved
 
+> 🟢 **2026-10-29 撞号订正（本节编号命名空间）**：本节原用 `UNRESOLVED-001 … UNRESOLVED-006`，
+> 与**同一域内**的 [`user/api.md` §9 `UNRESOLVED-001 … UNRESOLVED-005`](../user/api.md) **撞号** ——
+> 而两边的**内容完全不同**（本节是 admin-api 组件级问题；user 那节是 user-api 组件级问题）
+> ⇒ 同一编号在同域出现**两种状态**（本节多为「已关 / 前提不可达」，user 那节多为「✅ 已关」）⇒ 违反「同编号只有一种状态」。
+> ⇒ **本轮处置**：本节全部改用 **组件名限定的唯一编号 `UNRESOLVED-ADMINAPI-001 … -006`**（**全 41 处引用同步改名**）
+> ⇒ **`user/api.md` 侧保持原编号不动**（它的 `UNRESOLVED-00N` 属 **user-api 命名空间**，
+> 且 `docs/Pitfalls/users/user/api.md:96` 有指向它的**标题锚点链接** ⇒ 改名会打断该链接）。
+> ⇒ **本节原编号 `UNRESOLVED-001…006` 原样作废**（仅作历史指代，不再使用）。
+
+
 > 本节**不得为空**才允许下结论（spec §31-b）。
 
-### UNRESOLVED-001 · admin-rpc 在 5 个关键点上会返回什么？**（跨组件，需与 `admin/rpc.md` 合并判读）**
+### UNRESOLVED-ADMINAPI-001 · admin-rpc 在 5 个关键点上会返回什么？**（跨组件，需与 `admin/rpc.md` 合并判读）**
 
 | 待定问题 | 依赖方 | 为什么本组件无法确定 |
 |---|---|---|
@@ -918,7 +934,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 
 **Required Confirmation**：与 `admin/rpc.md` 合并判读；**本组件在得到答复前不得改 DRIFT-ADMINAPI-002/005/008**。
 
-### UNRESOLVED-002 · admin-api 的 text/plain 400 **没有真实 Tomcat 守门**
+### UNRESOLVED-ADMINAPI-002 · admin-api 的 text/plain 400 **没有真实 Tomcat 守门**
 
 > ✅ **已关闭（2026-10-24）** ⇒ 见本文件新增 **§2**（admin 入口真实 Tomcat 守门，`EXIT=0`）。
 
@@ -936,7 +952,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
   `/admin/v1/banuser` 缺 `uid`），并用 `./tools/difftest/run.sh` 起真实栈执行。
   **本轮未跑**（需要完整构建 + 两套栈，代价远超本组件的静态对照）。
 
-### UNRESOLVED-003 · Go 的 `omitempty` 对 struct 无效这一条，本轮只做了静态判定
+### UNRESOLVED-ADMINAPI-003 · Go 的 `omitempty` 对 struct 无效这一条，本轮只做了静态判定
 
 > ✅ **已关闭（2026-10-24）** ⇒ 见本文件新增 **§1**（逐字节副本 + `go run` 实测）。
 
@@ -945,7 +961,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 - **Required Confirmation**：一个 10 行的 Go 程序即可判定；或直接把 admin-rpc 的实际返回形态确认掉
   （那样 DRIFT-ADMINAPI-005 可能整条作废）。
 
-### UNRESOLVED-004 · RAG 侧 worker-pool 饱和 → 无 body 的 503
+### UNRESOLVED-ADMINAPI-004 · RAG 侧 worker-pool 饱和 → 无 body 的 503
 
 > ✅ **已关闭（2026-10-24）** ⇒ 见本文件新增 **§3**。
 > ⚠️ **本条上文的两处说法被推翻**：①「没有测试覆盖」是错的（`HttpMiddlewareWorkerPoolTest` 已有 3 条守门）；
@@ -956,7 +972,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 - **没有测试覆盖**，**也没有并发压测数据**说明该分支在真实负载下的可达性。
 - **Required Confirmation**：并发压测 + 观察池饱和阈值。本轮未跑。
 
-### UNRESOLVED-005 · 两项启动期事实未实测
+### UNRESOLVED-ADMINAPI-005 · 两项启动期事实未实测
 
 > ✅ **已关闭（2026-10-24）** ⇒ 见本文件新增 **§4**（① Nacos 不可达 ⇒ 起不来，实测；② counter 名实测为 `admin_api_intercept_total`，与 Go 同名）。
 
@@ -965,14 +981,14 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | DRIFT-ADMINAPI-009 | Nacos 不可达时 admin-api 的**真实**启动序列与就绪探针表现（静态只说明「不会像 Go 那样 panic」） |
 | M-43 | Micrometer Counter 名 `admin_api_intercept_total` 在 `/actuator/prometheus` 上**最终叫什么**（Micrometer 有 `_total` 归一化规则，未实测）⇒ 与 Go 的 `admin_api_intercept_total` 是否同名也未实测 |
 
-### UNRESOLVED-006 · 本组件的绝大多数结论是 `静态源码·双侧`
+### UNRESOLVED-ADMINAPI-006 · 本组件的绝大多数结论是 `静态源码·双侧`
 
 > ✅ **已关闭（2026-10-24）** ⇒ 见本文件新增 **§5**（admin 22 步 + 全量 39 步定向对拍，`unexpected=0`）。
 
 - 本轮**没有**跑双端活体对拍、**没有**跑真 Tomcat、**没有**跑真 PG（本组件无 SQL）。
 - 引用到的 2026-10-21/22 difftest（39 步）与 matrix（273 条）成果**本轮未复跑**，
   按 AGENTS.md 硬约束 1，**不得**据此把上表任何一条升级为「已闭环」。
-- **Required Confirmation**：在 §9 UNRESOLVED-001 得到答复后，跑一轮**只针对本文件 10 条新发现**
+- **Required Confirmation**：在 §9 UNRESOLVED-ADMINAPI-001 得到答复后，跑一轮**只针对本文件 10 条新发现**
   的定向对拍（预期 ~15 步），而不是重跑全量 273 条。
 
 ---
@@ -997,7 +1013,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 | 12 | Ordering 是否一致 | ⚠️ 部分 | **鉴权内部顺序一致**（M-09，三段取证）；**中间件外层顺序不一致**（M-39 / DRIFT-ADMINAPI-006 的 **① 遥测面**；**② 超时范围已修**，见 M-37） |
 | 13 | Retry 是否一致 | ✅ 是 | 两侧皆无（M-40） |
 | 14 | Timeout scope 是否一致 | ✅ 是（**2026-10-27 更新**） | 时长一致（M-36）；**包含范围已一致**（M-37 —— 验签搬进 `GoStyleJwtAuthFilter(+6)` ⇒ 出 3s 预算） |
-| 15 | Concurrency semantics 是否一致 | ⚠️ UNKNOWN | 无状态部分一致；RAG 多一个 worker-pool 分支（UNRESOLVED-004） |
+| 15 | Concurrency semantics 是否一致 | ⚠️ UNKNOWN | 无状态部分一致；RAG 多一个 worker-pool 分支（UNRESOLVED-ADMINAPI-004） |
 | 16 | Authentication / Authorization 是否一致 | ❌ **否** | **DRIFT-ADMINAPI-001 / 002 / 003 / 004** —— 本组件最严重的一组 |
 | 17 | Serialization semantics 是否一致 | ✅ **部分**（**2026-10-28 更新**） | `uid` 字符串化 / `extra_info` / `email` omitempty / 显式 null 一致（M-30~M-35）；**user 缺失形态不一致**（DRIFT-ADMINAPI-005）；~~503 缺 nosniff（DRIFT-ADMINAPI-007）~~ ⇒ ✅ **已闭合**（真 Tomcat L4 实测 503 带 nosniff，见 §14） |
 | 18 | Lifecycle 是否一致 | ❌ 否 | DRIFT-ADMINAPI-009 |
@@ -1056,7 +1072,7 @@ SEMANTICALLY NOT EQUIVALENT
 | 覆盖 | admin 域 13 个端点 + user 域 13 个端点（admin 域的 13 个端点全部在内：login / getself / getself.noauth / getself.badtok / invite.create / create / create.malformed / getuser / getuser.nouid / getuser.baduid / getuserlist ×4 / banuser / unbanuser / resetuserpassword / update / updateuser / delete / logout / getself.afterlogout） |
 | 权威记录 | `tools/difftest/grpc-admin-results.txt`（gRPC 层）与本轮命令输出（HTTP 层） |
 
-⇒ **「本组件的绝大多数结论是 `静态源码·双侧`」这条（UNRESOLVED-006）不再成立**：
+⇒ **「本组件的绝大多数结论是 `静态源码·双侧`」这条（UNRESOLVED-ADMINAPI-006）不再成立**：
 本域的 HTTP 层结论现在有**双侧活体对拍**背书。
 
 > ⚠️ **「39 步全绿」的效力边界**：它只覆盖 **HTTP wire 层**。
@@ -1161,9 +1177,9 @@ Tomcat 的头写出？）—— 留作 UNRESOLVED。
 > 只断言「Content-Type **含** text/plain」⇒ charset 的有无它看不见。
 > ⇒ 需要本条独立守门。**该脚本属 tools 共享资产，不在本 worker 的所有权内，本轮未改。**
 
-## 2. ✅ UNRESOLVED-001 得到答复（从 admin-rpc 侧）⇒ 三条 api 侧漂移**前提不可达**
+## 2. ✅ UNRESOLVED-ADMINAPI-001 得到答复（从 admin-rpc 侧）⇒ 三条 api 侧漂移**前提不可达**
 
-上文 §9 的 UNRESOLVED-001 列了 5 个「admin-rpc 会返回什么」的问题。
+上文 §9 的 UNRESOLVED-ADMINAPI-001 列了 5 个「admin-rpc 会返回什么」的问题。
 本轮在 rpc 域已逐条核到（Go 侧 + RAG 侧 + gRPC 双侧活体对拍），**现在可以答复**：
 
 | 待定问题 | 答复 | 依据 |
@@ -1256,7 +1272,7 @@ RAG 是 `{"code":1006,"msg":"TOKEN已过期","data":null}`。
 | **A-1** | 🔴 **`user-api` 有**同款 charset 缺失**：`user-api/.../advice/GlobalExceptionHandler.java:287` 也是 `headers.setContentType(new MediaType(MediaType.TEXT_PLAIN, …))` ⇒ 400 的 `Content-Type` 同样没有 charset | 与本文件 §1 同型（同一段 javadoc 都写着「Go 的 `net/http.Error` 设 `text/plain; charset=utf-8`」，但代码没做） | 归 users/user owner。⚠️ `tools/difftest/check-plaintext400-headers.sh` **只打 user-api** ⇒ 修 user-api 时顺手把该脚本的断言加严（断言 charset 存在）才是根治 |
 | **A-2** | ⚠️ **~~`docs/Intentional_Deviations/users/**` 下 6 个文件全是 0 字节（空占位）~~**<br>**2026-10-23 22:4x 复核订正：admin 域 3 个已补齐，`users/user` 域 3 个仍空** | `wc -c` 实测全为 0 | N-1 / N-4 / N-5 等「已签字」条目目前**只存在于 `docs/DRIFT/users/admin/_shared.md`**，没有进签字档 ⇒ 下一个 agent 按 `docs/Intentional_Deviations/_INDEX.md` 检索会查不到。**该目录不在本 worker 所有权内 ⇒ 只报告** |
 | **A-3** | ⚠️ **DRIFT-ADMINAPI-004（黑名单 401 的业务码 `401`→`1006`）在 `diff.py` 里被标成「N-1 已签字」**，但 N-1 只签了 body 形状 | §3 | 要么补一份正式签字，要么改 `diff.py` 的 assert 措辞（**`tools/` 是共享资产，不在本 worker 所有权内 ⇒ 只报告**） |
-| **A-4** | ⚠️ **§9 UNRESOLVED-002（admin-api 的 text/plain 400 没有真实 Tomcat 守门）** —— **本轮已部分关闭** | 本轮用 `curl -i` 直打真实 Tomcat 两侧栈，抓到了 `Content-Type` / `nosniff` / `Content-Length` / body 逐字节 | **仍缺一条可重复执行的脚本**：`tools/difftest/check-plaintext400-headers.sh` 的两个端口常量是 user-api 的（`RAG_USER=59900` / `GO_USER=18888`），**没有 admin 入口** ⇒ 补 admin 入口需要改共享脚本 ⇒ 归 `tools/` owner。⚠️ 但本轮已证明：**MockMvc 断言完整头值字符串是错的**（见 §1「测试方法论」）⇒ 补脚本时也要注意断言形状 |
+| **A-4** | ⚠️ **§9 UNRESOLVED-ADMINAPI-002（admin-api 的 text/plain 400 没有真实 Tomcat 守门）** —— **本轮已部分关闭** | 本轮用 `curl -i` 直打真实 Tomcat 两侧栈，抓到了 `Content-Type` / `nosniff` / `Content-Length` / body 逐字节 | **仍缺一条可重复执行的脚本**：`tools/difftest/check-plaintext400-headers.sh` 的两个端口常量是 user-api 的（`RAG_USER=59900` / `GO_USER=18888`），**没有 admin 入口** ⇒ 补 admin 入口需要改共享脚本 ⇒ 归 `tools/` owner。⚠️ 但本轮已证明：**MockMvc 断言完整头值字符串是错的**（见 §1「测试方法论」）⇒ 补脚本时也要注意断言形状 |
 
 
 ### 🔴 附：本轮同时修掉了一条**把缺陷锁死的绿测试**（§3.3.3 的原型案例）
@@ -1346,8 +1362,8 @@ assertEquals("text/plain", asPlainText.getResponse().getContentType(),
 | DRIFT-ADMINAPI-002（getself 多两道校验） | 前提不可达 ⇒ **仍维持**「实现差异（防御性加固）」，本轮未动 |
 | DRIFT-ADMINAPI-005（user 字段缺失时消失） | 前提不可达 ⇒ 同上 |
 | DRIFT-ADMINAPI-008（getself 的 4 个 code 不可达） | 同上；通用映射表未动（被 12 个端点共用） |
-| UNRESOLVED-002（text/plain 400 无真实 Tomcat 守门） | **部分关闭**：`AdminApiPlainText400ContentTypeTest` 已在，但可重复执行的脚本仍缺（`tools/` 共享资产，不在本域） |
-| UNRESOLVED-003 / 004 / 005 / 006 | 未变 |
+| UNRESOLVED-ADMINAPI-002（text/plain 400 无真实 Tomcat 守门） | **部分关闭**：`AdminApiPlainText400ContentTypeTest` 已在，但可重复执行的脚本仍缺（`tools/` 共享资产，不在本域） |
+| UNRESOLVED-ADMINAPI-003 / 004 / 005 / 006 | 未变 |
 | §5 A-1（user-api 同款 charset 缺失） | 仍有效，归 users/user 域 |
 | §5 A-2（`Intentional_Deviations/users/**` 6 个 0 字节） | ✅ **本域 3 个已补**；`users/user` 的 3 个**仍空**，归 users/user 域 |
 | §5 A-3（`diff.py` 把 ADMINAPI-004 标成「N-1 已签字」） | 措辞指向不精确属实；已由 SD-2026-10-23-08 给出准确引用。⚠️ **`tools/difftest/diff.py` 属共享资产，本轮未改** |
@@ -1380,14 +1396,14 @@ assertEquals("text/plain", asPlainText.getResponse().getContentType(),
 |---|---|---|---|
 | 1 | **ADMINAPI-003** | ✅ **已被 SD-2026-10-23-01 覆盖**（本轮订正了上一轮「未签字」的错误说法） | 静态 |
 | 2 | **ADMINAPI-009** | ✅ **已实修**（真栈双向验证：可达⇒能起 / 不可达⇒起不来 / Nacos 不可达⇒起不来） | **双侧活体对拍** |
-| 3 | **UNRESOLVED-002** | ✅ 关闭（admin 入口真实 Tomcat 守门 `EXIT=0`） | **双侧活体对拍** |
-| 4 | **UNRESOLVED-003** | ✅ 关闭（Go `omitempty` 对 struct 无效 ⇒ 逐字节副本 + `go run` 实测） | **真源程序实测** |
-| 5 | **UNRESOLVED-004** | ✅ 关闭（**推翻了上文两条说法**：不是「没有测试覆盖」，且该分支在默认配置下**不可达**） | **并发压测 + 结构论证** |
-| 6 | **UNRESOLVED-005 ①** | ✅ 关闭（Nacos 不可达 ⇒ 进程起不来，实测） | **双侧活体对拍** |
-| 7 | **UNRESOLVED-005 ②** | ✅ 关闭（counter 名恰好 `admin_api_intercept_total`，与 Go 同名） | **真容器 `/actuator/prometheus`** |
-| 8 | **UNRESOLVED-006** | ✅ 关闭（admin 22 步 + 全量 39 步，`unexpected=0`） | **双侧活体对拍** |
+| 3 | **UNRESOLVED-ADMINAPI-002** | ✅ 关闭（admin 入口真实 Tomcat 守门 `EXIT=0`） | **双侧活体对拍** |
+| 4 | **UNRESOLVED-ADMINAPI-003** | ✅ 关闭（Go `omitempty` 对 struct 无效 ⇒ 逐字节副本 + `go run` 实测） | **真源程序实测** |
+| 5 | **UNRESOLVED-ADMINAPI-004** | ✅ 关闭（**推翻了上文两条说法**：不是「没有测试覆盖」，且该分支在默认配置下**不可达**） | **并发压测 + 结构论证** |
+| 6 | **UNRESOLVED-ADMINAPI-005 ①** | ✅ 关闭（Nacos 不可达 ⇒ 进程起不来，实测） | **双侧活体对拍** |
+| 7 | **UNRESOLVED-ADMINAPI-005 ②** | ✅ 关闭（counter 名恰好 `admin_api_intercept_total`，与 Go 同名） | **真容器 `/actuator/prometheus`** |
+| 8 | **UNRESOLVED-ADMINAPI-006** | ✅ 关闭（admin 22 步 + 全量 39 步，`unexpected=0`） | **双侧活体对拍** |
 
-## 1. ✅ UNRESOLVED-003 关闭：Go 的 `omitempty` 对 struct **无效**
+## 1. ✅ UNRESOLVED-ADMINAPI-003 关闭：Go 的 `omitempty` 对 struct **无效**
 
 **判定物**：`tools/difftest/probe-go-omitempty.sh`（可复现）
 **方法**：**逐字节复制**真源 `service/user/admin/api/internal/types/types.go` 到临时模块再 `go run`
@@ -1411,7 +1427,7 @@ SCENARIO=map_empty         JSON={}          ← 对照：map 形态才会被省�
 3. **但该路径前提不可达**（与 DRIFT-ADMINAPI-002 / 008 同源，见本文件 §2）
    ⇒ 维持「实现差异（防御性加固）」的归类，不改实现。
 
-## 2. ✅ UNRESOLVED-002 关闭：真实 Tomcat 下的 400 响应头（admin 入口）
+## 2. ✅ UNRESOLVED-ADMINAPI-002 关闭：真实 Tomcat 下的 400 响应头（admin 入口）
 
 **新增可重复执行的守门**：`tools/difftest/check-plaintext400-headers.sh` 补了 **admin 入口**
 并加了 **charset 断言**；脚本随后又加了**分域执行**（`[all|admin|user]`）。
@@ -1440,7 +1456,7 @@ SCENARIO=map_empty         JSON={}          ← 对照：map 形态才会被省�
 （`Content-Type='text/plain'` vs Go 的 `text/plain; charset=utf-8`）
 ⇒ 那是 **users/user 域**的账（对应本文件 §5 A-1），**不是 admin 域的**。
 
-## 3. ✅ UNRESOLVED-004 关闭：worker-pool 饱和分支在默认配置下**不可达**
+## 3. ✅ UNRESOLVED-ADMINAPI-004 关闭：worker-pool 饱和分支在默认配置下**不可达**
 
 > ⚠️ **本条推翻了上文 §9 的两处说法**：
 > ① 「**没有测试覆盖**」——**错的**：`service/common/src/test/java/com/rag/common/observability/HttpMiddlewareWorkerPoolTest.java`
@@ -1499,7 +1515,7 @@ SCENARIO=map_empty         JSON={}          ← 对照：map 形态才会被省�
 ⚠️ 该分支**没有 Go 侧对应物**（Go 用 goroutine，无池）⇒ 一旦触发就是 RAG 独有行为，
 但默认配置下不发生 ⇒ **维持 M-42 的 `UNKNOWN` 归类，但补充可达性结论**。
 
-## 4. ✅ UNRESOLVED-005 关闭（①②）
+## 4. ✅ UNRESOLVED-ADMINAPI-005 关闭（①②）
 
 ### 4.1 ① Nacos 不可达时的真实启动序列
 
@@ -1521,7 +1537,7 @@ counter 名**恰好** `admin_api_intercept_total`，与 Go
 ⇒ M-43 的「`_total` 命名归一化未实测」这条**关闭**；M-43 维持 `IMPLEMENTATION DIFFERENCE`
 （实现不同、**可观测名相同**）。
 
-## 5. ✅ UNRESOLVED-006 关闭：api 域定向双侧活体对拍
+## 5. ✅ UNRESOLVED-ADMINAPI-006 关闭：api 域定向双侧活体对拍
 
 **工具**：`tools/difftest/diff.py`（补了「模板未解析 ⇒ 不可判定」的判定，见下）
 
@@ -1817,7 +1833,7 @@ RAG 的 admin-api 现在**必须在 admin-rpc ready 之后起**（fail-fast ⇒ 
 | 项 | 台账位置 |
 |---|---|
 | 表名 `admins`/`admin_invites`（Go）vs `admin_admin`/`admin_invite`（RAG） | `rpc.md:1289` + `Intentional_Deviations/users/admin/_shared.md:22`（**族内约定**，非缺陷；且标注「两侧物理上不共用 schema」） |
-| 400 响应的 `Content-Type` 分号后空格残差 | 本文件 §UNRESOLVED-002 段（**实测**：归一化后一致、逐字节不一致） |
+| 400 响应的 `Content-Type` 分号后空格残差 | 本文件 §UNRESOLVED-ADMINAPI-002 段（**实测**：归一化后一致、逐字节不一致） |
 | 13 个 HTTP 端点 / 13 个 gRPC RPC 逐条覆盖 | §4 Equivalence Matrix |
 | `admin-proto` 13 rpc 逐字节一致 | `_shared.md:164` + `rpc.md:1066`（`check-proto-static.sh` EXIT=0） |
 
@@ -1849,7 +1865,7 @@ RAG 的 admin-api 现在**必须在 admin-rpc ready 之后起**（fail-fast ⇒ 
 
 | # | 事项 | 归属 |
 |---|---|---|
-| 1 | `docs/DRIFT/_INDEX.md` 的证据强度行仍写「`admin-api` 的上限是**静态源码**」⇒ **已过期**：admin-api 已拿到**双侧活体对拍**（§UNRESOLVED-006 关闭，admin 22 步 + 全量 39 步，`unexpected=0`） | **共享索引** |
+| 1 | `docs/DRIFT/_INDEX.md` 的证据强度行仍写「`admin-api` 的上限是**静态源码**」⇒ **已过期**：admin-api 已拿到**双侧活体对拍**（§UNRESOLVED-ADMINAPI-006 关闭，admin 22 步 + 全量 39 步，`unexpected=0`） | **共享索引** |
 | 2 | `docs/DRIFT/_INDEX.md` 记「`admin-proto` **无专属台账文件**」⇒ 事实层已覆盖（`_shared.md` + `rpc.md`），但索引口径与事实层不一致 | **共享索引** |
 | 3 | `AGENTS.md §0` users 行三处出入（`update_time ×5`→**×6**、撤销「`status=0L` 未修」、`extra_info` 标注 users/user 域已改） | **共享文件 `AGENTS.md`** |
 | 4 | `Intentional_Deviations/users/admin/_shared.md` 的 **N-5** 引用的 `JwtUtil` 已被 `align/users-user` 改动（padding 未变，但签名实现变了）⇒ 合并后应复核一次 | **本域**（下轮复核） |
@@ -2342,7 +2358,7 @@ Sea-RideTheWind_golang/service/common/observability/http.go:88  → http.Error(w
    （⚠️ 这与本轮 §50 的 V-014 / ARPC-013 不同 —— 那两条是**两侧都跑了探针**。）
 2. **只覆盖 public 路径**（`/admin/v1/create`、`/admin/v1/login`）⇒ 受保护路径的 401 分支**不在本类覆盖面**。
 3. **400 的 charset 空格残差仍在**（`text/plain;charset=utf-8` vs Go 的 `text/plain; charset=utf-8`）
-   ⇒ **归「框架限制」，不修** ⇒ 见 §UNRESOLVED-002 与 [`../vs-common.md`](../vs-common.md) 第 4 行。
+   ⇒ **归「框架限制」，不修** ⇒ 见 §UNRESOLVED-ADMINAPI-002 与 [`../vs-common.md`](../vs-common.md) 第 4 行。
 4. **只验字节与状态码**，不验 envelope 语义（那是 CASE-01/02 的面）。
 5. **未起容器** ⇒ 本类**零 Docker 依赖** ⇒ 既省启动时间，也躲开「宿主→容器端口转发」那类环境 flake
    ⇒ ⇒ **对波末收口回归的负载增量极小**（实测整类 **11.0s / 3 条**，其中含 1 次真 Tomcat 上下文启动）。

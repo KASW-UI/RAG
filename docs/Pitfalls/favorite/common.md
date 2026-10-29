@@ -8,7 +8,10 @@
 
 ---
 
-## PIT-FAV-COMMON-001 · 🕳️ **「拿我的 stub 验我的 stub」—— 真源 import 了 grpc 就不可能 stub**
+## PIT-FAV-COMMON-001 · 🕳️ **「拿我的 stub 验我的 stub」—— 真源 import 了 grpc 就不可能 stub** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-COMMON-001` ⇒ **新号**：`PIT-FAV-18`
+
 
 ### 现象
 
@@ -45,7 +48,10 @@
 
 ---
 
-## PIT-FAV-COMMON-002 · 🕳️ **「description 保真」不能靠「构造出的 Status 对象」推断**
+## PIT-FAV-COMMON-002 · 🕳️ **「description 保真」不能靠「构造出的 Status 对象」推断** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
+
+> **旧号**：`PIT-FAV-COMMON-002` ⇒ **新号**：`PIT-FAV-19`
+
 
 ### 现象
 

@@ -2,6 +2,40 @@
   "_comment": "AGENTS.md → DRIFT/ 搬移台账。phase A 纯搬移期间 AGENTS.md 保持零改动；phase B 依本表删除源行区间。",
   "_moved_at": "2026-10-23",
   "_source": "AGENTS.md @ 81744d1 + 工作区未提交增量（369625 bytes / 4093 lines）",
+  "_status": "phase A（抽取）+ phase B（依本表删除源行）均已于 2026-10-23 执行完毕 ⇒ 本表是**溯源记录**（当初搬走了什么、搬到哪个文件），**不是**「当前 AGENTS.md 行号 ↔ 目标文件」的映射表。",
+  "_src_anchor": {
+    "commit": "81744d1",
+    "commit_agents_md_measured": "171696 B / 1680 行（`git show 81744d1:AGENTS.md` 实测，2026-10-29）",
+    "effective_snapshot": "commit 81744d1 + 当时的未提交增量 = 369625 B / 4093 行（`_source` 声明）",
+    "effective_snapshot_reproducible": false,
+    "why_not_reproducible": "当时的未提交增量**从未入库**、现已流失 ⇒ 严格意义上的「源快照」已不可重建。",
+    "current_agents_md_measured": "32734 B / 276 行（2026-10-29 实测）",
+    "consequence": "⇒ 本表的 `src` 行区间**不指向当前 AGENTS.md**；当前 AGENTS.md 的 L57-L71 与本表 L57-L71 **不是同一段内容**。",
+    "answer_to_should_we_refresh_src": "**不该**用当前行号重写 `src` —— 目标文件里存的是当初那 40 段原文，重定位等于伪造溯源。"
+  },
+  "_tool_status": {
+    "command": "python3 tools/drift-move.py verify",
+    "measured_2026_10_29": {
+      "entries_total": 40,
+      "trivially_passing_empty_slice": 36,
+      "genuinely_failing": 4,
+      "actually_verified_content": 0,
+      "detail": "36 段因 `src` 越界 ⇒ `lines[a-1:b]` 取到**空串** ⇒ `\"\" not in text` 恒为 False ⇒ **平凡通过**；另 4 段（like/rpc.md L57-71 · message/rpc.md L72-101 · message/api.md L102-420 · _cross/fix-round-2026-10-23.md L54-101）切片非空但目标文件里找不到。"
+    },
+    "verdict": "⇒ 该门当前对 **40 段全部无有效检查力**（真校验 0 段）——「EXIT=0 的那 36 段」是**假绿**，不是通过。",
+    "not_a_product_defect": "**不是产品缺陷**；也**不要**靠回改各域台账正文来「转绿」（那些正文是真实产出）。",
+    "fix_direction": "取源内容应来自**锚点快照**而非当前 AGENTS.md；但严格源快照已不可重建（见 `_src_anchor.effective_snapshot_reproducible`）⇒ **逐字节复验已不可能** ⇒ 只能降级为「哨兵标记存在性」校验（目标文件里 `<!-- @move AGENTS.md L<a>-L<b> · <label> -->` 是否还在）⇒ 且必须配**变异测试**（改目标文件内容 ⇒ 守门必红），否则就是再造一个恒绿假绿（AGENTS.md §3.3.3）。",
+    "registered_at": "docs/CLOSEOUT-2026-10-29.md §十（登记条）· docs/DRIFT/_INDEX.md §〇 校验行",
+    "owner": "收口执行者（G4 写权面）",
+    "status": "🔴 未修 —— 本轮只做台账对齐，未改 `tools/`（改它必须配变异测试 ⇒ 超出本轮「只改 docs」范围）"
+  },
+  "_counts": {
+    "entries": 40,
+    "distinct_dst": 24,
+    "max_src_line": 4057,
+    "note": "`max_src_line` 4057 < 源快照 4093 行 ⇒ 40 段全部落在当时 AGENTS.md 之内 ⇒ 区间本身**当时是合法的**，失效只因 AGENTS.md 后续瘦身。",
+    "internal_inconsistency": "⚠️ 本表自身记录互斥：`_source` 说快照 4093 行，但 `_kept_in_agents_md` 引用到 **L4058-4127** ⇒ 快照真实长度 **≥ 4127** ⇒ 连「4093 行」这个数也只是当时的粗测 ⇒ 再次印证：**不要**试图按行号重建或刷新 `src`。"
+  },
   "entries": [
     {
       "src": [

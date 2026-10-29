@@ -5,7 +5,11 @@
 
 ---
 
-## PIT-USERSCOMMON-001 🔴 过期时间戳会在验签**之前**短路掉断言，用例照样「绿」
+## PIT-USERSCOMMON-01 🔴 过期时间戳会在验签**之前**短路掉断言，用例照样「绿」  ·  🔴 **仍生效**  ·  核对日期 **2026-10-29**  ·  本轮影响：**否**
+
+> **2026-10-29 对齐**：🔴 **仍生效**（核对日期 **2026-10-29**）· **本轮影响：否** —— 本轮**不新增 / 不改 JWT 用例** ⇒ 本轮不触发（守门网 `JwtUtilParityTest` 仍在位）。
+> **旧号**：`PIT-USERSCOMMON-001` ⇒ **新号（两位序号形态）**：`PIT-USERSCOMMON-01`（**同一条**；原号原样保留，以免破坏仓内既有引用）。
+> **证据**：`service/users/users-common/src/test/java/com/rag/users/common/jwt/JwtUtilParityTest.java`（`nowEpochSecond()` ＋ 注释说明为什么）
 
 **症状**：要验证「两侧 token 能否互相验签」，写完用例跑出来是绿的，
 但断言**根本没执行到** —— `parseSignedClaims` 在读 payload 之前就先抛了 `ExpiredJwtException`，
@@ -36,7 +40,11 @@
 
 ---
 
-## PIT-USERSCOMMON-002 ⚠️ 双侧探针的输出格式不同构，比对结果全是「假差异」
+## PIT-USERSCOMMON-02 ⚠️ 双侧探针的输出格式不同构，比对结果全是「假差异」  ·  🔴 **仍生效**  ·  核对日期 **2026-10-29**  ·  本轮影响：**否**
+
+> **2026-10-29 对齐**：🔴 **仍生效**（核对日期 **2026-10-29**）· **本轮影响：否** —— 本轮**不跑双侧探针** ⇒ 本轮不触发。🔴 **但「留下的守门网」已不在仓内** —— 本条所指的两个探针文件（`CommonProbe.java` / `/tmp/commonprobe/go/main.go`）**实测仓内 0 命中** ⇒ 该坑现在**只剩纪律、没有机器守门**。
+> **旧号**：`PIT-USERSCOMMON-002` ⇒ **新号（两位序号形态）**：`PIT-USERSCOMMON-02`（**同一条**；原号原样保留，以免破坏仓内既有引用）。
+> **证据**：实测 `find . -name 'CommonProbe*' -not -path './target/*'` ⇒ **0 命中** ⇒ 本条 §留下的守门网 所指文件**不在仓内**（临时目录已清）
 
 **症状**：Go 侧与 Java 侧探针都跑通了，逐行 diff 却报 11 条 jwt 差异。
 逐条看下来 `alg` / `typ` / `sig_len` **值全对**。
@@ -59,7 +67,11 @@
 
 ---
 
-## PIT-USERSCOMMON-003 ⚠️ 变异验证本身也可能编译失败 —— 「变红」不等于「证明了什么」
+## PIT-USERSCOMMON-03 ⚠️ 变异验证本身也可能编译失败 —— 「变红」不等于「证明了什么」  ·  🔴 **仍生效**  ·  核对日期 **2026-10-29**  ·  本轮影响：**否**
+
+> **2026-10-29 对齐**：🔴 **仍生效**（核对日期 **2026-10-29**）· **本轮影响：否** —— 本轮**不做变异** ⇒ 本轮不触发。
+> **旧号**：`PIT-USERSCOMMON-003` ⇒ **新号（两位序号形态）**：`PIT-USERSCOMMON-03`（**同一条**；原号原样保留，以免破坏仓内既有引用）。
+> **证据**：同族：`docs/Pitfalls/global/cross-domain.md` §PIT-GLOBAL-018（变异三道闸：跑前删旧 XML / 看 maven 退出码 / grep `COMPILATION ERROR`）
 
 **症状**：注入变异后 Maven 报的是 `COMPILATION ERROR: 找不到符号`，不是测试失败。
 
@@ -73,7 +85,11 @@
 
 ---
 
-## PIT-USERSCOMMON-004 ⚠️ `Keys.hmacShaKeyFor` 会**顺带决定签名算法**，显式传 alg 还不够
+## PIT-USERSCOMMON-04 ⚠️ `Keys.hmacShaKeyFor` 会**顺带决定签名算法**，显式传 alg 还不够  ·  🔴 **仍生效**  ·  核对日期 **2026-10-29**  ·  本轮影响：**否**
+
+> **2026-10-29 对齐**：🔴 **仍生效**（核对日期 **2026-10-29**）· **本轮影响：否** —— 本轮不写 JWT 签名用例 ⇒ 本轮不触发。
+> **旧号**：`PIT-USERSCOMMON-004` ⇒ **新号（两位序号形态）**：`PIT-USERSCOMMON-04`（**同一条**；原号原样保留，以免破坏仓内既有引用）。
+> **证据**：`service/users/users-common/src/test/java/com/rag/users/common/jwt/JwtUtilParityTest.java`（「alg」＋「sig_len」两个**独立观测量**覆盖 11 档）
 
 **症状**：按 §3.2 补上 `signWith(key, SignatureAlgorithm.HS256)` 后，
 密钥 ≥48 字节时 `alg` **仍然是 HS384**。
