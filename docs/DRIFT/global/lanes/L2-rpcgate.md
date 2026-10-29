@@ -78,7 +78,7 @@
 
 | 坑 | 说明 |
 |---|---|
-| **PIT-GLOBAL-018** | 变异脚本首版写成**编译不过**的表达式 lambda ⇒ maven **压根没跑测试** ⇒ surefire 里留着上一轮 XML ⇒ **报成假绿**。⇒ 必须三道闸：**跑前删旧 XML + 看 maven 退出码 + 查 `COMPILATION ERROR`** |
+| **PIT-GLOBAL-018** | 变异脚本首版写成**编译不过**的表达式 lambda ⇒ maven **压根没跑测试** ⇒ surefire 里留着上一轮 XML ⇒ **报成假绿**。⇒ 必须三道闸：**跑前删旧 XML + 看 maven 退出码 + 查 `COMPILATION ERROR`**<br> ⚠️ **2026-10-30 复核（global+common lane）**：**本行是 Pitfall 的引用** ⇒ 状态以 canonical 档为准 = 🔴 **仍生效**（`docs/Pitfalls/global/cross-domain.md:548` · 核对日期 2026-10-29）—— **三道闸在仓内确有实现**（可复算）：第 1 道「跑前删旧 XML」= `tools/difftest/mutate-deadline-precision.py:107`（注释逐字写「PIT-GLOBAL-018 第一道：跑前删掉旧 XML」）＋ 第 3 道「查 `COMPILATION ERROR`」= `tools/difftest/mutate-deadline-precision.py:116` ＋ 第 2 道「看 maven 退出码」= `tools/difftest/mutate-deadline-verdict.py:186`（`return p.returncode, reds, out`）⇒ **纪律仍在落地 ⇒ 坑仍会踩** · 核对日期 **2026-10-30** |
 | **变异红在更早的断言** | M3「完成但**不回包**」首版 ⇒ handler 秒完成并正常回包 ⇒ 客户端拿到 OK ⇒ 红在**更早**的 `assertThrows` 上 ⇒ **目标断言压根没被执行到** ⇒ 变异必须**红在目标断言** |
 | **`sleep(10_000)` 方案** | 两条新断言（「handler 被调用过」「取消时仍在跑」）在 sleep 方案下**根本写不出来** ⇒ 必须换 latch（`probe.release.await(30, SECONDS)`） |
 | **上游资源不进 reactor** | 改上游模块的资源只跑下游 ⇒ Maven 从 `~/.m2` 解析旧 jar ⇒ 必须 `-am` + `-Dsurefire.failIfNoSpecifiedTests=false` |

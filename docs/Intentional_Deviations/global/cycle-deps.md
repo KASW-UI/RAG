@@ -17,7 +17,7 @@
 
 | 编号 | 事项 | 结论 |
 |---|---|---|
-| **CYCLE-001** | `RpcInterceptor.markExpired(long)` 与 `UserDomainService` javadoc 的**双向循环引用** ⇒ 改一个会留半截 | ✅ **已闭环（2026-10-25）** —— **两步同一次提交走完**（删 `markExpired` + 改 javadoc）⇒ ⇒ **不是「明知不一致、已认账」，而是「已修」** ⇒ **不进本档**（DRIFT 侧已销账，见 [`../../DRIFT/global/cycle-deps.md`](../../DRIFT/global/cycle-deps.md)） |
+| **CYCLE-001** | `RpcInterceptor.markExpired(long)` 与 `UserDomainService` javadoc 的**双向循环引用** ⇒ 改一个会留半截 | ✅ **已闭环（2026-10-25）** —— **两步同一次提交走完**（删 `markExpired` + 改 javadoc）⇒ ⇒ **不是「明知不一致、已认账」，而是「已修」** ⇒ **不进本档**（DRIFT 侧已销账，见 [`../../DRIFT/global/cycle-deps.md`](../../DRIFT/global/cycle-deps.md)）<br><br>⚠️ **2026-10-30 复核（global+common lane）**：现行态 = ✅ **已闭环（维持）** —— **补可复算指针**：RAG 侧 `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:903`（「⚠️ 2026-10-25（`align/global` 收口提交）：原 `markExpired(long)` 已**删除**」）＋ `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:404`（**全文仅剩的 2 处 javadoc 提及之一** ⇒ **方法声明已不存在**）＋ 跨域侧 `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/service/UserDomainService.java:148`（「⇒ 曾被列为候选来源的 `markExpired(long)` **已移除**」）＋ 守门 `service/common/src/test/java/com/rag/common/observability/RpcInterceptorDeadlineBindingTest.java:206`（断言 `DeadlineState` 上**已无** `markExpired` 声明）· Go 侧 `service/common/observability/rpc.go:69`（ctx 自身判超时 ⇒ **Go 侧无「手动设过期时刻」的对应物**）⇒ **「删 `markExpired` + 改 javadoc」两步确实同一次收口走完** ⇒ **「不进本档」的判断仍成立** · 核对日期 **2026-10-30** |
 | **CYCLE-002** | `service/common` 的 javadoc 不得出现指向别的域类的 `{@link}` | ✅ **0 命中**（守门 `tools/difftest/check-cross-domain-holds.py`）⇒ ⇒ **无差异可认账** ⇒ 不进本档 |
 
 ### 关联（**不属本档**）

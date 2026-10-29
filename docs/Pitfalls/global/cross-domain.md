@@ -738,8 +738,8 @@ stat -f "%Sm  %N" -t "%H:%M:%S" \
 
 | 先例 | 位置 | 形态 |
 |---|---|---|
-| `SD-2026-10-24-04` | `docs/Intentional_Deviations/message/rpc.md:80` | 6 个时间列的 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧**多出来的**（Go 侧无默认）✅ **已签字** |
-| `SD-2026-10-24-CAND-01` | `docs/Intentional_Deviations/comment/rpc.md:22` | 9 处时间列的 `NOT NULL DEFAULT CURRENT_TIMESTAMP`（RAG 更严）⏳ **未签字候选** |
+| `SD-2026-10-24-04` | `docs/Intentional_Deviations/message/rpc.md:80`<br><br>⚠️ **2026-10-30 复核（global+common lane）**：⚠️ **原指针指错行** —— `docs/Intentional_Deviations/message/rpc.md:80` 落在 **`SD-2026-10-24-03`** 的块上（讲 `bizCodeFromError` 的 `instanceof` vs `errors.As`），**与 `DEFAULT CURRENT_TIMESTAMP` 无关**；**真正位置** = `docs/Intentional_Deviations/message/rpc.md:96`（标题行含「**状态（核对日期 2026-10-29）：✅ 仍成立**」）⇒ **形态与「✅ 已签字」状态仍成立**，只有位置指针过期 ⇒ **本条（PIT-GLOBAL-022）本轮当场复现：抄来的指针确实会指错行** · 核对日期 **2026-10-30** | 6 个时间列的 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧**多出来的**（Go 侧无默认）✅ **已签字** |
+| `SD-2026-10-24-CAND-01` | `docs/Intentional_Deviations/comment/rpc.md:22`<br><br>⚠️ **2026-10-30 复核（global+common lane）**：⚠️ **原指针指错行** —— `docs/Intentional_Deviations/comment/rpc.md:22` 落在该档「2026-10-29 对齐复核」的**引言段**（那里只是**提到** `CAND-01`），**不是条目本身**；**真正位置** = `docs/Intentional_Deviations/comment/rpc.md:34`（标题行含「**状态（核对日期 2026-10-29）：⏳ 未签字**」）⇒ **形态与「⏳ 未签字候选」状态仍成立**，只有位置指针过期 · 核对日期 **2026-10-30** | 9 处时间列的 `NOT NULL DEFAULT CURRENT_TIMESTAMP`（RAG 更严）⏳ **未签字候选** |
 
 ⇒ ⇒ 本轮登记的 `SD-2026-10-25-CAND-16`（users 域 8 处 DEFAULT）**挂的是上面这两条**，不是 `_README.md` 原先写的那个。
 
@@ -2771,7 +2771,7 @@ users 227 / 50 / 79 · users-admin 164 / 36 / 58 · A/B 逐项一致）。
 > **证据**：本条 §判别式 ①②③ ＋ `docs/PhaseGoal-judge.md` §五 X-6
 
 **症状**：2026-10-29 主线在主树独立复跑 `tools/api-full-parity-probe/article/run.sh`
-（G3 lane 落的 article 双侧活体探针）⇒ **同一个脚本、同一份代码、同��台机器**，结果**交替出现**：
+（G3 lane 落的 article 双侧活体探针）⇒ **同一个脚本、同一份代码、同一台机器**，结果**交替出现**：
 
 | 跑次 | 时刻 | 并发 agent 在跑？ | EXIT | 现象 |
 |---|---|---|---|---|

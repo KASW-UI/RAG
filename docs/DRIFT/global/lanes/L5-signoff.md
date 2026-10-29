@@ -131,8 +131,8 @@
 
 | 先例 | 位置 | 形态 | 状态 |
 |---|---|---|---|
-| `SD-2026-10-24-04` | `docs/Intentional_Deviations/message/rpc.md:80` | 6 个时间列的 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧多出来的（Go 侧无默认） | ✅ 已签字 |
-| `SD-2026-10-24-CAND-01` | `docs/Intentional_Deviations/comment/rpc.md:22` | 9 处时间列的 `NOT NULL DEFAULT CURRENT_TIMESTAMP`（RAG 更严） | ⏳ 未签字候选 |
+| `SD-2026-10-24-04` | `docs/Intentional_Deviations/message/rpc.md:80`<br><br>⚠️ **2026-10-30 复核（global+common lane）**：⚠️ **原指针指错行** —— `docs/Intentional_Deviations/message/rpc.md:80` 落在 **`SD-2026-10-24-03`** 的块上（讲的是 `bizCodeFromError` 的 `instanceof` vs `errors.As`），**与 `DEFAULT CURRENT_TIMESTAMP` 毫无关系**；本条的**真正位置** = `docs/Intentional_Deviations/message/rpc.md:96`（标题行「### SD-2026-10-24-04 · 6 个时间列的 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧**多出来的**（Go 侧无默认）｜ **状态（核对日期 2026-10-29）：✅ 仍成立**」）⇒ **形态描述与「✅ 已签字」状态均仍成立**，只有**位置指针**过期 · 核对日期 **2026-10-30** | 6 个时间列的 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧多出来的（Go 侧无默认） | ✅ 已签字 |
+| `SD-2026-10-24-CAND-01` | `docs/Intentional_Deviations/comment/rpc.md:22`<br><br>⚠️ **2026-10-30 复核（global+common lane）**：⚠️ **原指针指错行** —— `docs/Intentional_Deviations/comment/rpc.md:22` 落在该档「2026-10-29 对齐复核」的**引言段**上（那里只是**提到** `CAND-01`），**不是条目本身**；本条的**真正位置** = `docs/Intentional_Deviations/comment/rpc.md:34`（标题行「## SD-2026-10-24-CAND-01：9 处时间列的 `NOT NULL DEFAULT CURRENT_TIMESTAMP`（RAG 更严）｜ **状态（核对日期 2026-10-29）：⏳ 未签字**」）⇒ **形态描述与「⏳ 未签字候选」状态均仍成立**，只有**位置指针**过期 · 核对日期 **2026-10-30** | 9 处时间列的 `NOT NULL DEFAULT CURRENT_TIMESTAMP`（RAG 更严） | ⏳ 未签字候选 |
 
 ⇒ `SD-2026-10-25-CAND-16` 挂的是**上面这两条**，不是 `_README.md` 原先写的那个 ⇒ 订正补丁见 §十一·③。
 
@@ -306,8 +306,8 @@
 
 | 编号 | 一句话 | 落点 |
 |---|---|---|
-| **PIT-GLOBAL-022** | 🔴 **抄来的「同形态先例」编号也要复核** —— 指针不是证据，它本身是一条**待核对的断言**；**错的指针比空指针更贵** | [`docs/Pitfalls/global/cross-domain.md`](../../../Pitfalls/global/cross-domain.md) |
-| **PIT-GLOBAL-023** | 🔴 **「这个出口在 XX 层 ⇒ 不经过 X」是推断，不是证据** —— 「层」的判断必须落到**注册点** | [`docs/Pitfalls/global/common-tails.md`](../../../Pitfalls/global/common-tails.md) |
+| **PIT-GLOBAL-022** | 🔴 **抄来的「同形态先例」编号也要复核** —— 指针不是证据，它本身是一条**待核对的断言**；**错的指针比空指针更贵** | [`docs/Pitfalls/global/cross-domain.md`](../../../Pitfalls/global/cross-domain.md)<br><br>⚠️ **2026-10-30 复核（global+common lane）**：**本行是 Pitfall 的引用** ⇒ 状态以 canonical 档为准 = 🔴 **仍生效**（`docs/Pitfalls/global/cross-domain.md:704` · 核对日期 2026-10-29）—— 本轮**当场复现了这条坑本身**：本文件 `:134` 与 `docs/Pitfalls/global/cross-domain.md:741` 两处**抄来的**「真实同形态先例」位置指针（`message/rpc.md:80`）**同样指错行** ⇒ 正确的先例位置是 `docs/Intentional_Deviations/message/rpc.md:96`（`SD-2026-10-24-04`）与 `docs/Intentional_Deviations/comment/rpc.md:34`（`SD-2026-10-24-CAND-01`）⇒ **本条仍生效，且本轮新增 1 次实证** · 核对日期 **2026-10-30** |
+| **PIT-GLOBAL-023** | 🔴 **「这个出口在 XX 层 ⇒ 不经过 X」是推断，不是证据** —— 「层」的判断必须落到**注册点** | [`docs/Pitfalls/global/common-tails.md`](../../../Pitfalls/global/common-tails.md)<br><br>⚠️ **2026-10-30 复核（global+common lane）**：**本行是 Pitfall 的引用** ⇒ 状态以 canonical 档为准 = 🔴 **仍生效**（`docs/Pitfalls/global/common-tails.md:288` · 核对日期 2026-10-29）—— 纪律仍成立：**「出口在 XX 层 ⇒ 不经过 X」只是推断**，必须落到**注册点**；本文件 §九·二 正是这么做的（Go **注册点** `go-zero@v1.10.2/rest/engine.go:113-115`：`handle := chn.ThenFunc(route.Handler)` ⇒ `return router.Handle(route.Method, route.Path, handle)` ⇒ 含 `TraceHandler` 的链被**注册进 router** ⇒ router 自己生成的 405 不经过它；**注入点** `go-zero@v1.10.2/rest/handler/tracehandler.go:61`：`propagator.Inject(spanCtx, propagation.HeaderCarrier(w.Header()))`）· 核对日期 **2026-10-30** |
 
 ⇒ 两条都是**本轮实际踩到 / 实际差点踩到**的，不是凑数的：
 **PIT-GLOBAL-022** 是复核 C3 的先例指针时**当场发现的错指针**；
