@@ -385,6 +385,10 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 - **Risk**: **HIGH**
 - **Evidence**: **真 PG 探针**（PROBE1 对照组正常 / PROBE2、PROBE3、PROBE4 全 null）+ 静态（方法签名处无 `@ResultMap`）。
 
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已修（2026-10-23 修复轮 · FIX-01）** ⇒ **现行态 = ✅ 已修**（**判定不变**）。
+> 依据（RAG 侧三处 `@ResultMap` / `@Results` **当场核过行号**）：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mapper/ArticleMapper.java:202`（`@ResultMap("articleEntityResultMap")` ⇒ `selectAuthorView`）· `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mapper/ArticleRevisionMapper.java:48-51`（`@Results(id = "articleRevisionEntityResultMap", … typeHandler = JsonbTypeHandler.StringListTypeHandler.class)` ⇒ `selectByRevisionId`）· `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mapper/ArticlePublicMapper.java:220`（`@ResultMap("…ArticleRevisionMapper.articleRevisionEntityResultMap")` ⇒ `selectRevisionsForPublished`）· Go `service/article/rpc/internal/model/article.go:44-54,63-73`（`StringArray.Scan` / `JSONMap.Scan` ⇒ **无条件填充** jsonb 列）· 核对日期 2026-10-30。
+> ⚠️ **指针订正**：本条 Java Behavior 列的 `ArticleMapper.java:174-208` / `ArticleRevisionMapper.java:34-36` / `ArticlePublicMapper.java:206-212` 描述的是**修复前**（无 `@ResultMap`）的位置（原句保留）；**修复后的现行位置**见上 ⇒ ⇒ 「三处 jsonb 两列静默变 null」的**根因已消除** ⇒ **不改判**。
+
 ### DRIFT-ARTICLE-RPC-002 —— `updated_at` 在所有更新路径上永不推进
 
 > **当前状态（✅ **已修**（2026-10-23 修复轮 · FIX-02；真 PG 守门，含 SkipHooks 反向断言 + 变异验证））**
@@ -403,6 +407,10 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 - **Classification**: **SEMANTIC MISMATCH**
 - **Risk**: **HIGH**（外部消费者按时间增量拉取的场景）
 - **Evidence**: **真 PG 探针** PROBE5 + 静态（实体无 fill 注解 + 全仓零 `MetaObjectHandler`）。
+
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已修（2026-10-23 修复轮 · FIX-02）** ⇒ **现行态 = ✅ 已修**（**判定不变**）。
+> 依据：RAG `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/domain/ArticleEntity.java:151-152`（`@TableField(fill = FieldFill.INSERT_UPDATE)` ＋ `private OffsetDateTime updatedAt`）＋ `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/config/ArticleMetaObjectHandler.java:82`（`implements MetaObjectHandler`）＋ `:125-131`（`updateFill` ⇒ `setFieldValByName("updatedAt", OffsetDateTime.now(ZoneOffset.UTC), metaObject)` ⇒ **消费点**）· Go `service/article/rpc/internal/model/article.go:31`（`UpdatedAt time.Time \`gorm:"autoUpdateTime"\``）＋ `:99-101`（`ArticleRepo.Update` = `Save(article)` ⇒ **每次写都推进**）· 核对日期 2026-10-30。
+> ⚠️ **指针订正**：本条 Java Behavior 列的 `ArticleEntity.java:131`（**无** fill 注解）是**修复前**的位置（原句保留）；**修复后**的现行位置 = `:151-152` ＋ `ArticleMetaObjectHandler.java:125-131` ⇒ ⇒ 「`updated_at` 永不推进」的**根因已消除**（注解 ＋ Handler **成对**存在，缺一即静默失效）⇒ **不改判**。
 
 ### DRIFT-ARTICLE-RPC-003 —— 公开读的三处 Go `INTERNAL` 退化为 `UNKNOWN`（业务码 5001 → 1015）
 
@@ -425,9 +433,14 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 - **Risk**: MEDIUM
 - **Evidence**: 静态（`ArticleExceptions.java:130` 零调用点 + `ArticlePublicDomainService.java:96-141` 无 try/catch + `ArticleServiceGrpcImpl.java:147-151`）。
 
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已修（2026-10-24 修复轮 · FIX-04）** ⇒ **现行态 = ✅ 已修**（**判定不变**）。
+> 依据：RAG `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/service/ArticlePublicDomainService.java:273-283`（`readPublication(...)` ⇒ `:276-278` 先放行领域异常 `ArticleExceptions.Rpc`，`:279-282` 宽 catch ⇒ `ArticleExceptions.readPublicationFailed()`）＋ `:304-307`（`catch (RuntimeException e)` ⇒ `ArticleExceptions.incrementPublicViewFailed()`）· Go `service/article/rpc/internal/logic/get_article_logic.go:131-134`（`status.Error(codes.Internal, "read publication failed")`）＋ `:157-161`（`status.Error(codes.Internal, "increment public view failed")`）· 核对日期 2026-10-30。
+> ⚠️ **指针订正**：本条 Java Behavior 列的 `ArticlePublicDomainService.java:96-141`（**无 try/catch**）是**修复前**的位置（原句保留）；**修复后**的现行位置 = `:273-283` ＋ `:304-307` ⇒ ⇒ 「公开读 DB 失败 ⇒ `INTERNAL`（业务码 5001）而非 `UNKNOWN`（1015）」的**结论复核成立**（`readPublicationFailed` / `incrementPublicViewFailed` 两个工厂方法**现在都有调用点**）⇒ **不改判**。
+
 ### DRIFT-ARTICLE-RPC-004 —— `updateById` 会写已软删行；Go 的 `Save` 会拒绝
 
 > **当前状态（🔴 **撤销**（2026-10-23 第二轮：复核发现台账的 **Go 侧描述有误** ⇒ 该条**不是**漂移，照台账修反而会制造新漂移 ⇒ 不修）<br>⚠️ **它的相邻差异**（`Save` 的 `Selects="*"` vs MP `NOT_NULL`）已在 **第十轮** 单独展开并关闭（差异真实但**不可观察**）⇒ 见本文件「第十轮」节。）**
+> ⚠️ **2026-10-30 主线标记订正（原值保留）** —— 本行用的标记是 **🔴 ＋ 文字「撤销」** ⇒ 但 `docs/DRIFT/**` 的取值域里 **🔴 = 「仍开着 / 与 Go 不一致」**、**⚫ = 「已撤销 / 范围外 / N/A」** ⇒ ⇒ **同一个 🔴 在别处会被读成「仍开着」** ⇒ ⇒ **本条现行态 = ⚫ 已撤销**（不是「仍开着」）⇒ 依据（两侧逐条回到消费点复核：Go `service/article/rpc/internal/model/article.go:99-101` ＋ `gorm@v1.31.1/soft_delete.go:91-93` ＋ `gorm@v1.31.1/finisher_api.go:109-110`）见本节下方「2026-10-30 真实性复核」段。
 
 - **Component**: RPC 服务端 · 写入侧
 - **Operation**: 全部 `articleMapper.updateById` 调用点
@@ -442,6 +455,11 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 - **Classification**: **SEMANTIC MISMATCH**（差异会改变"系统应该如何行为"；可达性窄，故风险 MEDIUM 而非 HIGH）
 - **Risk**: MEDIUM
 - **Evidence**: **真 PG 探针** PROBE6（Java 侧）+ 静态（GORM 软删除插件行为，**Go 侧未实跑** ⇒ 归入 U-4 的一部分）。
+
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **🔴 撤销** ⇒ **现行态 = ⚫ 已撤销（结论不变）**。
+> 依据（Go 侧**逐条回到消费点**复核「台账原文断言 ⇒ 不成立」这一定性）：Go `service/article/rpc/internal/model/article.go:99-101`（`ArticleRepo.Update` = `m.Db.WithContext(ctx).Save(article)`）· `gorm@v1.31.1/soft_delete.go:76-96`（`SoftDeleteQueryClause.ModifyStatement` ⇒ `:91-93` 追加 `deleted_at = ZeroValue`）＋ `:98-100`（`UpdateClauses` 挂到 UPDATE）· `gorm@v1.31.1/finisher_api.go:109-110`（`RowsAffected == 0` ⇒ 回落 `clause.OnConflict{UpdateAll: true}.Create(value)` ⇒ **`ON CONFLICT DO UPDATE`，不是报错**）· `gorm@v1.31.1/callbacks/create.go:376-378`（跳过条件 ⇒ `DeletedAt` 无 default 且非 AutoCreateTime ⇒ **不被跳过** ⇒ `deleted_at` 被写回同一非零值）· 版本依据：Go `go.mod:28` = `gorm.io/gorm v1.31.1`（与本条正文写的 `v1.31.1` 一致）· 核对日期 2026-10-30。
+> ⇒ ⇒ **台账原文那句「GORM `Save` 在 0 行时会退化成 `Create` ⇒ 撞主键 ⇒ 整个事务失败并报错」经复核仍不成立** ⇒ ⇒ **本条不是漂移**、照台账修反而会制造新漂移 ⇒ ⇒ **撤销维持**（原句保留）。
+> ⚠️ **状态标记订正（本轮新发现 · 不改原值）**：本条用的标记是 **🔴 ＋ 文字「撤销」** ⇒ 但 `docs/DRIFT/**` 的取值域里 **🔴 = 「仍开着 / 与 Go 不一致」**、**⚫ = 「已撤销 / 范围外 / N/A」** ⇒ ⇒ **同一个 🔴 在别处会被读成「仍开着」** ⇒ ⇒ 本条的**现行态按取值域应读作 ⚫（已撤销）**（本段已写明）⇒ ⚠️ **建议主线统一该标记**（本 lane **只追加订正、不回改历史行**）。
 
 ### DRIFT-ARTICLE-RPC-005 —— schema 门禁发生在开始收流量之后 ✅ **已修（2026-10-24）**
 
@@ -471,6 +489,10 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 > （article 域这条守的是「已发布正文不可变」，丢了会**静默**改写已发布内容）。
 > ⇒ **不属于 article 域 scope**，登记在此供主会话跨域处理。
 
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已修（2026-10-24 第四轮 · FIX-07）** ⇒ **现行态 = ✅ 已修**（**判定不变**）。
+> 依据：RAG `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/bootstrap/ArticleSchemaGate.java:82`（`public class ArticleSchemaGate implements SmartInitializingSingleton` ⇒ **不再是 `ApplicationReadyEvent`**）＋ `:112-115`（`afterSingletonsInstantiated()` ⇒ `verifySchema()`）＋ `:122`（`public void verifySchema()`）· Go `service/article/rpc/article.go:41`（`u := model.NewArticleRepo(c)` ⇒ 校验在**建 server 之前**）＋ `:44`（`zrpc.MustNewServer`）＋ `:58,60`（两个 `kq.MustNewQueue`）· 核对日期 2026-10-30。
+> ⚠️ **指针订正**：本条 Java Behavior 列的 `ArticleSchemaGate.java:73`（**修复前**的 `@EventListener(ApplicationReadyEvent.class)`）已不存在（原句保留）；**修复后**的现行落点 = 上面的 `:82` ＋ `:112-115` ⇒ ⇒ 「门禁在 server / consumer 对外可用**之前**生效」这一**结论复核成立** ⇒ **不改判**。
+
 ### DRIFT-ARTICLE-RPC-006 —— outbox 中继的 `pollIntervalMs<=0` 兜底根本没接上
 
 > **当前状态（✅ **已修**（2026-10-24 修复轮 · FIX-05；真容器 + 变异验证））**
@@ -488,6 +510,10 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 - **Classification**: **OBSERVABLE DIFFERENCE**
 - **Risk**: LOW
 - **Evidence**: 静态（grep 零调用点 + 注解字面量）。
+
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已修（2026-10-24 修复轮 · FIX-05）** ⇒ **现行态 = ✅ 已修**（**判定不变**）。
+> 依据：RAG `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mq/ArticleSyncOutboxRelay.java:94-98`（`@Scheduled(fixedRateString = "#{T(…ArticleSyncOutboxRelay).normalizeIntervalMs(${article-rpc.article-sync-outbox.poll-interval-ms:1000})}", initialDelayString = 同一个归一化表达式)` ⇒ **兜底已接进注解本身**）＋ `:118-120`（`public static long normalizeIntervalMs(long configured) { return configured <= 0L ? 1000L : configured; }` ⇒ **单一实现**）＋ `:168-170`（`effectiveIntervalMs()` 也调它 ⇒ **两处不各写一份**）· Go `service/article/rpc/article.go:62-65`（`relayInterval := …; if relayInterval <= 0 { relayInterval = time.Second }`）· 核对日期 2026-10-30。
+> ⚠️ **指针订正**：本条 Java Behavior 列的 `ArticleSyncOutboxRelay.java:78`（**修复前**的注解字面量）与 `:130-133`（旧的 `effectiveIntervalMs()`）是**修复前**的位置（原句保留）；**修复后**的现行位置 = `:94-98` ＋ `:118-120` ＋ `:168-170`（方法名也由 `effectiveIntervalMs` 改成 `normalizeIntervalMs` ⇒ 更贴合「它被 `@Scheduled` 的 SpEL 直接调」）⇒ ⇒ **「`pollIntervalMs<=0` ⇒ 1s」的结论复核成立** ⇒ **不改判**。
 
 ### DRIFT-ARTICLE-RPC-007 —— 每通道独立的 Kafka brokers 是"声明但从不消费"的配置
 
@@ -523,6 +549,10 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
   → **2026-10-24 追加**：真上下文实测（`ArticleSpringContextWiringTest`，真 PG + 真 Spring 容器）证实
   「四个通道的 brokers 与全局**逐项相同**」且**校验器确实在启动期跑过**（分叉即启动失败，见第九轮节）。
 
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **🟡 已处置（差异仍在 · 已签字偏离 `SD-2026-10-24-02`）** ⇒ **现行态 = 🟡 已处置（判定不变）**。
+> 依据：RAG `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/config/ArticleKafkaChannelValidator.java:121`（**全仓唯一的 `getBrokers()` 读点** —— 只**校验**、不**连接**）＋ `:65`（类注释自记「四个键**声明了但没有任何消费点**」）· 签字档 `docs/Intentional_Deviations/article/rpc.md:164`（`SD-2026-10-24-02@article` · 状态 **✅ 仍成立** · 核对日期 2026-10-29）· Go `go-queue@v1.2.2/kq/config.go:12`（`Brokers []string` 声明点）＋ `kq/pusher.go:44-47`（`kafka.Writer{Addr: kafka.TCP(addrs...)}` ⇒ **生产消费点**）＋ `kq/queue.go:120-121`（`kafka.ReaderConfig{Brokers: c.Brokers}` ⇒ **消费消费点**）· 版本依据：Go `go.mod:16` = `github.com/zeromicro/go-queue v1.2.2` · 核对日期 2026-10-30。
+> ⚠️ **指针订正**：本条 Evidence 列的 `ArticleDomainService:663`（只取 `.getTopic()`）⇒ 现行 **`:930`**；`kq/queue.go:121`（现为 `ReaderConfig` 的 `Brokers:` 行，**正确**）保留不变；`internal/svc/service_context.go:65,66`（两个 `kq.NewPusher`）**复核正确** ⇒ ⇒ **「RAG 侧仍不能逐通道切 broker、但静默忽略已改成启动即失败」这一判定复核成立** ⇒ ⇒ **一条差异 ≠ 一个缺陷**（已签字 ⇒ 不是缺陷）⇒ **不改判**。
+
 ### DRIFT-ARTICLE-RPC-008 —— `@Scheduled` 首次执行时机与 Go ticker 不同
 
 > **当前状态（✅ **已修**（2026-10-24 修复轮 · FIX-05；真容器 + 变异验证））**
@@ -537,6 +567,10 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 - **Classification**: **OBSERVABLE DIFFERENCE**
 - **Risk**: LOW
 - **Evidence**: 静态（Go 侧确证）；**Spring 侧默认值未读源码** ⇒ 该项的 Java 侧行为同时登记为 **U-4**。
+
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已修（2026-10-24 修复轮 · FIX-05）** ⇒ **现行态 = ✅ 已修**（**判定不变**）。
+> 依据：RAG `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mq/ArticleSyncOutboxRelay.java:97-98`（`initialDelayString = "#{T(…ArticleSyncOutboxRelay).normalizeIntervalMs(${article-rpc.article-sync-outbox.poll-interval-ms:1000})}"` ⇒ **首次执行与 fixedRate 用同一个归一化间隔** ⇒ 不再是 Spring 的「立即执行首次」默认）· Go `service/article/rpc/article.go:94`（`ticker := time.NewTicker(s.interval)` ⇒ **首次触发在 interval 之后**）＋ `:101`（`case <-ticker.C:`）· 核对日期 2026-10-30。
+> ⚠️ **原 Evidence 的 U-4 已消解**：原文写「**Spring 侧默认值未读源码** ⇒ 该项的 Java 侧行为同时登记为 **U-4**」⇒ ⇒ 本轮**已在代码里核到**（`:97-98` 显式给 `initialDelayString`）⇒ ⇒ **U-4 这半个缺口不再成立**（原句保留）⇒ ⇒ 「Java 比 Go 早 ≤1s 推第一批 outbox」的**差异已消除** ⇒ **不改判**。
 
 ### DRIFT-ARTICLE-RPC-009 —— 通知标题取冻结 payload，Go 取当前行（**原台账判成"两者必相等"，该论证已证伪**）
 
@@ -595,6 +629,10 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 
 ⇒ 修复时**只**改通知那一处；revision 那一处**本来就该**取冻结值。
 ⇒ 回归网同时断言这两个源（任一取错都红），见 `docs/Pitfalls/article/rpc.md` `PF-ARTICLE-RPC-009`。
+
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已修（2026-10-24 第三轮 · FIX-06）** ⇒ **现行态 = ✅ 已修**（**判定不变**）。
+> 依据：RAG `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/service/ArticleAtomicService.java:417`（`new PublishOutcome(article.getAuthorId(), article.getTitle(), true)` ⇒ **通知标题取当前行**）＋ `:398`（注释明写「通知标题取**当前行**（`article.getTitle()`），不是冻结 payload 的 `approved.title`」）＋ `:433`（`publishApprovedRevision` 的 javadoc 明写「**不要**把它换成冻结输入的 `approved.title`」）· Go `service/article/rpc/internal/mqs/article_sync_result_consumer.go:147`（`notifyAuthor, notifyTitle = article.AuthorID, article.Title` ⇒ **当前行**）＋ `:115` 侧的 `Title: approved.Title`（⇒ **revision 那一处**取冻结值）· 核对日期 2026-10-30。
+> ⇒ ⇒ **两个标题源在两侧仍然分开**（通知＝当前行 / revision＝冻结 payload）⇒ ⇒ **「原台账的『双重判据 ⇒ 两者必相等』论证仍被证伪」这条元结论复核成立** ⇒ ⇒ **不改判**（⚠️ 守门 `PF-ARTICLE-RPC-009` 仍在 `docs/Pitfalls/article/rpc.md`，本轮**未跑** ⇒ 证据强度维持「真 PG（2026-10-24 实测）」）。
 
 ### DRIFT-ARTICLE-RPC-010 —— MinIO 耗时的直方图**实际有 77 个桶**，Go 只有 8 个
 

@@ -22,9 +22,9 @@
 
 | 条目 | 性质 | 落点 |
 |---|---|---|
-| `DRIFT-ARTICLE-API-001` | 上传路径下游 gRPC 失败的 HTTP 状态码 | ✅ **已修**（`docs/DRIFT/article/api.md:576,1204`）⇒ 不进本档 |
-| `DRIFT-ARTICLE-API-006` | 8–10 MiB JSON body 的**错误文案** | 🟡 **已确认 LOW，不修**（`docs/DRIFT/article/api.md:972`）⇒ ⚠️ **仍不是签字偏离** —— 它是「characterization test 锁住实测现状」的漂移，**不构成「决定不对齐」的签字** |
-| `DRIFT-ARTICLE-API-009` | Go `net/url` 的三条 query 解析行为 | ✅ **已修**（`docs/DRIFT/article/api.md:737`）⇒ 不进本档 |
+| `DRIFT-ARTICLE-API-001` | 上传路径下游 gRPC 失败的 HTTP 状态码 | ✅ **已修**（`docs/DRIFT/article/api.md:576,1287`）⇒ 不进本档<br>⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修（判定不变）** · 依据：`docs/DRIFT/article/api.md:576`（条目标题）＋ `:1287`（「2026-10-24 修复轮 · F-1」行：❌ 未修 ⇒ ✅ **已修** · 守门 `ArticleApiMvcPipelineTest` × 3 · 变异 **3/3 转红**）· 核对日期 2026-10-30 ⇒ ⇒ **两侧指针当场核过、均指向本条 ⇒ 「已修 ⇒ 不进本档」的结论复核成立** ⇒ **不改判**；⚠️ 原指针的第二段 `:1204` 因本 lane 在 `docs/DRIFT/article/api.md` 内追加复核段而行号后移 ⇒ **现行 `:1287`** |
+| `DRIFT-ARTICLE-API-006` | 8–10 MiB JSON body 的**错误文案** | 🟡 **已确认 LOW，不修**（`docs/DRIFT/article/api.md:703,705`）⇒ ⚠️ **仍不是签字偏离** —— 它是「characterization test 锁住实测现状」的漂移，**不构成「决定不对齐」的签字**<br>⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **🟡 已确认 LOW，不修** ⇒ **现行态 = 🟡 已确认 LOW，不修（判定不变）** · 依据：`docs/DRIFT/article/api.md:703`（条目标题）＋ `:705`（`> **当前状态（🟡 **LOW，确认不修**（2026-10-24 第六轮；characterization test + 变异验证））**`）· 核对日期 2026-10-30 ⇒ ⇒ **「它不是『决定不对齐』的签字、只是被 characterization test 锁住的漂移」这一定性复核成立** ⇒ ⇒ **不进本档（除非用户另行签字）** ⇒ **不改判**；🔴 **原指针 `:972` 指错行** —— 该行是 `### UNRESOLVED-002 —— …`（**跨组件条目**，与本条无关）⇒ ⇒ **本次订正为 `:703,705`** |
+| `DRIFT-ARTICLE-API-009` | Go `net/url` 的三条 query 解析行为 | ✅ **已修**（`docs/DRIFT/article/api.md:750`）⇒ 不进本档<br>⚠️ **2026-10-30 真实性复核（W-D lane · 指针随行号后移订正）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修（判定不变）** · 依据：`docs/DRIFT/article/api.md:750`（条目标题）· 核对日期 2026-10-30；⚠️ 原指针 `:737` 因本 lane 追加复核段而后移 ⇒ **现行 `:750`** |
 
 ### 核对记录
 

@@ -76,7 +76,7 @@ MyBatis 有**两套**互不相通的结果映射机制：
 > **旧号**：`PF-ARTICLE-RPC-002` ⇒ **新号**：`PIT-ARTICLE-24`
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条的现象（「`updated_at` 自创建后再不变化」）**已在本域消除** —— 实体已挂 `@TableField(fill = FieldFill.INSERT_UPDATE)` 且已补 `MetaObjectHandler` ⇒ 本轮不会再出现「ORM 不会自动维护时间戳」的形态，故不单列防错约束。
-> **依据**：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/domain/ArticleEntity.java:151`（`@TableField(fill = FieldFill.INSERT_UPDATE)`）· `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/config/ArticleMetaObjectHandler.java`（已存在）· 台账 `docs/DRIFT/article/rpc.md:390`（`DRIFT-ARTICLE-RPC-002` ✅ 已修 · FIX-02 · 含 SkipHooks 反向断言 + 变异验证）⇒ **证据强度：真 PG + 变异**。
+> **依据**：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/domain/ArticleEntity.java:151`（`@TableField(fill = FieldFill.INSERT_UPDATE)`）· `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/config/ArticleMetaObjectHandler.java`（已存在）· 台账 `docs/DRIFT/article/rpc.md:394`（`DRIFT-ARTICLE-RPC-002` ✅ 已修 · FIX-02 · 含 SkipHooks 反向断言 + 变异验证）⇒ **证据强度：真 PG + 变异**。
 
 ### 现象
 
@@ -120,7 +120,7 @@ Go 侧 `UpdatedAt time.Time \`gorm:"autoUpdateTime"\``（`model/article.go:31`�
 > **旧号**：`PF-ARTICLE-RPC-003` ⇒ **新号**：`PIT-ARTICLE-25`
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条的现象（「Go 用一段 catch 统一映射的分支整类漏掉」）**已在本域对齐** ⇒ 本轮不会再出现「只有显式 `status.Error` 分支被对齐、归一映射分支整类漏掉」的形态，故不单列防错约束。
-> **依据**：台账 `docs/DRIFT/article/rpc.md:409`（`DRIFT-ARTICLE-RPC-003` ✅ 已修 · FIX-04 · 真 PG + 变异验证）⇒ **证据强度：真 PG + 变异**。
+> **依据**：台账 `docs/DRIFT/article/rpc.md:417`（`DRIFT-ARTICLE-RPC-003` ✅ 已修 · FIX-04 · 真 PG + 变异验证）⇒ **证据强度：真 PG + 变异**。
 
 ### 现象
 
@@ -168,7 +168,7 @@ if err != nil { return Internal("read publication failed") }   // ← 一整类�
 > **旧号**：`PF-ARTICLE-RPC-004` ⇒ **新号**：`PIT-ARTICLE-26`
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条赖以成立的**前提**（「Go 的 `Save` 会追加 `deleted_at IS NULL`、已软删行会被拒绝」）经复核**不成立** ⇒ 对应的漂移条目已**撤销** ⇒ 按「撤销的不计」的口径，本条**不再作为坑位存在**，本轮不落防错约束。
-> **依据**：台账 `docs/DRIFT/article/rpc.md:430`（`DRIFT-ARTICLE-RPC-004` 当前状态 = 🔴 **撤销** · 2026-10-23 第二轮：「复核发现台账的 **Go 侧描述有误** ⇒ 该条不是漂移，照台账修反而会制造新漂移 ⇒ 不修」）· 其**相邻差异**（`Save` 的 `Selects="*"` vs MP `NOT_NULL`）已在**第十轮**单独展开并关闭（差异真实但**不可观察**）⇒ **证据强度：Go 真源复核（静态）+ 活体对拍**。
+> **依据**：台账 `docs/DRIFT/article/rpc.md:442`（`DRIFT-ARTICLE-RPC-004` 当前状态 = 🔴 **撤销** · 2026-10-23 第二轮：「复核发现台账的 **Go 侧描述有误** ⇒ 该条不是漂移，照台账修反而会制造新漂移 ⇒ 不修」）· 其**相邻差异**（`Save` 的 `Selects="*"` vs MP `NOT_NULL`）已在**第十轮**单独展开并关闭（差异真实但**不可观察**）⇒ **证据强度：Go 真源复核（静态）+ 活体对拍**。
 
 ### 现象
 
@@ -327,7 +327,7 @@ S-3 的修复**结论**（对齐 Go 的 `ForceCommit=true`，失败即提交位�
 > **旧号**：`PF-ARTICLE-RPC-008` ⇒ **新号**：`PIT-ARTICLE-30`
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**是** —— 「改的是 bean、读的是 Environment」这条**两条数据通路并存**的事实未变（`@Scheduled` / `@Value` / SpEL 几乎总是读 `Environment`）⇒ 本轮凡写「某个配置值生效」的测试，仍须先确认被测代码**从哪条通路取值**，再决定改哪里；且变异档必须包含「把框架注解改回原样」。
-> **依据**：本域实例**已修**：`DRIFT-ARTICLE-RPC-008` ✅ 已修（FIX-05 · 真容器 + 变异验证）⇒ `docs/DRIFT/article/rpc.md:528` ⇒ 但**形态未消除** ⇒ **证据强度：真容器 + 变异**。
+> **依据**：本域实例**已修**：`DRIFT-ARTICLE-RPC-008` ✅ 已修（FIX-05 · 真容器 + 变异验证）⇒ `docs/DRIFT/article/rpc.md:557` ⇒ 但**形态未消除** ⇒ **证据强度：真容器 + 变异**。
 
 **现象**
 给 outbox 中继的 `@Scheduled` 补「配置 ≤ 0 ⇒ 兜底 1s」的语义时，
@@ -387,7 +387,7 @@ S-3 的修复**结论**（对齐 Go 的 `ForceCommit=true`，失败即提交位�
 > **旧号**：`PF-ARTICLE-RPC-009` ⇒ **新号**：`PIT-ARTICLE-31`
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**是** —— 「某个判据 ⇒ 两者必相等」这种**空推论句式**今天仍会被写进台账（它长得像一条严谨的证明）⇒ 本轮凡写「A 与 B 等价」进台账，必须先问：**我依据的那个判据，比对的是不是 A 和 B 本身**；判不准就写 `UNKNOWN`，别写 IMPLEMENTATION DIFFERENCE。
-> **依据**：本域实例**已修**：`DRIFT-ARTICLE-RPC-009` ✅ 已修（FIX-06 · 真 PG + 变异）⇒ `docs/DRIFT/article/rpc.md:1123` —— 但**教训的第二个来源**（Go 侧同一语义点有多个源：冻结 payload vs 当前行）**在本轮仍然有效** ⇒ **证据强度：真 PG + 变异**。
+> **依据**：本域实例**已修**：`DRIFT-ARTICLE-RPC-009` ✅ 已修（FIX-06 · 真 PG + 变异）⇒ `docs/DRIFT/article/rpc.md:1160` —— 但**教训的第二个来源**（Go 侧同一语义点有多个源：冻结 payload vs 当前行）**在本轮仍然有效** ⇒ **证据强度：真 PG + 变异**。
 
 **现象**
 2026-10-24 补 `U-5`（`acceptSyncResult` 成功路径的真 PG 用例）时，
@@ -481,7 +481,7 @@ assertEquals("作者改过的标题", outcome.title());      // Go :147
 > **旧号**：`PF-ARTICLE-RPC-010` ⇒ **新号**：`PIT-ARTICLE-32`
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条描述的具体形态（「schema 门禁挂在 `ApplicationReadyEvent` ⇒ 失败之前 gRPC server 已绑端口、已对外服务过」）**已在本域消除** —— 门禁已改挂 `SmartInitializingSingleton`（落在 `SmartLifecycle` 启动**之前**）⇒ 本轮不再出现「校验晚了一个生命周期阶段」的形态。
-> **依据**：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/bootstrap/ArticleSchemaGate.java:5,82,113`（`implements SmartInitializingSingleton` · `afterSingletonsInstantiated()`）· 台账 `docs/DRIFT/article/rpc.md:448`（`DRIFT-ARTICLE-RPC-005` ✅ 已修 · FIX-07 · 真进程实测 + 变异验证）⇒ ⚠️ 同域另有 `MinioBucketBootstrap` / `SnowflakeBootstrap` 仍挂 `ApplicationReadyEvent`（**只记日志、不做门禁** ⇒ 不属本条形态）⇒ **证据强度：真进程实测 + 变异**。
+> **依据**：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/bootstrap/ArticleSchemaGate.java:5,82,113`（`implements SmartInitializingSingleton` · `afterSingletonsInstantiated()`）· 台账 `docs/DRIFT/article/rpc.md:465`（`DRIFT-ARTICLE-RPC-005` ✅ 已修 · FIX-07 · 真进程实测 + 变异验证）⇒ ⚠️ 同域另有 `MinioBucketBootstrap` / `SnowflakeBootstrap` 仍挂 `ApplicationReadyEvent`（**只记日志、不做门禁** ⇒ 不属本条形态）⇒ **证据强度：真进程实测 + 变异**。
 
 **现象**
 `ArticleSchemaGate` 原本用 `@EventListener(ApplicationReadyEvent.class)` 做启动期校验。
@@ -702,7 +702,7 @@ if (serviceLevelObjectives != null) {
 > **旧号**：`PF-ARTICLE-RPC-013` ⇒ **新号**：`PIT-ARTICLE-35`
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**是** —— 「配置声明与实际生效不一致、但不改变运行结果的差异 ⇒ 行为测试**在原理上**就抓不到它」这一事实未变 ⇒ 本轮凡有此类差异，仍只能靠「启动即失败」的守卫守，且守卫要挂在**对外收流量之前**的钩子上。
-> **依据**：本域**已装守卫**：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/config/ArticleKafkaChannelValidator.java:118`（`@PostConstruct`）· `:131`（抛 `IllegalStateException`）⇒ 台账 `docs/DRIFT/article/rpc.md:494`（`DRIFT-ARTICLE-RPC-007` → 🟡 已处置 · 落签字偏离 `SD-2026-10-24-02`）⇒ **证据强度：真上下文 + 变异（6/6 有效变异全红）**。
+> **依据**：本域**已装守卫**：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/config/ArticleKafkaChannelValidator.java:118`（`@PostConstruct`）· `:131`（抛 `IllegalStateException`）⇒ 台账 `docs/DRIFT/article/rpc.md:519`（`DRIFT-ARTICLE-RPC-007` → 🟡 已处置 · 落签字偏离 `SD-2026-10-24-02`）⇒ **证据强度：真上下文 + 变异（6/6 有效变异全红）**。
 
 ### 现象（本轮实际发生的一件事）
 

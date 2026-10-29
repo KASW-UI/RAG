@@ -695,6 +695,11 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 > - ⚠️ **残余（不在本组件内）**：Tomcat 数「**总参数个数**」、Go 数「**非空值个数**」⇒
 >   「2049~10000 段且非空值 ≤2048」这个窗口仍有差异 ⇒ 登记为 `DRIFT-HOTAPI-030`（**跨域待拍板**）。
 
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（**判定不变**）。
+> 依据：RAG `service/common/src/main/java/com/rag/common/http/GoStyleFormValues.java:207,273`（`MAX_FORM_PARAM_COUNT = 2048` ＋ `nonEmpty > MAX_FORM_PARAM_COUNT` ⇒ 按 Go 口径数**非空值**）· Go `go-zero@v1.10.2/rest/httpx/util.go:15,48-53`（`maxFormParamCount = 2048` ＋ 消费点）· 核对日期 2026-10-30。
+> ⚠️ **本条两处叙述已过期（原句保留不改写）**：① 本条点名的域内类 `GoStyleFormParamCountFilter` / `GoStyleGetFormValuesFilter` **已不存在** —— commit `1adc627d`（2026-10-25 · global 第十四轮 X-6）把它**删除并迁到共享层**（现落点 = 上面的 `GoStyleFormValues`）⇒ ⇒ 「已补应用层 Go 语义闸门」的**结论仍成立**，**只是落点换了**；
+> ② 「容器旋钮对齐 ⇒ `server.tomcat.max-parameter-count: 2048`」说的是 **yaml 层** ⇒ **运行期值已是 10001**：`service/common/src/main/java/com/rag/common/http/GoStyleTomcatParameterLimitCustomizer.java:170`（`MAX_PARAMETER_COUNT = 10001`；该类 `@Order(LOWEST_PRECEDENCE)` ⇒ **无条件覆盖** yaml 的 2048）⇒ ⇒ 判定权交还应用层（= Go `net/url` 段数上限 10000 ＋ 1）⇒ ⇒ **本条「状态码与 body 与 Go 一致」的结论不变**。
+
 #### DRIFT-ARTICLE-API-006 —— 8–10 MiB JSON body 的错误文案（OBSERVABLE DIFFERENCE，LOW）
 
 > **当前状态（🟡 **LOW，确认不修**（2026-10-24 第六轮；characterization test + 变异验证））**
@@ -711,6 +716,10 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
   锁住实测现状（含文案断言 + 变异验证 MUT-RED）⇒ 将来谁改动这条路径，测试会立刻变红。
   详见本文件「第六轮」节。
 
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **🟡 LOW，确认不修** ⇒ **现行态 = 🟡 LOW，确认不修**（**判定不变**）。
+> 依据：RAG `service/article/article-api/src/main/java/com/rag/article/article/api/config/GoStyleJsonBodyLimitFilter.java:94,96`（`:94` = `getContentLengthLong() > MAX_JSON_BODY_BYTES` 判定；`:96` = `writeGoStyleBadRequest(response, "request entity too large")` ⇒ body = `"request entity too large\n"`）＋ 守门 `service/article/article-api/src/test/java/com/rag/article/article/api/ArticleApiMvcPipelineTest.java:965`（`oversizedJsonBodyIsRejectedAtEightMiB`）· Go `go-zero@v1.10.2/rest/httpx/requests.go:21`（`maxBodyLen = 8 << 20` ⇒ `io.LimitReader` 静默截断）· 核对日期 2026-10-30。
+> ⚠️ **两处小订正**：① 正文写的 RAG 侧行号 `:93-97` → 现行 **`:95-97`**（`MAX_JSON_BODY_BYTES` 常量在 `:86`，判定与文案在 `:95-97`）；② 状态码 / `Content-Type` / `nosniff` 三项一致、**仅 body 文案不同**这一结论**两侧当场复核成立** ⇒ **一条差异 ≠ 一个缺陷** ⇒ 维持「不修」。
+
 #### DRIFT-ARTICLE-API-007 —— `ext_info` key 排序在非 BMP 字符上不同（OBSERVABLE DIFFERENCE，极低）✅ **已修**
 
 > **当前状态（✅ **已修**（2026-10-24 第三轮 · FIX-09；双侧探针 + 变异验证））**
@@ -721,6 +730,10 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 - **✅ 当前状态（2026-10-24）**：**已修**。改用**码点序**比较器（`CODE_POINT_ORDER`），
   码点序 = Go 的 UTF-8 字节序 ⇒ 双侧探针实测一致（Go 1.25.11 + JDK 21 同跑），
   并配回归网 + 变异验证 MUT-RED。详见本文件「第三轮」节。
+
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（**判定不变**）。
+> 依据：RAG `service/article/article-api/src/main/java/com/rag/article/article/api/service/ArticleApiSupport.java:227-228`（`new java.util.TreeMap<>(CODE_POINT_ORDER)`）＋ `:261`（`CODE_POINT_ORDER` 比较器本体，逐 `codePointAt` 比较 ⇒ **码点序**）· Go `go1.25.11/src/encoding/json/encode.go:793-807`（`// Extract and sort the keys.` ＋ `slices.SortFunc` 按 `strings.Compare` ⇒ **UTF-8 字节序**）· 核对日期 2026-10-30。
+> ⚠️ **补当前态指针**：正文的 `ArticleApiSupport.java:226` 描述的是**修复前**的 `new java.util.TreeMap<>(source)`（历史值，原句保留）；**现行实现**在 `:227-228` ＋ `:261` ⇒ ⇒ 「码点序 = Go 的 UTF-8 字节序 ⇒ 双侧一致」的结论**当场复核成立**。
 
 #### DRIFT-ARTICLE-API-008 —— 本仓台账的文件计数结论已被再次推翻（台账卫生）
 
@@ -762,6 +775,10 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
   ⚠️ **第十二轮已把这条从「实测如此」升级为「结构性必然」**：Tomcat 11.0.24 的
   HTTP/1.1 与 HTTP/2 **两条路径**都拒 query 里任何 `>= 0x80` 的字节 ⇒ 换配置也绕不过。
 
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（**判定不变**）。
+> 依据：RAG `service/common/src/main/java/com/rag/common/http/GoStyleFormValues.java:263`（`number of URL query parameters exceeded limit`）＋ `:274`（`too many form values, error: ` ＋ Go 的 `r.Form.Encode()` 形态）· Go `go1.25.11/src/net/url/url.go:1001,1019-1022,1026-1029,1034-1045`（`defaultMaxParams = 10000` ＋ 三条解析错误）· 核对日期 2026-10-30。
+> ⚠️ **落点已迁（原句保留）**：本条点名的域内类 `GoStyleFormParamCountFilter`（现 `GoStyleGetFormValuesFilter`）**已不存在** —— commit `1adc627d`（2026-10-25 · global 第十四轮 X-6）删除并迁到共享层 ⇒ ⇒ **现落点 = `service/common/src/main/java/com/rag/common/http/GoStyleFormValues.java`**（文案与 2048 计数都在这里）⇒ ⇒ 「filter 按 Go 的**顺序**复刻：段数上限 → 分段解析（错误**要上报**）→ go-zero 的 2048 计数」这条**结论本身复核成立**（共享层 `:263` 先判段数、`:274` 再判 2048）⇒ ⇒ **不改判**。
+
 #### DRIFT-ARTICLE-API-010 —— Go `strconv.IsPrint` 的 **Latin-1 补充段**（`0xA1..0xFF`）RAG 曾**判成不可打印** ✅ **已修（2026-10-24）**
 
 > **当前状态（✅ **已修**（2026-10-24 第十二轮 · FIX-18；Go 侧真标准库探针 + 直接单元测试 + 4/4 变异转红））**
@@ -787,6 +804,9 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 - **证据**：Go 侧探针（真标准库 `strconv.Quote`，逐字节十六进制）+ RAG 侧**直接单元测试**
   （端到端测不到 ⇒ 必须直测）+ **4/4 变异转红**。详见本文件末尾「第十二轮」节。
 
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（**判定不变**）。
+> 依据：RAG `service/common/src/main/java/com/rag/common/http/GoStyleFormValues.java:691-700`（`isGoPrintable`：`0x20..0x7E` ⇒ 可打印；`0xA1..0xFF` ⇒ 可打印且**唯一例外 `0xAD`**；其余 ⇒ 不可打印）· Go `go1.25.11/src/strconv/quote.go:522-563`（`IsPrint` 本体）＋ `:525-528`（`0x20..0x7E`）＋ `:529-532`（`0xA1..0xFF` ＋ `r != 0xAD`）· 核对日期 2026-10-30。
+> ⚠️ **落点已迁（原句保留）**：本条点名的 `GoStyleGetFormValuesFilter.isGoPrintable` **已不存在** —— commit `1adc627d`（2026-10-25 · global 第十四轮 X-6）删除域内 filter 并迁共享层 ⇒ ⇒ **现行落点 = `service/common/src/main/java/com/rag/common/http/GoStyleFormValues.java:691`**（其类注释自记 `Go strconv/quote.go:524-533` 的 Latin-1 快路径）⇒ ⇒ **判据与 Go 逐条同形 ⇒ 结论复核成立，不改判**。
 
 ---
 
@@ -819,6 +839,11 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
   （`CommentApiProperties.java:48` / `FavoriteApiProperties.java:50`）⇒ **键路径与结构一致，绑定正常**。
   ⇒ 🔴 **只有 `article-api` 的结构是嵌套的 `Auth auth`**（`ArticleApiProperties.java:72-76`）⇒ **只有它要求多一层 `auth:`**。
   ⇒ **别去「修」没坏的两个域**。
+
+> ⚠️ **2026-10-30 真实性复核（W-D lane · 本条为 HIGH 档 · 逐条严格核）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（**判定不变**）。
+> 依据：RAG `service/article/article-api/src/main/resources/application.yml:126-127`（`auth:` ＋ `access-secret: ${USER_JWT_SECRET}` **已补回**）· RAG `service/article/article-api/src/main/java/com/rag/article/article/api/config/ArticleApiProperties.java:77-78`（`@NestedConfigurationProperty` ＋ `private Auth auth = new Auth()` ⇒ **嵌套**结构 ⇒ 绑定路径必须是 `article-api.auth.access-secret`）＋ `:133-136`（`@PostConstruct void verifyAccessSecret()` ⇒ `requireSecret(secret, "article-api.auth.access-secret", "USER_JWT_SECRET")`）· 守门 `service/article/article-api/src/test/java/com/rag/article/article/api/config/ArticleApiPropertiesSecretGuardTest.java:134`（`realYamlBindsSecretIntoNestedAuth` ⇒ **读真 yaml**）· 核对日期 2026-10-30。
+> ⚠️ **两处指针已过期（原句保留，订正在此）**：本条写的 `ArticleApiProperties.java:72-76` ⇒ 现行 **`:77-78`**；写的 `:107-115` ⇒ 现行 **`:133-136`**。⇒ **根因**（yaml 少 `auth:` 一层 ⇒ 绑定落空 ⇒ 组件起不来）**已不复存在**，但**偏移原因**是 commit `01d37829` / `9e0e8c2f`（2026-10-29 · P0 #8 补正）在 `verifyAccessSecret()` 之前补了一大段「未解析占位符 / 空串」判据的 javadoc ⇒ ⇒ **文件变长 ⇒ 行号后移**（**结论不变**）。
+> ⚠️ **同族自查本轮复核（结论不变）**：`comment-api` 仍是**一层** `user-auth:`（yaml `:76`）＋ `CommentApiProperties.java:51` `private UserAuth userAuth`；`favorite-api` 同构（yaml `:160` ＋ `FavoriteApiProperties.java:53`）⇒ ⇒ **两个域的键路径与结构一致、绑定正常** ⇒ ⇒ 「只有 `article-api` 命中、别去修没坏的两个域」**仍然成立**（⚠️ 本条正文写的 `:48` / `:50` 现行分别是 **`:51`** / **`:53`**）。
 
 ---
 
@@ -969,7 +994,11 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
   ⇒ 真容器实测：`Content-Type` / `nosniff` **都到位**（响应头没丢）；
   ⇒ 同时**首次确认一条 LOW 漂移**：Go 写 `text/plain; charset=utf-8`（**带空格**），实测 `text/plain;charset=utf-8`（**无空格**，Tomcat 规范化）⇒ **决定不修**。
 
-### UNRESOLVED-002 —— **依赖 `article-rpc` 的响应语义（跨组件，需与 `docs/DRIFT/article/rpc.md` 合并判读）**
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已关闭（2026-10-24，第二轮）** ⇒ **现行态 = ✅ 已关闭**（**判定不变**）。
+> 依据：RAG `service/article/article-api/src/main/java/com/rag/article/article/api/http/GoStylePlainTextErrors.java:78-79`（`.header(HttpHeaders.CONTENT_TYPE, TEXT_PLAIN_UTF8)` ＋ `.header("X-Content-Type-Options", "nosniff")`；常量在 `:53` = `"text/plain; charset=utf-8"`）＋ `service/article/article-api/src/main/java/com/rag/article/article/api/config/GoStyleJsonBodyLimitFilter.java:111-115`（刻意用 `setHeader` 而非 `setContentType` ⇒ 规避 Tomcat 规范化）· 真容器守门 `service/article/article-api/src/test/java/com/rag/article/article/api/ArticleApiAssemblyWiringTest.java:334-335`（`realTomcatBadRequestHeadersAreGoShaped` ⇒ 断言 `text/plain;charset=utf-8` ＋ `nosniff`）· 核对日期 2026-10-30。
+> ⚠️ **指针订正**：本条 Java Evidence 写的 `GoStylePlainTextErrors.java:69-75` ⇒ 现行 **`:75-80`**（写头的两行在 **`:78-79`**）；`GoStyleJsonBodyLimitFilter.java:110-115` ⇒ 现行 **`:111-115`** ⇒ ⇒ **「已关闭」的结论本身复核成立**（真 Tomcat 守门仍在位、断言的仍是 Go 的形状）。
+
+### UNRESOLVED-002 —— **依赖 `article-rpc` 的响应语义（跨组件，需与 `docs/DRIFT/article/rpc.md` 合并判读）** ✅ **已关闭（2026-10-30 · W-D lane 跨组件复核）**
 - **Question**：article-api 的三处安全闸门是否真的有效？
   ① `GetArticle` 是否尊重 `public_only=true`；② `ListArticles` 是否尊重 `public_only=true`；
   ③ `ListArticles` / `GetArticle` 返回的 `status` 是否真的等于 `PUBLISHED(枚举值)`；
@@ -985,6 +1014,20 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
 - **Required Confirmation**：与 `docs/DRIFT/article/rpc.md` 合并判读；建议提升为**跨组件条目**
   （`public_only` 契约由两个组件共同承担，见 §7 各条）。
 
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **未决（跨组件待判读 · 原文「本轮未读 article-rpc ⇒ 不能替对端背书」）** ⇒ **现行态 = ✅ 已关闭**（**改判**）。
+> **关闭理由**：跨组件前提**已可判读** —— `article-rpc` 侧在 2026-10-29（W-D lane）已完成逐条回源核，本轮**又独立复核了一遍**，四个子问题**两侧都有 `文件:行号`** ⇒ ⇒ 「证据不足」这个**未决前提本身已消失** ⇒ ⇒ 本条**不是**「判不了」，是「当初的依赖方已核完」。
+>
+> | 子问题 | Go 真源 | RAG | 判定 |
+> |---|---|---|---|
+> | ① `GetArticle` 尊重 `public_only=true` | `service/article/rpc/internal/logic/get_article_logic.go:41-43`（`if in.PublicOnly { return l.getPublicArticle(in) }`） | `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/service/ArticleDomainService.java:230-236` | ✅ **两侧都有公开分支**（早于 span 起始，与 Go 同序） |
+> | ② `ListArticles` 尊重 `public_only=true` | `service/article/rpc/internal/logic/list_articles_logic.go:46-48` | `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/service/ArticleDomainService.java:740-744` | ✅ **两侧都有公开分支** |
+> | ③ 返回的 `status` 真的等于 `PUBLISHED` | api 侧 `service/article/api/internal/logic/article/get_article_logic.go:54` ＋ `list_articles_logic.go:64`（`!= articlepb.ArticleStatus_PUBLISHED` 即拒） | api 侧 `service/article/article-api/src/main/java/com/rag/article/article/api/service/ArticleGetService.java:121-126` ＋ `ArticleListService.java:117-119`（`ArticleApiSupport.isPublished`） | ✅ **两侧同口径**；枚举值也同：Go `proto/article.proto:10` `PUBLISHED = 2` ≡ RAG `service/article/article-proto/src/main/proto/article.proto:11` `PUBLISHED = 2` |
+> | ④ `CreateArticle` 的 status 文案（冒号分隔、冒号后是 article_id） | api 侧 `service/article/api/internal/logic/article/create_article_logic.go:58`（`extractArticleIDFromStatusMessage(st.Message())`）＋ `:82-91`（`LastIndex(":")` ⇒ `TrimSpace(message[idx+1:])`） | api 侧 `service/article/article-api/src/main/java/com/rag/article/article/api/service/ArticleCreateService.java:144-153`（`lastIndexOf(':')` ⇒ `substring(idx+1).trim()`） | ✅ **逐字同构**（约定式协议，两侧同一形态） |
+>
+> ⚠️ **一处**产品代码**注释已过期**（**本轮只记，台账不改代码**）：`ArticleGetService.java:120` 写「老版本 rpc 忽略 `public_only` ⇒ 这里必须自己再判一次」⇒ 但 rpc 侧**现在有** `public_only` 分支（`ArticleDomainService.java:230,740`）⇒ ⇒ 该 api 侧闸门现为**防御性冗余**（两侧都有，仍**一致**，**不构成漂移**）⇒ **建议**由域 owner 择机订正注释（本 lane **不碰产品代码**）。
+> ⚠️ **本条的 Java Evidence 指针复核通过**：`ArticleGetService.java:121-126` / `ArticleListService.java:117-119` / `ArticleCreateService.java:144-153` **三处逐行对上**（原句保留）· 核对日期 2026-10-30。
+> ⚠️ **证据强度声明（不要当成活体）**：本次关闭依据 = **L1 静态双侧源码对照**（两侧 `文件:行号` 逐条读）· **本轮未跑跨栈活体探针** ⇒ ⇒ 原 §8.3 里的「article 域双侧活体 **0 条**」那项**仍开着**（属 G-3 双侧活体，**不阻塞阶段 1**）⇒ ⇒ **不要把本条的关闭读成「article-api 的公开读已双侧活体验过」**。
+
 ### UNRESOLVED-003 —— Filter 链的实际 `@Order` 全序 ✅ **已关闭（2026-10-24，第二轮）**
 - **Question**：`GoStylePathNormalizingFilter`(HIGHEST) / `ArticleGoStyleCorsFilter`(HIGHEST) /
   `GoStyleMaxConnsFilter`(+1) / `GoStyleCpuSheddingFilter`(+3) / `HttpMiddlewareFilter`(+5) /
@@ -996,6 +1039,13 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
 - **Required Confirmation**：启动容器打印 `FilterRegistrationBean` 顺序，或补一条装配层断言。
 - **✅ 关闭依据（2026-10-24）**：见本文件「第二轮」节第 3 条 —— 已用**装配层测试**钉死实际生效序
   （并把该结论固化成 `ArticleApiAssemblyWiringTest` 的链序断言 ⇒ 后来者改 `@Order` 会立刻变红）。
+
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已关闭（2026-10-24，第二轮）** ⇒ **现行态 = ✅ 已关闭**（**判定不变**）· 核对日期 2026-10-30。
+> **补可复算指针（本条原为 PTRLESS · Java Evidence 原文只写「各 Filter 上的 `@Order` 注解（静态可见）」）**：
+> - **守门（装配层 · 真起容器）**：`service/article/article-api/src/test/java/com/rag/article/article/api/ArticleApiAssemblyWiringTest.java:173-174`（`effectiveFilterOrderMatchesGoChain` ⇒ 断言实际生效序 == Go 的链序 ＋ 路由层（CORS / path.Clean）必须最先 ＋ traceparent 的位置约束）。
+> - **现行 `@Order` 全序（逐个当场核过行号）**：`service/article/article-api/src/main/java/com/rag/article/article/api/config/ArticleGoStyleCorsFilter.java:79`（**+1**）→ `service/common/src/main/java/com/rag/common/http/GoStylePathNormalizingFilter.java:70`（**+2**）→ `service/common/src/main/java/com/rag/common/http/GoStyleTraceparentFilter.java:190`（**+3**）→ `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java:96`（**+4**）→ `service/common/src/main/java/com/rag/common/protection/GoStyleBreakerFilter.java:87`（**+5**）→ `service/common/src/main/java/com/rag/common/protection/GoStyleCpuSheddingFilter.java:63`（**+6**，与域内 `service/article/article-api/src/main/java/com/rag/article/article/api/auth/GoStyleJwtAuthFilter.java:101` 的 **+6** 同值）→ `service/common/src/main/java/com/rag/common/spring/HttpMiddlewareFilter.java:40`（**+7**）→ `service/common/src/main/java/com/rag/common/protection/GoStyleMaxBytesFilter.java:83`（**+8**）→ `service/article/article-api/src/main/java/com/rag/article/article/api/config/GoStyleJsonBodyLimitFilter.java:78`（**+9**）。
+> ⚠️ **本条原文列的 `@Order` 数值（`+1/+3/+5/+6/+7`）已全部过期**（原句保留）⇒ **现行全序见上** ⇒ ⇒ 「装配层测试钉死实际生效序」这一**结论仍成立**（守门仍在位、仍在断言相对序）。
+> ⚠️ **问法已部分变形（结构性变更，非漂移）**：本条问的是「**Filter 链**的全序」⇒ 但 **form 值闸门已于 2026-10-25（commit `1adc627d`）从 servlet Filter 改成 HandlerInterceptor** —— `service/common/src/main/java/com/rag/common/http/GoStyleFormLimitWebMvcConfig.java:42`（`registry.addInterceptor(interceptor).order(Ordered.HIGHEST_PRECEDENCE)`）⇒ ⇒ 它**不再参与 Filter 链排序**（改走 MVC interceptor 序，**排在鉴权之前**）⇒ ⇒ 「Filter 链全序」这一子问已由共享层接管，**域内不再有 `GoStyleGetFormValuesFilter`**（已被删除）。
 
 ### UNRESOLVED-004 —— `@GrpcClient` 是否真在容器装配 + Nacos 寻址 ✅ **已关闭（2026-10-24，第二轮）**
 - **Question**：`ArticleRpcClient` / `UserRpcClient` 的 `@GrpcClient("article-rpc")` 阻塞 stub
@@ -1010,6 +1060,11 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
 - **✅ 关闭依据（2026-10-24）**：见本文件「第二轮」节第 1 条 —— 已起**真实 Spring 上下文**（不 mock client）
   断言两个 stub 非 null ⇒ **真在容器装配**。（Nacos 寻址属于**部署期**依赖，仍随部署验证。）
 
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已关闭（2026-10-24，第二轮）** ⇒ **现行态 = ✅ 已关闭**（**判定不变**）。
+> 依据：RAG `service/article/article-api/src/main/java/com/rag/article/article/api/client/ArticleRpcClient.java:52-53`（`@GrpcClient("article-rpc")` ＋ 阻塞 stub 字段）· RAG `service/article/article-api/src/main/resources/application.yml:69-73`（`grpc.client.article-rpc.address: discovery:///article-rpc` ＋ **`negotiation-type: plaintext`**）· 守门 `service/article/article-api/src/test/java/com/rag/article/article/api/ArticleApiAssemblyWiringTest.java:114-115`（起**真实 Spring 上下文**（不 mock client）断言两个 stub 非 null）· 核对日期 2026-10-30。
+> ⚠️ **指针订正**：本条 Java Evidence 写的 `application.yml:56-69` ⇒ `negotiation-type: plaintext` 实际在 **`:73`** ⇒ 现行指针取 **`:69-73`**（`:56-59` 是 tomcat 三旋钮，与本条无关）⇒ ⇒ **「真在容器装配」的结论复核成立**（`ArticleApiProperties`/`ArticleRpcClient` 均未 mock 掉）。
+> ⚠️ **边界不变**：**Nacos 寻址仍属部署期依赖**（本轮未起真 Nacos ⇒ 不宣称已验）⇒ 原文这句**保留**。
+
 ### UNRESOLVED-005 —— 真实 Tomcat 下 405→404 空 body 是否仍无 `Content-Type` ✅ **已关闭（2026-10-24，第二轮）**
 - **Question**：`ResponseEntity.status(404).build()`（`GlobalExceptionHandler.java:314-318`）
   在真实容器里会不会被 Tomcat 补上 `Content-Type`？
@@ -1018,6 +1073,10 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
 - **Required Confirmation**：同 UNRESOLVED-001 的真实 Tomcat 探针。
 - **✅ 关闭依据（2026-10-24，真 Tomcat）**：同 `UNRESOLVED-001` —— 见本文件「第二轮」节第 4 条。
   ⇒ 真容器实测 405→404 仍是**空 body**且**无 `Content-Type`**，与 Go 一致。
+
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已关闭（2026-10-24，第二轮）** ⇒ **现行态 = ✅ 已关闭**（**判定不变**）。
+> 依据：RAG `service/article/article-api/src/main/java/com/rag/article/article/api/advice/GlobalExceptionHandler.java:341-343`（`@ExceptionHandler(HttpRequestMethodNotSupportedException.class)` ⇒ `ResponseEntity.status(HttpStatus.NOT_FOUND).build()` ⇒ **空 body、无 `Content-Type`**）· 守门 `service/article/article-api/src/test/java/com/rag/article/article/api/ArticleApiAssemblyWiringTest.java:393-394`（`realTomcatMethodMismatchIsEmptyBodyNotFound` ⇒ **真 Tomcat** 实测）· 核对日期 2026-10-30。
+> ⚠️ **指针订正**：本条写的 `GlobalExceptionHandler.java:314-318` ⇒ 现行 **`:341-343`**（该文件其后被扩写，方法整体下移）⇒ ⇒ **「405→404 空 body 且无 Content-Type」的结论复核成立**（真容器守门仍在位）。
 
 ### UNRESOLVED-006 —— 共享层（`com.rag.common`）在 article-api 上的真实生效 ✅ **已关闭（2026-10-24，第二轮）**
 - **Question**：`GoStyleGrpcClientBreakerInterceptor` / `GoStyleCpuSheddingFilter` / `GoStyleMaxConnsFilter` /
@@ -1030,6 +1089,11 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
 - **Required Confirmation**：补一条「上下文里这些 Bean 都存在」的装配层测试。
 - **✅ 关闭依据（2026-10-24）**：见本文件「第二轮」节第 2 条 —— 已补**装配层测试**，断言这 5 个共享件
   **真的被扫到**（而不是「Bean 存在」这种弱断言）。
+
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已关闭（2026-10-24，第二轮）** ⇒ **现行态 = ✅ 已关闭**（**判定不变**）。
+> 依据：RAG `service/article/article-api/src/main/java/com/rag/article/article/api/ArticleApiApplication.java:81-84`（`@SpringBootApplication(scanBasePackages = {"com.rag.article.article.api", "com.rag.common"})` ⇒ **扫到 `com.rag.common`**）· 守门 `service/article/article-api/src/test/java/com/rag/article/article/api/ArticleApiAssemblyWiringTest.java:129-152`（`sharedCommonBeansAreReallyRegistered` ⇒ 断言各共享件 Bean **真在上下文里** ＋ `GoStyleJsonBodyConverter` **真在 MVC 的 message converter 链里**）· 核对日期 2026-10-30。
+> ⚠️ **计数订正**：本条正文说「**5 个**共享件」⇒ 守门现已断言 **6 个**（新增 `GoStyleBreakerFilter` ＋ `GoStyleMaxBytesFilter`；`GoStyleJsonBodyConverterConfig` 另以「转换器在链里」单独断言）⇒ ⇒ **结论不变**（共享层**真被扫到** ＋ **真生效**）。
+> ⚠️ **边界不变（原文保留）**：`HttpMiddleware` 的 worker 池（`SynchronousQueue` ＋ 512 上限 ＋ `AbortPolicy`）在饱和时抛 `RejectedExecutionException` ⇒ **该分支的 HTTP 输出本轮仍未验证**（原文「本轮未验证」一句**不改**）。
 
 ### UNRESOLVED-007 —— `SecurityRpc` 的启动期行为在 `NonBlock:false` 下的差异 ✅ **已关闭（2026-10-24，零新代码）**
 - **Question**：若 Go 侧日后给 `SecurityRpcConf` 显式写 `NonBlock: false`，`zrpc.MustNewClient`
@@ -1056,6 +1120,10 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
   ⇒ 即使补上，RAG 也**不会**像 Go 那样 panic ⇒ 补了也不产生对齐效果，
   反而引入一个**零消费者**的启动期依赖 ⇒ 不做。
 
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已关闭（2026-10-24，零新代码）** ⇒ **现行态 = ✅ 已关闭**（**判定不变**）。
+> 依据（Go 侧逐条回到**消费点**）：`go-zero@v1.10.2/zrpc/config.go:30`（`NonBlock bool \`json:",default=true"\`` ⇒ **默认 true**）· `go-zero@v1.10.2/zrpc/client.go:65-69`（`if c.NonBlock { WithNonBlock() } else { WithBlock() }` ⇒ 消费点）· `go-zero@v1.10.2/zrpc/internal/client.go:147-151`（`WithBlock()` ⇒ `options.NonBlock = false` ⇒ **阻塞 dial**）· `go-zero@v1.10.2/zrpc/client.go:50-54`（`MustNewClient` ⇒ `logx.Must(err)` ⇒ **panic**）· Go `service/article/api/internal/svc/service_context.go:17,25`（`SecurityRpc` 字段 + 装配 ⇒ **零消费者**）· Go `service/article/api/etc/article-api.yaml:14-18`（`SecurityRpcConf` **未配 `NonBlock`** ⇒ 取默认 true）· 核对日期 2026-10-30。
+> ⚠️ **结论不变**：**今天的实际行为 = 两侧都启动成功 ⇒ 无差异**；差异仅在「yaml 显式写 `NonBlock: false`」时显形（**config-gated**）且作用在一个**零消费者**的 client 上 ⇒ ⇒ **「已验证且当前无差异」而非「未验证」** ⇒ **不改判**。
+
 ### UNRESOLVED-008 —— 上游注释引用的 `DRIFT-024` 在本仓无对应台账 ✅ **已关闭（2026-10-24，零新代码）**
 - **Question**（原文）：`GlobalExceptionHandler.java:118` 的「DRIFT-024 同款教训（多出来的 Content-Type / nosniff）」
   指向何处？
@@ -1064,7 +1132,7 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
   | 位置 | 内容 |
   |---|---|
   | **`docs/DRIFT/users/_shared.md:103`** | **DRIFT-024 =「text/plain 400 的响应头丢失」**（2026-10-22 E-1 收口时发现，*article-api 的 `DRIFT-ARTICLE-API-006` 的另一半从未真正对齐*）<br>症状：`Content-Type` 与 `nosniff` **全部缺失**，状态行连 reason phrase 都没有，传输退化为 `Transfer-Encoding: chunked` + `Connection: close`<br>根因：`HttpMiddleware$ObservabilityResponseWriter.setHeader` 只收进 `capturedHeaders`、等 `flushTo` 才写回 underlying，而那时底层已 committed ⇒ Tomcat **静默忽略**<br>已改为三个覆写点（`setHeader`/`addHeader`/`setContentType`）实时 propagate<br>守门：`tools/difftest/check-plaintext400-headers.sh`（**必须真实 Tomcat**） |
-  | `docs/DRIFT/common/http.md:117` | 引用它当**类比**（「响应对了不代表 body 对」） |
+  | `docs/DRIFT/common/http.md:127` | 引用它当**类比**（「响应对了不代表 body 对」）—— ⚠️ **2026-10-30 订正**：原指针 `:117` 指向**空行**（订正对照表见本节下方「3 个交叉指针指错行」） |
   | `docs/DRIFT/_cross/status-snapshot-2026-10-22.md:29,46` | 跨域快照里登记了它的修复结论 |
   | `docs/DRIFT/users/admin/api.md:65,723` | 指出 **admin-api 上没有任何守门** |
   ⇒ ⇒ **`DRIFT-024` 是 users 域的编号**（域内编号会重复，跨域引用必须带域前缀才查得到）
@@ -1079,6 +1147,18 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
     实测是 `text/plain;charset=utf-8`（**无空格**）⇒ Tomcat 规范化 ⇒ **决定不修**。
 - **判定**：引用有效、缺陷已修、本域不受影响 ⇒ 本条关闭。
 
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已关闭（2026-10-24，零新代码）** ⇒ **现行态 = ✅ 已关闭**（**判定不变**）· 核对日期 2026-10-30。
+> **共享层已修的证据（指针订正）**：RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:1054,1076,1093`（`ObservabilityResponseWriter` 的**三个**覆写点 `setHeader` / `addHeader` / `setContentType` ⇒ **实时 propagate**；`:1071` 是 `resp.setHeader(name, value)` 本体）⇒ ⇒ 原句写的 `:661-678` **已过期**（该文件其后被扩写，行号后移）⇒ ⇒ **「原缺陷已修、全域受益」的结论复核成立**。
+> **本域不受影响的证据**：守门 `service/article/article-api/src/test/java/com/rag/article/article/api/ArticleApiAssemblyWiringTest.java:334-335`（真 Tomcat 断言 400 带 `Content-Type: text/plain;charset=utf-8` ＋ `X-Content-Type-Options: nosniff`）· Go `net/http.Error` ⇒ 设 `text/plain; charset=utf-8` ＋ `nosniff`（**带空格**）⇒ 唯一残留仍是**已登记的 LOW**（Tomcat 规范化去空格）⇒ **决定不修**（原句保留）。
+> 🔴 **原表里 3 个交叉指针指错行（本条原值保留，在此逐条订正 —— 均在**别的域**的文件里，本 lane 无写权，只订正本条里的指针文本）**：
+> | 原指针 | 真实位置 | 讲的是什么 |
+> |---|---|---|
+> | `docs/DRIFT/users/_shared.md:103` | **`docs/DRIFT/users/_shared.md:115`** | **DRIFT-024 的定义行**（`text/plain 400 的响应头丢失`） |
+> | `docs/DRIFT/common/http.md:117` | **`docs/DRIFT/common/http.md:127`** | 「只看响应头会以为没问题」（DRIFT-024 同款）—— 原 `:117` 指向**空行** |
+> | `docs/DRIFT/users/admin/api.md:723` | **`docs/DRIFT/users/admin/api.md:950`** | 「`users/_shared.md` DRIFT-024 的修复在 admin-api 上没有任何守门」—— 原 `:723` 指向别的段落 |
+> | `docs/DRIFT/_cross/status-snapshot-2026-10-22.md:29,46` | ✅ **两处都对** | 跨域快照里的登记 |
+> | `docs/DRIFT/users/admin/api.md:65` | ✅ **对** | 「域内最大为 DRIFT-024」 |
+
 ### UNRESOLVED-009 —— RAG 侧 `dto/UpdateArticleReq.java` 的 Go 行号引用有误 ✅ **已关闭（2026-10-24，第二轮）**
 - **Question**：`UpdateArticleReq.java:8` 的 javadoc 写「Go `types.go:61-71`」，
   实际 Go 的 `UpdateArticleReq` 在 `service/article/api/internal/types/types.go:74-83`。
@@ -1089,6 +1169,10 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
   `types.go:74-83`（原文 `types.go:61-71` 实为 `ListArticlesReq` / `ListArticlesResp`）。
   ⚠️ 这条**不是行为差异**，是**证据指针错误** —— 但同样必须修：错行号会让后来者按 §3.1 的纪律
   去核对时读到**另一个结构体**。
+
+> ⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已关闭（2026-10-24，第二轮）** ⇒ **现行态 = ✅ 已关闭**（**判定不变**）。
+> 依据：RAG `service/article/article-api/src/main/java/com/rag/article/article/api/dto/UpdateArticleReq.java:8`（javadoc 已写「对应 Go `types.go:74-83` 的 `UpdateArticleReq`」；订正块在 `:10-13`）· Go `service/article/api/internal/types/types.go:74-83`（`:74` = `type UpdateArticleReq struct {` … `:83` = `}` ⇒ **确为 `UpdateArticleReq`**，不是 `ListArticlesReq` / `ListArticlesResp`）· 核对日期 2026-10-30。
+> ⚠️ **补当前态指针**：原句只说「javadoc 的 Go 行号引用已更正为 `types.go:74-83`」而**没给 RAG 侧行号** ⇒ 现补 **`service/article/article-api/src/main/java/com/rag/article/article/api/dto/UpdateArticleReq.java:8`** ⇒ ⇒ **「已更正、已关闭」的结论复核成立**。
 
 ### UNRESOLVED-010 —— Go `net/url` 的三个 query 解析行为，RAG 未覆盖 ✅ **已关闭（2026-10-24）**
 - **Question**：`httpx.GetFormValues` 之前还有一层 Go **标准库** `net/url` 的解析，

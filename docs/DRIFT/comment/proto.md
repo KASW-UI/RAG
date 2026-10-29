@@ -58,7 +58,7 @@
 
 | ID | 内容 | 状态 |
 |---|---|---|
-| **`SD-2026-10-23-04`** | proto `package` 归一为 `comment` ⇒ gRPC 方法全名 `/comment.CommentService/*` vs Go 的 `/pb.CommentService/*` | ✅ **已签字（2026-10-23，用户指令）** —— **不是缺陷** |
+| **`SD-2026-10-23-04`** | proto `package` 归一为 `comment` ⇒ gRPC 方法全名 `/comment.CommentService/*` vs Go 的 `/pb.CommentService/*` | ✅ **已签字（2026-10-23，用户指令）** —— **不是缺陷**<br>⚠️ **2026-10-30 真实性复核（W-D lane）**：原判 **✅ 已签字** ⇒ **现行态 = ✅ 已签字（判定不变）** · 依据：RAG `service/comment/comment-proto/src/main/proto/comment.proto:3`（`package comment;`）· Go `proto/comment.proto:4`（`package pb;`）· 签字档 `docs/Intentional_Deviations/comment/proto.md:11`（`SD-2026-10-23-04` · 状态 **✅ 仍成立** · 核对日期 2026-10-29）· 跨栈兜底 `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/impl/PbCommentServiceAlias.java:53-54`（`@GrpcService` ＋ `implements BindableService` ⇒ 另注册 `/pb.CommentService/*`）· 核对日期 2026-10-30 ⇒ ⇒ **两侧 `package` 仍不一致 ⇒ 偏离对象未消失 ⇒ 签字仍有效** ⇒ **不改判**（⚠️ 「仓内自产自销无影响」这一判断**仍然成立**：RAG↔RAG 两侧都是 `/comment.`） |
 
 > ⚠️ **读这条时注意**：`SD-2026-10-23-04` 的原文写「本域 api / rpc / common 三个组件仍是空壳 ⇒ 没有任何 RAG 侧 client / server 会去连这个服务」，
 > 该前提**已于 2026-10-23 20:2x 被实测推翻**（三个组件均已落地）。
