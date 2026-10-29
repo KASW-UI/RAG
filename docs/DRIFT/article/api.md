@@ -1485,7 +1485,7 @@ return userServiceBlockingStub.withDeadlineAfter(effective, TimeUnit.MILLISECOND
 | `UNRESOLVED-003` Filter 链实际 `@Order` 全序 | 🔴 OPEN | 同为容器级 〔**本行为历史快照；现状见 §9 = ✅ 已关闭（2026-10-24，第二轮）**〕 |
 | `UNRESOLVED-004` `@GrpcClient` 真装配 + Nacos 寻址 | 🔴 OPEN | 本轮 60 条测试仍**全部**用 `@MockitoBean` 把 client 换掉了 —— **恰好把要验证的那一段替换掉了** 〔**本行为历史快照；现状见 §9 = ✅ 已关闭（2026-10-24，第二轮）**〕 |
 | `UNRESOLVED-006` 共享层 `com.rag.common` 真被扫到 | 🔴 OPEN | 同上 〔**本行为历史快照；现状见 §9 = ✅ 已关闭（2026-10-24，第二轮）**〕 |
-| `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | 本轮**已在 rpc 侧**核对 `public_only` / `status` 的消费方式（见 [`rpc.md`](./rpc.md) 与 [`proto.md`](./proto.md)） |
+| `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | 本轮**已在 rpc 侧**核对 `public_only` / `status` 的消费方式（见 [`rpc.md`](./rpc.md) 与 [`proto.md`](./proto.md)） 〔**本行为历史快照；现状见 §9 = ✅ 已关闭（2026-10-30 · W-D lane 跨组件复核）** —— 四个子问题两侧都有 `文件:行号`；「缺跨栈活体」是**另一个独立未决项**，见 §8.3 的「article 域双侧活体 0 条」= G-3，**不阻塞阶段 1**〕 |
 | `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | 🔴 OPEN | 仍查无对应台账 〔**本行为历史快照；现状见 §9 = ✅ 已关闭（2026-10-24）—— 原结论作废：`DRIFT-024` 在 **users 域** `docs/DRIFT/users/_shared.md:103`，本域不受影响**〕 |
 | `UNRESOLVED-009` `UpdateArticleReq.java:8` 的 Go 行号引用有误 | 🔴 OPEN | 本轮**只读不写**该文件；建议下一轮顺手改 〔**本行为历史快照；现状见 §9 = ✅ 已关闭（2026-10-24，第二轮）**〕 |
 
@@ -1677,7 +1677,7 @@ chn = chn.Append(GunzipHandler)          // ⑪
 | `UNRESOLVED-003` Filter 链实际顺序 | 🔴 OPEN（UNKNOWN） | ✅ **已关闭**（实测链序已钉死） |
 | `UNRESOLVED-004` `@GrpcClient` 真装配 | 🔴 OPEN（UNKNOWN） | ✅ **已关闭** |
 | `UNRESOLVED-006` 共享层真被扫到 | 🔴 OPEN（UNKNOWN） | ✅ **已关闭** |
-| `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | 🟡 部分关闭（本轮在 rpc 侧核对了 `public_only`/`status` 的消费方式） |
+| `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | ✅ **已关闭（2026-10-30 · W-D lane 跨组件复核）** —— 关闭理由：原判未决的原因是「`article-rpc` 侧**没核** ⇒ 不能替对端背书」⇒ **该未决前提本身已消失**（rpc 侧 2026-10-29 已逐条回源核 + 2026-10-30 独立复核，四个子问题两侧都有 `文件:行号`）⇒ **不是「判不了」，是「当初的依赖方已核完」** ⇒ ⇒ 逐条见 §9 `UNRESOLVED-002` · ⚠️ **证据强度 = L1 静态双侧源码对照**（**本轮未跑跨栈活体探针**）⇒ 「article 域双侧活体 0 条」那项**仍开着**（§8.3 = G-3，**不阻塞阶段 1**）⇒ **不要把本条的关闭读成「公开读已双侧活体验过」**（本表「修复前」列的 🟡 保留原值） |
 | `UNRESOLVED-007` `SecurityRpc` 的 `NonBlock:false` 差异 | 🔴 OPEN | ✅ **已关闭**（2026-10-24，零新代码）：已读到消费点（`zrpc/config.go:30` tag 默认 true → `client.go:65-69` → `internal/client.go:147-151` → `MustNewClient` panic）⇒ **条件性差异，当前不可达** |
 | `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | 🔴 OPEN | ✅ **已关闭**（2026-10-24，零新代码）：已定位到 users 域台账条目 + 共享层已修 + 本域真 Tomcat 用例已断言 400 响应头 |
 | `UNRESOLVED-009` `UpdateArticleReq.java:8` 的 Go 行号引用有误 | 🔴 OPEN | ✅ **已关闭**（2026-10-24，第二轮）〔**2026-10-29 订正**：原「修复后」格写「🔴 OPEN（本轮只读不写该文件）」⇒ **与紧邻的 §6「✅ `UNRESOLVED-009` 已关闭」直接矛盾** ⇒ 已按实测收敛为 ✅；**原文保留于「修复前」格**〕 |
@@ -1712,7 +1712,7 @@ chn = chn.Append(GunzipHandler)          // ⑪
 | `DRIFT-ARTICLE-API-009` Go `net/url` 的三条 query 解析行为 | ✅ **已修**（2026-10-24） | 修前 ②**静默放过**（200）、③**500 空 body**、①**顺序反了** ⇒ 已按 Go 的顺序复刻（段数上限 → 分段解析（错误上报）→ 2048 计数），真容器实测 **body 逐字一致** ⇒ 见本文件末尾「第八轮」节<br>⚠️ **2026-10-29 对齐**：编号由 `DRIFT-009` 改为权威编号 `DRIFT-ARTICLE-API-009`；**状态格不变**（与 §7.5 `:718`「✅ **已修（2026-10-24）**」一致） |
 | `DRIFT-ARTICLE-API-011` `application.yml` 少 `auth:` 一层 ⇒ **组件起不来** | ✅ **已修**（2026-10-29 · G3） | 启动阻断类 ⇒ 修前 `article-api` **根本起不来** ⇒ 见 §7 条目 `:774` · 探针副产品（实跑才暴露）<br>⚠️ **2026-10-29 对齐**：本条**本轮有变动** ⇒ 按本表读法（「只登记仍有讨论价值 / **本轮有变动**的条目」）**补登记**（此前只出现在 §7 条目，未进活状态表） |
 | `DRIFT-ARTICLE-API-012` JSON **字段顺序**漂移 | ✅ **已修**（2026-10-29 · G3） | Go 按 struct 声明序 / Jackson 按字母序 ⇒ 见 §7 条目 `:806`<br>⚠️ **2026-10-29 对齐**：同上 ⇒ **补登记**到活状态表 |
-| `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | 🟡 部分关闭 | rpc 侧已核过 `public_only` / `status` 的消费方式（见 [`proto.md`](./proto.md)）；仍缺**跨栈活体对拍** |
+| `UNRESOLVED-002` 依赖 `article-rpc` 的响应语义 | ~~🟡 部分关闭~~ ⇒ ✅ **已关闭（2026-10-30 · W-D lane 跨组件复核）** | 四个子问题（`GetArticle`/`ListArticles` 尊重 `public_only` · 返回 `status == PUBLISHED` · `CreateArticle` 的 status 文案格式）两侧都有 `文件:行号`（Go `get_article_logic.go:41-43` / `list_articles_logic.go:46-48` / `create_article_logic.go:58,82-91` ≡ RAG `ArticleDomainService.java:230-236,740-744` / `ArticleGetService.java:121-126` / `ArticleListService.java:117-119` / `ArticleCreateService.java:144-153`）⇒ ⇒ 「原判未决 = 对端没核」这个**前提已消失** ⇒ ⇒ **逐条见 §9 `UNRESOLVED-002`**。⚠️ **证据强度 = L1 静态双侧源码对照**（**未跑跨栈活体探针**）⇒ 「仍缺跨栈活体对拍」是**另一个独立未决项**（§8.3「article 域双侧活体 0 条」= G-3，**不阻塞阶段 1**）⇒ ⇒ **本行不再把「缺活体」当作本条未闭合的理由**（原值 🟡 部分关闭 以删除线保留） |
 | `UNRESOLVED-007` `SecurityRpc` 的 `NonBlock:false` | ✅ **已关闭**（2026-10-24） | 结论依赖 go-zero 的 tag 默认值，不是设计对齐 ⇒ 已读到消费点确认为**条件性差异、当前不可达**（详见 §9） |
 | `UNRESOLVED-008` 上游注释引用的 `DRIFT-024` | ✅ **已关闭**（2026-10-24） | 🔴 **原结论作废**：`DRIFT-024` 在 **users 域** `docs/DRIFT/users/_shared.md:103`，common 域与 `_cross` 快照都在引用它；本域**不受影响**（共享层已修 + 真 Tomcat 已断言） |
 | 🔴 **新增确认**：`Content-Type` 少一个空格 | 🟡 **已确认为 LOW OBSERVABLE DIFFERENCE** | 本轮首次由真 Tomcat 确认；**决定不修**（理由见上节），已用 characterization test 锁住实测现状 |
