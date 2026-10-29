@@ -53,7 +53,7 @@
 | `follow` | `follow-rpc` | 17 / 2,692 | 70 | [`rpc.md`](../follow/rpc.md) | **双侧活体对拍 + 真 PG** | ✅ **EQUIVALENT** |
 | `follow` | `follow-common` | 4 / 562 | 37 | [`common.md`](../follow/common.md) | 双侧对拍 | ✅ **EQUIVALENT**（16 码 16 文案逐条一致，零漂移） |
 | `follow` | `follow-proto` | — | 0 | [`proto.md`](../follow/proto.md) | §3.4 + 消费方式 | ✅ **EQUIVALENT** |
-| `hot` | `hot-api` | 17 / 2,434 | 89 | [`api.md`](../hot/api.md) | **双侧活体对拍** | 🔴 三组件已全部对拍；**第十三轮已修 D21/D22/D23**；残留 `DRIFT-HOTAPI-030`/`-031` |
+| `hot` | `hot-api` | 17 / 2,434 | 89 | [`api.md`](../hot/api.md) | **双侧活体对拍** | 🔴 三组件已全部对拍；**第十三轮已修 D21/D22/D23**；残留 `DRIFT-HOTAPI-031`⚠️ **2026-10-29 订正**：`DRIFT-HOTAPI-030` **已落地**（第十四轮 · 共享层修法 · favorite 零触碰）⇒ **不再是残留** |
 | `hot` | `hot-rpc` | 15 / 2,535 | 89 | [`rpc.md`](../hot/rpc.md) | 真 Kafka + 2×真 Redis + 真 gRPC | ✅ D1 闭合；`DRIFT-COMMON-004` 已修（拦截器接线） |
 | `hot` | `hot-common` | 2 / 172 | 14 | [`common.md`](../hot/common.md) | 双侧对拍 | ✅ 一致 |
 | `hot` | `hot-proto` | — | 0 | ❌ 无专属台账 | §3.4 复制忠实 | ⚠️ **消费方式未验**（§3.4 效力边界第 1 条） |
@@ -75,7 +75,7 @@
 | `users` | `users-common` | 11 / 1,037 | 33 | [`common.md`](../users/common.md) | 真 PG | ✅ 被 [`_shared.md`](../users/_shared.md) 覆盖 |
 | `users` | `user-proto` | — | 0 | ❌ 无专属台账 | §3.4 复制忠实 | ⚠️ **消费方式未验** |
 | `users` | `admin-proto` | — | 0 | ❌ 无专属台账 | §3.4 复制忠实 | ⚠️ **消费方式未验** |
-| 跨服务 | `service/common` | 44 / 7,529 | 174 | [`alignment-2026-10-23.md`](../common/alignment-2026-10-23.md) | 多层 | 🔴 **不是「已审计完成」** —— 5 个可比包 **3 个 NOT EQUIVALENT**；**28 条编号未修** + 5 项未编号 + 9 项交接 |
+| 跨服务 | `service/common` | 44 / 7,529 | 174 | [`alignment-2026-10-23.md`](../common/alignment-2026-10-23.md) | 多层 | 🔴 **不是「已审计完成」** —— 5 个可比包 **3 个 NOT EQUIVALENT**；**23 条编号未修** + 5 项未编号（= **28 项**）+ 9 项交接⚠️ **2026-10-29 订正**：原文写「**28 条编号未修**」⇒ 与 `common/alignment-2026-10-23.md:669` 的合计 **23** 冲突 ⇒ **权威 = 23 编号 + 5 未编号 = 28**（**「编号条目 = 28」这个说法本身是错的**）<br>🔴 **2026-10-29 复判新增**：**`E65` = 🔴 A 类**（出向 gRPC 不继承 deadline）⇒ **原先不在那 28 项的逐条定级表里** ⇒ ⇒ **共享层的 A 类硬阻塞 ≠ 0** |
 
 ### 当前态的三条结论
 

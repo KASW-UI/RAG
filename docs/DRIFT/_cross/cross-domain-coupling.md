@@ -231,7 +231,7 @@ task     →                            （Kafka ← like）
 - **权威条数**（surefire XML **逐 `testsuite` 求和**；**442 份 XML / 28 个含测试模块**）：
   **2860 条 · 0 failures · 0 errors · 4 skipped**（skip = `favorite-rpc` 3 + `favorite-api` 1）
 - **共享层 `service/common` = 337** ⇒ ⚠️ **旧台账的 333 已过期**，以本轮实测为准
-- **`task-rpc` = 134** ⇒ 与台账声称值**逐字相等**
+- **`task-rpc` = 137** ⇒ 与台账声称值**逐字相等**（`docs/DRIFT/task/rpc.md:1633`）⚠️ **2026-10-29 订正**：原文写 **134**，是旧快照 —— 守门 `python3 tools/check-ledger-selfcheck.py` 实测输出为「**台账 134 / 实测 137**」⇒ **137 为准**；同一域另有 `task/rpc.md:29` 与 `task/vs-common.md:1433` 也写 134 ⇒ **三处 134 与一处 137 矛盾**（**该红门的根因就是这个数字漂移** ⇒ 已派 `P4-T04` 域侧订正）
   ⇒ ⇒ 📌 **订正一条踩坑结论**：合并后 `check-ledger-selfcheck.py` 一度报「台账 134 / **实测 114**」
   ⇒ ⇒ **根因 = 主工作树里 `service/task/*/target/surefire-reports` 是 10-26 的 stale 报告**（`mvn test` 读不到新报告 ⇒ 读到旧的）
   ⇒ ⇒ **不是台账错、也不是回归** ⇒ **`clean` 跑完后该守门即转绿**（实测 ✅「台账 134 / 实测 134」）。

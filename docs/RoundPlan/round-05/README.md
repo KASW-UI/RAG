@@ -26,7 +26,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **处理哪些已知问题** | ① `G-19`（proto 消费方式取证 · **取证缺口**）② 各域「明细面 vs 现状面」的**逐条矛盾** ③ **两套 `X-` 编号语义冲突**（`global/cross-domain.md` X-1~X-10 vs `PhaseGoal-judge.md` §五 X-1~X-12 ⇒ **`X-2`~`X-10` 共 9 个号全错位**（2026-10-29 复核：两套 `X-n` 里**只有 `X-1` 同物**；`X-6` 在 `global/vs-common.md` 指 `DRIFT-HOTAPI-030`，在 judge §五 指 deadline 分层预算） ⇒ 编号不可寻址）④ `DRIFT-HOTAPI-030` **六处四态**（`_cross/open-items.md:15` 🔴 · `global/_README.md:134` 🟡 · `global/cross-domain.md:26` + `AGENTS.md:142` + `global/vs-common.md:34` ✅ · `hot/api.md:1237`/`:2170` 🔴 · `favorite/api.md:1085` 🔴；另 `hot/api.md` 与 `global/vs-common.md` **各自文件内还各有两态**） ⑤ Pitfalls 台账的**状态字段几乎完全缺失**（380 条里**只有 1 条**有状态 ⇒ 379 条无从区分「仍生效」与「已闭环」；另有 **20 种编号形态并存** + **11 个 0 字节坑位文件**）⑥ 台账里**几十处写死数字**（漂移温床） |
+| **处理哪些已知问题** | ① `G-19`（proto 消费方式取证 · **取证缺口**）② 各域「明细面 vs 现状面」的**逐条矛盾** ③ **两套 `X-` 编号语义冲突**（`global/cross-domain.md` X-1~X-10 vs `PhaseGoal-judge.md` §五 X-1~X-12 ⇒ **`X-2`~`X-10` 共 9 个号全错位**（2026-10-29 复核：两套 `X-n` 里**只有 `X-1` 同物**；`X-6` 在 `global/vs-common.md` 指 `DRIFT-HOTAPI-030`，在 judge §五 指 deadline 分层预算） ⇒ 编号不可寻址）④ `DRIFT-HOTAPI-030` **六处四态**（`_cross/open-items.md:15` 🔴 · `global/_README.md:134` 🟡 · `global/cross-domain.md:26` + `AGENTS.md:142` + `global/vs-common.md:34` ✅ · `hot/api.md:1237`/`:2170` 🔴 · `favorite/api.md:1085` 🔴；另 `hot/api.md` 与 `global/vs-common.md` **各自文件内还各有两态**） ⑤ Pitfalls 台账的**状态字段几乎完全缺失**（**336 条**里只有 **74 条**有状态 ⇒ **262 条**无从区分「仍生效」与「已闭环」；另有 **20 种编号形态并存** + **0 字节坑位文件**（开工时 11 个））⑥ 台账里**几十处写死数字**（漂移温床） |
 | **产生哪些可检查的结果** | ① 10 个 proto 的消费方式**逐个有结论（无「未知」）** ② 每个矛盾对**收敛到单一状态**且带「核对日期 + 依据」 ③ 跨域 `X-n` **重编号为 `CD-n`**（保留原号对照列） ④ `DRIFT-HOTAPI-030` 三处状态**一致** ⑤ 每条 Pitfall 有「状态 + 核对日期 + 是否影响当前轮次」 ⑥ 一份**「写死数字清单」**（文件:行号 + 数字 + 它统计什么 + 谁维护） |
 | **为什么是下一轮的必要前提** | ① Round 6 的收口回归**要跑得干净** ⇒ 守门不能因台账自相矛盾而红 ② Round 7 的最终验收**逐条核判据** ⇒ 台账必须先自洽，否则「证据」本身不可靠 ③ `P5-T06` 的数字清单是**后续所有轮次**的防漂移清单 |
 | **本轮不做** | 不改判据（Round 3）· 不改产品代码（取证任务可能**新增测试**，但不改行为）· **不代用户给 18 条未签字候选签字** · 不改 `tools/difftest/` 的守门清单计数口径 · 不做阶段二 |
@@ -144,7 +144,7 @@
 | **原始编号** | `PIT-*`（global 56+ 条 + 各域） |
 | **来源** | `docs/Pitfalls/_INDEX.md` + `docs/Pitfalls/<域>/**` + `docs/Pitfalls/_cross/**` |
 | **当前状态** | 🔴 **状态字段几乎完全缺失** —— 台账**没有结构化的「状态」字段** ⇒ 无法区分「仍生效」与「已闭环」⇒ 台账**不可审计** |
-| **当前事实** | 2026-10-29 实测：① 全目录 **380 条** Pitfall 条目，其中**只有 1 条**带「已闭环 / 仍生效 / 已撤销」标记 ⇒ **379 条无状态（缺失率 99.7%）**；② 条目结构 = `## PIT-XXX 🔴 <标题>` + 正文（症状 / 根因 / 教训）⇒ **`🔴` 是「严重度」不是「是否仍生效」**；③ **编号形态 20 种并存**（`PIT-GLOBAL-*` / `PIT-FAV-*` / `PIT-LIKEAPI-*` / `PITFALL-FOLLOW-*` / `PF-ARTICLE-RPC-*` / `P-HOTRPC-*` …）⇒ 机器无法用单一模式枚举；④ **11 个坑位文件是 0 字节**（`_cross/{signed-deviations,message-domain-wide,open-items}` · `comment/{common,proto}` · `follow/{common,proto}` · `task/{api,proto}` · `article/common` · `users/admin/_shared`）⇒ `docs/Pitfalls/common/` 与 `docs/Pitfalls/task/` **零条逐条台账**；少数有明确状态的（如 `PIT-LANE-06` / `PIT-LANE-07` 标「已闭环」并附守门指针）⇒ **说明字段是能填的，只是没填** |
+| **当前事实** | 2026-10-29 实测：① 全目录 **336 条** Pitfall 条目（**守门口径**），其中 **74 条**带状态标记 ⇒ **262 条无状态（缺失率 77%）**；② 条目结构 = `## PIT-XXX 🔴 <标题>` + 正文（症状 / 根因 / 教训）⇒ **`🔴` 是「严重度」不是「是否仍生效」**；③ **编号形态 20 种并存**（`PIT-GLOBAL-*` / `PIT-FAV-*` / `PIT-LIKEAPI-*` / `PITFALL-FOLLOW-*` / `PF-ARTICLE-RPC-*` / `P-HOTRPC-*` …）⇒ 机器无法用单一模式枚举；④ **11 个坑位文件是 0 字节**（`_cross/{signed-deviations,message-domain-wide,open-items}` · `comment/{common,proto}` · `follow/{common,proto}` · `task/{api,proto}` · `article/common` · `users/admin/_shared`）⇒ `docs/Pitfalls/common/` 与 `docs/Pitfalls/task/` **零条逐条台账**；少数有明确状态的（如 `PIT-LANE-06` / `PIT-LANE-07` 标「已闭环」并附守门指针）⇒ **说明字段是能填的，只是没填** |
 | **执行目的** | 规范 §2.3：「凡是某条 Pitfall 揭示了某项任务的错误判断方式…就必须将其转换成相关任务的**执行约束、验证动作或禁止事项**」⇒ **要先知道它是否仍生效**，才能正确转换；且规范 §12.3 要求每条相关 Pitfall 落进四种去向之一（执行约束 / 测试要求 / 并行写权纪律 / **写明不适用的具体原因**）⇒ **没有状态字段 ⇒ 四种去向都无法判定** |
 | **具体操作** | ⓪ **先定编号规范**：20 种编号形态并存 ⇒ 先定**单一可枚举的形态**（建议 `PIT-<域>-<序号>`）并给**旧编号 → 新编号对照表**（**旧号原样保留**，不许改写历史行）① 给**每条** Pitfall 补三个字段：**状态**（仍生效 / 已闭环 / 已撤销）· **核对日期** · **是否影响当前轮次** ② 「已闭环」必须附**证据指针**（哪个守门 / 哪次变异）③ 「仍生效」的**必须**在对应轮次的「防错约束」小节里出现（**双向可查**）④ **「仍生效」但当前轮次不适用的** ⇒ 必须在「是否影响当前轮次」列写明**不适用的具体原因**（规范 §12.3 的第四种落点：「或说明当前不适用的具体原因」）—— **不许留空** ⑤ ⚠️ **不要**把已闭环的历史问题重新变成整改任务（规范 §2.3 末句）⑥ ⚠️ **不要**顺手改 Pitfall 的**内容**（只补状态字段） |
 | **具体落点** | `docs/Pitfalls/_INDEX.md` · `docs/Pitfalls/<域>/**` · `docs/Pitfalls/_cross/**` |
@@ -152,8 +152,8 @@
 | **前置条件** | Round 3 完成 |
 | **并行关系** | 各域**可并行** |
 | **写权限** | `docs/Pitfalls/<域>/**` = 各域 lane · `docs/Pitfalls/global/**` = G4 · `docs/Pitfalls/_INDEX.md` + `_cross/**` = 主线 |
-| **验收命令** | ```bashpython3 tools/check-ledger-count.py ; echo "EXIT=$? （守 _INDEX.md 的条目计数）"\npython3 tools/check-ledger-tables.py ; echo "EXIT=$?"\n# ① 带状态标记的条目数必须 == 条目总数（基线：1 / 380）\ntot=$(grep -rhoE '^#+ *P[A-Za-z0-9_-]*-[0-9]+' docs/Pitfalls/ --include='*.md' | wc -l)\nhas=$(grep -rhoE '^#+ *P[A-Za-z0-9_-]*-[0-9]+.*(已闭环|仍生效|已撤销|已失效)' docs/Pitfalls/ --include='*.md' | wc -l)\nprintf '条目总数=%s 有状态=%s\n' \"$tot\" \"$has\"   # 期望 has == tot\n# ② 0 字节坑位文件必须归零（当前 11 个）\nfind docs/Pitfalls -name '*.md' -size 0 | wc -l``` |
-| **验收证据** | ① **有状态条目数 == 条目总数**（当前基线 1/380 ⇒ 缺口 379）② **0 字节坑位文件 == 0**（当前 11 个）③ 计数守门 EXIT=0 ④ 「仍生效」的条目**在各轮防错约束里可查到**（双向对账）⑤ **「当前轮次不适用」的条目有具体原因**（规范 §12.3 第四种落点）—— **0 条留空** |
+| **验收命令** | ```bashpython3 tools/check-ledger-count.py ; echo "EXIT=$? （守 _INDEX.md 的条目计数）"\npython3 tools/check-ledger-tables.py ; echo "EXIT=$?"\n# ① 状态字段覆盖率必须 100% ＋ 0 字节坑位文件为 0（**用核验器，别用宽正则** ——\n#    宽正则数出 380，守门口径是 336 ⇒ 判据永远对不上）\npython3 tools/difftest/ledger-status-coverage.py ; echo \"status-coverage EXIT=$?\"
+| **验收证据** | ① **有状态条目数 == 条目总数**（当前基线 74 / 336 ⇒ 缺口 379）② **0 字节坑位文件 == 0**（当前 11 个）③ 计数守门 EXIT=0 ④ 「仍生效」的条目**在各轮防错约束里可查到**（双向对账）⑤ **「当前轮次不适用」的条目有具体原因**（规范 §12.3 第四种落点）—— **0 条留空** |
 | **完成条件** | **每条 Pitfall 都有状态** ⇒ 台账可审计 |
 | **失败处理** | 判定不了某条是否仍生效 ⇒ 标「**待核实**」+ 写清缺什么 ⇒ **不许默认「仍生效」也不许默认「已闭环」** |
 | **状态更新** | 即本任务 |
@@ -203,7 +203,7 @@ python3 tools/check-agents-budget.py      ; echo "EXIT=$?"
 # ── ④ 编号唯一性（X-n 只应指向 judge §五）──────────────
 rg -n 'X-[0-9]+' docs/ --glob '!docs/总/**' --glob '!docs/RoundPlan/_legacy-index.md' | head -30
 
-# ── ⑤ Pitfalls 状态字段覆盖率（基线 1/380）+ 0 字节文件 ────\ntot=$(grep -rhoE '^#+ *P[A-Za-z0-9_-]*-[0-9]+' docs/Pitfalls/ --include='*.md' | wc -l)\nhas=$(grep -rhoE '^#+ *P[A-Za-z0-9_-]*-[0-9]+.*(已闭环|仍生效|已撤销|已失效)' docs/Pitfalls/ --include='*.md' | wc -l)\nprintf '有状态 %s / 总数 %s\n' "$has" "$tot"\nfind docs/Pitfalls -name '*.md' -size 0 | wc -l\n```
+# ── ⑤ Pitfalls 状态字段覆盖率（基线 74 / 336）+ 0 字节文件 ────\npython3 tools/difftest/ledger-status-coverage.py ; echo \"status-coverage EXIT=$?\"
 
 ---
 
@@ -215,7 +215,7 @@ rg -n 'X-[0-9]+' docs/ --glob '!docs/总/**' --glob '!docs/RoundPlan/_legacy-ind
 | 2 | 明细面与现状面收敛 | 同一编号在同域内**只有一种状态**（或明确标「待核实」） |
 | 3 | `X-n` 只有一个语义 | 全仓裸 `X-n` 引用**只指向 judge §五**；跨域的用 `CD-n` |
 | 4 | `DRIFT-HOTAPI-030` 一态 | 所有出现处状态一致（历史指针保留） |
-| 5 | Pitfalls 每条有状态 | **有状态条目数 == 条目总数**（基线 1/380）＋ **0 字节坑位文件 == 0**（基线 11）；计数门 EXIT=0 |
+| 5 | Pitfalls 每条有状态 | **有状态条目数 == 条目总数**（基线 74 / 336）＋ **0 字节坑位文件 == 0**（基线 11）；计数门 EXIT=0 |
 | 6 | 写死数字清单成文 | 每条可定位；抽 5 条回真源核实通过 |
 | 7 | 门全绿 | 台账四门 + proto 门 + 预算门 **全 EXIT=0** |
 | 8 | **不能算完成的情况** | 把「已闭环」的历史 Pitfall 重新变成整改任务 · 判定不了却选了「看起来对」的一侧 · 改了 Pitfall 的内容 · `AGENTS.md` 字节数变增 · 把 `X-n` 重编号但**旧引用没改完** |
@@ -228,7 +228,7 @@ rg -n 'X-[0-9]+' docs/ --glob '!docs/总/**' --glob '!docs/RoundPlan/_legacy-ind
 - [ ] **P5-T02** 每个冲突对收敛到单一状态 + 核对日期 + 依据；**原值保留**
 - [ ] **P5-T03** 跨域 `X-n` → `CD-n` 重编号完成；引用点全改；AGENTS.md 字节中性
 - [ ] **P5-T04** `DRIFT-HOTAPI-030` 三处一致
-- [ ] **P5-T05** 每条 Pitfall 有状态（有状态数 == 总数 · 基线 1/380）＋ 0 字节坑位文件归零（基线 11）
+- [ ] **P5-T05** 每条 Pitfall 有状态（有状态数 == 总数 · 基线 74 / 336）＋ 0 字节坑位文件归零（基线 11）
 - [ ] **P5-T06** 写死数字清单成文
 - [ ] 证据路径：各门禁真实退出码 + `docs/RoundPlan/_hardcoded-numbers.md`
 - [ ] 原始编号 → 最新状态：`G-19` · 各域冲突编号 · `X-n`/`CD-n` · `DRIFT-HOTAPI-030` · `PIT-*` 全族
