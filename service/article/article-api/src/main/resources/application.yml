@@ -85,7 +85,7 @@ grpc:
 # 业务配置（对齐 Go 端 Auth.*）
 # =============================================================================
 # Go: article-api.yaml
-#   Auth.AccessSecret = ae0536f9-6450-4606-8e13-5a19ed505da0（36 字节 UUID）
+#   Auth.AccessSecret = <36 字节 UUID 字面量>（⚠️ **值不贴在本仓**：它就是那把公开密钥）
 #   Auth.AccessExpire = 31536000（365 天）
 #
 # ⚠️ access-secret 必须与**签发方**（user-api）一致：
@@ -97,9 +97,21 @@ grpc:
 # ⚠️ 36 字节 ≥ 32，jjwt 不需要补齐；JwtUtil.padToHmacKeySize 对它其实是 no-op。
 #   统一调用是为了与其它域共用同一份逻辑。
 article-api:
-  # 🔴 2026-10-29 · G3 阶段 1（P0 #8）：**明文默认值已去掉** ⇒ 缺变量 ⇒ 启动失败；
-  #    变量为空串 ⇒ 也启动失败（ArticleApiProperties#verifyAccessSecret 的 @PostConstruct 校验）
-  #    ⇒ 两条路都 fail-closed（不再有「悄悄用仓里的公开 UUID 起来 ⇒ token 可伪造」）。
+  # 🔴 2026-10-29 · G3 阶段 1（P0 #8）：**明文默认值已去掉**
+  #    ⇒ 不再有「悄悄用仓里的公开 UUID 起来 ⇒ token 可伪造」这条路径。
+  # 🔴 2026-10-29（本轮补）：**「yaml 不给默认值」只挡得住一半** ⇒ 另一半必须由**代码守卫**挡
+  #    ⇒ 守卫 = `ArticleApiProperties#verifyAccessSecret()`（@PostConstruct）
+  #      ⇒ 下面的 `access-secret: ${USER_JWT_SECRET}` **没有默认值**
+  #      ⇒ ⚠️ **单靠 yaml，缺变量时并不会炸**：Spring 的 `@ConfigurationProperties` 绑定器
+  #        遇到**解析不出来**的占位符**不报错**，而是把**占位符原文**当成值绑上去
+  #        ⇒ ⇒ 应用**照常启动** ⇒ ⇒ 而那是**仓里公开可知的一串字符**
+  #        ⇒ ⇒ 🔴 **比空密钥更危险**（HMAC 密钥公开 ⇒ 谁都能伪造 token）。
+  #      ⇒ ⚠️ 同理，**变量存在但值为空串**时，Spring 的 PropertyPlaceholderHelper
+  #        把**空串当合法值**（不走默认值、也不报错）⇒ 属性绑成 "" ⇒ 空签名密钥 ⇒ token 可伪造。
+  #      ⇒ ⇒ 「未解析占位符」与「空串」**两条都**由 `verifyAccessSecret()` 显式拒
+  #        ⇒ ⇒ **缺变量 / 空串 / 占位符原文 三条路都 fail-closed**。
+  #    ⇒ 回归网：`ArticleApiPropertiesSecretGuardTest#prodLikeStartupWithoutEnvVarFails`
+  #      （真 SpringApplication + 真 ConfigData + 只有 application.yml ⇒ 生产等价路径）。
   #    ⚠️ Go 侧写的是**字面量**（article-api.yaml:27）⇒ 本条属「RAG 更严」的一侧 ⇒ 登记为有意偏离。
   #    ⚠️ 根级 compose 需注入 USER_JWT_SECRET（共享面 ⇒ 已登记反馈单 ⇒ 应改 `${USER_JWT_SECRET:?...}`）。
   # 🔴 2026-10-29 · G3 阶段 1（A-1 双侧活体实测）：**`auth:` 这一层不能少** ——

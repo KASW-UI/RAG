@@ -56,22 +56,28 @@ spring:
 
 like-api:
   user-auth:
-    # Go: likecenter.yaml:6  AccessSecret: ae0536f9-6450-4606-8e13-5a19ed505da0
+    # Go: likecenter.yaml:6  AccessSecret = <36 字节 UUID 字面量>（⚠️ **值不贴在本仓**：它就是那把公开密钥）
     # ⚠️ 36 字节 UUID，jjwt 要求 ≥32 字节，天然满足（JwtUtil.padToHmacKeySize 对它其实是 no-op）。
     #    必须与**签发方** user-api 完全一致，否则验签必失败 → HTTP 401 + 空 body。
     #
-    # 🔴 2026-10-29 · R1·T-1.3（P0 #8）：**默认明文值已去掉**
-    #    （原为裸字面量 `ae0536f9-6450-4606-8e13-5a19ed505da0`）
+    # 🔴 2026-10-29 · R1·T-1.3（P0 #8）：**默认明文值已去掉**（原为裸字面量）
     #    ⇒ 理由：那个 UUID 是**写在仓里的公开密钥** ⇒ 谁都能用它伪造 JWT
     #    ⇒ 而本模块**只验签、不签发**（签发方是 user-api）
     #    ⇒ ⇒ 一旦部署时忘了覆盖 ⇒ **token 可伪造**。
-    #    ⇒ 现在 **缺变量 ⇒ 启动失败**（Spring 的 placeholder 不可解析 ⇒ 绑定期直接炸）；
-    #      **变量存在但为空串 ⇒ 也启动失败**
-    #      （LikeApiProperties#verifyAccessSecret 的 @PostConstruct 校验）
-    #    ⇒ ⇒ **两条路都 fail-closed**（不再有「悄悄用仓里的公开 UUID 起来」这条路径）。
-    #    ⚠️ 只去掉默认值**堵不住空串那条路** —— Spring 的 PropertyPlaceholderHelper
-    #      对「属性存在但值为空串」解析成空串（**不走默认值、也不报错**）
-    #      ⇒ 空串必须由代码堵 ⇒ 即 verifyAccessSecret()。
+    #
+    # 🔴 2026-10-29（本轮补）：**「yaml 不给默认值」只挡得住一半** ⇒ 另一半必须由**代码守卫**挡
+    #    ⇒ 守卫 = `LikeApiProperties#verifyAccessSecret()`（@PostConstruct）
+    #      ⇒ 本文件下面的 `access-secret: ${USER_JWT_SECRET}` **没有默认值**
+    #      ⇒ ⚠️ **单靠 yaml，缺变量时并不会炸**：Spring 的 `@ConfigurationProperties` 绑定器
+    #        遇到**解析不出来**的占位符**不报错**，而是把**占位符原文**当成值绑上去
+    #        ⇒ ⇒ 应用**照常启动** ⇒ ⇒ 而那是**仓里公开可知的一串字符**
+    #        ⇒ ⇒ 🔴 **比空密钥更危险**（HMAC 密钥公开 ⇒ 谁都能伪造 token）。
+    #      ⇒ ⚠️ 同理，**变量存在但值为空串**时，Spring 的 PropertyPlaceholderHelper
+    #        把**空串当合法值**（不走默认值、也不报错）⇒ 属性绑成 "" ⇒ 空签名密钥 ⇒ token 可伪造。
+    #      ⇒ ⇒ 「未解析占位符」与「空串」**两条都**由 `verifyAccessSecret()` 显式拒
+    #        ⇒ ⇒ **缺变量 / 空串 / 占位符原文 三条路都 fail-closed**。
+    #    ⇒ 回归网：`LikeApiPropertiesSecretGuardTest#prodLikeStartupWithoutEnvVarFails`
+    #      （真 SpringApplication + 真 ConfigData + 只有 application.yml ⇒ 生产等价路径）。
     #    ⚠️ 本地开发 / 测试：本模块测试用 `src/test/resources/application.properties` 提供同名变量
     #      （**test scope 不进产物 jar** ⇒ 生产拿不到默认值）。
     #    ⚠️ Go 侧写的是**字面量**（真源公开在仓里）⇒ 本条属「RAG 更严」的一侧
