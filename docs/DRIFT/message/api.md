@@ -1779,3 +1779,53 @@ GZ="$HOME/go/pkg/mod/github.com/zeromicro/go-zero@v1.10.2"
 sed -n '664p;715,717p' "$GZ/core/mapping/unmarshaler.go"   # ⇒ func 起点 / } / 空行
 sed -n '80,87p'  "$GZ/rest/token/tokenparser.go"            # ⇒ 空行 / func doParseToken / } / 空行
 ```
+
+---
+
+## 🔴 P0 #8 **域侧** · message-api 的 **明文默认验签密钥** ⇒ 已去掉 ⇒ 缺变量/空串 ⇒ **启动失败**（2026-10-29 · G2 阶段 1）
+
+> **阶段归属（`twoStage.md` §10）**：**A 类**（P0 #8「关键配置和敏感信息没有明显的不安全处理方式」）⇒ **域侧已修**（fail-closed）⇒ **根级**半边（compose 缺 `:?` 守卫 ＋ 根 README 的 `.env.example`）归「**合并收口执行者**」⇒ ⇒ **不阻断阶段 1**。
+> **产出归属**：`align/r2-message-follow-secret` 工作树 · **核对日期** 2026-10-29。
+> **性质**：**RAG 侧更严**（Go 侧写的是字面量）⇒ ⇒ 属**有意偏离**（不是「RAG 抄错了 Go」）⇒ 登记位置 = 本域台账（按 AGENTS.md「一条问题只在一个档里落笔」）。
+
+### §5.3 差异与暂缓项（11 项）
+
+| # | 项 | 内容 |
+|---|---|---|
+| **1** | **唯一编号** | `DRIFT-MSGAPI-016`（**新登记** · 域内）· **跨域同款**：`article-api` / `comment-api` / `favorite-api`（2026-10-29 · G3 · commit `45e0af4`）—— ⚠️ **本条比那三域多一层判据，见第 11 项** |
+| **2** | **原始项目中的文件 / 方法 / 业务契约** | Go 真源：`service/message/api/etc/messagecenter.yaml:11`（`UserAuth.AccessSecret` = **36 字节 UUID**）与 `:15`（`AdminAuth.AccessSecret` = **15 字节**）⇒ ⇒ **Go 侧同样把密钥写成仓里的字面量**。<br>Go 侧消费点（逐层到消费点，AGENTS.md §3.3.1）：`service/message/api/internal/handler/routes.go:60` 的 `rest.WithJwt(serverCtx.Config.UserAuth.AccessSecret)` ＋ `:92` 的 `rest.WithJwt(serverCtx.Config.AdminAuth.AccessSecret)`。<br>RAG 侧（修前）：`service/message/message-api/src/main/resources/application.yml:84`（`${USER_JWT_SECRET:<36 字节 UUID>}`）＋ `:87`（`${ADMIN_JWT_SECRET:<15 字节>}`）—— **两段都带明文默认值** |
+| **3** | **原始行为** | Go：**字面量** ⇒ 部署时不改也能起 ⇒ 但**任何拿到仓库的人都能用它签出合法 JWT** ⇒ ⇒ 该域的**鉴权等于没有**（除非运维记得改） |
+| **4** | **阶段 1 当前行为（修前）** | ① 不设环境变量 ⇒ **用公开密钥正常起来** ⇒ 🔴 **token 可伪造**；② 设成空串 ⇒ Spring 把空串当合法值 ⇒ **空签名密钥正常起来** ⇒ 🔴 **token 可伪造**（HMAC 空密钥谁都能算） |
+| **5** | **具体差异** | 修前：**两条路径都会「静默地不安全地起来」**。<br>修后：① **不设变量 ⇒ 启动失败** ② **设成空串 ⇒ 启动失败** ⇒ ⇒ **两条路都 fail-closed** |
+| **6** | **暂缓或简化理由** | **不适用 —— 已修**。⚠️ **但有一处不能域侧单做**：根级 `docker-compose.yaml` 的 `USER_JWT_SECRET` / `ADMIN_JWT_SECRET` 注入**缺 `:?` 守卫** ⇒ ⇒ 不设变量时 compose 会把**空串**注入容器 ⇒ ⇒ 修后容器会**启动失败**（安全上是 fail-closed ✔）⇒ ⇒ 但运维看到的是 crash-loop 而不是 compose 级的清晰报错 ⇒ ⇒ **该半边属【根级文件】⇒ 归「合并收口执行者」**（根 README 无 `.env.example` 属 **P0 #5** · 同样根级） |
+| **7** | **对业务正确性 / 安全性 / 数据一致性 / 可靠性的影响** | **安全性**：**正面**（核心）—— 从「可静默用公开密钥起来」变成「起不来」⇒ ⇒ 消除「token 可伪造」。<br>**业务正确性**：**无影响**（变量被提供时，密钥取值与 Go 侧**逐字节一致** ⇒ 验签行为零变化）。<br>**数据一致性 / 可靠性**：**无影响**。⚠️ **运维**：**缺变量 ⇒ 起不来** ⇒ ⇒ 部署说明必须同步（根 README 无 `.env.example` ⇒ 根级 ⇒ 归「合并收口执行者」） |
+| **8** | **是否阻断阶段 1** | **否**（域侧已修 ⇒ P0 #8 的**域侧部分**闭合）。⚠️ 根级半边（compose `:?` ＋ 根 README `.env.example`）**仍开** ⇒ ⇒ P0 #8 **整体**仍不能判 ✅ ⇒ ⇒ **收口执行者的事** |
+| **9** | **阶段 2 的恢复或替换方案** | **不需要恢复**（这是「更严」的一侧）。阶段 2 要做的是**把密钥管理做完整**：① 根级 `.env.example`（列出**全部**必填变量）② 密钥轮换 ③ 部署期校验清单 ⇒ ⇒ **共享面 ⇒ 阶段 2 / 收口** |
+| **10** | **阶段 2 的测试场景和通过标准** | ① **compose 侧**：`docker compose config` 在**不设** `USER_JWT_SECRET` / `ADMIN_JWT_SECRET` 时**必须报错**（`:?` 生效）⇒ **通过标准：非零退出 + 明确报错**。② **空变量起栈实测**：`USER_JWT_SECRET= docker compose up` ⇒ 容器**必须起不来**（fail-closed）⇒ **通过标准：日志里出现本域的 `IllegalStateException`**。③ **域侧回归**：`message-api` 全量测试全绿（密钥由 test scope 提供） |
+| **11** | **当前证据及剩余证据缺口** | **已有**：**L4**（域内守门 `MessageApiPropertiesSecretGuardTest`：**7 条** · **真 `ApplicationContextRunner` ＋ 真 `SpringApplication`（完整 ConfigData 流程）** ⇒ 缺变量 / 空串 / 未解析占位符 ⇒ **上下文起不来**（`hasFailed()`）＋ 正常密钥 ⇒ 上下文正常起（对照组）＋ 判据边界（含「未解析占位符字面量」）＋ **读真 yaml 的绑定回归网**）＋ `message-api` 全量 **114 条 / 0F / 0E / 0S**（`mvn -o -B -pl service/message/message-api -am -DargLine=-Xmx2g test` ⇒ **BUILD SUCCESS** · 3:13 min）。<br>⚠️ **本条比 article/comment/favorite 那三域多一层判据（实测逼出来的，重要）**：那三域（commit `45e0af4`）的守卫**只判「空 / 空白」**，而它们在 yaml 注释里断言的「**缺变量 ⇒ 启动失败**」**实测不成立** —— Spring 的 `@ConfigurationProperties` 绑定器遇到**解析不出来**的占位符时**不报错**，而是把**占位符原文**（如 `"${USER_JWT_SECRET}"`）**当成值绑上去** ⇒ ⇒ 应用**照常启动**，且那个「密钥」是**公开可知的字面量** ⇒ ⇒ **本域的守卫额外识别「未解析占位符字面量」**（`MessageApiProperties.java:177` 的 `UNRESOLVED_PLACEHOLDER`）⇒ ⇒ 才真正做到「缺变量 ⇒ 启动失败」。<br>**剩余缺口**：① **compose 侧**未验证（**根级 ⇒ 归「合并收口执行者」**）② **根 README 无 `.env.example`**（P0 #5 · 根级） |
+
+### §5.4 实际改造记录（8 项）
+
+| # | 项 | 内容 |
+|---|---|---|
+| **1** | **修改前的实现和行为** | `message-api/src/main/resources/application.yml:84`：`access-secret: ${USER_JWT_SECRET:<36 字节 UUID>}`；`:87`：`access-secret: ${ADMIN_JWT_SECRET:<15 字节>}` ⇒ **两段都有默认值** ⇒ 不设变量也能起 ⇒ 用仓里的公开密钥验签 |
+| **2** | **具体问题** | 「仓里写死的公开密钥」＋「Spring 把空串当合法值」＋「Spring 把未解析占位符**原文**当合法值」⇒ ⇒ **三条路都能静默地不安全地起来** ⇒ ⇒ P0 #8 的域侧缺口 |
+| **3** | **修改后的实现** | ① yaml：`:100` `access-secret: ${USER_JWT_SECRET}`、`:103` `access-secret: ${ADMIN_JWT_SECRET}`（**去默认值**；**键路径逐字未动**：`message-api.user-auth.access-secret` / `message-api.admin-auth.access-secret`）＋ 注释写明「为什么」与「测试从哪来」。<br>② `MessageApiProperties`：**新增 `@PostConstruct verifyAccessSecrets()`**（`:91`）⇒ 逐段调 `verifyUserAccessSecret()`（`:124`）/ `verifyAdminAccessSecret()`（`:140`）⇒ 值为 `null`/空串/全空白/**未解析占位符字面量** ⇒ 抛 `IllegalStateException` ⇒ **启动失败**。<br>③ 新增 `service/message/message-api/src/test/resources/application.properties`：**test scope** 提供两段密钥（值 = 测试里签 token 的常量）⇒ ⇒ **测试不依赖环境变量** ＋ **不进产物 jar** ⇒ 生产拿不到默认值 |
+| **4** | **修改理由** | ① 去默认值只能堵「变量被提供」那一半 ⇒ 堵不住「变量没设」（**实测**：绑定器留占位符原文）也堵不住「变量是空串」（**Spring 的 `PropertyPlaceholderHelper` 实测行为：存在但为空串 ⇒ 解析为空串、不走默认值**）⇒ ⇒ **三条都必须由代码校验**才真正 fail-closed。<br>② 用 `@PostConstruct` 而不是 `@Validated + @NotBlank` ⇒ **零新增依赖**（不引入 `spring-boot-starter-validation`）。<br>③ **两个 `@PostConstruct` 写成两个方法 ⇒ 报错顺序不确定**（实测两次运行分别先抛 user 段与 admin 段 ⇒ 同一 bean 内多个 `@PostConstruct` 的执行顺序不由 JVM 规范保证）⇒ ⇒ 改成**一个入口 + 顺序固定的逐段校验**。<br>④ 测试用 test scope 的 `application.properties` 而不是改 14 个 `@SpringBootTest` 类 ⇒ ⇒ **一处改动** ＋ **不污染主配置**（test scope 不进 jar） |
+| **5** | **实际变更文件** | ① 改 `service/message/message-api/src/main/resources/application.yml`（**只改值** ＋ 注释）<br>② 改 `…/config/MessageApiProperties.java`（+`@PostConstruct` 校验 ＋ 类级 javadoc 订正「上表是 Go 值、不是 RAG 侧默认值」）<br>③ **新增** `…/src/test/resources/application.properties`<br>④ **新增** `…/src/test/java/com/rag/message/message/api/config/MessageApiPropertiesSecretGuardTest.java`（**7 条**） |
+| **6** | **测试场景和断言** | ① **空串 / 未设 ⇒ 上下文起不来**（`ApplicationContextRunner` ＋ `hasFailed()`）② **正常密钥 ⇒ 上下文正常起**（对照组 ⇒ 证明不是「无脑拒绝启动」）③ **判据边界**：`null` / `""` / `"   "` / **未解析占位符字面量** ⇒ 抛；正常值 ⇒ 不抛（两段各测一遍 ＋ 组合入口）④ **读真 yaml**：绑定进嵌套字段（键路径写错 ⇒ 红）⑤ **读真 yaml ＋ 变量未设 / 空串 ⇒ 起不来** ⑥ **生产同款启动**（真 `SpringApplication` ＋ 完整 ConfigData ＋ `spring.config.location` 只加载 `application.yml`）＋ 变量未设 ⇒ **起不来**（⇒ 「缺变量 ⇒ 启动失败」的**生产等价**证据） |
+| **7** | **实际执行结果** | `mvn -o -B -pl service/message/message-api -am -DargLine=-Xmx2g test` ⇒ **BUILD SUCCESS**（3:13 min）⇒ **message-api 114 条 / 0F / 0E / 0S**（含守门 7 条全绿）。<br>⚠️ 另注：`service/common` 的 `RpcInterceptorClientDeadlineGateTest.effectiveTimeoutMustInheritClientDeadline` 在同一轮**偶发红**（**超时继承的时序敏感**）⇒ 重跑即绿 ⇒ **与本条无关**（`service/common` 与 message/follow **无依赖关系**，且本轮**未改动** `service/common` 任何文件） |
+| **8** | **尚未解决的问题 / 对阶段 2 的影响** | ① **compose 侧 `:?`**（**根级 ⇒ 归「合并收口执行者」**）② **根 README 的 `.env.example`**（P0 #5 · 根级 ⇒ 合并收口执行者）③ **跨域同款缺口**：article-api / comment-api / favorite-api 的守卫**只判「空 / 空白」** ⇒ 它们的「缺变量 ⇒ 启动失败」**实测不成立**（绑定器留占位符原文 ⇒ 应用照常启动）⇒ ⇒ **本轮已在本域修好，但那三域需同款补齐**（**不属本 lane 写权面 ⇒ 上报项**）④ **阶段 2**：完整的密钥管理（轮换 ＋ `.env.example` ＋ 部署清单） |
+
+### 复算命令
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r2-message-follow-secret"
+# ① 明文默认值已清零
+grep -rnE '\$\{(USER_JWT_SECRET|ADMIN_JWT_SECRET):[^}]' service/message/ service/follow/ ; echo "exit=$? (1 = 0 命中)"
+# ② 域侧守门（缺变量 / 空串 / 未解析占位符 ⇒ 启动失败；正常密钥 ⇒ 正常起）
+mvn -o -B -pl service/message/message-api -am -DargLine=-Xmx2g \
+    -Dtest=MessageApiPropertiesSecretGuardTest -DfailIfNoTests=false test
+# ③ 域内全量
+mvn -o -B -pl service/message/message-api -am -DargLine=-Xmx2g test
+```

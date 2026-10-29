@@ -140,9 +140,25 @@ grpc:
 # ⚠️ follow-api 只验签、不签发：Go 侧本服务没有 login / register 端点。
 #   AccessExpire 在本模块不被读取（Go 侧同样没有 logic 读它，签发在别的服务），
 #   保留字段是为了让 yaml 与 Go 端 1:1 可对照。
+#
+# 🔴 2026-10-29 · G1 阶段 1 · P0 #8：**默认明文值已去掉**
+#    （修前是「环境变量名 + 冒号 + 明文默认值」的占位符写法；默认值出处 = Go
+#      `service/follow/api/etc/followcenter.yaml:11` —— **Go 侧写的是字面量**）
+#    ⇒ 理由：那个值是**写在仓里的公开密钥** ⇒ 谁都能用它伪造 JWT ⇒ 而本域**只验签、不签发**
+#    ⇒ ⇒ 一旦部署时忘了覆盖 ⇒ token 可伪造（P0 #8）。
+#    ⇒ 现在 **缺变量 ⇒ 启动失败**、**变量存在但为空串 ⇒ 也启动失败**
+#      （⚠️ **实测（2026-10-29）**：Spring 的 `@ConfigurationProperties` 绑定器遇到
+#        **解析不出来**的占位符时**不报错**，而是把**占位符原文**当值绑上去
+#        ⇒ ⇒ 只去掉默认值**堵不住**「变量没设」那条 ⇒ ⇒ 两条都得由
+#        FollowApiProperties#verifyAccessSecret 的 @PostConstruct 校验堵
+#        ⇒ ⇒ **两条路都 fail-closed**）。
+#    ⚠️ 本地开发 / 测试：本域测试用 `src/test/resources/application.properties` 提供同名变量
+#      （值与测试里签发 token 用的常量一致）⇒ ⇒ **测试不依赖环境变量**。
+#    ⚠️ 部署侧：根级 `docker-compose.yaml` 需给本服务注入 `USER_JWT_SECRET`
+#      （**根级文件 ⇒ 归「合并收口执行者」**；compose 侧应给该变量加 `:?` 守卫 ⇒ 未设即报错）。
 follow-api:
   user-auth:
-    access-secret: ${USER_JWT_SECRET:ae0536f9-6450-4606-8e13-5a19ed505da0}
+    access-secret: ${USER_JWT_SECRET}
     access-expire: ${USER_JWT_EXPIRE:31536000}
 
 # =============================================================================
