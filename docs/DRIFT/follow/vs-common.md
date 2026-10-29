@@ -257,6 +257,7 @@ installed_rank | version |      description       | success
 
 | 探针 | 结果 | 对 follow 域的定位 |
 |---|---|---|
+| 🟢 **`tools/api-full-parity-probe/follow/run.sh`**（**2026-10-29 落仓** · Round-2 T-2.5 / G-1） | ✅ **EXIT=0** —— **20 条**用例 · **Go 真源 == RAG == 冻结期望值** 三方**逐字节**一致<br>（读路径 9 + 协议层 6 + 写路径 5） | 🟢 **follow 域自己的 HTTP 层**首次有**可复算**的双侧活体证据（此前「52/52」的脚本全在 `/tmp` 且已消失 ⇒ 不可复算）<br>🔴 **顺带修掉 FAILING-010 / PITFALL-FOLLOW-010**：旧探针**固定 `-o` 文件** ⇒ 请求失败时读到**上一次的残留 body** ⇒ 假绿 ⇒ 现为**每请求一个 `mktemp` 唯一文件** + **`http_code == 000` 守卫**（`mutate-parity.sh` **M4/M5** 把假绿**复现**出来）<br>⚠️ **覆盖面小于历史 52 条**：**故障注入族**（黑洞 / 熔断 / 指标 / 保护层四道 / JWT 边界 / 并发竞态）**仍不可复算** ⇒ 「52/52」**降级为历史声明** |
 | `tools/semantic-probe/run-parity.sh` | ✅ **EXIT=0**（56 例 · 一致 54 · 不一致 0 · 已签字偏离 2） | ⚠️ 覆盖的是 **message 域 DTO ＋ `users-common` 的必填校验/coercion** ⇒ 对 follow 是**间接旁证**（users-common 侧）<br>⇒ ⚠️ **`follow` 自己的 DTO 解析语义（`FollowGoStyleCoercion` 私有变体）本轮无双侧活体对拍** ⇒ **A4 / A6 / A7 在 follow 侧仍是「台账既有证据强度」** |
 | `tools/semantic-probe/rpc-timeout/run-rpc-timeout-parity.sh` | ✅ **EXIT=0**（3/3 一致 · `client_deadline_ctx` 一致） | 🟢 **`client_deadline_ctx` = E38② 第①层的验证用例** ⇒ **① 层已闭环** ⇒ 直接改写了 §1.1 的 `UNRESOLVED-ARPC-002` 状态与 §4 #3 的派单内容（**已向 G4 发订正**） |
 

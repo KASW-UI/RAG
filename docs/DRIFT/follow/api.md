@@ -12,6 +12,21 @@
 **首轮组件级对照：发现 2 条 wire 级可观察漂移（均已修）**，其余语义层 `SEMANTICALLY EQUIVALENT`。
 **双侧活体对拍：协议层 20 条 + 数据路径 16 条 + 边界/鉴权 16 条 = 52/52 逐字节一致。**
 
+> 🔴 **2026-10-29 订正（Round-2 T-2.5 · G-1）**：上面这句「52/52」**今天不可复算** ——
+> 那批探针脚本（`/tmp/probe.sh` / `probe_data.sh` / `probe_ext.sh` / `cmp.sh` / `u3d_probe.sh` /
+> `u3c_probe.sh` / `blackhole3.py`）**全在 `/tmp` 且已消失** ⇒ 台账自己写明「故障注入装置应从
+> `/tmp` 提升为仓库资产 —— 本轮未做」。
+> ⇒ **本轮已把其中一部分搬进版本控制**：
+> [`tools/api-full-parity-probe/follow/`](../../../tools/api-full-parity-probe/follow/)
+> （`run.sh` + `expected.txt` + `mutate-parity.sh` + `README.md` + `mint-jwt.py`）
+> ⇒ **20 条用例 · Go == RAG == 冻结期望值 三方逐字节一致**（2026-10-29 实跑），
+> **可复算**（`bash tools/api-full-parity-probe/follow/run.sh` ⇒ EXIT=0）。
+> ⚠️ **52 条与 20 条不是同一批**：52 条覆盖「协议层/数据路径/边界鉴权」三类，
+> 20 条覆盖「读路径 9 + 协议层 6 + 写路径 5」⇒ **本轮未复现的 32 条仍不可复算**
+> （尤其**故障注入**类：黑洞 / 熔断 / 指标 / 保护层四道 / JWT 边界 9 种 / 并发竞态 40 轮）。
+> ⇒ 「52/52」**降级为「历史声明，不可复算」**；**可复算**的部分 = 20 条（见下方 §证据强度 与
+> [`vs-common.md`](vs-common.md) §8）。
+
 | # | 漂移 | 级别 | 状态 |
 |---|---|---|---|
 | DRIFT-FOLLOW-001 | 空列表出参 Go=`"user_ids":null` / RAG=`"user_ids":[]` | **可观察（L1 wire）** | ✅ 已修 |
@@ -685,7 +700,7 @@ PITFALL-FOLLOW-011 / PITFALL-FOLLOW-012。）
 |---|---|
 | 源码逐条对照（24 个 Go 文件 ↔ 27 个 Java 文件） | ✅ 双向静态 |
 | 真启动（真 Tomcat + 真 Redis + 真 Nacos） | ✅ **真启动**（`Started FollowApiApplication`） |
-| HTTP 行为 | ✅ **双侧活体对拍** **52/52** 逐字节一致（协议层 20 + 数据路径 16 + 边界/鉴权 16） |
+| HTTP 行为 | ⚠️ **历史**：双侧活体对拍 **52/52** 逐字节一致（协议层 20 + 数据路径 16 + 边界/鉴权 16）—— **2026-10-24 测，脚本在 `/tmp` ⇒ 已消失 ⇒ 不可复算**<br>🟢 **现状（2026-10-29 · Round-2 T-2.5）**：**20 条**已落仓可复算（[`tools/api-full-parity-probe/follow/`](../../../tools/api-full-parity-probe/follow/)）⇒ **Go == RAG == 冻结期望值 三方逐字节一致**（读路径 9 + 协议层 6 + 写路径 5）⇒ 证据强度 **L4 双侧活体（可复算）** |
 | 指标数值 | ✅ **双侧抓取比对**（归零重测；计数器同名同标签同值；直方图 Go 的 12 个 le 边界全在 ⇒ 残留见 DRIFT-FOLLOW-007） |
 | 保护层四道（MaxConns/MaxBytes/CPU shedding/breaker） | ✅ **双侧活体实测**（阈值压到 1 后对拍）；breaker 为**受控并发对照**（见 U3 节） |
 | 下游挂死的超时级联 | ✅ **双侧活体实测**（黑洞 v3：完成 HTTP/2 握手后挂住） |
@@ -694,6 +709,10 @@ PITFALL-FOLLOW-011 / PITFALL-FOLLOW-012。）
 | 并发竞态（Follow × Block） | ✅ **双侧活体实测**（各 40 轮）⇒ **两侧共有缺陷**，记 Pitfalls 不记 DRIFT |
 
 ## 受控故障注入环境（可复现）
+
+> 🔴 **2026-10-29 订正（Round-2 T-2.5）**：**本节的 `/tmp` 装置已全部消失** ⇒
+> 下面的「可复现」**只对当时成立** ⇒ **今天不可复算**。
+> ⇒ 已落仓的**可复算**替代品 = [`tools/api-full-parity-probe/follow/`](../../../tools/api-full-parity-probe/follow/)（下表最后一行）。
 
 | 组件 | Go 侧 | RAG 侧 |
 |---|---|---|
@@ -720,6 +739,7 @@ PITFALL-FOLLOW-011 / PITFALL-FOLLOW-012。）
 | `/tmp/u3c_probe.sh <base> <label>` | **串行**口径（12 发 × 0.3s 间隔）⇒ 测超时级联 |
 | `/tmp/probe.sh` / `probe_data.sh` / `probe_ext.sh` | 协议层 20 + 数据路径 16 + 边界 16（52/52 逐字节对拍） |
 | `/tmp/cmp.sh` | 两侧同库复位 + 逐行 diff |
+| 🟢 **`tools/api-full-parity-probe/follow/run.sh`**（**2026-10-29 落仓**） | **两侧同时起服务**（Go 真源 `follow-api`/`follow-rpc`/`user-rpc` ＋ RAG `follow-api`/`follow-rpc`）· **两侧各自播种同一行** · 20 条用例 · **Go == RAG == 冻结期望值** 逐字节<br>🔴 **已修 PITFALL-FOLLOW-010 / FAILING-010**：旧探针用**固定 `-o` 文件** ⇒ 请求失败时读到**上一次的残留 body** ⇒ 假绿 ⇒ 现改为**每请求一个 `mktemp` 唯一文件** + **`http_code == 000` 守卫**（`mutate-parity.sh` 的 **M4/M5** 专门盯这两条：M5 能把假绿**复现**出来） |
 
 > ⚠️ **三个「假绿」陷阱**（详见 [`docs/Pitfalls/follow/api.md`](../../Pitfalls/follow/api.md)）：
 > 探针固定 `-o` 文件 ⇒ 失败时 body 是上次残留（PITFALL-FOLLOW-010）；
