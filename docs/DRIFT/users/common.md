@@ -14,13 +14,13 @@
 
 | 项 | 值 |
 |---|---|
-| 核对日期 | **2026-10-23**（22:00–22:25 实跑） |
+| 核对日期 | **2026-10-29**（第六轮 · Round-2 T-2.6 · 探针落仓并实跑；首轮为 2026-10-23 22:00–22:25） |
 | 组件 | `service/users/users-common`（12 个 main 类 + 4 份 DDL + 2 个测试类，1,532 行） |
-| Go 对照面 | `service/user/common/{cryptx/password.go, errmsg/errmsg.go, jwt/jwt.go}`（**全部 3 个文件，无遗漏**） |
-| **证据强度** | ✅ **双侧活体对拍**（Go 进程 ↔ JVM 进程，逐条逐字节比对；非静态源码、非单侧推断） |
-| Go 侧探针 | `/tmp/commonprobe/go/`（`errmsg`/`jwt`/`cryptx` 72 行）、`go3/`（bearer/`go-zero@v1.10.2/core/mapping` 46 行）、`xverify/`（交叉验签）、`alcheck/`（alg 固定消费者） |
-| RAG 侧探针 | `/tmp/commonprobe/CommonProbe.java`（**调用 `users-common` 的真实类**，无重写）、`XVerify.java`、`SigDebug.java` |
-| 冻结仓完整性 | `go.mod` 用 `replace` 指令**只读引用**真源包；跑完 `git status` 与探针前完全一致（仅 2 个先前存在的未跟踪文件） |
+| Go 对照面 | `service/user/common/{cryptx/password.go, errmsg/errmsg.go, jwt/jwt.go}`（**全部 3 个文件，无遗漏**）＋ 两个 Go 侧没有同名包的超集（`http/*` → go-zero `core/mapping`；`ddl/*` → GORM `AutoMigrate`） |
+| **证据强度** | ✅ **双侧活体对拍**（Go 进程 ↔ JVM 进程，逐条逐字节比对；非静态源码、非单侧推断）<br>🆕 **且可复算**（2026-10-29 起）：探针**在仓内** `tools/api-full-parity-probe/users-common/`、期望值冻结、**变异必红** ⇒ 详见 §「2026-10-29 第六轮」 |
+| Go 侧探针 | ✅ **在仓内**：`tools/api-full-parity-probe/users-common/go/{main.go,admin_main.go}`（`go build -overlay` 虚拟挂进真源模块树 ⇒ **真源仓零改动**）<br>⚠️ ~~`/tmp/commonprobe/go/`（`errmsg`/`jwt`/`cryptx` 72 行）、`go3/`、`xverify/`、`alcheck/`~~ —— **已消失** ⇒ 旧结论曾**不可复算** |
+| RAG 侧探针 | ✅ **在仓内**：`tools/api-full-parity-probe/users-common/java/Probe.java`（**调用 `users-common` 的真实类**，无重写）<br>⚠️ ~~`/tmp/commonprobe/CommonProbe.java`、`XVerify.java`、`SigDebug.java`~~ —— **已消失** ⇒ 同上 |
+| 冻结仓完整性 | `go build -overlay`（**虚拟挂载，不写盘**）+ 脚本第 0/1/7 步各断言一次 `git status --porcelain -- service/user` 为空 ⇒ **真源一个字节都没被改** |
 | 依赖版本 | Go：`golang-jwt/jwt/v4@v4.5.2`、`go-zero@v1.10.2`、`x/crypto@v0.53.0`、Go 1.25.11<br>Java：**jjwt 0.12.6**、`spring-security-crypto 7.0.7`、JDK 21 |
 
 ### 本轮的方法论要点（踩过的坑都写在这）
@@ -574,6 +574,9 @@ SEMANTICALLY EQUIVALENT
   ⇒ **复开触发条件**：任一条被取证 ⇒ **重开本判定**
 - **对照覆盖**：176 条，**全部双侧活体实测**；证据强度为本仓 users 域组件最高
   （对比：`user-api` 上限为静态源码、`user-rpc` 为真 PG + 真启动）
+  🆕 **2026-10-29 追加**：探针落仓后**重跑并冻结**为 **260 条**（218 条两侧逐字节相同 ·
+  25 条单侧专属 · 17 条已登记不同）⇒ 覆盖从「176 条声明」升级为「**260 条可复算**」
+  ⇒ 详见 §「2026-10-29 第六轮」。
 
 > ⚠️ **本判定的效力边界**：本轮只对照了 **common 自身**。
 > 「common 一致」**推不出**「调用方一致」——
@@ -584,17 +587,26 @@ SEMANTICALLY EQUIVALENT
 
 ## 8. 本轮的复现方式
 
-```bash
-# Go 侧（只读引用冻结仓，不写入一个字节）
-cd /tmp/commonprobe/go   && GOFLAGS=-mod=mod go run . > go_out.jsonl
-cd /tmp/commonprobe/go3  && GOFLAGS=-mod=mod go run .
+> 🆕 **2026-10-29 起：探针已落仓 ⇒ 下面两条命令就是复现入口**（原先的 `/tmp/commonprobe/**` 已消失）。
 
-# RAG 侧（调用 users-common 真实类）
-cd /tmp/commonprobe && java -cp "classes:$RAG_CP" CommonProbe > rag_out.jsonl
-python3 diff.py go_out.jsonl rag_out.jsonl
+```bash
+# ① 双侧活体对拍（Go 真源进程 ＋ JVM 进程，两侧同时跑，真 PG 播种同一行，逐字节比对）
+bash tools/api-full-parity-probe/users-common/run.sh          # EXIT=0 = Go == RAG == expected.txt
+
+# ② 变异验证（探针自己也要能被验：M1~M4 必须精确转红 + 还原后转绿）
+bash tools/api-full-parity-probe/users-common/mutate-parity.sh # EXIT=0 = 非假绿
 ```
 
-> 探针目录在 `/tmp`，**不入仓**。若需长期回归，守门测试已在仓内落地（见 §5）。
+> ⚠️ 2026-10-23 那轮的复现方式（**已失效**，留档说明为什么换掉）：
+> ```bash
+> cd /tmp/commonprobe/go   && GOFLAGS=-mod=mod go run . > go_out.jsonl
+> cd /tmp/commonprobe/go3  && GOFLAGS=-mod=mod go run .
+> cd /tmp/commonprobe && java -cp "classes:$RAG_CP" CommonProbe > rag_out.jsonl
+> python3 diff.py go_out.jsonl rag_out.jsonl
+> ```
+> ⇒ `/tmp` 里的脚本**不算证据**（Round-2 铁律第 1 条）⇒ 已被上面两条**在仓内**的命令取代。
+> ⚠️ 新探针的 Go 侧**不再用** `replace` 指令，而是在真源模块树里用 `go build -overlay`
+> **虚拟挂载** ⇒ 既能 import 真源的 `internal/model`，又**不写真源一个字节**。
 ---
 
 <!-- @fix 2026-10-23 第五轮：UNRESOLVED-USERSCOMMON-005 关闭（双侧真实路径实测） -->
@@ -647,3 +659,173 @@ python3 diff.py go_out.jsonl rag_out.jsonl
 **任何一侧都不可能签出 ≥2^64 的 userId** ⇒ 该分歧点**当前不可观察**，不构成漂移。
 
 ⇒ **本条关闭。** 若将来引入新的 uid 生成器（超过 2^63），**必须重开本条**。
+
+---
+
+<!-- @new 2026-10-29 · `align/r2-users-common` · Round-2 **T-2.6**（G-4）：把「176 条活体证据」**落仓**成**可复算**的探针 -->
+
+## 2026-10-29 第六轮：G-4 闭环 —— 探针落仓 + 证据**可复算**（`align/r2-users-common` · Round-2 T-2.6）
+
+### 0. 上一轮（§0 / §8）留下的**证据缺口**是什么
+
+| 项 | §0（2026-10-23）的写法 | 本轮（2026-10-29）的实测 |
+|---|---|---|
+| 证据强度 | ✅ **双侧活体对拍**（Go 进程 ↔ JVM 进程，逐条逐字节） | ✅ **双侧活体对拍** ＋ 🆕 **可复算**（探针**在仓内**、期望值冻结、**变异必红**） |
+| Go 侧探针 | `/tmp/commonprobe/go/`、`go3/`、`xverify/`、`alcheck/` | 🔴 **`/tmp` 已清空 ⇒ 该结论今天跑不出来**（`docs/DRIFT/_cross/phasegoal-judge.md` §九 **G-4** 原文：「`users-common` 的 176 条双侧活体证据在 `/tmp/commonprobe/**`，已消失」） |
+| RAG 侧探针 | `/tmp/commonprobe/CommonProbe.java`、`XVerify.java`、`SigDebug.java` | 🔴 同上 |
+| 复现方式 | §8 写的是 `cd /tmp/commonprobe/go && go run .` | 🔴 **命令已失效** ⇒ §0 的「176 条全部双侧活体实测」在证据链上**降级为「声明」**（AGENTS.md §3.3 的口径：「**声明的结论，不是可复算的**」） |
+
+⇒ **本轮把这条链补上**：探针落进 `tools/api-full-parity-probe/users-common/`，
+**在仓内**（`git ls-files tools/ | grep users-common` 可见）⇒ §0 的 R 档从「声明」升级为「**可复算**」。
+
+### 1. 落了什么
+
+| 文件 | 作用 |
+|---|---|
+| `tools/api-full-parity-probe/users-common/run.sh` | 编排：前置检查 → 构建两侧探针 → 起两侧库 → **两侧同时跑**（phase 1 库面+DDL / phase 2 交叉验签）→ 逐 case 判定 |
+| `tools/api-full-parity-probe/users-common/mutate-parity.sh` | **变异验证**（M1~M4 ⇒ 必须精确转红 + 还原后转绿） |
+| `tools/api-full-parity-probe/users-common/expected.txt` | **冻结的期望值**（260 条：`CASE` 243 条 + `REG` 17 条）⇒ 每次跑都要满足 **Go == RAG == expected.txt** |
+| `tools/api-full-parity-probe/users-common/compare.py` | 判定器（**故意很严**：未冻结的 case / 期望值与实现脱钩 ⇒ 都算失败） |
+| `tools/api-full-parity-probe/users-common/go/{main.go,admin_main.go}` | **Go 真源侧**探针（`go build -overlay` **虚拟挂进**真源模块树 ⇒ 真源仓零改动） |
+| `tools/api-full-parity-probe/users-common/java/Probe.java` | **RAG 侧**探针（调用 `users-common` 的**真实类**，不重写任何实现） |
+| `tools/api-full-parity-probe/users-common/README.md` | 覆盖范围 / 11 条踩坑 / 变异表 |
+
+**为什么是「库面」而不是某个 api**：`users-common` 是**共享库**（§3.5 / §5.3f 的第二个共享层）⇒
+它的对照面是 **Go `service/user/common/**` 的全部 3 个文件** ＋ 两个 Go 侧没有同名包的超集
+（`http/*` 的对照面在 go-zero 库里、`ddl/*` 的对照面在 GORM 库里）⇒ 探针打的是**库面**。
+
+### 2. 实跑结果（**真实输出**，非转述）
+
+```console
+$ bash tools/api-full-parity-probe/users-common/run.sh
+== 0/7 前置检查 ==
+   ✓ 命令齐 / 真源仓 service/user 干净
+   ✓ PG 模式 = docker
+== 1/7 构建 Go 侧探针（go build -overlay ⇒ 虚拟挂进真源模块树，真源仓零改动） ==
+   ✓ Go 侧探针构建完成（真源仓仍干净）
+== 2/7 构建 RAG 侧探针（javac + users-common 的真实 classes） ==
+   ✓ RAG 侧探针编译完成（classpath 含 users-common 真实 classes）
+== 3/7 两侧各自的 Postgres（Go 侧一个库 · RAG 侧另一个库 ⇒ 互不污染） ==
+   ✓ 两侧库就绪（Go :18111/first_db · RAG :18112/first_db）
+== 4/7 phase 1 —— 两侧**同时**起跑（库面 + DDL 面；各自在**自己的库**里建表并播种同一行） ==
+   ✓ phase 1 两侧都跑完（Go 0 · RAG 0）
+   ✓ Go 侧 admin 探针跑完（admin 两张表的 AutoMigrate）
+== 5/7 phase 2 —— 两侧**同时**做交叉验签（Go 签的 ⇄ RAG 验；RAG 签的 ⇄ Go 验） ==
+   ✓ phase 2 两侧都跑完
+== 6/7 逐 case 比对（Go == RAG == expected.txt） ==
+   · Go 侧 case 数：358 · RAG 侧：336
+   两侧逐字节相同的 case : 218
+   单侧专属的 case       : 25
+   已登记的两侧不同       : 17
+   失败                  : 0
+✅ Go == RAG == expected.txt（逐字节）
+== 7/7 收尾 ==
+   ✓ 真源仓 service/user 全程干净（跑前 / 构建后 / 跑后各断言一次）
+$ echo $?
+0
+```
+
+**覆盖范围（260 条）**：`errmsg` 39 · `jwt` 形状 66 + 规范化签名 11 + **交叉验签 12** ·
+`cryptx` 14 + 形状 1 + **交叉验签 1** · `bearer` 22 · `,string` int64 17 · 必填校验 4 ·
+**DDL 逐列 33** + 表清单 1 · **播种读回 21**。
+
+**两侧各自一个真 PG**（Go 侧 `admin/first_db`、RAG 侧另一个库），**各自用自己的真源路径建表**
+（Go = GORM `AutoMigrate`；RAG = `SchemaInitializer.applyAll`），**各自播种同一行** ⇒
+**不是「两边都空」那种无信息量的对拍**。
+
+### 3. 变异验证（**探针自己也要能被验** · AGENTS.md §3.3.3）
+
+```console
+$ bash tools/api-full-parity-probe/users-common/mutate-parity.sh
+== 基线（未变异）必须转绿 ==
+   ✅ 基线绿（exit 0）
+== M1 冻结的期望值被改（c.errmsg.200：OK → Ok）⇒ 必须转红 ==
+   ✅ 转红（exit 1）
+   ✅ 精确转红：c.errmsg.200
+== M2 RAG 侧 JwtUtil 影子副本（不再钉死 HS256）⇒ 必须转红 ==
+   ✅ 转红（exit 1）
+   ✅ 精确转红：c.jwt.alg.48
+   ✅ 精确转红：c.jwt.siglen.48
+== M3 Go 侧真源 jwt.go 的 overlay 影子副本（HS256 → HS384）⇒ 必须转红 ==
+   ✅ 转红（exit 1）
+   ✅ 精确转红：c.jwt.alg.15
+== M4 RAG 侧 GoStyleStringInt64 影子副本（不再接受 JSON 数字字面量）⇒ 必须转红 ==
+   ✅ 转红（exit 1）
+   ✅ 精确转红：c.int64.1
+== 还原后必须重新转绿（影子副本全部在临时目录 ⇒ 仓内源码从未被改） ==
+   ✅ 还原后绿（exit 0）
+✅ 四条变异全部精确转红 + 还原后转绿 ⇒ 探针非假绿
+$ echo $?
+0
+```
+
+> 🔴 **变异脚本不写共享层源码、也不写真源仓**：
+> 「打实现」的变异全部用**影子化**（RAG 侧把类的**副本**编译到临时目录并置于 classpath 最前；
+> Go 侧用 `go build -overlay` 替换真源的某个文件为**变异副本**）⇒ 仓内源码**一个字节都没动**
+> （脚本末尾断言 `git status` 两处皆空）。
+
+### 4. 本轮**新抓到**的一条：`DRIFT-USERSCOMMON-006` 🔴（潜伏 · wire 不可观察 · 共享层写权）
+
+**现象**：`BearerTokenExtractor.tokenForSignatureVerification("Bearer ")` 返回 `"Bearer "`；
+Go 侧返回 `""`（剥成空串）。
+
+| 侧 | 判据 | `"Bearer "`（7 字符）的结果 |
+|---|---|---|
+| Go | `golang-jwt/jwt/v4@v4.5.2/request/oauth2.go:8-14`：`if len(tok) > 6 && strings.ToUpper(tok[0:7]) == "BEARER " { return tok[7:], nil }` ⇒ 判据是 **`len(tok) > 6`**（即 ≥7） | ✅ **剥成空串** |
+| RAG | `service/users/users-common/src/main/java/com/rag/users/common/jwt/BearerTokenExtractor.java:74-81`：`if (authHeader.length() > BEARER_PREFIX.length() && …)` ⇒ `BEARER_PREFIX.length()` = **7** ⇒ 判据变成 **`length() > 7`** | 🔴 **不剥**（差一） |
+
+- 🔴 **该类自己的 javadoc（同文件 `:62-71`）写的就是 Go 的语义**（「`Bearer `(7 字符) 会被剥成空串」）
+  ⇒ **代码与自己的注释矛盾** ⇒ 这不是「设计取舍」，是**实现写错了**。
+- **影响面**：`tokenForSignatureVerification` 被 **8 个外域 api** 的验签路径调用
+  （`user-api` / `admin-api` / `like-api` / `comment-api` / `follow-api` / `message-api` /
+  `favorite-api` / `article-api`）⇒ **共享层的改动面是全仓**。
+- **为什么判「wire 不可观察」**：两侧在 `"Bearer "` 这种畸形头上**都落到 401**
+  （RAG：`token` 非空 ⇒ `parseSignedClaims("Bearer ")` 抛错 ⇒ 401；
+  Go：token 为空 ⇒ 解析失败 ⇒ 401）⇒ 与 `DRIFT-USERSCOMMON-002/003`（键序）同类 ⇒ 潜伏差异。
+- **处置**：⏸️ **本轮不改** —— `service/users/users-common/**` 是 **G4 的写权面**（AGENTS.md §5.3f）
+  ⇒ **按「反馈单 7 项」转派 G4**。
+  **建议修法**：`length() > BEARER_PREFIX.length()` ⇒ `length() >= BEARER_PREFIX.length()`
+  （即 Go 的 `len(tok) > 6`）；改完 `c.bearer.sig.5` 的 REG 行要同步改成 CASE 行。
+- **复开触发条件**：G4 落地该修法 ⇒ 本条销号 ⇒ `expected.txt` 的 `REG|c.bearer.sig.5|…` 改 `CASE|…|BOTH|`。
+
+### 5. 本轮**实测**（不再是「未查」）的两条取证缺口
+
+| 原缺口 | 本轮结论 | 证据 |
+|---|---|---|
+| **UNRESOLVED-USERSCOMMON-004**（`ddl/SchemaInitializer` 与 Go `AutoMigrate` 的**逐列等价性**） | 🟡 **部分关闭**：**33 列逐列实测**，**24 列两侧逐字节相同**；**9 列**是 **3 类已登记差异** ① `users_user.status` 可空性（Go `bigint:YES` / RAG `bigint:NO`，AGENTS.md §0 记「仍未修」）② 8 个 `create_time`/`update_time` 的 `DEFAULT CURRENT_TIMESTAMP`（Go **无** / RAG **有**，AGENTS.md §0 记「刻意保留」/ `DRIFT-USERRPC-V-011`）+ **表名约定** 1 条（`users`→`users_user` 等，§7 A8 ④ 已签字）⇒ **差异本身仍未修，但「差在哪」已逐列钉死** | **L4 双侧活体**（真 PG 上两侧各自建表 ⇒ `information_schema.columns` 逐列对拍） |
+| **UNRESOLVED-USERSCOMMON-005**（JWT claim 数值类型 · `userId > 2^53`） | ✅ **关闭**：交叉验签用 `userId = 9007199254740993`（2^53+1）⇒ Go 侧 `json.Number.Int64()` 与 RAG 侧 `((Number) claim).longValue()` **两侧都精确**（12/12 交叉验签全通） | **L4 双侧活体**（Go 签 ⇄ RAG 验、RAG 签 ⇄ Go 验，6 密钥档 × 2 向） |
+
+### 6. 证据强度（**核对日期 2026-10-29**）
+
+| 维度 | 强度 | 说明 |
+|---|---|---|
+| 对照面 | **L4（双侧活体）** | Go 真源进程（`service/user/common/**` ＋ `internal/model` 的真 `AutoMigrate`）↔ JVM 进程（`users-common` 的**真实类**）⇒ **两侧同时跑**，同一批输入 |
+| 判定方式 | **逐字节** | `Go == RAG == expected.txt` 三条腿；`compare.py` 对「未冻结 case」与「期望值脱钩」都判失败 |
+| 可复算性 | 🆕 **✅ 可复算**（§0/§8 的旧结论**不可复算**） | 探针**在仓内** ⇒ `git ls-files tools/ \| grep users-common` 可见 |
+| 探针自证 | ✅ **变异必红** | M1~M4 各自**精确**转红 + 还原后转绿 |
+| 真源完整性 | ✅ **零改动** | `go build -overlay` ⇒ 真源仓 `git status --porcelain -- service/user` **跑前 / 构建后 / 跑后各断言一次，皆空** |
+| 播种 | ✅ **两侧同一行** | 同一 uid / username / email / bcrypt hash / status / score / extra_info ⇒ **不是「两边都空」** |
+
+⇒ ⚠️ **效力边界（AGENTS.md §0）**：
+① 本轮只对照了**库面**（`users-common` 自身）⇒ **推不出「调用方一致」**
+（`user-api` / `admin-api` / 6 个外域 api 的 wire 面仍在各自域台账里）；
+② DDL 的 **9 列差异本身仍未修**（本轮只取证 ⇒ 按 §6 的口径「**状态未变**」）；
+③ **PG 大版本敏感**：`column_default` 的字面量渲染（如 `nextval('…'::regclass)`）随 PG 版本而异
+⇒ 换 PG 大版本需**重新冻结 `expected.txt` 并逐条复核**（本轮在 **postgres:16-alpine** 上冻结）。
+
+### 7. 顺带记一笔：**真源侧**的一处隐患（**不是漂移**，真源冻结 ⇒ 不改）
+
+`service/user/user/rpc/internal/model/db.go:21-27`（以及 `follow/rpc`、`message/rpc` 的同名函数）
+**无条件**写 `password=%s` ⇒ 而 **pgconn 的 DSN 解析器**在 `password=`（**空值**）时会把
+**下一个 `key=value` 整段吃进密码** ⇒ 实测 `password= dbname=x` ⇒ `Database=""`、`Password="dbname=x"`
+⇒ 连接落到「与用户名同名的库」⇒ 报 `FATAL: database "<user>" does not exist`。
+⇒ 本探针的对策是「密码为空时填占位值」；**真源侧是否要改由真源 owner 决定**（真源已冻结 ⇒ 本轮只记录）。
+
+### 8. 本轮**没有**做什么（诚实边界）
+
+- ❌ **没有改 `service/users/users-common/**`**（共享层写权归 G4）⇒ `DRIFT-USERSCOMMON-006` 只登记不落码；
+- ❌ **没有改 Go 真源**（冻结只读）；
+- ❌ **没有**动 `docs/PhaseGoal-judge.md`（§九 **G-4 的销号**属主线写权，Round-2 T-2.10）·
+  `docs/RoundPlan/**` · `AGENTS.md` · `docs/Worktree.md` · `docs/DRIFT/_cross/**` · `docs/DRIFT/global/**`
+  · `tools/difftest/check-*.py`；
+- ❌ **没有**把「本轮 17 条已登记差异」写成「已对齐」⇒ 按 §0 的口径，它们一律读作「**在该证据强度下一致**」。

@@ -1,0 +1,301 @@
+# users-common 双侧活体对拍探针 · **冻结的期望值**
+#
+# 由 `tools/api-full-parity-probe/users-common/run.sh` 消费（compare.py）。
+# 每次跑都必须同时满足：**Go == RAG == 本文件**。
+#
+# 记录类型：
+#   CASE|<case_id>|<side>|<value>          side ∈ BOTH / GO / RAG
+#        BOTH = 两侧都必须产出且都等于 <value>；GO/RAG = 只有该侧产出。
+#   REG|<case_id>|<go_value>|<rag_value>    **已登记的两侧不同**（两侧值都被钉住）。
+#
+# ⚠️ **改这个文件 = 改判据**：任何一行改动都会让探针的红绿含义改变 ⇒ 必须走 review。
+# ⚠️ 重新冻结的流程：跑 run.sh → 拿到 go.out / rag.out → **逐条人工复核**差异是否可接受
+#    → 才允许写回本文件。**禁止**「跑挂了就把 expected 改成实际值」。
+#
+# ── 覆盖范围（本轮实测：218 条两侧逐字节相同 · 25 条单侧专属 · 21 条已登记不同）──
+#   errmsg 39 · jwt 79(+12 交叉验签) · cryptx 16(+1 交叉验签) · bearer 22
+#   `,string` int64 17 · 必填校验 4 · DDL 逐列 33 + 表清单 1 · 播种读回 21
+
+# ── ① 两侧逐字节相同的 case（Go == RAG == 本文件）──
+CASE|c.bearer.sig.0|BOTH|eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOjF9.sig
+CASE|c.bearer.sig.1|BOTH|eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOjF9.sig
+CASE|c.bearer.sig.10|BOTH|Bearer\teyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOjF9.sig
+CASE|c.bearer.sig.2|BOTH|eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOjF9.sig
+CASE|c.bearer.sig.3|BOTH| eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOjF9.sig
+CASE|c.bearer.sig.4|BOTH|XXBearer eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOjF9.sig
+CASE|c.bearer.sig.6|BOTH|Bearer
+CASE|c.bearer.sig.7|BOTH|eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOjF9.sig
+CASE|c.bearer.sig.8|BOTH|
+CASE|c.bearer.sig.9|BOTH| Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOjF9.sig
+CASE|c.bearer.trim.0|BOTH|eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOjF9.sig
+CASE|c.bearer.trim.1|BOTH|bearer eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOjF9.sig
+CASE|c.bearer.trim.10|BOTH|Bearer\teyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOjF9.sig
+CASE|c.bearer.trim.2|BOTH|BEARER eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOjF9.sig
+CASE|c.bearer.trim.3|BOTH| eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOjF9.sig
+CASE|c.bearer.trim.4|BOTH|XXBearer eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOjF9.sig
+CASE|c.bearer.trim.5|BOTH|
+CASE|c.bearer.trim.6|BOTH|Bearer
+CASE|c.bearer.trim.7|BOTH|eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOjF9.sig
+CASE|c.bearer.trim.8|BOTH|
+CASE|c.bearer.trim.9|BOTH| Bearer eyJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOjF9.sig
+CASE|c.cryptx.check.cost_overflow|BOTH|false
+CASE|c.cryptx.check.cost_zero|BOTH|false
+CASE|c.cryptx.check.empty_hash|BOTH|false
+CASE|c.cryptx.check.empty_pwd|BOTH|false
+CASE|c.cryptx.check.match|BOTH|true
+CASE|c.cryptx.check.mismatch|BOTH|false
+CASE|c.cryptx.check.not_bcrypt|BOTH|false
+CASE|c.cryptx.check.prefix_2b|BOTH|true
+CASE|c.cryptx.check.prefix_2y|BOTH|true
+CASE|c.cryptx.check.pwd_72|BOTH|false
+CASE|c.cryptx.check.truncated|BOTH|false
+CASE|c.cryptx.check.unicode_pwd|BOTH|false
+CASE|c.cryptx.encrypt_shape|BOTH|prefix=$2a$10$,len=60,charset=ok
+CASE|c.ddl.col.admin_admin.email|BOTH|text:YES:
+CASE|c.ddl.col.admin_admin.extra_info|BOTH|text:YES:
+CASE|c.ddl.col.admin_admin.id|BOTH|bigint:NO:nextval(...)
+CASE|c.ddl.col.admin_admin.password|BOTH|text:YES:
+CASE|c.ddl.col.admin_admin.uid|BOTH|bigint:NO:
+CASE|c.ddl.col.admin_admin.username|BOTH|text:YES:
+CASE|c.ddl.col.admin_invite.code|BOTH|text:NO:
+CASE|c.ddl.col.admin_invite.expires_at|BOTH|timestamp with time zone:NO:
+CASE|c.ddl.col.admin_invite.id|BOTH|bigint:NO:nextval(...)
+CASE|c.ddl.col.admin_invite.inviter_uid|BOTH|bigint:NO:
+CASE|c.ddl.col.admin_invite.used_at|BOTH|timestamp with time zone:YES:
+CASE|c.ddl.col.admin_invite.used_by_uid|BOTH|bigint:YES:
+CASE|c.ddl.col.users_user.email|BOTH|text:YES:
+CASE|c.ddl.col.users_user.extra_info|BOTH|text:YES:
+CASE|c.ddl.col.users_user.id|BOTH|bigint:NO:nextval(...)
+CASE|c.ddl.col.users_user.password|BOTH|text:YES:
+CASE|c.ddl.col.users_user.score|BOTH|integer:YES:
+CASE|c.ddl.col.users_user.uid|BOTH|bigint:NO:
+CASE|c.ddl.col.users_user.username|BOTH|text:YES:
+CASE|c.ddl.col.users_user_avatar_history.avatar_url|BOTH|text:NO:
+CASE|c.ddl.col.users_user_avatar_history.content_type|BOTH|text:YES:
+CASE|c.ddl.col.users_user_avatar_history.history_id|BOTH|text:NO:
+CASE|c.ddl.col.users_user_avatar_history.id|BOTH|bigint:NO:nextval(...)
+CASE|c.ddl.col.users_user_avatar_history.is_current|BOTH|boolean:NO:false
+CASE|c.ddl.col.users_user_avatar_history.size_bytes|BOTH|bigint:YES:
+CASE|c.ddl.col.users_user_avatar_history.uid|BOTH|bigint:NO:
+CASE|c.errmsg.-1|BOTH|FAIL
+CASE|c.errmsg.0|BOTH|FAIL
+CASE|c.errmsg.1|BOTH|FAIL
+CASE|c.errmsg.1001|BOTH|用户名已存在
+CASE|c.errmsg.1002|BOTH|用户名或密码错误
+CASE|c.errmsg.1003|BOTH|用户不存在
+CASE|c.errmsg.1004|BOTH|TOKEN不存在
+CASE|c.errmsg.1005|BOTH|TOKEN格式错误
+CASE|c.errmsg.1006|BOTH|TOKEN已过期
+CASE|c.errmsg.1007|BOTH|TOKEN刷新失败
+CASE|c.errmsg.1008|BOTH|权限不足
+CASE|c.errmsg.1009|BOTH|未登录
+CASE|c.errmsg.1010|BOTH|已登录
+CASE|c.errmsg.1011|BOTH|用户已被封禁
+CASE|c.errmsg.1012|BOTH|Redis更新失败
+CASE|c.errmsg.1014|BOTH|FAIL
+CASE|c.errmsg.1015|BOTH|服务繁忙
+CASE|c.errmsg.1016|BOTH|管理员邀请码错误
+CASE|c.errmsg.1019|BOTH|FAIL
+CASE|c.errmsg.200|BOTH|OK
+CASE|c.errmsg.3001|BOTH|积分余量不足
+CASE|c.errmsg.3002|BOTH|重试次数超限
+CASE|c.errmsg.3003|BOTH|积分处理超时
+CASE|c.errmsg.4000|BOTH|FAIL
+CASE|c.errmsg.500|BOTH|FAIL
+CASE|c.errmsg.5001|BOTH|系统内部错误
+CASE|c.errmsg.5002|BOTH|更新数据库失败
+CASE|c.errmsg.5003|BOTH|查询数据库失败
+CASE|c.errmsg.5004|BOTH|数据库插入失败
+CASE|c.errmsg.5005|BOTH|事务操作失败
+CASE|c.errmsg.5006|BOTH|雪花ID生成失败
+CASE|c.errmsg.5007|BOTH|JSON序列化失败
+CASE|c.errmsg.5008|BOTH|JSON反序列化失败
+CASE|c.errmsg.5009|BOTH|Kafka消息发送失败
+CASE|c.errmsg.5010|BOTH|延时消息发送失败
+CASE|c.errmsg.999|BOTH|FAIL
+CASE|c.errmsg.99999|BOTH|FAIL
+CASE|c.int64.0|BOTH|OK:123
+CASE|c.int64.1|BOTH|OK:123
+CASE|c.int64.10|BOTH|OK:123
+CASE|c.int64.11|BOTH|OK:9223372036854775807
+CASE|c.int64.12|BOTH|REJECT
+CASE|c.int64.13|BOTH|OK:-9223372036854775808
+CASE|c.int64.14|BOTH|REJECT
+CASE|c.int64.15|BOTH|OK:9223372036854775807
+CASE|c.int64.16|BOTH|REJECT
+CASE|c.int64.2|BOTH|REJECT
+CASE|c.int64.3|BOTH|REJECT
+CASE|c.int64.4|BOTH|REJECT
+CASE|c.int64.5|BOTH|REJECT
+CASE|c.int64.6|BOTH|REJECT
+CASE|c.int64.7|BOTH|REJECT
+CASE|c.int64.8|BOTH|REJECT
+CASE|c.int64.9|BOTH|REJECT
+CASE|c.jwt.alg.128|BOTH|HS256
+CASE|c.jwt.alg.15|BOTH|HS256
+CASE|c.jwt.alg.16|BOTH|HS256
+CASE|c.jwt.alg.31|BOTH|HS256
+CASE|c.jwt.alg.32|BOTH|HS256
+CASE|c.jwt.alg.36|BOTH|HS256
+CASE|c.jwt.alg.47|BOTH|HS256
+CASE|c.jwt.alg.48|BOTH|HS256
+CASE|c.jwt.alg.63|BOTH|HS256
+CASE|c.jwt.alg.64|BOTH|HS256
+CASE|c.jwt.alg.65|BOTH|HS256
+CASE|c.jwt.canon_sig.128|BOTH|3ab1b8cd2958c6964e716ca70700573b84e4a28c09326dad50bf7a1f87d8d387
+CASE|c.jwt.canon_sig.15|BOTH|395e5c516876103a6bdd110b16b6582ae9561aefa5d96aed8d932f28c46a73e9
+CASE|c.jwt.canon_sig.16|BOTH|74a7afdf56f488ffecd69f52426b91afe2f905b6be26335faba126d2efd473c8
+CASE|c.jwt.canon_sig.31|BOTH|444be1004399b2eb334ee3e1d732b99c6f03529521a6b353ac56960df07f7686
+CASE|c.jwt.canon_sig.32|BOTH|327bf65324ab89d09411a20b4ec7f53db252de5619fa28cdc3e9da4aa9c8c6df
+CASE|c.jwt.canon_sig.36|BOTH|c9e171bcb79fd81551200a7fc6f45eea072ef249abd2f9735d87c1bcd68f517b
+CASE|c.jwt.canon_sig.47|BOTH|994212fe13b7b06a7362565c968564385f5582693a8005d0f85eb9379656d5d4
+CASE|c.jwt.canon_sig.48|BOTH|9820e5321039cf7d449a5673216919faa3a84c32ca3912c3bc8582e2b02b4d49
+CASE|c.jwt.canon_sig.63|BOTH|b6086251109b89792a58a3956b92df0b115e44e4574aa9b14cb6b22c1b37d11b
+CASE|c.jwt.canon_sig.64|BOTH|85473298d5357462a07473c7e6eae5fb66cce6dc85e7951117e2412a1564c684
+CASE|c.jwt.canon_sig.65|BOTH|3beb245855b853006ae7cbd458371e88124fd2fb39efcad931c28fe69efcc89b
+CASE|c.jwt.header_keys.128|BOTH|alg,typ
+CASE|c.jwt.header_keys.15|BOTH|alg,typ
+CASE|c.jwt.header_keys.16|BOTH|alg,typ
+CASE|c.jwt.header_keys.31|BOTH|alg,typ
+CASE|c.jwt.header_keys.32|BOTH|alg,typ
+CASE|c.jwt.header_keys.36|BOTH|alg,typ
+CASE|c.jwt.header_keys.47|BOTH|alg,typ
+CASE|c.jwt.header_keys.48|BOTH|alg,typ
+CASE|c.jwt.header_keys.63|BOTH|alg,typ
+CASE|c.jwt.header_keys.64|BOTH|alg,typ
+CASE|c.jwt.header_keys.65|BOTH|alg,typ
+CASE|c.jwt.payload_keys.128|BOTH|exp,iat,userId
+CASE|c.jwt.payload_keys.15|BOTH|exp,iat,userId
+CASE|c.jwt.payload_keys.16|BOTH|exp,iat,userId
+CASE|c.jwt.payload_keys.31|BOTH|exp,iat,userId
+CASE|c.jwt.payload_keys.32|BOTH|exp,iat,userId
+CASE|c.jwt.payload_keys.36|BOTH|exp,iat,userId
+CASE|c.jwt.payload_keys.47|BOTH|exp,iat,userId
+CASE|c.jwt.payload_keys.48|BOTH|exp,iat,userId
+CASE|c.jwt.payload_keys.63|BOTH|exp,iat,userId
+CASE|c.jwt.payload_keys.64|BOTH|exp,iat,userId
+CASE|c.jwt.payload_keys.65|BOTH|exp,iat,userId
+CASE|c.jwt.siglen.128|BOTH|43
+CASE|c.jwt.siglen.15|BOTH|43
+CASE|c.jwt.siglen.16|BOTH|43
+CASE|c.jwt.siglen.31|BOTH|43
+CASE|c.jwt.siglen.32|BOTH|43
+CASE|c.jwt.siglen.36|BOTH|43
+CASE|c.jwt.siglen.47|BOTH|43
+CASE|c.jwt.siglen.48|BOTH|43
+CASE|c.jwt.siglen.63|BOTH|43
+CASE|c.jwt.siglen.64|BOTH|43
+CASE|c.jwt.siglen.65|BOTH|43
+CASE|c.jwt.typ.128|BOTH|JWT
+CASE|c.jwt.typ.15|BOTH|JWT
+CASE|c.jwt.typ.16|BOTH|JWT
+CASE|c.jwt.typ.31|BOTH|JWT
+CASE|c.jwt.typ.32|BOTH|JWT
+CASE|c.jwt.typ.36|BOTH|JWT
+CASE|c.jwt.typ.47|BOTH|JWT
+CASE|c.jwt.typ.48|BOTH|JWT
+CASE|c.jwt.typ.63|BOTH|JWT
+CASE|c.jwt.typ.64|BOTH|JWT
+CASE|c.jwt.typ.65|BOTH|JWT
+CASE|c.jwt.userid_json_type.128|BOTH|number
+CASE|c.jwt.userid_json_type.15|BOTH|number
+CASE|c.jwt.userid_json_type.16|BOTH|number
+CASE|c.jwt.userid_json_type.31|BOTH|number
+CASE|c.jwt.userid_json_type.32|BOTH|number
+CASE|c.jwt.userid_json_type.36|BOTH|number
+CASE|c.jwt.userid_json_type.47|BOTH|number
+CASE|c.jwt.userid_json_type.48|BOTH|number
+CASE|c.jwt.userid_json_type.63|BOTH|number
+CASE|c.jwt.userid_json_type.64|BOTH|number
+CASE|c.jwt.userid_json_type.65|BOTH|number
+CASE|c.required.map_absent|BOTH|OK
+CASE|c.required.scalar_absent|BOTH|field "name" is not set
+CASE|c.required.scalar_empty|BOTH|OK
+CASE|c.required.scalar_explicit_null|BOTH|field "name" mustn't be nil
+CASE|c.seed.admin_admin.email|BOTH|probe-admin@example.invalid
+CASE|c.seed.admin_admin.extra_info|BOTH|{"a":"1","b":"2"}
+CASE|c.seed.admin_admin.password|BOTH|$2a$10$k5Q0/H16AzxsOsbbng9Mz.S0S21mTo6/xYlKwLm.9wUw9UGJPoBMm
+CASE|c.seed.admin_admin.uid|BOTH|9007199254740994
+CASE|c.seed.admin_admin.username|BOTH|probe-admin
+CASE|c.seed.admin_invite.code|BOTH|ADM-PROBE0001
+CASE|c.seed.admin_invite.expires_at_epoch|BOTH|1767323045
+CASE|c.seed.admin_invite.inviter_uid|BOTH|9007199254740994
+CASE|c.seed.admin_invite.used_at_epoch|BOTH|
+CASE|c.seed.admin_invite.used_by_uid|BOTH|
+CASE|c.seed.users_user.email|BOTH|probe@example.invalid
+CASE|c.seed.users_user.extra_info|BOTH|{"a":"1","b":"2"}
+CASE|c.seed.users_user.password|BOTH|$2a$10$k5Q0/H16AzxsOsbbng9Mz.S0S21mTo6/xYlKwLm.9wUw9UGJPoBMm
+CASE|c.seed.users_user.score|BOTH|7
+CASE|c.seed.users_user.status|BOTH|1
+CASE|c.seed.users_user.uid|BOTH|9007199254740993
+CASE|c.seed.users_user.username|BOTH|probe-user
+CASE|c.seed.users_user_avatar_history.avatar_url|BOTH|https://example.invalid/a.png
+CASE|c.seed.users_user_avatar_history.content_type|BOTH|image/png
+CASE|c.seed.users_user_avatar_history.history_id|BOTH|probe-history-1
+CASE|c.seed.users_user_avatar_history.is_current|BOTH|true
+CASE|c.seed.users_user_avatar_history.size_bytes|BOTH|4096
+CASE|c.seed.users_user_avatar_history.uid|BOTH|9007199254740993
+
+# ── ② 单侧专属的 case（交叉验签 / Go 内部类型）──
+#    · c.jwt.xverify.go.*  = Go 侧验 RAG 签的 token（peer=VERIFIED,uid=…）
+#    · c.jwt.xverify.rag.* = RAG 侧验 Go 签的 token
+#    · c.cryptx.xverify.go / .rag = 两侧互认对方生成的 bcrypt hash
+#    · g.jwt.userid_go_type.* = Go 侧 claim 的**内部**类型（json.Number，WithJSONNumber 路径）
+CASE|c.cryptx.xverify.go|GO|true
+CASE|c.jwt.xverify.go.15|GO|peer=VERIFIED,uid=9007199254740993
+CASE|c.jwt.xverify.go.32|GO|peer=VERIFIED,uid=9007199254740993
+CASE|c.jwt.xverify.go.36|GO|peer=VERIFIED,uid=9007199254740993
+CASE|c.jwt.xverify.go.47|GO|peer=VERIFIED,uid=9007199254740993
+CASE|c.jwt.xverify.go.48|GO|peer=VERIFIED,uid=9007199254740993
+CASE|c.jwt.xverify.go.64|GO|peer=VERIFIED,uid=9007199254740993
+CASE|g.jwt.userid_go_type.128|GO|number(json.Number)
+CASE|g.jwt.userid_go_type.15|GO|number(json.Number)
+CASE|g.jwt.userid_go_type.16|GO|number(json.Number)
+CASE|g.jwt.userid_go_type.31|GO|number(json.Number)
+CASE|g.jwt.userid_go_type.32|GO|number(json.Number)
+CASE|g.jwt.userid_go_type.36|GO|number(json.Number)
+CASE|g.jwt.userid_go_type.47|GO|number(json.Number)
+CASE|g.jwt.userid_go_type.48|GO|number(json.Number)
+CASE|g.jwt.userid_go_type.63|GO|number(json.Number)
+CASE|g.jwt.userid_go_type.64|GO|number(json.Number)
+CASE|g.jwt.userid_go_type.65|GO|number(json.Number)
+CASE|c.cryptx.xverify.rag|RAG|true
+CASE|c.jwt.xverify.rag.15|RAG|peer=VERIFIED,uid=9007199254740993
+CASE|c.jwt.xverify.rag.32|RAG|peer=VERIFIED,uid=9007199254740993
+CASE|c.jwt.xverify.rag.36|RAG|peer=VERIFIED,uid=9007199254740993
+CASE|c.jwt.xverify.rag.47|RAG|peer=VERIFIED,uid=9007199254740993
+CASE|c.jwt.xverify.rag.48|RAG|peer=VERIFIED,uid=9007199254740993
+CASE|c.jwt.xverify.rag.64|RAG|peer=VERIFIED,uid=9007199254740993
+
+# ── ③ 已登记的两侧不同（REG）──
+#    每一组都对应台账 `docs/DRIFT/users/common.md` 的一条已登记条目；
+#    ⚠️ **不是**「新的未登记漂移」⇒ 探针不把它当失败，但**两侧的值都被钉住**
+#    ⇒ 任何一侧再变一点点，探针立刻转红。
+#   · DRIFT-USERSCOMMON-006（2026-10-29 本探针新发现）：BearerTokenExtractor 的 `>` 应为 `>=`（潜伏 · wire 不可观察）
+REG|c.bearer.sig.5||Bearer 
+#   · SD-USERSCOMMON-001（已签字：RAG 保留 fail-closed）
+REG|c.cryptx.check.prefix_1|true|false
+REG|c.cryptx.check.prefix_2x|true|false
+#   · DEFAULT CURRENT_TIMESTAMP 残留（刻意保留）
+REG|c.ddl.col.admin_admin.create_time|timestamp with time zone:YES:|timestamp with time zone:YES:current_timestamp
+REG|c.ddl.col.admin_admin.update_time|timestamp with time zone:YES:|timestamp with time zone:YES:current_timestamp
+REG|c.ddl.col.admin_invite.create_time|timestamp with time zone:YES:|timestamp with time zone:YES:current_timestamp
+REG|c.ddl.col.admin_invite.update_time|timestamp with time zone:YES:|timestamp with time zone:YES:current_timestamp
+#   · DEFAULT CURRENT_TIMESTAMP 残留（AGENTS.md §0 记「刻意保留」/ DRIFT-USERRPC-V-011）
+REG|c.ddl.col.users_user.create_time|timestamp with time zone:YES:|timestamp with time zone:YES:current_timestamp
+#   · users_user.status 可空性（AGENTS.md §0 记「仍未修」）
+REG|c.ddl.col.users_user.status|bigint:YES:0|bigint:NO:0
+#   · DEFAULT CURRENT_TIMESTAMP 残留（AGENTS.md §0 记「刻意保留」/ DRIFT-USERRPC-V-011）
+REG|c.ddl.col.users_user.update_time|timestamp with time zone:YES:|timestamp with time zone:YES:current_timestamp
+#   · DEFAULT CURRENT_TIMESTAMP 残留（刻意保留）
+REG|c.ddl.col.users_user_avatar_history.create_time|timestamp with time zone:YES:|timestamp with time zone:YES:current_timestamp
+REG|c.ddl.col.users_user_avatar_history.update_time|timestamp with time zone:YES:|timestamp with time zone:YES:current_timestamp
+#   · 表名约定（台账 A8 ④「表名 users→users_user ✅ 签字」）：Go 的 4 张表名与 RAG 的 4 张不同
+REG|c.ddl.tables|admin_invites,admins,user_avatar_history,users|admin_admin,admin_invite,users_user,users_user_avatar_history
+#   · DRIFT-USERSCOMMON-001（已销号：两侧均不可观察；primitive 层文案仍不同）
+REG|c.errmsg.1017|FAIL|请求参数错误
+REG|c.errmsg.1018|FAIL|头像历史不存在
+#   · DRIFT-USERSCOMMON-002/003：JSON 键序（语义等价，台账判为不修）
+REG|c.jwt.raw.header|{"alg":"HS256","typ":"JWT"}|{"typ":"JWT","alg":"HS256"}
+#   · DRIFT-USERSCOMMON-003：claim 键序（语义等价，台账判为不修）
+REG|c.jwt.raw.payload|{"exp":1700003600,"iat":1700000000,"userId":1234567890}|{"iat":1700000000,"exp":1700003600,"userId":1234567890}
