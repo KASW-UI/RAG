@@ -95,6 +95,40 @@ spring:
         server-addr: ${NACOS_ADDR:nacos}:${NACOS_PORT:8848}
         namespace: ${NACOS_NAMESPACE:public}
         group: ${NACOS_GROUP:DEFAULT_GROUP}
+        # 🔴 **必须显式关掉自动注册**（2026-10-29 · DRIFT-FOLLOW-006 落地时实测补上）。
+        #
+        # 【为什么】`spring-cloud-starter-alibaba-nacos-discovery` 的**自动注册**
+        # （NacosAutoServiceRegistration）注册的是 **web 容器端口** ——
+        # 而本模块的 web 容器（2026-10-29 起为了给 Actuator 载体才引入）
+        # 监听的是 **观测端口 16065**，**不是 gRPC 业务端口 8082**。
+        # ⇒ 自动注册一旦生效 ⇒ Nacos 里会出现「follow-rpc → 16065」这条**错端口**实例
+        # ⇒ follow-api 按 Nacos 给出的地址连过来 ⇒ 连到一个**只提供 /actuator/** 的 HTTP 端口
+        # ⇒ **gRPC 链路直接断**（业务码塌成 1015）。
+        #
+        # 【本模块的注册是手写的】`bootstrap/NacosRegistration.java` 用
+        # `GrpcServerProperties.getPort()`（= gRPC 端口）注册 ⇒ 与 Go 侧
+        # `zrpc.MustNewServer` 注册 ListenOn 的语义一致。
+        # ⇒ 自动注册必须关掉，否则**同一个服务名下会有两个端口的实例**。
+        register-enabled: false
+
+# =============================================================================
+# HTTP 观测端口（Actuator 载体）
+# =============================================================================
+# 🔴 **这是本模块唯一的 HTTP 监听**（2026-10-29 · DRIFT-FOLLOW-006 落地）。
+#
+# 【Go 出处（真源 · 消费点）】
+#   service/follow/rpc/etc/follow.yaml:20-27  DevServer.Port: 16065
+#   ⇒ go-zero@v1.10.2/core/service/serviceconf.go:77  devserver.StartAgent(sc.DevServer)
+#   ⇒ go-zero@v1.10.2/internal/devserver/server.go:67-75  独立端口 http.ListenAndServe
+# ⇒ ⇒ **Go 的观测端口就是 16065** ⇒ RAG 侧取同一个端口（默认 16065），
+#      抓取配置只需改**路径**（Go `/metrics` → RAG `/actuator/prometheus`），
+#      **端口一字不差**。
+#
+# ⚠️ **与 gRPC 业务端口严格分离**：本端口只承载 Actuator（无任何业务路由），
+#    gRPC 仍是 `grpc.server.port`（8082 / ${FOLLOW_RPC_PORT}）。
+#    ⇒ 探针/部署可用 FOLLOW_RPC_MANAGEMENT_PORT 覆盖（探针会自动挑空闲端口）。
+server:
+  port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}
 
 # ============== gRPC server（devh）==============
 # 对应 Go follow.yaml:2 ListenOn: 0.0.0.0:8082
@@ -160,6 +194,16 @@ management:
   endpoints:
     web:
       exposure:
+        # ⚠️ **这行以前是死配置**（2026-10-29 才真正生效，见下）：
+        #    `spring-boot-starter-actuator` 只给 endpoint 与自动配置，**不给 servlet 容器**
+        #    ⇒ classpath 上没有 jakarta.servlet.Servlet ⇒ WebApplicationType 推导出 NONE
+        #    ⇒ 没有 web server ⇒ 这一族配置**不加载**（不是报错，是静默无效）。
+        #    ⇒ 2026-10-29 补 `spring-boot-starter-web`（pom 第 5 段）后才有载体。
+        #
+        # ⚠️ **与 Go 的暴露面差异**（twoStage.md §10 定级 · 已登记）：
+        #    Go  : DevServer 的 `MetricsPath: /metrics` + `HealthPath: /healthz`（follow.yaml:20-27）
+        #    RAG : `/actuator/prometheus` + `/actuator/health`（Actuator 的固定前缀）
+        #    ⇒ **路径不同、端口相同（都是 16065）** ⇒ 抓取配置要改路径，不是改端口。
         include: health,info,prometheus,metrics
   endpoint:
     health:

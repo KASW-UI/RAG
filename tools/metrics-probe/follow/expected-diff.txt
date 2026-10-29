@@ -1,0 +1,30 @@
+# follow 域 **指标抓取面**双侧对拍的**冻结期望差异**。
+#
+# 语义：探针跑完后，实际的「Go 侧有 / RAG 侧无」+「RAG 侧有 / Go 侧无」+「值不同」
+#       三类差异的**并集**，必须与本文件**逐条相同** ⇒ 守门通过（exit 0）。
+#       不一致 ⇒ 有**未登记的新差异**或**已登记的差异消失了** ⇒ 守门失效（exit 1）。
+#
+# ⚠️ 本文件是**冻结的期望**，不是「跑出来什么就录什么」：
+#    下面每一条都对应 docs/DRIFT/follow/rpc.md 的 DRIFT-FOLLOW-006 残余差异登记。
+#
+# ── RAG 独有：Micrometer 的 Timer max gauge（8 条）──────────────────────────
+# Go 侧 prometheus.client_golang 的 Histogram **不导出 `_max`**；
+# Micrometer 1.16 的 Timer **默认导出 `_max`**（滚动窗口最大值）。
+# ⇒ RAG 侧多 8 条 series ⇒ **纯增项**：不影响 Go 侧任何 PromQL 的语义
+#   （PromQL 按指标名 + 标签取值，多出来的 series 只是多一个可选指标）。
+# ⇒ 定级：**P3 / D 类**（已登记的残余差异，不修）。
+#
+# ⚠️ **桶边界已不是差异**（2026-10-29 修掉）：RAG 侧原先用 Micrometer 的
+#    HdrHistogram 默认桶集（68 个，与 Go 的 DefBuckets **零重合**）⇒
+#    同一段 `histogram_quantile()` 在两侧给出不同分位数。
+#    已改为 `serviceLevelObjectives(...)` 逐个钉成 Go 的 `prometheus.DefBuckets`
+#    ⇒ 桶边界逐个相同（仅 `1`/`1.0`、`5`/`5.0`、`10`/`10.0` 的**文本**差异，
+#    Prometheus 的 `le` 按浮点解析 ⇒ 语义等价）。
+follow_rpc_request_duration_seconds_max{method=Block}
+follow_rpc_request_duration_seconds_max{method=Follow}
+follow_rpc_request_duration_seconds_max{method=GetBlockList}
+follow_rpc_request_duration_seconds_max{method=GetFollowList}
+follow_rpc_request_duration_seconds_max{method=GetFollowerList}
+follow_rpc_request_duration_seconds_max{method=GetRecommendations}
+follow_rpc_request_duration_seconds_max{method=Unblock}
+follow_rpc_request_duration_seconds_max{method=Unfollow}

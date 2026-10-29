@@ -17,7 +17,7 @@
 | DRIFT-FOLLOW-002 | 运行时 classpath 缺 `grpc-inprocess` ⇒ `NoClassDefFoundError` ⇒ 启动失败 | **启动阻塞（硬失败）** | ✅ 已修 |
 | DRIFT-FOLLOW-003 | `discovery://user-rpc` 两斜杠被 devh 拒绝 ⇒ 启动失败 | **启动阻塞（硬失败）** | ✅ 已修 |
 | DRIFT-FOLLOW-004 | `server-addr` 硬编码 `:8848`、忽略 `NACOS_PORT`，与 follow-api 语义冲突 ⇒ api/rpc 连到两台 Nacos | 运行时故障（业务码塌成 1015） | ✅ 已修 |
-| DRIFT-FOLLOW-006 | 5 个 `follow_rpc_*` 指标**无任何抓取出口**（Go 有 DevServer `/metrics`，RAG 的 follow-rpc 是纯 gRPC 进程） | **可观察（抓取侧）** | 🔴 **未修**（用户 2026-10-24 定：**本轮不落地**，转「全仓 rpc 层统一方案」交主会话拍板） |
+| DRIFT-FOLLOW-006 | 5 个 `follow_rpc_*` 指标**无任何抓取出口**（Go 有 DevServer `/metrics`，RAG 的 follow-rpc 是纯 gRPC 进程） | **可观察（抓取侧）** | ✅ **已修（2026-10-29 · 编号 `S1-FOLLOW-001`）** —— 出口已落地（Tomcat + Actuator，**端口 16065 与 Go 一字不差**）⇒ 双侧 series 集合**逐条一致**（仅余 **P3/D 类**的 8 条 `_max` 增项）⇒ 详见下方 §「DRIFT-FOLLOW-006 的落地（2026-10-29）」 |
 
 > ⚠️ **三条都发生在「测试全绿」的状态下** —— 修复前 63 条测试 0 失败（现为 68 条），
 > 而 `java -jar` 起不来。根因见 [`docs/Pitfalls/follow/rpc.md`](../../Pitfalls/follow/rpc.md)。
@@ -179,7 +179,7 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
 `first_db` 里最终只有 `block_relation` / `follow_relation` / `flyway_schema_history_follow` 三张表
 ⇒ 与 `article-rpc`（默认账本）**不撞号**。
 
-## DRIFT-FOLLOW-006 🔴 follow-rpc 的 5 个指标**无任何抓取出口**
+## DRIFT-FOLLOW-006 ✅ follow-rpc 的 5 个指标**无任何抓取出口**（🔴 2026-10-24 记录 → ✅ **2026-10-29 已落地**，详见下方 §「DRIFT-FOLLOW-006 的落地」）
 
 **现象（U1：抓取实测）**
 
@@ -317,6 +317,165 @@ threading.GoSafe(func() {
 ⇒ 已改成 `publishPercentileHistogram()`，**这样等出口补上时格式就已经是对的**
 （详见 `docs/DRIFT/follow/api.md` 的 DRIFT-FOLLOW-007）。
 
+## 🟢 DRIFT-FOLLOW-006 的落地（2026-10-29 · 编号 `S1-FOLLOW-001` · G1 lane · follow 域）
+
+### 一句话结论
+
+**RAG 侧现在真抓得到 `follow_rpc_*`**，且在**同一批请求**下与 Go 侧 DevServer 的
+**series 集合逐条一致** —— 仅余 **8 条 `_max` 增项**（P3 / D 类，已登记，不修）。
+
+⚠️ **「已改」≠「已验证」**：本节全部结论由**双侧活体对拍**得出（L4），
+不是「代码写成了这样」。
+
+### 落码清单（改了哪几行 + 为什么）
+
+| # | 文件 | 改动 | 为什么（Go 出处 / 机制） |
+|---|---|---|---|
+| 1 | `service/follow/follow-rpc/pom.xml` | 加 `spring-boot-starter-web`（**版本由 `spring-boot-dependencies` BOM 管 ⇒ 不写 `<version>`**） | `spring-boot-starter-actuator` **只给 endpoint + 自动配置，不给 servlet 容器** ⇒ classpath 上没有 `jakarta.servlet.Servlet` ⇒ `WebApplicationType` 推导为 `NONE` ⇒ `management.endpoints.web.*` 这一族配置**一直是死配置**（**不报错、不生效**）⇒ 补 servlet 容器才有载体。**Boot 4 拆模块核对**：`WebEndpointAutoConfiguration`（含 `WebEndpointServletConfiguration`）**仍在** `spring-boot-actuator-autoconfigure:4.0.8` ✔；`PrometheusScrapeEndpoint` / `PrometheusMetricsExportAutoConfiguration` 在 `spring-boot-micrometer-metrics` ✔ ⇒ **唯一缺的就是 servlet 容器 + Spring MVC** ⇒ `spring-boot-starter-web`（= `spring-boot-starter-tomcat` + `spring-boot-webmvc` + `spring-boot-http-converter`）。**与本仓 8 个 api 模块的既有写法一致** |
+| 2 | `service/follow/follow-rpc/src/main/resources/application.yml` | 加 `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}` | Go `service/follow/rpc/etc/follow.yaml:20-27` `DevServer: {Enabled: true, Host: 0.0.0.0, Port: 16065, MetricsPath: /metrics, HealthPath: /healthz, EnableMetrics: true}` ⇒ ⇒ **端口一字不差**（只有路径不同） |
+| 3 | 同上 | 加 `spring.cloud.nacos.discovery.register-enabled: false` | 自动注册（`NacosAutoServiceRegistration`）注册的是 **web 容器端口** ⇒ 引入 web 容器后 Nacos 里会出现「follow-rpc → **16065**」的**错端口实例** ⇒ `follow-api` 按它连 ⇒ 连到一个只提供 `/actuator/` 的 HTTP 口 ⇒ **gRPC 链路直接断**（业务码塌成 1015）。本模块的注册是**手写**的（`bootstrap/NacosRegistration.java:128` 用 `GrpcServerProperties.getPort()`）⇒ 与 Go `zrpc.MustNewServer` 注册 `ListenOn` 的语义一致 ⇒ 自动注册必须关掉，否则**同一服务名下会有两个端口的实例** |
+| 4 | `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/metrics/FollowRpcMetrics.java` | 直方图改用 **`serviceLevelObjectives(...)`** 逐个钉 Go 的 `DefBuckets`（**不再用 `publishPercentileHistogram()`**） | 见下方「桶边界」一节 |
+
+### 🔴 桶边界：这一条**不是**「表达层差异」，是**语义差异**（已修）
+
+**现象（实测）**：RAG 侧原先的 `_bucket` 边界与 Go 的 `prometheus.DefBuckets` **零重合**。
+
+| | 桶边界 | 每 method 的 `_bucket` 条数 |
+|---|---|---|
+| **Go** | `prometheus.DefBuckets` = `.005 .01 .025 .05 .1 .25 .5 1 2.5 5 10`（11 个）＋ `+Inf`（`client_golang@v1.23.2/prometheus/histogram.go:271`；由 `service/follow/rpc/internal/metrics/metrics.go:23` 的 `Buckets: prometheus.DefBuckets` 消费） | **12** |
+| **RAG（修前）** | Micrometer 的 **HdrHistogram 派生的 68 个**（`0.001` / `0.001048576` / … / `30.0`）＋ `+Inf` | **69** |
+
+⇒ 同一段 PromQL（`histogram_quantile(0.95, sum(rate(follow_rpc_request_duration_seconds_bucket[5m])) by (le))`）
+在两侧**给出不同的分位数** ⇒ 监控语义不等价 ⇒ **不是表达层差异**。
+
+**根因**：只写 `publishPercentileHistogram()` ⇒ Micrometer 用**它自己的**默认桶集。
+
+**修法**：只用 `serviceLevelObjectives(...)`（SLO 直方图）⇒ **以 SLO 边界为桶边界**。
+⚠️ **不能再加 `publishPercentileHistogram()`** —— 实测 Micrometer 会把 SLO 边界
+**叠加**到它自己的 68 个桶上（⇒ 79 个桶）⇒ 反而更不接近 Go。
+⚠️ **Boot 4 已删掉 `management.metrics.distribution.buckets.<meter>`**
+（`MetricsProperties.Distribution`（`spring-boot-micrometer-metrics:4.0.8`）只有
+`percentilesHistogram` / `percentiles` / `slo` / `minimumExpectedValue` /
+`maximumExpectedValue` / `expiry` / `bufferLength`，**没有 `buckets`**）
+⇒ 桶边界**只能**在代码侧钉。
+
+**修后实测**：
+
+```
+RAG : 0.005 0.01 0.025 0.05 0.1 0.25 0.5 1.0 2.5 5.0 10.0 +Inf
+Go  : 0.005 0.01 0.025 0.05 0.1 0.25 0.5 1   2.5 5   10  +Inf
+```
+
+⇒ **边界逐个相同**；只剩 `1`/`1.0`、`5`/`5.0`、`10`/`10.0` 的**文本**差异
+（Java `double` 的 `toString`）⇒ Prometheus 的 `le` 按浮点解析 ⇒ **语义等价**
+⇒ 登记为 **P3 / D 类**（已登记，不修；探针按**浮点数值**归一化 `le` 后比对）。
+
+> ⚠️ **原 javadoc 的断言是错的**（已当场订正）：原文写「`publishPercentileHistogram()`
+> ……其桶边界与 Go 的 `prometheus.DefBuckets` **逐个相同**」——
+> **实测零重合** ⇒ 属 AGENTS.md §3.2 说的「无出处 idiomatization」的反面：
+> **有出处、但断言与事实不符** ⇒ 本次按实测订正。
+
+### 双侧活体对拍结果（**L4**）
+
+探针：**`tools/metrics-probe/follow/run.sh`**（可复算，`EXIT=0` ⇒ 守门通过）
+⇒ 两侧**各起一套**（Go follow-rpc + Go user-rpc + RAG follow-rpc + **两个隔离 PG**），
+**同一份** gRPC 客户端（pb 从冻结真源现拷）打**同一批**请求。
+
+**请求矩阵 28 步（两侧逐条比对，全部一致）**：8 个方法各一次**成功** + 8 个方法各一次
+**业务失败**（`user_id=0` / `target_id=0` / 自关系 / 目标用户不存在）
++ **10 步故障注入**（改名表制造真 DB 错误 ⇒ 覆盖 `db_error_total` 的 (action, type) 维度）。
+
+**指标族行数（实测）**：
+
+| 指标族 | Go | RAG | 判定 |
+|---|---|---|---|
+| `follow_rpc_request_total` | 16 | 16 | ✅ 一致 |
+| `follow_rpc_relation_action_total` | 8 | 8 | ✅ 一致 |
+| `follow_rpc_db_error_total` | 10 | 10 | ✅ 一致 |
+| `follow_rpc_recommendation_size` | 1 | 1 | ✅ 一致 |
+| `follow_rpc_request_duration_seconds_bucket` | 96 | 96 | ✅ 一致（桶边界已对齐） |
+| `follow_rpc_request_duration_seconds_count` | 8 | 8 | ✅ 一致 |
+| `follow_rpc_request_duration_seconds_sum` | 8 | 8 | ✅ 一致（**值不比**，取决于真实耗时） |
+| `follow_rpc_request_duration_seconds_max` | 0 | 8 | 🟡 **RAG 多 8 条**（见下） |
+| **合计 `follow_rpc_*` 行数** | **147** | **155** | — |
+
+**series 集合差异（逐条）**：
+
+```
+仅 Go 有：  （0 条）
+仅 RAG 有：  （8 条）
+  follow_rpc_request_duration_seconds_max{method=Block}
+  follow_rpc_request_duration_seconds_max{method=Follow}
+  follow_rpc_request_duration_seconds_max{method=GetBlockList}
+  follow_rpc_request_duration_seconds_max{method=GetFollowList}
+  follow_rpc_request_duration_seconds_max{method=GetFollowerList}
+  follow_rpc_request_duration_seconds_max{method=GetRecommendations}
+  follow_rpc_request_duration_seconds_max{method=Unblock}
+  follow_rpc_request_duration_seconds_max{method=Unfollow}
+值差异：    （0 条）—— 计数型 / gauge 型的**值**两侧逐条相等
+```
+
+### 残余差异登记（按 `docs/twoStage.md` §10 定级）
+
+| # | 差异 | 严重度 | 阶段归属 | 理由 |
+|---|---|---|---|---|
+| 1 | **RAG 多 8 条 `…_seconds_max`** | **P3** | **D 类**（可不实现 / 不适用） | Micrometer 的 Timer 默认导出滚动窗口 max；Go 的 `client_golang` Histogram **不导出 `_max`** ⇒ **纯增项** ⇒ 不影响 Go 侧任何 PromQL 的语义（PromQL 按指标名 + 标签取值，多出来的 series 只是多一个可选指标）⇒ **不修**（Micrometer 1.16 无「关掉 Timer max」的开关） |
+| 2 | **暴露路径不同**（Go `/metrics` + `/healthz` ↔ RAG `/actuator/prometheus` + `/actuator/health`） | **P3** | **D 类** | **端口一字不差（都是 16065）**；路径是 Actuator 的固定前缀，与本仓 8 个 api 模块的既定形态一致 ⇒ 抓取配置**改路径不改端口** ⇒ 表达层差异 |
+| 3 | **载体不同**（Go = `http.ListenAndServe` 的小 server，无 servlet；RAG = Tomcat，有 servlet 但**无任何业务 HTTP 路由**） | **P3** | **D 类** | 对外可观测面（独立端口 + Prometheus 文本）一致；载体不同属框架表达差异 ⇒ **不修** |
+| 4 | **`le` 文本 `1` vs `1.0` / `5` vs `5.0` / `10` vs `10.0`** | **P3** | **D 类** | Prometheus 按浮点解析 `le` ⇒ 同一个桶 ⇒ 语义等价 ⇒ 不修 |
+| 5 | Go DevServer 另有 `/debug/pprof/*`（`follow.yaml:27` `EnablePprof: true`） | **P3** | **D 类** | RAG 侧 Actuator 无 pprof endpoint ⇒ **新增可观测面缺失**；不影响指标可比性 ⇒ 不修 |
+
+⚠️ **「一条差异 ≠ 一个缺陷」**：上表 5 条**全部是 D 类**（已分析确认可不实现），
+**没有一条是 A/B/C 类** ⇒ **DRIFT-FOLLOW-006 本体（零抓取出口）已闭环**。
+
+### 证据强度 / 核对日期
+
+| 项 | 强度 | 日期 |
+|---|---|---|
+| 抓取出口存在性 | ✅ **L4 双侧活体**（真进程 + 真 PG + 真 Nacos + 真 HTTP 抓取） | 2026-10-29 |
+| series 集合逐条比对 | ✅ **L4 双侧活体**（28 步请求矩阵 + 10 步故障注入，两侧响应逐字节一致） | 2026-10-29 |
+| 计数型 / gauge 型的值比对 | ✅ **L4**（两侧**同一批请求** ⇒ 值逐条相等，实测 0 差异） | 2026-10-29 |
+| 桶边界对齐 | ✅ **L4**（两侧 `le` 边界逐个比对，按浮点归一化） | 2026-10-29 |
+| 变异必红 | ✅ **L4**（见下） | 2026-10-29 |
+
+**变异必红（两处，均已还原干净）**：
+
+| 变异 | 现象 | 结果 |
+|---|---|---|
+| ① **改实现**：摘掉 `serviceLevelObjectives(...)`（`FollowRpcMetrics.java`） | RAG 侧 `_bucket` **一条都不剩**（无 SLO 也无 `publishPercentileHistogram` ⇒ 不出直方图）⇒ `仅 Go 有 = 96` | ✅ **转红（`EXIT=1`）**，报「期望 8 条 / 实际 104 条」 |
+| ② **改期望值**：往 `expected-diff.txt` 加一条不存在的差异 | 实际差异与冻结期望不再逐条相同 | ✅ **转红（`EXIT=1`）**，报「- 期望有、实际无：`follow_rpc_db_error_total{action=mutated,type=mutated}`」 |
+
+⇒ 还原后复跑 **两次 `EXIT=0`**（绿）。
+
+### 解除条件（本条**已解除**）
+
+- ✅ **出口存在** ⇒ RAG 侧真起 follow-rpc 就能抓到 `follow_rpc_*`。
+- ✅ **series 集合可比** ⇒ 两侧同一批请求 ⇒ 集合逐条一致（残余 5 条 D 类已登记）。
+- ✅ **有可复算的守门** ⇒ `tools/metrics-probe/follow/run.sh`（`EXIT=0` 绿 / `EXIT=1` 红 / `EXIT=2` 环境问题）。
+- ✅ **残余差异已登记** ⇒ 上表 5 条全部 **D 类**，无 A/B/C 类待办。
+
+⇒ **DRIFT-FOLLOW-006 关闭（CLOSED）**。
+
+### 顺带确认的两件事（**不是**本条漂移）
+
+1. **`service/common` 的 `ObservabilityLifecycle` 关闭路径引用 `jakarta.servlet.Filter`**
+   （`rpc.md` 待办第 2 条）⇒ **本轮引入 servlet 容器后，follow-rpc 运行时 classpath 上
+   有了 servlet-api ⇒ 该 `NoClassDefFoundError` 在 follow-rpc 上**不再复现** ⇒
+   **但共享层代码未动**（**G4 写权**）⇒ 其它仍无 servlet 的 rpc 组件**仍会踩** ⇒
+   **登记为给 G4 的信息，不在本条结案**。
+2. **`management.server.port` 未单独设置** ⇒ Actuator 挂在**主 web 端口**上
+   （本模块唯一的 HTTP 监听）⇒ 与 Go 的 DevServer「独立端口」**形态等价**
+   （Go 的主端口是 gRPC，DevServer 是另一个口；RAG 的主 gRPC 端口与 web 端口分离，
+   web 端口 = 观测端口 16065）⇒ 两者都是「**gRPC 业务口 + 另一个观测口**」。
+
+### 跨域待办（**仍归主会话 / 其它域**，本工作树不碰）
+
+上表 §「全仓调查结论」列的另外 5 个 rpc 组件
+（`favorite-rpc` 16062 / `message-rpc` 16067 / `like-rpc` 9098 /
+`user-user-rpc` 9094 / `user-admin-rpc` 9097）
+**仍是「Go 有 DevServer、RAG 零出口」** ⇒ 本轮**只落 follow 域**
+⇒ 跨域派单**保持原样**（本工作树不得改域外文件）。
+
 > **🧾 第二轮复核（2026-10-24 · 最全性）**：补录「逐文件对照索引」——
 > 此前「逐条对照」这条断言**无法从台账里核对**
 > （`FollowRpcApplication`、`UserRpcClient`、`FollowRpcProperties`、
@@ -399,7 +558,7 @@ threading.GoSafe(func() {
 | 真启动（`java -jar` 真 PG + 真 Nacos） | ✅ **真启动**，非 test classpath |
 | DDL vs GORM 产物 | ✅ **双侧真产物逐行对比** |
 | gRPC 行为 | ✅ **双侧活体对拍**（Go follow-rpc 与 RAG follow-rpc 同跑，52/52 逐字节一致） |
-| 指标口径 | ⚠️ **无法对拍**（Go 侧抓到 127 行 `follow_rpc_*`；**RAG 侧零抓取出口** ⇒ 取不到值可比）⇒ 已登记 **DRIFT-FOLLOW-006** |
+| 指标口径（**series 集合 + 计数型/gauge 型的值**） | ✅ **L4 双侧活体**（2026-10-29 落地后：Go 147 行 / RAG 155 行 `follow_rpc_*`，**series 集合逐条一致**，残余 8 条 `_max` 增项已登记 P3/D）⇒ 探针 `tools/metrics-probe/follow/run.sh` |
 
 ## 对拍环境（可复现）
 
@@ -425,11 +584,22 @@ threading.GoSafe(func() {
    `jakarta.servlet.Filter`，而 follow-rpc 运行时 classpath **无 servlet-api**
    ⇒ 进程关闭时抛 `NoClassDefFoundError`（不影响启动，但会污染关闭日志）
    ⇒ 属 `service/common` 职责，**未在本工作树改动**。
-3. ~~**指标数值**未做双侧对拍~~ ⇒ ✅ **已做**（2026-10-24，U1）：
-   Go 侧抓到 127 行 `follow_rpc_*`；RAG 侧**零出口** ⇒ 登记为 **DRIFT-FOLLOW-006**。
-4. **DRIFT-FOLLOW-006 的修法已转为「全仓 rpc 层统一方案」交主会话拍板**（用户 2026-10-24 定）。
-   ⇒ 本工作树**不落地代码**；调查结论（rpc 层 0/8 有出口、B 只在 api 层是既定形态、C 无先例、
-   Go 侧只有 6 个 rpc 有 DevServer、Go 的 DevServer 本身即方案 A）见该条目。
+3. ~~**指标数值**未做双侧对拍~~ ⇒ ✅ **已做**（2026-10-24，U1 → **2026-10-29 落地**）：
+   2026-10-24 只做到「Go 侧抓到 127 行 `follow_rpc_*`；RAG 侧**零出口**」；
+   **2026-10-29（`S1-FOLLOW-001`）** 已补齐出口并完成**双侧 series 集合逐条比对**
+   （Go 147 行 / RAG 155 行，**仅余 8 条 `_max` 增项** ⇒ P3/D 类）⇒ **DRIFT-FOLLOW-006 关闭**。
+4. ~~**DRIFT-FOLLOW-006 的修法已转为「全仓 rpc 层统一方案」交主会话拍板**~~ ⇒
+   ✅ **已落地（用户重新批准 · 2026-10-29 · 编号 `S1-FOLLOW-001`）**：
+   本轮**只落 follow 域**（`follow-rpc` 补 `spring-boot-starter-web` + 观测端口 16065 +
+   关掉 Nacos 自动注册 + 直方图桶边界对齐 Go 的 `DefBuckets`）⇒
+   **域内结论、逐行比对、差异定级、探针、变异必红**见
+   §「DRIFT-FOLLOW-006 的落地（2026-10-29）」。
+   ⚠️ **全仓统一方案仍未做**：另外 5 个 rpc 组件（`favorite-rpc` / `message-rpc` / `like-rpc` /
+   `user-user-rpc` / `user-admin-rpc`）**仍是「Go 有 DevServer、RAG 零出口」**
+   ⇒ **跨域派单保持原样**（本工作树不得改域外文件）。
+   ⚠️ 本轮**选的是「方案 B 变体」**（Tomcat 承载 Actuator，**观测端口与 Go 同为 16065**），
+   而非台账里列的「方案 A」（`com.sun.net.httpserver` 小 server）：
+   ⇒ 原因与代价已登记在 §「残余差异登记」的第 2/3 条（**D 类**）。
 5. **跨域派单（5 处同款缺口）**：`favorite-rpc`(16062) / `message-rpc`(16067) / `like-rpc`(9098) /
    `user-user-rpc`(9094) / `user-admin-rpc`(9097) —— Go 有 DevServer、RAG 零出口。
    ⇒ 连同端口规划一起交主会话（本域不得改域外文件）。
