@@ -77,7 +77,12 @@ public final class GoStyleRouterErrorResponses {
 
     /**
      * {@code http.NotFound} 的响应体 —— {@code http.Error} 用 {@code fmt.Fprintln} 写出，
-     * 所以<b>带一个尾随换行</b>，全长 {@code 20} 字节。
+     * 所以<b>带一个尾随换行</b>，全长 {@code 19} 字节
+     * （{@code "404 page not found"} = 18 字节 ＋ {@code "\n"} = 1 字节）。
+     *
+     * <p>🔴 <b>2026-10-29（R3 轮）订正</b>：本 javadoc 原写「全长 {@code 20} 字节」⇒ <b>错</b>
+     * ⇒ 是 {@code GoStyleRouterErrorResponsesContractGateTest#notFoundMatchesGoByteShape}
+     * 按字节数组实测抓出来的（{@code hasSize(19)}）⇒ ⇒ <b>字节数必须实测，不能手数</b>。
      */
     private static final byte[] NOT_FOUND_BODY =
             "404 page not found\n".getBytes(StandardCharsets.UTF_8);

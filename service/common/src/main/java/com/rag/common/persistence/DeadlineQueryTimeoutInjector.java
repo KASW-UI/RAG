@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li><b>② 已过期则查询直接失败</b>：Go 标准库 {@code database/sql} 的 {@code DB.conn(ctx, …)}
  *       在<b>取连接之前</b>就查 {@code ctx.Err()} ⇒ ctx 已过期 ⇒ <b>查询根本不会发到服务端</b>
  *       ⇒ 返回 {@code context.DeadlineExceeded}。</li>
- *   <li><b>③ 提交不看 deadline</b>：{@code gorm.io/gorm@v1.31.1} {@code finisher_api.go:622} 的
+ *   <li><b>③ 提交不看 deadline</b>：{@code gorm.io/gorm@v1.31.1/finisher_api.go:622} 的
  *       {@code Transaction} ⇒ {@code db.Begin()} ⇒ {@code BeginTx(db.Statement.Context, opt)}（事务带 ctx），
  *       但 {@code tx.Commit()} ⇒ {@code committer.Commit()} ⇒ <b>不检查 ctx</b>
  *       ⇒ <b>Go 侧「查询全部成功 ⇒ 提交成功」，哪怕提交时 ctx 已过期</b>。</li>

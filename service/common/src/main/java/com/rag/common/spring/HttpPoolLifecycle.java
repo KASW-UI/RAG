@@ -6,6 +6,9 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.stereotype.Component;
 
 /**
+ * <p><b>Go 出处</b>：{@code service/common/observability/http.go:36}（Go 侧的 HTTP 中间件池由<b>进程生命周期</b>托管，Go 侧无显式关闭）
+ * ⇒ ⇒ Java 侧<b>必须</b>显式关（线程是 daemon ⇒ 不关也不阻止 JVM 退出，但会与 Spring 的 graceful shutdown 错开）
+ * ⇒ ⇒ 这是<b>表达层差异</b>，Go 侧<b>没有对应物</b> ⇒ <b>不构成行为漂移</b>。
  * <b>HTTP 观测层线程池的关闭钩子 —— 只在 servlet 进程里存在</b>。
  *
  * <h2>为什么必须与 {@link ObservabilityLifecycle} 分开</h2>

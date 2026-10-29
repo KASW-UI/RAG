@@ -856,10 +856,10 @@ public final class RpcInterceptor {
          * <ul>
          *   <li><b>Go 出处（逐条可核）</b>：标准库 {@code context.WithDeadline}
          *       （{@code $GOROOT/src/context/context.go:625} · {@code :632}）把 deadline 存成
-         *       {@code time.Time}（字段见 {@code context.go:666}）⇒ <b>纳秒精度</b>；
+         *       {@code time.Time}（字段见 {@code $GOROOT/src/context/context.go:666}）⇒ <b>纳秒精度</b>；
          *       而 {@code time.Time} <b>自带单调时钟读数</b>（{@code $GOROOT/src/time/time.go:152}
          *       的 {@code ext int64} + {@code :164} 的 {@code hasMonotonic} 标志位）；
-         *       {@code time.Until(t)}（{@code time.go:1233}）在有单调读数时走
+         *       {@code time.Until(t)}（{@code $GOROOT/src/time/time.go:1233}）在有单调读数时走
          *       {@code subMono(t.ext, runtimeNano()-startNano)} ⇒ <b>纯单调</b>
          *       ⇒ <b>NTP 校正 / {@code setSystemTime} / 虚拟机快照恢复都影响不到它</b>。</li>
          *   <li><b>旧实现（已修）的两个问题</b>：

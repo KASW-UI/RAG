@@ -1,6 +1,8 @@
 package com.rag.common.logger;
 
 /**
+ * <p><b>Go 出处</b>：{@code service/common/logger/logger.go:26-29}
+ * （{@code type LogOptions struct { UserID string; ArticleID string }}`）⇒ 两字段逐条对位 ⇒ <b>语义等价</b>。
  * 对应 Go 版 service/common/logger/logger.go 的 LogOptions struct：
  *
  * <pre>

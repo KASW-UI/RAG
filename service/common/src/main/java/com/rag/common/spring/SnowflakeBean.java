@@ -4,6 +4,9 @@ import com.rag.common.snowflake.Snowflake;
 import org.springframework.stereotype.Component;
 
 /**
+ * <p><b>Go 出处</b>：{@code service/common/snowflake/snowflake.go:22-38}
+ * （{@code func Init()} ⇒ {@code sync.Once} 懒加载、进程内<b>唯一</b>一份 {@code snowflake.Node}）
+ * ＋ {@code service/common/snowflake/snowflake.go:53-59}（{@code generateNodeId()} 的 {@code SNOWFLAKE_NODE_ID} 档）。
  * Snowflake Bean 化入口（决策 2：Snowflake 同意 Bean 化）。
  *
  * <p>workerId 来源优先级（决策 5）：

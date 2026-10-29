@@ -1,6 +1,9 @@
 package com.rag.common.logger;
 
 /**
+ * <p><b>Go 出处</b>：{@code service/common/logger/logger.go:35-39}
+ * （{@code func WithUserID(userID string) LogOption} ＋ 闭包体 {@code func(opts *LogOptions) { opts.UserID = userID }}`）
+ * ⇒ <b>语义等价</b>：Go 返回闭包 / Java 返回 {@link LogOption} 实现 ⇒ 调用点写法不同、行为一致。
  * 对应 Go 版 service/common/logger/logger.go 的 WithUserID 函数：
  *
  * <pre>

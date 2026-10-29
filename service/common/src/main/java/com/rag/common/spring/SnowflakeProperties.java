@@ -4,6 +4,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
+ * <p><b>Go 出处</b>：{@code service/common/snowflake/snowflake.go:53-59}
+ * （{@code generateNodeId()} 的 {@code SNOWFLAKE_NODE_ID} 环境变量档）
+ * ⚠️ Go 侧<b>没有</b>「yaml 配置 workerId」这一档 ⇒ ⇒ 本类提供的是 <b>RAG 多出的一档</b>
+ * ⇒ ⇒ 属<b>表达层扩展</b>（已登记为 {@code DRIFT-SF-002} · C 类 · 不计入 R3 ⑥）。
  * Snowflake Bean 化配置绑定，注入 workerId。
  *
  * <p>优先级（决策 5）：

@@ -7,6 +7,10 @@ import org.springframework.boot.web.servlet.ServletRegistrationBean;
 import org.springframework.stereotype.Component;
 
 /**
+ * <p><b>Go 出处</b>：{@code service/common/communityfact/authority_http.go:23}
+ * （{@code func NewAuthorityHandler(producer, token string, lookup AuthorityLookup, logger *slog.Logger) (http.Handler, error)}`）
+ * ＋ {@code service/common/communityfact/authority_http.go:28}
+ * （{@code mux.HandleFunc("GET /internal/v1/community/facts", …)}` ⇒ <b>HTTP 方法 + 路径逐字一致</b>）。
  * Spring 入口：把 {@link AuthorityHandler} 内部 HTTP 查询端点（{@code /internal/v1/community/facts}）
  * 注册为 Spring Bean。
  *

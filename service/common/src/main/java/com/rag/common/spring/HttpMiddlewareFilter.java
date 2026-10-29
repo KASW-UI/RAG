@@ -16,6 +16,9 @@ import java.io.IOException;
 import java.time.Duration;
 
 /**
+ * <p><b>Go 出处</b>：{@code service/common/observability/http.go:36}
+ * （{@code func NewHTTPMiddleware(serviceName string, timeout, slowThreshold time.Duration) rest.Middleware}`）
+ * ⇒ 本类是它在 Servlet 容器里的<b>注册入口</b>（Go 侧由 {@code rest.WithMiddlewares} 挂载）⇒ <b>表达层</b>。
  * Spring 入口：把 HTTP observability filter 注册为 Spring Bean，让 Spring Boot 自动挂到 Servlet
  * 容器（无需业务在 {@code @SpringBootApplication} 写 {@code FilterRegistrationBean}）。
  *

@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <h3>Go 出处（消费点，不是声明点）</h3>
  * <pre>
- *   zrpc@v1.10.2/zrpc/server.go:148-150
+ *   go-zero@v1.10.2/zrpc/server.go:148-150
  *       if c.Middlewares.Recover { svr.AddUnaryInterceptors(UnaryRecoverInterceptor) }
  *       └─ 默认值：zrpc/internal/config.go:22  Recover bool `json:",default=true"`
  *          ⇒ etc/message.yaml 未配 ⇒ 生效
