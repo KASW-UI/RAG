@@ -295,3 +295,44 @@ python3 tools/check-ledger-selfcheck.py --domain task --go-root /path/to/Sea-Rid
 
 ⚠️ **本域与 message / users-admin 域在 3 个共享文件上有重叠**
 （`check-ddl-static.py` / `run.sh` / `check-plaintext400-headers.sh`）⇒ 合并需人工合。
+
+---
+
+## 🆕 **2026-10-29 真实性复核回执**（W-B lane · 「台账结论 ↔ 代码」逐条复核 · task 域）
+
+> **口径**：每条带编号的结论 → 回 **Go 真源（只读）** ＋ **RAG 源码** 两侧核「被描述的那个行为现在还在不在」，
+> 再核「证据指针那一行是不是真的在讲这件事」（**指针能解析 ≠ 结论为真** —— 本轮就抓到 3 处「行号合法但指错行/指错文件」）。
+> **原值一律保留**；订正以 ⚠️ 段**追加**（明细订正在各条正文）。
+> **机器判据**：`python3 tools/difftest/ledger-claim-audit.py --domain task` ⇒ **🔴 落空 = 0**（`RedisURI.java:221` / `LettuceConnectionFactory.java:132` 现被工具**单列进「📦 jar 内第三方源码」档**、不计失败；本轮**独立**从本机 `lettuce-core-6.8.2.RELEASE-sources.jar` 与 `spring-data-redis-4.0.7-sources.jar` 取出那两行核对 ⇒ **行内容与断言逐字相符**，故**不改行号**）。
+
+### 一、逐条结论表（编号 · 原状态 · 现行态 · 依据 · 是否改判）
+
+| 编号 | 原状态 | 现行态 | 依据（两侧 `文件:行号` · 核对日期 2026-10-29） | 改判 |
+|---|---|---|---|---|
+| `DRIFT-TASK-API-001` | ✅ 已修 | ✅ 已修（不变） | RAG `service/task/task-api/src/main/resources/application.yml:72` = `port: ${TASK_API_PORT:18886}` ＋ Go `service/task/api/etc/task.yaml:3` = `Port: 18886` ⇒ 两侧一致。⚠️ `manage.sh:842` 指针指向**真源**那份 **1179 行**的 `manage.sh`（`:842` = `-p 18886:18886 -p 19005:9005`，本轮已核）⇒ **不是 RAG 仓那份 161 行的** ⇒ 按主线指示**不动** | 否 |
+| `DRIFT-TASK-API-002` | ✅ 已修 | ✅ 已修（不变） | RAG `service/task/task-api/src/main/java/com/rag/task/task/api/advice/GlobalExceptionHandler.java:76`（引 `go-zero@v1.10.2/rest/httpx/responses.go:150-153`）＋ `:279`/`:292`（引 `:154-155`）＋ `…/dto/GetTaskResp.java:18`（引 `:56-64`）⇒ 本轮**逐行核对** go-zero v1.10.2 真实源码：`:150-153` = gRPC 分支、`:154-155` = 非 gRPC ⇒ `http.Error(..., http.StatusBadRequest)`、`:56-64` = `OkJsonCtx`、`:142-173` = `doHandleError` ⇒ **4 处引用现已全部对得上** | 否 |
+| `DRIFT-TASK-API-003` | ✅ 已修 | ✅ 已修（不变） | RAG `service/task/task-api/src/main/java/com/rag/task/task/api/controller/TaskController.java:60,87` = `@RequestMapping` / `@PostMapping` **无 `consumes`**（`:57` 的注释明写「不要写 `consumes = "application/json"`」）⇒ Go `service/task/api/internal/handler/task/gettaskhandler.go:18-21` = `json.NewDecoder(r.Body)`（**不看 Content-Type**）⇒ 两侧同形 | 否 |
+| `DRIFT-TASK-API-004` | 🟡 未修（全域共性） | 🟡 未修（不变） | 判据是 **HTTP 头渲染层**（`application/json` 无 charset ＋ `text/plain;charset=utf-8` 无空格）⇒ **必须真容器活体**才能量到 ⇒ 本轮**未重跑**该对拍 ⇒ **字节级结论标「待核实」**（源码级侧已核：Go 侧常量在 `go-zero@v1.10.2/rest/httpx/responses.go:182` = `w.Header().Set(ContentType, header.ContentTypeJson)`，RAG 侧由 Spring 转换器产出） | 否（字节级待核实） |
+| `DRIFT-MSG-V-030` | ✅ 已修 | ✅ 已修（不变） | RAG `service/task/task-api/pom.xml:134` = `spring-boot-maven-plugin` ⇒ 产物是可执行 jar | 否 |
+| `DRIFT-TASK-RPC-001` | ✅ 已修 | ✅ 已修（不变） | RAG `service/task/task-rpc/src/main/java/com/rag/task/task/rpc/mq/TaskCountStore.java:42-43` = 「按 **group id** 命名空间隔离」＋ `:69` = key `task:goka:count:<groupId>:<messageKey>` ⇒ 原「内存单例 ⇒ 两 group 串号 + 重启归零」**已消除** | 否 |
+| `DRIFT-TASK-RPC-002` | ✅ 已修 | ✅ 已修（不变）**＋ 指针订正** | RAG `…/config/TaskSinkProperties.java:60` = `private Duration initTtl = Duration.ofDays(90);`（**类型已是 `Duration`** ⇒ 与 yaml `init-ttl` 逐字对上 ⇒ 原「`initTtlDays: long` ⇒ 静默丢弃」的死配置已消除）＋ `…/application.yml:254` = `definitions:` · `:260` = `init-ttl: 90d` | **指针订正**（`application.yml:184-185` ⇒ `:249`） |
+| `DRIFT-TASK-RPC-003` | ✅ 已修 | ✅ 已修（不变） | RAG `service/task/task-rpc/pom.xml:336-341` = surefire `configuration` ＋ `…/mapper/TaskProgressUpsertParityTest.java:71` = 「刻意**不加** `@EnabledIfDockerAvailable`」⇒ **本轮实测 surefire XML 求和：task-rpc `tests=137 failures=0 errors=0 skipped=0`（20 个 XML，最新 2026-10-29 21:31）** ⇒ 「15 条真 PG 用例静默全跳」**已消除** | 否 |
+| `DRIFT-TASK-RPC-004` | ✅ 已修 | ✅ 已修（不变） | RAG `…/service/RedisPipelines.java:98` = 「这里**绝不能**再调 `operations.exec()` —— pipeline 模式没发过 MULTI」⇒ 原「把 pipeline 当 MULTI/EXEC 事务」**已消除** | 否 |
+| `DRIFT-TASK-RPC-005` | ✅ 已修 | ✅ 已修（不变） | RAG `…/RedisPipelines.java:129-133` = `catch (RuntimeException e)` **向上抛**（只补一条 WARN，不吞）⇒ 与 Go `service/task/rpc/internal/sink/like_sink.go:223-225` / `article_sink.go:308-310`（`pipe.Exec` 报错 ⇒ 向上抛）同形 | 否 |
+| `DRIFT-TASK-RPC-006` | ✅ 已修 | ✅ 已修（不变）**＋ 指针订正** | RAG `…/mq/TaskUserCountConsumer.java:84` / `TaskArticleCountConsumer.java:80` / `TaskRawDiagnosticConsumer.java:54` = 三处**点分** `properties = "auto.offset.reset=…"` ⇒ 与 Go `service/task/rpc/internal/Init/initGoKa.go:131,173,207` = `sarama.OffsetOldest` ／ `initKafkaRaw.go:32` + `initArticleFilter.go:40` = `Offset: "latest"` 逐条对得上 | **指针订正**（`TaskUserCountConsumer.java:80` ⇒ `:84`） |
+| `DRIFT-TASK-RPC-007` | ✅ 已修 | ✅ 已修（不变） | RAG `service/task/task-rpc/src/main/resources/application.yml` = `timeout: 3s` ＋ `connect-timeout: 5s` ⇒ **不再落 Lettuce 默认 60s**（`RedisURI.java` 第 221 行 = `* Default timeout: 60 sec`，本轮已从本机 sources jar 独立核过） | 否 |
+| `DRIFT-TASK-RPC-008` | ✅ 已修 | ✅ 已修（不变） | RAG `…/application.yml:152-158` = `lettuce.pool`（`enabled: true` / `max-active: 64` / `max-idle: 16` / `min-idle: 0` / `max-wait: 4s`）＋ `service/task/task-rpc/pom.xml:148` = `commons-pool2` ⇒ **池已启用**（Go `service/task/rpc/internal/svc/service_context.go` 的 `redis.NewClient` 未设 `PoolSize` ⇒ 落库默认 ⇒ **Go 侧本就有池** ⇒ 形态轴已对齐） | 否 |
+| `SD-2026-10-23-TASK-01` | ✅ 已签字 | ✅ **仍成立**（不变） | Go `service/task/rpc/internal/svc/service_context.go:45` = `sqlDB.SetConnMaxLifetime(time.Duration(c.Postgres.ConnMaxLifetimeMinutes))`（**少乘 `* time.Minute`**）＋ `service/task/rpc/etc/task.yaml:53` = `ConnMaxLifetimeMinutes: 30` ⇒ **30 纳秒仍在**；RAG `service/task/task-rpc/src/main/resources/application.yml:37` = `max-lifetime: 1800000`（30 分钟）⇒ **两侧差异仍在 ⇒ 签字仍成立**（决策不是缺陷） | 否 |
+| `SD-2026-10-24-TASK-01` | ✅ 已签字 | ✅ **仍成立**（不变） | Go `service/task/rpc/internal/Init/initGoKa.go:138-145` = `goka.NewProcessor(...)` ⇒ `if err != nil { log.Fatal(err) }`（**进程退出**仍在）；RAG `…/mq/TaskUserCountConsumer.java:72` / `TaskArticleCountConsumer.java:70` / `TaskRawDiagnosticConsumer.java:44` = 三个 `@KafkaListener` ＋ 全仓 `missingTopicsFatal` **零命中** ⇒ **服务存活**仍在 ⇒ **签字仍成立** | 否 |
+
+### 二、仍**待核实**（不默认「仍生效」也不默认「已闭环」）
+
+| 编号 | 为什么判不了 | 本轮做过什么 |
+|---|---|---|
+| `DRIFT-TASK-API-004` 的**字节级**结论（charset / 空白） | 属**真容器 HTTP 头渲染层** ⇒ 只能靠真容器活体对拍量到 | 源码级侧已核（Go 侧常量出处 + RAG 侧由 Spring 产出）；**未重跑**对拍 |
+| `DRIFT-TASK-RPC-007` / `-008` 的**活体读数**（池等待 4.005s / 桶边界 12） | 需**真 Redis 容器 + 真 Go 客户端** ⇒ 本轮**未重跑** | 已核：**配置层**（`timeout` / `connect-timeout` / `lettuce.pool` 五项 / `commons-pool2` 依赖）+ **jar 内源码行**（`RedisURI.java` 第 221 行、`LettuceConnectionFactory.java` 第 132 行，本机 sources jar 独立核过） |
+| `PIT-TASK-01`~`PIT-TASK-34` 中标「仍生效」的**条目** | 这些是**方法论/踩坑形态**，其「仍生效」= 「该坑的触发条件仍可能重现」⇒ 需按条重跑才能证伪 | 本轮对**全部条目**做了「所引仓内文件是否存在」的机械复核 ⇒ **零缺失**；并抽核 `PIT-TASK-06`（Go `Pipeline()` 非事务）/ `-07`（`RedisPipelinesRealRedisGateTest.java` 存在）/ `-18`（三处点分 `properties`） |
+
+### 三、本轮**只核台账、不改产品代码**（AGENTS.md §3.3）
+
+⇒ 本 lane **未修改任何 `service/**` / `tools/**` 文件**；所有订正只落在 `docs/DRIFT/task/**`（本文件 + `api.md` + `rpc.md`）。

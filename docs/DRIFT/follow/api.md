@@ -258,9 +258,11 @@ RAG 侧改 `--grpc.client.follow-rpc.address=static://127.0.0.1:19999`），两�
   （`service/follow/api/followcenter.go:40-42` `DisableNativeRestTimeout` + `NewHTTPMiddleware`；
   `service/common/observability/http.go:53` `context.WithTimeout(r.Context(), timeout)`，
   `:67-68` `r = r.WithContext(ctx)`）。
-- Go 的 **zrpc 客户端超时 2s**：`go-zero@v1.10.2/zrpc/config.go:34`
+- Go 的 **zrpc 客户端超时 2s**：`go-zero@v1.10.2/zrpc/config.go:31`
   `Timeout int64 `json:",default=2000"``（`RpcClientConf`；`etc/followcenter.yaml` 未配 ⇒ 走 default）。
   客户端拦截器做的是 `context.WithTimeout(ctx, c.Timeout)` ⇒ **两层取更小的生效** ⇒ 2s 先到。
+  ⚠️ **2026-10-29 真实性复核（指针订正）**：原写 `zrpc/config.go:34` ⇒ **那一行是 `BalancerName`，不是 `Timeout`**（**行号合法但指错行** ⇒ 机器审计只报「歧义」、查不出 ⇒ 本轮当场逐行核对后改为 `:31`）。
+  **复核依据**：`~/go/pkg/mod/github.com/zeromicro/go-zero@v1.10.2/zrpc/config.go` 第 30–35 行逐行核对 ⇒ `:31` = `Timeout int64 `json:",default=2000"``、`:34` = `BalancerName string `json:",default=p2c_ewma"``（真源 `go.mod:17` 锁的就是 `go-zero v1.10.2` ⇒ 版本对得上）。
 - ⇒ Go 侧下游挂死时，**api 拿到的是 rpc 错误**（`DeadlineExceeded`）⇒ 走业务错误通道 ⇒
   **HTTP 200 + 业务码 1015**；**根本走不到** HTTP 超时分支。
 - RAG 侧此前**只有 ctx 预算**（`GoStyleRequestDeadline.applyTo` 把 HTTP 超时的 3s 预算
@@ -1061,6 +1063,10 @@ go-zero@v1.10.2/rest/server.go:222-233    WithMiddleware ⇒ middleware(route.Ha
 ---
 
 ## 🔴 `DRIFT-FOLLOW-013` · **「OS 盲选口」族** · 本组件 **2 处**（2026-10-28 · G1 lane）
+
+> ⚠️ **2026-10-29 真实性复核**：原判 **🔴（未修）** ⇒ **现行态 = ✅ 已修（2026-10-28 落码 · 本轮复核属实）**。
+> **依据（两侧当场核过）**：`service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiStartupFailFastTest.java:92` = `return RealGrpcPort.pick();`（**不再是 `new ServerSocket(0)`**）＋ 同文件 `:258` = `NettyServerBuilder.forPort(RealGrpcPort.pick()).build().start();`（**不再是 `forPort(0)`**）＋ `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/support/RealGrpcPort.java:66,69` = `FIRST = 22300` / `LAST = 22319`（**域内专用段**）＋ 全域实测 `grep -rn "forPort(0)\|new ServerSocket(0)\|RANDOM_PORT" service/follow/ --include='*.java'` ⇒ **零处真实命中**（只余注释与 javadoc 里的反面教材）⇒ ⇒ **「🔴」是「2026-10-28 新立时」的陈旧快照**，正文表格里的「已改」与本条结论一致。
+> ⇒ **标题的 🔴 标记保留不改写**（历史留痕），**当前状态读本订正段**。
 
 > 📌 **机制 / 本机实测（Q3·Q6·Q7·Q8）/ 守门细节 / 效力边界 ⇒ [`docs/DRIFT/users/vs-common.md` §65](../users/vs-common.md)**
 > ⇒ 本条只记**本组件那一份**（不抄机制表，避免两处漂移）。

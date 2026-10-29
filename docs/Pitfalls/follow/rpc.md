@@ -180,6 +180,11 @@ WARN ... Destroy method on bean with name 'com.rag.common.spring.ObservabilityLi
 **状态**：🔴 **未修** —— `service/common` 是**共享模块**（被 16 个组件依赖），
 本工作树**不碰域外/共享文件** ⇒ 登记为**跨域待办**，待主会话派单。
 
+> ⚠️ **2026-10-29 真实性复核**：上面这段「**状态**：🔴 **未修**」与「**影响**」段是 **2026-10-24 的原始取证**，保留不改写；
+> **当前状态读上方「状态」行 = 【已闭环】**（共享层 2026-10-27 已落码）。
+> **复核依据（当场核过）**：共享层 `service/common/src/main/java/com/rag/common/spring/HttpPoolLifecycle.java:53-54` = `@ConditionalOnWebApplication(type = SERVLET)` + `class HttpPoolLifecycle` ＋ `service/common/src/main/java/com/rag/common/spring/ObservabilityLifecycle.java:85-94` = 「destroy **只碰** `RpcInterceptor`；HTTP 池改由 `HttpPoolLifecycle` 关」⇒ ⇒ **纯 gRPC 进程的关闭路径已不再加载 servlet 类** ⇒ 本条**维持【已闭环】**。
+> **附带（域侧前提也已变）**：`service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web`（2026-10-29 补，起因 = 指标出口）⇒ ⇒ 「**follow-rpc 的运行时 classpath 里没有 servlet-api**」这句话**对 follow-rpc 已不再成立**（⇒ 域侧触发条件消失；**共享层那半边的修法价值仍在** —— 其它仍无 servlet 容器的 rpc 组件依旧受益）。
+
 ---
 
 ## PIT-FOLLOW-013 · 【仍生效】 shell 的两处**词法**陷阱：`&` 未加引号 / `$var` 紧跟多字节字符
@@ -265,3 +270,23 @@ RAG : 破窗（block 与 follow 并存）32/40
    **只测 RAG 一侧 ⇒ 只能证明 RAG 有问题，不能证明 Go 没问题**（AGENTS.md §3.3）。
 3. ⚠️ 修不修是**产品决策**（要修就得两侧都改 ⇒ 属于「改真源行为」，需用户拍板），
    **不在对齐 scope 内**。
+
+---
+
+## 🆕 **2026-10-29 真实性复核回执**（W-B lane · follow 域 · 本文件）
+
+| 编号 | 状态（本轮核后） | 依据（核对日期 2026-10-29） | 改判 |
+|---|---|---|---|
+| `PIT-FOLLOW-001` | 已闭环（不变） | RAG `service/follow/follow-rpc/src/main/resources/application.yml:163` = `address: discovery:///user-rpc`（**生产地址是三斜杠**）＋ 守门 `…/FollowRpcProductionAddressTest.java:87-95` 存在 ⇒ 「测试把生产地址覆盖成 `static://`」的形态已由**读生产 yml 的守门**堵住 | 否 |
+| `PIT-FOLLOW-002` | 已闭环（不变） | RAG `service/follow/follow-rpc/pom.xml:256-260` = `io.grpc:grpc-inprocess` **无 `<scope>test</scope>`**（compile 默认）⇒ 运行期 classpath 有该类 | 否（**跨域子结论已订正**：域外 4 个模块的 `test` scope 现已不存在） |
+| `PIT-FOLLOW-003` | 已闭环（不变） | 同上 `application.yml:163` = `discovery:///user-rpc`（**三斜杠**） | 否 |
+| `PIT-FOLLOW-004` | 已闭环（不变） | RAG `service/follow/follow-api/…/application.yml:58` ＋ `service/follow/follow-rpc/…/application.yml:95` = **同一套** `${NACOS_ADDR:nacos}:${NACOS_PORT:8848}` ⇒ 两端语义一致 | 否 |
+| `PIT-FOLLOW-005` | 已闭环（不变） | 共享层 `service/common/src/main/java/com/rag/common/spring/HttpPoolLifecycle.java:53-54` + `ObservabilityLifecycle.java:85-94` ⇒ 关闭路径不再加载 servlet 类（**正文订正见本条上方**） | 否 |
+| `PIT-FOLLOW-013` | 仍生效（不变） | 属**shell 词法**形态 ⇒ 与代码无关；本轮未复现 | 否 |
+| `PIT-FOLLOW-014` | 仍生效（不变） | 属**真源自身**的竞态（Go `service/follow/api/internal/middleware/checkblacklistmiddleware.go` 的「检查黑名单」与「写入关注」不同事务）⇒ 真源冻结 ⇒ 形态仍在 | 否 |
+
+### 仍未核到（**待核实**）
+
+| 编号 | 为什么判不了 | 本轮做过什么 |
+|---|---|---|
+| `PIT-FOLLOW-013` 的**触发条件复现** | 需真实多字节 shell 场景 | 未复现；状态沿用 2026-10-29 对齐 lane 的结论 |

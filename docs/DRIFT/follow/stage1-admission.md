@@ -73,6 +73,11 @@ follow-api (HTTP :8891)  ──gRPC plaintext──▶  follow-rpc (:8082)  ─�
 
 ### `S1-FOLLOW-001` 🟡 **B 类** · `follow-rpc` 的 5 个指标**无任何抓取出口**（跨域方案待定）
 
+> ⚠️ **2026-10-29 真实性复核**：原判 **🟡（B 类 · 跨域方案待定 · 未落地）** ⇒ **现行态 = ✅ 已落地（2026-10-29 · G1 lane）**。
+> ⚠️ **原判是陈旧快照**：本条对应的 DRIFT 条目 `DRIFT-FOLLOW-006` 已在**同一轮**落地，且**落地编号就是 `S1-FOLLOW-001`**（见 [`docs/DRIFT/follow/rpc.md` §「🟢 DRIFT-FOLLOW-006 的落地」](rpc.md)）⇒ ⇒ **本文件这一档与 `rpc.md` 的落地节指向同一条、却仍写「未落地」⇒ 属域内两处漂移**，本轮按现状收敛。
+> **依据（当场核过）**：`service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web`（**给了 Actuator 一个 servlet 载体**）＋ `service/follow/follow-rpc/src/main/resources/application.yml:131` = `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}`（**Go 侧 `service/follow/rpc/etc/follow.yaml:23` = `Port: 16065` ⇒ 端口一字不差**）＋ 同文件 `:112` = `register-enabled: false`（**关掉自动注册 ⇒ 避免 Nacos 里出现错端口实例**）＋ `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/metrics/FollowRpcMetrics.java:134` = `.serviceLevelObjectives(`（**只用 SLO 桶 ⇒ 桶边界对齐 Go 的 `prometheus.DefBuckets`**）＋ 探针脚本 `tools/metrics-probe/follow/run.sh` **存在**（`:355` 就绪判据 = **真抓到 `/actuator/prometheus`**，`:361` 未就绪即 `die` ⇒ 不是「端口开了就算」）。
+> **同款跨域缺口（原文第 5 项列的 5 个 rpc 模块）**：本轮实测 `grep -q spring-boot-starter-web <module>/pom.xml` ⇒ `favorite-rpc` / `message-rpc` / `like-rpc` / `user-user-rpc` **均已补上**（⇒ 那 4 个模块的出口已开）⇒ ⇒ **「5 个 rpc 模块零出口」这句话也已陈旧**（仍无 servlet 载体的是 `article-rpc` / `hot-rpc` / `admin-rpc` ⇒ **不在 follow 域写权面，本 lane 只登记不落码**）。
+
 | # | 项 | 内容 |
 |---|---|---|
 | 1 | 唯一编号 | `S1-FOLLOW-001`（= 台账里的 `DRIFT-FOLLOW-006`） |
@@ -113,6 +118,12 @@ follow-api (HTTP :8891)  ──gRPC plaintext──▶  follow-rpc (:8082)  ─�
 | 11 | 当前证据及剩余证据缺口 | **证据**：签字档 `SD-2026-10-25-01`（2026-10-25 用户签字 · L1 决策记录）· 共享层代码 javadoc `GoStyleMaxConnsFilter.java:67-72`（已指向签字档 + 明文「**不要**因为『Go 是 per-route』就把它当缺陷顺手改回」）· global 收口档 `docs/DRIFT/global/_README.md:88`（T-2 ✅ 已签字 ⇒ 已移出 DRIFT 档）· hot 域 `docs/DRIFT/hot/vs-common.md:31`（`D27` 同族已闭合）· users 域 `docs/DRIFT/users/vs-common.md:2740`（「MaxConns 半边 = 已签字偏离」）· 本域已同步订正 [`api.md`](api.md) + [`vs-common.md`](vs-common.md) §1/§1.1/§A3/§6.2。**缺口**：**基线层**（`docs/PhaseGoal-judge.md` 的 A-2 `follow-api` 行 + 机器生成的 `docs/PhaseGoal/g1.md`）**仍把它记成开放缺陷 ⇒ 待重新拍板** ⇒ **不在 G1 写权面 ⇒ 已上报收口** |
 
 ### `S1-FOLLOW-003` 🔴 **共享层** · 纯 gRPC 进程缺 `servlet-api` ⇒ **关闭路径**抛 `NoClassDefFoundError`
+
+> ⚠️ **2026-10-29 真实性复核**：原判 **🔴（共享层待办 · 派 G4）** ⇒ **现行态 = ✅ 已修（共享层 2026-10-27 已落码）**。
+> **依据（当场核过）**：共享层 `service/common/src/main/java/com/rag/common/spring/HttpPoolLifecycle.java:53-54` = `@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)` + `public class HttpPoolLifecycle {`（**HTTP 池的回收只由 servlet 进程的那个 Bean 负责**）＋ `service/common/src/main/java/com/rag/common/spring/ObservabilityLifecycle.java:85` = 「本方法**只碰** {@link RpcInterceptor}（该类零 servlet / 零 {@code HttpMiddleware} 引用）」＋ `:94` = 「HTTP 池改由 {@link HttpPoolLifecycle} 关 ⇒ **不在本方法里**」⇒ ⇒ **纯 gRPC 进程的关闭路径已不再触及任何 web 类型** ⇒ 原「抛 `NoClassDefFoundError`」的前提**已消除**。
+> **指针订正**：原文引 `ObservabilityLifecycle.java:54` 指「destroy 路径会触及该类型」⇒ **该行现在是讲**「`HttpMiddleware` 引用 `jakarta.servlet.Filter`」的 **javadoc 说明**（修法说明本身）⇒ **行号仍合法但语义已变** ⇒ 本轮按现状记录（`:85` / `:94` 才是当前的「不再触及」判据）。
+> **附带（本域另一半前提也不成立）**：`service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web`（2026-10-29 补，起因 = `S1-FOLLOW-001` 的指标出口）⇒ ⇒ **follow-rpc 的运行时 classpath 现在**有** servlet 容器 ⇒ 原第 4 项「follow-rpc 的运行时 classpath **无** servlet-api」**这一前提**同样不再成立**（⇒ 本域侧无需再派 G4）。
+> ⇒ **原判是 2026-10-27 之前落码前的陈旧快照**；**共享层写权仍归 G4**，本 lane 只登记不落码（本次亦未落码）。
 
 | # | 项 | 内容 |
 |---|---|---|

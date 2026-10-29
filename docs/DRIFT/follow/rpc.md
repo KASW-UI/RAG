@@ -71,6 +71,10 @@ mvn -pl service/follow/follow-rpc dependency:tree -Dincludes=io.grpc:grpc-inproc
 > 都把 `grpc-inprocess` 写成 `test` scope。本工作树**不碰域外文件**（并发写会撞）
 > ⇒ 登记为**跨域待办**，待主会话派给对应域的工作树：
 > 把那 4 个模块的 `grpc-inprocess` 去掉 `<scope>test</scope>`（其余不动）。
+>
+> ⚠️ **2026-10-29 真实性复核（跨域那半边已陈旧）**：原判「**那 4 个模块仍是 `test` scope** ⇒ 跨域待办」⇒ **现行态 = 跨域那半边已不成立**（域外模块已各自落码）。
+> **依据（本轮逐模块实测 `grep -A3 "grpc-inprocess" <module>/pom.xml`）**：`service/article/article-rpc/pom.xml` **无 `<scope>`**（⇒ compile 默认）· `service/comment/comment-rpc/pom.xml` **无 `<scope>`** · `service/like/like-rpc/pom.xml` **无 `<scope>`** · `service/message/message-rpc/pom.xml` **无 `<scope>`** · `service/task/task-rpc/pom.xml` **无 `<scope>`** ⇒ ⇒ **全仓已无 `grpc-inprocess` 的 `test` scope**；`service/favorite/favorite-rpc/pom.xml` = `<scope>runtime</scope>`（**不是 `test`** ⇒ 运行期 classpath 上有该类 ⇒ 也不构成「运行时缺类」）。
+> ⇒ **原句是 2026-10-24 的陈旧快照**，**只对本域（follow-rpc）成立**（本域 `:256-260` 已无 `<scope>test</scope>` ⇒ ✅ 已修，见上方「依据」行）。
 
 ## DRIFT-FOLLOW-003 ✅ `discovery:` URI 必须是三斜杠（启动阻塞）
 
@@ -641,6 +645,10 @@ Go  : 0.005 0.01 0.025 0.05 0.1 0.25 0.5 1   2.5 5   10  +Inf
 ---
 
 ## 🔴 `DRIFT-FOLLOW-013` · **「OS 盲选口」族** · 本组件 **2 处**（2026-10-28 · G1 lane）
+
+> ⚠️ **2026-10-29 真实性复核**：原判 **🔴（未修）** ⇒ **现行态 = ✅ 已修（2026-10-28 落码 · 本轮复核属实）**。
+> **依据（当场核过）**：`service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/FollowGrpcInterceptorWiringTest.java:115` = `ServerBuilder.forPort(RealGrpcPort.pick());`（**不再是 `forPort(0)`**）＋ `service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/FollowRpcSlowThresholdGateTest.java:274` = 同款（**不再是 `forPort(0)`**）＋ `service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/support/RealGrpcPort.java:66,69` = `FIRST = 22320` / `LAST = 22339`（**域内 rpc 专用段**，与 api 段的 22300–22319 不重叠）⇒ ⇒ 「🔴」是**「2026-10-28 新立时」的陈旧快照**，正文表格里的「已改」与本条结论一致。
+> ⇒ **标题的 🔴 标记保留不改写**（历史留痕），**当前状态读本订正段**。
 
 > 📌 **机制 / 本机实测（Q3·Q6·Q7·Q8）/ 守门细节 / 效力边界 ⇒ [`docs/DRIFT/users/vs-common.md` §65](../users/vs-common.md)**
 > ⇒ 本条只记**本组件那一份**（不抄机制表，避免两处漂移）。

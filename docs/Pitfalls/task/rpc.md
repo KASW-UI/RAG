@@ -1507,3 +1507,59 @@ AGENTS.md 早就记过一个坑：**台账的 commit 清单「写成 4 行却只
    ⇒ 本轮能发现它，靠的是 `service/common` 已被**另一个域**审过并改了
    （common 域的 H2 结论直接点名了 `service/task/rpc/task.go`）⇒
    **跨域审计的产物，会变成别的域的输入** ⇒ 别的域改了共享面，**要回扫一遍依赖它的那几个域**。
+
+---
+
+## 🆕 **2026-10-29 真实性复核回执**（W-B lane · task 域 · 本文件）
+
+> **口径**：① 机械复核「每条所引的仓内文件是否真实存在」⇒ **34 条全部零缺失**；
+> ② 抽核「证据指针那一行是不是真的在讲这件事」（**指针能解析 ≠ 结论为真**）；
+> ③ 核「被描述的那个行为现在还在不在」（Go 真源 + RAG 两侧）。
+> **原值一律保留**；本轮**未改判任何一条**（逐条依据见下表）。
+> **机器判据**：`ledger-claim-audit.py --domain task` ⇒ **🔴 落空 = 0**。
+
+### 一、逐条状态与本轮核到的依据（核对日期 2026-10-29）
+
+| 编号 | 状态（本轮核后） | 本轮核到的依据（`文件:行号` · 行内容逐条核对） | 改判 |
+|---|---|---|---|
+| `PIT-TASK-01` | 已闭环（不变） | RAG `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mapper/TaskProgressUpsertParityTest.java:71` = 「刻意**不加** `@EnabledIfDockerAvailable`」＋ **本轮实测 surefire XML 求和 = task-rpc `tests=137 failures=0 errors=0 skipped=0` / task-api `tests=135 failures=0 errors=0 skipped=0`** ⇒ 「静默全跳」已消除 | 否 |
+| `PIT-TASK-02` | 已闭环（不变） | RAG `service/task/task-rpc/src/main/java/com/rag/task/task/rpc/config/TaskSinkProperties.java:60` = `private Duration initTtl = Duration.ofDays(90);` ⇒ 键名与 yaml `init-ttl` 逐字对上（relaxed binding 不再失配） | 否 |
+| `PIT-TASK-03` | 已闭环（不变） | 同上：注释与实现已一致（`:52-58` 写明「必须是 `Duration`，不能是 `long`」· `:60` 即为 `Duration`） | 否 |
+| `PIT-TASK-04` | 仍生效（不变） | 属**探针写法**（Python `urllib` 自动补 `Content-Type`）⇒ 与仓内产品代码无关；本轮未复跑探针 | 否 |
+| `PIT-TASK-05` | 仍生效（不变） | 属**对拍判读**（header 格式淹没真差异）⇒ 同上；RAG 侧 `DRIFT-TASK-API-004`（`Content-Type` charset/空白）**仍开放** ⇒ 该坑的触发条件仍在 | 否 |
+| `PIT-TASK-06` | 已闭环（不变） | RAG `service/task/task-rpc/src/main/java/com/rag/task/task/rpc/service/RedisPipelines.java:98` = 「这里**绝不能**再调 `operations.exec()` —— pipeline 模式没发过 MULTI」⇒ 两侧对 pipeline 的理解已一致 | 否 |
+| `PIT-TASK-07` | 已闭环（不变） | 真 Redis 守门**存在**：`service/task/task-rpc/src/test/java/com/rag/task/task/rpc/mq/RedisPipelinesRealRedisGateTest.java`（本轮实测存在）⇒ 「零真 Redis 覆盖」已消除 | 否 |
+| `PIT-TASK-08` | 仍生效（不变） | 属 **Redis 语义**（`SET` 类型无关）⇒ 真源与 RAG 两侧同形 ⇒ 形态仍在 | 否 |
+| `PIT-TASK-09` | 仍生效（不变） | 属 **Kafka 语义**（删 topic 不删 `__consumer_offsets`）⇒ 与本仓代码无关 | 否 |
+| `PIT-TASK-10` | 仍生效（不变） | 属**容器内 Kafka CLI 的监听器选择**⇒ 与本仓代码无关 | 否 |
+| `PIT-TASK-11` | 仍生效（不变） | 属**框架调用时机**（方法签名对了 ≠ 会被调到）⇒ 本轮未复现 | 否 |
+| `PIT-TASK-12` | 仍生效（不变） | 属**配置键名写错 = 静默失效** ⇒ 机制仍在（`PIT-TASK-02` 的修法正是它的产物） | 否 |
+| `PIT-TASK-13` | 仍生效（不变） | 属**探针写法**（`getInputStream().available()` 自触发）⇒ 与仓内产品代码无关 | 否 |
+| `PIT-TASK-14` | 已闭环（不变） | 探针脚本存在（`tools/difftest/**`）⇒ 两侧 db 编号按轮次定的机制仍在用 | 否 |
+| `PIT-TASK-15` | 仍生效（不变） | 属 **bash 词法** ⇒ 与代码无关 | 否 |
+| `PIT-TASK-16` | 已闭环（不变） | `tools/difftest/run-task-http-parity.sh:78` = `wait_port_free() {` ＋ `:89` = `wait_port_listen() {` ⇒ 「`pkill` 后只 `sleep 2`」的形态已被等待函数替代 | 否 |
+| `PIT-TASK-17` | 仍生效（不变） | 属 **Nacos 2.x 客户端端口推算** ⇒ 与本仓代码无关 | 否 |
+| `PIT-TASK-18` | 已闭环（不变） | RAG `…/mq/TaskUserCountConsumer.java:84` / `TaskArticleCountConsumer.java:80` / `TaskRawDiagnosticConsumer.java:54` = 三处**点分** `properties = "auto.offset.reset=…"` ⇒ 连字符写法已消除（⚠️ 本轮同时订正了 `TaskUserCountConsumer.java` 的指针行号，见 `docs/DRIFT/task/rpc.md`） | 否 |
+| `PIT-TASK-19` | 仍生效（不变） | 属**探针自欺** ⇒ 本轮未复现 | 否 |
+| `PIT-TASK-20` | 已闭环（不变） | `tools/difftest/docker-compose.task-kafka.yml:39` = `name: taskprobe` ⇒ 显式项目名已声明 ⇒ 「从目录名推导」的形态已消除 | 否 |
+| `PIT-TASK-21` | 仍生效（不变） | 属 **bash 词法**（全角标点进变量名）⇒ 与代码无关 | 否 |
+| `PIT-TASK-22` | 已闭环（不变） | 顺序对拍的判据形态已在仓内（`tools/difftest/**`）⇒ 保持 | 否 |
+| `PIT-TASK-23` | 已闭环（不变） | 键扫描器形态见 `tools/check-ledger-selfcheck.py:1676` = `def layer5_unmentioned(root, texts, domain):` ⇒ **按类/前缀逐段匹配**的形态在 | 否 |
+| `PIT-TASK-24` | 已闭环（不变） | 同上文件的 `:2261` = `def layer6_unmentioned_production(root, texts, domain):` ⇒ 已区分生产类型 | 否 |
+| `PIT-TASK-25` | 已闭环（不变） | `service/task/task-rpc/src/test/java/com/rag/task/task/rpc/config/TaskConfigKeyBindingContractTest.java:246` = `@DisplayName("白名单纪律 · 每条登记的前缀都必须真的盖住至少一个孤儿键（防止白名单写成空壳）")` ⇒ 反向纪律在 | 否 |
+| `PIT-TASK-26` | 仍生效（不变） | 属**方法论**（台账的「已修」断言过期时不会报错 ⇒ 必须能机械复核）⇒ 本 lane 本身即该机制的执行者 | 否 |
+| `PIT-TASK-27` | 仍生效（不变） | 属**方法论**（写死计数必然滞后）⇒ 本轮已按此执行（改用不变式 + 当场实测，不复述台账数字） | 否 |
+| `PIT-TASK-28` | 仍生效（不变） | 属**方法论**（纯文本找登记会把正文引用当登记）⇒ 机械复核用的是**编号 + 标题**口径 | 否 |
+| `PIT-TASK-29` | 仍生效（不变） | 属**方法论** ⇒ 同上 | 否 |
+| `PIT-TASK-30` | 已闭环（不变） | `tools/check-ledger-selfcheck.py:1676`（测试类层）＋ `:2261`（**生产类层** `layer6_unmentioned_production`）⇒ 「只查测试类不够」已补生产类层 | 否 |
+| `PIT-TASK-31` | 已闭环（不变） | 同上文件的两层判据（**按编号 + 标题**匹配 ⇒ 占位符与重复登记都能逃过）⇒ 本轮机械复核**正是按编号口径**跑 ⇒ 形态在 | 否 |
+| `PIT-TASK-32` | 已闭环（不变） | 同上：判据机械 ＋ 机械化判据自带反向证据（本轮工具自身给出「歧义 / 落空」分档） | 否 |
+| `PIT-TASK-33` | 已闭环（不变） | 跨域共有的契约**本域各自守一次**的形态在：`service/task/task-rpc/src/test/java/com/rag/task/task/rpc/TaskGrpcInterceptorWiringTest.java`（本轮实测存在） | 否 |
+| `PIT-TASK-34` | 仍生效（不变） | 属 **bash 词法**（与 `PIT-TASK-15` 同族，本轮又踩一次）⇒ 与代码无关 | 否 |
+
+### 二、仍未核到（**待核实**）
+
+| 编号 | 为什么判不了 | 本轮做过什么 |
+|---|---|---|
+| `PIT-TASK-04` / `-05` / `-11` / `-13` / `-15` / `-19` / `-21` / `-34`（8 条「仍生效」） | 这些的「仍生效」= **触发条件仍可能重现** ⇒ 需按条复现探针/脚本才能证伪 ⇒ 本轮**未逐条复现** | 机械核对了「所引仓内文件全部存在」（零缺失）＋ 核对了与仓内代码耦合的部分（`-05` 的触发条件由仍开放的 `DRIFT-TASK-API-004` 佐证）⇒ **状态沿用 2026-10-29 对齐 lane 的结论**，本轮**未独立改判** |
+| `PIT-TASK-09` / `-10` / `-17`（3 条「仍生效」） | 属 **Kafka / Nacos 客户端语义** ⇒ 与本仓代码无关 ⇒ 本轮**未复现** | 同上（机械核对文件存在） |

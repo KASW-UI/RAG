@@ -192,7 +192,7 @@ RAG : {"users":[{"mutual_score":20,"target_id":"4"}]}      ← 字段顺序反�
 
 **根因：两个缺陷叠在一起**
 
-探针取 body 的写法（`/tmp/probe.sh:3`）：
+探针取 body 的写法（⚠️ **2026-10-29 真实性复核**：原引 **`/tmp/probe.sh` 的第 3 行** —— 该行号指向**本机一次性临时探针脚本、不随仓留存 ⇒ 本机不可核验**；**故不再作为仓内可复算指针** ⇒ 下方**脚本内容已整段内联**，可逐字核对；**仓内可复算的等价落点**见上方「证据」行：`tools/api-full-parity-probe/follow/run.sh:529`（`mktemp` 唯一 body 文件）＋ `:579-581`（`http_code == 000` 守卫）＋ `tools/api-full-parity-probe/follow/mutate-parity.sh:161-173`（**M5** 把这条假绿复现出来）—— **三处本轮均已当场逐行核过，行内容与断言一致**）：
 
 ```bash
 p(){ n="$1"; shift; printf "%s|" "$n"; code=$(curl -sS -o /tmp/pb.txt -w "%{http_code}" "$@" 2>/dev/null); printf "HTTP=%s|" "$code"; printf "%s\n" "$(head -c 200 /tmp/pb.txt)"; }
@@ -454,3 +454,29 @@ java.net.BindException: Address already in use
 4. ⚠️ **「进程被杀」≠「端口已释放」** ⇒ 重启脚本里必须有「等端口空闲」的轮询。
 5. ⚠️ **测试红了先看是不是 flake**：Testcontainers / 端口 / 资源类报错，
    **重跑一次再判断**；只有「重跑仍红」才当作代码缺陷去查。
+
+---
+
+## 🆕 **2026-10-29 真实性复核回执**（W-B lane · follow 域 · 本文件）
+
+> **口径**：逐条核「被描述的那个行为现在还在不在」（Go 真源 + RAG 两侧）＋「证据指针那一行是不是真的在讲这件事」。
+> **原值一律保留**；明细订正已追加在各条正文（见 `PIT-FOLLOW-010`）。
+> **机器判据**：`ledger-claim-audit.py --domain follow` ⇒ **🔴 落空 = 0**（本文件原有 1 处真落空 **`/tmp/probe.sh` 的第 3 行** ⇒ 已按 §三·5 处理：**标注「一次性临时探针、不随仓留存 ⇒ 本机不可核验」并改指仓内可复算落点**）。
+
+| 编号 | 状态（本轮核后） | 依据（核对日期 2026-10-29） | 改判 |
+|---|---|---|---|
+| `PIT-FOLLOW-006` | 已闭环（不变） | RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/service/FollowApiSupport.java:265` = `out.setUserIds(null);` ＋ `…/FollowApiMvcPipelineTest.java:625-626` = 断言 `"user_ids":null` ⇒ 触发条件（proto3 空 repeated 在 wire 上消失）已消除 | 否 |
+| `PIT-FOLLOW-007` | 已闭环（不变） | 同上：断言已从 `"user_ids":[]` 改成 `"user_ids":null`（`:625-626`）⇒ **「锁死错误答案」的断言已改** | 否 |
+| `PIT-FOLLOW-009` | 已闭环（不变） | RAG `…/follow-api/…/dto/RecommendUser.java:57` = `@JsonPropertyOrder({"target_id", "mutual_score"})` ⇒ Jackson 的字母序分支已被 `JsonPropertyOrder` 固定 | 否 |
+| `PIT-FOLLOW-008` | 已闭环（不变） | RAG `service/follow/follow-api/pom.xml:196` = `spring-boot-maven-plugin` ⇒ 产物为可执行 fat jar | 否 |
+| `PIT-FOLLOW-010` | 已闭环（不变） | 仓内可复算落点逐行核过：`tools/api-full-parity-probe/follow/run.sh:529` = `out="$(mktemp "${WORK}/body.XXXXXX")" \|\| return 1` ＋ `:579-581` = `http_code == 000` 守卫 ＋ `tools/api-full-parity-probe/follow/mutate-parity.sh:161-173` = **M5** 把这条假绿复现出来 ⇒ 触发条件已消除 | 否（**指针形态已改**：原 **`/tmp/probe.sh` 的第 3 行** ⇒ 标注不可核验并改指仓内落点） |
+| `PIT-FOLLOW-011` | 仍生效（不变） | 探针形态属**一次性外部装置** ⇒ 本轮未复跑；**触发条件（故障模拟器不完成 HTTP/2 握手）在本仓探针里仍在** ⇒ 维持「仍生效」 | 否 |
+| `PIT-FOLLOW-012` | 仍生效（不变） | 属 **go-zero 库行为**（etcd 键 = 前缀 + `/`）⇒ 本轮未复跑 Go 探针；库版本（`go-zero v1.10.2`）未变 ⇒ 维持「仍生效」 | 否 |
+| `PIT-FOLLOW-015` | 仍生效（不变 · **适用范围已写明**） | RAG `…/follow-api/…/metrics/FollowApiMetrics.java:131` = `.publishPercentileHistogram()` ＋ `:132` = `.serviceLevelObjectives(GO_DEF_BUCKETS)` ⇒ **api 侧两个开关同开 ⇒ 并集仍在（80 桶）** ⇒ 触发条件在；⚠️ 已在条目内写明「**follow-rpc 只开 SLO ⇒ 12 桶 ⇒ 该条不适用于单开 SLO 的形态**」 | 否 |
+| `PIT-FOLLOW-016` | 仍生效（不变） | 属**方法论**（对拍装置自身会骗人）⇒ 本轮未复跑；同类形态在本域探针里仍需逐条防（见 `PIT-FOLLOW-010` 的 M5 变异） | 否 |
+
+### 仍未核到（**待核实**）
+
+| 编号 | 为什么判不了 | 本轮做过什么 |
+|---|---|---|
+| `PIT-FOLLOW-011` / `-012` / `-016` 的**触发条件复现** | 需外部装置 / Go 侧进程 / 完整对拍 ⇒ 本轮**未复跑** | 只核了台账与仓内证据面（引用文件零缺失）⇒ 状态**沿用 2026-10-29 对齐 lane 的结论**，未独立改判 |

@@ -14,6 +14,14 @@
 > `TaskApiWiringTest` **5** · `GrpcStatusHttpMappingTest` **23** · `GetTaskReqParsingTest` **23** · `TaskGetServiceTest` **7**
 > ⇒ **合计 135 条 / 0 failures / 0 errors / 0 skipped**（task-api）。
 >
+> ⚠️ **2026-10-29 真实性复核（W-B lane）**：本档的两条断言**均仍成立** ——
+> **①「本域无独立条目、34 条全在 `rpc.md`」**：本轮实测 `grep -cE '^## PIT-' docs/Pitfalls/task/rpc.md` ⇒ **34** ⇒ 与本档所写一致；
+> **②「task-api 守门网合计 135 条 / 0F / 0E / 0S」**：本轮**逐类**重算 surefire XML（`service/task/task-api/target/surefire-reports/*.xml`，最新一轮 2026-10-29 21:30）⇒
+> `TaskApiContentTypeTest` **13** · `TaskApiFailurePathMatrixTest` **33** · `TaskApiFormLimitReachabilityTest` **6** · `TaskApiMvcPipelineTest` **20** ·
+> `TaskApiPathNormalizationControlTest` **2** · `TaskApiPathNormalizationRealTomcatTest` **3** · `TaskApiWiringTest` **5** ·
+> `GrpcStatusHttpMappingTest` **23** · `GetTaskReqParsingTest` **23** · `TaskGetServiceTest` **7**
+> ⇒ **合计 135 / failures 0 / errors 0 / skipped 0** ⇒ **逐类数字与本档所写逐条相符** ⇒ 「本档不重复登记」这条处置**仍正确**。
+
 > ⚠️ **若将来 task-api 真踩坑**（例如真 Tomcat 与 MockMvc 观测面再次分叉、`TaskApiFailurePathMatrixTest` 的端点×失败维度矩阵出现空洞）⇒ **在本文件登记一条 `PIT-TASK-NN`**。
 
 **本域 DRIFT 明细面** ⇒ [`docs/DRIFT/task/api.md`](../../DRIFT/task/api.md)

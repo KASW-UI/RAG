@@ -10,7 +10,7 @@
 
 ---
 
-## SD-2026-10-23-TASK-01 · PG 连接最大生存时间：Go 的 30 **纳秒** → RAG 的 30 **分钟**
+## SD-2026-10-23-TASK-01 · PG 连接最大生存时间：Go 的 30 **纳秒** → RAG 的 30 **分钟** ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 **签字状态**：✅ 已签字（本轮登记）。**性质**：RAG 做了**更合理**的那一侧。
 
@@ -27,6 +27,9 @@
 > ⇒ **计数口径**：**不变**（仍计入已签字条数）⇒ 共享索引的计数由**主线**统一更新。
 
 ### 两侧取值
+
+> ⚠️ **2026-10-29 真实性复核（W-B lane · 「台账结论 ↔ 代码」）**：原判 **✅ 已签字** ⇒ **现行态 = ✅ 仍成立**（**被签字描述的那个行为两侧都还在** ⇒ **不是缺陷、不重复质疑、也不得「顺手改回 Go 行为」**）。
+> **本轮独立复核（两侧当场核过 · 核对日期 2026-10-29）**：Go 侧 `service/task/rpc/internal/svc/service_context.go:45` = `sqlDB.SetConnMaxLifetime(time.Duration(c.Postgres.ConnMaxLifetimeMinutes))`（**少乘 `* time.Minute`** ⇒ 仍是 30 **纳秒**）＋ `service/task/rpc/etc/task.yaml:53` = `ConnMaxLifetimeMinutes: 30`；RAG 侧 `service/task/task-rpc/src/main/resources/application.yml:37` = `max-lifetime: 1800000`（= 30 **分钟**）⇒ ⇒ **两侧差异仍在** ⇒ **签字仍有效、计入已签字计数**（共享索引计数由主线更新，本 lane 不写）。
 
 | | 值 | 出处 |
 |---|---|---|
@@ -109,7 +112,7 @@ done 标记的段序点赞路 uid 在前、文章路 taskId 在前。
 | 全仓决策档 | [`_INDEX.md`](../_INDEX.md) · [`_cross/decisions.md`](../_cross/decisions.md) |
 ---
 
-## SD-2026-10-24-TASK-01 · topic 缺失时：Go **进程退出** vs RAG **服务存活**
+## SD-2026-10-24-TASK-01 · topic 缺失时：Go **进程退出** vs RAG **服务存活** ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 **签字状态**：✅ 已签字（2026-10-24 登记）。**性质**：RAG 做了**更可用**的那一侧。
 
@@ -127,6 +130,9 @@ done 标记的段序点赞路 uid 在前、文章路 taskId 在前。
 > ⇒ **计数口径**：**不变**（仍计入已签字条数）⇒ 共享索引的计数由**主线**统一更新。
 
 ### 两侧取值
+
+> ⚠️ **2026-10-29 真实性复核（W-B lane · 「台账结论 ↔ 代码」）**：原判 **✅ 已签字** ⇒ **现行态 = ✅ 仍成立**（**被签字描述的那个行为两侧都还在** ⇒ **不是缺陷、不重复质疑、也不得「顺手改回 Go 行为」**）。
+> **本轮独立复核（两侧当场核过 · 核对日期 2026-10-29）**：Go 侧 `service/task/rpc/internal/Init/initGoKa.go:138-145` = `goka.NewProcessor(...)` ⇒ `if err != nil { log.Fatal(err) }`（**进程直接退出**仍在）；RAG 侧 `service/task/task-rpc/src/main/java/com/rag/task/task/rpc/mq/TaskUserCountConsumer.java:72` / `TaskArticleCountConsumer.java:70` / `TaskRawDiagnosticConsumer.java:44` = 三个 `@KafkaListener` ＋ **全仓 `missingTopicsFatal` 零命中**（实测 `grep -rn 'missingTopicsFatal' service/ --include='*.java' --include='*.yml'` ⇒ 无命中）⇒ Spring Kafka 默认 `false` ⇒ topic 缺失**不 fail-fast**、listener 持续重试 ⇒ ⇒ **两侧差异仍在** ⇒ **签字仍有效、计入已签字计数**（共享索引计数由主线更新，本 lane 不写）。
 
 | | 值 | 出处 |
 |---|---|---|
