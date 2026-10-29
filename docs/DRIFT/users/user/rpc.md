@@ -2763,6 +2763,12 @@ span 状态恒为 **`Unset`** ⇒ ⇒ **RAG 侧多置一个 `ERROR`** 就是**�
 > ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
 
 
+### lane W11
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-USERRPC-V-002 | D（经分析确认不实现：保持 NOT NULL 才是等价的那一侧） | P2 | 否 | Go `service/user/user/rpc/internal/model/data_model.go:11`（`Status     int64             \`gorm:"column:status;default:0"\`` ⇒ **无 `not null` tag** ⇒ GORM v2 对标量字段默认不加 NOT NULL ⇒ Go 侧 `status` **可空**）vs RAG `service/users/users-common/src/main/resources/db/01_create_user.sql:39`（`status      BIGINT NOT NULL DEFAULT 0,` ⇒ **不可空**）⇒ **DDL 层可空性差异仍成立**（真 PG 活体对拍实测：`go=(nullable=YES)` ／ `rag=(nullable=NO)`，记录于 `docs/DRIFT/users/user/rpc.md:573`）⇒ **但两侧可观察结果相同**：Go 侧 GORM 对 `int64` 造 `**int64` ⇒ DB 值为 NULL 时**跳过 setter** ⇒ 读出 Go 零值 **0** 且不报错；RAG 侧 NOT NULL ⇒ **根本读不到 NULL** ⇒ 也是 0 ⇒ ⇒ **行为层零差异**；⇒ ⇒ **「放开可空」反而会制造新漂移**（RAG `callSettersOnNulls=false` ⇒ 读出 `null` ≠ Go 的 `0`；admin 侧更会从「NULL 当活跃(0)」翻成「NULL 当未知(null)」⇒ **方向相反**）⇒ ⇒ **经分析确认「保持 RAG 的 NOT NULL」＝ 本条不实现**（D 类构成要件「经分析确认」＋「明确理由」齐备；不是「还没查」）⇒ 归 **D**；⚠️ 本条**尚未销号**（销号签字归 G4 ／ 合并收口执行者，**落点无代码动作**）；**P2**：DDL 层差异真实存在但**零可观察行为影响** ⇒ 不命中阶段一 P0 九条 ⇒ **不阻断阶段一** | 2026-10-30 |
+
 ### lane W5
 
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |

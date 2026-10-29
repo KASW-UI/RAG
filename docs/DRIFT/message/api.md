@@ -1864,6 +1864,12 @@ mvn -o -B -pl service/message/message-api -am -DargLine=-Xmx2g test
 > ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
 
 
+### lane W10
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-MSGAPI-012 | D（经分析确认不可修 · 容器层框架限制 ⇒ 无待实现内容） | P2 | 否 | Go `go-zero@v1.10.2/rest/httpx/responses.go:155`（`http.Error(w, err.Error(), http.StatusBadRequest)`）＋ `:153`（gRPC 错误码路径同样走 `http.Error`）＋ Go 标准库 `net/http/server.go:2337`（`func Error(w ResponseWriter, error string, code int)`）＋ `:2351`（`h.Set("Content-Type", "text/plain; charset=utf-8")` ⇒ **分号后有空格**）vs RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:718`（`resp.setContentType("text/plain; charset=utf-8")` ⇒ 应用层**写的是带空格的原串**）＋ `:723-727`（同文件注释自记「Tomcat 序列化吃掉空格 ⇒ 归框架限制」）＋ `service/message/message-api/src/test/java/com/rag/message/message/api/MessageApiTimeoutRealTomcatTest.java:169-173`（真 Tomcat 断言只保「type 对 ＋ charset 在」，**不为那一个空格判红**）⇒ ⇒ **差异仍成立**（线上真发 `text/plain;charset=utf-8` ／ Go 真发 `text/plain; charset=utf-8` ⇒ **wire 字节级不同**）⇒ 但**经分析确认不可修**（2026-10-30 本机 `javap` 实测 `tomcat-embed-core` **11.0.24** —— 本项目 `spring-boot-dependencies-4.0.8.pom:209` 的 `tomcat.version`）：`org.apache.catalina.connector.Response.setContentType(String)` 走 `MEDIA_TYPE_CACHE.parse` ⇒ **只把 media type 本体交给 `setContentTypeNoCharset`**、charset 单独走 `CharsetHolder` ⇒ 重新序列化时**必然无空格**；`Response.setHeader` ／ `Response.addHeader` 遇到 `"Content-Type"` 都**转手调 `setContentType`**（`checkSpecialHeader`）⇒ ⇒ **Servlet API 的三条写法（`setContentType` ／ `setHeader` ／ `addHeader`）全部产出同一个被规范化后的值** ⇒ 应用层**无路可走** ⇒ 落点不在 `service/common` ⇒ 影响面 = 全部 api 的 `text/plain` 响应（**展示面，非功能面**）⇒ ⇒ 归 D · **不阻断阶段一** | 2026-10-30 |
+
 ### lane W6
 
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |

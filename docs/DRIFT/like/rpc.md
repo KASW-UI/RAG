@@ -2535,6 +2535,12 @@ bash tools/api-full-parity-probe/like/mutate-parity.sh   # ⇒ EXIT=0
 > ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
 
 
+### lane W12
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-LIKE-018 | D（差异已消失 ⇒ 无待实现内容） | P2 | 否 | Go `service/like/rpc/internal/mq/etc/mq.yaml:10`（`Consumers: 8`）＋ `go-queue@v1.2.2/kq/config.go:18`（`Consumers int json:",default=8"` ⇒ 默认值也是 8）＋ `go-queue@v1.2.2/kq/queue.go:249`（`for i := 0; i < q.c.Consumers; i++` ⇒ **消费侧协程数 = 8**）vs RAG `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/LikeRpcApplication.java:180`（`factory.setConcurrency(likeKafkaTopics.getConsumers())`）＋ `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/config/LikeKafkaTopics.java:61`（`private int consumers = 8;`）⇒ **差异已消失**：2026-10-23 第三轮已落码（`setConcurrency` 必须挂在**自建** factory 上 ⇒ Boot 的 `ConcurrentKafkaListenerContainerFactoryConfigurer` 不参与 ⇒ `spring.kafka.listener.concurrency` 在本模块是**死配置**，已在 yaml 与 javadoc 两处标注）⇒ ⇒ **并发度两侧同为 8，无待实现内容，不阻断阶段一** | 2026-10-30 |
+
 ### lane W7
 
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |

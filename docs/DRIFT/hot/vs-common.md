@@ -532,3 +532,23 @@ python3 tools/difftest/check-ddl-static.py --domain hot --print-rag-sql
 | [`docs/Intentional_Deviations/hot/`](../../Intentional_Deviations/hot/) | 三份**均非空**但**无 DDL 类条目** ⇒ ⇒ **本域零 DDL 类签字偏离** |
 
 ---
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W12
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| G4-19 | D（差异已消失 ⇒ 无待实现内容） | P2 | 否 | Go `service/hot/api/internal/handler/routes.go:16-25`（该脚本要比对的 Go 原件：`AddRoutes` ⇒ `GET /articles` ＋ `rest.WithPrefix("/hot/v1")` ⇒ Go 侧 HTTP 端点 = 1）vs RAG `tools/difftest/check-surface-parity.py:110`（`from go_repo import resolve_go_repo as _shared_resolve_go_repo` ⇒ **已改用共享实现**，本脚本不再自带解析逻辑）＋ `:118-124`（`_resolve_go_repo()` ⇒ 直接委托共享实现）＋ `tools/difftest/go_repo.py:99-134`（**判据三条**：环境变量 `GO_REPO` 优先且**必须校验**（`:115-122`）→ 否则**逐级向上搜索**（`:124-126` ＋ `:71-96`）→ 都找不到 ⇒ **抛 FileNotFoundError**（`:128-134`）⇒ 绝不退化成「Go 侧 0 个端点」）⇒ **差异已消失**：台账记的「默认路径 = `dirname(REPO)/Sea-RideTheWind_golang` ⇒ 工作树里恒指错 ⇒ hot 域直接 EXIT=1」是**过期快照**（2026-10-29 G4 已把它落成**共享解析函数**，并明确「就地修 = 下一个新脚本还会重犯」）⇒ ⇒ **无待实现内容，不阻断阶段一** | 2026-10-30 |
+| H-4 | D（差异已消失 ⇒ 无待实现内容） | P3 | 否 | Go `service/hot/rpc/etc/hot.yaml:2`（`ListenOn: 0.0.0.0:8083` ⇒ Go 侧 hot-rpc 的 gRPC 端口 = 8083；`hot2.yaml:2` = 8084、`hot3.yaml:2` = 8085 ⇒ 三副本）＋ `service/hot/rpc/internal/config/config.go:10-11`（`type Config struct { zrpc.RpcServerConf ... }` ⇒ yaml 的 `ListenOn` 绑定到 `zrpc.RpcServerConf`）vs RAG `Infrastructure.md:99`（§3「Java 版业务进程端口分配」表里 `hot-rpc` 行 = **8083** · gRPC · ✅ 实装 ⇒ **端口已预占**；该 §3 起于 `Infrastructure.md:78`）＋ `service/hot/hot-rpc/src/main/resources/application.yml:152`（`port: ${HOT_RPC_GRPC_PORT:8083}`）⇒ **差异已消失**：台账记的「`hot-rpc` 的 gRPC 端口未在 `Infrastructure.md §3` 预占」是**过期快照**（§3 已于 2026-10-29 按实测现状订正并给出 8083）⇒ ⇒ **无待实现内容，不阻断阶段一**。⚠️ **残留 = 一处过期注释（零行为变更）**：`service/hot/hot-rpc/src/main/resources/application.yml:150` 仍写「Infrastructure.md §3 目前只给 hot 预占了 18897(HTTP)，**gRPC 端口未分配**」⇒ 与 §3 现值矛盾 | 2026-10-30 |

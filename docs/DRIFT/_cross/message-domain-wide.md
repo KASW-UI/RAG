@@ -502,3 +502,22 @@ Go 侧这条同时命中信息泄露与错误归因两条，已属缺陷而非�
 
 ⚠️ **姊妹坑**（本轮同款）：**核守门存在性时我用 `find -name <方法名>.java` 去找测试方法** ⇒ 5 个守门被判「不存在」⇒
 实际上它们是**测试类里的方法**（`grep -rl "void <方法名>"` **6/6 全部在仓**）⇒ ⇒ **「按文件名找测试」是错的判据**（方法名 ≠ 文件名）。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W10
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| UNRESOLVED-MSG-V-001 | C（阶段 2 最终工程建设项 · 跨域部署配置面） | P2 | 否 | Go `service/message/rpc/message.go:37`（`s := zrpc.MustNewServer(c.RpcServerConf, …)` ⇒ 注册到服务发现）＋ `go-zero@v1.10.2/zrpc/server.go:43`（`server, err = internal.NewRpcPubServer(c.Etcd, c.ListenOn, serverOptions...)` ⇒ **只有 Etcd（Hosts＋Key）**）＋ `go-zero@v1.10.2/zrpc/config.go:113`（`return resolver.BuildDiscovTarget(cc.Etcd.Hosts, cc.Etcd.Key), nil` ⇒ **扁平 key，无 namespace／group 分层**；全仓 grep `nacos` **0 命中**）vs RAG `service/message/message-rpc/src/main/resources/application.yml:112`（`namespace: ${NACOS_NAMESPACE:public}`）＋ `:114`（`group: ${NACOS_GROUP:DEFAULT_GROUP}`）＋ `service/message/message-api/src/main/resources/application.yml:24-25`（同值）＋ `service/users/user/user-rpc/src/main/resources/application.yaml:89-90`（`${NACOS_NAMESPACE:sea-rtw}` ／ `${NACOS_GROUP:USER_GROUP}`）＋ `service/users/admin/admin-rpc/src/main/resources/application.yml:92-93`（同值）＋ `service/users/admin/admin-api/src/main/resources/application.yml:55-56`（同值）＋ `service/users/user/user-api/src/main/resources/application.yml:52-53`（同值）＋ `service/message/message-rpc/src/main/resources/application.yml:164`（`address: discovery:///user-rpc`）＋ `:171`（`address: discovery:///admin-rpc`）⇒ ⇒ **差异仍成立**（在 **yml 默认值层**两组分属：message／comment／like／follow／favorite = `public`／`DEFAULT_GROUP` vs users 域 4 个模块 = `sea-rtw`／`USER_GROUP` ⇒ **不注入 env** 时 message-rpc 的 `discovery:///user-rpc` ／ `discovery:///admin-rpc` 解析不到 users 域实例 ⇒ 跨域链路断）⇒ ⚠️ **compose 形态下不发作**：`docker-compose.yaml:166-167` 与 `:217-218` 给 user-rpc／user-api 注入了 `NACOS_NAMESPACE` ／ `NACOS_GROUP`（**env 覆盖 yml 默认**）⇒ 取 `.env:101-102`（`public` ／ `DEFAULT_GROUP`）⇒ 两侧一致 ⇒ ⇒ **剩余那部分 = 统一 yml 默认值**（Go 侧无 namespace／group ⇒ 对齐 Go 的唯一口径 = 取消分层或全仓收敛到一组），落点跨 message／users 两棵域树 ⇒ **阶段二**由收口执行者拍板收敛 ⇒ 归 C · **不阻断阶段一**（`docs/PhaseGoal/g2.md:28` 判 message-rpc = ✅ R4／E4，本项列在「仍开放项 · 跨域」栏） | 2026-10-30 |

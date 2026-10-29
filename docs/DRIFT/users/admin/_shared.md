@@ -220,3 +220,22 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 | **A-4** | ⚠️ `tools/difftest/check-plaintext400-headers.sh` 只打 user-api，**没有 admin 入口**；且只断言「Content-Type 含 text/plain」，**抓不到 charset 差异** | tools owner | `admin/api.md` §5 |
 | **U-7** | ✅ **已答（2026-10-26，users/user 域 owner 提问）** —— **ADJ-04**：admin 侧的写入路径**是否依赖 `users_user` 时间列的 DEFAULT `CURRENT_TIMESTAMP`**？<br>**答：不存在 INSERT 依赖** —— admin-rpc 对 `users_user` **只 UPDATE / DELETE，零 INSERT**（`AdminDomainService.java:688/730/1040/1192` = `userMapper.update(...)`；`:1088` = `userMapper.delete(...)`；全模块 `userMapper.insert` **零命中**）⇒ **不依赖 DEFAULT ⇒ 该差异对 admin 侧不显现**。<br>⚠️ **但同一机制在 admin 自己的两张表上成立**（`admin_admin` / `admin_invite` 的 INSERT **确实**靠 DB DEFAULT，实体 `insertStrategy = NEVER`）⇒ 那属于 **`admin/rpc.md` 的 `DRIFT-ARPC-001` 范围补充**（`create_time` 在 INSERT 路径上，机制与 `update_time` 不同、**实际不可观察**）⇒ 详见该补充段 | ~~users/user owner~~ **本域已答** | `admin/rpc.md` ARPC-001 范围补充 |
 | **U-8** | ✅ **已闭环（只读指针 · 原文订正归 users 域级 owner）** —— **ADJ-03**：`users_user` **建表责任交叉**（`user-rpc` ↔ `admin-rpc`）的「双栈并发未复跑」结论**已过期**：user 半边在 **2026-10-24 第五轮 §4** 做了**双侧对称并发启动实测**（两 rpc 同时对同一个**空库**启动，共 **9 轮**，2026-10-24 独立复现，结论逐条一致）⇒ 两侧**都能起来**、表**都建齐**、**0 致命错误**；机制不同（RAG 靠 advisory lock **机制性**串行；Go 靠 GORM `AutoMigrate` 的 check-then-act，**机制上仍有竞态窗口**，实测未撞 ≠ 机制保证）⇒ 结论 **OBSERVABLE EQUIVALENT**（可观察结果一致），**不是「机制等价」**。<br>⇒ ⚠️ **本域不改 `docs/DRIFT/users/_shared.md`**（域级共享文件，两个子域都会写 ⇒ 按 §5.3 合并时统一更新）⇒ 原文订正由 users 域级 owner 落 | ~~users 域级~~ **只读指针** | `users/user/rpc.md` §9.2 + §4「建表责任交叉」行 |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W11
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| U-2 | D（与 V-002 同一处列差异；经分析确认不实现） | P2 | 否 | Go `service/user/admin/rpc/internal/model/data_model.go:41`（admin 侧的 `User` 模型同样 `Status int64` + gorm tag `column:status;default:0` ⇒ **无 `not null`** ⇒ 可空）＋ `service/user/admin/rpc/internal/model/db.go:15`（`db.AutoMigrate(&Admin{}, &AdminInvite{}, &User{})` ⇒ admin 侧把 `User` 建在**同一张** `users` 表上，与 user-rpc 共用）vs RAG `service/users/users-common/src/main/resources/db/01_create_user.sql:39`（`status      BIGINT NOT NULL DEFAULT 0,` ⇒ 不可空）⇒ **与 `DRIFT-USERRPC-V-002` 是同一处列**（admin-rpc ↔ user-rpc 共表）⇒ **可空性差异仍成立**；⚠️ admin 侧原写的 🔴「`NOT NULL` 与 Go 的可空不一致」是**只带 DDL 层、未带行为层**的陈述（`docs/DRIFT/users/admin/rpc.md:1476`）⇒ 已被 2026-10-27 订正块取代（`docs/DRIFT/users/admin/_shared.md:212` 明写「落点无动作」）⇒ ⇒ **经分析确认「保持 RAG NOT NULL」＝ 不实现**（Go 读 NULL ⇒ **0** 且不报错；RAG NOT NULL ⇒ 读不到 NULL ⇒ 也是 0 ⇒ **可观察结果相同**；**放开可空反而制造新漂移**）⇒ 归 **D**；⚠️ **销号签字不在 G1 写权面** ⇒ 仍待 G4 ／ 合并收口执行者确认（**无代码动作**）；**P2**（零可观察行为影响 ⇒ **不阻断阶段一**） | 2026-10-30 |

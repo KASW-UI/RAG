@@ -885,6 +885,12 @@ Go 侧返回 `""`（剥成空串）。
 > ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
 
 
+### lane W11
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| UNRESOLVED-USERSCOMMON-004 | C（阶段二：DDL 生产工程收敛；落点 `users-common` = G4 写权面） | P2 | 否 | Go `service/user/user/rpc/internal/model/db.go:33`（`db.AutoMigrate(&User{}, &UserAvatarHistory{})` ⇒ DDL 由 GORM 生成：**标量字段无 `not null` tag ⇒ 列可空**（`service/user/user/rpc/internal/model/data_model.go:11`）· **`autoCreateTime`/`autoUpdateTime` 由应用侧写 ⇒ 建表不带 `DEFAULT`**（同文件 `:14`；avatar 见 `:30`））vs RAG `service/users/users-common/src/main/java/com/rag/users/common/ddl/SchemaInitializer.java:63`（四份脚本常量数组 01/02/03/04）＋ `:91`（`ADVISORY_LOCK_KEY = 8_675_309L`）＋ `:115`（`select pg_advisory_lock(...)` ⇒ 机制性串行）＋ `service/users/users-common/src/main/resources/db/01_create_user.sql:39`（`status BIGINT NOT NULL DEFAULT 0` ⇒ **可空性差异 1 处**）＋ `01_create_user.sql:42` ／ `:43`（`create_time` ／ `update_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP`）＋ `02_create_user_avatar_history.sql:30` ／ `:31` ＋ `03_create_admin.sql:59` ／ `:60` ＋ `04_create_admin_invite.sql:44` ／ `:45` ⇒ **合计 8 处 `DEFAULT CURRENT_TIMESTAMP` 残留**（Go 侧对应列：admin `service/user/admin/rpc/internal/model/data_model.go:12`、invite 同文件 `:27` ⇒ 均无 DB DEFAULT）＋ 索引面：RAG 独有 4 条非唯一索引（`01_create_user.sql:47` ／ `02_create_user_avatar_history.sql:37` ／ `03_create_admin.sql:64` ／ `04_create_admin_invite.sql:49`）vs Go 独有 3 条（avatar `service/user/user/rpc/internal/model/data_model.go:29` ／ admin `service/user/admin/rpc/internal/model/data_model.go:23` ／ 同文件 `:24`）⇒ **均为非唯一索引 ⇒ 性能面非行为面** ⇒ 「四份脚本与 Go `AutoMigrate` **逐列等价**」这个目标**未达成 ⇒ 差异仍成立**（剩余 = 1 处可空性 ＋ 8 处 DEFAULT ＋ 7 条索引差异，**全落在已登记类别**：`DRIFT-USERRPC-V-002` ／ `U-2` ／ `DRIFT-USERRPC-V-011`）⇒ 归 **C**（阶段二 DDL 收敛；`service/users/users-common/**` = **G4 写权面** ⇒ 本 lane 不落码）；⚠️ 类型/长度 **0 差异**、约束集合两侧一致（真 PG 活体对拍：`docs/DRIFT/users/common.md:871`）；⚠️ `ADVISORY_LOCK_KEY` 并发正确性：Go 侧 `AutoMigrate` = `HasTable` check-then-act（**无锁**）vs RAG 侧会话级 advisory lock ⇒ **机制不同、可观察结果相同**（双进程并发启动实测 EXIT=0，见 `docs/DRIFT/users/user/rpc.md:1715`）⇒ **P2**（DEFAULT 当前**不可观察** —— 两侧写入路径都显式写这两列；可空性差异行为层零差异；索引差异仅性能面 ⇒ 不命中阶段一 P0 九条 ⇒ **不阻断阶段一**） | 2026-10-30 |
+
 ### lane W5
 
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |

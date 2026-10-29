@@ -1200,3 +1200,22 @@ mvn -o -B -pl service/follow/follow-api -am -DargLine=-Xmx2g test
 | `DRIFT-FOLLOW-007` 的**桶边界总数 80**（活体读数） | 需**真容器 + `/actuator/prometheus` 活体抓取** ⇒ 本轮**未起进程、未抓取** | 已核**源码级**：两个开关仍同开 ⇒ 触发条件在；⚠️ **80 这个数字沿用 2026-10-24 的实测**，本轮**未复测** |
 | `DRIFT-FOLLOW-009` / `-010` / `-011` / `-012` 的**活体读数**（2.47s / 3s 边界 / 5s connect / 断连 0ms） | 需**真 Redis ＋ 真 Tomcat ＋ 故障注入** ⇒ 本轮**未复跑** | 已核**源码级 + 配置层**（逐行读 `application.yml` 与 `FollowRpcClient`）⇒ 状态**沿用 2026-10-29 结论**，本轮**未独立改判** |
 | `DRIFT-FOLLOW-001` / `-005` 的**双侧活体 wire 比对** | 需 Go 栈 + RAG 栈同跑 ⇒ 本轮**未跑** | 已核**源码级 + 守门断言**（`FollowApiMvcPipelineTest.java:625-626` / `RecommendUser.java:57`）⇒ 未独立改判 |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W14
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-FOLLOW-007 | C（阶段二工程建设项：残留 = api 侧直方图桶边界总数仍 ≠ Go 的 12） | P2 | 否（不阻断阶段一） | Go `service/follow/api/internal/metrics/metrics.go:29` = `Buckets: prometheus.DefBuckets`（11 个数值边界 ＋ `+Inf` ⇒ **12 桶**）＋ `:14` = `Subsystem: "follow_api"`（⇒ 落成指标名前缀，**不带** application tag）vs RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/metrics/FollowApiMetrics.java:131` = `.publishPercentileHistogram()` ＋ `:132` = `.serviceLevelObjectives(GO_DEF_BUCKETS)`（⇒ **两个开关同开** ⇒ Micrometer 取「默认桶 ∪ SLO 桶」⇒ 桶边界总数 ≠ 12）＋ `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/metrics/FollowRpcMetrics.java:134` = 只用 `.serviceLevelObjectives(`（⇒ **同仓 rpc 侧 12 桶**，`:118-120` 明写「不要再加 `publishPercentileHistogram()`」）＋ `service/follow/follow-api/src/main/resources/application.yml:265` = 「刻意不加 `tags.application`」⇒ **差异仍成立**：台账正文所述的「tag 已修 ＋ 直方图已有 `_bucket`」两半**确已在位**，但**残留的桶边界数这一半仍在**；台账 2026-10-27 拍板「不修、登记为框架限制」所依据的前提（**须脱离 Micrometer 才能对齐**）已被**同仓 follow-rpc 的 SLO-only 写法证伪** ⇒ 按真实剩余部分定级为 **C**（照 rpc 侧写法去掉 `publishPercentileHistogram()` 即可落在 12 桶 ⇒ 属可修的观测面等价性项）；⚠️ 另外两条残留（`le="1.0"` 渲染 ＋ 多一个 `_max`）**两侧同款**（rpc 侧同样有）⇒ 已定性为框架限制，不在本条范围 | 2026-10-30 |

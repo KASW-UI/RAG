@@ -2477,6 +2477,18 @@ Sea-RideTheWind_golang/service/common/observability/http.go:88  → http.Error(w
 > ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
 
 
+### lane W11
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| UNRESOLVED-ADMINAPI-005 | D（该开放项已关闭 ⇒ 无待实现内容） | P3 | 否 | Go `service/user/admin/api/internal/svc/servicecontext.go:27`（`AdminRpc: adminservice.NewAdminService(zrpc.MustNewClient(c.AdminRpc)),` ⇒ 下游不可达即 `logx.Must` **panic** ⇒ 进程起不来）＋ `service/user/admin/api/internal/metrics/metrics.go:9`（`prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "", Subsystem: "admin_api", Name: "intercept_total", …})` ⇒ Prometheus 全名 = `admin_api_intercept_total`）vs RAG `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/client/AdminRpcClient.java:142`（`@GrpcClient("admin-rpc")` ⇒ 启动期装配链在位）＋ `service/users/admin/admin-api/src/main/resources/application.yml:94`（`address: discovery:///admin-rpc`）＋ `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/metrics/AdminApiMetrics.java:122`（`return Counter.builder("admin_api_intercept_total")` ⇒ 与 Go 同名）＋ `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiStartupFailFastTest.java:121`（`assertThat(context).hasFailed();` ⇒ **① 已实测并被守门锁住**）＋ `:125`（`hasMessageContaining("Can't connect to channel");`）＋ `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiPrometheusMetricNameTest.java:116`（`assertTrue(names.contains(GO_METRIC_NAME),` ⇒ **② 已实测**）＋ `:123`（负向断言：不得出现 `admin_api_intercept_total_total`）＋ `tools/difftest/exp-admin-startup-failfast.sh:9`（双侧实证脚本，案例 A = 下游死端口 / 案例 B = Nacos 不可达）⇒ ⇒ 台账记的「**两项启动期事实未实测**」这个开放项**已不存在** ⇒ **差异已消失** ⇒ 归 **D**（无待实现内容）；⚠️ 本轮**未复跑**该脚本与两个 JUnit（证据强度 = 静态源码对照 ＋ 守门在位）⇒ 按 AGENTS.md §0 读作「在该证据强度下一致」；**P3**（本条是证据缺口项，缺口已补 ⇒ 不构成当前验收阻断条件） | 2026-10-30 |
+
+### lane W14
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-ADMINAPI-012 | D（已闭合 ⇒ 无待实现内容） | P1 | 否（不阻断阶段一） | Go `service/user/admin/api/internal/middleware/checkblacklistmiddleware.go:35` = `exists, err := m.Redis.ExistsCtx(r.Context(), blacklistKey)` ＋ `:36` = `if err == nil && exists {` ⇒ **Redis 出错 ⇒ 放行**（fail-open）＋ `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:14` = `maxRetries = 3` ＋ `:32-37` = `red.NewClient(&red.Options{… MaxRetries: maxRetries …})`（**不传任何 timeout** ⇒ 连接被拒 / 被关时**立即失败**、不排队）vs RAG `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/interceptor/AdminJwtAuthInterceptor.java:200` = `redisTemplate.hasKey(blacklistKey)` 包在 `catch (Throwable t)` 里 ＋ `:206` = `return exists != null && exists;` ⇒ **fail-open**（与 Go 同形）＋ `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java:132` = `ClientOptions.DisconnectedBehavior.REJECT_COMMANDS`（⇒ 断连即拒单 ⇒ 命令**毫秒级失败**，不再挂到 `commandTimeout` 3s）＋ 注册清单 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:5` ＋ 守门 `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiRedisDisconnectedFastFailTest.java:264` = `assertEquals(ClientOptions.DisconnectedBehavior.REJECT_COMMANDS, …)` ⇒ **差异已消失**：台账正文所述的修法（把 Lettuce 断连行为设成 `REJECT_COMMANDS`）**确已在位**，且域内副本 `RedisDisconnectedBehaviorConfig.java` 已删（该目录现存 `AdminApiProperties.java` / `WebMvcConfig.java`）⇒ 共享层未被遮蔽 ⇒ 断连（FIN）形态下 `hasKey` 快速失败 ⇒ 进 catch ⇒ **fail-open 200**（与 Go 同形）⇒ 原「挂满 3s ⇒ 503」不再发生；⚠️ RST 形态两侧都快速失败（不构成漂移）⇒ 本条无剩余待实现项 | 2026-10-30 |
+
 ### lane W5
 
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |

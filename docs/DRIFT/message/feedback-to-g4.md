@@ -107,6 +107,12 @@
 > ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
 
 
+### lane W10
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| FB-G2-04 | D（经分析确认不可修 · Tomcat 序列化行为 ⇒ 无待实现内容） | P2 | 否 | Go `go-zero@v1.10.2/rest/httpx/responses.go:155`（`http.Error(w, err.Error(), http.StatusBadRequest)` ⇒ 响应头写出侧）＋ Go 标准库 `net/http/server.go:2351`（`h.Set("Content-Type", "text/plain; charset=utf-8")` ⇒ **分号后有空格**）vs RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:718`（`resp.setContentType("text/plain; charset=utf-8")`）＋ `service/message/message-api/src/test/java/com/rag/message/message/api/MessageApiTimeoutRealTomcatTest.java:168`（真 Tomcat 取 `content-type` 头的断言入口）⇒ ⇒ **差异仍成立**（本反馈单 ① 现象描述的差异两侧都还在：Go `text/plain; charset=utf-8` ／ RAG 实发 `text/plain;charset=utf-8`）⇒ **经分析确认不可修**：`javap` 实测 `tomcat-embed-core` **11.0.24** ⇒ `org.apache.catalina.connector.Response.setContentType(String)` 把 Content-Type **解析成 MediaType 再序列化**（`MEDIA_TYPE_CACHE.parse` ⇒ media type 本体交 `setContentTypeNoCharset` ／ charset 走 `CharsetHolder` ⇒ **空格必丢**）；`setHeader` ／ `addHeader` 对 `"Content-Type"` **转手调 `setContentType`** ⇒ ⇒ **三条 Servlet 写法全部被规范化** ⇒ 应用层无路可走 ⇒ 建议修法 = **无**（性质 = 框架限制）⇒ ⇒ **不转派 G4**（转派也是空转）⇒ 影响面 = 全部 api 的 `text/plain` 响应 ⇒ ⇒ 归 D · **不阻断阶段一** | 2026-10-30 |
+
 ### lane W6
 
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |

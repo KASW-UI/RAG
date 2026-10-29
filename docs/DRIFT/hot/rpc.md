@@ -2694,6 +2694,12 @@ java.lang.AssertionError: 条件在 3000ms 内未成立
 > ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
 
 
+### lane W12
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-HOTRPC-005 | D（经分析确认不实现 · 方向明确、幅度有界 ⇒ 是决策不是缺陷） | P3 | 否 | Go `service/hot/rpc/hot.go:55-58`（`saramaConf := sarama.NewConfig()` ⇒ 用**库默认值**）＋ `sarama@v1.50.2/config.go:588-589`（**消费点**：`Consumer.Offsets.AutoCommit.Enable = true` ＋ `Interval = 1 * time.Second` ⇒ 位点**每 1 秒批量提交一次**）vs RAG `service/hot/hot-rpc/src/main/resources/application.yml:108`（`enable-auto-commit: false`）＋ `:121`（`ack-mode: record` ⇒ **每条处理完立刻提交**）⇒ **差异仍成立**（崩溃窗口内「Go 重投最多 1 秒内已处理的消息、RAG 不重投」⇒ `hk.Add` 非幂等 ⇒ 崩溃前后热榜分数分布不同）⇒ **D（经分析确认不实现）**：理由 = ① 方向明确、幅度有界（窗口 = 1 秒）；② RAG 侧逐条提交**更接近 exactly-once** ⇒ 属「更严的一侧」；③ 强行复刻 Go 的批量提交 = 用更弱的语义换一致性，而改 Go 侧是**禁止**的（真源冻结）⇒ ⇒ **保留登记即可，不阻断阶段一**。⚠️ 该「不改」的决策**尚未进** `docs/Intentional_Deviations/` 签字档（实测该目录**零命中** HOTRPC-005）⇒ 建议收口时补登记，否则下一轮会被当成「未处理的开放项」 | 2026-10-30 |
+
 ### lane W7
 
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |

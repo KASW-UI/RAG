@@ -142,3 +142,22 @@ Go `getlikestatelogic.go:57-63` 的 `status.FromError` 对非 status 错误返�
   只是产生的 status 是 `CANCELLED` 而非 `DEADLINE_EXCEEDED`。
   ⇒ 原判断描述的现象**根本不存在**，真正的问题是**超时对 client breaker 不可见**。
 
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W13
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-003 | D（差异已消失 ⇒ 无待实现内容） | P2 | 否 | Go `service/like/api/likecenter.go:37`（`server := rest.MustNewServer(c.RestConf)` ⇒ Go 的四层保护是 go-zero `rest.Server` 的**内建行为**，不是 like 域自己的代码）＋ `go-zero@v1.10.2/rest/engine.go:105`（`buildChainWithNativeMiddlewares`）＋ `:108`（**之后**才 `appendAuthHandler` ⇒ 鉴权排在链尾）＋ `:164`（`handler.MaxBytesHandler(...)`）＋ `go-zero@v1.10.2/rest/chain/chain.go:38-45`（`Append` 的语义 = 「加在请求流的**最后**」⇒ MaxBytes 在鉴权**之外**）＋ `go-zero@v1.10.2/rest/handler/maxbyteshandler.go:19-22`（`r.ContentLength > n` ⇒ 裸 `w.WriteHeader(413)`、无 body）＋ `service/like/api/internal/handler/routes.go:49`（`rest.WithJwt(...)` ⇒ 6 条路由全部受保护）＋ `service/like/api/internal/logic/like/getlikestatelogic.go:57-63`（`status.FromError(err)` 的 `ok=false` 分支 ⇒ `errmsg.NewErrCode(errmsg.ErrorServerCommon)`）＋ `service/like/common/errmsg/errmsg.go:41`（`ErrorServerCommon = 5001`）vs RAG `service/like/like-api/src/main/java/com/rag/like/like/api/LikeApiApplication.java:75-78`（`scanBasePackages` 含 `com.rag.common` ⇒ 保护层**自动生效、零装配代码**）＋ `service/common/src/main/java/com/rag/common/protection/GoStyleMaxBytesFilter.java:81-83`（`@ConditionalOnWebApplication(SERVLET)` ＋ `@Component`）＋ `:108-113`（`getContentLengthLong() > maxBytes` ⇒ 裸 413、无 body、只 `setStatus`）＋ `service/common/src/main/java/com/rag/common/protection/GoStyleProtectionConfiguration.java:78-79`（`@Configuration` ＋ `@EnableConfigurationProperties` ⇒ properties Bean 必被注册）＋ `service/like/like-api/src/main/resources/application.yml:151-163`（四层阈值 = Go 的 tag 默认 10000／1048576／900／enabled）＋ `service/like/like-api/src/main/java/com/rag/like/like/api/service/LikeApiSupport.java:177-186`（`rpcError`：`extractStatus` 为 null ⇒ 5001）＋ `:198-206`（`extractStatus` 只认 `StatusException`／`StatusRuntimeException`）＋ `service/common/src/main/java/com/rag/common/protection/GoStyleGrpcClientBreakerInterceptor.java:302-303`（抛 `GoStyleCircuitOpenException` ⇒ 非 status ⇒ 落 5001 分支）＋ `service/common/src/main/java/com/rag/common/protection/GoStyleCircuitOpenException.java:30`（`extends RuntimeException`）＋ `service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiProtectionMvcTest.java:99-102`（四个保护 Filter Bean 在位）＋ `:111`（超限 ⇒ 413 且压过鉴权）⇒ ⇒ **差异已消失**：本轮实跑 `mvn -o -pl service/like/like-api test -Dtest=LikeApiProtectionMvcTest` ⇒ `Tests run: 4, Failures: 0, Errors: 0, Skipped: 0`（真 Spring 上下文 ＋ 真实 MVC 管线）⇒ 「保护层在 like-api 上自动生效」这个**零装配前提**当场成立；like 域台账 `docs/DRIFT/like/api.md:384-386` 对 `DRIFT-LIKEAPI-003`（请求保护层四层全缺）／`-004`（超限请求优先级 413 而非 401）／`-005`（gRPC client 熔断缺失）记的「✅ 已关（2026-10-22）· **本轮未复审**」本轮**补上复审** ⇒ 三条均已闭合 ⇒ 台账记的「like-api 缺保护层 ⇒ 401 压过 413 ／ 无 client 熔断」这条已不存在 ⇒ 归 D（无待实现内容）；⚠️ **编号撞车**：同一个 `DRIFT-003` 在仓内另有两处 —— `DRIFT/message/api.md:79`（message 域 `,omitempty` vs `,optional` 根因段，本轮核过：Go `service/message/api/internal/types/types.go:18` = `json:"extra,optional"` vs RAG `service/message/message-api/src/main/java/com/rag/message/message/api/dto/AdminSendNotificationReq.java:127`「刻意不对 extra 做显式 null 校验」⇒ 该段已一致）与 `DRIFT/users/user/api.md:35`（「编号说明」段，无待办）⇒ 本行结论按派生层主落点 `DRIFT/common/protection.md:89` 给出 | 2026-10-30 |

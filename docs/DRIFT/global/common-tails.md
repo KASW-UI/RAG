@@ -717,6 +717,12 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 > ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
 
 
+### lane W14
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| T-16 | D（已闭合 ⇒ 无待实现内容） | P1 | 否（不阻断阶段一） | Go `service/common/observability/rpc.go:38` = `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)`（⇒ ctx 带客户端 deadline ⇒ **有效期限 = min(客户端 deadline, 服务端预算)**）＋ `:55` = `handler(timeoutCtx, req)`（handler 吃的是会被 cancel 的 ctx）＋ `:47-57` ＝ handler 跑**独立 goroutine**、`:68` 超时分支返回后 **goroutine 继续跑**（⇒ Go 也不杀 goroutine）vs RAG `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:293` = `effectiveTimeoutNanos = Math.min(serverBudgetNanos, clientDeadlineRemainingNanos())`（⇒ **第 ① 层确已落地**）＋ `:319`（超时调度器延时用它）＋ `:475` = `DeadlineState.bindRemainingNanos(effectiveTimeoutNanos)`（⇒ 线程上的期限 = 同一个有效期限）＋ `service/common/src/main/java/com/rag/common/persistence/DeadlineQueryTimeoutInjector.java:165` = `DeadlineState.remainingMillis()` ＋ `:172` = `applyMillisecondTimeout`（E62：先剥 HikariCP 代理再调毫秒级 `setQueryTimeoutMs`）⇒ **差异已消失**：台账正文所述的残留「第 ② 层 = 在途查询随客户端放弃而取消」**已由 E62 达成**（客户端 deadline 早于服务端预算时，PG 查询在**客户端那一档**被取消）⇒ 且「handler 在 deadline 后继续跑」这一面**两侧同款**（Go 的 goroutine 同样继续跑）⇒ 原文所提的「挪受控 executor ＋ 超时 interrupt」修法已在 2026-10-26 第四十六轮**被否决**（照做会比 Go 更严 ⇒ 新造漂移）⇒ 剩余的真实漂移已窄化为 **E65 / E66 / E67** 三个独立编号（`docs/DRIFT/global/_README.md:520-522`），不属本条范围 ⇒ 本条无剩余待实现项 | 2026-10-30 |
+
 ### lane W3
 
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |

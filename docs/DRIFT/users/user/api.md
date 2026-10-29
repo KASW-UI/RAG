@@ -3665,6 +3665,12 @@ RAG 侧的完整机制链（**消费点**）：
 > ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
 
 
+### lane W11
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-USERAPI-013 | C（剩余 ③ 是共享层生产工程项） | P2 | 否 | Go `go-zero@v1.10.2/rest/engine.go:149`（`chn = chn.Append(handler.BreakerHandler(route.Method, route.Path, metrics))` ⇒ 键 = **注册期路由模板**，每条路由各建一个 breaker ⇒ 键空间恒有界）＋ `go-zero@v1.10.2/rest/handler/breakerhandler.go:15`（`breakerSeparator = "://"`）＋ `:19`（`breaker.NewBreaker(...strings.Join([]string{method, path}, breakerSeparator))`）＋ `go-zero@v1.10.2/rest/engine.go:244`（`notFoundHandler` 的链只有 Trace + Log ⇒ **404 链里没有 breaker**）vs RAG `service/common/src/main/java/com/rag/common/protection/GoStyleBreakerFilter.java:136`（`return request.getMethod() + "://" + resolution.template();` ⇒ **键已改为注册期模板**）＋ `:176`（`if (resolution.kind() == GoStyleRouteResolution.Kind.NOT_MATCHED) {` ⇒ **未命中路由不进 breaker、不建 key**）＋ `:138`（`return request.getMethod() + "://" + request.getRequestURI();` ⇒ **`UNKNOWN` 时回落 raw URI ⇒ 键空间仍可无界**）＋ `:82`（javadoc 仍写「基数等于路由数（**本模块 13 条**…），无界增长的现实风险为零」⇒ **该安全保证不成立**）＋ `service/common/src/main/java/com/rag/common/protection/GoStyleRouteTemplateResolver.java:153`（解析抛异常 ⇒ 返回 `UNKNOWN` ⇒ 触发 `:138` 回落）＋ `:170`（匹配上但拿不到模板 ⇒ `UNKNOWN` ⇒ 同上）＋ `service/common/src/main/java/com/rag/common/protection/GoStyleBreakerRouteTemplateAutoConfiguration.java:31`（`@ConditionalOnClass(RequestMappingHandlerMapping.class)`）＋ `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java:102`（`private final Semaphore latch;`）＋ `:106`（`new Semaphore(maxConns)` ⇒ **全进程一个**）⇒ **拆半后的三段现状**：**①** MaxConns 闸门粒度 = **已签字偏离**（`docs/Intentional_Deviations/global/common-tails.md:11` 的 `SD-2026-10-25-01`，签字决定 = 保留 RAG 全局闸门 ⇒ **决策不是缺陷**）· **②** breaker 键空间 = **已修**（模板键 ＋ 未命中不进 breaker）· **③** = **差异仍成立**：剩下的只有「javadoc 写了错误的安全保证」＋「`UNKNOWN` 回落仍是无界口」⇒ 落点 `service/common`（**共享层 · G4 写权**）⇒ 归 **C**；⚠️ 「本模块 13 条」实测是 **admin-api 的 13 条**（user-api 9 / message-api 14 / hot-api 1）⇒ 该类在 `service/common` 供 **10 个 api 组件**共用 ⇒ 基数断言在共享层语境下不成立；**P2**（只影响 javadoc 正确性 ＋ 一条窄路径的无界 map 增长，无业务正确性/数据完整性影响 ⇒ 不命中阶段一 P0 九条 ⇒ **不阻断阶段一**） | 2026-10-30 |
+
 ### lane W5
 
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |

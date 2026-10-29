@@ -2952,6 +2952,12 @@ sed -n '22p'      "/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/servic
 > ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
 
 
+### lane W10
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-MSG-V-032 | B（阶段 1 竞争力补强项 · 验证闭环） | P2 | 否 | Go `service/common/observability/observability.go:41`（`func SlowThreshold() time.Duration` ⇒ 慢调用阈值的**真源**）＋ `service/message/rpc/message.go:44`（`s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, observability.SlowThreshold()))` ⇒ Go 侧打 `sea.slow` 标记的**唯一装配点**；⚠️ **Go 侧无任何对应测试** ⇒ 本条**不是** Go↔RAG 行为差异）vs RAG `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcSlowThresholdGateTest.java:280`（`void slowCallMustBeMarkedSlow()` ⇒ 台账记的那条用例仍在）＋ `:324`（`private void warmUp()` ⇒ 台账记的栈帧 `:318` 已漂移到 `:324`）＋ `:349`（`private SpanData callAndGetSpan(long holdMillis)` ⇒ 台账记的栈帧 `:349` 仍准）⇒ ⇒ **差异仍成立**（本条登记的「全量并发回归偶发 `UNAVAILABLE: Network closed for unknown reason`」**至今无加固**：`:340-346` 的 warm-up 仍是「发一次调用 → 立刻 `ch.shutdownNow()` ／ `server.shutdownNow()`」，**无重试、无优雅关闭**；2026-10-29 的 `bebf30d2` ／ `e9c39464` 只把监听口改成「探测式」分配，治的是**撞口**（`BindException`）不是**断链**）⇒ ⇒ 剩余那部分 = **给 warm-up／建连加拆除时序加固**（落点 `service/message/message-rpc/src/test/**` ⇒ **G2 域内可自修**）⇒ ⇒ 它威胁的是**阶段一验收证据本身**（全量回归当场 BUILD FAILURE），但当前全量回归是绿的 ⇒ 归 **B** · **不阻断阶段一** | 2026-10-30 |
+
 ### lane W6
 
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
