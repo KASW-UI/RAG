@@ -221,7 +221,7 @@ python3 tools/difftest/scan-bash-legacy-vars.py ; echo "bash-vars EXIT=$? （非
 | 3 | 红项零「未定性」 | 每个非 0 都有「真红 / 假红 / 已签字偏离 / N/A / 刻意保留」之一 + 依据 |
 | 4 | 10 域探针全绿 | **两侧同时跑**的退出码，不是单侧 |
 | 5 | 生成器 diff 为空 | `git diff --stat docs/PhaseGoal/` 无输出 |
-| 6 | 台账自洽 | `X-n` 唯一 · `HOTAPI-030` 一态 · Pitfalls 0 条「文件未标状态」 |
+| 6 | 台账自洽 | `X-n` 唯一 · `HOTAPI-030` 一态 · Pitfalls **状态字段覆盖率 100%**（基线 1/380）＋ **0 字节坑位文件 == 0**（基线 11） |
 | 7 | 计划层 6 组无「无去向任务」 | `_migration.md` 每行都有去向（迁移 / 已完成 / 已关闭 / 不属于阶段一 / 待裁定） |
 | 8 | **不能算完成的情况** | ① 用「全绿」代替逐门退出码 ② 把 `check-ddl-static.py` 的 **1/2/3** 当成「门坏了」③ `check-deadline-downstream.py` 转红时**当成回归去「修回去」** ④ 在 lane 树上跑完就宣布收口 ⑤ 探针环境受阻却写「已对齐」 ⑥ **为了让门变绿而改判据** |
 
