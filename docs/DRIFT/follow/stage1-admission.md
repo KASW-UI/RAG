@@ -93,6 +93,7 @@ follow-api (HTTP :8891)  ──gRPC plaintext──▶  follow-rpc (:8082)  ─�
 | 11 | 当前证据及剩余证据缺口 | **证据**：`FollowRpcMetrics.java`（4 类 5 指标）· `application.yml:159-180`（exposure 已配）· `follow-rpc` **无 `server.port`**（纯 gRPC）⇒ 出口不存在 · 同款缺口 5 处见 `follow/rpc.md` 「跨域派单（5 处同款缺口）」节。**缺口**：全仓统一方案未拍板 |
 
 ### `S1-FOLLOW-002` ✅ **已签字偏离 ⇒ 不修**（**2026-10-29 订正**：原写「🔴 共享层待办 · 派 G4」）
+> ⚠️ **2026-10-30 真实性复核（follow+task lane）**：原判 **✅ 已签字偏离 ⇒ 不修** ⇒ **现行态 = ✅ 仍成立（不变）**。逐条依据见本文件「逐条结论表」。
 
 > 🔴 **本条在本轮（2026-10-29 · G1 lane 阶段 1 复核）被推翻**：原先登记为
 > 「🔴 共享层缺陷 ⇒ 修法落在 `service/common` ⇒ 派 G4 落码」
@@ -140,6 +141,7 @@ follow-api (HTTP :8891)  ──gRPC plaintext──▶  follow-rpc (:8082)  ─�
 | 11 | 当前证据及剩余证据缺口 | **证据**：`follow/vs-common.md` §1 表（本轮已复核仍在）· `follow/rpc.md` 待办 2（同一件事的更早记录）。**缺口**：共享层修法需 G4 落码；`service/common` 的**关闭路径**当前无守门 |
 
 ### `S1-FOLLOW-004` 🟡 **B 类** · `follow` 域**无编排入口**（compose 只含 users 两个组件）
+> ⚠️ **2026-10-30 真实性复核（follow+task lane）**：原判 **🟡 B 类（follow 域无编排入口）** ⇒ **现行态 = 🟡 仍开放（不变）**。逐条依据见本文件「逐条结论表」。
 
 | # | 项 | 内容 |
 |---|---|---|
@@ -156,6 +158,7 @@ follow-api (HTTP :8891)  ──gRPC plaintext──▶  follow-rpc (:8082)  ─�
 | 11 | 当前证据及剩余证据缺口 | **证据**：`docker-compose.yaml` 的服务清单实测（`postgres`/`redis`/`nacos`/`jaeger`/`prometheus`/`user-rpc`/`user-api` + `default` 网络）· `manage.sh:77-82` 只构建 `user-rpc + user-api`。**缺口**：根级文件不在 G1 写权面 |
 
 ### `S1-FOLLOW-005` ✅ **已修** · `follow-rpc` 的 gRPC 端口硬编码 ⇒ 本轮补 env 覆盖
+> ⚠️ **2026-10-30 真实性复核（follow+task lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修（不变）**。逐条依据见本文件「逐条结论表」。
 
 | # | 项 | 内容 |
 |---|---|---|
@@ -172,6 +175,7 @@ follow-api (HTTP :8891)  ──gRPC plaintext──▶  follow-rpc (:8082)  ─�
 | 11 | 当前证据及剩余证据缺口 | **证据**：修前 `application.yml:103` 硬编码 + `lsof` 实测占用者 + `follow-api` 的 `${FOLLOW_API_PORT:8891}` 先例；修后见 §4.2 与 §5.2 的真启动实测。**缺口**：`users`/`admin` 侧端口仍不可覆盖（阶段 2） |
 
 ### `S1-FOLLOW-006` 🟢 **正面范例**（非缺陷）· 事务边界放在**独立 bean** 上 ⇒ 结构性规避 AOP 自调用陷阱
+> ⚠️ **2026-10-30 真实性复核（follow+task lane）**：原判 **🟢 正面范例（非缺陷）** ⇒ **现行态 = 🟢 仍成立（不变）**。逐条依据见本文件「逐条结论表」。
 
 | # | 项 | 内容 |
 |---|---|---|
@@ -434,7 +438,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 | **P0 / P1 / P2 最终状态** | **P0**：域内 ✅ 8/9（#5 项目级 🔴）· **P1**：✅ 至少 5 个机制闭环 · **P2**：3 项登记（1 项已销号 · 1 项已修 · 1 项待重新拍板） |
 | **全部已知缺陷和未验证风险** | §3（`S1-FOLLOW-001~009`）· §6.1 上报项 · §6.2 例外 · 域台账（`api.md` / `rpc.md` / `common.md` / `proto.md`）· [`vs-common.md`](vs-common.md) 9 轴 · 基线 §九 `G-1`（双侧探针未落仓）/ `G-6`（proto 静态守门只覆盖 3 域 ⇒ **本域已由 `FollowProtoContractTest` 补上**）/ **`G-13`（本域无独立失败路径矩阵 ⇒ 🆕 **本轮已闭合**）** / `G-19`（消费方式未取证）|
 | **完整的差异与暂缓项清单** | 本文件 §3（**9 条，每条 11 项齐全**）＋ §6.1.1 的 2 条上报项（`S1-FOLLOW-010` / `S1-FOLLOW-011`）|
-| **阶段 2 任务及其依赖** | ① `S1-FOLLOW-001` 指标出口（**待用户重新拍板**；依赖：全仓 rpc 层统一方案 ⇒ **非 G1 单方面可定**）② `S1-FOLLOW-003` 共享层关闭路径解耦（依赖：**G4 落码**）③ `S1-FOLLOW-004` compose 编排（依赖：**收口**）④ `S1-FOLLOW-007` 基线订正（依赖：**收口**）⑤ `S1-FOLLOW-008/009`（依赖：**收口 / G2 / G3**）|
+| **阶段 2 任务及其依赖** | ① `S1-FOLLOW-001` 指标出口（**待用户重新拍板**；依赖：全仓 rpc 层统一方案 ⇒ **非 G1 单方面可定**）② ~~`S1-FOLLOW-003` 共享层关闭路径解耦（依赖：**G4 落码**）~~ **（⚠️ 2026-10-30 真实性复核 · 收口执行者销号：G4 已于 2026-10-27 落码 ⇒ 本项**已销号**，依据 `service/common/src/main/java/com/rag/common/spring/HttpPoolLifecycle.java:53-54` ＋ `service/common/src/main/java/com/rag/common/spring/ObservabilityLifecycle.java:85`/`:94`；原值保留）**③ `S1-FOLLOW-004` compose 编排（依赖：**收口**）④ `S1-FOLLOW-007` 基线订正（依赖：**收口**）⑤ `S1-FOLLOW-008/009`（依赖：**收口 / G2 / G3**）|
 | **尚未处理的原始业务行为** | ① Go DevServer 的 `/metrics` 出口（RAG 侧 rpc 组件**零出口**）② MaxConns 的 per-route 语义（**用户已签字不修 ⇒ 是「决定不处理」，不是「尚未处理」**）③ `follow-proto` 的「消费方式」取证（follow 无 `optional` 字段 ⇒ 该边界**不适用**）|
 | **下一次执行应从哪里开始** | ① **收口**：`S1-USERS-001` 说明书 + `S1-FOLLOW-007` 基线订正（**A 类，阻断阶段 1**）② **G4**：收 §6.2 的 F1 / F2 反馈单 ＋ `S1-FOLLOW-010`（404 字节数注释）③ **G2/G3**：5 个 api 模块补 ryuk-disabled ＋ `S1-FOLLOW-011`（like 域同一处错数）④ **用户拍板**：是否重开 `S1-FOLLOW-001`（决定 `follow-rpc` 能否从 🟡 升 ✅）⑤ **G1 自身**：若要闭合基线 `G-1`（follow 双侧对拍落仓）⇒ 需重建探针 + 双栈 ⇒ **属阶段 1 的证据补强，非阻断**；⚠️ **`G-13` 的其余 3 域（article / task / hot）不在 G1 写权面 ⇒ 由 G2 / G3 补**<br>⚠️ **2026-10-30 真实性复核（follow+task lane）订正**：② 里的 `S1-FOLLOW-010`（G4 修 404 字节数注释）与 ③ 里的 `S1-FOLLOW-011`（G2 修 like 域同一处错数）**两项均已于 2026-10-29 落码订正** ⇒ **本轮从「下一次执行」清单里划掉** ⇒ 上文原值保留不改写。核对日期 2026-10-30。 |
 
@@ -525,20 +529,20 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 
 | 编号 | 落点 | 原状态 → 现行态 | 依据（两侧 `文件:行号` · 核对日期 2026-10-30） | 改判 |
 |---|---|---|---|---|
-| `S1-FOLLOW-002` | §3 标题 `:95` | ✅ 已签字偏离 ⇒ 不修 → ✅ 仍成立（不变） | 签字档 `docs/Intentional_Deviations/global/common-tails.md:11` = `## SD-2026-10-25-01：… ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**` ＋ `:18`（「对应的 DRIFT 条目」栏 = **T-2** = `DRIFT-FOLLOW-008` = 本条）· RAG `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java:67` = 「⚠️ 本条是经签字批准的『有意偏离』」· Go `go-zero@v1.10.2/rest/handler/maxconnshandler.go:20` = `latch := syncx.NewLimit(n)`（**每路由一个**）⇒ **差异仍在两侧 ⇒ 签字仍有效** | 否 |
-| `S1-FOLLOW-004` | §3 标题 `:142` | 🟡 B 类（`follow` 域无编排入口）→ 🟡 仍开放（不变） | RAG `docker-compose.yaml` 实测 **7 个 service**（`postgres` / `redis` / `nacos` / `jaeger` / `prometheus` / `user-rpc` / `user-api`）⇒ **无 `follow-rpc` / `follow-api` 入口** ⇒ **仍开放**；⚠️ **一条差异 ≠ 一个缺陷** + **根级 `docker-compose.yaml` 不在本 lane 写权面** ⇒ **维持 🟡 B 类，不升级成 🔴** | 否 |
-| `S1-FOLLOW-005` | §3 标题 `:158` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-rpc/src/main/resources/application.yml:143` = `port: ${FOLLOW_RPC_PORT:8082}`（**本轮重核该行内容**）· Go `service/follow/rpc/etc/follow.yaml:2` = `ListenOn: 0.0.0.0:8082` ⇒ **默认端口一字不变** ⇒ 结论仍成立 | 否 |
-| `S1-FOLLOW-006` | §3 标题 `:174` | 🟢 正面范例（非缺陷）→ 🟢 仍成立（不变） | RAG `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/service/FollowBlockTransactionService.java:42` = `@Service` ＋ `:43` = `public class FollowBlockTransactionService {`（**独立 bean**）＋ `:70` = `@Transactional(rollbackFor = Exception.class)` ＋ `:24` = 「Spring 的 `@Transactional` 靠 **AOP 代理**生效，代理**只拦截从容器外部进来的调用**」⇒ ⇒ **事务边界在独立 bean 上 ⇒ 结构性规避自调用陷阱** ⇒ 仍成立 | 否 |
-| `S1-FOLLOW-001` | §6.1 表行 | 🟡 B 类（跨域方案待定）→ **✅ 已落地** | RAG `service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web` ＋ `service/follow/follow-rpc/src/main/resources/application.yml:131` = `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}` ＋ `:112` = `register-enabled: false` · Go `service/follow/rpc/etc/follow.yaml:23` = `Port: 16065` ⇒ **端口一字不差** ⇒ **本域侧出口已落地**（订正段已追加在本行） | **是** |
-| `S1-FOLLOW-003` | §6.1 表行 | 🟡 B 类（共享层待办 · 派 G4）→ **✅ 已修** | RAG `service/common/src/main/java/com/rag/common/spring/HttpPoolLifecycle.java:53-54` ＋ `service/common/src/main/java/com/rag/common/spring/ObservabilityLifecycle.java:85` / `:94` ⇒ **关闭路径不再触及 web 类型** ＋ RAG `service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web` ⇒ **本域侧前提也不成立**（订正段已追加在本行） | **是** |
-| `S1-FOLLOW-004` | §6.1 表行 | 🟡 B 类 → 🟡 仍开放（不变） | 同 §3 标题行（RAG `docker-compose.yaml` = 7 个 service ⇒ 无 follow 入口）⇒ **仍开放** | 否 |
+| `S1-FOLLOW-002` | §3 标题 `:95` | ✅ 已签字偏离 ⇒ 不修 → ✅ 仍成立（不变） | 签字档 `docs/Intentional_Deviations/global/common-tails.md:11` = `## SD-2026-10-25-01：… ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**` ＋ `:18`（「对应的 DRIFT 条目」栏 = **T-2** = `DRIFT-FOLLOW-008` = 本条）· RAG `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java:67` = 「⚠️ 本条是经签字批准的『有意偏离』」· Go `go-zero@v1.10.2/rest/handler/maxconnshandler.go:20` = `latch := syncx.NewLimit(n)`（**每路由一个**）⇒ **差异仍在两侧 ⇒ 签字仍有效** | 否｜⚠️ **2026-10-30 真实性复核（复核面）**：本行即本轮逐条复核记录（原状态 → 现行态 · 两侧依据见本行）· 核对日期 2026-10-30 |
+| `S1-FOLLOW-004` | §3 标题 `:142` | 🟡 B 类（`follow` 域无编排入口）→ 🟡 仍开放（不变） | RAG `docker-compose.yaml` 实测 **7 个 service**（`postgres` / `redis` / `nacos` / `jaeger` / `prometheus` / `user-rpc` / `user-api`）⇒ **无 `follow-rpc` / `follow-api` 入口** ⇒ **仍开放**；⚠️ **一条差异 ≠ 一个缺陷** + **根级 `docker-compose.yaml` 不在本 lane 写权面** ⇒ **维持 🟡 B 类，不升级成 🔴** | 否（核对日期 2026-10-30） |
+| `S1-FOLLOW-005` | §3 标题 `:158` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-rpc/src/main/resources/application.yml:143` = `port: ${FOLLOW_RPC_PORT:8082}`（**本轮重核该行内容**）· Go `service/follow/rpc/etc/follow.yaml:2` = `ListenOn: 0.0.0.0:8082` ⇒ **默认端口一字不变** ⇒ 结论仍成立 | 否（核对日期 2026-10-30） |
+| `S1-FOLLOW-006` | §3 标题 `:174` | 🟢 正面范例（非缺陷）→ 🟢 仍成立（不变） | RAG `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/service/FollowBlockTransactionService.java:42` = `@Service` ＋ `:43` = `public class FollowBlockTransactionService {`（**独立 bean**）＋ `:70` = `@Transactional(rollbackFor = Exception.class)` ＋ `:24` = 「Spring 的 `@Transactional` 靠 **AOP 代理**生效，代理**只拦截从容器外部进来的调用**」⇒ ⇒ **事务边界在独立 bean 上 ⇒ 结构性规避自调用陷阱** ⇒ 仍成立 | 否（核对日期 2026-10-30） |
+| `S1-FOLLOW-001` | §6.1 表行 | 🟡 B 类（跨域方案待定）→ **✅ 已落地** | RAG `service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web` ＋ `service/follow/follow-rpc/src/main/resources/application.yml:131` = `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}` ＋ `:112` = `register-enabled: false` · Go `service/follow/rpc/etc/follow.yaml:23` = `Port: 16065` ⇒ **端口一字不差** ⇒ **本域侧出口已落地**（订正段已追加在本行） | **是**（核对日期 2026-10-30） |
+| `S1-FOLLOW-003` | §6.1 表行 | 🟡 B 类（共享层待办 · 派 G4）→ **✅ 已修** | RAG `service/common/src/main/java/com/rag/common/spring/HttpPoolLifecycle.java:53-54` ＋ `service/common/src/main/java/com/rag/common/spring/ObservabilityLifecycle.java:85` / `:94` ⇒ **关闭路径不再触及 web 类型** ＋ RAG `service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web` ⇒ **本域侧前提也不成立**（订正段已追加在本行） | **是**（核对日期 2026-10-30） |
+| `S1-FOLLOW-004` | §6.1 表行 | 🟡 B 类 → 🟡 仍开放（不变） | 同 §3 标题行（RAG `docker-compose.yaml` = 7 个 service ⇒ 无 follow 入口）⇒ **仍开放** | 否（核对日期 2026-10-30） |
 
 ### 二、本轮改判清单（**每条都带两侧证据**）
 
 | 编号 | 原判 | 现行态 | 改判依据（2026-10-30 当场核过） |
 |---|---|---|---|
-| `S1-FOLLOW-010` | 🟡 文档面（P3）· **派 G4 修**（共享层 javadoc 写「全长 20 字节」） | **✅ 已闭环** | RAG `service/common/src/main/java/com/rag/common/http/GoStyleRouterErrorResponses.java:80` = 「…**带一个尾随换行**，全长 {@code 19} 字节」＋ `:83` = 「🔴 **2026-10-29（R3 轮）订正**：本 javadoc 原写「全长 {@code 20} 字节」⇒ **错**」⇒ **所报缺陷已不存在** ⇒ **不再派 G4**；⚠️ **原指针 `:83` 现在指向「订正说明」⇒ 现行指针 = `:80`** |
-| `S1-FOLLOW-011` | 🟡 文档面（P3）· **派 G2 修**（like 域 javadoc + `@DisplayName` 写「20」） | **✅ 已闭环** | RAG `service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiRouterErrorRealTomcatTest.java:46` = 「…全长 **19** 字节」＋ `:48` = 「⚠️ 2026-10-29 订正：原写「20 字节」是**错的**」＋ `:190` 的 `@DisplayName` = 「…= **19** 字节」⇒ **所报缺陷已不存在** ⇒ **不再派 G2**；⚠️ **原指针 `:187` 现在是个空行 ⇒ 现行指针 = `:190`** |
+| `S1-FOLLOW-010` | 🟡 文档面（P3）· **派 G4 修**（共享层 javadoc 写「全长 20 字节」） | **✅ 已闭环** | RAG `service/common/src/main/java/com/rag/common/http/GoStyleRouterErrorResponses.java:80` = 「…**带一个尾随换行**，全长 {@code 19} 字节」＋ `:83` = 「🔴 **2026-10-29（R3 轮）订正**：本 javadoc 原写「全长 {@code 20} 字节」⇒ **错**」⇒ **所报缺陷已不存在** ⇒ **不再派 G4**；⚠️ **原指针 `:83` 现在指向「订正说明」⇒ 现行指针 = `:80`** ｜⚠️ **2026-10-30 真实性复核（follow+task lane）**：原判 **🟡 文档面（P3）· 派 G4 修（共享层 javadoc 写「全长 20 字节」）** ⇒ **现行态 = ✅ 已闭环（共享层 javadoc 已订正为 19 字节）**（维持）。逐条依据见本文件「逐条结论表」 |
+| `S1-FOLLOW-011` | 🟡 文档面（P3）· **派 G2 修**（like 域 javadoc + `@DisplayName` 写「20」） | **✅ 已闭环** | RAG `service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiRouterErrorRealTomcatTest.java:46` = 「…全长 **19** 字节」＋ `:48` = 「⚠️ 2026-10-29 订正：原写「20 字节」是**错的**」＋ `:190` 的 `@DisplayName` = 「…= **19** 字节」⇒ **所报缺陷已不存在** ⇒ **不再派 G2**；⚠️ **原指针 `:187` 现在是个空行 ⇒ 现行指针 = `:190`** ｜⚠️ **2026-10-30 真实性复核（follow+task lane）**：原判 **🟡 文档面（P3）· 派 G2 修（like 域 javadoc + `@DisplayName` 写「20」）** ⇒ **现行态 = ✅ 已闭环（like 域已订正为 19 字节）**（维持）。逐条依据见本文件「逐条结论表」 |
 
 ### 三、仍未核到（**待核实**）
 

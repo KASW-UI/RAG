@@ -141,6 +141,7 @@ java.lang.IllegalArgumentException: Incorrectly formatted target uri;
 > ⇒ 这是 §3.3「两侧同时跑的探针」的单侧最小形态。
 
 ## DRIFT-FOLLOW-004 ✅ `NACOS_ADDR` 在 api / rpc 两侧语义不一致
+> ⚠️ **2026-10-30 真实性复核（follow+task lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修（不变）**。逐条依据见本文件「逐条结论表」。
 
 > 🆕 **2026-10-29 对齐（W-B lane · 台账对齐）** —— **原状态标记 `🔴`（2026-10-24 台账留痕，保留不改写）** ⇒
 > **现状态：✅ 已修**（与同文件 §结论表 `:19` 的 `✅ 已修` 收敛到同一状态）。
@@ -689,12 +690,12 @@ Go  : 0.005 0.01 0.025 0.05 0.1 0.25 0.5 1   2.5 5   10  +Inf
 
 | 编号 | 落点 | 原状态 → 现行态 | 依据（两侧 `文件:行号` · 核对日期 2026-10-30） | 改判 |
 |---|---|---|---|---|
-| `DRIFT-FOLLOW-002` | §结论表 `:17` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-rpc/pom.xml:256-260` = `io.grpc:grpc-inprocess` **无 `<scope>test</scope>`**（compile 默认）＋ `:236`（注释明写「scope 必须是 compile（默认），不能是 test」）⇒ **运行期 classpath 有该类** ⇒ **本域成立**；⚠️ 跨域那半边（域外 4 个模块仍是 `test` scope）**2026-10-29 已订正**，本轮复核**属实**：逐模块 `grep -A4 grpc-inprocess` ⇒ `article-rpc` / `like-rpc` / `task-rpc` = **无 `<scope>`**、`favorite-rpc` = `<scope>runtime</scope>`（**不是 `test`**）⇒ **全仓已无 `grpc-inprocess` 的 `test` scope** ⇒ **跨域待办已销账** | 否（**子结论订正已在本条正文**） |
-| `DRIFT-FOLLOW-003` | §结论表 `:18` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-rpc/src/main/resources/application.yml:163` = `address: discovery:///user-rpc`（**本轮重核：该行确实讲这件事**）＋ 守门 `service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/FollowRpcProductionAddressTest.java:87` = `@DisplayName("生产 application.yml 的 grpc client 地址必须是 discovery:///user-rpc（三斜杠）")` ⇒ **「两斜杠」形态已消除** | 否（**子结论订正**：域外 5 个模块「全是两斜杠」**已陈旧** ⇒ 已在本条正文追加订正段） |
-| `DRIFT-FOLLOW-003` | §标题 `:79` | ✅ 已修 → ✅ 已修（不变） | 同上（根因段「devh 判据 = `uri.getPath()`」**不因代码未变而失效**）⇒ 结论仍成立 | 否（**子结论订正**：见本条正文追加段） |
-| `DRIFT-FOLLOW-004` | §结论表 `:19` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-api/src/main/resources/application.yml:58` = `server-addr: ${NACOS_ADDR:nacos}:${NACOS_PORT:8848}` ＋ RAG `service/follow/follow-rpc/src/main/resources/application.yml:95` = **同一串** ⇒ **两端必指同一台 Nacos**（本轮逐行重核两行内容一致） | 否 |
-| `DRIFT-FOLLOW-004` | §标题 `:132` | ✅ 已修 → ✅ 已修（不变） | 同上（根因段「同域两个模块对同一环境变量给出两种语义」**不因代码未变而失效**）⇒ 结论仍成立 | 否 |
-| `DRIFT-FOLLOW-006` | §结论表 `:20` | ✅ 已修（2026-10-29 · 编号 `S1-FOLLOW-001`）→ ✅ 已落地（不变） | RAG `service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web`（**给了 Actuator 一个 servlet 载体**）＋ RAG `service/follow/follow-rpc/src/main/resources/application.yml:131` = `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}` ＋ `:112` = `register-enabled: false`（**关掉自动注册 ⇒ 避免 Nacos 里出现错端口实例**）· Go `service/follow/rpc/etc/follow.yaml:23` = `Port: 16065` ⇒ **端口一字不差** ＋ 探针 `tools/metrics-probe/follow/run.sh:355` = 就绪判据 = **真抓到 `/actuator/prometheus`**（`:361` = 未就绪即 `die`）⇒ **抓取出口已在** | 否 |
+| `DRIFT-FOLLOW-002` | §结论表 `:17` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-rpc/pom.xml:256-260` = `io.grpc:grpc-inprocess` **无 `<scope>test</scope>`**（compile 默认）＋ `:236`（注释明写「scope 必须是 compile（默认），不能是 test」）⇒ **运行期 classpath 有该类** ⇒ **本域成立**；⚠️ 跨域那半边（域外 4 个模块仍是 `test` scope）**2026-10-29 已订正**，本轮复核**属实**：逐模块 `grep -A4 grpc-inprocess` ⇒ `article-rpc` / `like-rpc` / `task-rpc` = **无 `<scope>`**、`favorite-rpc` = `<scope>runtime</scope>`（**不是 `test`**）⇒ **全仓已无 `grpc-inprocess` 的 `test` scope** ⇒ **跨域待办已销账** | 否（**子结论订正已在本条正文**）｜⚠️ **2026-10-30 真实性复核（复核面）**：本行即本轮逐条复核记录（原状态 → 现行态 · 两侧依据见本行）· 核对日期 2026-10-30 |
+| `DRIFT-FOLLOW-003` | §结论表 `:18` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-rpc/src/main/resources/application.yml:163` = `address: discovery:///user-rpc`（**本轮重核：该行确实讲这件事**）＋ 守门 `service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/FollowRpcProductionAddressTest.java:87` = `@DisplayName("生产 application.yml 的 grpc client 地址必须是 discovery:///user-rpc（三斜杠）")` ⇒ **「两斜杠」形态已消除** | 否（**子结论订正**：域外 5 个模块「全是两斜杠」**已陈旧** ⇒ 已在本条正文追加订正段）（核对日期 2026-10-30） |
+| `DRIFT-FOLLOW-003` | §标题 `:79` | ✅ 已修 → ✅ 已修（不变） | 同上（根因段「devh 判据 = `uri.getPath()`」**不因代码未变而失效**）⇒ 结论仍成立 | 否（**子结论订正**：见本条正文追加段）（核对日期 2026-10-30） |
+| `DRIFT-FOLLOW-004` | §结论表 `:19` | ✅ 已修 → ✅ 已修（不变） | RAG `service/follow/follow-api/src/main/resources/application.yml:58` = `server-addr: ${NACOS_ADDR:nacos}:${NACOS_PORT:8848}` ＋ RAG `service/follow/follow-rpc/src/main/resources/application.yml:95` = **同一串** ⇒ **两端必指同一台 Nacos**（本轮逐行重核两行内容一致） | 否（核对日期 2026-10-30） |
+| `DRIFT-FOLLOW-004` | §标题 `:132` | ✅ 已修 → ✅ 已修（不变） | 同上（根因段「同域两个模块对同一环境变量给出两种语义」**不因代码未变而失效**）⇒ 结论仍成立 | 否（核对日期 2026-10-30） |
+| `DRIFT-FOLLOW-006` | §结论表 `:20` | ✅ 已修（2026-10-29 · 编号 `S1-FOLLOW-001`）→ ✅ 已落地（不变） | RAG `service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web`（**给了 Actuator 一个 servlet 载体**）＋ RAG `service/follow/follow-rpc/src/main/resources/application.yml:131` = `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}` ＋ `:112` = `register-enabled: false`（**关掉自动注册 ⇒ 避免 Nacos 里出现错端口实例**）· Go `service/follow/rpc/etc/follow.yaml:23` = `Port: 16065` ⇒ **端口一字不差** ＋ 探针 `tools/metrics-probe/follow/run.sh:355` = 就绪判据 = **真抓到 `/actuator/prometheus`**（`:361` = 未就绪即 `die`）⇒ **抓取出口已在** | 否｜⚠️ **2026-10-30 真实性复核（复核面）**：本行即本轮逐条复核记录（原状态 → 现行态 · 两侧依据见本行）· 核对日期 2026-10-30 |
 
 ### 二、本轮新增/订正的证据指针
 

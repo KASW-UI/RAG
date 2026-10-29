@@ -302,13 +302,13 @@ RAG : 破窗（block 与 follow 并存）32/40
 
 | 编号 | 原状态 → 现行态 | 依据（`文件:行号`） | 改判 |
 |---|---|---|---|
-| `PIT-FOLLOW-001` | 已闭环 → 已闭环（不变） | RAG `service/follow/follow-rpc/src/main/resources/application.yml:163` = `address: discovery:///user-rpc` ＋ `service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/FollowRpcProductionAddressTest.java:87` / `:91-92` = 读**生产 yml** 的 `assertEquals` ⇒ **「测试覆盖生产地址」的形态已堵住** | 否 |
-| `PIT-FOLLOW-002` | 已闭环 → 已闭环（不变） | RAG `service/follow/follow-rpc/pom.xml:256-260` = grpc-inprocess **无 `<scope>test</scope>`** ⇒ 运行期 classpath 有该类；⚠️ 跨域半边本轮复核**属实**（全仓已无 `test` scope） | 否（子结论订正**沿用** 2026-10-29） |
-| `PIT-FOLLOW-003` | 已闭环 → 已闭环（不变） | RAG `service/follow/follow-rpc/src/main/resources/application.yml:163` = `discovery:///user-rpc`（**三斜杠**） | 否（**补全路径**） |
-| `PIT-FOLLOW-004` | 已闭环 → 已闭环（不变） | RAG `service/follow/follow-api/src/main/resources/application.yml:58` ＋ `service/follow/follow-rpc/src/main/resources/application.yml:95` = **逐字同一串** `${NACOS_ADDR:nacos}:${NACOS_PORT:8848}` | 否（**补全路径**） |
-| `PIT-FOLLOW-005` | 已闭环 → 已闭环（不变） | RAG `service/common/src/main/java/com/rag/common/spring/HttpPoolLifecycle.java:53-54` ＋ `service/common/src/main/java/com/rag/common/spring/ObservabilityLifecycle.java:85` / `:94` ⇒ **关闭路径不再触及 web 类型** | 否 |
-| `PIT-FOLLOW-013` | 仍生效 → 仍生效（不变） | RAG `tools/api-full-parity-probe/follow/run.sh:232` = 含 `&` 的真源路径**整体加引号** ＋ `:233` = 变量加引号 ⇒ **仓库路径含 `&` ⇒ 触发条件永远存在** | 否（**补指针**） |
-| `PIT-FOLLOW-014` | 仍生效 → 仍生效（不变） | Go 真源 `service/follow/rpc/internal/logic/followlogic.go:48`（`ExistsAnyBlock` SELECT）＋ `:60`（`CreateFollow` INSERT）⇒ **不同事务**；对照 `service/follow/rpc/internal/logic/blocklogic.go:48`（**单事务**）⇒ **真源自身的竞态仍在** | 否（**补指针**） |
+| `PIT-FOLLOW-001` | 已闭环 → 已闭环（不变） | RAG `service/follow/follow-rpc/src/main/resources/application.yml:163` = `address: discovery:///user-rpc` ＋ `service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/FollowRpcProductionAddressTest.java:87` / `:91-92` = 读**生产 yml** 的 `assertEquals` ⇒ **「测试覆盖生产地址」的形态已堵住** | 否（核对日期 2026-10-30） |
+| `PIT-FOLLOW-002` | 已闭环 → 已闭环（不变） | RAG `service/follow/follow-rpc/pom.xml:256-260` = grpc-inprocess **无 `<scope>test</scope>`** ⇒ 运行期 classpath 有该类；⚠️ 跨域半边本轮复核**属实**（全仓已无 `test` scope） | 否（子结论订正**沿用** 2026-10-29）｜⚠️ **2026-10-30 真实性复核（复核面）**：本行即本轮逐条复核记录（原状态 → 现行态 · 两侧依据见本行）· 核对日期 2026-10-30 |
+| `PIT-FOLLOW-003` | 已闭环 → 已闭环（不变） | RAG `service/follow/follow-rpc/src/main/resources/application.yml:163` = `discovery:///user-rpc`（**三斜杠**） | 否（**补全路径**）（核对日期 2026-10-30） |
+| `PIT-FOLLOW-004` | 已闭环 → 已闭环（不变） | RAG `service/follow/follow-api/src/main/resources/application.yml:58` ＋ `service/follow/follow-rpc/src/main/resources/application.yml:95` = **逐字同一串** `${NACOS_ADDR:nacos}:${NACOS_PORT:8848}` | 否（**补全路径**）（核对日期 2026-10-30） |
+| `PIT-FOLLOW-005` | 已闭环 → 已闭环（不变） | RAG `service/common/src/main/java/com/rag/common/spring/HttpPoolLifecycle.java:53-54` ＋ `service/common/src/main/java/com/rag/common/spring/ObservabilityLifecycle.java:85` / `:94` ⇒ **关闭路径不再触及 web 类型** | 否（核对日期 2026-10-30） |
+| `PIT-FOLLOW-013` | 仍生效 → 仍生效（不变） | RAG `tools/api-full-parity-probe/follow/run.sh:232` = 含 `&` 的真源路径**整体加引号** ＋ `:233` = 变量加引号 ⇒ **仓库路径含 `&` ⇒ 触发条件永远存在** | 否（**补指针**）（核对日期 2026-10-30） |
+| `PIT-FOLLOW-014` | 仍生效 → 仍生效（不变） | Go 真源 `service/follow/rpc/internal/logic/followlogic.go:48`（`ExistsAnyBlock` SELECT）＋ `:60`（`CreateFollow` INSERT）⇒ **不同事务**；对照 `service/follow/rpc/internal/logic/blocklogic.go:48`（**单事务**）⇒ **真源自身的竞态仍在** | 否（**补指针**）（核对日期 2026-10-30） |
 
 ### 仍未核到（**待核实**）
 
