@@ -111,8 +111,14 @@ EOF
 fi
 
 if [[ "$unbuilt" -eq 0 ]]; then
-  echo "全部 $total 个 api + rpc 模块的 jar 均可执行 ✓（已检查 $checked/$total）"
+  # 🔴 2026-10-29（R4 轮）修：这里原来写的是裸 `$total）` / `$checked/$total）` ——
+  #    **macOS 自带 bash 3.2 会把紧跟在 `$VAR` 后的多字节字符（此处是全角右括号 `）`）
+  #    算进变量名** ⇒ 变量名变成 `total\xef\xbc\x89` ⇒ `set -u` ⇒
+  #    `total?: unbound variable` ⇒ **脚本在最后一行崩掉 ⇒ 明明 20/20 全过却 EXIT=1**
+  #    ⇒ **假红**（与 `tools/api-full-parity-probe/users/` README 记的同类坑同源）。
+  #    修法 = **一律用 `${VAR}` 显式界定变量名边界**。
+  echo "全部 ${total} 个 api + rpc 模块的 jar 均可执行 ✓（已检查 ${checked}/${total}）"
 else
-  echo "已检查的 $checked 个模块 jar 均可执行 ✓；⚠️ **另有 $unbuilt 个模块未构建 ⇒ 未检查**（不是「已通过」）"
+  echo "已检查的 ${checked} 个模块 jar 均可执行 ✓；⚠️ **另有 ${unbuilt} 个模块未构建 ⇒ 未检查**（不是「已通过」）"
 fi
 exit 0

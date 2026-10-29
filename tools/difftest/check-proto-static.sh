@@ -155,7 +155,13 @@ for row in "${DOMAINS[@]}"; do
   rag_file="$ROOT/${_rag_path}"
   echo "== ${_go} =="
   if [[ ! -f "$go_file" || ! -f "$rag_file" ]]; then
-    echo "  ✗ ${_label}: 文件缺失（go=$go_file rag=$rag_file）"
+    # 🔴 2026-10-29（R4 轮）修：这里原来写的是裸 `$rag_file）` ——
+    #    **macOS 自带 bash 3.2 会把紧跟在 `$VAR` 后的多字节字符（全角右括号 `）`）
+    #    算进变量名** ⇒ 变量名变成 `rag_file\xef\xbc\x89` ⇒ `set -u` ⇒
+    #    `rag_file?: unbound variable` ⇒ **在「文件缺失」这条错误路径上直接崩掉**，
+    #    报错信息根本打不出来 ⇒ 守门**用错误的姿势失败**。
+    #    修法 = **一律用 `${VAR}` 显式界定变量名边界**（同 `check-jar-executable.sh` 的同类修法）。
+    echo "  ✗ ${_label}: 文件缺失（go=${go_file} rag=${rag_file}）"
     FAILED=1
     continue
   fi

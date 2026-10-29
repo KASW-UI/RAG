@@ -81,6 +81,17 @@ PINNED = {
     #       （同 `docs/Pitfalls/global/common-tails.md` PIT-GLOBAL-001）。
     "gorm.io/driver/postgres": "v1.6.0",   # 真源 go.mod:27
     "github.com/lovoo/goka": "v1.1.16",    # 真源 go.mod:11
+    # 🆕 2026-10-29（R4 轮）：`kafka-go` 同属**同一个假阳性簇** ——
+    #    `service/article/article-rpc/src/test/java/com/rag/article/article/rpc/mq/
+    #    ArticleKafkaForceCommitGateTest.java:96` 与 `:337` 引 `kafka-go@v0.4.47/reader.go:171-185`
+    #    ⇒ **不在 PINNED 里 ⇒ 带版本前缀的路径解析不到 ⇒ 报 `[NO-SUCH-PATH]`**。
+    #    ⚠️ **已手工回真源核实该引用是对的**（不是台账写错）：
+    #    `~/go/pkg/mod/github.com/segmentio/kafka-go@v0.4.47/reader.go` **存在**（1619 行），
+    #    且 **171-185 行正是** `func (o offsetStash) merge(commits []commit) { … }`（offset 合并逻辑）
+    #    ⇒ ⇒ **守门报的是假阳性，不是漂移**。
+    #    ⚠️ **版本必须取真源 go.mod 的 pin（v0.4.47）**：module cache 里**同时躺着 v0.4.50**
+    #    ⇒ 读错版本同样是漂移（见 `docs/Pitfalls/global/common-tails.md` PIT-GLOBAL-001）。
+    "github.com/segmentio/kafka-go": "v0.4.47",   # 真源 go.mod:100
 }
 
 EXTS = (".go", ".sql", ".yaml", ".yml")

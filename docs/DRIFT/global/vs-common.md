@@ -4570,7 +4570,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 
 | 文件 | 关键结论 |
 |---|---|
-| `docs/PhaseGoal/g4.md` | G4 lane 矩阵（**机器生成** ⇒ `PhaseGoal-judge.md` 才是权威源，矛盾以 judge 为准并**登记**、不直接改生成物）⇒ 组件 **2 个（✅1 · 🟡0 · 🔴1）** ⇒ **lane 判定 🔴** ⇒ ⚠️ 该文件写着「27 条编号未修」+「`DRIFT-COMMON-005` 是唯一硬阻塞」⇒ ⇒ **两处已陈旧**（现 24 条 / 硬阻塞已消失） |
+| `docs/PhaseGoal/g4.md` | G4 lane 矩阵（**机器生成** ⇒ `PhaseGoal-judge.md` 才是权威源，矛盾以 judge 为准并**登记**、不直接改生成物）⇒ 组件 **2 个（✅1 · 🟡0 · 🔴1）** ⇒ **lane 判定 🔴** ⇒ ⚠️ 该文件写着「27 条编号未修」+「`DRIFT-COMMON-005` 是唯一硬阻塞」⇒ ⇒ **两处已陈旧**（当时写「现 24 条」⇒ ⚠️ **2026-10-29 再订正：24 ⇒ 23**（`DRIFT-CF-018` 共享层半边已修）· 硬阻塞已消失） |
 | `docs/PhaseGoal-judge.md` 的 `service/common` 行（`:217`） | 🔴 **R2 / E3** ⇒ 理由挂「**27 条编号未修** …… `DRIFT-COMMON-005` 是唯一硬阻塞（破坏性变更，需用户裁定）」⇒ ⇒ 🔴 **判据口径问题**：§1.1 的 **R3 ⑥ 只排除「已签字偏离 / 跨组件残留 / 取证缺口」，没有给「C 类阶段二暂缓项」留出口** ⇒ ⇒ **不是「逐条修」问题** ⇒ ⇒ **R3 ⑥ 一变 ⇒ 4 条 lane 矩阵全部要重算**（顺序有依赖） |
 | `docs/PhasedGoal.md` §二 **P0（九条）** | 逐条读 ⇒ ⇒ **P0 #3 =「关键数据能够正确持久化，事务边界合理，不存在已确认的严重数据丢失、**重复处理**或状态错误问题」** ⇒ ⇒ **`DRIFT-SF-001`（墙钟回拨 ⇒ 重复 ID）命中的就是这一条** ⇒ ⇒ 另：P0 允许「**明确、有限且不影响核心正确性的已知例外**」⇒ ⇒ 与 R3 ⑥ 缺出口是同一件事的两面 |
 | `docs/twoStage.md` §4 / §5.3 / §5.4 / §10 | §4 = 阶段 0 事实基线（**不允许用推测填补证据缺口**）· §5.3 = 差异与暂缓项 **11 字段**（唯一编号 / Go 出处 / 原始行为 / 阶段 1 当前行为 / 具体差异 / 暂缓理由 / 四类影响 / 是否阻断 / 阶段 2 恢复方案 / 阶段 2 测试场景与通过标准 / 当前证据及剩余缺口）· §5.4 = 改造记录 **9 字段** · §10 = **P0~P3（严重程度）× A/B/C/D（阶段归属）两轴不可互替**（**A** = 阶段 1 准入阻断项 / **B** = 竞争力补强项 / **C** = 阶段 2 最终工程建设项 / **D** = 可不实现）⇒ ⇒ 「25 条里绝大多数是 OBSERVABLE」⇒ ⇒ 它们天然落在 **C 类** ⇒ ⇒ **C 类必须有出口**（否则 R3 ⑥ 永远排除不掉它们） |
@@ -4872,7 +4872,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 | # | 落点 | 现象 | Go 侧 `文件:行号` | RAG 侧现状 | 证据强度 | 建议修法 | 影响面 | 阻塞本波 |
 |---|---|---|---|---|---|---|---|---|
 | **G4-13b** | `service/favorite/favorite-rpc`（**G3 写权面**） | 仍调用**已弃用**的阻塞重载 ⇒ 进程关不掉 | `service/comment/rpc/cmd/fact-dispatch/main.go:68`（`ctx, stop := signal.NotifyContext(...)`）＋ `service/common/communityfact/process.go:56-60` | `FavoriteFactDispatchScheduler.java:119-124` 调 `Dispatcher.run(ctx, …, once, false)` ⇒ `this.handle` 永不赋值 ⇒ `:134-141` 的 `@PreDestroy` 拿到 null | E2（源码级）＋ **共享层侧已由 `DispatcherHandleLifecycleGateTest` 证明 API 形状可用** | 改用 `Dispatcher.run(ctx, …, once, handle, false)`，句柄由 scheduler 持有（与 comment-rpc 的 `runAsync` 等价，但走新的调用方持有句柄形态） | favorite-rpc 单域 | 否（**落点在别的域 ⇒ 按 §1.1 ⑥ 第 2 条不计入本组件 R3 ⑥**） |
-| **G4-13c** | `docs/PhaseGoal-judge.md:217`（**共享面**） | `service/common` 行仍写「**27 条编号未修** …… `DRIFT-COMMON-005` 是唯一硬阻塞」 | — | **两处均已过期** ⇒ 真实为 **24 条**（`DRIFT-COMMON` 族未修 = **0**）⇒ **无硬阻塞** | E1（读台账） | 改为「24 条编号未修（其中 19 条 C 类 · 3 条 D 类 · 0 条 A/B 类）· **无硬阻塞**」＋ 组件评级按 §1.1 ⑥ 第 4 条重算 | 4 条 lane 矩阵 | 否 |
+| **G4-13c** | `docs/PhaseGoal-judge.md:217`（**共享面**） | `service/common` 行仍写「**27 条编号未修** …… `DRIFT-COMMON-005` 是唯一硬阻塞」 | — | **两处均已过期** ⇒ 当时真实为 **24 条**（`DRIFT-COMMON` 族未修 = **0**）⇒ **无硬阻塞**<br>⚠️ **2026-10-29 再订正：24 ⇒ 23** —— `DRIFT-CF-018` **共享层半边已修**（favorite 域半边仍待修 ⇒ 派单 **R5-F7**）⇒ **权威出处 = `common/alignment-2026-10-23.md` §十二·一 / §十四·三** | E1（读台账） | 改为「24 条编号未修（其中 19 条 C 类 · 3 条 D 类 · 0 条 A/B 类）· **无硬阻塞**」＋ 组件评级按 §1.1 ⑥ 第 4 条重算 | 4 条 lane 矩阵 | 否 |
 
 ### 4.18.6 🟡 本轮的**诚实边界**（AGENTS.md §0：「已改」≠「已验证」）
 

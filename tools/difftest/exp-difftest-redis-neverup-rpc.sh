@@ -116,7 +116,11 @@ done
 if [[ ! -x "$PROBE" ]]; then
   echo "  · 探针不存在 ⇒ 现在构建（运行时生成 go.mod ⇒ 仓里不留机器相关路径）"
   if [[ ! -d "$GO_TRUTH_REPO" ]]; then
-    echo "  FAIL 真源仓库不存在：$GO_TRUTH_REPO（可用 GO_TRUTH_REPO=… 指定）" >&2; exit 2
+    # 🔴 2026-10-29（R4 轮）修：裸 `$GO_TRUTH_REPO（` —— macOS 自带 **bash 3.2**
+    #    会把紧跟在 `$VAR` 后的**全角左括号**算进变量名 ⇒ `set -u` ⇒ unbound variable
+    #    ⇒ **恰恰在这个「真源仓不存在」的报错路径上崩掉** ⇒ 报错打不出来。
+    #    修法 = 用 `${VAR}` 显式界定变量名边界（见 `tools/difftest/scan-bash-legacy-vars.py`）。
+    echo "  FAIL 真源仓库不存在：${GO_TRUTH_REPO}（可用 GO_TRUTH_REPO=… 指定）" >&2; exit 2
   fi
   BUILD_DIR="$(mktemp -d)/goprobe"
   mkdir -p "$BUILD_DIR"

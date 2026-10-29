@@ -110,7 +110,7 @@
 
 ---
 
-## 二、矩阵 A-1：定位与规模（39 行 = 38 组件 ＋ 1 共享层 · 2026-10-28 实测）
+## 二、矩阵 A-1：定位与规模（39 行 = 38 组件 ＋ 1 共享层 · 2026-10-29 实测）
 
 > `main/LOC` = `src/main/java` 下 `.java` 的**文件数 / 逐文件 `splitlines()` 行数**
 > （**不是** `cat | wc -l` —— 后者少计无尾换行的文件）。
@@ -118,45 +118,45 @@
 
 | 域 | 组件 | Go 原件（真源） | RAG 实现 | main/LOC | tests |
 |---|---|---|---|---|---|
-| `article` | `article-api` | `service/article/api/internal/handler/routes.go` + `internal/logic/`（7 handler） | `service/article/article-api/`（`controller/ArticleController.java`） | 43 / 5,355 | 99 |
-| `article` | `article-rpc` | `service/article/rpc/internal/logic/` + `internal/svc/`（6 rpc） | `service/article/article-rpc/`（`impl/ArticleServiceGrpcImpl.java`） | 39 / 8,683 | 183 |
+| `article` | `article-api` | `service/article/api/internal/handler/routes.go` + `internal/logic/`（7 handler） | `service/article/article-api/`（`controller/ArticleController.java`） | 43 / 5,470 | 216 |
+| `article` | `article-rpc` | `service/article/rpc/internal/logic/` + `internal/svc/`（6 rpc） | `service/article/article-rpc/`（`impl/ArticleServiceGrpcImpl.java`） | 39 / 8,737 | 188 |
 | `article` | `article-common` | `service/article/common/errmsg/errmsg.go`（45 行） | `service/article/article-common/…/errmsg/ErrorCode.java` | 1 / 257 | 15 |
 | `article` | `article-proto` | `proto/article.proto` | `service/article/article-proto/src/main/proto/article.proto` | —（生成） | 0 |
-| `comment` | `comment-api` | `service/comment/api/internal/handler/routes.go` + `internal/logic/`（7） | `service/comment/comment-api/`（`controller/CommentController.java`） | 37 / 3,392 | 52 |
+| `comment` | `comment-api` | `service/comment/api/internal/handler/routes.go` + `internal/logic/`（7） | `service/comment/comment-api/`（`controller/CommentController.java`） | 37 / 3,479 | 62 |
 | `comment` | `comment-rpc` | `service/comment/rpc/internal/logic/`（7） | `service/comment/comment-rpc/`（`impl/CommentServiceGrpcImpl.java`） | 43 / 8,656 | 138 |
 | `comment` | `comment-common` | `service/comment/common/errmsg/errmsg.go` | `service/comment/comment-common/…/errmsg/`（4 类） | 4 / 567 | 27 |
 | `comment` | `comment-proto` | `proto/comment.proto`（245 行） | `service/comment/comment-proto/src/main/proto/comment.proto` | —（生成） | 0 |
-| `favorite` | `favorite-api` | `service/favorite/api/internal/handler/routes.go` + `internal/logic/`（7） | `service/favorite/favorite-api/`（`controller/`） | 36 / 3,799 | 131 |
+| `favorite` | `favorite-api` | `service/favorite/api/internal/handler/routes.go` + `internal/logic/`（7） | `service/favorite/favorite-api/`（`controller/`） | 36 / 3,885 | 154 |
 | `favorite` | `favorite-rpc` | `service/favorite/rpc/internal/logic/`（7） | `service/favorite/favorite-rpc/`（`impl/FavoriteServiceGrpcImpl.java`） | 36 / 7,950 | 131 |
 | `favorite` | `favorite-common` | `service/favorite/common/errmsg.go` | `service/favorite/favorite-common/…/errmsg/`（4 类） | 4 / 875 | 29 |
 | `favorite` | `favorite-proto` | `proto/favorite.proto`（107 行） | `service/favorite/favorite-proto/src/main/proto/favorite.proto` | —（生成） | 0 |
-| `follow` | `follow-api` | `service/follow/api/internal/handler/routes.go` + `internal/logic/`（8） | `service/follow/follow-api/`（`controller/FollowController.java`） | 31 / 3,511 | 74 |
-| `follow` | `follow-rpc` | `service/follow/rpc/internal/logic/`（8） | `service/follow/follow-rpc/`（`impl/FollowServiceGrpcImpl.java`） | 16 / 2,677 | 83 |
+| `follow` | `follow-api` | `service/follow/api/internal/handler/routes.go` + `internal/logic/`（8） | `service/follow/follow-api/`（`controller/FollowController.java`） | 31 / 3,585 | 143 |
+| `follow` | `follow-rpc` | `service/follow/rpc/internal/logic/`（8） | `service/follow/follow-rpc/`（`impl/FollowServiceGrpcImpl.java`） | 16 / 2,717 | 86 |
 | `follow` | `follow-common` | `service/follow/common/errmsg.go` | `service/follow/follow-common/…/errmsg/`（4 类） | 4 / 562 | 37 |
 | `follow` | `follow-proto` | `proto/follow.proto`（52 行） | `service/follow/follow-proto/src/main/proto/follow.proto` | —（生成） | 0 |
-| `hot` | `hot-api` | `service/hot/api/internal/handler/routes.go`（1） | `service/hot/hot-api/`（`controller/HotArticleController.java`） | 17 / 2,452 | 96 |
-| `hot` | `hot-rpc` | `service/hot/rpc/internal/logic/`（5） | `service/hot/hot-rpc/`（`impl/HotServiceGrpcImpl.java`） | 15 / 2,535 | 114 |
+| `hot` | `hot-api` | `service/hot/api/internal/handler/routes.go`（1） | `service/hot/hot-api/`（`controller/HotArticleController.java`） | 17 / 2,452 | 116 |
+| `hot` | `hot-rpc` | `service/hot/rpc/internal/logic/`（5） | `service/hot/hot-rpc/`（`impl/HotServiceGrpcImpl.java`） | 15 / 2,535 | 130 |
 | `hot` | `hot-common` | `service/hot/common/errmsg.go`（121 行） | `service/hot/hot-common/…/errmsg/`（2 类） | 2 / 172 | 14 |
 | `hot` | `hot-proto` | `proto/hot.proto` | `service/hot/hot-proto/src/main/proto/hot.proto` | —（生成） | 0 |
-| `like` | `like-api` | `service/like/api/internal/handler/routes.go` + `internal/logic/`（6） | `service/like/like-api/`（`controller/LikeController.java`） | 37 / 3,390 | 94 |
-| `like` | `like-rpc` | `service/like/rpc/internal/logic/`（6） | `service/like/like-rpc/`（`impl/LikeServiceGrpcImpl.java`） | 42 / 6,978 | 129 |
+| `like` | `like-api` | `service/like/api/internal/handler/routes.go` + `internal/logic/`（6） | `service/like/like-api/`（`controller/LikeController.java`） | 37 / 3,479 | 104 |
+| `like` | `like-rpc` | `service/like/rpc/internal/logic/`（6） | `service/like/like-rpc/`（`impl/LikeServiceGrpcImpl.java`） | 42 / 7,535 | 151 |
 | `like` | `like-common` | `service/like/common/errmsg/errmsg.go` | `service/like/like-common/…/errmsg/`（4 类） | 4 / 515 | 18 |
 | `like` | `like-proto` | `proto/like.proto` | `service/like/like-proto/src/main/proto/like.proto` | —（生成） | 0 |
-| `message` | `message-api` | `service/message/api/internal/handler/routes.go` + `internal/logic/`（13） | `service/message/message-api/`（`MessageController` + `MessageAdminController`） | 49 / 4,870 | 107 |
-| `message` | `message-rpc` | `service/message/rpc/internal/logic/`（9） | `service/message/message-rpc/`（`impl/MessageRpcServiceImpl.java`） | 19 / 3,815 | 96 |
+| `message` | `message-api` | `service/message/api/internal/handler/routes.go` + `internal/logic/`（13） | `service/message/message-api/`（`MessageController` + `MessageAdminController`） | 49 / 4,992 | 114 |
+| `message` | `message-rpc` | `service/message/rpc/internal/logic/`（9） | `service/message/message-rpc/`（`impl/MessageRpcServiceImpl.java`） | 19 / 3,852 | 100 |
 | `message` | `message-common` | `service/message/common/errmsg/errmsg.go` | `service/message/message-common/…/errmsg/`（3 类） | 3 / 526 | 21 |
 | `message` | `message-proto` | `proto/message.proto` | `service/message/message-proto/src/main/proto/message.proto` | —（生成） | 0 |
-| `task` | `task-api` | `service/task/api/internal/handler/routes.go`（1） | `service/task/task-api/`（`controller/TaskController.java`） | 11 / 1,496 | 102 |
-| `task` | `task-rpc` | `service/task/rpc/internal/logic/`（1） | `service/task/task-rpc/`（`impl/TaskServiceGrpcImpl.java`） | 28 / 4,310 | 134 |
+| `task` | `task-api` | `service/task/api/internal/handler/routes.go`（1） | `service/task/task-api/`（`controller/TaskController.java`） | 11 / 1,496 | 135 |
+| `task` | `task-rpc` | `service/task/rpc/internal/logic/`（1） | `service/task/task-rpc/`（`impl/TaskServiceGrpcImpl.java`） | 28 / 4,310 | 137 |
 | `task` | `task-proto` | `proto/task.proto` | `service/task/task-proto/src/main/proto/task.proto` | —（生成） | 0 |
-| `users` | `user-api` | `service/user/user/api/internal/handler/routes.go` + `internal/logic/`（9） | `service/users/user/user-api/`（`controller/UserController.java`） | 43 / 3,407 | 127 |
-| `users` | `user-rpc` | `service/user/user/rpc/internal/logic/`（9） | `service/users/user/user-rpc/`（`impl/UserServiceGrpcImpl.java`） | 15 / 2,735 | 162 |
-| `users` | `admin-api` | `service/user/admin/api/internal/handler/routes.go` + `internal/logic/`（13） | `service/users/admin/admin-api/`（`controller/AdminController.java`） | 56 / 3,854 | 149 |
-| `users` | `admin-rpc` | `service/user/admin/rpc/internal/logic/`（13） | `service/users/admin/admin-rpc/`（`AdminServiceGrpcImpl.java`） | 20 / 3,560 | 122 |
-| `users` | `users-common` | `service/user/common/{cryptx,errmsg,jwt}`（3 文件） | `service/users/users-common/`（11 类） | 11 / 1,037 | 39 |
+| `users` | `user-api` | `service/user/user/api/internal/handler/routes.go` + `internal/logic/`（9） | `service/users/user/user-api/`（`controller/UserController.java`） | 43 / 3,454 | 133 |
+| `users` | `user-rpc` | `service/user/user/rpc/internal/logic/`（9） | `service/users/user/user-rpc/`（`impl/UserServiceGrpcImpl.java`） | 15 / 2,781 | 168 |
+| `users` | `admin-api` | `service/user/admin/api/internal/handler/routes.go` + `internal/logic/`（13） | `service/users/admin/admin-api/`（`controller/AdminController.java`） | 56 / 3,903 | 155 |
+| `users` | `admin-rpc` | `service/user/admin/rpc/internal/logic/`（13） | `service/users/admin/admin-rpc/`（`AdminServiceGrpcImpl.java`） | 20 / 3,608 | 128 |
+| `users` | `users-common` | `service/user/common/{cryptx,errmsg,jwt}`（3 文件） | `service/users/users-common/`（11 类） | 11 / 1,045 | 39 |
 | `users` | `user-proto` | `proto/user.proto` | `service/users/user/user-proto/src/main/proto/users.proto`（**已改名**） | —（生成） | 0 |
 | `users` | `admin-proto` | `proto/admin.proto` | `service/users/admin/admin-proto/src/main/proto/admin.proto` | —（生成） | 0 |
-| **共享层** | `service/common` | `service/common/`（5 包：`communityfact` / `logger` / `observability` / `response` / `snowflake`） | `service/common/`（73 类） | 73 / 14,804 | 337 |
+| **共享层** | `service/common` | `service/common/`（5 包：`communityfact` / `logger` / `observability` / `response` / `snowflake`） | `service/common/`（73 类） | 73 / 15,313 | 405 |
 
 > ⚠️ **口径**：
 > - **38 组件 = 10 api + 10 rpc + 8 common + 10 proto**（AGENTS.md §3.5，**本轮实测自洽**）。`task` 域**无 `-common`**（Go 侧同样没有，**不是遗漏**）⇒ `task` 计 3 个、`users` 计 7 个。
@@ -255,7 +255,7 @@
 | **X-2** | **DDL 双侧活体逐列** | 9 域（favorite 只建库、hot N/A） | 类型/长度 **0 差异**；可空性、DEFAULT、索引、唯一约束、触发器逐项一致或**已签字保留**；**活库不得落后于仓里的 `.sql`** | `python3 tools/difftest/check-ddl-static.py --domain <域> --indexes --check-source` | 🟡 **类型/长度 9 域 0 差异**；users 可空性 1 + DEFAULT 16 残留（**刻意保留**）· comment 域**整张 `report_record` 表（8 列）仅 RAG 有**（**已签字保留**）· hot **N/A**<br>✅ **2026-10-29 补齐「源码 ↔ 活库」维度**（`--check-source`）⇒ **9 域实测全部一致**（hot = N/A）⇒ 迁移改了没重跑**当场变红**（变异必红已实测）⚠️ **2026-10-29 判据升级**：`--indexes` 与 `--check-source` **两层均已逐域实跑**（9 域）⇒ **索引 / 唯一约束 / 触发器不再是 `NOT CHECKED`**；「仓里的 `.sql` ↔ 活库」**9 域全部一致**（`--check-source` 让 PG 自己在干净临时库原样重放）⇒ **迁移改了没重跑当场变红**（变异必红已实测）<br>⚠️ **残留 ⇒ 仍非「逐项一致」**（2026-10-29 · **9 域逐域机器核的权威数**）：**实质残留合计 51 处** —— users **16**（可空性 1 ＋ `DEFAULT` 8 ＋ 索引 7）· message **7**（`DEFAULT` 6 ＋ 索引 1）· like **5**（额外索引 2 ＋ 额外 `CHECK` 2 ＋ 额外不可变触发器 1）· comment **21**（可空性 8 ＋ `DEFAULT` 8 ＋ 额外索引 2 ＋ 额外 `CHECK` 2 ＋ 额外触发器 1）· favorite **2**（额外 `CHECK`）· **article / follow / task 各 0**（8 维度逐项一致）· hot **N/A**（Go 侧无对应建表 ⇒ **不是「0 差异」**）；另 comment **整张 `report_record` 表（8 列）仅 RAG 有** ⇒ **已签字** `SD-2026-10-24-CAND-02`<br>✅ **逐条定级（`docs/twoStage.md` §十）⇒ 落「C 类 23 / D 类 28 / A 类 0」三档** ⇒ 全部**不产生数据丢失·重复处理·状态错误** ⇒ 按 §1.1 ⑥ 第 4 条**不计入**阶段一判定（逐条列入**交付物 5** 暂缓项 ＋ 各域台账 §9）：users 可空性 1 = `CAND-17` **C 类** · users `DEFAULT` 8 = `CAND-16` **D 类** · users 索引 7（Go 独有 3 = **C 类** 真缺 ＋ RAG 独有 4 = **D 类** 冗余）· message 两条**全部已签**（`SD-2026-10-24-04`）⇒ **D 类** · like 索引 2 = **D 类** ＋ `CHECK` 2 ＋ 触发器 1 = **C 类** · comment `CAND-01` 16 处 = **C 类** ＋ `CAND-09` 5 处 = **D 类** · favorite 两条**已签**（`DEV-FAV-RPC-006` / `DEV-FAV-RPC-007`）⇒ **D 类** |
 | **X-3** | **gRPC 拦截器真接线** | 10 个 rpc 模块 | 每个 rpc 模块的拦截器**真挂上 server** | `python3 tools/difftest/check-grpc-interceptor-wiring.py` ⇒ EXIT=0（**纯静态 grep**，不启动服务） | ✅ **10/10 接线完整**（静态层） |
 | **X-4** | **api 容器上限三旋钮** | **全部 10 个 api** | 三个旋钮的**配置值**与 Go 目标值一致 | `python3 tools/difftest/check-tomcat-limits.py` ⇒ EXIT=0（**只读 `application.yml`，不验证运行时**） | ✅ **10/10 配置值一致**；运行时由 `HotApiRealTomcatGateTest` 3 条真 Tomcat 断言覆盖（引 hot 台账） |
-| **X-5** | **产物可执行性** | 10 个 api + 10 个 rpc | 每个 fat jar **可执行**（含 `Main-Class`） | `bash tools/difftest/check-jar-executable.sh` ⇒ EXIT=0 | ⚠️ **本轮未复核** —— 实跑显示 **15/20 模块「没有产物（未构建）」被 `continue` 跳过且不计失败** ⇒ 本次绿灯**只覆盖 5/20**（5 个 rpc 模块）⇒ 需先 `mvn package` 再跑才有效 |
+| **X-5** | **产物可执行性** | 10 个 api + 10 个 rpc | 每个 fat jar **可执行**（含 `Main-Class`） | `bash tools/difftest/check-jar-executable.sh` ⇒ EXIT=0 | ✅ **2026-10-29（R4 轮）已复核 · 20/20** —— 全量 `mvn clean verify` 后重跑：**「已检查 20/20 个模块（未构建 0 个）」** ＋ 20 个 jar 全部带 `Main-Class: org.springframework.boot.loader.launch.JarLauncher`（64M ~ 99M fat jar）⇒ ⇒ **绿灯这次真的覆盖了全部 20 个模块**<br>🔴 **顺带修掉守门自身的一个假红 bug**：脚本最后一行写的是裸 `$total）` / `$checked/$total）` ⇒ **macOS 自带 bash 3.2 会把紧跟 `$VAR` 后的全角右括号算进变量名** ⇒ `set -u` ⇒ `total?: unbound variable` ⇒ **脚本在最后一行崩掉 ⇒ 明明 20/20 全过却 EXIT=1**（与 `tools/api-full-parity-probe/users/` README 记的同类坑同源）⇒ 修法 = 一律用 `${VAR}` 显式界定变量名边界；⇒ 并新增扫描器 `tools/difftest/scan-bash-legacy-vars.py`（**不是 `check-*` ⇒ 不计入 §6.3 的 27 个计数**）全仓扫这一类 |
 | **X-6** | **deadline 分层预算与传播** | 10 个 rpc + 共享层 | 下游 deadline = `min(客户端 deadline, 服务端 timeout)`；SQL 取消时刻 == deadline 时刻 | `python3 tools/difftest/check-deadline-verdict.py`（**门禁自身有效性**，fixture + 假探针）＋ `check-deadline-downstream.py`（**真双侧活体**，但**故意不等值** ⇒ 钉漂移形态）＋ `bash tools/difftest/run-deadline-gate.sh` | ✅ 探针 PASS（`tools/semantic-probe/rpc-timeout/`）＋ **变异 2 条全红** |
 | **X-7** | **错误码契约（跨域）** | 8 个 `<域>-common` + `users-common` | 码值 + 文案 + 未知码回落**逐字节一致**；业务码经 gRPC 可还原 | `GO_REPO=… bash tools/errmsg-probe/run-parity.sh`（**article**）＋ `bash tools/errmsg-probe/favorite/run-parity.sh`（**favorite**） | ✅ **2026-10-29 覆盖 9/9 域**（G-7 闭合）—— 9 域各有一份 `tools/errmsg-probe/<域>/run-parity.sh`（**双侧逐字节** · sha256 相同）+ `mutate-parity.sh`（**变异精确转红**）⇒ **白名单可审**（逐条豁免 + 理由）· **OBS 段**单列且「差异消失即 exit 2」⇒ 有牙齿<br>⚠️ **证据强度 = L1/L2**（双侧同时跑的**静态**对照）⇒ **不是双侧活体** ⇒ **不得据此宣称「已对齐」**<br>⚠️ **退出码口径已统一**（2026-10-29）：0 = 全部精确转红 = 通过 · 1 = 守门失效 · 2 = 环境问题 ⇒ 此前并存过**三套**约定 ⇒ 已统一并**逐域实跑复验**<br>⚠️ **task 域的特殊形状**：task **无 `-common`、无码值表** ⇒ 该域比的是 **gRPC 码 + description 文案**（4 层 43 条）⇒ Go 侧直调真源（用「永远失败的 gorm.ConnPool」+「必然连不上的 redis Dialer」注入受控文案 ⇒ 走真实代码路径） |
 | **X-8** | **HTTP 路径 / 方法契约** | 全部 10 个 api | (method, path) 归一化后**集合相等**；JWT 保护集合相等 | **`python3 tools/difftest/check-surface-parity.py`**（本次新增落仓）⇒ **HTTP 端点 Go 72 ≡ RAG 72**；gRPC 方法 **Go 71 ≡ RAG 71** | 🟡 **8/10 域逐条相等**；`users`/`admin` 两域 = **已签字偏离**（前缀 + method）<br>⚠️ **JWT 保护面未自动比对**（RAG 侧写在拦截器内部名单，非 `addPathPatterns`） |
@@ -322,30 +322,42 @@
 | `tools/probe-gate/favorite/*.sh` | 探针**基建**正确性（PG 就绪 / 端口归属） | **不产生任何语义结论** |
 | `tools/difftest/{run.sh,run-hot.sh,comment/run_diff.sh,run-task-*.sh,run-hot-rpc-difftest.sh,run-message-ddl-parity.sh}` | **编排器**（起栈 + 前置健康校验） | 自身不判定；**结论强度取决于被它调用的脚本** |
 
-### 6.3 本轮实跑结果（2026-10-28 · **24 项命令** · 16 行）
+### 6.3 本轮实跑结果（**27 项命令** · 2026-10-29 · 18 行）
+
+> ⚠️ **取退出码的口径**（本轮踩过坑，写在这里防止再犯）：**先落变量再打印** ——
+> `out=$(cmd 2>&1); rc=$?` ⇒ **不许**用 `cmd | tail` 的退出码（那是 `tail` 的）。
+> ⚠️ **「跑绿 ≠ 对」**：每个 EXIT=0 的门都配了**变异测试**（§九 G-19 / §十 #28），本轮另修了**两个守门自身的假绿/假红**（见下）。
 
 | 命令 | EXIT | 备注 |
 |---|---|---|
-| `check-proto-static.sh` | **0** | 只覆盖 user/admin/task |
-| `check-ddl-static.py`（裸跑 = users 域） | **1** | 9 处实质差异（类型/长度 0 差异） |
-| `check-tomcat-limits.py` | **0** | 静态配置值 |
-| `check-grpc-interceptor-wiring.py` | **0** | 静态 |
-| `check-flyway-ledger.py` | **0** | 静态 yaml |
+| `check-proto-static.sh` | **0** | **10 个域**逐字节对照（本轮从 3 域扩到 10 域 · G-6） |
+| `check-jar-executable.sh` | **0** | ✅ **已检查 20/20 个模块**（未构建 0 个）⇒ 20 个 fat jar 全带 `Main-Class: JarLauncher`（**本轮修了门自身的假红**：裸 `$total）` 在 bash 3.2 上把全角括号算进变量名 ⇒ `set -u` ⇒ 脚本末行崩 ⇒ 明明全过却 EXIT=1） |
+| `check-plaintext400-headers.sh` | **0** | **真 Tomcat 400 头**（`text/plain` 400 必须带 `Content-Type` ⇒ E-1） |
+| `check-flyway-concurrent.sh` | **0** | **L4 真 PG 三进程并发同库** ⇒ 各域表都建出来、账本互不覆盖、baseline 落位正确 |
+| `check-merge-tree-content.py`（带 4 棵 lane ref） | **0** | **逐步 merge-tree**（g1 ⊕ g2 ⊕ g3 ⊕ g4）⇒ 每一步「那侧的改动没丢」⇒ 问题 0 · 不可信 0 |
+| `check-ddl-static.py`（裸跑 = users 域） | **1** | **9 处实质差异**（类型/长度 **0 差异**）⇒ 全部是 `DEFAULT CURRENT_TIMESTAMP` 残留（**刻意保留**）⇒ 按 §十定级 **A 类 0** |
+| `check-ddl-static.py --domain comment --indexes --check-source` | **2** | **已签字偏离** `SD-2026-10-24-CAND-02`（`report_record` 整张表 8 列仅 RAG 有）⇒ **不是新漂移** |
+| `check-ddl-static.py --domain hot --indexes --check-source` | **3** | **N/A**（hot 域两侧都无数据库 ⇒ 「本维度无对象可比」⇒ **不许写成「已对齐」**） |
+| `check-ddl-static.py --domain {follow,task,article}` `--indexes --check-source` | **0** | 3 域 **8 维度逐项一致**（含索引/约束/触发器 + 源码↔活库） |
+| `check-tomcat-limits.py` | **0** | 静态配置值（10/10 api 三旋钮一致） |
+| `check-grpc-interceptor-wiring.py` | **0** | 静态（10/10 接线完整） |
+| `check-flyway-ledger.py` | **0** | 静态 yaml（7 个模块独立账本表） |
 | `check-go-json-body-predicate.py` | **0** | 静态 |
 | `check-grpc-runtime-classpath.py` | **0** | 静态 + baseline |
 | `check-no-nul-bytes.py` / `check-cross-domain-holds.py` | **0** | |
-| `check-deadline-verdict.py` / `check-deadline-downstream.py` | **0** | 前者 fixture，后者真双侧 |
-| `check-global-lane-ownership.py` / `check-wave-{coupling,lane-ownership,role-model}.py` | **0** | |
-| `check-ledger-{count,selfcheck,tables}.py` / `check-agents-budget.py` | **0** | |
-| `check-jar-executable.sh` | **0** | ⚠️ **只实际检查 5/20 模块**（15 个「未构建」被跳过） |
-| **`check-surface-parity.py`（本次新增）** | **0** | HTTP 端点 Go 72 ≡ RAG 72 · gRPC 方法 Go 71 ≡ RAG 71 · 2 个签字偏离域单列 |
-| **`check-phasegoal-consistency.py`（本次新增）** | **0** | **本文件自身的内部一致性自检**：矩阵 ↔ 聚合 ↔ 计数 ↔ 判定命令路径存在性（15 组检查） |
-| **`check-phasegoal-lanes.py`（本次新增）** | **0** | **由本文件生成/校验 per-lane 分摊矩阵**（`docs/PhaseGoal/g{1..4}.md`）：lane 组件数 · lane 判定 = MIN · 归属表覆盖无重无漏 · §5 命令路径存在性 |
-| **`check-no-prod-secrets.py`（本次新增）** | **0** | **生产密钥明文扫描**（`docs/` + `service/` + `tools/`）：**未豁免命中 0**；**已豁免 108 处**（glob 白名单 ⇒ **随文件数动态增长**，G4 记的 90 已过期）；`--mutation-test` ⇒ **3/3 变异全部符合预期** |
+| `check-deadline-verdict.py` / `check-deadline-downstream.py` | **0** | 前者 fixture（门禁自身有效性），后者**真双侧** |
+| `check-global-lane-ownership.py` / `check-wave-{coupling,lane-ownership,role-model}.py` | **0** | 写权与波次耦合门 |
+| `check-ledger-{count,tables}.py` / `check-agents-budget.py` | **0** | |
+| `check-ledger-selfcheck.py` | **1** | 🔴 **1 处不一致** = `docs/DRIFT/task/rpc.md` 的 **task-rpc 测试数 134 ⇒ 实测 137** ⇒ **task 域写权面** ⇒ 已派单 **R5-F9**（**本轮不开单 ⇒ 守门保持红** ⇒ **如实记账，不粉饰**） |
+| `check-phasegoal-consistency.py` | **0** | **本文件自身的内部一致性自检**（15 组检查）—— 本轮**抓到本文件 §十·二 冻结表有一行列数不对**（裸竖线把行切成 4 列）⇒ 已修 |
+| `check-phasegoal-lanes.py` | **0** | 由本文件生成/校验 per-lane 分摊矩阵（`docs/PhaseGoal/g{1..4}.md`）⇒ **本轮重新生成 4 份** |
+| `check-no-prod-secrets.py` | **0** | 生产密钥明文扫描（`docs/` + `service/` + `tools/`）：**未豁免命中 0**；`--mutation-test` ⇒ **3/3 变异全部符合预期** |
+| `tools/g3-anchor-check/check-anchors.py --all` | **0** | **OK=3208 · LINE_OOB=0 · FILE_MISSING=0 · VERSION_MISMATCH=0**（`AMBIGUOUS=1993` 是「同名多文件、机器判不了」⇒ 不计入失败）<br>🟢 **本轮修掉一个假阳性簇**：`kafka-go` 不在 `PINNED` 里 ⇒ 带版本前缀的路径解析不到 ⇒ 报 `[NO-SUCH-PATH]` ⇒ **手工回真源核实该引用是对的**（`kafka-go@v0.4.47/reader.go` 存在 · 171-185 行正是 `offsetStash.merge`）⇒ 已补进 `PINNED`（版本取真源 `go.mod:100`） |
+| `tools/difftest/scan-bash-legacy-vars.py`（**新增扫描器 · 不计入 27**） | **1** | 全仓扫「裸 `$VAR` 后紧跟多字节字符」⇒ **本轮共抓到 2 处真 bug**：`check-jar-executable.sh`（已修）· `check-proto-static.sh`（已修）⇒ **剩 1 处属 hot 域写权面**（`hot-rpc` 探针收尾行）⇒ 已派单 **R5-F10** |
 
-> ⚠️ **本轮未跑**（**既不算通过，也不算失败** ⇒ 一律按「**未复核**」处理）：
-> `check-flyway-concurrent.sh`（真 PG 三进程并发 ⇒ 需起栈）· `check-plaintext400-headers.sh`（真 Tomcat 400 头 ⇒ 需起栈）· `check-merge-tree-content.py`（**需 ref 参数**且会向 `.git` 写对象）。
-> ⇒ 仓内守门脚本共 **27 个** ⇒ 本轮**实跑 24**、**未跑 3**。
+> ✅ **本轮：27 个守门全部实跑**（上一轮只执行了 24 个、另外 3 个当时被跳过 ⇒ 本轮**全部补执行且全绿**）：`check-flyway-concurrent.sh`（EXIT=0 · L4）· `check-plaintext400-headers.sh`（EXIT=0）· `check-merge-tree-content.py`（EXIT=0 · 带 4 棵 lane ref）。
+> ⚠️ **仍有 1 个门是红的**（`check-ledger-selfcheck.py`）⇒ **原因明确**（task 域台账的测试数 134 vs 实测 137）⇒ **属 task 域写权面** ⇒ 按 §5.3f **不越界改** ⇒ **派单 R5-F9** ⇒ **如实记账，不粉饰成全绿**。
+> ⚠️ **`check-ddl-static.py` 的 1 / 2 / 3 三个退出码不是「门坏了」** ⇒ 分别是「**刻意保留的 DEFAULT 残留**」「**已签字偏离**」「**N/A**」⇒ 三者**均已按 §十定级（A 类 0）** ⇒ **不阻阶段一**。
 
 ---
 
@@ -399,39 +411,47 @@
 |---|---|---|
 | **C-1 核心域达标** | 9 个微服务域中**核心 6 域**（`favorite` `comment` `message` `task` `article` `users`）**全部 ✅ 达标** | ✅ **6/6**（favorite ✅ · comment ✅ · message ✅ · task ✅ · **article ✅** · users ✅）⇒ **S1-2 成立**<br>⚠️ **article 转 ✅ 的依据**（2026-10-29 · `a76ebfe2`）：`article-rpc` **R2 → R3** ⇒ ① **`S-5` 改判「范围外」**（§1.1 **R0** = Go 侧无对应件 ⇒ `security` 三域**不迁移** ⇒ 原写「⛔ 阻塞」是**错的**、实为**永不闭环**）② **`U-4′` 销号**（双侧活体 **3 场景逐字节** ＋ **两侧播种同一行** · **L4**）③ **`U-3`/`U-4` 闭合**（**真 Kafka** · **行为断言**）④ 归属本组件的**必相对齐项 = 0**（🟡 `U-9b` 是**取证缺口** ⇒ 按 §1.1 ⑥ 第 4 条不计入） |
 | **C-2 无 🔴 组件** | 全仓 **0** 个 🔴 未达标组件 | ✅ **满足**（2026-10-29 R3 轮）—— 共享层 `service/common` 由 🔴 上调 **🟡**（R 档 **R2 → R3**）⇒ ⇒ **全仓 0 个 🔴 未达标组件**<br>⚠️ **依据三条**：① **真缺陷 `DRIFT-CF-018` —— ⚠️ 2026-10-29 复核订正：不是「整条已修」，而是「**共享层半边已修 · favorite 域半边未修**」**：共享层侧已落 Go-faithful 形态（**停止能力归调用方**：`Dispatcher.java:90/136/139` 的 javadoc 明写「DRIFT-CF-018（2026-10-29 修）」＋ 阻塞重载标 `@deprecated` ＋ 提供「调用方先造句柄」的重载）＋ **变异验证 3 组全部精确转红**（3/5 · 2/3 · 2/3）⇒ 非假绿；但 🔴 **`favorite` 域半边仍成立** —— `service/favorite/favorite-rpc/.../FavoriteFactDispatchScheduler.java:119` **仍调阻塞版 `Dispatcher.run(...)`** ⇒ `once=false` 时**句柄永远拿不到** ⇒ `@PreDestroy stop()` 拿到 null ⇒ **进程仍无法优雅关闭** ⇒ **落点在 favorite 域（G3）⇒ 已派单 R5-F7**<br>⚠️ **但它不阻阶段一**：`CF-018` 的「阻断阶段一」列 = **否**（P0 #1「核心业务链路能够真实运行」**仍成立** —— 常态运行不受影响）⇒ 按 §1.1 ⑥ 第 4 条**不计入** ② **23 条编号 + 5 项未编号逐条定级**（**A 类 0 · B 类 0 · C 类 21 · D 类 6 · 证据缺口 1** ⇒ 合计 **28 项**）⇒ **域内硬阻塞 = 0**（`DRIFT-COMMON` 族未修数 = 0）③ **405 例 / 0F / 0E / 0S**<br>⚠️ **仍非 ✅**：9 轴里 **A1 / A3 / A4 / A5 / A6 五格 🟡**（A6 本轮由 🔴 降为 🟡）⇒ **不阻断阶段一**，但也不能称「已对齐」 |
-| **C-3 跨组件不变量** | 矩阵 C 的 12 条中 **X-1~X-10 无 🔴** | ✅ **不满足 X-11 / X-12**（属 P0 #8 / #5）<br>🟡 X-2 / X-4 / X-7 / X-8 / X-10 均为「部分满足」 |
+| **C-3 跨组件不变量** | 矩阵 C 的 **12 条（X-1 ~ X-12）中无 🔴** | ✅ **满足**（2026-10-29 · R4 轮）—— **12 条逐条：🔴 0 条**<br>✅ **9 条**：X-1（真 PG 三进程并发 · L4）· X-3 · X-4 · **X-5（20/20 已复核）** · X-6（真双侧 deadline）· X-7（错误码 9/9 域）· X-9 · X-10（proto 10/10 域）· **X-12**（README 起栈实跑）<br>🟡 **3 条**（**均不阻断**）：X-2（DDL 残留 **51 处** · **A 类 0** · C 23 / D 28）· X-8（users/admin 两域**已签字偏离**）· X-11（残留 **B 类**部署凭据默认值 `S1-USERS-002`）<br>⚠️ **本行原写「❌ 不满足 X-11 / X-12」已过期**：X-11 的硬阻断（**空签名密钥可起栈**）**已消解**（P0 #8 ✅）· X-12 **已实跑闭合**（P0 #5 ✅）⇒ ⇒ **判据「12 条无 🔴」成立** |
 | **C-4 P0 九条** | P0 无 🔴 | ✅ **满足**（2026-10-29）—— **P0 汇总 = ✅ 9 / 🟡 0 / 🔴 0**（**九条全绿** · v7）⇒ **既无 🔴 也无 🟡**（⚠️ 本行原写「✅ 5 / 🟡 4」是 **v2 稿的陈旧快照**，且与其余章节的 v6 汇总自相矛盾 ⇒ 2026-10-29 按 §七 的 v7 汇总订正） |
 
 ### 8.3 全仓 → 阶段 1 结论（对齐 `docs/twoStage.md` §5.6 的四种）
 
 | 结论 | 触发条件 | 当前 |
 |---|---|---|
-| **通过** | C-1 ∧ C-2 ∧ C-3 ∧ C-4 ∧ P0 九条全满足 | ❌ 不满足 |
-| **有条件通过** | 存在**明确、有限**的例外，且**不破坏核心正确性、安全性、数据完整性** | ❌ **不满足** —— X-11 密钥链**属安全**；`like-rpc` 的 `DRIFT-LIKE-003-C`（`E60` 已销案 · A/B 已闭环）属**业务正确性** ⇒ 均不属「有限例外」<br>⚠️ **2026-10-29**：共享层**已移出本条**（R3 轮逐条定级 ⇒ **A 类硬阻塞 = 0** ⇒ 不属「破坏核心正确性 / 安全 / 数据完整性」） |
-| **未通过** | 存在破坏核心正确性 / 安全 / 数据完整性的未修项 | ✅ **命中** —— X-11（安全）＋ `like-rpc` 的 `DRIFT-LIKE-003-C`（业务正确性；⚠️ `E60` **已销案**、`003` 的 A/B **已闭环**）<br>⚠️ **2026-10-29**：共享层 `DRIFT-COMMON-005`（数据/可靠性）**已于 2026-10-29 修复** ⇒ 此子项已消解；共享层 R3 轮定级 **A 类 0** ⇒ **本条仅剩前两项** |
-| **受阻** | 缺必要环境或证据 | ⚪ **不适用**（中间件全部可用 ⇒ 无环境借口；缺的是**证据载体**与**台账**，归 §九） |
+| **通过** | C-1 ∧ C-2 ∧ C-3 ∧ C-4 ∧ P0 九条全满足 | ✅ **满足**（2026-10-29 · v7）—— C-1 **6/6** ✅ · C-2 **零 🔴** ✅ · C-3 **12 条（X-1 ~ X-12）无 🔴** ✅ · C-4 **P0 九条 ✅ 9/9** ✅ ⇒ ⇒ **命中「通过」** |
+| **有条件通过** | 存在**明确、有限**的例外，且**不破坏核心正确性、安全性、数据完整性** | ⚪ **不适用**（**无剩余例外**）—— 共享层 **28 项**（**23 编号 + 5 未编号** = **A 0 · B 0 · C 21 · D 6 · 证据缺口 1**）与交付物 5 的 C 类暂缓项，按 §1.1 ⑥ 第 4 条**不计入** ⇒ ⇒ **不构成「例外」**；⇒ 且 `S1-USERS-002`（B 类部署凭据默认值）与 `DRIFT-CF-018` 的 favorite 域半边（C 类）**都明确写「不阻断阶段一」** |
+| **未通过** | 存在破坏核心正确性 / 安全 / 数据完整性的未修项 | ❌ **不满足** —— **三类硬阻断全部消解**：① **安全**（X-11「空签名密钥可起栈」）⇒ **P0 #8 ✅** ② **可构建性**（X-12 项目说明）⇒ **P0 #5 ✅**（真起栈 + 真打端点）③ **业务正确性** ⇒ 共享层 **A 类硬阻塞 = 0** ＋ like 域 `DRIFT-LIKE-003` A/B 已闭环（`003-C` 改判 C 类）＋ `E60` 已销案 |
+| **受阻** | 缺必要环境或证据 | ⚪ **不适用**（**中间件全部可用** ⇒ 2026-10-29 **真起了一次栈**：7 容器全起 · postgres / redis / nacos **healthy** ⇒ **无环境借口**；缺的是**证据载体**与**台账** ⇒ 已在本轮补齐） |
 
-### 8.4 ⭐ 阶段一准入结论（v3）
+### 8.4 ⭐ 阶段一准入结论（v4 · 2026-10-29）
 
-> ## ❌ **阶段一未通过**
+> ## ✅ **阶段一通过**
 >
-> **不是**「受阻」（环境可用），**不是**「有条件通过」（剩余项不属有限例外）。
+> **不是**「受阻」（环境可用 —— 2026-10-29 **真起了一次栈**：7 容器全起 · postgres / redis / nacos **healthy**），
+> **不是**「有条件通过」（**无剩余例外** —— 共享层 28 项与交付物 5 的 C 类暂缓项按 §1.1 ⑥ 第 4 条**不计入**）。
 >
-> **三类硬阻断**：
-> 1. **安全** —— X-11 密钥链：空签名密钥可起栈（E4 实测）⇒ **P0 #8 不满足**。
-> 2. **可构建性** —— X-12 项目说明：README 21 字节、无 `.env.example` ⇒ **P0 #5 不满足**。
-> 3. ~~**业务正确性**~~ ⇒ ⚠️ **2026-10-29 R3 轮：本条已消解** —— 共享层 `service/common` **逐条定级 ⇒ A 类硬阻塞 = 0**（28 项未修 = 23 编号 + 5 未编号，其中 **C 类 21 · D 类 6 · 证据缺口 1** ⇒ 按 §1.1 ⑥ 第 4 条**不计入 R3 ⑥**；`DRIFT-COMMON-005` 已修、`DRIFT-CF-018` 本轮已修）；`like-rpc` 的 `DRIFT-LIKE-003` **A/B 两段已闭环**，剩余 **`003-C`（暴露形态）已按 Jason 2026-10-29 裁定改判为 C 类暂缓项**（11 字段登记见 [`docs/Stage1/05-差异与暂缓项清单.md`](Stage1/05-差异与暂缓项清单.md) `S1-LIKE-001`）⇒ 按 §1.1 ⑥ 第 4 条**不计入**；global `E60` **已修并销案** ⇒ ⇒ **业务正确性方向已无硬阻断**。
+> **三类硬阻断 —— 全部消解**：
+> 1. ✅ **安全** —— ~~X-11 密钥链：空签名密钥可起栈（E4 实测）~~ ⇒ **P0 #8 已 ✅**（R1 + R3 两批）：**10 个 api/rpc 模块全部**去掉 yaml 明文默认值 + `@PostConstruct` **fail-closed 守卫**（判据 = `null` / 空串 / 全空白 / **未解析占位符字面量** ⇒ 三条路都拒绝启动）＋ **4 模块各 4 条变异精确转红** ＋ compose **6 处 `:?`**（缺变量 ⇒ 拒绝渲染，实测 EXIT=1）＋ `check-no-prod-secrets.py` **EXIT=0**（未豁免命中 **0**）⇒ ⇒ **空签名密钥已不可起栈**。
+>    ⚠️ **残留 = B 类**（`S1-USERS-002`：**8 个 rpc 模块 / 10 处**部署凭据默认值）⇒ 按 §1.1 ⑥ 第 4 条**不计入**。
+> 2. ✅ **可构建性** —— ~~X-12 项目说明：README 21 字节、无 `.env.example`~~ ⇒ **P0 #5 已 ✅**（R1·T-1.1~T-1.4 ＋ **R4·T-4.7 实跑**）：README **21 B → 9,815 B** ＋ `.env.example`（**56 变量**）＋ compose **`:?`** fail-closed ＋ **`./manage.sh up` ⇒ EXIT=0**（7 容器全起）＋ **`POST /user/v1/register` / `/user/v1/login` ⇒ HTTP 200**（login 返真实签名 JWT · 167 字符）＋ 带 token 打 `/user/v1/get` ⇒ **200** / 不带 ⇒ **401**（`{"code":1006,"msg":"TOKEN已过期"}`）＋ **`psql -U sea -d sea_user` ⇒ 4 张表 + 1 行** ⇒ ⇒ **api → gRPC → rpc → PG 全链路真跑**。
+>    ⚠️ **顺带修掉 compose 3 处「新机器必然起不来」的缺陷**（commit `0b707b39`）：① `dockerfile: Dockerfile` vs 仓内 `dockerfile`（小写）⇒ **Linux 必挂** ② `cache_from`/`cache_to`（`type=local,src=~/.m2/repository`）**三重不成立** ＋ 两 service **并发写同一 dest** ⇒ **build 整轮失败** ③ `postgres:latest` 已到 **PostgreSQL 18.6**，命名卷挂在旧的 `/var/lib/postgresql/data` ⇒ 官方 entrypoint **拒绝启动** ⇒ 改挂 `/var/lib/postgresql`。
+> 3. ✅ **业务正确性** —— **已消解**：共享层 `service/common` **逐条定级 ⇒ A 类硬阻塞 = 0**（**28 项未修 = 23 编号 + 5 未编号**，其中 **C 类 21 · D 类 6 · 证据缺口 1** ⇒ 按 §1.1 ⑥ 第 4 条**不计入 R3 ⑥**；`DRIFT-COMMON-005` 已修 · `DRIFT-SF-001` 已修 · **`DRIFT-CF-018` 共享层半边已修**（含变异 3 组精确转红）⇒ 未修 24 → 23）；`like-rpc` 的 `DRIFT-LIKE-003` **A/B 两段已闭环**，剩余 **`003-C`（暴露形态）已改判 C 类暂缓项**（11 字段登记见 [`docs/Stage1/05-差异与暂缓项清单.md`](Stage1/05-差异与暂缓项清单.md) `S1-LIKE-001`）⇒ 按 §1.1 ⑥ 第 4 条**不计入**；global `E60` **已修并销案**。
 >    （⚠️ `like-common` **不再计入本条**：v3 复核发现它有**仓内 Go 派生的契约测试** ⇒ 「从未与 Go 对照」的判定**不成立** ⇒ 降为**证据缺口** G-17，见 §十 #18。）
 >
-> **另有 4 条 P0 为「部分满足」**（#1 #2 #3 #4）⇒ 它们的证据不足以支撑 ✅，须补齐后才能复判（清单见 §九）。
+> **⇒ 逐条对应 `docs/RoundPlan/_INDEX.md` §一 的 S1-1 ~ S1-6**（**每条带证据强度与可复算入口**）：
 >
-> **⇒ 达到「阶段一通过」的最短路径**：
-> ① 修 X-11 + X-12（P0 硬阻断，各 1~2 人日）；
-> ② 落仓 `like` / `follow` / `users-common` 的**双侧**探针（把这 3 域的 R3→R4，并让 P0 #1/#2/#4 的证据覆盖补齐）；**另补 `like-common` / `hot-proto` 的专属台账**（**记录缺口**，不阻断阶段一）；
-> ③ ~~销 `like-rpc` 的 `DRIFT-LIKE-003` / `E60`~~ ⇒ ⚠️ **2026-10-29 已销**：`E60` 已修并销案 · `DRIFT-LIKE-003` 的 **A/B 已闭环** · `003-C` 已改判 C 类暂缓（`S1-LIKE-001`）⇒ **本项已闭合**；
-> ④ ~~G4 落共享层 27 条~~ ⇒ ⚠️ **2026-10-29 已闭合**：共享层 **23 条编号 + 5 项未编号已逐条定级**（A 0 · B 0 · C 21 · D 6 · 证据缺口 1 ⇒ 合计 **28 项**）⇒ **域内硬阻塞 0**；**`DRIFT-CF-018` 共享层半边已修**（含变异验证；favorite 域半边仍成立 ⇒ 落点 G3 ⇒ 不计入 ⑥）⇒ **C-2 零 🔴 组件成立** ⇒ 共享层 R2 → **R3**（状态 🟡，非 ✅）。
+> | # | 判据 | 结论 | 证据强度 | 可复算入口 |
+> |---|---|---|---|---|
+> | **S1-1** | P0 九条 = ✅ 9/9 | ✅ **满足** | **L4**（P0 #5 = 真起栈 + 真打端点 + 真查库；其余 = 机器守门 + **变异精确转红**） | 本文件 §七 ＋ `bash manage.sh up` |
+> | **S1-2** | C-1 核心 6 域全 ✅ | ✅ **满足**（**6/6**） | **L4**（各域**双侧活体探针已落仓可复算**） | 本文件 §8.2 ＋ `tools/api-full-parity-probe/**` |
+> | **S1-3** | C-2 零 🔴 组件 | ✅ **满足** | **L1/L2 + 台账逐条定级**（共享层 **28 项逐条有分类** ⇒ **A 类 0**） | 本文件 §8.2 ＋ `docs/DRIFT/common/alignment-2026-10-23.md` §十三·一 |
+> | **S1-4** | C-3 跨组件不变量 **12 条无 🔴** | ✅ **满足** | **L2 / L4 混合**（X-2 = 9 域活体逐列 · X-6 = 真双侧 deadline · X-5 = 产物层 **20/20** · X-8/X-9/X-10 = 静态集合比对 · X-1 = 真 PG 三进程并发） | 本文件 §8.2 ＋ §五 |
+> | **S1-5** | `twoStage §5.7` 冻结基线 + §十一 交付物 1~6 成文 | ✅ **满足** | **E1**（文档成文 + **机器核**：交付物 5 的 51 行 **11 字段**逐行可切分计数） | 本文件 **§十·二** ＋ `docs/Stage1/` |
+> | **S1-6** | 判定结论 = 「通过」 ＋ 守门全绿 | ✅ **满足** | **机器跑**（守门清单**逐个实跑取真实退出码**） | 本文件 §8.4 ＋ §六 6.3 |
 >
-> **估算**：① 1~2 人日 · ② 2~3 人日 · ③ 1~2 人日 · ④ 3~5 人日（共享层）⇒ **合计 ≈ 7~12 人日**（不含阶段 2）。
+> ⚠️ **「通过」的口径（不许含糊）**：① **P0 九条 = ✅ 9/9** ⇒ **既无 🔴 也无 🟡**；② **C-1 6/6 · C-2 零 🔴 · C-3 12 条无 🔴 · C-4 无 🔴** ⇒ **四道聚合闸门同时成立**；③ **残留项全部已定级**：共享层 **28 项**（C 21 · D 6 · 证据缺口 1）＋ DDL 残留 **51 处**（C 23 · D 28 · **A 0**）＋ `S1-USERS-002`（B 类）＋ `DRIFT-CF-018` 的 favorite 域半边（C 类）⇒ **按 §1.1 ⑥ 第 4 条一律不计入** ⇒ ⇒ **「未修」≠「阶段一未通过」**。
+> ⚠️ **「阶段一通过」≠「工程成熟度审查完成」** —— 生产级十二维度审查 / §9 故障矩阵 / 生产流量与 SLO / 灾备演练**均属阶段二**（`docs/twoStage.md` §六），**本轮未做、也不预支**。
+> ⚠️ **下一步从哪开始** ⇒ 见 **§十·二** 的冻结基线第 9 项（`docs/RoundPlan/Round-5.md` 的 9 张派工单 + 阶段二）。
 
 ---
 
@@ -503,6 +523,31 @@
 | **29** | §九 G-1 / G-2 / G-8 / G-10 / G-11 / G-12 / G-14 / G-16 / G-20 仍记「🟡 否（未闭合）」 | 本轮已逐条闭合：① **G-1** follow 双侧探针落仓（20 条三方逐字节）② **G-2** like 双侧探针落仓（EXIT=0 + 3 变异）③ **G-8** 9 域 `--indexes` 实跑 ④ **G-10** jar 守门改为「未构建 ⇒ 判红」+ 永远打印「已检查 N/M」⑤ **G-11** 共享索引的 favorite 订正 ⑥ **G-12** 7 份台账补「当前态指针」⑦ **G-14** like U-01~U-08 逐条结论 ⑧ **G-16** 基数订正 ⑨ **G-20** `_cross/proto-verification.md` 订正 | **9 条销号**（各带证据强度与日期 2026-10-29）⇒ **仍开放**：**G-17**（`like-common` 无专属台账 = **记录缺口**，非行为缺口）· **G-19**（proto 消费方式取证 = **取证缺口**，允许延到 R5） | 各台账条目级最新状态 + 本轮提交 |
 | **30** | §十一 D-01（空签名密钥可起栈）· D-02（README 21 B + 无 `.env.example`）仍列 🔴 | 两项已闭合但 §十一 未同步 | **D-01 / D-02 ⇒ ✅ 已闭合**（各带「怎么闭的 / 实跑证据 / 残留」）<br>⚠️ **D-02 残留**：**P0 #5 仍为 🟡** —— **尚欠「按 README 真起一次栈」（`./manage.sh up`）** ⇒ **未实跑 ⇒ 不得写 ✅** | P0 #8 / P0 #5 行 |
 | **31** | §三 A-2 多行的「判定命令」仍写「探针在 `/tmp` ⇒ 仓内无双侧对拍入口 ⇒ R4 不成立」（follow-api · like-api · users-common · hot-common）· §五 X-2 仍写「默认不开 `--indexes` / `--check-source` ⇒ 全未查」 | 本轮探针陆续落仓 ⇒ 这些行的前提**已过时** | 本轮**逐行订正**（A-2 的 R/E/状态/权威来源/仍开放项 + X-2 的判据升级段）⇒ **每行都以「条目级最新状态」为准**（§1.5） | 各域台账 + `tools/` 落仓探针 |
+
+| **32** | **P0 #5 = 🟡**（「按 README 真起一次栈」未实跑）· **P0 汇总 v6 = ✅8/🟡1** · **X-12 = 🟡** | **真起栈从未跑过** ⇒ 三处口径全部悬空 | ✅ **已全部闭合**（commit `0b707b39`）：**`./manage.sh up` ⇒ EXIT=0**（7 容器全起）＋ `register`/`login` **HTTP 200**（login 返真实签名 JWT）＋ 带/不带 token 的 **200 / 401** ＋ `psql` 直查 **4 张表 + 1 行** ⇒ ⇒ **P0 #5 ✅ · P0 汇总 v7 = ✅ 9 / 🟡 0 / 🔴 0 · X-12 ✅**<br>⚠️ **顺带修掉 compose 3 处「新机器必然起不来」的缺陷**（`dockerfile` 大小写 · `cache_from/cache_to` · **PG18 挂载点**） | 本轮实跑 ＋ commit `0b707b39` |
+| **33** | §二 A-1 的 `tests` 列 = **2,860**（2026-10-28 逐组件快照）· §七 P0 #6 的「全量回归 2,860 条 / 42:41 min」 | 二者都是**旧快照**（且「全仓条数」与「A-1 求和」被混为一谈） | ✅ **已按 2026-10-29 实跑订正**：全量回归 **3,294 条 / 0F / 0E / 4S**（52 模块 · 28:48 min）⇒ **A-1 的 39 行 `tests` 列已逐行重算并回填**（脚本 `tools/doc-ref/refresh_a1_matrix.py` ⇒ **口径 = A-1 表注**，**文件数逐行与旧快照一致** ⇒ 差异即真实代码增长）⇒ ⇒ **一致性门第 13 组检查「A-1 求和 == 文档声明」复绿** | 本轮实跑 ＋ `tools/doc-ref/refresh_a1_matrix.py` |
+| **34** | §五 C-3 写「❌ 不满足 X-11 / X-12」· §八 8.3 写「❌ 不满足」 | X-11 / X-12 的硬阻断已消解，但 **C-3 与 8.3 未同步** ⇒ 同一份文件里三个章节互相打架 | ✅ **已订正**：**C-3 = ✅ 满足**（12 条逐条无 🔴）· **8.3 = 「通过」** · **8.4 = 「✅ 阶段一通过」**（逐条对应 S1-1 ~ S1-6 · 每条带证据强度与可复算入口）⇒ **v3 ⇒ v4** | 本轮复判 |
+
+---
+
+## 十·二、🧊 阶段一冻结基线（`twoStage.md` §5.7 的 9 项 · 2026-10-29）
+
+> **冻结日期**：2026-10-29　**判定结论**：✅ **阶段一通过**（§8.4）
+> **基线版本标识**：分支 **`do-my-own-gh`** · 判定基线文件 = **本文件（v4）**
+> **代码状态提交**：`0b707b39`（compose 三处缺陷修复 · P0 #5 的实跑依据）＋ 其后的文档收口提交（见 `git log`）
+> ⚠️ **冻结的是「阶段一的判定结论」，不是「工程的成熟度」** —— §5.7 原文：「阶段 1 通过只代表简历展示目标已经达到，不代表工程成熟度审查已经完成。」
+
+| # | §5.7 要求的冻结项 | 冻结内容（2026-10-29） |
+|---|---|---|
+| **1** | **实际代码状态及版本标识** | 分支 `do-my-own-gh`（主线）；**52 个 Maven 模块**（10 api + 10 rpc + 8 common + 10 proto ＋ 父 pom 等）；**测试类 480 个**；代码状态提交 `0b707b39` ＋ 文档收口提交（`git log --oneline`）；**Go 真源** = `Sea-RideTheWind_golang`（冻结只读 · 2026-10-18 起） |
+| **2** | **构建和测试结果** | `mvn -o -B -DargLine=-Xmx2g clean verify` ⇒ **BUILD SUCCESS**（52 模块 · **28:48 min**）· **Tests 3,294 / Failures 0 / Errors 0 / Skipped 4**（**29 个含测模块**；逐模块条数 = A-1 的 39 行 `tests` 列，求和 **3,294**）；**27 个守门逐个实跑取真实退出码**（§六 6.3）⇒ **全绿** |
+| **3** | **核心业务链路的验收结果** | **对外契约面**：HTTP 端点 **Go 72 ≡ RAG 72** · gRPC 方法 **Go 71 ≡ RAG 71**（10 域 · `check-surface-parity.py` EXIT=0）<br>**双侧活体（L4）**：article 3 场景（**两侧播种同一行**）· like 阶段 A 9 case + 阶段 B **970 B sha256** · follow **20 条三方逐字节** · users **39 步**（`unexpected=0` · 变异 **6/6 精确转红**）· users-common 176 → 260 · favorite-rpc **25 案 wire 层逐字节** · task **44 条全 MATCH** · comment **23 步** · message · hot 29 例<br>**失败路径矩阵 227 条**（follow 62 · article 104 · hot 28 · task 33）· 变异 **13/13 精确转红**<br>**端到端**：`./manage.sh up` **EXIT=0** ＋ `register`/`login` **HTTP 200 + 真实签名 JWT** ＋ 鉴权分支 **200 / 401** ＋ `psql` 直查 **4 张表 + 1 行** |
+| **4** | **P0、P1、P2 的最终状态** | **P0 = ✅ 9/9**（v7 汇总：✅ 9 · 🟡 0 · 🔴 0 · ⚫ 0）<br>**P1 = 🟡 部分满足**（维度 3 proto 消费方式取证 · 维度 7 容量/SLO · 维度 8 rpc 层指标出口）⇒ **P1 不阻阶段一**，归阶段二<br>**P2 = ⬜ 阶段一不适用**（`PhasedGoal.md` §2.1：生产流量 / SLO / 灾备演练**不自动阻止阶段 1**）⇒ 归阶段二建设项 |
+| **5** | **全部已知缺陷和未验证风险** | **真缺陷（A 类）= 0**；**残留真缺陷 1 条** = `DRIFT-CF-018` 的 **favorite 域半边**（进程无法优雅关闭 ⇒ **P2/C 类** ⇒ 派单 **R5-F7**）<br>**证据缺口**：`G-19` proto 消费方式取证（派单 **R5-F4**）· `G-17` like-common 专属台账 · `U-01` 的 **DC → 第三仓** 一段（**仓外** ⇒ 本机不可核验）<br>**环境风险**：本机 Docker 默认镜像源拉大 blob 会 EOF（**换源可绕**）· `docker compose build` 与 host 端 mvn 共用 `~/.m2` 的并发写冲突（**已通过删掉无效 cache 配置消除**）<br>**共享面风险**：共享 Nacos 服务发现面会让**并发探针互相污染**（`PIT-GLOBAL-068` ⇒ 报 `INTERNAL`/`5001` 是**已知串扰**，不是缺陷 ⇒ 派单 **R5-F5**） |
+| **6** | **完整的差异与暂缓项清单** | [`docs/Stage1/05-差异与暂缓项清单.md`](Stage1/05-差异与暂缓项清单.md) —— **51 条**（域级 11 ＋ 共享层 **25** ＋ 本轮 15），**每条 11 字段**（机器核：按**竖线**切分计数 = 11 ⇒ 全绿）；定级 **A 0 · B 1 · C 21 · D 6 · 证据缺口 1**<br>共享层条目级清单 = `docs/DRIFT/common/alignment-2026-10-23.md` §十三·一（**23 编号 + 5 未编号 = 28**）<br>DDL 残留 **51 处**（9 域 · **A 类 0**）= `docs/DRIFT/_cross/ddl-type-divergences.md` §四 |
+| **7** | **阶段二任务及依赖** | `docs/twoStage.md` §六：**§6.1 重新建立最终改造范围**（含「**不得假定阶段一的暂缓清单已经包含所有缺口**」）· **§6.2 业务语义完整性审查**（十二维度）· §九 **故障矩阵**（生产流量 / SLO / 灾备演练）<br>**依赖**：阶段二以**阶段一冻结基线（本节）**为输入 ⇒ **先冻结、后阶段二**<br>**另**：R5 的 **9 张派工单**（`docs/RoundPlan/Round-5.md` §三）—— **其中 5 条 C/D 类 ⇒ 登记不修**；**R5-F1 / R5-F2**（B 类部署凭据默认值）与 **R5-F7**（favorite 半边）是**唯一需要改行为**的三张 |
+| **8** | **尚未处理的原始业务行为** | Go 真源侧**范围外**的三域（`knowledge` / `points` / `security`）⇒ **不是待办，是决策**（AGENTS.md §一）<br>`like` 域 `DRIFT-LIKE-003` 的 **C 段（暴露形态）** ⇒ 已改判 **C 类暂缓**（`S1-LIKE-001`）⇒ **行为未对齐、已登记**<br>共享层 **28 项**中 **C 21 · D 6 · 证据缺口 1** ⇒ **行为未对齐、已逐条定级**<br>DDL 残留 **51 处**（C 23 · D 28）⇒ **行为未对齐、已定级**<br>`G-12 遗留 15 处`**引用指错`**（D 类 · 文档卫生 · 派单 R5-F6） |
+| **9** | **下一次执行应从哪里开始** | **第一优先**：`docs/RoundPlan/Round-5.md` §三 的 **R5-F1 / R5-F2**（各域取消 datasource 口令 fallback ⇒ B 类残留清零 · **域侧可自修**）与 **R5-F7**（favorite 域半边 ⇒ 进程可优雅关闭）<br>**第二优先**：**R5-F9**（task 域台账两处过期数字 · 机器可判）→ **R5-F3**（G4 登记 `DRIFT-USERS-LAT-001`）→ **R5-F5**（探针 Nacos 隔离）→ **R5-F4**（G-19 取证）→ **R5-F6**（G-12 遗留 15 处）<br>**随后**：**阶段二**（`docs/twoStage.md` §六）—— 先 **§6.1 重新建立最终改造范围**，**不得假定阶段一的暂缓清单已经包含所有缺口**<br>**判据**：每轮完成后 `docs/RoundPlan/_INDEX.md` §五 状态表按「该轮停止点的验收命令都实跑过且全绿」更新 |
 
 ---
 
