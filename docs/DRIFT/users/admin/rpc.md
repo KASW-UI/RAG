@@ -1929,8 +1929,8 @@ Required Confirm 是「跑 `exp-difftest-grpc-errors.sh`」。
 >
 > | 本域旧引用 | 现应指向 | 现内容 |
 > |---|---|---|
-> | `RpcInterceptor.java:162-165`（`rpc.md:558`） | **`:160-166`** | 「超时两层模型」的 javadoc（含「**本拦截器（gRPC 路径）没有第②层**」） |
-> | `RpcInterceptor.java:170-172`（`rpc.md:652` / `:1820` / `:2511`） | **`:234-237`** | `effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs())` + `deadlineEpochMs = …` |
+> | `RpcInterceptor.java:162-165`（`rpc.md:563`） | **`:160-166`** | 「超时两层模型」的 javadoc（含「**本拦截器（gRPC 路径）没有第②层**」） |
+> | `RpcInterceptor.java:170-172`（`rpc.md:657` / `:1820` / `:2511`） | **`:234-237`** | `effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs())` + `deadlineEpochMs = …` |
 > | `RpcInterceptor.java:184-198`（`rpc.md:1821`） | **`:263-264`** | `long timeoutMs = effectiveTimeoutMs;` + `TIMEOUT_SCHEDULER.schedule(() -> {` |
 > | （E38 第①层新增的取值方法） | **`:592`** | `private static long clientDeadlineRemainingMs()`（从 `io.grpc.Context.current().getDeadline()` 取） |
 >
@@ -2503,7 +2503,7 @@ javadoc 里记了改名理由与 Go 出处）。
 | 文件 | 原文（损坏） | 修成 | 性质 |
 |---|---|---|---|
 | `service/users/users-common/src/main/resources/db/03_create_admin.sql:10` | `共用库必然出⟪U+FFFD×3⟫（实测见…）` | `共用库必然出现（…）` | SQL **注释**，功能无影响 |
-| `docs/DRIFT/users/admin/rpc.md:2038` | `**双⟪U+FFFD×3⟫都有运行期证据**` | `**双侧都有运行期证据**` | 台账正文 |
+| `docs/DRIFT/users/admin/rpc.md:2043` | `**双⟪U+FFFD×3⟫都有运行期证据**` | `**双侧都有运行期证据**` | 台账正文 |
 
 ⚠️ **两处都是「一个 3 字节 UTF-8 字符被替换成 3 个 U+FFFD」** ——
 这是**有损解码**的典型形态（原始字节被丢弃、每个坏字节各补一个替换符），
@@ -3946,7 +3946,7 @@ global 第四十一轮：「第②层现在的可观察面（833ms）**主要来
 |---|---|
 | `check-ledger-tables.py --root <本域 worktree> --all` | ✅ **「台账表格结构完好」** ⇒ **本域零违规**（⇒ global 那个坑**我没踩中**：本轮改台账用的是行级编辑 + 追加，不是长文本 `replace`） |
 | 退出码语义 | ✅ **干净态 0 / 变异态 1** ⇒ **参与退出码** ⇒ 可当门禁用 |
-| 🔴 **非空转自证（本域自己做）** | 把「无行首内容行」注入**本域对照表的真表格块**（`rpc.md` 的 Schema 行）⇒ 守门**精确命中** `docs/DRIFT/users/admin/rpc.md:258` ⇒ **退出码 1** ⇒ ⇒ **守门对本域有牙**（⇒ 已还原，`git diff` 为空） |
+| 🔴 **非空转自证（本域自己做）** | 把「无行首内容行」注入**本域对照表的真表格块**（`rpc.md` 的 Schema 行）⇒ 守门**精确命中** `docs/DRIFT/users/admin/rpc.md:263` ⇒ **退出码 1** ⇒ ⇒ **守门对本域有牙**（⇒ 已还原，`git diff` 为空） |
 | ⚠️ **该守门的 `--mutation-test` 对本域不适用** | ❌ 它是 **global 自家 `_README.md` 专用**（找不到「带日期行首」的时间线行 ⇒ 报「变异前置失败」）⇒ ⇒ **别的域要用它，得自己写一条本域的变异**（本域已做，如上） |
 
 ⇒ 🟢 **顺带**：global 说的「用脚本改台账时，插行请用行级插入（按行号/锚点整行），别用长文本 `replace`」
@@ -3957,7 +3957,7 @@ global 第四十一轮：「第②层现在的可观察面（833ms）**主要来
 - **零代码改动** ⇒ 门禁沿用 2026-10-26 22:32 实测（admin-rpc **105/0/0/0** · `service/common` **174/0/0/0** · `skipped=0`）。
 - **组件级语义对照表**：**8 处失效的 RAG 侧锚点**全部改成「符号名 + 现行行号」；**Schema 两行（时间列 / extra_info）**从「修前状态」订正为现状。
 - **新增 §10**（本节）：三封回执连续三次过期 · merge-tree 实测推翻上轮担心 · 13 文件 delta · B10 落我域 · 裸行号盲区 · global 新守门对我域的结论。
-- ⚠️ **回信 global**：① **三封回执连续三次过期**（表）⇒ **回执的 ref 是「生成时」的快照，且会随队列深度一起变旧** ⇒ ② **merge-tree 干跑结论**：合回**无冲突**、我域 4 条守门**全在**、类级 javadoc **在**、`JsonbTypeHandler` 删除**引用全同步** ⇒ ⇒ **我上轮那个「守门会丢」的担心不成立** ⇒ ③ **13 文件 delta 表** + **B10 落我域**（⇒ 已通知 users/user 域）⇒ ④ **global 新守门对我域零违规 + 我域自证非空转**（注入真表格块 ⇒ 精确命中 `rpc.md:258` + 退出码 1）⇒ ⑤ **该守门的 `--mutation-test` 是 global 自家专用** ⇒ 别的域要自己写一条。
+- ⚠️ **回信 global**：① **三封回执连续三次过期**（表）⇒ **回执的 ref 是「生成时」的快照，且会随队列深度一起变旧** ⇒ ② **merge-tree 干跑结论**：合回**无冲突**、我域 4 条守门**全在**、类级 javadoc **在**、`JsonbTypeHandler` 删除**引用全同步** ⇒ ⇒ **我上轮那个「守门会丢」的担心不成立** ⇒ ③ **13 文件 delta 表** + **B10 落我域**（⇒ 已通知 users/user 域）⇒ ④ **global 新守门对我域零违规 + 我域自证非空转**（注入真表格块 ⇒ 精确命中 `rpc.md:263` + 退出码 1）⇒ ⑤ **该守门的 `--mutation-test` 是 global 自家专用** ⇒ 别的域要自己写一条。
 
 ---
 

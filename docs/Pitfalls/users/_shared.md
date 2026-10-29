@@ -951,7 +951,7 @@ UserApiProtectionMvcTest.normalRequestReachesBusinessLogic
 
 ⚠️ **为什么工具找不到**：modcache 里 **`migrator.go`（根文件，111 行）与 `migrator/migrator.go`（1038 行）是两个不同文件**，
 且 `gorm@v1.31.1` / `gorm@v1.31.2` **各一份** ⇒ 短路径**天然有歧义** ⇒ 工具按 basename 命中根文件后，行号也超范围（111 < 124 / 309）。
-⇒ **修法不是「让工具去猜」，而是把引用写全**（`docs/DRIFT/users/user/rpc.md:1332` 本来就是这么写的 ⇒ 域内写法当时并不统一）。
+⇒ **修法不是「让工具去猜」，而是把引用写全**（`docs/DRIFT/users/user/rpc.md:1337` 本来就是这么写的 ⇒ 域内写法当时并不统一）。
 ⇒ ✅ 本域 3 处已补全（2026-10-26）。
 
 ### 唯一一处**真问题**（当时）

@@ -710,7 +710,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 | 项 | 值 |
 |---|---|
 | **批准来源** | Jason 于 **2026-10-29 04:0x 追加拍板** ⇒ 纳入本轮（调度员已改两份台账的 ⑤ 批准范围 ＋ ③ 第 4 项，并提交 `2ec9830`）|
-| **事项** | `admin-rpc` 的 `admin_invite.update_time` 不推进（`admin/rpc.md:1778`）⇒ 与 `docs/Pitfalls/users/admin/rpc.md` **P-2** 同型（**`FieldStrategy.NEVER` + `LambdaUpdateWrapper` ⇒ 永不推进**；**user-rpc 修过、admin-rpc 漏修**）|
+| **事项** | `admin-rpc` 的 `admin_invite.update_time` 不推进（`admin/rpc.md:1783`）⇒ 与 `docs/Pitfalls/users/admin/rpc.md` **P-2** 同型（**`FieldStrategy.NEVER` + `LambdaUpdateWrapper` ⇒ 永不推进**；**user-rpc 修过、admin-rpc 漏修**）|
 | **核实 ①：代码** | ✅ **已在** —— `AdminCreateAtomicService.java:201` = `.setSql("update_time = CURRENT_TIMESTAMP")`（W4「标记 invite 已用」那条 UPDATE，**无条件**进 SET）|
 | **核实 ②：守门网** | ✅ **已有** —— `AdminRpcGoWireParityTest.createAdminAdvancesInviteUpdateTimeLikeGo()`（`:419`）= **真 PG ＋ 真 gRPC** ⇒ 真查 `select extract(epoch from update_time)::bigint from admin_invite where code = ?` **前后对比**并断言 `after > before`；断言消息直接写明「若本断言失败，说明 W4 的 setSql("update_time = CURRENT_TIMESTAMP") 被删了」|
 | **核实 ③：台账** | ✅ `docs/DRIFT/users/admin/rpc.md` §2「🔴 新发现（台账**从未记录**）」已记 **✅ 已补**（`.setSql(...)` ＋ 守门测试）· 另含连带订正：「**5 处 UPDATE**」这个计数是错的 ⇒ 全组件正确总数 = **6 处**（本类 5 ＋ `AdminCreateAtomicService` 1）|

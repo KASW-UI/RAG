@@ -516,7 +516,7 @@ PITFALL-FOLLOW-011 / PITFALL-FOLLOW-012。）
 >   （含「**不要**因为『Go 是 per-route』就把它当缺陷顺手改回」的明文）；
 > - global 收口档已销账：`docs/DRIFT/global/_README.md:88`（T-2 = ✅ 已签字 ⇒ 已移出本档）；
 > - 同族域已对齐：`docs/DRIFT/hot/vs-common.md:31`（hot 的 `D27` = 同一条，✅ 已闭合）；
-> - users 侧已注明：`docs/DRIFT/users/vs-common.md:2735`（「MaxConns 半边 = 已签字偏离 `SD-2026-10-25-01`」）。
+> - users 侧已注明：`docs/DRIFT/users/vs-common.md:2740`（「MaxConns 半边 = 已签字偏离 `SD-2026-10-25-01`」）。
 > ⇒ **三处已对齐，只有 follow 域台账落后** ⇒ 本轮订正。
 >
 > ⚠️ **按 §5.3b 硬边界 2**（「不要在 `docs/DRIFT/` 里记『决定不对齐』的偏离」）⇒

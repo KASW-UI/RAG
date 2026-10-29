@@ -3264,7 +3264,7 @@ Go 侧 `go-zero@v1.10.2/zrpc/internal/clientinterceptors/breakerinterceptor.go` 
 |---|---|---|
 | `users/user` | ✅ 已记（本条） | ✅ 已记（本条） |
 | `message` | ✅ 已记（`docs/DRIFT/message/api.md:196`，定性为「刻意的表达层差异（已在 javadoc 留痕，非隐藏缺口）」） | ❌ **没记** |
-| `like` | ❌ **判 EQUIVALENT**（`docs/DRIFT/like/api.md:305` 只比了参数值 10000==10000） | ❌ **没记** |
+| `like` | ❌ **判 EQUIVALENT**（`docs/DRIFT/like/api.md:310` 只比了参数值 10000==10000） | ❌ **没记** |
 | `hot` | ❌ **判 EQUIVALENT（静态）**（`docs/DRIFT/hot/api.md:447`） | ❌ **没记** |
 | `article` | ⏳ 挂在 unresolved（`docs/DRIFT/article/api.md:711`，未结论） | ❌ **没记** |
 

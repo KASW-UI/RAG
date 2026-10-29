@@ -163,7 +163,7 @@ INSERT INTO t_jsonb(extra_info) VALUES (CAST('{"k":"\u0000"}' AS jsonb));
 
 | 位置 | 内容 |
 |---|---|
-| `docs/DRIFT/users/admin/rpc.md:483` | 写「PG jsonb 拒收（22P02 / unsupported…」⇒ **SQLSTATE 错**，应为 22P05 |
+| `docs/DRIFT/users/admin/rpc.md:488` | 写「PG jsonb 拒收（22P02 / unsupported…」⇒ **SQLSTATE 错**，应为 22P05 |
 | `docs/DRIFT/users/admin/rpc.md:732` | 写「jsonb 失败是 22P02」⇒ 同上 |
 | `docs/Pitfalls/users/admin/api.md:386` | 写「INTERNAL: DB更新失败（22P02）」⇒ 同上 |
 

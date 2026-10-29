@@ -1047,7 +1047,7 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
   | **`docs/DRIFT/users/_shared.md:103`** | **DRIFT-024 =「text/plain 400 的响应头丢失」**（2026-10-22 E-1 收口时发现，*article-api 的 `DRIFT-ARTICLE-API-006` 的另一半从未真正对齐*）<br>症状：`Content-Type` 与 `nosniff` **全部缺失**，状态行连 reason phrase 都没有，传输退化为 `Transfer-Encoding: chunked` + `Connection: close`<br>根因：`HttpMiddleware$ObservabilityResponseWriter.setHeader` 只收进 `capturedHeaders`、等 `flushTo` 才写回 underlying，而那时底层已 committed ⇒ Tomcat **静默忽略**<br>已改为三个覆写点（`setHeader`/`addHeader`/`setContentType`）实时 propagate<br>守门：`tools/difftest/check-plaintext400-headers.sh`（**必须真实 Tomcat**） |
   | `docs/DRIFT/common/http.md:117` | 引用它当**类比**（「响应对了不代表 body 对」） |
   | `docs/DRIFT/_cross/status-snapshot-2026-10-22.md:29,46` | 跨域快照里登记了它的修复结论 |
-  | `docs/DRIFT/users/admin/api.md:60,723` | 指出 **admin-api 上没有任何守门** |
+  | `docs/DRIFT/users/admin/api.md:65,723` | 指出 **admin-api 上没有任何守门** |
   ⇒ ⇒ **`DRIFT-024` 是 users 域的编号**（域内编号会重复，跨域引用必须带域前缀才查得到）
   ⇒ **不存在"未入库的历史漂移清单"** —— 原文的这个推断**作废**。
 - **✅ 本域是否受影响：不受影响**（2026-10-24 实测确认）

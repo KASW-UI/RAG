@@ -485,7 +485,7 @@ Caused by: org.postgresql.util.PSQLException:
 | 问题 | Go 有没有 | 依据 |
 |---|---|---|
 | **① 账本撞车（Flyway 特有）** | **结构性没有** | GORM `AutoMigrate` 无状态：没有版本号、没有 `flyway_schema_history`、没有 checksum、没有 `baseline`。DRIFT-NEW-015 是**本仓库自己引入的复杂度造成的**，不是 PG 或 Go 的固有问题 |
-| **② PG 的 DDL 并发竞态** | **有，只是窗口窄得多** | GORM 的建表 SQL **没有** `IF NOT EXISTS`（`gorm.io/gorm@v1.31.1/migrator/migrator.go:309` 就是 `tx.Exec(createTableSQL, values...).Error`，而 `createTableSQL = "CREATE TABLE ? ("` 定义在同文件 `:225`），保护只来自 `HasTable` 先查（`gorm.io/gorm@v1.31.1/migrator/migrator.go:124` 的 `if !queryTx.Migrator().HasTable(value)` check-then-act，`HasTable` 本体在 `:333`）。并发失败形态会是 `relation already exists`，与 RAG 的 `pg_type_typname_nsp_index` 不同<br>⚠️ **2026-10-26 更正引用路径**：本行初稿把这两处写成「`gorm@v1.31.1` 下的**根** `migrator.go`」与「**裸** `migrator.go`」—— **行号全对**（已逐行核对：`:124` 就是那行 `HasTable` 判断、`:309` 就是那句 `tx.Exec`），**但路径少了 `migrator/` 子目录**：gorm 包里 `migrator.go`（根，111 行）与 `migrator/migrator.go`（1038 行）是**两个不同文件**，且 modcache 内同名文件不止一处（`v1.31.1` / `v1.31.2` 各一份）⇒ 短路径**有歧义** ⇒ 已按 `docs/DRIFT/users/user/rpc.md:1332` 的同款写法补全 |
+| **② PG 的 DDL 并发竞态** | **有，只是窗口窄得多** | GORM 的建表 SQL **没有** `IF NOT EXISTS`（`gorm.io/gorm@v1.31.1/migrator/migrator.go:309` 就是 `tx.Exec(createTableSQL, values...).Error`，而 `createTableSQL = "CREATE TABLE ? ("` 定义在同文件 `:225`），保护只来自 `HasTable` 先查（`gorm.io/gorm@v1.31.1/migrator/migrator.go:124` 的 `if !queryTx.Migrator().HasTable(value)` check-then-act，`HasTable` 本体在 `:333`）。并发失败形态会是 `relation already exists`，与 RAG 的 `pg_type_typname_nsp_index` 不同<br>⚠️ **2026-10-26 更正引用路径**：本行初稿把这两处写成「`gorm@v1.31.1` 下的**根** `migrator.go`」与「**裸** `migrator.go`」—— **行号全对**（已逐行核对：`:124` 就是那行 `HasTable` 判断、`:309` 就是那句 `tx.Exec`），**但路径少了 `migrator/` 子目录**：gorm 包里 `migrator.go`（根，111 行）与 `migrator/migrator.go`（1038 行）是**两个不同文件**，且 modcache 内同名文件不止一处（`v1.31.1` / `v1.31.2` 各一份）⇒ 短路径**有歧义** ⇒ 已按 `docs/DRIFT/users/user/rpc.md:1337` 的同款写法补全 |
 | **③ 真实部署里两个服务同时对空库启动** | **两边都不发生** | Go 与 RAG 的 `docker-compose` **都只有基建、没有应用服务**（Go 侧连 user-rpc / admin-rpc 都没有）。首次初始化通常由单个服务完成 |
 
 **② 的实测**：把 Go 的 user-rpc 与 admin-rpc **同时**对着一个全新空库启动（刻意不 sleep 错开），
@@ -1027,7 +1027,7 @@ AGENTS.md §9 / §8 / §0 三处都写着「**过期状态必须随实测同步�
 |---|---|---|---|
 | **1** | `docs/DRIFT/users/user/api.md` 第八轮 MaxBytes 表写「真容器由 `check-protection-layer.sh` 守」—— **该脚本在仓内不存在** | 🔴 **台账事实错误** | ✅ 已更正（见下） |
 | **2** | `rpc.md:1282` / `rpc.md:1477` / `_shared.md:889` 引用的守门类 **`UserRpcJsonbAndAvatarProjectionTest`** —— 该类**已改名为 `UserRpcJsonTextAndAvatarProjectionTest`**（真源：`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/service/UserRpcJsonTextAndAvatarProjectionTest.java`） | 🔴 **守门清单指向不存在的类** | ✅ 三处已改新名 |
-| **3** | 同上改名**未同步到 admin 域**：`docs/DRIFT/users/admin/rpc.md:372,382` 仍用旧名 | ⚠️ **跨域** | ✅ **admin 域已于 2026-10-26 改完**（提交 `c09fa45`，分支 `align/users-admin`：`admin/rpc.md:372,382` + `admin/rpc.md` 的 Pitfalls `:78,:92` 共 4 处）⇒ 本条关闭 |
+| **3** | 同上改名**未同步到 admin 域**：`docs/DRIFT/users/admin/rpc.md:377,382` 仍用旧名 | ⚠️ **跨域** | ✅ **admin 域已于 2026-10-26 改完**（提交 `c09fa45`，分支 `align/users-admin`：`admin/rpc.md:377,382` + `admin/rpc.md` 的 Pitfalls `:78,:92` 共 4 处）⇒ 本条关闭 |
 | **4** | ⚠️ **`.xml` 报告名**（`UserRpcJsonbAndAvatarProjectionTest.xml`）**不是类名引用**，是**历史 surefire 报告文件名**（Oct 23 的真实产物、已成孤儿） | ✅ **不是缺陷** | ✅ **保持原样，勿「顺手统一」** —— 改了反而失真（报告文件名就是当时那次的真实名字）。<br>本域的 2 处（`users/user/api.md` 的「Oct 23 的旧报告」+ `Pitfalls/users/_shared.md` 的「上一轮遗留旧报告」）**已确认为报告名、保留**；admin 域同样保留。<br>⇒ **约定**：**类名引用**改新名，**`.xml` 报告名**保留原样。 |
 
 **另新查出 1 个覆盖缺口**（复核的副产品）：

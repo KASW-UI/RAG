@@ -1809,7 +1809,7 @@ Caused by: java.lang.IllegalStateException: article-rpc 的 Kafka 通道「kq-pu
 
 | # | 待办 | 位置 | 依据 |
 |---|---|---|---|
-| 1 | 🔴 **`gorm@v1.31.2` 的错版本引用**（同一个 Go 仓库、同一份 `go.mod` ⇒ 版本是 v1.31.1） | `docs/DRIFT/like/rpc.md:881`（`schema/field.go:330-341`）<br>`docs/DRIFT/users/admin/rpc.md:863,1087`<br>`docs/DRIFT/users/user/rpc.md:507,767` | `Sea-RideTheWind_golang/go.mod:28` = `gorm.io/gorm v1.31.1`；`go.sum:428` 佐证；**无 replace 指令** |
+| 1 | 🔴 **`gorm@v1.31.2` 的错版本引用**（同一个 Go 仓库、同一份 `go.mod` ⇒ 版本是 v1.31.1） | `docs/DRIFT/like/rpc.md:881`（`schema/field.go:330-341`）<br>`docs/DRIFT/users/admin/rpc.md:868,1087`<br>`docs/DRIFT/users/user/rpc.md:512,767` | `Sea-RideTheWind_golang/go.mod:28` = `gorm.io/gorm v1.31.1`；`go.sum:428` 佐证；**无 replace 指令** |
 | 2 | 🔴 `*SchemaGate` 仍用 `@EventListener(ApplicationReadyEvent.class)`（应挪到对外服务**之前**，见 `DRIFT-ARTICLE-RPC-005`） | `like-rpc` / `comment-rpc` / `favorite-rpc` / `task-rpc` | article 域已完成同型改造（`ArticleSchemaGate` 改用 `SmartInitializingSingleton`） |
 
 #### 📌 一条可复用的元教训
@@ -2603,4 +2603,3 @@ bash tools/api-full-parity-probe/article/mutate-parity.sh          # ⇒ EXIT=0 
 | **§七 RPC 型 5 条** | **5/5 满足**（③ ④ 两格由本轮**补齐**，其余三格既有） |
 | **仍开放（不阻断 R3）** | ① `U-9b`（Go 侧 handler 并发模型**未活体对拍**）② 双侧活体的**成功路径完整字段语义**（`user.rpc` 两侧都不可达 ⇒ 现钉的是**降级路径**）③ `O-4` / `O-6` 仍只有静态取证 |
 | **⚠️ 不许越界读** | **本组件不是「零差异」** —— §12.4.2 的模型差异、`O-4`/`O-6` 的静态取证、双侧活体只覆盖降级路径 ⇒ 都**不等于**「两侧行为逐字节一致」 |
-

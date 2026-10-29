@@ -626,8 +626,8 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 
 | 项 | 证据 |
 |---|---|
-| 漂移成立 | Go：`service/user/user/rpc/internal/model/data_model.go:11` = `Status int64 \`gorm:"column:status;default:0"\`` ⇒ GORM **未标 `not null`** ⇒ 建出**可空**列；RAG：`service/users/users-common/src/main/resources/db/01_create_user.sql:39` = `status BIGINT NOT NULL DEFAULT 0` ⇒ 🔴 **可空性不同**（真库实证见 `docs/DRIFT/users/user/rpc.md:1518`） |
-| **为什么不能单独改** | 🔴 `docs/DRIFT/users/user/rpc.md:1559` 明写：「**动它会立刻激活 admin-rpc 的同款缺陷**」—— `service/users/admin/admin-rpc/.../domain/UserEntity.java:60` 是 `private Long status = 0L;` ＋ MyBatis `callSettersOnNulls=false` ⇒ **NULL 读成 0** ⇒ admin 侧会把 NULL 当「活跃」⇒ ⇒ **必须与 admin 侧一起改** |
+| 漂移成立 | Go：`service/user/user/rpc/internal/model/data_model.go:11` = `Status int64 \`gorm:"column:status;default:0"\`` ⇒ GORM **未标 `not null`** ⇒ 建出**可空**列；RAG：`service/users/users-common/src/main/resources/db/01_create_user.sql:39` = `status BIGINT NOT NULL DEFAULT 0` ⇒ 🔴 **可空性不同**（真库实证见 `docs/DRIFT/users/user/rpc.md:1523`） |
+| **为什么不能单独改** | 🔴 `docs/DRIFT/users/user/rpc.md:1564` 明写：「**动它会立刻激活 admin-rpc 的同款缺陷**」—— `service/users/admin/admin-rpc/.../domain/UserEntity.java:60` 是 `private Long status = 0L;` ＋ MyBatis `callSettersOnNulls=false` ⇒ **NULL 读成 0** ⇒ admin 侧会把 NULL 当「活跃」⇒ ⇒ **必须与 admin 侧一起改** |
 | **写权归属** | DDL（`service/users/users-common/**`）= **本层写权**；`admin-rpc` 的 `UserEntity` = **G1 写权** ⇒ ⇒ **跨 lane** |
 | 🔴🔴 **2026-10-27 订正：上一行的「必须与 admin 侧同改」前提被证伪 ⇒ 两步方案整体撤回** | G1 回执（提交 `ded22af`）给出逐层证据链，**本层已独立复核成立**：<br>① `gorm.io/gorm` `schema/field.go`（真源 `go.mod` pin 的 **v1.31.1**；v1.31.2 同一段代码**逐字相同**）的 `case reflect.Int, …, reflect.Int64:` 分支里：`case **int64: if data != nil && *data != nil { field.ReflectValueOf(ctx, value).SetInt(**data) }` ⇒ ⇒ **DB 值是 NULL ⇒ `*data == nil` ⇒ 什么都不做 ⇒ 字段保持 Go 零值 0 ⇒ 不报错**（本层读源码核实）；<br>② `database/sql/convert.go` 的 `case reflect.Pointer: if src == nil { dv.SetZero(); return nil }` ⇒ **dest 的 kind 是 Pointer** ⇒ 走这一支 ⇒ **不报错**；<br>③ 双侧活体对拍（G1 域台账 `docs/DRIFT/users/user/rpc.md`「2026-10-23 第三轮」）：`status IS NULL` 打 Login ⇒ **Go 200 + token** ⇒ ⇒ **「删掉 = 0L」才是不等价的那一侧**，上午那次「删 = 0L + 加 null ⇒ INTERNAL」是**误修**，当天已恢复。<br>⇒ ⇒ **本层原来的那句「Go 侧读到 NULL status 会扫描报错（`converting NULL to int64 is unsupported`）= 事实错误** ⇒ ⇒ **「保留 NOT NULL」与「放开可空」在行为层同形 ⇒ ⇒ 那条裁决题不存在 ⇒ ⇒ 「需 Jason 拍板」撤销** |
 | ⇒ ⇒ **正确的结论（与原两步方案相反）** | **行为层零差异**：Go「可空 + 读成 **0**」vs RAG「**不可空** ⇒ 读不到 NULL ⇒ 也是 **0**」⇒ ⇒ **可观察结果相同** ⇒ ⇒ **保持 RAG 的 NOT NULL 就是等价的那一侧**（RAG 更严：写 NULL 被 PG 拒；Go 侧写得进去但读出来还是 0 ⇒ 行为同形）⇒ ⇒ **「放开可空」反而会制造新漂移**：RAG 侧 MyBatis `callSettersOnNulls=false` ⇒ NULL 时**跳过 setter** ⇒ 若字段没有 `= 0L` 初始值 ⇒ 读出 **null** ≠ Go 的 **0**；且 admin 侧会从「NULL 当活跃(0)」变成「NULL 当未知(null)」⇒ ⇒ **方向相反** ⇒ ⇒ ⇒ **第 1 步（改 `admin-rpc` 的 `UserEntity.status`）不执行；第 2 步（放开 DDL 的 NOT NULL）也不执行 ⇒ ⇒ 两步方案整体撤回** ⇒ ⇒ **本层 DDL 保持 `status BIGINT NOT NULL DEFAULT 0` 不动**（DDL 层差异**如实保留** ⇒ 归「**DDL 层差异 · 行为层零差异**」）⇒ ⇒ **本层零落码** |
@@ -4005,7 +4005,7 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 |---|---|
 | **合并两个 deadline 载体**（`DeadlineState` ↔ `GoStyleRequestDeadline`） | 那是**重构**，不是**对齐** ⇒ ⇒ **阶段二候选** ⇒ 本层**只登记，不预支**（§4.9.4 的「载体不统一」待答项已收窄） |
 | **`docs/DRIFT/global/common-tails.md:551` 的陈旧断言** | 那句「真正只有毫秒的是 `DeadlineState` ⇒ 成立 —— 它用 `System.currentTimeMillis()` 存」**本轮已失效** ⇒ ⇒ 但该文件是**共享文件**（`check-wave-lane-ownership.py` 的 `SHARED` 清单）⇒ ⇒ **本层不写** ⇒ ⇒ **登记 + 上报给合并收口执行者** |
-| **`docs/DRIFT/users/admin/rpc.md:2767` 提到的 `deadlineEpochMs`** | 该变量名本轮已从生产代码移除（改成 `effectiveTimeoutNanos` / `deadlineNanos`）⇒ ⇒ 但那是 **G1（users 域）的文件** ⇒ ⇒ **本层不写** ⇒ ⇒ 已并入给 G3 的反馈单同款口径知会 G1 |
+| **`docs/DRIFT/users/admin/rpc.md:2772` 提到的 `deadlineEpochMs`** | 该变量名本轮已从生产代码移除（改成 `effectiveTimeoutNanos` / `deadlineNanos`）⇒ ⇒ 但那是 **G1（users 域）的文件** ⇒ ⇒ **本层不写** ⇒ ⇒ 已并入给 G3 的反馈单同款口径知会 G1 |
 | **`align/like` 的 `SD-2026-10-23-09`（同一现象的签字）** | 现象已不复存在 ⇒ ⇒ 但它在 `docs/Intentional_Deviations/like/` ⇒ ⇒ **不是本层能单方面改的** ⇒ ⇒ **登记 + 上报给合并收口执行者** |
 | **E65 统一载体**（21 类 / 30 处零 deadline） | Jason 已拍板走 global 统一载体 `applyTo(stub)` ⇒ ⇒ **本轮只重算覆盖面并登记，不改**（§4.11.5） |
 
@@ -4096,7 +4096,7 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | 4 | `docs/PhaseGoal-judge.md:217` 的 🔴 **判据口径** | 🔴 §1.1 的 **R3 ⑥ 只排除「已签字偏离 / 跨组件残留 / 取证缺口」，没有给「C 类阶段二暂缓项」留出口** ⇒ ⇒ 24 条里绝大多数是 OBSERVABLE ⇒ ⇒ **先复核 R3 ⑥，再重算**（⚠️ **顺序有依赖**：R3 ⑥ 变了 ⇒ **4 条 lane 矩阵全部要重算**） | 合并收口执行者 |
 | 5 | `docs/PhaseGoal-judge.md:187`（`favorite-api` 行）标 405 的 Content-Type「**落点 `service/common`**」 | ❌ **落点订正** —— 共享层 `GoStyleJsonContentTypeAdvice.java:144` **第一行就是** `if (body == null) return body;` ⇒ 405 的 body 为 null ⇒ **共享层不写 Content-Type**；**真正来源 = favorite-api 域内** `advice/GlobalResponseAdvice.java:79`（**在 `body == null` 早退之前**写 `setContentType`）⇒ 其余 7 域的 advice **都是先早退** | **G3**（域内）⇒ 本层**不落码** |
 | 6 | `docs/DRIFT/global/common-tails.md:551`「真正只有毫秒的是 `DeadlineState`」 | ❌ **已失效**（`DRIFT-COMMON-005` 已修 ⇒ 全仓已无「只有毫秒」的 deadline 载体） | 合并收口执行者 |
-| 7 | `docs/DRIFT/users/admin/rpc.md:2767` 提到 `deadlineEpochMs` · `docs/Intentional_Deviations/like/` 的 `SD-2026-10-23-09` | ❌ 前者**已从生产代码移除**；后者**现象已不复存在** | G1 / G2（其自有文件） |
+| 7 | `docs/DRIFT/users/admin/rpc.md:2772` 提到 `deadlineEpochMs` · `docs/Intentional_Deviations/like/` 的 `SD-2026-10-23-09` | ❌ 前者**已从生产代码移除**；后者**现象已不复存在** | G1 / G2（其自有文件） |
 
 **§4.15.4 🔴 一条本层引入的基线计数漂移（**真阳性** ⇒ 只登记 + 上报，不越界改共享面**）**
 

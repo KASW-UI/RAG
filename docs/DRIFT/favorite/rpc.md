@@ -3852,8 +3852,8 @@ G4 通报（2026-10-28）：`service/favorite/favorite-rpc/src/test/java/com/rag
 
 ### ⚠️ 顺带：G1 域那 2 处真 NUL（G1 写权面 · G3 只登记）
 
-`docs/DRIFT/users/admin/rpc.md:1329` / `:1334` 含 **2 个真 NUL**（引述 `extra_info = {"k":"«NUL»"}` 的 payload）⇒ ⇒
-按 **G1 自己在 `docs/DRIFT/users/admin/rpc.md:2483-2487` 定的记号约定**（「凡要在文档里展示损坏字节，一律用 `⟪U+FFFD×n⟫` 之类的可见记号」）⇒ ⇒
+`docs/DRIFT/users/admin/rpc.md:1334` / `:1334` 含 **2 个真 NUL**（引述 `extra_info = {"k":"«NUL»"}` 的 payload）⇒ ⇒
+按 **G1 自己在 `docs/DRIFT/users/admin/rpc.md:2488-2492` 定的记号约定**（「凡要在文档里展示损坏字节，一律用 `⟪U+FFFD×n⟫` 之类的可见记号」）⇒ ⇒
 **这 2 处也该换成可见记号** ⇒ ⇒ ⛔ **G1 写权面，G3 不代改** ⇒ ⇒ **已通知 G1**（否则 G4 的「文档零 NUL」守门一落地就会红在 G1 域）。
 
 #### 📌 订正注记（2026-10-28 10:3x · G3）—— 上面最后那句「**会红在 G1 域**」【已被 G4 的豁免证伪】

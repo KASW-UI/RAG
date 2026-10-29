@@ -110,7 +110,7 @@ follow-api (HTTP :8891)  ──gRPC plaintext──▶  follow-rpc (:8082)  ─�
 | 8 | 是否阻断阶段 1 | ❌ **否**（且**不是**待办项 ⇒ 不进差异清单） |
 | 9 | 阶段 2 的恢复或替换方案 | —— **阶段 2 也不做**（签字决定保留全局闸门）<br>⚠️ **若将来要重开**：必须**先撤销签字**（用户拍板）⇒ 再按「两侧都应是 Y = 每路由一个 latch」落码 ⇒ 且与 breaker 键空间半边**同批** |
 | 10 | 阶段 2 的测试场景和通过标准 | —— **不适用**（不实施）<br>⚠️ 若撤销签字后重开：场景 = 并发打满路由 A ⇒ 路由 B **仍可服务**；通过标准 = A 被拒时 B 的成功率不下降（与 Go 侧同口径对拍） |
-| 11 | 当前证据及剩余证据缺口 | **证据**：签字档 `SD-2026-10-25-01`（2026-10-25 用户签字 · L1 决策记录）· 共享层代码 javadoc `GoStyleMaxConnsFilter.java:67-72`（已指向签字档 + 明文「**不要**因为『Go 是 per-route』就把它当缺陷顺手改回」）· global 收口档 `docs/DRIFT/global/_README.md:88`（T-2 ✅ 已签字 ⇒ 已移出 DRIFT 档）· hot 域 `docs/DRIFT/hot/vs-common.md:31`（`D27` 同族已闭合）· users 域 `docs/DRIFT/users/vs-common.md:2735`（「MaxConns 半边 = 已签字偏离」）· 本域已同步订正 [`api.md`](api.md) + [`vs-common.md`](vs-common.md) §1/§1.1/§A3/§6.2。**缺口**：**基线层**（`docs/PhaseGoal-judge.md` 的 A-2 `follow-api` 行 + 机器生成的 `docs/PhaseGoal/g1.md`）**仍把它记成开放缺陷 ⇒ 待重新拍板** ⇒ **不在 G1 写权面 ⇒ 已上报收口** |
+| 11 | 当前证据及剩余证据缺口 | **证据**：签字档 `SD-2026-10-25-01`（2026-10-25 用户签字 · L1 决策记录）· 共享层代码 javadoc `GoStyleMaxConnsFilter.java:67-72`（已指向签字档 + 明文「**不要**因为『Go 是 per-route』就把它当缺陷顺手改回」）· global 收口档 `docs/DRIFT/global/_README.md:88`（T-2 ✅ 已签字 ⇒ 已移出 DRIFT 档）· hot 域 `docs/DRIFT/hot/vs-common.md:31`（`D27` 同族已闭合）· users 域 `docs/DRIFT/users/vs-common.md:2740`（「MaxConns 半边 = 已签字偏离」）· 本域已同步订正 [`api.md`](api.md) + [`vs-common.md`](vs-common.md) §1/§1.1/§A3/§6.2。**缺口**：**基线层**（`docs/PhaseGoal-judge.md` 的 A-2 `follow-api` 行 + 机器生成的 `docs/PhaseGoal/g1.md`）**仍把它记成开放缺陷 ⇒ 待重新拍板** ⇒ **不在 G1 写权面 ⇒ 已上报收口** |
 
 ### `S1-FOLLOW-003` 🔴 **共享层** · 纯 gRPC 进程缺 `servlet-api` ⇒ **关闭路径**抛 `NoClassDefFoundError`
 

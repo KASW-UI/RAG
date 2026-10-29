@@ -676,7 +676,7 @@ ERROR logger-test-omits-err -service="logger-test-omits-err" event_id="2113…"
 
 | # | 域 | 条目 | 落点（`文件:行`） | 差异 | 当前真实状态（2026-10-25 实测） |
 |---|---|---|---|---|---|
-| **T-1** | `like` | `DRIFT-LIKEAPI-015` | `common/http/GoStyleJsonBodyConverter.java:115-117`（`getContentType().toString()` ⇒ MediaType 已小写化）vs `goReadsBody` `:98-101`（`contains` 大小写敏感） | Go 用**原始头**（`strings.Contains` 敏感），RAG 用**已解析 MediaType** | 🔴 **仍未修**（`like/api.md:456`）。⚠️ **6 域共用**（like / follow / message / users×2 / task / article）⇒ **单点解多域** |
+| **T-1** | `like` | `DRIFT-LIKEAPI-015` | `common/http/GoStyleJsonBodyConverter.java:115-117`（`getContentType().toString()` ⇒ MediaType 已小写化）vs `goReadsBody` `:98-101`（`contains` 大小写敏感） | Go 用**原始头**（`strings.Contains` 敏感），RAG 用**已解析 MediaType** | 🔴 **仍未修**（`like/api.md:461`）。⚠️ **6 域共用**（like / follow / message / users×2 / task / article）⇒ **单点解多域** |
 | **T-2** | `follow` | `DRIFT-FOLLOW-008` | `common/protection/GoStyleMaxConnsFilter.java` | Go `MaxConnsHandler` **每路由一个** latch，RAG **全局一个** | 🔴 **仍未修**（`follow/api.md:20`「`service/common` 共享模块 ⇒ 派单」） |
 | **T-3** | `hot` | `D14` / `DRIFT-HOTAPI-014` | `common/observability/HttpMiddleware.java:431`（`writeTimeoutResponse`） | 503 / 499 响应缺 `X-Content-Type-Options: nosniff` | ✅ **已修，但 hot 域台账未销账** —— 代码 2026-10-24 commit `8d019e0` 已 `setHeader(..., "nosniff")`；真 Tomcat 守门 `MessageApiTimeoutRealTomcatTest:140` 断言 `x-content-type-options == "nosniff"` ⇒ **实际已闭合** |
 | **T-4** | `hot` | `D25` / `DRIFT-HOTAPI-025` | `common/observability/HttpMiddleware.java:332`（`writeTimeoutResponse(resp, 499)`） | 客户端断连后 RAG **等 2s deadline**、**断连后继续发下游调用**、**无 499 记录**；Go 侧 1–3ms 内取消 8 个在飞 gRPC 并打 `[HTTP] 499` | 🔴 **仍开放，且全仓无 499 守门测试**（`grep -rln "499" service/*/*/src/test/java/` ⇒ **0 命中**）⇒ 修了也**没有防回退网** |
@@ -854,7 +854,7 @@ service/users/user/user-rpc/.../UserDomainService.java:113   ← 这行 javadoc 
 | 编号 | 陈旧断言 | 现状 | 落点 |
 |---|---|---|---|
 | `docs/DRIFT/global/common-tails.md:551` | 「真正只有毫秒的是 `DeadlineState`」 | ❌ **已失效** —— `DRIFT-COMMON-005` 已修（单调钟 + 纳秒）⇒ **全仓已无「只有毫秒」的 deadline 载体** | 合并收口执行者（共享面） |
-| `docs/DRIFT/users/admin/rpc.md:2767`（G1 文件） | 提到 `deadlineEpochMs` | ❌ **已从生产代码移除**（`DRIFT-COMMON-005` 修复时删掉） | G1（其自有文件） |
+| `docs/DRIFT/users/admin/rpc.md:2772`（G1 文件） | 提到 `deadlineEpochMs` | ❌ **已从生产代码移除**（`DRIFT-COMMON-005` 修复时删掉） | G1（其自有文件） |
 | `docs/Intentional_Deviations/like/` 的 `SD-2026-10-23-09` | 登记的现象 | ❌ **现象已不复存在** | G2（其自有文件） |
 
 #### 十三·四·二、🔴 **阶段一基线**（`docs/PhaseGoal-judge.md`）的 5 处待订正（**共享面 ⇒ 只登记**）
