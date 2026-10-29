@@ -41,8 +41,7 @@
 | **A2** | gRPC 拦截器链 | `ArticleRpcApplication.java:124-131` → 共享层 `GoStyleRpcProtectionChain.build(...)`（`service/common/.../protection/GoStyleRpcProtectionChain.java:61-78` 定义链序：recover → breaker → shedding → 业务观测） | ✅ **服务端链一致** —— Go `zrpc/server.go:144-167`（`setupUnaryInterceptors`：Trace/Recover/Stat/Prometheus/Breaker/Shedding/Timeout 逐条按 `c.Middlewares.*` 装配）⇒ RAG 三层 ＋ 业务观测层**顺序与判据逐条对齐**；Go 侧 `Timeout` 被 `DisableNativeRpcTimeout` 置 0 ⇒ Go 的 `UnaryTimeoutInterceptor` 不生效 ⇒ **两侧都只有一个超时执行者**。<br>🟡 Go 专属的 `Stat`/`Prometheus` 两层 RAG 改用 Micrometer 承接（**表达层**）<br>🔴 **但出向侧无熔断（client breaker 缺失）**：`GoStyleGrpcClientBreakerInterceptor.java:103-106` 是 `@Component` ＋ **`@GrpcGlobalClientInterceptor`** ⇒ **只能靠组件扫描**；`article-rpc` **刻意不扫 `com.rag.common`**（`ArticleRpcApplication.java` 的 `@SpringBootApplication` **无** `scanBasePackages`）⇒ 该 client 侧能力**不在容器里** ⇒ **出向调用无熔断**（Go 侧 client breaker 默认开：`zrpc/internal/config.go:14` ＋ `zrpc/internal/client.go:113`）⇒ **落点在共享层 ⇒ §4-G4-6**。<br>⚠️ **本域确实有出向调用**（不是 N/A）：`article-rpc` 实测 **`@GrpcClient` = 5**（`client/SecurityRpcClient.java` / `MessageRpcClient.java` / `ContentSecurityPort.java` / `ImageSecurityRpcClient.java` 等）⇒ 缺口**可观测** | **L3**（链序 ＋ 装配面）；装配真挂另有 `ArticleGrpcInterceptorWiringTest`（`@Testcontainers` 真 PG ＋ 真发 gRPC ＋ 断言 `DEADLINE_EXCEEDED` ＋ 断言「取消时仍在跑」）⇒ **测试存在但本轮未跑**<br>（client breaker 缺失侧为 **L1**：否定事实可静态判定） | 2026-10-27 |
 | **A3** | HTTP 保护链 | `article-api/.../application.yml:159` `rag.http.go-form-limit.mode: raw` ＋ `:160-174` `rag.protection.*`（max-conns 10000 / max-bytes 10485760 / cpu-threshold 900 / breaker enabled）＋ 共享层 4 个 Filter（`GoStyleBreakerFilter` / `GoStyleCpuSheddingFilter` / `GoStyleMaxBytesFilter` / `GoStyleMaxConnsFilter`）；扫描面 `ArticleApiApplication.java:81-84`（含 `com.rag.common`） | ✅ **一致** —— `mode: raw` **同向**：Go 侧 `service/article/api/` **未注册** `httpx.SetErrorHandler`（实测：全仓仅 `comment/api/commentservice.go:47` ＋ `hot/api/hotcenter.go:53` 注册）⇒ Go handler 走 `httpx.ErrorCtx`（`get_article_handler.go:21-24`）⇒ **400 + text/plain + nosniff + Go 原文**；RAG `raw` 档同形。其余阈值与 go-zero `rest/config.go` 的 tag 默认逐条同值 | **L3**（yaml ＋ 装配面；Filter 实现体未逐行读）<br>✅ **验签与保护链的相对次序已对齐（2026-10-27 · 本轮 · §3-L-8）**：本域新增的 `auth/GoStyleJwtAuthFilter`（`@Order(+6)`）落在 `+3 Traceparent` **之内**、`+7 HttpMiddlewareFilter`（预算起算）**之外**、`+8 MaxBytes` **之内** ⇒ ⚠️ **它排在 MaxBytes 之前** ⇒ **若它自己写 401 就会压过 413** ⇒ ⇒ 故它**绝不写响应**（只验签、只写 request attribute、401 仍由 interceptor 抛）⇒ **413 仍压过 401**（守门「413 压过 401」一条 ＋ 变异验证：让 Filter 自己写 401 ⇒ 该条**当场变红**）⇒ ⚠️ **它与 `GoStyleCpuSheddingFilter` 并列 +6**（共享层已占满 [+3,+6]）⇒ **两者相对位置由组件扫描顺序决定、**不承重**（本 Filter 绝不写响应 ⇒ 互换不改变任何可观察行为）⇒ 已在既有守门 `ArticleApiAssemblyWiringTest` 的失败提示里写明，避免后人把「顺序互换」误判成行为回归 | | 2026-10-27 |
 | **A4** | 错误码 / envelope | 共享层 `service/common/.../http/GoStyleRouterErrorResponses.java:121-140`（404/405 裸响应）＋ `service/common/.../response/Response.java:14-17`（三字段、**无** `@JsonInclude`）＋ 域侧 `article-api/.../advice/GlobalResponseAdvice.java:69-113` / `GlobalExceptionHandler.java` | ✅ **一致** —— Go `service/common/response/response.go:3-7`（`Code/Msg/Data` 三字段**无 omitempty**）⇒ `data:null` 一定出现；Go `rest/router/patrouter.go:73,79-82`（404/405）≡ RAG（404 = `404 page not found\n` ＋ `text/plain; charset=utf-8` ＋ `nosniff`）。<br>🟡 **方法不匹配（405）被刻意分叉成 404 空 body**（article-api 是四域中唯一开 `rest.WithCors()` 的 ⇒ Go 的 `notAllowed` 被 CORS handler 接管 ⇒ `rest/internal/cors/handlers.go:44-48`）⇒ 已登记差异<br>✅ **本轮落码后 401 空 body 形状逐字未变**（验签失败由 Filter 产出**异常对象**、interceptor **原样重抛** ⇒ `@ExceptionHandler` 仍管得到 ⇒ 仍落 **401 + 空 body**；⚠️ 变异验证时发现：**本域「401 空 body」那条不区分**（Filter 裸写 401 恰好也是空 body ⇒ 只能证明「形状没变」、不能证明「谁写的」）⇒ ⇒ **本域判「Filter 不写响应」靠「413 压过 401」那一条**） | **L4**（`tools/errmsg-probe/run-parity.sh` ⇒ **EXIT=0**，Go sha256 == Java sha256 == `cad5cb4f…d1134`，49 行 = CONST 15 ＋ TABLE 15 ＋ FALLBACK 19；真源 sha256 校验通过） | 2026-10-27 |
-| **A5** | 端口治理 | `article-api/.../application.yml:43` `server.port: ${ARTICLE_API_PORT:8889}` ＋ `article-rpc/.../application.yml:96` `grpc.server.port: 9001` | ✅ **一致** —— Go `service/article/api/etc/article-api.yaml:3` `Port: 8889` ＋ `service/article/rpc/etc/article.yaml:2` `ListenOn: 0.0.0.0:9001` ⇒ **端口图 1:1 复刻**（含 Go 自身存在的重号：article-rpc 9001 ＝ comment-rpc 9001、article-api 8889 ＝ admin-api 8889 ⇒ 靠容器隔离）。`RANDOM_PORT` **只出现在测试**（`ArticleApiAssemblyWiringTest.java:72` 用 `${local.server.port}` 读回，不硬编码）⇒ 生产面无随机端口<br>🔴 **2026-10-27 G3 实测补登（本域 gRPC 测试端口段未治理 · 待 G4 分配段号）**：**生产面**无随机端口 ✔，但**测试面**有 **9 处**落 **OS 临时段**（49152–65535 ＝ **Docker 随机发布容器端口用的同一段** ⇒ 别的会话的容器先占住 ⇒ `EADDRINUSE` ⇒ 环境性抖动）：**8 处** `@SpringBootTest` 写 `"grpc.server.port=0"`（`ArticleGrpcInterceptorWiringTest.java:97` · `ArticleSchemaGateStartupOrderTest.java:154` · `ArticleTransactionWiringTest.java:64` · `ArticleJsonbResultMapWiringTest.java:64` · `ArticleSpringContextWiringTest.java:66` · `ArticleRpcSlowThresholdGateTest.java:111` · `service/ArticleNullJsonbToProtoMappingTest.java:81` · `ArticleNotNullUpdateStrategyWiringTest.java:87`）＋ **1 处** `ArticleRpcRuntimeBootGateTest.java:185` 的 `new ServerSocket(0)`（真 fat jar 进程口）⇒ ⇒ **与 comment 域同款缺陷**（comment 域本轮已迁：补 `RealGrpcPort` 同款 ＋ 5 处全改）⇒ ⇒ ⚠️ **本域**同样**没有**段管理类（实测 `find service/article -name "*Port*.java"` ⇒ 零命中）⇒ ⇒ **需要 global 段表先分配一段**（预留池 `22200–22599` 里挑一段）<br>📌 **订正（2026-10-28 10:5x · G3）—— 上面最后那句「需要 global 段表先分配一段」【已过期，且是本域自己的活】**：global 段表 §4.10.19.3 **早就把 `22400–22499` 预分配给 article 域**（状态「本层预分配 · **域侧未落码**」）⇒ ⇒ **不需等 G4 派单** ⇒ ⇒ 本轮已**全域自修**（9 处全迁 ＋ 机制类 `RealGrpcPort` ＋ 守门 6 条含 2 条源扫）⇒ ⇒ 逐条 ⇒ [`article/rpc.md` §二十三.7](./rpc.md#二十三7-🟢🔴-grpc-真进程端口也迁出-os-临时段13-处--本域专用段-2240022479-2026-10-28-105x--g3) |⇒ ⇒ **段表是 global 协调面 ⇒ 本域不擅自占预留段 ⇒ 已转派 G4**（本域落码待段号到位）
-<br>✅ **2026-10-28 订正（落码后回填 · 原值保留不改写）**：① **「待 G4 分配」是误判** ⇒ ⇒ global 段表 §4.10.19.3 **早就把 `22400–22499` 预分配给 article 域**（状态「本层预分配 · **域侧未落码**」）⇒ ⇒ **本项本就是域侧自修**（AGENTS.md §5.3d）⇒ ⇒ **本域已自修**（段 `22400–22479`；机制类 `article-rpc/.../support/RealGrpcPort.java` ＋ 守门 `RealGrpcPortTest.java` 6 条）⇒ ⇒ 逐条落账见 [`article/rpc.md` §二十三.7](./rpc.md#二十三7-🟢🔴-grpc-真进程端口也迁出-os-临时段13-处--本域专用段-2240022479-2026-10-28-105x--g3)（**含本行「9 处」的口径订正 ⇒ 实迁 13 处**）② **「9 处」只数了 Spring 上下文形态** ⇒ ⇒ 另有 **4 处** `ServerBuilder.forPort(0)`（同域 · 同一 OS 临时段）⇒ ⇒ **实迁 = 13 处** ⇒ ⇒ **本行按订正读**。 | **L3**（yaml 面扫描 + 测试源码实测；未起进程验绑定） | 2026-10-27 |
+| **A5** | 端口治理 | `article-api/.../application.yml:43` `server.port: ${ARTICLE_API_PORT:8889}` ＋ `article-rpc/.../application.yml:96` `grpc.server.port: 9001` | ✅ **一致** —— Go `service/article/api/etc/article-api.yaml:3` `Port: 8889` ＋ `service/article/rpc/etc/article.yaml:2` `ListenOn: 0.0.0.0:9001` ⇒ **端口图 1:1 复刻**（含 Go 自身存在的重号：article-rpc 9001 ＝ comment-rpc 9001、article-api 8889 ＝ admin-api 8889 ⇒ 靠容器隔离）。`RANDOM_PORT` **只出现在测试**（`ArticleApiAssemblyWiringTest.java:72` 用 `${local.server.port}` 读回，不硬编码）⇒ 生产面无随机端口<br>🔴 **2026-10-27 G3 实测补登（本域 gRPC 测试端口段未治理 · 待 G4 分配段号）**：**生产面**无随机端口 ✔，但**测试面**有 **9 处**落 **OS 临时段**（49152–65535 ＝ **Docker 随机发布容器端口用的同一段** ⇒ 别的会话的容器先占住 ⇒ `EADDRINUSE` ⇒ 环境性抖动）：**8 处** `@SpringBootTest` 写 `"grpc.server.port=0"`（`ArticleGrpcInterceptorWiringTest.java:97` · `ArticleSchemaGateStartupOrderTest.java:154` · `ArticleTransactionWiringTest.java:64` · `ArticleJsonbResultMapWiringTest.java:64` · `ArticleSpringContextWiringTest.java:66` · `ArticleRpcSlowThresholdGateTest.java:111` · `service/ArticleNullJsonbToProtoMappingTest.java:81` · `ArticleNotNullUpdateStrategyWiringTest.java:87`）＋ **1 处** `ArticleRpcRuntimeBootGateTest.java:185` 的 `new ServerSocket(0)`（真 fat jar 进程口）⇒ ⇒ **与 comment 域同款缺陷**（comment 域本轮已迁：补 `RealGrpcPort` 同款 ＋ 5 处全改）⇒ ⇒ ⚠️ **本域**同样**没有**段管理类（实测 `find service/article -name "*Port*.java"` ⇒ 零命中）⇒ ⇒ **需要 global 段表先分配一段**（预留池 `22200–22599` 里挑一段）<br>📌 **订正（2026-10-28 10:5x · G3）—— 上面最后那句「需要 global 段表先分配一段」【已过期，且是本域自己的活】**：global 段表 §4.10.19.3 **早就把 `22400–22499` 预分配给 article 域**（状态「本层预分配 · **域侧未落码**」）⇒ ⇒ **不需等 G4 派单** ⇒ ⇒ 本轮已**全域自修**（9 处全迁 ＋ 机制类 `RealGrpcPort` ＋ 守门 6 条含 2 条源扫）⇒ ⇒ 逐条 ⇒ [`article/rpc.md` §二十三.7](./rpc.md#二十三7-🟢🔴-grpc-真进程端口也迁出-os-临时段13-处--本域专用段-2240022479-2026-10-28-105x--g3) |⇒ ⇒ **段表是 global 协调面 ⇒ 本域不擅自占预留段 ⇒ 已转派 G4**（本域落码待段号到位）<br>✅ **2026-10-28 订正（落码后回填 · 原值保留不改写）**：① **「待 G4 分配」是误判** ⇒ ⇒ global 段表 §4.10.19.3 **早就把 `22400–22499` 预分配给 article 域**（状态「本层预分配 · **域侧未落码**」）⇒ ⇒ **本项本就是域侧自修**（AGENTS.md §5.3d）⇒ ⇒ **本域已自修**（段 `22400–22479`；机制类 `article-rpc/.../support/RealGrpcPort.java` ＋ 守门 `RealGrpcPortTest.java` 6 条）⇒ ⇒ 逐条落账见 [`article/rpc.md` §二十三.7](./rpc.md#二十三7-🟢🔴-grpc-真进程端口也迁出-os-临时段13-处--本域专用段-2240022479-2026-10-28-105x--g3)（**含本行「9 处」的口径订正 ⇒ 实迁 13 处**）② **「9 处」只数了 Spring 上下文形态** ⇒ ⇒ 另有 **4 处** `ServerBuilder.forPort(0)`（同域 · 同一 OS 临时段）⇒ ⇒ **实迁 = 13 处** ⇒ ⇒ **本行按订正读**。 | **L3**（yaml 面扫描 + 测试源码实测；未起进程验绑定） | 2026-10-27 |
 | **A6** | errmsg 契约 | `article-common/.../errmsg/ErrorCode.java:95-178`（15 个常量 ＋ 文案）`:229-231`（`of`）`:254-256`（`getMsg`）；消费点 `article-api/.../advice/GlobalResponseAdvice.java:113` ＋ 各 Service | ✅ **一致** —— 15 个码值/文案与 Go `service/article/common/errmsg/errmsg.go:3-19`（const）`:21-37`（codeMsg）`:39-45`（`GetErrMsg`）**逐条相同**；未知码回落（`of` → `ERROR` ⇒ `"FAIL"`）一致；**业务码从不上 gRPC 线**（rpc 发标准 gRPC 码、api 侧映射回业务码）≡ Go `get_author_article_logic.go:44-52` | **L4**（同 A4 的探针 ⇒ **错误码值/文案/未知码回落语义逐字节一致**） | 2026-10-27 |
 | **A7** | proto 契约 | `service/article/article-proto/src/main/proto/article.proto:1-134` | ✅ **一致**（差异仅 option 块＝表达层）—— 与 Go `proto/article.proto:1-133` **逐行相同**：`ArticleStatus` 6 个枚举值、6 个 message 的字段名/字段号/类型、`repeated`/`optional`/`map` 标注、`service ArticleService` 的 6 个 rpc 全部一致；唯一差异 = 删 `option go_package`（Go 原 `:4`）＋ 加 `java_package` ＋ `java_multiple_files=true`。<br>🔴 **但无机器回归网**：`tools/difftest/check-proto-static.sh` **只覆盖 `user` / `admin` / `task` 三域** ⇒ **article 的 proto 契约无任何自动守门**（AGENTS.md §3.4 已记「10 个 proto 中 8 个无回归网」）⇒ **域侧可自修**（域内加一条 proto 契约测试） | **L1**（逐行对照）；⚠️ **无回归网 ⇒ 下次改动无人守** | 2026-10-27 |
 | **A8** | DDL 时间列 / 类型 | `article-rpc/.../db/migration/V8__create_article.sql:21-49` ＋ `V9__create_article_sync_outbox.sql:11-40` ＋ `V10__create_article_community_revision.sql:16-57`；jsonb typeHandler 在**域内** `article-rpc/.../mapper/JsonbTypeHandler.java:48-93`（配 `autoResultMap=true` ＋ 自定义 `@Select` 必须挂 `@ResultMap`，见 `ArticleMapper.java:43-48,55-70`） | ✅ **DDL 列级一致**（类型/可空性/DEFAULT/索引/触发器全对齐，含 `secondary_tags`/`ext_info` = JSONB、三个时间列 = TIMESTAMPTZ）<br>🔴 **但 `baseline-version: 0` 缺**（`article-rpc/.../application.yml:53-57`）⇒ 非空 schema 下 **V1 被整条跳过** ⇒ **域侧自修**（见 §3） | **L4**（`python3 tools/difftest/check-ddl-static.py --domain article` ⇒ **EXIT=0**：两侧各 56 列、**逐字相同 56 列**、可空性差异 **0**、DEFAULT 差异 **0**）＋ 配置面 L3 | 2026-10-27 |
@@ -603,3 +602,203 @@ comment 域的 `CommentSpans` 用的是「异常逃出 ⇒ 按业务码段判一
 **④ 等批准** ⇒ **批准后才开工**（**回执落笔时**本轮除本回执小节外不写任何代码、不改任何台账；已读动作仅限只读：四档台账 + `_cross` + 阶段标准 + 回执模板）⇒ **Jason 于 2026-10-29 03:44 在本 lane 会话内明示「继续」**（消息 id `182054`）⇒ **已获批开工**（⑤ 由调度员代填，见本节末尾）。
 
 **⑤ 批准记录：Jason · 2026-10-29 03:44 · 批准范围：本 lane 回执 ① 所列候选任务 **H-A1**（hot proto 消息体 wire 探针落码）+ **A-1**（article 域双侧活体对拍）+ **F-1**（favorite-rpc 整域双侧活体对拍）· **G4 反馈单 1 张**（7 项，含补守门 `PINNED` 两行 `gorm.io/driver/postgres: v1.6.0` + `github.com/lovoo/goka: v1.1.16`）· **自有写权面 2 处台账过期描述**（`article/common.md:22` / `:74-77`、`comment/common.md:110` vs `:112`）**　← 由**调度员代填**（依据：Jason 于 2026-10-29 03:44 在**本 lane 会话内**明示「继续」· 消息 id `182054`；**回执人不得自批**· **代填 ≠ 代批准**）
+
+---
+
+## 10. 🟢 **DDL 逐域机器核**（`--indexes` + `--check-source`）· 2026-10-29 · R3·T-3.1（G3 lane · `article` 域）
+
+> **本节为什么存在**：`tools/difftest/check-ddl-static.py` **默认不开 `--indexes`** ⇒ 索引 / 唯一约束 / 触发器**从未被机器核过**；**默认不开 `--check-source`** ⇒ 只比活库、不比仓里的 `.sql` ⇒ 「迁移改了但没人重跑」**不可见**。
+> 主线已把这两层补上并逐域实跑，结论只落在 `docs/PhaseGoal-judge.md` §七 **G-8 / G-9** ⇒ **域级证据链断了一节** ⇒ 本节把 `article` 域的结论**落到本域台账**。
+> ⚠️ **本节只落结论与证据，不改任何差异**（RoundPlan T-3.1：冒出的差异按域登记，不当场修）。
+> ⚠️ **`article` 域不是 N/A** —— `hot` 域才是 N/A（两侧无数据库）；**本域两侧都有真库**（Go 侧 5 张表 / RAG 侧 5 张表）⇒ 本节是**实跑**结论，不是「本维度不适用」。
+> ⚠️ **本域触发器维度两侧各 1 个 ⇒ 可比对且一致**（**不是**「无对象可比」）—— 这是本域与 `follow` / `hot` 域的关键区别。
+
+### 10.1 执行口径（命令原文 · EXIT · 日期 · 环境）
+
+| 项 | 值 |
+|---|---|
+| 实跑日期 | **2026-10-29**（14:2x–14:5x 本机时间） |
+| 工作树 / 分支 | `/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-g3b` · `align/r3-ddl-g3-2`<br>基点 = `do-my-own-gh` @ **`d10227c5`** |
+| 真源 | `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang` —— **冻结 · 只读**；脚本只**复制**副本，从不写入 |
+| 容器 / 库 | `ddl-article-pg`（`postgres:16-alpine` · 端口 **55560**）· Go 库 `go_article_db` · RAG 库 `rag_article_db` |
+| Go 侧 schema 来源 | **真源自己的 `AutoMigrate`** + **真源自己的手写 `.sql`**：`service/article/rpc/internal/model/db.go:29`（`func InitDB(c config.Config) (*gorm.DB, error)`）→ `:55-58`（`db.AutoMigrate(&Article{}, &ArticleSyncOutboxEvent{})`）⇒ 之后由 `service/article/rpc/internal/model/002_community_revision.sql` 建 `article_revision`（`:4`）· `article_publication`（`:21`）· `article_domain_outbox`（`:29`）· 索引（`:41`）· **触发器 `article_revision_immutable`（`:51-53`）** |
+| ⚠️ Go 侧的**启动契约** | `db.go:61-71`：`InitDB` 在 AutoMigrate 之后**必须**查到 `article_revision_immutable` 触发器，缺则 `return nil, fmt.Errorf("community revision migration 002_community_revision.sql is required before article RPC startup")` ⇒ 探针**第一次跑必然报 `INITDB_ERR`** —— 这是**真源的启动契约**，不是 bug（补放 `002` 后即通过） |
+| RAG 侧 schema 来源 | 仓内 `service/article/article-rpc/src/main/resources/db/migration/`：`V8__create_article.sql` · `V9__create_article_sync_outbox.sql` · `V10__create_article_community_revision.sql`（**Flyway**；生产 `locations: classpath:db/migration` ⇒ `application.yml:77` · `baseline-version: 0` ⇒ `application.yml:76`） |
+| 豁免名单 | **一个都没用**（`--allow-idx` / `--allow-default` **均未传**）⇒ 差异数是**原始值** |
+| 两侧表集合 | Go `go_article_db` = {`article`, `article_sync_outbox`, `article_revision`, `article_publication`, `article_domain_outbox`} · RAG `rag_article_db` = **同名 5 张** ⇒ **表名两侧完全相同**（Go 的 `NamingStrategy{SingularTable:true}` + `TableName()`）⇒ `table_map` 为空（写一个映射进去 = **凭空制造列集合不一致**） |
+
+**命令 ① —— 建库 + 双侧活体对拍（索引 / 约束 / 触发器 + 源码↔活库 一次跑全）**
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-g3b"
+bash tools/difftest/ddl-parity.sh article
+```
+
+⇒ **EXIT=0** —— 末行 `== 实质差异合计 0 处 ⇒ 退出码 0 ==`；runner 行 `=== 对拍退出码: 0 ===`
+⇒ Go 探针第一次打印 `INITDB_ERR: community revision migration 002_community_revision.sql is required before article RPC startup`（**真源启动契约**，见上），补放 `002` 后建表成功。
+
+**命令 ② —— 只读静态对拍（显式带 `--indexes --check-source`）**
+
+```bash
+python3 tools/difftest/check-ddl-static.py --domain article --indexes --check-source
+```
+
+⇒ **EXIT=0**（0 处）—— 与 ① 同数同因 ⇒ 两条路径互为复算
+
+**命令 ③ —— 打印 RAG 侧 SQL 清单**
+
+```bash
+python3 tools/difftest/check-ddl-static.py --domain article --print-rag-sql
+```
+
+⇒ **EXIT=0**，输出 **3 行**（V8 / V9 / V10），与 ① 实际执行的 3 份 `.sql` **逐条一致** ⇒ **清单没有落后于仓**（清单由**目录扫描**产生 ⇒ 单一产生点）
+
+### 10.2 八个被核维度的逐项结论
+
+| # | 维度 | 两侧规模 | 结论 | 计入失败数 |
+|---|---|---|---|---|
+| 1 | **源码 ↔ 活库**（G-9 `--check-source`） | 5 张表 | ✅ **0 差异** —— 仓里的 3 份 `.sql` 在**干净临时库** `rag_article_db_srccheck` 上原样重放后，与活库**逐项一致**（表 / 列 / 列属性 / 可空性 / DEFAULT / 索引 / 约束 / 触发器） | 0 |
+| 2 | **列类型 / 长度** | **56 列 ↔ 56 列**（键集合一致 ✓） | ✅ **0 差异** —— 脚本原话「**逐字相同 56 列**」 | 0 |
+| 3 | **可空性（NOT NULL）** | 56 列 | ✅ **0 差异** —— 脚本原话「（两侧完全一致 ✓）」 | 0 |
+| 4 | **DEFAULT** | 56 列 | ✅ **0 差异** —— 脚本原话「（两侧完全一致 ✓）」 | 0 |
+| 5 | **索引**（`pg_indexes`） | Go **16** / RAG **16** | ✅ **0 差异** —— 脚本原话「（两侧索引定义逐条一致 ✓）」⇒ 连**索引名**都逐字相同 | 0 |
+| 6 | **唯一约束 / 主键**（`pg_constraint`） | Go **12** / RAG **12** | ✅ **0 差异** —— 脚本原话「逐条一致 12 行 ✓」（两侧约束集合完全一致 ✓） | 0 |
+| 7 | **触发器**（`pg_trigger`） | Go **1** / RAG **1** | ✅ **0 差异** —— **同名同表 1 个 ✓**（两侧触发器集合完全一致 ✓）⇒ ⚠️ **本维度有对象可比，不是「无对象可比」** | 0 |
+| 8 | **触发器形式**（`pg_get_triggerdef` → 结构化属性） | 两侧各 1，**可比对 1** | ✅ **0 差异** —— 「1 个可比对的触发器形式逐条一致 ✓」 | 0 |
+| 8′ | **触发器函数体**（`pg_proc` → 结构化语义属性，**不比 SQL 文本**） | 两侧各 1，**可比对 1** | ✅ **0 差异** —— 「1 个可比对的函数属性逐条一致 ✓」 | 0 |
+| | **合计** | | | **0** |
+
+⇒ **本域 DDL 在 8 个被核维度（触发器拆成集合 / 形式 / 函数体三条 ⇒ 实为 **9** 条判据）上 0 处残留。**
+
+### 10.3 「0 差异」项（逐条列全，不写「其余一致」）
+
+**① 列类型 / 长度 —— 56 列逐字相同**
+
+- 脚本原话：`DDL 列级对比  go_article_db=56 列  rag_article_db=56 列  （键集合一致 ✓）` + `逐字相同 56 列。`
+- ⇒ **本域没有 `users` 域那种「Go `text` vs RAG `varchar(255)`」的位宽问题**：Go 侧 `secondary_tags` / `ext_info` 是 `jsonb`（自定义类型 tag `gorm:"type:jsonb"`）⇒ RAG 侧 V8 也写 `JSONB` ⇒ **两侧逐字相同**。
+
+**② 可空性 / DEFAULT —— 两侧完全一致（0 处）**
+
+- `article` 表：Go 侧除 `id` / `title` 外**都可空**（Go 的 DDL 不加 `NOT NULL`）⇒ RAG 侧 `V8` **照抄**，未「顺手收紧」（收紧会让 Go 侧原本能写入的行在 Java 侧被拒 ⇒ 新增行为）。
+- ⚠️ **本域两侧都没有 `DEFAULT CURRENT_TIMESTAMP` 残留** —— 与 `users` / `comment` 域不同：`article` 的三个时间列 `created_at` / `updated_at` / `deleted_at` 两侧都是 **`TIMESTAMPTZ` 且可空、无 DB 默认**（Go 的 `autoCreateTime` 由 GORM 在 Go 代码里赋值 ⇒ 不建 DB 默认；RAG 侧照抄了这一形态）。
+
+**③ 索引 —— 16 / 16 逐条一致（连名字都逐字相同）**
+
+- 脚本原话：「（两侧索引定义逐条一致 ✓）」⇒ **本域 16 条索引的 `pg_indexes.indexdef` 逐字相同**（含主键索引与各列索引）。
+
+**④ 唯一约束 / 主键 —— 12 / 12 逐条一致**
+
+- 脚本原话：「逐条一致 12 行 ✓」+「（两侧约束集合完全一致 ✓）」⇒ **同表同名同定义**。
+
+**⑤ 触发器 —— 1 / 1 同名同表（**本域最硬的那条约束**）**
+
+| 侧 | 触发器 | 事件 | 目标表 | 函数 |
+|---|---|---|---|---|
+| Go | `article_revision_immutable` | `BEFORE UPDATE OR DELETE` | `article_revision` | `reject_article_revision_mutation()` |
+| RAG | `article_revision_immutable` | `BEFORE UPDATE OR DELETE` | `article_revision` | `reject_article_revision_mutation()` |
+
+⇒ 脚本的结构化属性逐项一致：`fn=reject_article_revision_mutation  rettype=trigger  args=<无>  volatility=VOLATILE  is_trigger=trigger  lang=plpgsql`（**go 与 rag 两行逐字相同**）。
+⇒ Go 出处：`service/article/rpc/internal/model/002_community_revision.sql:51-53`（`CREATE TRIGGER article_revision_immutable BEFORE UPDATE OR DELETE ON article_revision FOR EACH ROW EXECUTE FUNCTION reject_article_revision_mutation();`）· RAG 出处：`service/article/article-rpc/src/main/resources/db/migration/V10__create_article_community_revision.sql:60`（函数）+ `:68-70`（触发器）。
+⇒ ⚠️ **这条触发器是「article 修订不可变」语义的唯一载体** ⇒ 触发器维度**不是「无对象可比」**（对比 `follow` / `hot` 域两侧各 0 ⇒ 只能写「无对象可比」）⇒ 本域这一维度是**真比对过且一致**。
+
+**⑥ 源码 ↔ 活库 —— 0 差异（G-9 维度，本轮新增）**
+
+- 目录扫描得到 **3 份**迁移脚本 ⇒ **清单由目录扫描产生**，不会落后于仓。
+- 在**干净临时库** `rag_article_db_srccheck` 上**原样重放**（交给 PG 自己解析）⇒ 与活库逐项对比：**表集合 5 ↔ 5** · **列集合 0 差异** · **列属性 0 差异** · **可空性 0 差异** · **DEFAULT 0 差异** · **索引 0 差异** · **约束 0 差异** · **触发器 0 差异**
+- ⇒ 脚本原文：`✅ 仓里的迁移脚本**重放结果**与活库逐项一致（表 / 列 / 列属性 / 可空性 / DEFAULT / 索引 / 约束 / 触发器）`
+- ⇒ **含义**：本域仓里的 `.sql` 与**当前活库**之间**没有分叉** ⇒ 「迁移改了没人重跑」这一类漂移**在 `article` 域为零**。
+
+### 10.4 残留
+
+**本域残留 = 0 处。** ⇒ **无一条需要按 `docs/twoStage.md` §十 定级**。
+
+⚠️ **「0 残留」不等于「全维度已核」** —— 下列维度**无对象可比**或**脚本不查**，其结论是「**无对象可比**」/「**人工补查**」，**不是「已对齐」**（§10.6）：
+
+| 维度 | 状态 | 说明 |
+|---|---|---|
+| CHECK / 外键 / 分区 / 存储过程 | ⚪ **人工补查 ⇒ 两侧各 0** | 见 §10.6 的效力边界表（**人工闭合，非脚本原生结论**） |
+| 触发器**函数体的语义**（它到底在拒绝什么） | ⚪ **人工对照已核** | Go `002_community_revision.sql:44-48` 的函数体 `RAISE EXCEPTION 'article revision is immutable';` ⇒ RAG `V10:60-66` 同 ⇒ **两侧同一条拒绝**；⚠️ **函数体的语义机器判不了**（脚本只比结构化属性）⇒ 本条为**人工核对** |
+| 索引是否被真实查询计划选中 | ⚪ **未核** | 需 `EXPLAIN` + 真实数据量 ⇒ 本轮**未核**；本域两侧索引**定义全同** ⇒ 查询计划**无索引层面的差异来源**，实际代价未量化 |
+
+**签字状态**：`docs/Intentional_Deviations/article/` 下 `api.md` / `common.md` 是 **0 字节空占位**，`rpc.md` 两份（`SD-2026-10-24-01` 全局锁序 · `SD-2026-10-24-02` Kafka 通道切 broker）**均与 DDL 无关** ⇒ ⇒ **本域零 DDL 类签字偏离** ⇒ 本节**没有**「已签字 ⇒ 不要重复质疑」的条目需要回避，也**没有**「已登记待签字候选」条目。
+⚠️ **空占位 ≠「已签字」**（`docs/Pitfalls/users/admin/rpc.md` **P-9**）—— 这里只是说「**本域没有需要按签字档回避的 DDL 差异**」。
+
+### 10.5 变异验证（证明守门有牙齿，不是假绿）
+
+> ⚠️ **为什么不直接改仓内的 `.sql`**：`service/article/**` 的**代码与台账由本波次的另一条 lane 在改**（AGENTS.md §5.3d 并发纪律）⇒ 本轮**零改动仓内迁移脚本** ⇒ 变异走**临时副本**（任务书允许的「**临时副本**」路线）：把 `check-ddl-static.py` 与该域的 `db/migration/` 目录**原样拷到一棵临时树**（保持相对路径 ⇒ `REPO_ROOT` 与仓内布局一致），**逐字节校验 sha256 相同**，再在**副本**上做变异。
+> ⇒ 守门读到的**仍是仓里那份 `.sql` 的内容**（同一份字节），只是不在仓里写。
+
+**变异 ①：`article.status` 的列类型（`SMALLINT` → `INTEGER`）**
+
+| 步骤 | 命令 | 结果 |
+|---|---|---|
+| 副本 sha256（变异前） | `shasum -a 256` 副本 vs 仓内 3 份 `.sql` | **3/3 逐字节相同**（`V8` = `7eede910c871653fa975f5a672798d361b4c42aa94a76db0f4fa454d55eb6613` · `V9` = `e211dfb80225d23119879a112ea40fd1e914fa00d4d7bde4a75a89352b2fe721` · `V10` = `538c956ec91671dd0064bca942313e83849116bb650d1869870dab42404d795e`） |
+| 基线 | `python3 tools/difftest/check-ddl-static.py --domain article --indexes --check-source`（临时树） | **EXIT=0**（0 处）· 源码↔活库 = `✅ 一致` |
+| 变异 | `V8__create_article.sql`：`    status          SMALLINT      DEFAULT 0,` → `    status          INTEGER       DEFAULT 0,`（改**一个列的类型**，命中目标行 **1** 处） | — |
+| 变异后重跑 | 同上命令 | **EXIT=1**（**1** 处）· 源码↔活库 **转红**：<br>`🔴 列属性不同：article.status  源码=('integer', '')  活库=('smallint', '')`<br>`❌ 源码 ↔ 活库**分叉 1 处** ⇒ 活库已过期于仓里的迁移脚本` |
+| 还原 | 改回 `SMALLINT` | — |
+| 还原后重跑 | 同上命令 | **EXIT=0**（**0** 处 · 回到基线）· 源码↔活库 回到 `✅ 一致` |
+| **还原校验** | `shasum -a 256` 临时副本 vs 仓内文件 | **3/3 仍逐字节相同**（`V8` 仍是 `7eede910…eb6613`）⇒ 逐字节回到变异前 |
+| 副本清理 | `rm -rf` 临时树 | **已删除**（复查：目录不存在）⇒ **工作树里不留临时副本** |
+
+⇒ **结论**：变异**精确报出 1 处**、**指向被改的那一列**（`article.status`），**没有多红也没有漏红** ⇒ 守门**不是假绿**；还原后**精确回到 EXIT=0** ⇒ 无残留。
+⚠️ 本域基线就是 **EXIT=0** ⇒ 「变异必红 ⇒ 还原必绿」的**两端都是干净的 0/1 往返**（对比 `favorite` 域：基线 EXIT=1 ⇒ 变异后 3 ⇒ 还原后 1）。
+
+**仓内零改动核验**
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-g3b"
+git status --short -- service/     # ⇒ 空
+git diff --stat -- service/        # ⇒ 0 行
+```
+
+⇒ `service/article/**` 与 `service/favorite/**`（同波次另一 lane 在改）**零改动**。
+
+### 10.6 证据强度 · 效力边界 · 未能核到的部分
+
+**证据强度 = E4（`docs/twoStage.md` §8.1「运行证据」）＋ L4（域台账分层：运行面 · 双侧活体）** —— 两侧各建一个**真 PG 16** 库（Go 侧跑真源自己的 `AutoMigrate` + 真源自己的 `002_community_revision.sql`、RAG 侧跑仓里的真迁移脚本）⇒ 逐列 / 逐索引 / 逐约束 / 逐触发器 dump 后机器比对。
+⚠️ 本节所有 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环（AGENTS.md §0 证据强度分层）。
+
+**效力边界（越界即失效）**
+
+| # | 边界 | 对本域是否成立 |
+|---|---|---|
+| 1 | **`--check-source` 的重放引擎 ≠ 生产引擎** —— 重放用 **psql**；本域生产用 **Flyway 引擎**（`application.yml:77` `locations: classpath:db/migration`）⇒ 两个切句器不同 | ✅ **对本域不成立** —— 已核：3 份 `.sql` 的 `$$` 命中 **0** ⇒ 无美元引号块 ⇒ 两个引擎看到的语句序列相同；且三份脚本只含 `CREATE TABLE IF NOT EXISTS` / `CREATE OR REPLACE FUNCTION` / `CREATE TRIGGER` / `DROP TRIGGER IF EXISTS` 形态 |
+| 2 | **迁移清单 = 生产清单** —— `discover_rag_sql` 目录扫描的 3 份，与生产 Flyway `locations` 指向的目录内容**逐条一致**（命令 ③ 与 ① 的执行日志互证） | ✅ **成立** |
+| 3 | **Flyway 账本表** —— 生产库会有账本表（`application.yml:53` `flyway:` 段；`article-rpc` 用**默认表名** `flyway_schema_history`，见 `application.yml:56-59` 的注释），但**对拍环境直接用 psql 放 `.sql`** ⇒ 两个库里**都没有**账本表 ⇒ 本轮表集合就是 {5 张业务表} | ✅ **本轮无干扰**；⚠️ 换用真 Flyway 起环境时，账本表会出现在 RAG 侧 ⇒ 工具靠 `exclude_tables=("flyway_schema_history",)` 前缀匹配排除（**已配置**） |
+| 4 | **`baseline-version: 0`**（`application.yml:76`）—— 生产拓扑（共享非空 schema）下 V1 **必须**执行，否则表建不出来 | ⚠️ **本轮未核** —— 对拍用的是**全新空库** ⇒ baseline 不触发 ⇒ V1 正常执行。⚠️ **这正是该配置注释里点名的陷阱**（`application.yml:56-75`）⇒ **该维度的守门在域侧真 PG + 真 Flyway 引擎的用例里**，不在本节范围 ⇒ **登记为「未核」** |
+| 5 | **触发器函数体的语义**机器判不了 ⇒ 走人工逐条 | ✅ **已人工核对**（§10.3 ⑤）—— 两侧函数体都是 `RAISE EXCEPTION 'article revision is immutable'` ⇒ **同一条拒绝** |
+| 6 | **`pg_constraint` 只比 `contype` + 定义文本，不解析外键的引用目标**（脚本文件头第 44–45 行） | ✅ **不适用**（本域两侧 `contype='f'` 各 **0 行**，见 §10.6 的人工补查表） |
+| 7 | **分区 / 存储过程 / 触发器函数** —— 脚本不查 | ✅ **不适用**（3 份 `.sql` 的**可执行部分**无 `PARTITION` / `PROCEDURE` 关键字 ⇒ 已人工核；两侧 `pg_partitioned_table` / `prokind='p'` 均 **0**） |
+| 8 | **Go 侧 schema 与生产的完全等价性** | ⚠️ **有一处未核** —— 本域 Go 侧**有**手写 `.sql`（`002`）且 `ddl-parity.sh` 的 `GO_SQL` 清单**确实包含**它 ⇒ 跑的是「AutoMigrate → 补放 002」的**app-first** 顺序。⚠️ **本域的 `002` 用的是 `CREATE TABLE IF NOT EXISTS`**（`002:4` · `:21` · `:29`）⇒ 在 AutoMigrate 已建的表上会**整表跳过** —— 但本域 `article_revision` / `article_publication` / `article_domain_outbox` **都不在 AutoMigrate 列表里**（`db.go:55-58` 只 AutoMigrate `Article` + `ArticleSyncOutboxEvent`）⇒ ⇒ **`002` 的三张表都是新表 ⇒ 整条执行成功** ⇒ ⇒ **本域不存在 `favorite` 域那种「顺序敏感性」**（见 [`favorite/vs-common.md` §9.4](../favorite/vs-common.md)）⇒ ⇒ **本域 app-first ≡ sql-first**。⚠️ **但「Go 生产上 `002` 是否真被执行」本身未核**（真源无任何 Go 代码执行它 ⇒ 属运维手工步骤）⇒ **登记为「未核」** |
+
+**人工补查（脚本**不查**的维度 —— 结论强度 = **L4 + 人工补查**，**非脚本原生结论**）**
+
+| 维度 | Go 侧 `go_article_db` | RAG 侧 `rag_article_db` | 判定 |
+|---|---|---|---|
+| 外键（`pg_constraint` `contype='f'`） | **0 行** | **0 行** | ⚪ 两侧各 0 ⇒ **无对象可比** |
+| 分区表（`relkind='p'` / `pg_partitioned_table`） | **0** / **0** | **0** / **0** | ⚪ 两侧各 0 ⇒ **无对象可比** |
+| 存储过程（`prokind='p'`） | **0** | **0** | ⚪ 两侧各 0 ⇒ **无对象可比** |
+| 函数（`prokind='f'`，**非触发器**） | **0** | **0** | ⚪ 两侧各 0 ⇒ **无对象可比** |
+| 触发器函数（被 `pg_trigger` 引用） | **1**：`reject_article_revision_mutation` | **1**：`reject_article_revision_mutation` | ✅ **同名 ⇒ 人工闭合**（语义另由 §10.3 ⑤ 人工核对） |
+
+**未能核到的部分（明确写「未核」+ 原因，不含糊）**
+
+| # | 未核项 | 原因 | 影响 |
+|---|---|---|---|
+| 1 | **共享库拓扑下的 Flyway `baseline-version: 0` 行为** | 对拍用**全新空库** ⇒ baseline 不触发 ⇒ 该配置**未被本节验证** | ⚠️ 该维度的守门在域侧真 PG + 真 Flyway 引擎的用例里（`application.yml:56-75` 明写这个陷阱）⇒ 本节**不重复核**，只登记边界 |
+| 2 | **Go 生产上 `002_community_revision.sql` 由谁执行** | 真源**没有任何 Go 代码**执行它 ⇒ 属运维手工步骤 ⇒ 本节只核了「AutoMigrate + 补放 002」这一种组合 | ⚠️ 若生产上**从未**执行 `002` ⇒ Go 生产库**缺** `article_revision` / `article_publication` / `article_domain_outbox` 三张表 ⇒ 那是**部署面**问题（不是 DDL 漂移）⇒ 本节**无法从 schema 对拍看出** |
+| 3 | **索引是否被真实查询计划选中** | 需 `EXPLAIN` + 真实数据量 ⇒ 本轮**未核** | 本域两侧索引**定义全同** ⇒ 查询计划**无索引层面的差异来源**；实际代价未量化 |
+| 4 | **触发器在真实 UPDATE/DELETE 下的拒绝行为** | 本节只比**结构化属性**，**没有**真的发一次 UPDATE 去撞触发器 | 两侧触发器定义**逐字相同** ⇒ 拒绝行为**无差异来源**；但「RAG 侧 `article_revision` 的 UPDATE 确实被拒」这一**运行期**事实**不在本节证据内** |
+
+### 10.7 与其它台账的关系（指针，不改别的文件）
+
+| 台账 | 本节与它的关系 |
+|---|---|
+| [`docs/DRIFT/article/rpc.md`](rpc.md) | 本域**组件级**台账；本节是 **DDL 这一维度**的域级落账（域内 DDL 残留 **0**）⇒ 与那一份台账的其它维度结论**互不冲突** |
+| 本文件 **§2 的 A8 轴** | A8 行已记 `L4`（`check-ddl-static.py --domain article` ⇒ EXIT=0 · 两侧各 56 列逐字相同）⇒ ✅ **本节是 A8 那一格的**扩展**（补上 `--indexes`（索引 / 约束 / 触发器）与 `--check-source`（源码↔活库）两层）⇒ **A8 原结论不变**（仍读作「✅ DDL 列级一致」），只是**证据维度变宽** |
+| 本文件 **§2 的 A8 轴「`baseline-version: 0` 缺」那条** | 🔴 **已被后续事实推翻** —— `application.yml:76` **现在就有** `baseline-version: 0`（2026-10-27 G3 域侧自修已落码）⇒ A8 那行「🔴 但 `baseline-version: 0` 缺（`application.yml:53-57`）⇒ 域侧自修（见 §3）」**是陈旧的** ⇒ ⚠️ **本 lane 不改 §2**（该行属本文件但改动需与另一 lane 在改的 article 台账协调）⇒ **只在此登记，报给收口执行者** |
+| [`docs/DRIFT/_cross/ddl-type-divergences.md`](../../DRIFT/_cross/ddl-type-divergences.md) | 🔴 **该文件属 `_cross` ⇒ 本 lane 无写权** ⇒ 只在此登记：主线对 `article` 域记「类型/长度 **0 差异**」⇒ **与本节独立复跑结论一致**（本节另补了索引 / 约束 / 触发器 / 源码↔活库四层 + 变异验证） |
+| [`docs/PhaseGoal-judge.md` §七 **G-8 / G-9`](../../PhaseGoal-judge.md) | 主线结论（G-8 / G-9 已闭合 · 9 域逐域跑）—— 本节是 `article` 域的**域级落账**；⚠️ 该文件**主线写** ⇒ 本 lane 只读 |
+
+---

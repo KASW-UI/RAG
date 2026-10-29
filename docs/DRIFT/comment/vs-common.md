@@ -140,7 +140,12 @@
 
 | 项 | 内容 |
 |---|---|
-| **被卡住的 4 件事** | ① Redis 断连快速失败的**活体对拍**（favorite-api 侧）—— ⚠️ **本域现状已核清（2026-10-27 · 独立实测，不是转述）**：**我四域的域侧副本 = 0**（全仓生产代码里 `RedisDisconnectedBehaviorConfig` 只命中 G1 域的 `users/user/user-api` 等 **5** 份 ⇒ 我域**零命中**）⇒ ⇒ **G4 收编时的删除动作在我域 = 0**（与 G1 的 5 份不同）；且**我树共享层根本没有 redis 自动配置**（`find service/common/src/main/java -iname "*redis*"` ⇒ 零命中；`2f12236` 不在 HEAD 历史）🔴 **订正（2026-10-27 第十八轮 · 合并后）**：**这一条已不成立** —— merge `e18fd52` 把 `align/g4-service-common` @ `cd893d1` 合入 ⇒ ⇒ `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java` **已在本树** ⇒ ⇒ 「共享层那份**必被创建**」现在**可在树内验**（我四域仍**零域侧副本** ⇒ **无遮蔽** ⇒ 收编成立）⇒ ⇒ **「G4 收编时的删除动作在我域 = 0」这条结论不变**（域内副本数仍为 0）⇒ ⇒ **我域不是「被域内副本遮蔽」，而是「两边都没有」** ⇒ ⇒ 断连快速失败在我域**尚未成立** ⇒ ⇒ **活体对拍必须等共享层落地**（这正是它卡在选项 D 的原因）<br>② 删域侧排序桥副本（🔴 **2026-10-27 订正：原写「本域 article-rpc / favorite-rpc 各 1 份」是**漏了本域** ⇒ 本域自己也有 1 份（`service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` ＋ 自己的 `imports:1`）⇒ **全仓 9 座域侧桥**（article / comment / favorite / follow / like / message / task / users-user / users-admin）⇒ 本域那份此前**没进过台账**）<br>✅ **2026-10-27 G3 已落码**：本域那份**已删**（删 `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` ＋ 本域自己的 `imports` 文件**整份删**—— 它**只有那 1 行** ⇒ ⇒ 与 article-rpc 的「2 行、只删第 1 行」形态**不同**）⇒ ⇒ **验证（先 `clean` 再跑）**：`mvn -o -pl service/comment/comment-rpc -am test -Dtest='CommentRpcGoSemanticsGateTest,CommentRpcArtifactClasspathGateTest,CommentRpcRuntimeBootGateTest'` ⇒ **18 条 / 0 failures / 0 errors / 0 skipped**（2026-10-27T23:17:11+08:00）⇒ `CommentRpcGoSemanticsGateTest` **14 条**（**真上下文** ＋ 注入 `SqlSessionFactory`）＋ `CommentRpcArtifactClasspathGateTest` **3 条**（含**新增**第 ③ 条：fat jar 内嵌的 common jar 带共享层排序桥）＋ `CommentRpcRuntimeBootGateTest` **1 条**（**真 fat jar 真进程起来**）⇒ ⇒ **全仓现存 6 座域侧桥**（follow / like / message / task / users-user / users-admin）⇒ ⇒ **排序桥的唯一来源 = 共享层那座**
+| **被卡住的 4 件事** | ① Redis 断连快速失败的**活体对拍**（favorite-api 侧）—— ⚠️ **本域现状已核清（2026-10-27 · 独立实测，不是转述）**：**我四域的域侧副本 = 0**（全仓生产代码里 `RedisDisconnectedBehaviorConfig` 只命中 G1 域的 `users/user/user-api` 等 **5** 份 ⇒ 我域**零命中**）⇒ ⇒ **G4 收编时的删除动作在我域 = 0**（与 G1 的 5 份不同）；且**我树共享层根本没有 redis 自动配置**（`find service/common/src/main/java -iname "*redis*"` ⇒ 零命中；`2f12236` 不在 HEAD 历史）🔴 **订正（2026-10-27 第十八轮 · 合并后）**：**这一条已不成立** —— merge `e18fd52` 把 `align/g4-service-common` @ `cd893d1` 合入 ⇒ ⇒ `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java` **已在本树** ⇒ ⇒ 「共享层那份**必被创建**」现在**可在树内验**（我四域仍**零域侧副本** ⇒ **无遮蔽** ⇒ 收编成立）⇒ ⇒ **「G4 收编时的删除动作在我域 = 0」这条结论不变**（域内副本数仍为 0）⇒ ⇒ **我域不是「被域内副本遮蔽」，而是「两边都没有」** ⇒ ⇒ 断连快速失败在我域**尚未成立** ⇒ ⇒ **活体对拍必须等共享层落地**（这正是它卡在选项 D 的原因）<br>② 删域侧排序桥副本（🔴 **2026-10-27 订正：原写「本域 article-rpc / favorite-rpc 各 1 份」是**漏了本域** ⇒ 本域自己也有 1 份（`service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` ＋ 自己的 `imports:1`）⇒ **全仓 9 座域侧桥**（article / comment / favorite / follow / like / message / task / users-user / users-admin）⇒ 本域那份此前**没进过台账**）<br>✅ **2026-10-27 G3 已落码**：本域那份**已删**（删 `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/config/MybatisPlusOrderingBridgeAutoConfiguration.java` ＋ 本域自己的 `imports` 文件**整份删**—— 它**只有那 1 行** ⇒ ⇒ 与 article-rpc 的「2 行、只删第 1 行」形态**不同**）⇒ ⇒ **验证（先 `clean` 再跑）**：`mvn -o -pl service/comment/comment-rpc -am test -Dtest='CommentRpcGoSemanticsGateTest,CommentRpcArtifactClasspathGateTest,CommentRpcRuntimeBootGateTest'` ⇒ **18 条 / 0 failures / 0 errors / 0 skipped**（2026-10-27T23:17:11+08:00）⇒ `CommentRpcGoSemanticsGateTest` **14 条**（**真上下文** ＋ 注入 `SqlSessionFactory`）＋ `CommentRpcArtifactClasspathGateTest` **3 条**（含**新增**第 ③ 条：fat jar 内嵌的 common jar 带共享层排序桥）＋ `CommentRpcRuntimeBootGateTest` **1 条**（**真 fat jar 真进程起来**）⇒ ⇒ **全仓现存 6 座域侧桥**（follow / like / message / task / users-user / users-admin）⇒ ⇒ **排序桥的唯一来源 = 共享层那座** ③ client breaker **装配复验**（= §4-G4-2）④ **U15 / C-3 统一载体**落地（= global E65） |
+| **共同前置** | 共享层的落码 commit **不在我树 HEAD 历史**（`2e2a84f` · `a1a2e05` · `e3f2046` ⇒ `git merge-base --is-ancestor` 对我树 HEAD **全为否**，仅 object 库里存在）⇒ ⇒ **共享层标准件没进我树 ⇒ 我不能先删域侧副本**（先删 ⇒ MP 排序边消失 ⇒ 上下文起不来） |
+| **选项 D（本轮新增 · 我推荐）** | 我直接 `git merge align/g4-service-common` 到我树 ⇒ **同一仓库 ⇒ 提交对象共享 ⇒ 不产生「内容同、hash 异」的副本** ⇒ 合主干时**不会** add/add 撞 ⇒ ⇒ **只需你给一个稳定点**（从哪个 commit 起） |
+| **其他选项** | **A**（你合主干后我合主干）· **B**（我 cherry-pick ⇒ **会**造出 hash 不同的副本 ⇒ 合主干时大概率撞）· **C**（你替我合） |
+| **要你回什么** | **一个字**：`D` 还是 `A`；若 `D` ⇒ 再给**起始 commit**。⇒ 我拿到即按序推进那 4 件事（**不重复催**，这是同一件事的第 3 次问，前两次都附了 A/B/C） |
+
 > 🔴 **2026-10-27 · G3 独立核结论（4 项全过 ⇒ 删除动作本身结构上安全，但**等真 PG 窗口**才落刀）**
 > 📌 **2026-10-27 G3 已落刀（原文保留不改写）**：**「等真 PG 窗口」这个条件本轮**没等**（也不需要）——
 >   删除是**纯删减**（删一个空类 ＋ 删掉只含那一行的 `imports` 文件）⇒ ⇒ 且三处验证**本身就要真环境**：
@@ -172,11 +177,6 @@
 > 〔📌 **2026-10-28 G3 更新**：**规格已入仓** ⇒ [`hot/rpc.md` §十二.9](../hot/rpc.md#十二9-🔴-toolsredis-disconnect-probe-的完整落码规格2026-10-28--g3--自包含照此即可落码)（**含可直接复制的 Go 探针源码** ＋ 真源 Options 逐条出处 ＋ 时序 ＋ 编排 ＋ 实测基线 ＋ 输出格式 ＋ 退出码）⇒ ⇒ **G4 不必再等聊天里的信，直接照仓内规格落码** ⇒ ⇒ 待 `tools/redis-disconnect-probe/` 落地后 ⇒ **仓内即可复现** ⇒ ⇒ 证据强度可从「L4-一次性」升为「**L4（仓内可复现）**」⇒ **原句保留不改写**〕
 > ⚠️ **附带（删 imports 的具体形态）**：`comment-rpc` 的 `imports` 文件**只有这一行**（= 桥类）
 > ⇒ ⇒ 删桥后**文件变空** ⇒ 决定**连文件一起删**（空 imports 文件无意义）。
-③ client breaker **装配复验**（= §4-G4-2）④ **U15 / C-3 统一载体**落地（= global E65） |
-| **共同前置** | 共享层的落码 commit **不在我树 HEAD 历史**（`2e2a84f` · `a1a2e05` · `e3f2046` ⇒ `git merge-base --is-ancestor` 对我树 HEAD **全为否**，仅 object 库里存在）⇒ ⇒ **共享层标准件没进我树 ⇒ 我不能先删域侧副本**（先删 ⇒ MP 排序边消失 ⇒ 上下文起不来） |
-| **选项 D（本轮新增 · 我推荐）** | 我直接 `git merge align/g4-service-common` 到我树 ⇒ **同一仓库 ⇒ 提交对象共享 ⇒ 不产生「内容同、hash 异」的副本** ⇒ 合主干时**不会** add/add 撞 ⇒ ⇒ **只需你给一个稳定点**（从哪个 commit 起） |
-| **其他选项** | **A**（你合主干后我合主干）· **B**（我 cherry-pick ⇒ **会**造出 hash 不同的副本 ⇒ 合主干时大概率撞）· **C**（你替我合） |
-| **要你回什么** | **一个字**：`D` 还是 `A`；若 `D` ⇒ 再给**起始 commit**。⇒ 我拿到即按序推进那 4 件事（**不重复催**，这是同一件事的第 3 次问，前两次都附了 A/B/C） |
 
 ## 5. 交付物清单
 
@@ -332,3 +332,313 @@
 **④ 等批准** ⇒ **批准后才开工**（**回执落笔时**本轮除本回执小节外不写任何代码、不改任何台账；已读动作仅限只读：四档台账 + `_cross` + 阶段标准 + 回执模板）⇒ **Jason 于 2026-10-29 03:44 在本 lane 会话内明示「继续」**（消息 id `182054`）⇒ **已获批开工**（⑤ 由调度员代填，见本节末尾）。
 
 **⑤ 批准记录：Jason · 2026-10-29 03:44 · 批准范围：本 lane 回执 ① 所列候选任务 **H-A1**（hot proto 消息体 wire 探针落码）+ **A-1**（article 域双侧活体对拍）+ **F-1**（favorite-rpc 整域双侧活体对拍）· **G4 反馈单 1 张**（7 项，含补守门 `PINNED` 两行 `gorm.io/driver/postgres: v1.6.0` + `github.com/lovoo/goka: v1.1.16`）· **自有写权面 2 处台账过期描述**（`article/common.md:22` / `:74-77`、`comment/common.md:110` vs `:112`）**　← 由**调度员代填**（依据：Jason 于 2026-10-29 03:44 在**本 lane 会话内**明示「继续」· 消息 id `182054`；**回执人不得自批**· **代填 ≠ 代批准**）
+
+---
+
+## 9. 🔴 **DDL 逐域机器核**（`--indexes` + `--check-source`）· 2026-10-29 · R3·T-3.1（G3 lane · `comment` 域）
+
+> **本节为什么存在**：`tools/difftest/check-ddl-static.py` **默认不开 `--indexes`** ⇒ 索引 / 唯一约束 / 触发器**从未被机器核过**；**默认不开 `--check-source`** ⇒ 只比活库、不比仓里的 `.sql` ⇒ 「迁移改了但没人重跑」**不可见**。
+> 主线已把这两层补上并逐域实跑，结论只落在 `docs/PhaseGoal-judge.md` §七 **G-8 / G-9** ⇒ **域级证据链断了一节** ⇒ 本节把 `comment` 域的结论**落到本域台账**。
+> ⚠️ **本节只落结论与证据，不改任何差异**（RoundPlan T-3.1：冒出的差异按域登记，不当场修）。
+> ⚠️ **`comment` 域不是 N/A** —— `hot` 域才是 N/A；**本域两侧都有真库**（Go 侧 6 张表 / RAG 侧 7 张表）⇒ 本节是**实跑**结论。
+
+### 9.0 🔴 **本域有一个「机器核跑不到」的坑：默认口径在列集合不一致处提前退出 ⇒ 7 张表里只核了 1 张**
+
+> ⚠️ **这一节是本域最重要的发现**，先说清楚，后面的表才有意义。
+
+**现象**：`check-ddl-static.py` 的「列集合不一致」分支（脚本第 ~1050 行）在**列类型 / 可空性 / DEFAULT / 索引 / 约束 / 触发器**七项对照**之前**就 `return 2` ⇒ ⇒ **只要两侧表集合不一致，其余七个维度一个都跑不到**。
+
+**本域实测（默认口径）**：
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-g3b"
+bash tools/difftest/ddl-parity.sh comment
+python3 tools/difftest/check-ddl-static.py --domain comment --indexes --check-source
+```
+
+⇒ **两条命令都 EXIT=2**；输出末段是 8 行 `仅 RAG 有: report_record.*` ⇒ **Go↔RAG 的七项对照全部没跑到**。
+
+⇒ **后果**：`docs/PhaseGoal-judge.md` §七 **G-8 / G-9** 那行对 `comment` 域记的残留是「**comment 域整张 `report_record` 表（8 列）仅 RAG 有**（已签字保留）」⇒ ⇒ **那一行只记下了「导致提前退出的那一条差异」，把另外 6 张表的对照结果整个漏掉了**（⇒ 详见 §9.7 的跨台账登记）。
+
+**补跑口径（不改守门、不改仓内任何文件）**：用守门**自带的 `--rag-db` 覆盖参数**，把 RAG 侧指向一份**只删掉 `report_record` 表的同源副本** ⇒ 表集合对齐 ⇒ 七个维度就能真跑。
+
+```bash
+# ① 在对拍容器内造一份「RAG 侧去掉 report_record」的同源副本（TEMPLATE ⇒ 逐对象同源）
+docker exec ddl-comment-pg psql -U admin -d postgres \
+  -c "CREATE DATABASE rag_comment_db_cmp6 TEMPLATE rag_comment_db;"
+docker exec ddl-comment-pg psql -U admin -d rag_comment_db_cmp6 -c "DROP TABLE report_record;"
+
+# ② 用守门自带的 --rag-db 覆盖跑七项对照（工具与仓内文件零改动）
+python3 tools/difftest/check-ddl-static.py --domain comment --indexes --rag-db rag_comment_db_cmp6
+```
+
+⇒ **EXIT=1**（**23 处**）⇒ 结论见 §9.3 / §9.4。
+⇒ ⚠️ **本节的「23 处」结论来自这条补跑口径**，**不是**默认口径的产出；默认口径的产出就是 **EXIT=2**（本节两处都如实记）。
+
+### 9.1 执行口径（命令原文 · EXIT · 日期 · 环境）
+
+| 项 | 值 |
+|---|---|
+| 实跑日期 | **2026-10-29**（14:3x–15:0x 本机时间） |
+| 工作树 / 分支 | `/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-g3b` · `align/r3-ddl-g3-2`<br>基点 = `do-my-own-gh` @ **`d10227c5`** |
+| 真源 | `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang` —— **冻结 · 只读**；脚本只**复制**副本，从不写入 |
+| 容器 / 库 | `ddl-comment-pg`（`postgres:16-alpine` · 端口 **55566**）· Go 库 `go_comment_db` · RAG 库 `rag_comment_db`（补跑副本 `rag_comment_db_cmp6`） |
+| Go 侧 schema 来源 | **真源自己的 `AutoMigrate`**：`service/comment/rpc/internal/model/db.go:15`（`db.AutoMigrate(&Subject{}, &CommentContent{}, &CommentIndex{}, &CommentLike{}, &CommentDomainFactOutbox{}, &CommentFactStream{})`）⇒ **6 张表** ⇒ 探针调的正是**真源自己的 `InitDB`**（`dsn` 探针）⇒ 跑的是**真源同一份 struct tag + 同一个 gorm 版本** |
+| ⚠️ **Go 侧没有手写 `.sql`** | 本域的 `001/002/003` 在 `service/comment/rpc/internal/model/migrations/` 下，且**只被测试脚本执行**（`service/comment/rpc/internal/model/test-community-postgres.sh:47,49`）⇒ ⇒ **`ddl-parity.sh` 的 `GO_SQL` 清单对本域为空** ⇒ **Go 侧生产 DDL = `AutoMigrate` 产物**（这一点是 comment 域所有约束差异的根因，见 §9.4） |
+| Go struct 出处 | `service/comment/rpc/internal/model/data_model.go`（`Subject` / `CommentContent` / `CommentIndex` / `CommentLike` / `CommentDomainFactOutbox` / `CommentFactStream`）· ⚠️ **`ReportRecord` 的 struct 存在**（`data_model.go:55-68`，`TableName()` → `report_record`）**但不在 `db.go:15` 的 AutoMigrate 列表里** ⇒ **表不会被创建** |
+| RAG 侧 schema 来源 | 仓内 `service/comment/comment-rpc/src/main/resources/db/migration/`：`V1__create_comment_subject.sql` · `V2__create_comment_index.sql` · `V3__create_comment_content.sql` · `V4__create_comment_like.sql` · `V5__create_comment_report_record.sql` · `V6__create_comment_domain_fact_outbox.sql` · `V7__create_comment_fact_stream.sql` · `V8__align_comment_fact_delivery_with_go.sql`（**Flyway**；生产 `locations: classpath:db/migration` ⇒ `application.yml:110` · `baseline-version: 0` ⇒ `application.yml:109`） |
+| 豁免名单 | **一个都没用**（`--allow-idx` / `--allow-default` **均未传**）⇒ 差异数是**原始值** |
+| 两侧表集合 | Go `go_comment_db` = {`subject`, `comment_index`, `comment_content`, `comment_like`, `comment_domain_fact_outbox`, `comment_fact_stream`} = **6 张**<br>RAG `rag_comment_db` = 上述 **6 张 ＋ `report_record`** = **7 张** ⇒ ⇒ **表名两侧完全相同** ⇒ `table_map` 为空 |
+
+**命令 ① —— 建库 + 双侧活体对拍（默认口径）**
+
+```bash
+bash tools/difftest/ddl-parity.sh comment
+```
+
+⇒ **EXIT=2**（runner 行 `=== 对拍退出码: 2 ===`）—— Go 探针打印 `AUTOMIGRATE_OK`；RAG 侧按序执行 `V1`→`V8`（`V8` 有一条 `NOTICE: trigger "comment_fact_identity_immutable" ... does not exist, skipping` ⇒ **RAG 侧建出了该触发器**）
+⇒ 退出码 2 的含义 = **「列集合不一致」**（脚本自身的闸门），**不是**「有实质差异」也不是「环境不满足」。
+
+**命令 ② —— 只读静态对拍（显式带 `--indexes --check-source`，默认口径）**
+
+```bash
+python3 tools/difftest/check-ddl-static.py --domain comment --indexes --check-source
+```
+
+⇒ **EXIT=2**，输出与 ① 相同（8 行 `仅 RAG 有: report_record.*`）。
+⇒ ⚠️ **但「源码 ↔ 活库」那一维**在退出前**已经跑完**（脚本把 G-9 放在所有环境闸门**之前**执行）⇒ 该维结论 = **0 差异**（详见 §9.2 第 1 行）。
+
+**命令 ③ —— 打印 RAG 侧 SQL 清单**
+
+```bash
+python3 tools/difftest/check-ddl-static.py --domain comment --print-rag-sql
+```
+
+⇒ **EXIT=0**，输出 **8 行**（V1~V8），与 ① 实际执行的 8 份 `.sql` **逐条一致** ⇒ **清单没有落后于仓**。
+
+**命令 ④ —— 补跑口径（覆盖 `--rag-db` ⇒ 让七项对照真跑）**
+
+```bash
+docker exec ddl-comment-pg psql -U admin -d postgres \
+  -c "CREATE DATABASE rag_comment_db_cmp6 TEMPLATE rag_comment_db;"
+docker exec ddl-comment-pg psql -U admin -d rag_comment_db_cmp6 -c "DROP TABLE report_record;"
+python3 tools/difftest/check-ddl-static.py --domain comment --indexes --rag-db rag_comment_db_cmp6
+```
+
+⇒ **EXIT=1**（**23 处**）—— 逐条见 §9.3 / §9.4。
+⇒ ⚠️ **本命令不传 `--check-source`** —— 副本库少了 `report_record`，而仓里 `V5` 会把它建出来 ⇒ 源码重放库是 **7 张**、副本活库是 **6 张** ⇒ 该维度必然报 1 处**表集合**差异 ⇒ ⇒ **该维度以命令 ② 的默认口径为准（0 差异）**。
+
+### 9.2 八个被核维度的逐项结论
+
+| # | 维度 | 两侧规模 | 结论 | 计入失败数 |
+|---|---|---|---|---|
+| 1 | **源码 ↔ 活库**（G-9 `--check-source`，**默认口径**） | 7 张表 ↔ 7 张表 | ✅ **0 差异** —— 仓里的 8 份 `.sql` 在**干净临时库** `rag_comment_db_srccheck` 上原样重放后，与活库**逐项一致**（表 / 列 / 列属性 / 可空性 / DEFAULT / 索引 / 约束 / 触发器） | 0 |
+| 2 | **列类型 / 长度**（**补跑口径**） | **52 列 ↔ 52 列**（键集合一致 ✓） | ✅ **0 差异** —— 脚本原话「**逐字相同 52 列**」⇒ **8 张表的其余 6 张，类型/长度 0 差异** | 0 |
+| 3 | **可空性（NOT NULL）**（补跑口径） | 52 列 | 🔴 **8 处差异** —— 逐条见 §9.4① | **8** |
+| 4 | **DEFAULT**（补跑口径） | 52 列 | 🔴 **10 处差异** —— 逐条见 §9.4②（**其中 2 处经人工闭合为工具方法假阳性**） | **10**（**其中 2 处为假阳性** ⇒ 实质 **8**） |
+| 5 | **索引**（`pg_indexes`，补跑口径） | Go **11** / RAG **13** | 🔴 **2 处差异**（**均仅 RAG 有**）—— 逐条见 §9.4③ | **2** |
+| 6 | **唯一约束 / 主键**（`pg_constraint`，补跑口径） | Go **6** / RAG **9** | 🔴 **2 处差异**（**均仅 RAG 有**，`contype=c` 的 CHECK）+ **1 处语义等价**（`comment_like.idx_user_comment_like` ≡ `idx_user_comment_like`，**唯一约束 ↔ 唯一索引，载体不同** ⇒ **不计失败**） | **2** |
+| 7 | **触发器**（`pg_trigger`，补跑口径） | Go **0** / RAG **1** | 🔴 **1 处差异**（**仅 RAG 有**：`comment_domain_fact_outbox.comment_fact_identity_immutable`） | **1** |
+| 8 | **触发器形式**（`pg_get_triggerdef` → 结构化属性，补跑口径） | 两侧各 0/1，**可比对 0** | ⚪ **无对象可比** —— 脚本原话「两侧**没有可成对比对的触发器** ⇒ 本维度**什么都没比**（不是「已对齐」）」⇒ **单边触发器的形式未被比对**（其函数属性单列，见 §9.2 8′） | 0 |
+| 8′ | **触发器函数体**（`pg_proc` → 结构化语义属性，补跑口径） | 两侧各 0/1，**可比对 0** | ⚪ **同上 ⇒ 无对象可比** —— 脚本原话「两侧**没有可成对比对的触发器函数** ⇒ 本维度**什么都没比**」⇒ 但**单边**触发器的函数属性被脚本单独打印了：`fn=reject_comment_fact_identity_change  rettype=trigger  args=<无>  volatility=VOLATILE  is_trigger=trigger  lang=plpgsql` | 0 |
+| | **合计** | | | **23**（**8 + 10 + 2 + 2 + 1**）⇒ **实质 21**（扣掉 §9.4② 的 2 处工具方法假阳性） |
+
+⇒ **本域 DDL 在 8 个被核维度上共 23 处机器报出的差异 ⇒ 其中 21 处是实质差异、2 处是工具方法的假阳性（人工闭合）。**
+
+### 9.3 「0 差异」项（逐条列全，不写「其余一致」）
+
+**① 列类型 / 长度 —— 52 列逐字相同（补跑口径）**
+
+- 脚本原话：`DDL 列级对比  go_comment_db=52 列  rag_comment_db_cmp6=52 列  （键集合一致 ✓）` + `逐字相同 52 列。`
+- ⇒ **`report_record` 之外的 6 张表，列类型 / 长度 0 差异** ⇒ 符合 AGENTS.md §0 的总体结论「类型/长度 0 差异」。
+
+**② 源码 ↔ 活库 —— 0 差异（G-9 维度，默认口径）**
+
+- 目录扫描得到 **8 份**迁移脚本 ⇒ **清单由目录扫描产生**，不会落后于仓。
+- 在**干净临时库** `rag_comment_db_srccheck` 上**原样重放**（交给 PG 自己解析）⇒ 与活库逐项对比：**表集合 7 ↔ 7** · **列集合 0 差异** · **列属性 0 差异** · **可空性 0 差异** · **DEFAULT 0 差异** · **索引 0 差异** · **约束 0 差异** · **触发器 0 差异**
+- ⇒ 脚本原文：`✅ 仓里的迁移脚本**重放结果**与活库逐项一致（表 / 列 / 列属性 / 可空性 / DEFAULT / 索引 / 约束 / 触发器）`
+- ⇒ **含义**：本域仓里的 `.sql` 与**当前活库**之间**没有分叉** ⇒ 「迁移改了没人重跑」这一类漂移**在 `comment` 域为零**。
+- ⚠️ **本维度含 `report_record`**（7 张表全在内）⇒ **它是本域唯一覆盖了 `report_record` 这张表的机器证据**。
+
+**③ 唯一约束的「载体不同」形态差（1 处，不计失败）**
+
+| 表 | Go 侧 | RAG 侧 | 判定 |
+|---|---|---|---|
+| `comment_like` | `idx_user_comment_like`（**唯一约束** `contype=u`） | `idx_user_comment_like`（**唯一索引**，载体不同） | ✅ **语义等价** —— 都保证 `(user_id, comment_id)` 唯一 ⇒ PG 层面的唯一性判定与冲突行为**完全相同** ⇒ 脚本按「语义等价（仅命名形态差）」归类，**不计失败** |
+
+### 9.4 残留（逐条 · 定级 · 签字状态）
+
+> ⚠️ **一条差异 ≠ 一个缺陷** —— 下面 23 处机器报出的差异，按**根因**归成 **6 条**。
+> ⚠️ **签字状态先查 `docs/Intentional_Deviations/comment/`**（AGENTS.md §0 第 1 条）：**已签字的是决策不是缺陷 ⇒ 不重复质疑、也不「修回去」**。
+
+**① 可空性 8 处（4 张表 × `created_at` / `updated_at`）**
+
+| 表 · 列 | Go 侧 | RAG 侧 |
+|---|---|---|
+| `subject.created_at` / `subject.updated_at` | `nullable=YES` | `nullable=NO` |
+| `comment_index.created_at` / `comment_index.updated_at` | `nullable=YES` | `nullable=NO` |
+| `comment_content.created_at` / `comment_content.updated_at` | `nullable=YES` | `nullable=NO` |
+| `comment_like.created_at` / `comment_like.updated_at` | `nullable=YES` | `nullable=NO` |
+
+- Go 侧成因：gorm tag 只有 `autoCreateTime` / `autoUpdateTime` ⇒ **不产生 NOT NULL、也不产生 DB 层 DEFAULT**（Go 出处 `service/comment/rpc/internal/model/data_model.go:14-15,34-35,47-48,95-96`）⇒ ⇒ **Go 侧落 NULL**，RAG 侧落「入库时刻」。
+- RAG 侧出处：`V1:27-28` · `V2:22-23` · `V3:18-19` · `V4:24-25`。
+- **签字状态**：🟡 **`SD-2026-10-24-CAND-01`（待签字候选 · 未签字）** —— 该条列了 **9 处**同族时间列（含 `report_record.created_at`）⇒ ⇒ **本轮实测到其中 8 处**（第 9 处在 `report_record` 上 ⇒ 因该表 Go 侧**整表不存在** ⇒ **不可比**）。
+- **定级**：**C 类（阶段 2 最终工程建设项）** —— 理由：① **加强型差异**（RAG 更严）⇒ **不产生数据丢失 / 重复处理 / 状态错误**（RAG 侧所有写路径都显式传值 ⇒ 当前行为等价）⇒ 按 `docs/twoStage.md` §十 不构成**阶段 1 准入阻断**（**不是 A 类**）；② 改回去要删 9 处 `NOT NULL` ⇒ **会降低完整性**、且与同仓 `comment_domain_fact_outbox.created_at` 的 Go tag（`not null;default:CURRENT_TIMESTAMP`）**不自洽** ⇒ ⇒ 属「阶段 2 再决策」而非「阶段 1 必须修」；③ 归 **C 而非 D**，是因为签字档自己给的第三条路（去掉 `DEFAULT`、保留 `NOT NULL`）**改变了 DDL** ⇒ 需要单独决策 ⇒ **不能按「可实现或不适用」销号**。
+
+**② DEFAULT 10 处（其中 8 处属 CAND-01 同族，2 处是工具方法假阳性）**
+
+| # | 表 · 列 | Go 侧 | RAG 侧 | 判定 |
+|---|---|---|---|---|
+| ②-1 ~ ②-8 | `subject` / `comment_index` / `comment_content` / `comment_like` 的 `created_at` / `updated_at` | `<NULL>` | `CURRENT_TIMESTAMP` | 🔴 **实质差异** ⇒ 与 ① 同根因 ⇒ 归 **CAND-01** ⇒ **C 类**（同 ① 的理由） |
+| ②-9 | `subject.id` | `nextval('subject_id_seq'::regclass)` | `<NULL>` | ⚪ **工具方法假阳性（人工闭合）** ⇒ 见下方说明 |
+| ②-10 | `comment_like.id` | `nextval('comment_like_id_seq'::regclass)` | `<NULL>` | ⚪ **工具方法假阳性（人工闭合）** ⇒ 见下方说明 |
+
+**⚪ ②-9 / ②-10 为什么是假阳性（人工闭合，**非脚本原生结论**）**
+
+- 守门的 DEFAULT 维度读的是 `information_schema.columns.column_default` ⇒ **对 IDENTITY 列恒为 NULL**（IDENTITY 的默认值存在 `pg_attribute.attidentity` 里，不进 `column_default`）。
+- 实测（`pg_attribute` 直查）：
+
+| 侧 | `attidentity` | `pg_get_expr(adbin)` | `information_schema.is_identity` |
+|---|---|---|---|
+| Go `subject.id` | **空**（非 IDENTITY） | `nextval('subject_id_seq'::regclass)` | `NO` |
+| RAG `subject.id` | **`d`**（= `BY DEFAULT`） | **空** | `YES`（`identity_generation = BY DEFAULT`） |
+
+- ⇒ **RAG 侧写的是 `BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY`**（`V1:19` · `V4:17`，脚本头自带出处注释：`-- Go: Id int64 \`primaryKey;autoIncrement\``）⇒ **PG 会自动供值**；Go 侧写的是 `bigserial` ⇒ **PG 也会自动供值**。
+- ⇒ **两侧的「主键自动生成」语义完全一致** ⇒ ⇒ **这不是 DDL 漂移，是「identity 列 vs serial 列」的写法差** ⇒ **工具的 DEFAULT 维度看不见 IDENTITY 列 ⇒ 报成差异** ⇒ ⇒ **人工闭合为「非真差」**。
+- ⚠️ **与 `users` 域那条不同**：`docs/DRIFT/users/vs-common.md` 记的 `nextval('users_id_seq')` ≡ `nextval('users_user_id_seq')` 是**序列名不同但语义等价**（脚本自己判为非真差）⇒ **本域这两处是同一个工具盲点** ⇒ **登记给收口执行者**（脚本层改进项，**本 lane 不改 `tools/difftest/check-*.py`**）。
+
+**③ 索引 2 处（均仅 RAG 有）**
+
+| 索引 | 唯一性 | 列 | 出处 |
+|---|---|---|---|
+| `idx_comment_fact_delivery` | non-unique | `delivery_status`, `created_at`, `event_id` | Go 的 `002_comment_dc_wire.sql`（**测试夹具**，不进生产）⇒ RAG `V8` |
+| `idx_comment_legacy_fact_aggregate` | non-unique | 部分索引 `((payload...` | Go 的 `001/003`（**测试夹具**）⇒ RAG `V6/V8` |
+
+- **签字状态**：🟡 **`SD-2026-10-24-CAND-09`（待签字候选 · 未签字）** —— 该条逐条列了**同样这 5 个对象**（本 2 个索引 ＋ 2 个 CHECK ＋ 1 个触发器）⇒ ⇒ **本轮独立复跑，逐条命中**。
+- **定级**：**D 类（经分析确认可不实现或不适用的事项）** —— 理由：① **纯性能**（无行为差异）⇒ **不产生数据丢失 / 重复处理 / 状态错误** ⇒ **不是 A 类**；② **Go 侧的生产路径根本没有这些对象**（`001/002/003` 只被 `service/comment/rpc/internal/model/test-community-postgres.sh:47,49` 执行 ⇒ **是测试夹具，不进生产**）⇒ ⇒ 「RAG 比 Go 多」这件事**没有 Go 生产 DDL 作为对照基准** ⇒ ⇒ 按 §十「D 类 = 经分析确认可不实现或不适用」⇒ **可接受 RAG 更严 / 更全** ⇒ **不修、不改回**。
+
+**④ CHECK 2 处（均仅 RAG 有，`contype=c`）**
+
+| 约束 | 定义 | 备注 |
+|---|---|---|
+| `comment_domain_fact_outbox.comment_new_fact_has_dc_wire` | `CHECK ((aggregate_id IS NOT NULL) AND (fact_version IS NOT NULL) AND (delivery_envelope IS NOT NULL)) NOT VALID` | `NOT VALID` ⇒ 只对**新写入**生效，不校验存量行 |
+| `comment_fact_stream.comment_fact_stream_version_range` | `CHECK ((version >= 1) AND (version <= '9007199254740991'::bigint))` | `version` 从 1 递增 ⇒ 要到 2^53-1 才触发 |
+
+- **签字状态**：🟡 **`SD-2026-10-24-CAND-09`（待签字候选 · 未签字）** ⇒ 同 ③。
+- **定级**：**D 类** —— 理由同 ③（① 不可观察：现有写入 / 投递路径**永远填齐**这三个字段、`version` 从 1 递增 ⇒ 正常路径不可能触发 ⇒ **不产生数据丢失 / 重复处理 / 状态错误**；② Go 生产 DDL 无对应物（`001/002/003` 是测试夹具）⇒ ⇒ 可接受 RAG 更严 ⇒ 不修、不改回）。
+
+**⑤ 触发器 1 处（仅 RAG 有）**
+
+| 触发器 | 事件 | 表 | 函数 |
+|---|---|---|---|
+| `comment_fact_identity_immutable` | `BEFORE UPDATE` | `comment_domain_fact_outbox` | `reject_comment_fact_identity_change()` |
+
+- 脚本打印的函数属性：`fn=reject_comment_fact_identity_change  rettype=trigger  args=<无>  volatility=VOLATILE  is_trigger=trigger  lang=plpgsql`（**单边** ⇒ 不与 Go 比）。
+- **签字状态**：🟡 **`SD-2026-10-24-CAND-09`（待签字候选 · 未签字）** —— 该条把本触发器列为 5 个对象里**「唯一原则上可观察的」**，并写明「**但现有写入 / 投递路径都不碰受保护列** ⇒ **当前不可观察**」。
+- **定级**：**D 类** —— 理由：① Go 生产 DDL 无对应物（同 ③/④ 的根因）⇒ ⇒ 无对照基准 ⇒ 可接受 RAG 更严；② ⚠️ **但它是本域唯一的「可观察面」** ⇒ ⇒ 若将来出现**第二个写入方**去 UPDATE 受保护列 ⇒ RAG 抛错、Go 不抛 ⇒ ⇒ **不按 C 类销号，保留 D 类并把「可观察面」写进登记**（⇒ 与 `favorite` 域 `DEV-FAV-RPC-007` 的同款「什么时候会变成真差异」条件一致）。
+
+**⑥ `report_record` 整张表（8 列 ＋ 复合唯一索引 `idx_user_comment_report`）—— ✅ **已签字****
+
+| 项 | 值 |
+|---|---|
+| 机器报出的形态 | **仅 RAG 有 8 列**（`report_record.id` / `.user_id` / `.target_type` / `.target_id` / `.comment_id` / `.reason` / `.detail` / `.created_at`）⇒ **默认口径在此提前退出（EXIT=2）** |
+| Go 侧事实 | `db.go:15` 的 AutoMigrate 列表**不含** `&ReportRecord{}` ⇒ **表不会被创建**；`data_model.go:55-68` 的 struct 存在且 `TableName() = "report_record"` ⇒ 代码路径完整；`comment.go:242-250` 的 `InsertReport` 用 `ON CONFLICT DO NOTHING` ⇒ 表不存在时**插入报错** ⇒ logic 发 `errmsg.ErrorDbInsert`(5004) |
+| RAG 侧事实 | `V5__create_comment_report_record.sql` 建表（8 列 ＋ 复合唯一索引 `idx_user_comment_report`） |
+| **签字状态** | ✅ **已签字**（2026-10-24，用户 Jason）⇒ **`SD-2026-10-24-CAND-02`** ⇒ **是决策不是缺陷 ⇒ 不重复质疑、也不「修回去」** |
+| 签字结论原文 | 「**保留** `V5__create_comment_report_record.sql` ⇒ RAG 侧 `report_record` 表**继续存在**，`ReportComment` 在 RAG 侧**继续可用**（Go 侧仍会 5004，这是**已知的真源侧缺陷**）」 |
+| **定级** | **D 类（经分析确认可不实现或不适用的事项）** —— 理由：① **已签字** ⇒ 按 §十 属「经分析确认」⇒ 不修；② **不是 A 类**：Go 侧 `ReportComment` 必然 5004 ⇒ 是**真源侧缺陷**，不是 RAG 的问题 ⇒ **RAG 更全**，不产生数据丢失 / 重复处理 / 状态错误；③ ⚠️ **撤回方式备查**：删 `V5` 迁移 ⇒ RAG 侧退化成与 Go 一致的「全新部署必 5004」；但**已应用的迁移不可回滚**（Flyway 只增不改）⇒ 真要撤需**新写一个 V9 DROP TABLE** |
+
+**残留汇总（按根因归条 ⇒ 6 条）**
+
+| # | 根因 | 机器报出 | 实质 | 签字 | 定级（§十） |
+|---|---|---|---|---|---|
+| ① | 时间列 `NOT NULL` | 8 | **8** | 🟡 `CAND-01`（待签字） | **C** |
+| ② | 时间列 `DEFAULT CURRENT_TIMESTAMP` | 8 | **8** | 🟡 `CAND-01`（待签字） | **C** |
+| ③ | 额外索引 2 | 2 | **2** | 🟡 `CAND-09`（待签字） | **D** |
+| ④ | 额外 `CHECK` 2 | 2 | **2** | 🟡 `CAND-09`（待签字） | **D** |
+| ⑤ | 额外不可变触发器 1 | 1 | **1** | 🟡 `CAND-09`（待签字） | **D** |
+| ⑥ | 整张 `report_record` 表 | （8 列） | **1（表级）** | ✅ **`CAND-02`（已签字）** | **D** |
+| — | **`id` 的 `nextval` vs IDENTITY** | 2 | **0** | — | ⚪ **工具方法假阳性 · 人工闭合** |
+| | **合计** | **23** | **21** | | |
+
+### 9.5 变异验证（证明守门有牙齿，不是假绿）
+
+> ⚠️ **为什么不直接改仓内的 `.sql`**：`service/comment/**` 的代码由本波次另一条 lane 在改 ⇒ 本轮**零改动仓内迁移脚本** ⇒ 变异走**临时副本**（任务书允许的路线）：把 `check-ddl-static.py` 与该域的 `db/migration/` 目录**原样拷到一棵临时树**（保持相对路径 ⇒ `REPO_ROOT` 与仓内布局一致），**逐字节校验 sha256 相同**，再在**副本**上做变异。
+
+**变异 ①：`subject.total_count` 的列类型（`BIGINT` → `INTEGER`）**
+
+| 步骤 | 命令 | 结果 |
+|---|---|---|
+| 副本 sha256（变异前） | `shasum -a 256` 副本 vs 仓内 8 份 `.sql` | **8/8 逐字节相同**（`V1` = `cd96a9f16ee95be65f34368d8fb7e8bff1c06137409d6146bca8faf978e4e7e3` · `V2` = `f9d2daef0599f7d4dce557e924b08ad9fe234e8a76711d63cc62a8d419511c79` · `V3` = `f4ce58b84c79cdd9df17a1f675967f63d5f4cf1e997f49db6f8ede512d157a3e` · `V4` = `5f46ed268aeec35889b4a1a96b4bf1cdcdea5b7dcaa7caa69631964b7c97f8ca` · `V5` = `7cdf003cb27ce49950bd7000c81631d1c4441b6d1da7d5cd9951f74c9fd12617` · `V6` = `0d4966bef568ce07bbbf9edf16a65a398bfdb51e38fc9c4ae41eb794e05a72dc` · `V7` = `59c3a29ad808fb63310aed77ad5040ba523f5ec8c21d154f9ad6965ddf8bba5b` · `V8` = `1d71a9c9ba0bdfc37d84fab0a886b6198629e1e690e2abc67ab3c7f81316d30e`） |
+| 基线 | `python3 tools/difftest/check-ddl-static.py --domain comment --indexes --check-source`（临时树） | **EXIT=2**（列集合不一致：`report_record.*` 8 列仅 RAG 有） |
+| 变异 | `V1__create_comment_subject.sql`：`    total_count  BIGINT       NOT NULL DEFAULT 0,` → `    total_count  INTEGER      NOT NULL DEFAULT 0,`（改**一个列的类型**，命中目标行 **1** 处） | — |
+| 变异后重跑 | 同上命令 | **EXIT=1**（脚本规定「源码↔活库有实质差异 ⇒ 退出码 **1** 优先于 2」）· 源码↔活库 **转红**：<br>`🔴 列属性不同：subject.total_count  源码=('integer', '')  活库=('bigint', '')`<br>`❌ 源码 ↔ 活库**分叉 1 处** ⇒ 活库已过期于仓里的迁移脚本` |
+| 还原 | 改回 `BIGINT` | — |
+| 还原后重跑 | 同上命令 | **EXIT=2**（**回到基线**）· 输出回到 8 行 `仅 RAG 有: report_record.*` |
+| **还原校验** | `shasum -a 256` 临时副本 vs 仓内文件 | **8/8 仍逐字节相同**（`V1` 仍是 `cd96a9f1…4e7e3`）⇒ 逐字节回到变异前 |
+| 副本清理 | `rm -rf` 临时树 | **已删除**（复查：目录不存在）⇒ **工作树里不留临时副本** |
+
+⇒ **结论**：变异**精确报出 1 处**、**指向被改的那一列**（`subject.total_count`），**没有多红也没有漏红** ⇒ 守门**不是假绿**；还原后**精确回到 EXIT=2**（基线）⇒ 无残留。
+⚠️ **本域基线是 EXIT=2 而非 0/1** ⇒ 「变异必红 ⇒ 还原必绿」的**两端是 2 → 1 → 2** ⇒ ⇒ **且验证了脚本自己的一条规则**：「源码↔活库有实质差异时退出码 1 **优先于** 2」（脚本第 ~1055 行）⇒ **该规则本轮被实测命中**。
+
+**仓内零改动核验**
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-g3b"
+git status --short -- service/     # ⇒ 空
+git diff --stat -- service/        # ⇒ 0 行
+```
+
+⇒ `service/comment/**` **零改动**（含 `service/article/**` 与 `service/favorite/**`）。
+
+### 9.6 证据强度 · 效力边界 · 未能核到的部分
+
+**证据强度 = E4（`docs/twoStage.md` §8.1「运行证据」）＋ L4（域台账分层：运行面 · 双侧活体）** —— 两侧各建一个**真 PG 16** 库（Go 侧跑真源自己的 `AutoMigrate`、RAG 侧跑仓里的真迁移脚本）⇒ 逐列 / 逐索引 / 逐约束 / 逐触发器 dump 后机器比对。
+⚠️ 本节所有 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环（AGENTS.md §0 证据强度分层）。
+
+**效力边界（越界即失效）**
+
+| # | 边界 | 对本域是否成立 |
+|---|---|---|
+| 1 | **默认口径的七项对照在本域「根本没跑」**（EXIT=2 提前退出）⇒ ⇒ **「0 差异」不能从默认口径读出** | 🔴 **成立且是本域最重要的边界** ⇒ 本节的七项结论**全部来自 §9.1 命令 ④ 的补跑口径**（`--rag-db` 覆盖 + 同源副本库）⇒ **复现必须用那条命令**，不能用默认命令 |
+| 2 | **补跑副本与活库的同源性** | ✅ **成立** —— `CREATE DATABASE ... TEMPLATE rag_comment_db` ⇒ **逐对象同源**（表 / 列 / 索引 / 约束 / 触发器 / 函数全带过来）⇒ 只 `DROP TABLE report_record` ⇒ ⇒ **除那张表外，其余 6 张表与活库**逐对象相同** ⇒ ⇒ 结论**可外推到活库**。⚠️ 副本是**一次性**的（补跑后已 `DROP`）⇒ 复现需重建（命令见 §9.0 / §9.1） |
+| 3 | **`--check-source` 的重放引擎 ≠ 生产引擎** —— 重放用 **psql**；本域生产用 **Flyway 引擎**（`application.yml:110`） | ✅ **对本域不成立** —— 已核：8 份 `.sql` 的 `$$` 命中 **0** ⇒ 无美元引号块 ⇒ 两个引擎看到的语句序列相同 |
+| 4 | **迁移清单 = 生产清单** —— `discover_rag_sql` 目录扫描的 8 份，与生产 Flyway `locations` 指向的目录内容**逐条一致**（命令 ③ 与 ① 的执行日志互证） | ✅ **成立** |
+| 5 | **Flyway 账本表** —— 生产库会有 `flyway_schema_history_comment`（AGENTS.md §6.3 问题 4 的定案），但**对拍环境直接用 psql 放 `.sql`** ⇒ 两个库里**都没有**账本表 | ✅ **本轮无干扰**；工具靠 `exclude_tables=("flyway_schema_history",)` 前缀匹配排除（**已配置**） |
+| 6 | **`baseline-version: 0`**（`application.yml:109`） | ⚠️ **本轮未核** —— 对拍用**全新空库** ⇒ baseline 不触发 ⇒ V1 正常执行。⚠️ **这正是该配置注释里点名的陷阱**（`application.yml:90-108`）⇒ **登记为「未核」** |
+| 7 | **触发器函数体的语义**机器判不了 ⇒ 走人工逐条 | ⚪ **本域有单边触发器**（RAG 有、Go 无）⇒ **无 Go 侧可比对象** ⇒ ⇒ **函数体语义「未核」**（只能确认 RAG 侧那条**存在**且形态正常） |
+| 8 | **`pg_constraint` 只比 `contype` + 定义文本，不解析外键的引用目标** | ✅ **不适用**（本域两侧 `contype='f'` 各 **0 行**，见 §9.6 的人工补查表） |
+| 9 | **分区 / 存储过程 / 触发器函数** —— 脚本不查 | ✅ **不适用**（8 份 `.sql` 的**可执行部分**无 `PARTITION` / `PROCEDURE` 关键字 ⇒ 已人工核；两侧 `pg_partitioned_table` / `prokind='p'` 均 **0**） |
+
+**人工补查（脚本**不查**的维度 —— 结论强度 = **L4 + 人工补查**，**非脚本原生结论**）**
+
+| 维度 | Go 侧 `go_comment_db` | RAG 侧 `rag_comment_db` | 判定 |
+|---|---|---|---|
+| 外键（`pg_constraint` `contype='f'`） | **0 行** | **0 行** | ⚪ 两侧各 0 ⇒ **无对象可比** |
+| 分区表（`relkind='p'` / `pg_partitioned_table`） | **0** / **0** | **0** / **0** | ⚪ 两侧各 0 ⇒ **无对象可比** |
+| 存储过程（`prokind='p'`） | **0** | **0** | ⚪ 两侧各 0 ⇒ **无对象可比** |
+| 函数（`prokind='f'`，**非触发器**） | **0** | **0** | ⚪ 两侧各 0 ⇒ **无对象可比** |
+| 触发器函数（被 `pg_trigger` 引用） | **0** | **1**：`reject_comment_fact_identity_change` | 🔴 **单边**（RAG 独有）⇒ 已归入 §9.4 ⑤ |
+
+**未能核到的部分（明确写「未核」+ 原因，不含糊）**
+
+| # | 未核项 | 原因 | 影响 |
+|---|---|---|---|
+| 1 | **共享库拓扑下的 Flyway `baseline-version: 0` 行为** | 对拍用**全新空库** ⇒ baseline 不触发 ⇒ 该配置**未被本节验证** | ⚠️ 该维度的守门在域侧真 PG + 真 Flyway 引擎的用例里（`application.yml:90-108` 明写这个陷阱）⇒ 本节**不重复核**，只登记边界 |
+| 2 | **RAG 侧单边触发器的函数体语义** | 机器只比结构化属性；且 Go 侧**无对应触发器** ⇒ **无对象可比** | ⇒ 本域「事实信封不可变」这条语义**只有 RAG 侧有载体** ⇒ ⇒ 该语义**无法做双侧对照**（已在 §9.4 ⑤ 登记） |
+| 3 | **`report_record` 表自身的列级 / 索引级双侧对照** | Go 侧**整表不存在** ⇒ 无样本 | ⇒ 该表的 8 列 ＋ `idx_user_comment_report` **只有 RAG 侧样本** ⇒ ⇒ 本节对它**只能登记「已签字的 RAG 多一张表」**，**不能**给「列级一致」的结论 |
+| 4 | **索引是否被真实查询计划选中** | 需 `EXPLAIN` + 真实数据量 ⇒ 本轮**未核** | 本域 2 个 RAG 独有索引是**纯性能** ⇒ 实际代价未量化 |
+| 5 | **DEFAULT 维度的 IDENTITY 列盲点**（`id` 的 `nextval` vs IDENTITY） | **工具方法的盲点** ⇒ 不是本域能自行闭合的 ⇒ 人工闭合已做（§9.4 ②-9/②-10） | ⇒ **守门本身对该形态仍会报差异** ⇒ ⇒ **登记给收口执行者**（脚本层改进项；**本 lane 不改 `tools/difftest/check-*.py`**） |
+
+### 9.7 与其它台账的关系（指针，不改别的文件）
+
+| 台账 | 本节与它的关系 |
+|---|---|
+| [`docs/Intentional_Deviations/comment/rpc.md`](../../Intentional_Deviations/comment/rpc.md) | **本节全部 21 处实质差异在此有归属**：`CAND-01`（时间列 8+8，🟡 待签字）· `CAND-09`（约束 / 索引 / 触发器 5 处，🟡 待签字）· `CAND-02`（`report_record` 表，✅ **已签字** ⇒ **不重复质疑、不改回**）⇒ ⇒ **本节不新增签字条目**，只把机器结论落到域台账 |
+| [`docs/DRIFT/comment/rpc.md`](rpc.md) · [`api.md`](api.md) · [`common.md`](common.md) | 本域**组件级**台账；本节是 **DDL 这一维度**的域级落账 ⇒ 与那几份台账的其它维度结论**互不冲突** |
+| [`docs/PhaseGoal-judge.md` §七 **G-8 / G-9**](../../PhaseGoal-judge.md) | 🔴 **该文件对 `comment` 域的那一行不完整** —— 它记的残留是「comment 域整张 `report_record` 表（8 列）仅 RAG 有（**已签字保留**）」⇒ ⇒ **那正是导致默认口径提前退出（EXIT=2）的那一条** ⇒ ⇒ **另外 6 张表的 21 处实质差异没有进那一行**（其中 16 处属 `CAND-01`、5 处属 `CAND-09` ⇒ **都已在签字档里**，只是没进主线的残留汇总）。⚠️ **该文件主线写 ⇒ 本 lane 只读 ⇒ 只在此登记，报给收口执行者** |
+| [`docs/DRIFT/_cross/ddl-type-divergences.md`](../../DRIFT/_cross/ddl-type-divergences.md) | 🔴 **属 `_cross` ⇒ 本 lane 无写权** ⇒ 只在此登记：该文件对 `comment` 域「类型/长度 0 差异」的记录**与本节一致**（52 列逐字相同）⇒ ⇒ **无需更正**；但**它若也只记了 `report_record` 一条 ⇒ 同样不完整** ⇒ 报给收口执行者 |
+| [`docs/DRIFT/_cross/open-items.md`](../../DRIFT/_cross/open-items.md) | 🔴 **属 `_cross` ⇒ 本 lane 无写权** ⇒ 只在此登记：本节若与该文件 P2 行的 `comment` 记数**不一致**（它可能只记了 `report_record`）⇒ ⇒ 报给收口执行者 |
+| 本文件的 **§2 A8 轴** | ⚠️ 本节**不改** A8 的结论（A8 记的是 DDL 列级一致面）⇒ ⇒ **A8 原结论不变**；本节是**在其之上补了约束 / 索引 / 触发器 / 源码↔活库四层**，且**把 21 处加强型差异显式登记**（A8 原行**未提**这些）⇒ ⇒ **A8 那格的「✅ DDL 列级一致」应读作「列级（类型/长度）一致」**，**不含**约束 / 索引 / 触发器面 |
+
+---

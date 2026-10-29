@@ -361,3 +361,298 @@
 |---|---|---|---|---|
 | （域侧 · 非编号） | **`favorite-rpc` 的两个出向 client 走的是**「服务端路径 ⇒ `GoStyleRequestDeadline.applyTo` 恒 no-op」** ⇒ 出向**零期限**（与 Go 的 `zrpc` 无条件 2s 客户端超时 + `depCtx` 传播父 deadline 相反）⇒ ⇒ 一旦下游 `user.rpc` **在场但慢**，RAG 侧会**一直等**而 Go 侧 **2s 就断** | **共享层** `service/common`（`RpcInterceptor` / `GoStyleRequestDeadline`）⇒ 落点同 `E65` | 🔴 **OPEN**（**与 §1 的 `E65` 同一条**，本轮只是给它补了一个**可观测后果**） | 本轮探针**未直接测**（下游缺席 ⇒ 走不到超时分支）⇒ **本条只登记，不改判** |
 
+
+---
+
+## 9. 🔴 **DDL 逐域机器核**（`--indexes` + `--check-source`）· 2026-10-29 · R3·T-3.1（G3 lane · `favorite` 域）
+
+> **本节为什么存在**：`tools/difftest/check-ddl-static.py` **默认不开 `--indexes`** ⇒ 索引 / 唯一约束 / 触发器**从未被机器核过**；**默认不开 `--check-source`** ⇒ 只比活库、不比仓里的 `.sql` ⇒ 「迁移改了但没人重跑」**不可见**。
+> 主线已把这两层补上并逐域实跑，结论只落在 `docs/PhaseGoal-judge.md` §七 **G-8 / G-9** ⇒ **域级证据链断了一节** ⇒ 本节把 `favorite` 域的结论**落到本域台账**。
+> ⚠️ **本节只落结论与证据，不改任何差异**（RoundPlan T-3.1：冒出的差异按域登记，不当场修）。
+> ⚠️ **`favorite` 域不是 N/A** —— `hot` 域才是 N/A；**本域两侧都有真库**（Go 侧 4 张表 / RAG 侧 4 张表）⇒ 本节是**实跑**结论。
+
+### 9.0 🔴 **本域有一条「机器报成实质差异、实为口径差」的残留 —— 根因 = Go 侧 DDL 的「执行顺序」**
+
+> ⚠️ **先说清楚这一条**，否则 §9.4 的「2 处残留」会被误读成「RAG 无出处地加严」。
+
+**机器报出的原文**（`tools/difftest/ddl-parity.sh favorite`）：
+
+```
+实质差异: favorite_fact_outbox.favorite_fact_outbox_aggregate_version_range（仅 RAG 有）  contype=c
+  CHECK ((aggregate_version = ANY (ARRAY[(1)::bigint, (2)::bigint])))
+```
+
+**但 Go 真源的 `.sql` 里逐字写着这条 CHECK** —— `service/favorite/rpc/internal/model/001_favorite_fact_outbox.sql:6`：
+
+```sql
+aggregate_version bigint NOT NULL CHECK (aggregate_version IN (1,2)),
+```
+
+**为什么它没进 Go 活库** —— `tools/difftest/ddl-parity.sh` 的 Go 侧顺序是 **app-first**（先跑真源 `InitDB` 的 AutoMigrate，再补放手写 `.sql`）⇒ `AutoMigrate` 已经建好 `favorite_fact_outbox` ⇒ 补放 `001` 时 **`CREATE TABLE IF NOT EXISTS` 变成 no-op** ⇒ 整表跳过 ⇒ **内联在 CREATE TABLE 里的 CHECK 建不出来**。
+⇒ **实跑日志原文**（`bash tools/difftest/ddl-parity.sh favorite`）：
+
+```
+  --- Go 手写迁移: 001_favorite_fact_outbox.sql ---
+NOTICE:  relation "favorite_fact_outbox" already exists, skipping
+```
+
+⇒ ⚠️ **注意**：`001` 里的**部分索引** `favorite_fact_outbox_pending` 是**独立语句** ⇒ 它**照样建出来**（⇒ 这也是本域两个工具口径**唯一**真正不同的地方）。
+
+**真源文档指定的顺序是 sql-first** —— `service/favorite/rpc/DELIVERY_ACCEPTANCE.md:7`（"## 部署和交接"）：
+
+> 「先在现有 Favorite PostgreSQL 库执行 `internal/model/001_favorite_fact_outbox.sql`，再执行 `internal/model/002_favorite_fact_delivery.sql`。」
+
+⇒ **本轮已在真 PG 上把 sql-first 口径直接验出来**（只放 Go 的 `001`、不带 AutoMigrate）：
+
+| 侧 | 约束名 | 定义 |
+|---|---|---|
+| Go（**sql-first**，本轮实跑） | `favorite_fact_outbox_aggregate_version_check` | `CHECK ((aggregate_version = ANY (ARRAY[(1)::bigint, (2)::bigint])))` |
+| RAG（活库） | `favorite_fact_outbox_aggregate_version_range` | `CHECK ((aggregate_version = ANY (ARRAY[(1)::bigint, (2)::bigint])))` |
+
+⇒ ⇒ **定义逐字相同、名字不同** ⇒ ⇒ **在真源文档指定的顺序下，这条不是「RAG 多出来的约束」，而是「同一条约束的不同名字」** ⇒ ⇒ **它正是已签字项 `DEV-FAV-RPC-006` 记的 12 条命名差里的第 1 条约束**（该条原文就写「`favorite_fact_outbox_aggregate_version_check`↔`..._aggregate_version_range`」）。
+
+⚠️ **本域因此有「两个 Go 侧 DDL 口径」并存** —— 两者都不是错的，差别只在**执行顺序**：
+
+| 口径 | 载体 | Go 侧 `favorite_fact_outbox` 的 CHECK | 判定基准 |
+|---|---|---|---|
+| **app-first**（应用先起 → 运维后跑 `001..004`） | `tools/difftest/ddl-parity.sh`（**本轮跑的就是它**） | **没有**（`CREATE TABLE IF NOT EXISTS` 变 no-op） | 本轮机器口径 |
+| **sql-first**（运维先跑 `001..004` → 应用后起） | `tools/ddl-parity-probe/favorite/`（**域内自有探针**）· 真源 `DELIVERY_ACCEPTANCE.md:7` 指定 | **有**（`..._aggregate_version_check`） | **真源文档指定的权威口径** |
+
+⇒ ⇒ **本节的净结论**：机器跑出的 2 处「实质差异」**全部落在已签字范围内**（① 落在 `DEV-FAV-RPC-006` 的同一对象；② 落在 `DEV-FAV-RPC-007`）⇒ ⇒ **本域零「未签字的残留」**；① 的成因**不是 RAG 加严，而是执行顺序口径差**。
+
+### 9.1 执行口径（命令原文 · EXIT · 日期 · 环境）
+
+| 项 | 值 |
+|---|---|
+| 实跑日期 | **2026-10-29**（14:4x–15:2x 本机时间） |
+| 工作树 / 分支 | `/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-g3b` · `align/r3-ddl-g3-2`<br>基点 = `do-my-own-gh` @ **`d10227c5`** |
+| 容器 / 库 | `ddl-favorite-pg`（`postgres:16-alpine` · 端口 **55564**）· Go 库 `go_favorite_db` · RAG 库 `rag_favorite_db` |
+| 真源 | `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang` —— **冻结 · 只读**；脚本只**复制**副本，从不写入 |
+| Go 侧 schema 来源 | **真源自己的 `AutoMigrate`**：`service/favorite/rpc/internal/model/db.go:20`（`func InitDB(conf DBConf) *gorm.DB`）→ `:33`（`db.AutoMigrate(&FavoriteFolder{}, &FavoriteItem{}, &FavoriteFactOutbox{})`）⇒ **3 张表** ⇒ 之后由真源手写 `.sql` 补放：`001_favorite_fact_outbox.sql` · `002_favorite_fact_delivery.sql` · `003_favorite_target_revision.sql` · `004_favorite_legacy_fact_marker.sql`（`service/favorite/rpc/internal/model/`） |
+| ⚠️ Go 侧手写 `.sql` 的**执行者** | **没有任何 Go 代码执行它们** —— 全仓只有 `_test.go` 读它们（`service/favorite/rpc/internal/model/favorite_fact_test.go:58` · `service/favorite/rpc/internal/server/favorite_fact_rpc_test.go:129`）⇒ ⇒ **属运维手工步骤** ⇒ 顺序由运维决定 ⇒ ⇒ **这正是 §9.0 口径差的根因** |
+| Go 侧的权威部署顺序 | **`service/favorite/rpc/DELIVERY_ACCEPTANCE.md:7`** —— 「先执行 `001`，再执行 `002`」⇒ ⇒ **sql-first** |
+| RAG 侧 schema 来源 | 仓内 `service/favorite/favorite-rpc/src/main/resources/db/migration/`：`V1__create_favorite_folder.sql` · `V2__create_favorite_item.sql` · `V3__create_favorite_fact_outbox.sql` · `V4__create_favorite_legacy_fact_marker.sql` · `V5__add_favorite_fact_delivery.sql` · `V6__align_favorite_schema_with_go.sql` · `V7__align_favorite_outbox_time_columns_with_go.sql`（**Flyway**；生产 `locations: classpath:db/migration` ⇒ `application.yml:109` · `baseline-version: 0` ⇒ `application.yml:108`） |
+| 豁免名单 | **一个都没用**（`--allow-idx` / `--allow-default` **均未传**）⇒ 差异数是**原始值** |
+| 两侧表集合 | Go `go_favorite_db` = {`favorite_folder`, `favorite_item`, `favorite_fact_outbox`, `favorite_legacy_fact_marker`} · RAG `rag_favorite_db` = **同名 4 张** ⇒ **表名两侧完全相同** ⇒ `table_map` 为空 |
+
+**命令 ① —— 建库 + 双侧活体对拍（索引 / 约束 / 触发器 + 源码↔活库 一次跑全）**
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-g3b"
+bash tools/difftest/ddl-parity.sh favorite
+```
+
+⇒ **EXIT=1** —— 末行 `== 实质差异合计 2 处 ⇒ 退出码 1 ==`；runner 行 `=== 对拍退出码: 1 ===`
+⇒ Go 探针打印 `AUTOMIGRATE_OK`；Go 手写迁移 `001~004` 按序补放（`001` 整表跳过 ⇒ 见 §9.0）；RAG 侧按序执行 `V1`→`V7`
+
+**命令 ② —— 只读静态对拍（显式带 `--indexes --check-source`）**
+
+```bash
+python3 tools/difftest/check-ddl-static.py --domain favorite --indexes --check-source
+```
+
+⇒ **EXIT=1**（**2 处**）—— 与 ① 同数同因 ⇒ 两条路径互为复算
+
+**命令 ③ —— 打印 RAG 侧 SQL 清单**
+
+```bash
+python3 tools/difftest/check-ddl-static.py --domain favorite --print-rag-sql
+```
+
+⇒ **EXIT=0**，输出 **7 行**（V1~V7），与 ① 实际执行的 7 份 `.sql` **逐条一致** ⇒ **清单没有落后于仓**（含 `V7__align_favorite_outbox_time_columns_with_go.sql` ⇒ **G-9 当初抓出的那一份就在清单里**）
+
+**命令 ④ —— 真源文档指定顺序（sql-first）的直接验证**
+
+```bash
+docker exec ddl-favorite-pg psql -U admin -d postgres \
+  -c "CREATE DATABASE go_favorite_sqlfirst_probe;"
+docker exec -i ddl-favorite-pg psql -U admin -d go_favorite_sqlfirst_probe -v ON_ERROR_STOP=1 \
+  < "/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/service/favorite/rpc/internal/model/001_favorite_fact_outbox.sql"
+docker exec ddl-favorite-pg psql -U admin -d go_favorite_sqlfirst_probe \
+  -c "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='favorite_fact_outbox'::regclass ORDER BY conname;"
+```
+
+⇒ **3 条约束**（`..._aggregate_version_check` / `..._favorite_id_aggregate_version_key` / `..._pkey`）⇒ ⇒ **sql-first 下 Go 侧**确实**有**那条 CHECK（名字不同、定义逐字相同）⇒ **§9.0 的结论由本轮实跑坐实，不是文档转述**。
+
+### 9.2 八个被核维度的逐项结论
+
+| # | 维度 | 两侧规模 | 结论 | 计入失败数 |
+|---|---|---|---|---|
+| 1 | **源码 ↔ 活库**（G-9 `--check-source`） | 4 张表 ↔ 4 张表 | ✅ **0 差异** —— 仓里的 7 份 `.sql` 在**干净临时库** `rag_favorite_db_srccheck` 上原样重放后，与活库**逐项一致**（表 / 列 / 列属性 / 可空性 / DEFAULT / 索引 / 约束 / 触发器） | 0 |
+| 2 | **列类型 / 长度** | **38 列 ↔ 38 列**（键集合一致 ✓） | ✅ **0 差异** —— 脚本原话「**逐字相同 38 列**」 | 0 |
+| 3 | **可空性（NOT NULL）** | 38 列 | ✅ **0 差异** —— 脚本原话「（两侧完全一致 ✓）」 | 0 |
+| 4 | **DEFAULT** | 38 列 | ✅ **0 差异** —— 脚本原话「（两侧完全一致 ✓）」⇒ **本域无 `DEFAULT CURRENT_TIMESTAMP` 残留**（`V7__align_favorite_outbox_time_columns_with_go.sql` 已把 outbox 的两个时间列对齐到 Go 的「无默认」） | 0 |
+| 5 | **索引**（`pg_indexes`） | Go **16** / RAG **16** | ✅ **0 差异** —— 脚本原话「（两侧索引定义逐条一致 ✓）」＋ **2 处「语义等价（仅命名形态差）」不计失败**（见 §9.3③） | 0 |
+| 6 | **唯一约束 / 主键**（`pg_constraint`） | Go **12** / RAG **15** | 🔴 **2 处实质差异**（均**仅 RAG 有** · `contype=c`）＋ **4 行逐条一致** ＋ **9 处「语义等价（仅命名形态差）」不计失败** | **2** |
+| 7 | **触发器**（`pg_trigger`） | Go **2** / RAG **2** | ✅ **0 差异** —— 脚本原话「同名同表 2 个 ✓」（两侧触发器集合完全一致 ✓）⇒ ⚠️ **本维度有对象可比**（不是「无对象可比」） | 0 |
+| 8 | **触发器形式**（`pg_get_triggerdef` → 结构化属性） | 两侧各 2，**可比对 2** | ✅ **0 差异** —— 「2 个可比对的触发器形式逐条一致 ✓」 | 0 |
+| 8′ | **触发器函数体**（`pg_proc` → 结构化语义属性） | 两侧各 2，**可比对 2** | ✅ **0 差异** —— 「2 个可比对的函数属性逐条一致 ✓」 | 0 |
+| | **合计** | | | **2** |
+
+⇒ **本域 DDL 在 8 个被核维度（触发器拆三条 ⇒ 实为 **9** 条判据）上共 2 处机器残留。**
+
+### 9.3 「0 差异」项（逐条列全，不写「其余一致」）
+
+**① 列类型 / 长度 —— 38 列逐字相同**
+
+- 脚本原话：`DDL 列级对比  go_favorite_db=38 列  rag_favorite_db=38 列  （键集合一致 ✓）` + `逐字相同 38 列。`
+- ⇒ 符合 AGENTS.md §0 的总体结论「类型/长度 0 差异」；⚠️ `favorite_item.target_id` 两侧都是 **`varchar(255)`**（**不是** `bigint`）⇒ RAG 侧 `V2:33` 的注释自记了这条（雪花 ID > 2^53 会溢出）⇒ **两侧同型**。
+
+**② 可空性 / DEFAULT —— 两侧完全一致（0 处）**
+
+- `favorite_item` 的 `target_revision` 两侧**都可空、无默认**（Go `data_model.go:25-26` 的注释是硬约束：「Nil means … do not backfill legacy rows」）⇒ RAG 侧 `V2:38` 照抄 ⇒ **一致**。
+- ⚠️ `favorite_fact_outbox` 的 `created_at` / `updated_at` 两侧**可空、无默认**（Go 的 `autoCreateTime` 不建 DB 默认）⇒ RAG 侧靠 `V7__align_favorite_outbox_time_columns_with_go.sql` 对齐（**G-9 当初抓出的正是这一条**）⇒ ⇒ **本域 DEFAULT 0 差异**。
+
+**③ 索引 / 约束的「语义等价（仅命名形态差）」—— 11 处（脚本原话「**不计失败**」）**
+
+| # | 表 | Go 侧 | RAG 侧 | 备注 |
+|---|---|---|---|---|
+| 1 | `favorite_folder` | `idx_favorite_folder_folder_id`（unique 索引） | `uk_favorite_folder_folder_id`（unique 索引） | 列集合同为 `folder_id` ⇒ 等价 |
+| 2 | `favorite_item` | `idx_favorite_item_favorite_id`（unique 索引） | `uk_favorite_item_favorite_id`（unique 索引） | 列集合同为 `favorite_id` ⇒ 等价 |
+| 3 | `favorite_legacy_fact_marker` | `favorite_legacy_fact_marker_approval_ref_check` | `favorite_legacy_marker_approval_ref_nonempty` | `CHECK (approval_ref <> '')` ⇒ 表达式逐字相同 |
+| 4 | `favorite_legacy_fact_marker` | `favorite_legacy_fact_marker_check` | `favorite_legacy_marker_revision_scope` | `CHECK (target_revision IS NULL OR (target_type='article' AND target_revision<>''))` ⇒ 表达式逐字相同 |
+| 5 | `favorite_legacy_fact_marker` | `favorite_legacy_fact_marker_favorite_id_check` | `favorite_legacy_marker_favorite_id_positive` | `CHECK (favorite_id > 0)` |
+| 6 | `favorite_legacy_fact_marker` | `favorite_legacy_fact_marker_folder_id_check` | `favorite_legacy_marker_folder_id_positive` | `CHECK (folder_id > 0)` |
+| 7 | `favorite_legacy_fact_marker` | `favorite_legacy_fact_marker_source_snapshot_sha256_check` | `favorite_legacy_marker_snapshot_hash_format` | `CHECK (source_snapshot_sha256 ~ '^[a-f0-9]{64}$')` |
+| 8 | `favorite_legacy_fact_marker` | `favorite_legacy_fact_marker_target_id_check` | `favorite_legacy_marker_target_id_nonempty` | `CHECK (target_id <> '')` |
+| 9 | `favorite_legacy_fact_marker` | `favorite_legacy_fact_marker_target_type_check` | `favorite_legacy_marker_target_type_nonempty` | `CHECK (target_type <> '')` |
+| 10 | `favorite_legacy_fact_marker` | `favorite_legacy_fact_marker_user_id_check` | `favorite_legacy_marker_user_id_positive` | `CHECK (user_id > 0)` |
+| 11 | `favorite_fact_outbox` | `favorite_fact_outbox_favorite_id_aggregate_version_key`（**表约束** `contype=u`） | `uk_favorite_fact_version`（**唯一索引**，载体不同） | `UNIQUE (favorite_id, aggregate_version)` ⇒ 列集合与唯一性相同 ⇒ 等价 |
+
+⇒ **11/11 全部落在已签字项 `DEV-FAV-RPC-006`（12 条）的范围内** ⇒ 该条把其中 3 条记在「索引」段、9 条记在「约束」段；本轮脚本按**约束载体**归类 ⇒ ⇒ **同一批对象、归类不同**（第 11 条在本轮记在「约束」段，因 RAG 侧是表约束）。
+⇒ ⚠️ **不要重复质疑这 11 条**：它们是**已签字的纯标识符差异**（签字档原文：「纯标识符差异 ⇒ 约束的语义（唯一性、列集合、冲突行为、CHECK 表达式）完全相同」）。
+
+**④ 触发器 —— 2 / 2 同名同表（**本域最硬的那条约束**）**
+
+| 侧 | 触发器 | 表 | 函数 |
+|---|---|---|---|
+| Go | `favorite_fact_identity_immutable` | `favorite_fact_outbox` | `reject_favorite_fact_identity_change()` |
+| RAG | `favorite_fact_identity_immutable` | `favorite_fact_outbox` | `reject_favorite_fact_identity_change()` |
+| Go | `favorite_legacy_marker_immutable` | `favorite_legacy_fact_marker` | `reject_favorite_legacy_marker_change()` |
+| RAG | `favorite_legacy_marker_immutable` | `favorite_legacy_fact_marker` | `reject_favorite_legacy_marker_change()` |
+
+⇒ 脚本的结构化属性逐项一致（两条触发器各一行，**go 与 rag 逐字相同**）：`fn=… rettype=trigger args=<无> volatility=VOLATILE is_trigger=trigger lang=plpgsql`。
+⇒ Go 出处：`service/favorite/rpc/internal/model/002_favorite_fact_delivery.sql:15`（`OR NEW.aggregate_version IS DISTINCT FROM OLD.aggregate_version`）· `004_favorite_legacy_fact_marker.sql:18+`；RAG 出处：`V5__add_favorite_fact_delivery.sql` · `V4__create_favorite_legacy_fact_marker.sql`。
+
+**⑤ 源码 ↔ 活库 —— 0 差异（G-9 维度）**
+
+- 目录扫描得到 **7 份**迁移脚本 ⇒ **清单由目录扫描产生**，不会落后于仓。
+- 在**干净临时库** `rag_favorite_db_srccheck` 上**原样重放**（交给 PG 自己解析）⇒ 与活库逐项对比：**表集合 4 ↔ 4** · **列集合 0 差异** · **列属性 0 差异** · **可空性 0 差异** · **DEFAULT 0 差异** · **索引 0 差异** · **约束 0 差异** · **触发器 0 差异**
+- ⇒ 脚本原文：`✅ 仓里的迁移脚本**重放结果**与活库逐项一致（表 / 列 / 列属性 / 可空性 / DEFAULT / 索引 / 约束 / 触发器）`
+- ⇒ ⇒ 「迁移改了没人重跑」这一类漂移**在 `favorite` 域为零**（**且含 `V7`** —— 正是 G-9 当初抓出「写死清单漏了 V7」的那一份）。
+
+### 9.4 残留（逐条 · 定级 · 签字状态）
+
+> ⚠️ **一条差异 ≠ 一个缺陷** —— 本域 2 处机器残留，按根因归成 **2 条**，**两条都落在已签字范围内**。
+
+**① `favorite_fact_outbox.favorite_fact_outbox_aggregate_version_range`（仅 RAG 有）**
+
+| 项 | 值 |
+|---|---|
+| 机器报出的定义 | `CHECK ((aggregate_version = ANY (ARRAY[(1)::bigint, (2)::bigint])))` |
+| RAG 出处 | `service/favorite/favorite-rpc/src/main/resources/db/migration/V3__create_favorite_fact_outbox.sql:42`（`CONSTRAINT favorite_fact_outbox_aggregate_version_range CHECK (aggregate_version IN (1, 2))`）· 另有 `V6__align_favorite_schema_with_go.sql:73-74` 的「对存量库补加」段 |
+| Go 出处 | `service/favorite/rpc/internal/model/001_favorite_fact_outbox.sql:6`（`aggregate_version bigint NOT NULL CHECK (aggregate_version IN (1,2))`）⇒ **逐字同源**（RAG `V3:37` 的脚本头自记：「Go 侧逐字：CHECK (aggregate_version IN (1,2))」） |
+| **为何 Go 活库没有** | **执行顺序（app-first）** —— `ddl-parity.sh` 先 AutoMigrate（`db.go:33` 建 `favorite_fact_outbox`）⇒ 补放 `001` 时 `CREATE TABLE IF NOT EXISTS` 变 no-op（实跑日志：`NOTICE: relation "favorite_fact_outbox" already exists, skipping`）⇒ 内联 CHECK 建不出来。⚠️ **真源文档指定的顺序是 sql-first**（`DELIVERY_ACCEPTANCE.md:7`）⇒ **本轮已在真 PG 上验出 sql-first 下的 Go 侧约束名 = `favorite_fact_outbox_aggregate_version_check`、定义逐字相同** ⇒ ⇒ **在权威顺序下这是「同一条约束的不同名字」** |
+| **签字状态** | ✅ **已签字** —— `DEV-FAV-RPC-006`（12 条命名差，2026-10-25 用户 Jason）的第 1 条约束：原文「`favorite_fact_outbox_aggregate_version_check`↔`..._aggregate_version_range`」⇒ ⇒ **已登记 ⇒ 不重复质疑、不「修回去」** |
+| ⚠️ **口径提示（登记给收口执行者）** | 该签字条的**前提**是「Go 侧有这条约束、只是名字不同」（**sql-first 口径**）。本轮机器跑的是 **app-first** ⇒ 同一对象**被报成「实质差异」** ⇒ ⇒ **不是新回归**，但**机器口径与签字档口径不一致** ⇒ ⇒ 登记给收口执行者（**签字档的表述要不要加一句「app-first 下 Go 侧无此约束」** ⇒ 属 `_cross` / 签字档 ⇒ **本 lane 不写**）。**决策不变**（保留现状） |
+| **定级** | **D 类（经分析确认可不实现或不适用的事项）** —— 理由：① **已签字**（`DEV-FAV-RPC-006`）⇒ 按 §十属「经分析确认」⇒ **不修、不改回**；② 在**真源文档指定的顺序**下它**只是命名差**（定义逐字相同）⇒ **不构成 DDL 语义漂移**；③ 即便按 app-first 口径把 RAG 侧这条去掉理解，RAG 侧也只是**更严**（会拒绝 `aggregate_version ∉ {1,2}` 的写入）⇒ **不产生数据丢失 / 重复处理 / 状态错误** ⇒ **不是 A 类**（不阻断阶段 1） |
+
+**② `favorite_item.favorite_item_target_revision_scope`（仅 RAG 有）**
+
+| 项 | 值 |
+|---|---|
+| 机器报出的定义 | `CHECK (((target_revision IS NULL) OR (((target_type)::text = 'article'::text) AND ((target_revision)::text <> ''::text))))` |
+| RAG 出处 | `service/favorite/favorite-rpc/src/main/resources/db/migration/V6__align_favorite_schema_with_go.sql:60-61`；脚本头 `:47-52` **自述「这是有意加强」**并给出依据 |
+| Go 侧事实 | ① Go 的 **`favorite_item` 表本体没有任何 CHECK**；② 同语义的复合 CHECK 只存在于**另一张表** `favorite_legacy_fact_marker`（`service/favorite/rpc/internal/model/004_favorite_legacy_fact_marker.sql:15`：`CHECK (target_revision IS NULL OR (target_type = 'article' AND target_revision <> ''))`）⇒ 而那张表**只在迁移期**用（人工批准的 pre-Outbox 旧行凭证）⇒ ⇒ **日常写入路径的 `favorite_item` 在 Go 侧不受任何 DB 级约束**；③ Go 的**应用层**有同一条断言：`service/favorite/rpc/internal/model/favorite_fact.go:138`（`(item.TargetRevision != nil && (item.TargetType != "article" \|\| *item.TargetRevision == ""))` ⇒ `invalid favorite fact`） |
+| **签字状态** | ✅ **已签字** —— `DEV-FAV-RPC-007`（2026-10-25，用户 Jason：「保留现状，登记为签字偏离」⇒ **不是缺陷**；改动需**重新征签**）⇒ ⇒ **不重复质疑、不「修回去」** |
+| 签字档自记的「什么时候会变成真差异」 | 出现**第二个写入方**（人工脚本 / 另一个服务 / 数据修复工具）直接写 `favorite_item` 且**故意**写非法 `target_revision` ⇒ RAG 侧被拒（SQLSTATE 23514）、Go 侧不拒 ⇒ ⇒ **届时不需要改 RAG**（RAG 更安全），但**写入方需要知道 RAG 多这条约束** |
+| **定级** | **D 类（经分析确认可不实现或不适用的事项）** —— 理由：① **已签字** ⇒ 不修；② **加强型差异**（RAG 更严）⇒ **不产生数据丢失 / 重复处理 / 状态错误** ⇒ **不是 A 类**；③ Go 侧**本来就没有**这条 DB 级约束 ⇒ RAG 的这条是**把 Go 的应用层断言下沉到 DB 层**（应用层断言两侧都有 ⇒ 正常写入路径**两侧都不可能触发**）⇒ ⇒ **可接受 RAG 更严** ⇒ 归 D；⚠️ **但保留签字档那条「第二写入方」触发条件**（本节把它复述在此，**不改签字档**） |
+
+**残留汇总**
+
+| # | 对象 | 机器口径 | 权威口径（真源指定顺序） | 签字 | 定级（§十） |
+|---|---|---|---|---|---|
+| ① | `favorite_fact_outbox_aggregate_version_range` | **实质差异**（仅 RAG 有） | ✅ **命名差**（Go 侧有同名不同名的同一 CHECK） | ✅ `DEV-FAV-RPC-006` | **D** |
+| ② | `favorite_item_target_revision_scope` | **实质差异**（仅 RAG 有） | **实质差异**（Go 侧 `favorite_item` 本体无此约束） | ✅ `DEV-FAV-RPC-007` | **D** |
+| | **合计** | **2** | | **2 条均已签字** | ⇒ **零未签字残留** |
+
+### 9.5 变异验证（证明守门有牙齿，不是假绿）
+
+> ⚠️ **为什么不直接改仓内的 `.sql`**：`service/favorite/**` 的**代码与台账由本波次另一条 lane 在改**（AGENTS.md §5.3d 并发纪律）⇒ 本轮**零改动仓内迁移脚本** ⇒ 变异走**临时副本**（任务书允许的「**临时副本**」路线）：把 `check-ddl-static.py` 与该域的 `db/migration/` 目录**原样拷到一棵临时树**（保持相对路径 ⇒ `REPO_ROOT` 与仓内布局一致），**逐字节校验 sha256 相同**，再在**副本**上做变异。
+
+**变异 ①：`favorite_item.favorite_id` 的列类型（`bigint` → `integer`）**
+
+| 步骤 | 命令 | 结果 |
+|---|---|---|
+| 副本 sha256（变异前） | `shasum -a 256` 副本 vs 仓内 7 份 `.sql` | **7/7 逐字节相同**（`V1` = `fbb8b1ef664947976c5477f55c1943f15f8fa4908c8c5c14b694fedebfca6156` · `V2` = `5a50122facf623404bb731c6ac7eac4f9e079311931d899a7b0c9ebe5022f722` · `V3` = `674160fb2039e8f499b9b4dcef50ae44f4cca72d9c92ca79fd5bb7ec3ca74f09` · `V4` = `895f41e89c746769f1201acee3e4f6162ff0615e7f077a135a664a59f72e7c27` · `V5` = `343c1097b594e72ae38343dda4180b856ed424926f71aba5a08e549ab4905c31` · `V6` = `bf5fdd40a706336c383ad3ac189cc1c61deb932a5a0997c9110465e09cbef0ba` · `V7` = `8d839e896e1170be8e99055d3b3c2328ae4a9f8c26a58d4873fb6bc1d625b824`） |
+| 基线 | `python3 tools/difftest/check-ddl-static.py --domain favorite --indexes --check-source`（临时树） | **EXIT=1**（**2 处** · 基线那 2 条）· 源码↔活库 = `✅ 一致` |
+| 变异 | `V2__create_favorite_item.sql`：`    favorite_id bigint      NOT NULL,` → `    favorite_id integer     NOT NULL,`（改**一个列的类型**，命中目标行 **1** 处） | — |
+| 变异后重跑 | 同上命令 | **EXIT=1**（**3 处** = 基线 2 ＋ **新 1**）· 源码↔活库 **转红**：<br>`🔴 列属性不同：favorite_item.favorite_id  源码=('integer', '')  活库=('bigint', '')`<br>`❌ 源码 ↔ 活库**分叉 1 处** ⇒ 活库已过期于仓里的迁移脚本` |
+| 还原 | 改回 `bigint` | — |
+| 还原后重跑 | 同上命令 | **EXIT=1**（**2 处** · **回到基线**）· 源码↔活库 回到 `✅ 一致` |
+| **还原校验** | `shasum -a 256` 临时副本 vs 仓内文件 | **7/7 仍逐字节相同**（`V2` 仍是 `5a50122f…2f722`）⇒ 逐字节回到变异前 |
+| 副本清理 | `rm -rf` 临时树 | **已删除**（复查：目录不存在）⇒ **工作树里不留临时副本** |
+
+⇒ **结论**：变异**精确报出 1 处**、**指向被改的那一列**（`favorite_item.favorite_id`），**没有多红也没有漏红**（基线那 2 条仍在，总数从 2 → 3）⇒ 守门**不是假绿**；还原后**精确回到 EXIT=1 的基线计数（2 处）**⇒ 无残留。
+⚠️ 本域基线**不是 0** ⇒ 「变异必红 ⇒ 还原必回基线」的**两端是 1(2 处) → 1(3 处) → 1(2 处)** ⇒ ⇒ **计数守恒**（这正是 §3.3 规则③「脚本批量改 N 处必须配覆盖全部 N 处的守恒断言」的本域形态）。
+
+**仓内零改动核验**
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-g3b"
+git status --short -- service/     # ⇒ 空
+git diff --stat -- service/        # ⇒ 0 行
+```
+
+⇒ `service/favorite/**` 与 `service/article/**`（同波次另一 lane 在改）**零改动**。
+
+### 9.6 证据强度 · 效力边界 · 未能核到的部分
+
+**证据强度 = E4（`docs/twoStage.md` §8.1「运行证据」）＋ L4（域台账分层：运行面 · 双侧活体）** —— 两侧各建一个**真 PG 16** 库（Go 侧跑真源自己的 `AutoMigrate`、RAG 侧跑仓里的真迁移脚本）⇒ 逐列 / 逐索引 / 逐约束 / 逐触发器 dump 后机器比对。
+⚠️ 本节所有 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环（AGENTS.md §0 证据强度分层）。
+
+**效力边界（越界即失效）**
+
+| # | 边界 | 对本域是否成立 |
+|---|---|---|
+| 1 | **机器口径（app-first）≠ 真源文档指定的权威口径（sql-first）** | 🔴 **成立** —— 见 §9.0 ⇒ ⇒ **「2 处残留」这个数字是 app-first 口径下的**；在 sql-first 口径下其中 1 处只是命名差 ⇒ ⇒ **不得把「2」读成「2 条真漂移」** |
+| 2 | **`ddl-parity.sh` 的 Go 侧顺序 = app-first**（AutoMigrate → 补放 `001..004`） | 🔴 **成立** —— 真源 `db.go:33` 的 AutoMigrate 先建 `favorite_fact_outbox` ⇒ `001` 的 `CREATE TABLE IF NOT EXISTS` 变 no-op（实跑日志逐字佐证） |
+| 3 | **`--check-source` 的重放引擎 ≠ 生产引擎** —— 重放用 **psql**；本域生产用 **Flyway 引擎**（`application.yml:109`） | ⚠️ **需人工核（本轮已核）** —— 7 份 `.sql` 里含 `DO $$ ... $$` 守卫块（`V6` 段）⇒ **psql 与 Flyway 都会把 `$$` 块交给 PG 自己解析** ⇒ 两者看到的语句序列相同 ⇒ **对本域不成立** |
+| 4 | **迁移清单 = 生产清单** —— `discover_rag_sql` 目录扫描的 7 份，与生产 Flyway `locations` 指向的目录内容**逐条一致**（命令 ③ 与 ① 的执行日志互证） | ✅ **成立** |
+| 5 | **Flyway 账本表** —— 生产库会有 `flyway_schema_history_favorite`（AGENTS.md §6.3 问题 4），但**对拍环境直接用 psql 放 `.sql`** ⇒ 两个库里**都没有**账本表 | ✅ **本轮无干扰**；工具靠 `exclude_tables=("flyway_schema_history",)` 前缀匹配排除（**已配置**） |
+| 6 | **`baseline-version: 0`**（`application.yml:108`） | ⚠️ **本轮未核** —— 对拍用**全新空库** ⇒ baseline 不触发 ⇒ V1 正常执行。⚠️ **这正是该配置注释里点名的陷阱**（`application.yml:89-107`）⇒ **登记为「未核」** |
+| 7 | **触发器函数体的语义**机器判不了 ⇒ 走人工逐条 | ⚠️ **本轮未逐行核** —— 两侧函数**同名**、结构化属性逐项一致 ⇒ **形式面无差异来源**；但**函数体到底拒绝什么**（Go 的 `002:15` 的 `IS DISTINCT FROM` 与 RAG 的对应实现是否逐字等价）**未逐行核** ⇒ **登记为「未核」** |
+| 8 | **`pg_constraint` 只比 `contype` + 定义文本，不解析外键的引用目标** | ✅ **不适用**（本域两侧 `contype='f'` 各 **0 行**，见 §9.6 的人工补查表） |
+| 9 | **分区 / 存储过程 / 触发器函数** —— 脚本不查 | ✅ **不适用**（7 份 `.sql` 的**可执行部分**无 `PARTITION` / `PROCEDURE` 关键字 ⇒ 已人工核；两侧 `pg_partitioned_table` / `prokind='p'` 均 **0**） |
+
+**人工补查（脚本**不查**的维度 —— 结论强度 = **L4 + 人工补查**，**非脚本原生结论**）**
+
+| 维度 | Go 侧 `go_favorite_db` | RAG 侧 `rag_favorite_db` | 判定 |
+|---|---|---|---|
+| 外键（`pg_constraint` `contype='f'`） | **0 行** | **0 行** | ⚪ 两侧各 0 ⇒ **无对象可比** |
+| 分区表（`relkind='p'` / `pg_partitioned_table`） | **0** / **0** | **0** / **0** | ⚪ 两侧各 0 ⇒ **无对象可比** |
+| 存储过程（`prokind='p'`） | **0** | **0** | ⚪ 两侧各 0 ⇒ **无对象可比** |
+| 函数（`prokind='f'`，**非触发器**） | **0** | **0** | ⚪ 两侧各 0 ⇒ **无对象可比** |
+| 触发器函数（被 `pg_trigger` 引用） | **2**：`reject_favorite_fact_identity_change` · `reject_favorite_legacy_marker_change` | **2**：**同名两个** | ✅ **同名 ⇒ 人工闭合** |
+
+**未能核到的部分（明确写「未核」+ 原因，不含糊）**
+
+| # | 未核项 | 原因 | 影响 |
+|---|---|---|---|
+| 1 | **共享库拓扑下的 Flyway `baseline-version: 0` 行为** | 对拍用**全新空库** ⇒ baseline 不触发 ⇒ 该配置**未被本节验证** | ⚠️ 该维度的守门在域侧真 PG + 真 Flyway 引擎的用例里（`application.yml:89-107` 明写这个陷阱）⇒ 本节**不重复核**，只登记边界 |
+| 2 | **触发器函数体的逐行语义等价** | 机器只比结构化属性（函数名 / 返回类型 / 参数 / volatility / 语言）⇒ **函数体文本未比** | ⇒ 两侧函数**同名 + 同属性** ⇒ **形式面无差异来源**；但「函数体到底拒绝哪些列变更」**未逐行核** ⇒ ⇒ **需人工逐行核 `002_favorite_fact_delivery.sql` 与 RAG `V5` 的函数体** |
+| 3 | **sql-first 口径下的**完整**双侧对照**（不只是 `001` 那一条 CHECK） | 本轮只把 Go 的 `001` 单独放进空库验了 `favorite_fact_outbox` 的约束集 ⇒ **没有**在 sql-first 下把 Go 侧 4 张表整体重建后再跑一遍七项对照 | ⇒ §9.4 ① 的结论**已坐实**（那条 CHECK 的有无与名字）；但「sql-first 下是否还有别的差异」**未核** ⇒ ⇒ **域内自有探针 `tools/ddl-parity-probe/favorite/` 就是干这件事的** ⇒ ⇒ **本节建议以该探针为 sql-first 口径的权威证据源**（本轮**未跑**它 ⇒ 登记为「未跑」） |
+| 4 | **索引是否被真实查询计划选中** | 需 `EXPLAIN` + 真实数据量 ⇒ 本轮**未核** | 本域 2 个 RAG 独有索引是**纯性能** ⇒ 实际代价未量化 |
+| 5 | **「运维到底按哪个顺序跑 `001..004`」** | 属**部署面**，不是 schema ⇒ schema 对拍**看不出** | ⚠️ **这正是 §9.0 口径差的现实来源** ⇒ ⇒ 本域的 DDL 一致性**依赖运维纪律**（真源文档 `DELIVERY_ACCEPTANCE.md:7` 规定了 sql-first）⇒ ⇒ **登记为「未核」（部署面）** |
+
+### 9.7 与其它台账的关系（指针，不改别的文件）
+
+| 台账 | 本节与它的关系 |
+|---|---|
+| [`docs/Intentional_Deviations/favorite/rpc.md`](../../Intentional_Deviations/favorite/rpc.md) | **本节 2 处机器残留在此有归属**：`DEV-FAV-RPC-006`（12 条命名差 · 2026-10-25 已签字）· `DEV-FAV-RPC-007`（`favorite_item` 多一道 CHECK · 2026-10-25 已签字）⇒ ⇒ **本节不新增签字条目**，只把机器结论落到域台账；⚠️ §9.4 ① 的「口径提示」**只在此登记**（签字档属 `_cross` 口径面 ⇒ **本 lane 不写**） |
+| [`docs/DRIFT/favorite/rpc.md`](rpc.md) · [`api.md`](api.md) · [`common.md`](common.md) · [`proto.md`](proto.md) | 本域**组件级**台账；本节是 **DDL 这一维度**的域级落账 ⇒ 与那几份台账的其它维度结论**互不冲突** |
+| [`tools/ddl-parity-probe/favorite/`](../../../tools/ddl-parity-probe/favorite/) | 🔴 **域内自有探针 · 判定基准 = sql-first**（README「两个执行顺序都跑」节 + `run.sh:315-325`）⇒ ⇒ **它与本节机器口径（app-first）是同域的两个 Go 侧口径** ⇒ ⇒ **两者结论「不矛盾」**（差在执行顺序）⇒ ⇒ **本节的 §9.0 就是把这两个口径显式对齐**（本轮**未跑**该探针 ⇒ 登记为「未跑」） |
+| [`docs/PhaseGoal-judge.md` §七 **G-8 / G-9**](../../PhaseGoal-judge.md) | 主线结论 —— 本节是 `favorite` 域的**域级落账**；⚠️ 该文件对 `favorite` 域记的残留是「**favorite 2**（额外 `CHECK` ⇒ **RAG 更严**）」⇒ ⇒ **与本节一致**（2 处）⇒ ⇒ **但本节补充了它没写的成因**（① 是**执行顺序口径差**、两条**都已签字**）⇒ ⇒ 该文件**主线写** ⇒ **本 lane 只读** |
+| [`docs/DRIFT/_cross/ddl-type-divergences.md`](../../DRIFT/_cross/ddl-type-divergences.md) | 🔴 **属 `_cross` ⇒ 本 lane 无写权** ⇒ 只在此登记：该文件对 `favorite` 域的「类型/长度 0 差异」**与本节一致**（38 列逐字相同）⇒ ⇒ **无需更正** |
+
+---
