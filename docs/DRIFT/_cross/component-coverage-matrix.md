@@ -45,9 +45,9 @@
 | `comment` | `comment-rpc` | 42 / 8,119 | 87 | [`rpc.md`](../comment/rpc.md) | 首轮 + 真 PG 修复轮 | 🔴 首轮判定；**7 条 MISMATCH 已全部修复**（各配真 PG 守门网 + 变异验证） |
 | `comment` | `comment-common` | 4 / 567 | 27 | [`common.md`](../comment/common.md) | 双侧对拍 | ✅ **EQUIVALENT** |
 | `comment` | `comment-proto` | — | 0 | [`proto.md`](../comment/proto.md) | §3.4 + 消费方式 | ✅ **EQUIVALENT** |
-| `favorite` | `favorite-api` | 31 / 2,920 | 69 | ❌ **0 字节** | — | 🔴 **从未对照** |
-| `favorite` | `favorite-common` | 3 / 456 | 25 | ❌ **0 字节** | — | 🔴 **从未对照** |
-| `favorite` | `favorite-proto` | — | 0 | ❌ **0 字节** | — | 🔴 **从未对照**（§3.4 复制忠实是另一回事） |
+| `favorite` | `favorite-api` | 31 / 2,920 | 69 | [`api.md`](../favorite/api.md) | 真 PG + 真 Tomcat | 🟢 **已对照**（183 KB 台账；🟢 **2026-10-29 订正** —— 原写「0 字节 / 从未对照」**已被实测推翻**） |
+| `favorite` | `favorite-common` | 3 / 456 | 25 | [`common.md`](../favorite/common.md) | 契约测试 | 🟢 **已对照**（🟢 **2026-10-29 订正** —— 原写「0 字节 / 从未对照」**已被实测推翻**） |
+| `favorite` | `favorite-proto` | — | 0 | [`proto.md`](../favorite/proto.md) | `FavoriteProtoWireParityTest` ＋ `check-proto-static.sh` | 🟢 **已对照**（🟢 **2026-10-29 订正** —— 原写「0 字节 / 从未对照」**已被实测推翻**；⚠️ §3.4 的「复制忠实」与「消费方式已验」**仍是两回事**） |
 | `favorite` | `favorite-rpc` | 36 / 7,106 | 58 | [`rpc.md`](../favorite/rpc.md) | 真 PG + 真启动 | 🔴 已修 6 处 L2 语义偏差；**7 条未决**（3 条待签字） |
 | `follow` | `follow-api` | 27 / 3,047 | 50 | [`api.md`](../follow/api.md) | **双侧活体对拍** | ✅ **EQUIVALENT** |
 | `follow` | `follow-rpc` | 17 / 2,692 | 70 | [`rpc.md`](../follow/rpc.md) | **双侧活体对拍 + 真 PG** | ✅ **EQUIVALENT** |
@@ -79,8 +79,11 @@
 
 ### 当前态的三条结论
 
-1. **38 个组件里，3 个仍是「台账 0 字节」** ⇒ `favorite-api` / `favorite-common` / `favorite-proto`
-   **从未对照**（`favorite-rpc` 有台账）⇒ **favorite 域是 38 组件里唯一整块空白**。
+1. ~~**38 个组件里，3 个仍是「台账 0 字节」** ⇒ `favorite-api` / `favorite-common` / `favorite-proto`
+   **从未对照**（`favorite-rpc` 有台账）⇒ **favorite 域是 38 组件里唯一整块空白**。~~
+   🟢 **2026-10-29 订正（G-11 闭合）**：三份台账**全部在库且非空**（`api.md` 183 KB / `common.md` 10 KB / `proto.md` 15 KB）
+   ⇒ ⇒ **favorite 域不是「整块空白」** ⇒ 上表三行已改为 ✅。
+   ⚠️ **教训**：本条**当时**是真的（2026-10-25 快照），但**没人在快照过期后重核** ⇒ ⇒ 「台账 0 字节」这种**可机器核的事实**也必须**定期重测**，否则索引就会**长期骗人**。
 2. **台账齐 ≠ 已对齐**：仍有 🔴 的域 = `article`（2 组件）· `like`（2）· `message`（2）· `users`（4）
    · `favorite-rpc` · `service/common`；已 ✅ 的域 = `comment`（3/4）· `follow`（4/4）· `hot`（2/3）· `message-common/proto`。
 3. **8 个 `*-proto` 只有 §3.4 的「复制忠实」**（`hot` / `like` / `favorite` / `user` / `admin` / `task` / `comment` / `follow` 各自的 proto），

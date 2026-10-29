@@ -42,7 +42,7 @@
 | 档 | proto | 证据 | 能否防回退 |
 |---|---|---|---|
 | ✅ 有网 | `user` / `admin` | `tools/difftest/check-proto-static.sh` → `EXIT=0`，脚本逐字节比对字段名 / 字段号 / message 名 / rpc 签名 | ✅ 改坏即红 |
-| ⚠️ **只有一次性实测** | `article` / `hot` / `like` / `message` / `comment` / `favorite` / `follow` / `task` | 2026-10-23 首次比对，一致；**但脚本一个都没覆盖** | ❌ **无网，随时可被改坏而无人知晓** |
+| ✅ **已有网（2026-10-29 扩面）** | **全部 10 个 proto** | `tools/difftest/check-proto-static.sh` ⇒ **2026-10-29 扩到 10 个域**（R3·G-6）⇒ 逐字节比对**字段名 / 字段号 / message 名 / rpc 签名**；⚠️ `like` / `comment` 的 proto `package` 行**按签字偏离排除**，但**另钉签字值**（改动仍会红）<br>另：各域还有**专属契约测试**（`ArticleProtoContractTest` / `HotProtoContractTest` / `FavoriteProtoWireParityTest` / `LikeProtoContractTest` …） | ✅ **改坏即红**（2026-10-29 两次变异验证：改字段号 ⇒ 红；改签字 package 值 ⇒ 红） |
 | 🚫 **不做（非本项目范围）** | `knowledge` / `points` / `security` | Go 侧 `proto/` 共 12 个，RAG 侧做 10 个；缺的这 3 个**不在范围内**，见 §1「微服务范围」 | 不适用 |
 
 🆕 **2026-10-23 12:25 新增 4 个 proto 的补充事实**：

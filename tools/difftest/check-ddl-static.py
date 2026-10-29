@@ -118,9 +118,13 @@ RAG 那 4 份 `db/*.sql` 是照着**旧 JPA @Column** 写的,不是照着 Go 的
    ⇒ 改这条之前，task 域会因「主键名不同」被误判成有差异（实测 EXIT=1）。
 """
 import argparse
+import os
 import re
 import subprocess
 import sys
+
+# 仓根（tools/difftest/check-ddl-static.py → 上溯三层）
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ── 域预设 ─────────────────────────────────────────────────────────────
 # 每个域一套：容器名 / 两个库名 / 表名映射 / 排除表 / 差异说明
@@ -164,6 +168,10 @@ DOMAINS = {
                  "⇒ 超过 255 字符的 username/email/history_id 在 Go 写成功、"
                  "在 RAG 被 PG 拒（22001）⇒ 5001/5003；反噬读路径时 RAG 报 1002/1003。"),
         "prepare_hint": "先起 tools/difftest/ddl-parity.sh users",
+        # ⚠️ users 域**不用 Flyway**：改用 SchemaInitializer 幂等重放
+        #    （AGENTS.md §6.3 问题 1）⇒ 迁移脚本在 `db/` 而不是 `db/migration/`，
+        #    且没有 V<n> 前缀（是 01_~04_）。
+        "rag_sql_dir": "service/users/users-common/src/main/resources/db",
     },
     "task": {
         # ✅ 2026-10-26（global 域 L10）订正：原写 `taskprobe-postgres` / `task_go_db`
@@ -189,6 +197,7 @@ DOMAINS = {
                  "  RAG 的 V1/V2 迁移脚本就是照这条规则写的。\n"
                  "⇒ 本域出现任何差异都应视为**新漂移**，而不是「已知的历史包袱」。"),
         "prepare_hint": "先起 tools/difftest/ddl-parity.sh task",
+        "rag_sql_dir": "service/task/task-rpc/src/main/resources/db/migration",
     },
     "message": {
         # ✅ 2026-10-26（global 域 L10）订正：原写 `msg_ddl_pg` / `go_db` / `rag_db`
@@ -217,6 +226,7 @@ DOMAINS = {
                  "  RAG 的 V1~V5 迁移脚本就是照这条规则写的。\n"
                  "⇒ 本域出现任何差异都应视为**新漂移**，而不是「已知的历史包袱」。"),
         "prepare_hint": "先起 tools/difftest/ddl-parity.sh message",
+        "rag_sql_dir": "service/message/message-rpc/src/main/resources/db/migration",
     },
     "comment": {
         # ✅ 2026-10-25（B3/X-7 扩域）：本域**已有现成的双侧库**（comment 域对拍环境）
@@ -242,6 +252,7 @@ DOMAINS = {
                  "  **没有出现在 `go_comment` 库里** ⇒ 该表是**只被 RAG 侧 migrate 过**，\n"
                  "  两侧对照因此在 report_record 上缺 Go 侧样本 ⇒ 结论只覆盖其余 6 张表。"),
         "prepare_hint": "先起 tools/difftest/ddl-parity.sh comment",
+        "rag_sql_dir": "service/comment/comment-rpc/src/main/resources/db/migration",
     },
     # ══════════════════════════════════════════════════════════════════
     # 2026-10-25（global 域 L3 / X-7）新增 5 域
@@ -266,6 +277,7 @@ DOMAINS = {
                  "  article_publication / article_domain_outbox；RAG 的 V8/V9/V10 逐条对齐。\n"
                  "⇒ 本域出现任何差异都应视为**新漂移**。"),
         "prepare_hint": "先起 tools/difftest/ddl-parity.sh article",
+        "rag_sql_dir": "service/article/article-rpc/src/main/resources/db/migration",
     },
     "like": {
         "container": "ddl-like-pg",
@@ -281,6 +293,7 @@ DOMAINS = {
         "note": ("like 域：Go 的 AutoMigrate（5 张表）+ migrations/001~003 手写 SQL；\n"
                  "  RAG 的 Flyway V1~V6。⇒ 本域出现任何差异都应视为**新漂移**。"),
         "prepare_hint": "先起 tools/difftest/ddl-parity.sh like",
+        "rag_sql_dir": "service/like/like-rpc/src/main/resources/db/migration",
     },
     "hot": {
         "container": "ddl-hot-pg",
@@ -297,6 +310,9 @@ DOMAINS = {
                  "  RAG 侧 hot-rpc 无 migration 目录 ⇒ DDL 这一维度对本域**不适用（N/A）**。\n"
                  "  ⚠️ 「两侧都是 0 张表」不等于「DDL 已对齐」—— 结论是「本维度无对象可比」。"),
         "prepare_hint": "先起 tools/difftest/ddl-parity.sh hot",
+        # ⚠️ hot 域**没有数据库** ⇒ 没有迁移脚本 ⇒ 「源码 ↔ 活库」这一维度
+        #    对本域**不适用（N/A）**，不是「已一致」。
+        "rag_sql_dir": None,
     },
     "follow": {
         "container": "ddl-follow-pg",
@@ -310,6 +326,7 @@ DOMAINS = {
         "note": ("follow 域：Go 的 AutoMigrate(&FollowRelation{}, &BlockRelation{}) vs\n"
                  "  RAG 的 Flyway V1/V2 ⇒ 本域出现任何差异都应视为**新漂移**。"),
         "prepare_hint": "先起 tools/difftest/ddl-parity.sh follow",
+        "rag_sql_dir": "service/follow/follow-rpc/src/main/resources/db/migration",
     },
     "favorite": {
         "container": "ddl-favorite-pg",
@@ -325,8 +342,226 @@ DOMAINS = {
         "note": ("favorite 域：Go 的 AutoMigrate(3 表) + 001~004 手写 SQL vs RAG 的 Flyway V1~V6。\n"
                  "  ⚠️ favorite 是**只读域**（域零写权）⇒ 本域差异**只登记、不修**。"),
         "prepare_hint": "先起 tools/difftest/ddl-parity.sh favorite",
+        "rag_sql_dir": "service/favorite/favorite-rpc/src/main/resources/db/migration",
     },
 }
+
+# ══════════════════════════════════════════════════════════════════════
+# G-9（R3·T-3.2）—— RAG 侧**迁移脚本（源码）↔ 活库**的双向校验
+# ══════════════════════════════════════════════════════════════════════
+#
+# 【为什么要有这个】
+#   本脚本原先**只比「Go 活库 ↔ RAG 活库」** ⇒ 它证明的是「活库与 Go 对齐」，
+#   **不证明「活库与仓里的 .sql 对齐」**。
+#   ⇒ 于是「迁移文件改了、但没人重跑迁移」这种漂移**完全不可见**：
+#   活库还是旧的（与 Go 对齐 ⇒ 绿灯），仓里的 .sql 已经是新的 ⇒ 源码与活库分叉。
+#
+# 【实测到的真实例子（G-9 不是假想）】
+#   `tools/difftest/ddl-parity.sh` 里 RAG 侧迁移清单是**写死的**，
+#   而 favorite 域后来新增了 `V7__align_favorite_outbox_time_columns_with_go.sql`
+#   （去掉 favorite_fact_outbox.created_at/updated_at 的 DEFAULT now()，对齐 Go 的
+#   AutoMigrate 行为）⇒ **写死的清单没跟上** ⇒ 那份活库永远缺 V7 的效果。
+#   ⇒ 而 Go↔活库 对拍**照样绿**（因为 Go 侧本来就没有 DEFAULT，差异被当成「已知」）。
+#   ⇒ 这就是「守门只比活体、不比源码」的真实盲区。
+#
+# 【修法（两层，缺一不可）】
+#   ① **清单只能由目录扫描产生**（discover_rag_sql）⇒ 不再可能「写死清单落后于仓」
+#      ⇒ tools/difftest/ddl-parity.sh 也改成调本函数（RAG_SQL 清单**单一产生点**）。
+#   ② **本脚本加 --check-source**：把仓里的 .sql **在一个干净临时库上重放一遍**，
+#      再与活库逐项对比 ⇒ 「源码改了但没重跑」当场变红。
+#      ⚠️ **用独立临时库**（不是同一库的另一个 schema）：仓里的 .sql 有
+#      `DO $$ ... IF NOT EXISTS (SELECT 1 FROM pg_constraint ...) $$` 这类**守卫**，
+#      而 pg_constraint 查询**不按 schema 过滤** ⇒ 若在活库旁边建 schema，
+#      守卫会被 public 里已存在的同名约束「误判为已存在」⇒ 跳过创建 ⇒ 假差异。
+#      ⇒ 独立库 ⇒ 守卫的行为与「全新部署」完全一致。
+#
+# 【为什么让 PG 自己去解析 .sql，而不是本脚本写 SQL 解析器】
+#   .sql 里有 `DO $$ ... $$` / `CREATE OR REPLACE FUNCTION ... $$` / `IF NOT EXISTS` /
+#   `ALTER COLUMN ... TYPE ... USING` 等十余种形态 ⇒ 手写解析器必然漏判
+#   （漏判 ⇒ 假绿，正是本仓反复踩的坑）⇒ **把解析交给 PG**：脚本原样重放，
+#   PG 解析出什么就是什么 ⇒ 与生产 Flyway / SchemaInitializer **同一条路径**。
+
+def discover_rag_sql(domain: str) -> list[str]:
+    """⇒ RAG 侧迁移脚本清单（**仓内真实文件**，按版本号排序）。
+
+    ⚠️ **为什么不能用「写死的清单」**：写死的清单会悄悄落后于仓里新增的迁移
+      （实测：favorite 域的 V7__align_favorite_outbox_time_columns_with_go.sql
+      就不在 ddl-parity.sh 的写死清单里 ⇒ 那份活库永远缺 V7 的效果，
+      而 Go↔活库 对拍看不出来 ⇒ 这正是 G-9 要抓的那类漂移）。
+    ⇒ 清单**只能**由目录扫描产生，且**只有一个**产生点（ddl-parity.sh 也调本函数）。
+    """
+    cfg = DOMAINS.get(domain) or {}
+    d = cfg.get("rag_sql_dir")
+    if not d:
+        return []
+    root = os.path.join(REPO_ROOT, d)
+    if not os.path.isdir(root):
+        return []
+    files = [f for f in os.listdir(root) if f.endswith(".sql")]
+    # ⚠️ Flyway 的默认位置就是 `db/migration`（默认前缀 `V`、后缀 `.sql`）
+    #   ⇒ 那个目录里**不是** `V*.sql` 的文件，Flyway 生产上**根本不执行**
+    #   ⇒ 扫进来会让「源码重放」比生产多跑东西 ⇒ 假差异。
+    #   ⇒ 按目录约定区分：Flyway 目录只认 `V` 前缀；users 域的 `db/`（SchemaInitializer
+    #   幂等重放，无版本前缀）认全部 `.sql`。
+    if os.path.basename(root) == "migration":
+        files = [f for f in files if f.startswith("V")]
+
+    def _key(name: str):
+        # ⚠️ 两种命名都要认：Flyway 的 `V<n>__xxx.sql` 与 users 域的 `01_xxx.sql`
+        #   ⇒ 取文件名里**第一个**数字串当版本号。
+        m = re.search(r"\d+", name)
+        return (int(m.group(0)) if m else 10 ** 9, name)
+
+    return [os.path.join(d, f) for f in sorted(files, key=_key)]
+
+
+def _psql(container: str, db: str, user: str, sql: str):
+    return subprocess.run(
+        ["docker", "exec", "-i", container, "psql", "-U", user, "-d", db,
+         "-v", "ON_ERROR_STOP=1", "-t", "-A", "-c", sql],
+        capture_output=True, text=True)
+
+
+def check_source_sync(domain, cfg, container, rag_db, pg_user, exclude_tables):
+    """⇒ (状态, 差异条数, 打印行)
+
+    状态：
+      "ok"    —— 仓里的 .sql 重放结果与活库**逐项一致**
+      "na"    —— 本域没有迁移脚本（hot 域）⇒ 该维度不适用
+      "diff"  —— 有实质差异（源码与活库分叉）
+      "error" —— 仓里的 .sql **在干净库上重放就失败** ⇒ 迁移脚本自身不可重放
+    """
+    sqls = discover_rag_sql(domain)
+    out: list[str] = []
+    if not sqls:
+        out.append("  ⚠️ 本域**没有迁移脚本**（hot 域无数据库）⇒ "
+                   "「源码 ↔ 活库」这一维度**不适用（N/A）**，不是「已一致」。")
+        return "na", 0, out
+
+    scratch = f"{rag_db}_srccheck"
+    out.append(f"  源码迁移脚本 {len(sqls)} 份（目录扫描 ⇒ 不会落后于仓）：")
+    for rel in sqls:
+        out.append(f"    · {rel}")
+    out.append(f"  临时库：{scratch}（干净库 ⇒ 守卫行为与全新部署一致）")
+
+    # ---- ① 建干净临时库 ------------------------------------------------
+    try:
+        p = _psql(container, "postgres", pg_user, f"DROP DATABASE IF EXISTS {scratch};")
+        if p.returncode != 0:
+            return "error", 0, out + [f"  FATAL: 建临时库失败：{p.stderr.strip()}"]
+        p = _psql(container, "postgres", pg_user, f"CREATE DATABASE {scratch};")
+        if p.returncode != 0:
+            return "error", 0, out + [f"  FATAL: 建临时库失败：{p.stderr.strip()}"]
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        return "error", 0, out + [f"  FATAL: 连不上容器 {container}：{e}"]
+
+    # ---- ② 原样重放仓里的 .sql -----------------------------------------
+    for rel in sqls:
+        path = os.path.join(REPO_ROOT, rel)
+        with open(path, "rb") as f:
+            data = f.read()
+        try:
+            p = subprocess.run(
+                ["docker", "exec", "-i", container, "psql", "-U", pg_user,
+                 "-d", scratch, "-v", "ON_ERROR_STOP=1"],
+                input=data.decode("utf-8", errors="replace"),
+                capture_output=True, text=True)
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            return "error", 0, out + [f"  FATAL: 重放 {rel} 失败：{e}"]
+        if p.returncode != 0:
+            out.append(f"  🔴 源码 .sql **在干净库上重放失败**：{rel}")
+            for line in (p.stderr or "").strip().splitlines()[:20]:
+                out.append(f"      {line}")
+            out.append("     ⇒ 迁移脚本自身不可重放（既可能是源码缺陷，"
+                       "也可能是环境缺前置；**这不是活库的差异**）")
+            return "error", 0, out
+
+    # ---- ③ 逐项对比：重放结果（源码） ↔ 活库 ---------------------------
+    try:
+        src_cols = load(container, scratch, {}, QUERY, exclude_tables, pg_user)
+        live_cols = load(container, rag_db, {}, QUERY, exclude_tables, pg_user)
+        src_cons = load_constraints(container, scratch, {}, exclude_tables, pg_user)
+        live_cons = load_constraints(container, rag_db, {}, exclude_tables, pg_user)
+        src_idx = load_indexes(container, scratch, {}, exclude_tables, pg_user)
+        live_idx = load_indexes(container, rag_db, {}, exclude_tables, pg_user)
+        src_trg = load_triggers(container, scratch, {}, exclude_tables, pg_user)
+        live_trg = load_triggers(container, rag_db, {}, exclude_tables, pg_user)
+        src_cc = load(container, scratch, {}, QUERY_CONSTRAINT, exclude_tables, pg_user)
+        live_cc = load(container, rag_db, {}, QUERY_CONSTRAINT, exclude_tables, pg_user)
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        return "error", 0, out + [f"  FATAL: 读库失败：{e}"]
+
+    diffs = 0
+
+    src_tables = {k.split(".", 1)[0] for k in src_cols}
+    live_tables = {k.split(".", 1)[0] for k in live_cols}
+    only_src = sorted(src_tables - live_tables)
+    only_live = sorted(live_tables - src_tables)
+    out.append(f"\n  表集合：源码 {len(src_tables)} 张  活库 {len(live_tables)} 张")
+    for t in only_src:
+        out.append(f"    🔴 仅源码有（活库缺 ⇒ 迁移没跑全 / 活库过期）：{t}")
+    for t in only_live:
+        out.append(f"    🔴 仅活库有（源码里没有 ⇒ 活库与仓分叉）：{t}")
+    diffs += len(only_src) + len(only_live)
+
+    only_src_c = sorted(set(src_cols) - set(live_cols))
+    only_live_c = sorted(set(live_cols) - set(src_cols))
+    for k in only_src_c:
+        out.append(f"    🔴 仅源码有的列：{k}  {src_cols[k]}")
+    for k in only_live_c:
+        out.append(f"    🔴 仅活库有的列：{k}  {live_cols[k]}")
+    diffs += len(only_src_c) + len(only_live_c)
+
+    for k in sorted(set(src_cols) & set(live_cols)):
+        if src_cols[k] != live_cols[k]:
+            out.append(f"    🔴 列属性不同：{k}  源码={src_cols[k]}  活库={live_cols[k]}")
+            diffs += 1
+    for k in sorted(set(src_cc) & set(live_cc)):
+        if src_cc[k] != live_cc[k]:
+            # ⚠️ 序列名映射的副产品不算真差（同主路径的 _norm_seq 口径）
+            if _norm_seq(src_cc[k][1]) == _norm_seq(live_cc[k][1]):
+                continue
+            out.append(f"    🔴 可空性/DEFAULT 不同：{k}  "
+                       f"源码={src_cc[k]}  活库={live_cc[k]}")
+            diffs += 1
+
+    only_src_i = sorted(set(src_idx) - set(live_idx))
+    only_live_i = sorted(set(live_idx) - set(src_idx))
+    for k in only_src_i:
+        out.append(f"    🔴 仅源码有的索引：{k}  {src_idx[k]}")
+    for k in only_live_i:
+        out.append(f"    🔴 仅活库有的索引：{k}  {live_idx[k]}")
+    diffs += len(only_src_i) + len(only_live_i)
+    for k in sorted(set(src_idx) & set(live_idx)):
+        if src_idx[k] != live_idx[k]:
+            out.append(f"    🔴 索引定义不同：{k}  源码={src_idx[k]}  活库={live_idx[k]}")
+            diffs += 1
+
+    only_src_k = sorted(set(src_cons) - set(live_cons))
+    only_live_k = sorted(set(live_cons) - set(src_cons))
+    for k in only_src_k:
+        out.append(f"    🔴 仅源码有的约束：{k}  {src_cons[k]}")
+    for k in only_live_k:
+        out.append(f"    🔴 仅活库有的约束：{k}  {live_cons[k]}")
+    diffs += len(only_src_k) + len(only_live_k)
+
+    only_src_t = sorted(set(src_trg) - set(live_trg))
+    only_live_t = sorted(set(live_trg) - set(src_trg))
+    for k in only_src_t:
+        out.append(f"    🔴 仅源码有的触发器：{k[0]}.{k[1]}")
+    for k in only_live_t:
+        out.append(f"    🔴 仅活库有的触发器：{k[0]}.{k[1]}")
+    diffs += len(only_src_t) + len(only_live_t)
+
+    if diffs == 0:
+        out.append("  ✅ 仓里的迁移脚本**重放结果**与活库逐项一致"
+                   "（表 / 列 / 列属性 / 可空性 / DEFAULT / 索引 / 约束 / 触发器）")
+    else:
+        out.append(f"  ❌ 源码 ↔ 活库**分叉 {diffs} 处** ⇒ 活库已过期于仓里的迁移脚本")
+        out.append("     ⇒ 典型成因：迁移文件改了但**没人重跑迁移**"
+                   "（这正是 Go↔活库 对拍看不见的那一类漂移）")
+    return ("ok" if diffs == 0 else "diff"), diffs, out
+
 
 # 列类型 / 长度
 QUERY = (
@@ -705,7 +940,22 @@ def main():
     ap.add_argument("--allow-default", default="",
                     help="豁免名单：逗号分隔的「表.列」键，"
                          "这些列的 DEFAULT 差异不计为失败")
+    ap.add_argument("--check-source", action="store_true",
+                    help="⭐ G-9：额外核对「仓里的迁移脚本（源码）↔ 活库」"
+                         "—— 把仓里的 .sql 在一个干净临时库上重放一遍，"
+                         "再与活库逐项对比 ⇒ 抓「迁移文件改了但没人重跑」"
+                         "（Go↔活库 对拍看不见的那一类漂移）")
+    ap.add_argument("--print-rag-sql", action="store_true",
+                    help="只打印本域的 RAG 侧迁移脚本清单（仓库相对路径，逐行一个）"
+                         "然后退出 —— 供 tools/difftest/ddl-parity.sh 复用，"
+                         "保证「清单」只有**一个**产生点")
     args = ap.parse_args()
+
+    # ---- --print-rag-sql：不需要任何 DB ⇒ 必须在连库之前返回 -------------
+    if args.print_rag_sql:
+        for rel in discover_rag_sql(args.domain):
+            print(rel)
+        return 0
 
     cfg = DOMAINS[args.domain]
     container = args.container or cfg["container"]
@@ -739,6 +989,28 @@ def main():
     print(f"== 域: {args.domain}  容器: {container}  "
           f"Go库: {go_db}  RAG库: {rag_db} ==")
 
+    # ---- G-9：仓里的迁移脚本（源码）↔ 活库 ----------------------------
+    # ⚠️ **位置很重要 —— 必须在所有环境闸门之前跑**：
+    #    原先放在最后 ⇒ 像 comment 域那样「Go 侧缺 report_record ⇒ 列集合不一致 ⇒
+    #    提前 return 2」的域**根本跑不到源码校验** ⇒ 该校验对那些域**等于不存在**。
+    #    ⇒ 「跑绿」会掩盖「压根没查」⇒ 正是本仓反复踩的坑（零命中是假信号）。
+    # ⚠️ **独立于 --indexes**：它核的是「活库有没有落后于仓里的 .sql」，
+    #    与「Go↔活库」是**两个不同**的维度 ⇒ 不开 --indexes 也要能查。
+    source_error = False
+    source_diffs = 0
+    if args.check_source:
+        print("\n对照 · 源码 ↔ 活库（G-9：仓里的 .sql 在干净临时库上重放 ↔ 活库）")
+        st, n, lines = check_source_sync(args.domain, cfg, container, rag_db,
+                                         pg_user, exclude_tables)
+        for line in lines:
+            print(line)
+        if st == "na":
+            pass  # N/A 已打印说明，不计失败、不改结论
+        elif st == "error":
+            source_error = True
+        else:
+            source_diffs = n
+
     # ---- 环境闸门 ①：本域是否根本不适用（N/A）----------------------------
     # ⚠️ 「两侧都是 0 张表」**不是**「DDL 已对齐」—— 那只说明这个域没有数据库
     #    （hot 域就是这种：Go 侧无 gorm，RAG 侧无 migration）。
@@ -763,7 +1035,9 @@ def main():
             for t in missing_rag:
                 print(f"  RAG 侧缺:  {t}")
             print(cfg["prepare_hint"])
-            return 2
+            # ⚠️ 「源码 ↔ 活库」这一维度**独立于 Go 侧** ⇒ 它若已查出实质差异，
+            #    那是**真的漂移**（不是环境问题）⇒ 退出码 1 优先于 2。
+            return 1 if source_diffs else 2
 
     only_go = sorted(set(go) - set(rag))
     only_rag = sorted(set(rag) - set(go))
@@ -774,7 +1048,7 @@ def main():
             print(f"  仅 Go 有:  {k}")
         for k in only_rag:
             print(f"  仅 RAG 有:  {k}")
-        return 2
+        return 1 if source_diffs else 2
 
     diffs = [(k, go[k], rag[k]) for k in sorted(go) if go[k] != rag[k]]
 
@@ -934,11 +1208,21 @@ def main():
               "索引 / 唯一约束 / 约束 / 触发器 / 触发器形式 / 触发器函数体属性。"
               "加 --indexes 可核。")
 
+    # ---- G-9 的差异已在上方（环境闸门之前）统计 ⇒ 这里并入总账 ----------
+    failures += source_diffs
+
     if diffs:
         print()
         print(cfg["note"])
     print(f"\n== 实质差异合计 {failures} 处 ⇒ 退出码 {1 if failures else 0} ==")
-    return 1 if failures else 0
+    if failures:
+        return 1
+    if source_error:
+        # ⚠️ 「检查没做完」**不能**报绿（否则「跑绿 ≠ 对」又成立一次）
+        #    ⇒ 但也**不是**「有实质差异」⇒ 用退出码 2（环境不满足 / 检查未完成）。
+        print("⚠️ 源码 ↔ 活库这一维度**未能完成** ⇒ 退出码 2（**不是**「已一致」）")
+        return 2
+    return 0
 
 
 if __name__ == "__main__":

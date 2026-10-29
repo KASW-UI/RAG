@@ -86,9 +86,6 @@ domain_config() {
     article)
       PROBE_PKGS="article:config:service/article/rpc"
       GO_SQL="service/article/rpc/internal/model/002_community_revision.sql"
-      RAG_SQL="service/article/article-rpc/src/main/resources/db/migration/V8__create_article.sql
-service/article/article-rpc/src/main/resources/db/migration/V9__create_article_sync_outbox.sql
-service/article/article-rpc/src/main/resources/db/migration/V10__create_article_community_revision.sql"
       ;;
     like)
       PROBE_PKGS="like:dsn:service/like/rpc"
@@ -104,25 +101,16 @@ service/article/article-rpc/src/main/resources/db/migration/V10__create_article_
       GO_SQL_FIXTURE="service/like/rpc/internal/model/migrations/001_like_domain_fact_outbox.sql
 service/like/rpc/internal/model/migrations/002_like_dc_wire.sql
 service/like/rpc/internal/model/migrations/003_like_fact_delivery.sql"
-      RAG_SQL="service/like/like-rpc/src/main/resources/db/migration/V1__create_like_record.sql
-service/like/like-rpc/src/main/resources/db/migration/V2__create_like_consume_inbox.sql
-service/like/like-rpc/src/main/resources/db/migration/V3__create_like_outbox_event.sql
-service/like/like-rpc/src/main/resources/db/migration/V4__create_like_domain_fact_outbox.sql
-service/like/like-rpc/src/main/resources/db/migration/V5__create_like_fact_stream.sql
-service/like/like-rpc/src/main/resources/db/migration/V6__align_like_domain_fact_outbox_with_go.sql"
       ;;
     hot)
       # ⚠️ hot 域**根本没有数据库**：Go 侧 service/hot 全域无 gorm / 无 AutoMigrate
       #    （只有 Redis + Kafka）；RAG 侧 hot-rpc 无 db/migration 目录、无 Mapper/Entity。
       PROBE_PKGS=""
       GO_SQL=""
-      RAG_SQL=""
       ;;
     follow)
       PROBE_PKGS="follow:dbconf:service/follow/rpc"
       GO_SQL=""
-      RAG_SQL="service/follow/follow-rpc/src/main/resources/db/migration/V1__create_follow_relation.sql
-service/follow/follow-rpc/src/main/resources/db/migration/V2__create_block_relation.sql"
       ;;
     favorite)
       PROBE_PKGS="favorite:dbconf:service/favorite/rpc"
@@ -130,12 +118,6 @@ service/follow/follow-rpc/src/main/resources/db/migration/V2__create_block_relat
 service/favorite/rpc/internal/model/002_favorite_fact_delivery.sql
 service/favorite/rpc/internal/model/003_favorite_target_revision.sql
 service/favorite/rpc/internal/model/004_favorite_legacy_fact_marker.sql"
-      RAG_SQL="service/favorite/favorite-rpc/src/main/resources/db/migration/V1__create_favorite_folder.sql
-service/favorite/favorite-rpc/src/main/resources/db/migration/V2__create_favorite_item.sql
-service/favorite/favorite-rpc/src/main/resources/db/migration/V3__create_favorite_fact_outbox.sql
-service/favorite/favorite-rpc/src/main/resources/db/migration/V4__create_favorite_legacy_fact_marker.sql
-service/favorite/favorite-rpc/src/main/resources/db/migration/V5__add_favorite_fact_delivery.sql
-service/favorite/favorite-rpc/src/main/resources/db/migration/V6__align_favorite_schema_with_go.sql"
       ;;
     users)
       # ⚠️ users 域要**两个** Go 探针：admin 两张表由 admin/rpc 自己的 InitDB 产出
@@ -143,22 +125,10 @@ service/favorite/favorite-rpc/src/main/resources/db/migration/V6__align_favorite
       PROBE_PKGS="user:dbconf:service/user/user/rpc
 admin:dsn:service/user/admin/rpc"
       GO_SQL=""
-      RAG_SQL="service/users/users-common/src/main/resources/db/01_create_user.sql
-service/users/users-common/src/main/resources/db/02_create_user_avatar_history.sql
-service/users/users-common/src/main/resources/db/03_create_admin.sql
-service/users/users-common/src/main/resources/db/04_create_admin_invite.sql"
       ;;
     comment)
       PROBE_PKGS="comment:dsn:service/comment/rpc"
       GO_SQL=""
-      RAG_SQL="service/comment/comment-rpc/src/main/resources/db/migration/V1__create_comment_subject.sql
-service/comment/comment-rpc/src/main/resources/db/migration/V2__create_comment_index.sql
-service/comment/comment-rpc/src/main/resources/db/migration/V3__create_comment_content.sql
-service/comment/comment-rpc/src/main/resources/db/migration/V4__create_comment_like.sql
-service/comment/comment-rpc/src/main/resources/db/migration/V5__create_comment_report_record.sql
-service/comment/comment-rpc/src/main/resources/db/migration/V6__create_comment_domain_fact_outbox.sql
-service/comment/comment-rpc/src/main/resources/db/migration/V7__create_comment_fact_stream.sql
-service/comment/comment-rpc/src/main/resources/db/migration/V8__align_comment_fact_delivery_with_go.sql"
       ;;
     task)
       # ✅ 2026-10-26（global 域 L10）新增：task 域进**本 runner 自管的容器**。
@@ -170,8 +140,6 @@ service/comment/comment-rpc/src/main/resources/db/migration/V8__align_comment_fa
       # ⚠️ Model 包的路径是 **internal/Model（大写 M）** —— 与其它域的 internal/model 不同。
       PROBE_PKGS="task:automigrate:service/task/rpc"
       GO_SQL=""
-      RAG_SQL="service/task/task-rpc/src/main/resources/db/migration/V1__create_task_progress.sql
-service/task/task-rpc/src/main/resources/db/migration/V2__create_user_like_count.sql"
       ;;
     message)
       # ✅ 2026-10-26（global 域 L10）新增：message 域进**本 runner 自管的容器**。
@@ -179,15 +147,19 @@ service/task/task-rpc/src/main/resources/db/migration/V2__create_user_like_count
       #    （service/message/rpc/internal/model/db.go:20，内部 db.go:44 跑 AutoMigrate）。
       PROBE_PKGS="message:dbconf:service/message/rpc"
       GO_SQL=""
-      RAG_SQL="service/message/message-rpc/src/main/resources/db/migration/V1__create_message_notification.sql
-service/message/message-rpc/src/main/resources/db/migration/V2__create_message_conversation.sql
-service/message/message-rpc/src/main/resources/db/migration/V3__create_message_conversation_message.sql
-service/message/message-rpc/src/main/resources/db/migration/V4__conversation_pair_unique_index.sql
-service/message/message-rpc/src/main/resources/db/migration/V5__message_time_columns_timestamptz.sql"
       ;;
     *)
       echo "FATAL: 未知域: $1" >&2; exit 2 ;;
   esac
+
+  # ⚠️ **RAG 侧迁移清单只从仓里扫描**（单一产生点）—— G-9（R3·T-3.2）落码。
+  #    原来这里是**每个域写死一份清单** ⇒ 仓里新增了迁移（实测：favorite 域的
+  #    V7__align_favorite_outbox_time_columns_with_go.sql）而清单没跟上
+  #    ⇒ 那份活库永远缺 V7 的效果，而 Go↔活库 对拍**照样绿**（看不见）。
+  #    ⇒ 现在清单由 tools/difftest/check-ddl-static.py --print-rag-sql 扫描产生
+  #    ⇒ 「清单落后于仓」这件事**从结构上不可能再发生**。
+  RAG_SQL="$(python3 "${REPO_ROOT}/tools/difftest/check-ddl-static.py" \
+              --domain "$1" --print-rag-sql)"
 }
 
 # ── 探针源码（只调真源的 model.InitDB ⇒ 跑的是真源自己的 AutoMigrate）──────
@@ -437,7 +409,8 @@ run_domain() {
   if [ "$RUN_CHECK" -eq 1 ]; then
     echo "  --- 双侧活体 DDL 对拍 ---"
     python3 "${REPO_ROOT}/tools/difftest/check-ddl-static.py" \
-      --domain "$domain" --container "$container" --go-db "$go_db" --rag-db "$rag_db" --indexes \
+      --domain "$domain" --container "$container" --go-db "$go_db" --rag-db "$rag_db" \
+      --indexes --check-source \
       ${DDL_ALLOW_IDX:+--allow-idx "$DDL_ALLOW_IDX"} \
       ${DDL_ALLOW_DEFAULT:+--allow-default "$DDL_ALLOW_DEFAULT"}
     rc=$?
