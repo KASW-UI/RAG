@@ -20,6 +20,7 @@
 | **R5-2** | **`DRIFT-USERS-LAT-001`** —— RAG 侧 HTTP 响应延迟被共享层的「**500ms 切片等待**」量化（实测 Go `max=319ms` vs RAG `max=2046ms`；中位数 50 vs 51ms 几乎相同 ⇒ **两侧调用链层数相同**，不是跳数差） | **P3 / D 类** | 共享层 `service/common`（`HttpMiddleware.java:415-419`）⇒ **G4** | **登记 + 写解除条件**（**不修**：D 类 = 竞争力，且结论依赖「空载复跑」这一前提） |
 | **R5-3** | **G-19** —— proto 的「**消费方式**」取证（`optional` presence / 代码里的字段号硬编码 / Jackson 配置） | **取证缺口**（**不降 R**：§1.3 的 proto 分型口径下，`.proto` 逐字节 diff 已满足 ⑤） | 各域 proto 消费点 | **取证**（**不改行为**） |
 | **R5-4** | **PIT-GLOBAL-068** —— 共享 Nacos 服务发现面让**并发探针互相污染** ⇒ 「跑红 ≠ 是缺陷」 | **D 类**（工具面） | 探针工具（`tools/api-full-parity-probe/**`） | **隔离方案**（**不改产品代码**） |
+| **R5-6** | **`DRIFT-CF-018` 的 `favorite` 域半边** —— `FavoriteFactDispatchScheduler.java:119` **仍调阻塞版 `Dispatcher.run(...)`** ⇒ `once=false` 时**句柄永远拿不到** ⇒ `@PreDestroy` 拿到 null ⇒ **进程仍无法优雅关闭**（共享层半边已修 ⇒ 这半边是**域内**的） | **P2 / C 类**（不阻阶段一：P0 #1「核心业务链路能够真实运行」**仍成立**） | `service/favorite/favorite-rpc/**`（域内 ⇒ G3） | **修**（一行：`Dispatcher.run` → `Dispatcher.runAsync`，与 comment-rpc 对齐） |
 | **R5-5** | **G-12 遗留 15 处**「原引用本就指错」—— 基线行本身是**空行 / 重复表头** ⇒ **早于 G-12 就指错**，**不是 G-12 引入的回归** | **D 类**（文档卫生） | 各域台账 | **逐条定位后修**（**当前不改**：无法唯一定位 ⇒ 瞎改比不改更糟） |
 
 > ⚠️ **`AMBIGUOUS` 1918 条仍不做**（理由同模板：「同名多文件无法静态判定」的**全集** ⇒ 人工判读不现实 ⇒ 只处理与 P0 九条 / 组件必相对齐项相关的那一小部分 ⇒ 其余**登记为阶段二**）。
@@ -45,6 +46,8 @@
 | **F-4** | 各域（按 proto 归属） | **G-19 取证**：逐 proto 核「消费方式」三问（`optional` presence 有无语义差 / 有无字段号硬编码 / Jackson 配置与 Go 侧是否同形） | 各域台账 + `docs/DRIFT/_cross/proto-verification.md` | 每条有「是/否 + 证据（`文件:行号`）」⇒ **无「未知」** |
 | **F-5** | **G3** | 探针的 **Nacos 隔离**（避免共享服务发现面互相污染） | `tools/api-full-parity-probe/article/**` | 同一份探针在**并发跑**时不再互报 `INTERNAL`/`5001` |
 | **F-6** | 各域 | **G-12 遗留 15 处**：逐条用**上下文关键词**定位作者真正想指的行 | 各域台账 | 每处的目标行**逐条有依据**（内容锚定，不是猜） |
+| **F-7** | **G3** | **`DRIFT-CF-018` 的 favorite 域半边**：`FavoriteFactDispatchScheduler.java:119` 改用 `Dispatcher.runAsync(…)`（与 `CommentFactDispatchScheduler.java:93` 对齐）⇒ 进程可优雅关闭 | `service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/fact/FavoriteFactDispatchScheduler.java` | ① 优雅关闭测试：开启 `favorite.fact.dispatch.enabled=true` ⇒ 发起关闭 ⇒ 断言**进程在 N 秒内退出**且 `@PreDestroy` 拿到**非 null** handle ② `mvn -pl service/favorite/favorite-rpc -am test` ⇒ 0F/0E |
+| **F-8** | **G4** | **共享层台账的计数/条目订正**（本轮复核发现）：① `docs/DRIFT/common/alignment-2026-10-23.md` §十二·一 的合计表**漏减 `DRIFT-CF-018`**（该条共享层半边已修）⇒ communityfact「15 条一条未动」是**陈旧快照** ⇒ 未修编号 **24 → 23** ② §十三·一 的 **CF-018 行**按「**已修一半**」改写（共享层已修 · favorite 半边仍成立）③ **LOG-003 / LOG-006 各缺「暂缓理由」一列**（表头 11 列 / 这两行只有 10 列）⇒ 补齐 | `docs/DRIFT/common/alignment-2026-10-23.md` | ① 机器核：§十三·一 的**每行都是 11 列**（脚本：按 `|` 切分计数，≠11 即红）② 合计行与 §十三·三 的「23 未修 + 5 未编号 = 28」**自洽** ③ `check-ledger-tables.py` ⇒ EXIT=0 |
 
 ---
 
