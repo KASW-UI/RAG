@@ -31,7 +31,11 @@
 
 ---
 
-## SD-2026-10-24-CAND-01：9 处时间列的 `NOT NULL DEFAULT CURRENT_TIMESTAMP`（RAG 更严）
+## SD-2026-10-24-CAND-01：9 处时间列的 `NOT NULL DEFAULT CURRENT_TIMESTAMP`（RAG 更严） ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**
+
+> 🟡 **2026-10-30 真实性复核（W-D lane · 本条首次拿到 L4 机器证据）**：「9 处」的构成已被机器逐条拆开 —— `python3 tools/difftest/check-ddl-static.py --domain comment --indexes --rag-db <同源副本库>`（补跑口径 · 命令原文见 `docs/DRIFT/comment/rpc.md` §4.5.1）⇒ **EXIT=1 / 23 处**，其中 **可空性 8 处 + DEFAULT 8 处** = **本条的 8 处可比对差异**（`subject` / `comment_index` / `comment_content` / `comment_like` × `created_at` / `updated_at`；两侧取值 `go=nullable=YES` / `rag=nullable=NO`，`go=<NULL>` / `rag=CURRENT_TIMESTAMP`）⇒ **第 9 处（`report_record.created_at`）因该表 Go 侧整表不存在 ⇒ 不可比** ⇒ ⇒ **「9 处」的口径成立，但机器只能复算 8 处** ⇒ ⇒ **建议按「8 处可比对 + 1 处不可比」签字**。
+> ⇒ 逐条 `文件:行号` 出处：Go `service/comment/rpc/internal/model/data_model.go:14-15`（Subject）· `:34-35`（CommentIndex）· `:47-48`（CommentContent）· `:95-96`（CommentLike）—— tag **只有 `autoCreateTime`/`autoUpdateTime`、无 `not null`** ⇒ 落 NULL；RAG `V1:27,28` · `V2:22,23` · `V3:18,19` · `V4:24,25` —— 全部 `NOT NULL DEFAULT CURRENT_TIMESTAMP` ⇒ ⇒ **证据强度：L4（机器双侧活体对照 · 两次独立复跑一致）**。
+> ⚠️ **上表「列级 60/60 已一致」的措辞需按此读**：类型/长度维度机器只核了 **52/52**（6 张可比表）—— `report_record` 的 8 列**无 Go 侧样本** ⇒ **不可比**（这一点与 `SD-2026-10-24-CAND-02` 一致）。核对日期 2026-10-30。
 
 | 项 | 值 |
 |---|---|
@@ -88,7 +92,7 @@
 
 ---
 
-## SD-2026-10-24-CAND-02：`report_record` 表在 RAG 侧存在，Go 侧**根本不存在**
+## SD-2026-10-24-CAND-02：`report_record` 表在 RAG 侧存在，Go 侧**根本不存在** ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 | 项 | 值 |
 |---|---|
@@ -155,7 +159,15 @@
 
 ---
 
-## SD-2026-10-24-CAND-09：RAG 的 DDL **比 Go 生产 DDL 更严**（约束 / 索引 / 触发器层）
+## SD-2026-10-24-CAND-09：RAG 的 DDL **比 Go 生产 DDL 更严**（约束 / 索引 / 触发器层） ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**
+
+> ✅ **2026-10-30 真实性复核（W-D lane · 本条的对象清单已被机器逐条钉死）**：本条写的「约束 / 索引 / 触发器层更严」此前只有「活体 schema 差分」一个**笼统口径**；**2026-10-30 机器复跑**（`check-ddl-static.py --domain comment --indexes --rag-db <同源副本库>` ⇒ **EXIT=1 / 23 处**）把对象**逐条钉死为 5 个**（**均仅 RAG 有**，Go 的**生产** schema 里不存在）⇒ ⇒ **本条的对象清单 = 5 个，不是笼统的「约束 / 索引 / 触发器层」**：
+> · **索引 2 个**：`comment_domain_fact_outbox.idx_comment_fact_delivery`（RAG `V8:47-48`）· `comment_domain_fact_outbox.idx_comment_legacy_fact_aggregate`（RAG `V6:42-44`）
+> · **CHECK 2 个**：`comment_domain_fact_outbox.comment_new_fact_has_dc_wire`（RAG `V6:63`）· `comment_fact_stream.comment_fact_stream_version_range`（RAG `V7:31`）
+> · **触发器 1 个**：`comment_domain_fact_outbox.comment_fact_identity_immutable`（RAG `V8:66,82`）
+> ⇒ ⇒ **根因与本节下方「RAG 抄的是 Go 的测试夹具 DDL」完全对上**：Go 那三份手写 `.sql`（`001|002|003`）**只被测试脚本执行**（`service/comment/rpc/internal/model/test-community-postgres.sh:47,49`）⇒ 不在 Go 的生产 DDL（= `service/comment/rpc/internal/model/db.go:15` 的 GORM `AutoMigrate` 产物）⇒ ⇒ **本条成立 ⇒ 建议签字**（登记类，**不代签**）。
+> ⚠️ **一处需显式标注的「载体不同」**：`comment_fact_stream_version_range` 这条 CHECK，Go 在**应用层**强制同一条区间（`service/comment/rpc/internal/model/domain_fact.go:121` `if stream.Version < 1 \|\| stream.Version > 9007199254740991 { … }`）⇒ ⇒ **该条属「载体不同、语义等价」**，另 4 条才是**纯 RAG 侧多出来的 DB 层防线**。
+> ⇒ 逐条 `文件:行号` 出处见 `docs/DRIFT/comment/rpc.md` §4.5.1 ⇒ ⇒ **证据强度：L4（机器双侧活体对照 · 两次独立复跑一致）**。核对日期 2026-10-30。
 
 | 项 | 值 |
 |---|---|
@@ -214,7 +226,7 @@
 
 ---
 
-## SD-2026-10-24-CAND-03：authority / dispatch 两个子命令**默认关闭**
+## SD-2026-10-24-CAND-03：authority / dispatch 两个子命令**默认关闭** ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**
 
 | 项 | 值 |
 |---|---|
@@ -259,7 +271,7 @@
 
 ---
 
-## SD-2026-10-24-CAND-06：`manage` 的**清位**分支 —— Go 侧 SQL **必然报错**，RAG 侧正常
+## SD-2026-10-24-CAND-06：`manage` 的**清位**分支 —— Go 侧 SQL **必然报错**，RAG 侧正常 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 | 项 | 值 |
 |---|---|

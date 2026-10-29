@@ -151,6 +151,24 @@
 （§0 原文的 36 确实错了），但**它记的具体数字（38 / 4,666）也已成为历史** ——
 ⇒ 该条的状态横幅已在第十二轮补上**核对日期**，并指向本节。
 
+### 0.3 2026-10-29 复核（W-D lane · 台账真实性复核 phase）：§0.2 的计数**第三次过期**（原文同样保留，不抹除）
+
+> 依据：本 phase 的任务就是「台账结论 ↔ 代码真实性逐条对齐」⇒ `DRIFT-ARTICLE-API-008` 本身就是被核对象 ⇒ **必须先把它自己的数字重新量一遍**。
+> 命令（**与 §0.2 完全同法**，可复算）：
+> `find service/article/article-api/src/main/java -name "*.java" | wc -l`
+> 与 `find service/article/article-api/src/main/java -name "*.java" -exec cat {} + | wc -l`。
+
+| 项 | §0 原文（00:1x） | §0.1（2026-10-23） | §0.2（2026-10-24） | **本轮实测（2026-10-29）** | 结论 |
+|---|---|---|---|---|---|
+| `src/main/java` `.java` 文件数 | 36 | 38 | 41 | **43** | ⬆ **第三次被推翻** |
+| `src/test/java` `.java` 文件数 | 未记 | 2 | 6 | **12** | ⬆ |
+| 主源码总行数 | 4,275 | 4,666 | 5,733 | **5,447** | ⬇ **−286（行数首次下降）** |
+| `src/main/java` 最新写入 | 2026-10-22 23:56 | 2026-10-23 | 2026-10-24 | **2026-10-29 09:10**（`dto/ListArticlesResp.java` · `dto/Article.java` · `config/ArticleApiProperties.java`） | ⬆ |
+
+⚠️ **行数下降但文件数上升 ⇒ 是「拆分 / 搬迁」而不是「代码变少」** ⇒ 与 §0.2 的「本域自己的对齐工作带来的」同因（2026-10-28~29 的 JWT 验签外迁等改造把大文件拆成多个类）⇒ ⇒ **不构成任何行为结论**。
+⚠️ **又一次踩了 §0.1 自己写下的那个坑**（本仓 Pitfalls `P-6`：「台账里的『实测计数』会在同一天内过期」）⇒ **本节按 §0.1 / §0.2 的同样规矩处理：不抹除原文，追加新节**。
+⇒ **`DRIFT-ARTICLE-API-008` 的状态横幅已按本次实测再补一次核对日期**（状态本身 **✅ 已修** 不变 —— 「台账计数会被推翻」这个结论**恰恰又一次被本轮证实**）。核对日期 2026-10-29。
+
 
 ---
 
@@ -598,7 +616,7 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 | **Must Preserve** | `user-rpc` 单次调用预算 = 2s（`RpcClientConf.Timeout` tag 默认）。 |
 | **Risk** | **MEDIUM-HIGH** |
 | **Classification** | **SEMANTIC MISMATCH** |
-| **Evidence** | Go：`service/article/api/etc/article-api.yaml:20-24`（无 Timeout）、go-zero `zrpc/config.go:31`（声明点）、`zrpc/client.go:70-71` + `zrpc/internal/client.go:83`（**消费点**）；RAG：`UserRpcClient.java:48-50`、`GoStyleRequestDeadline.java:110-120`、`application.yml:188-189`。**证据强度：静态源码（已读到消费点）。** |
+| **Evidence** | Go：`service/article/api/etc/article-api.yaml:20-24`（无 Timeout）、go-zero `zrpc/config.go:31`（声明点）、`zrpc/client.go:70-71` + `zrpc/internal/client.go:83`（**消费点**）；RAG：`UserRpcClient.java:48-50`、`GoStyleRequestDeadline.java:110-120`、`application.yml:188-189`。**证据强度：静态源码（已读到消费点）。**<br>⚠️ **2026-10-29 真实性复核（W-D lane · 指针订正）**：本行三处 RAG 侧指针中，**两处行号已过期**（本行记的是**修复前**的证据形态，行号随重构漂移）⇒ `UserRpcClient.java:48-50` ⇒ 实为 **`:82-87`**（`userRpc()` 的 `min(remaining, CLIENT_TIMEOUT_MILLIS)` 真实实现）；`application.yml:188-189` ⇒ 实为 **`:260`**（`http-timeout: 70s`）；`GoStyleRequestDeadline.java:110-120` ⇒ **仍准确**（`applyTo` 方法体）。⇒ **本条「已修」判定不变**（修法证据见 §F-2：`UserRpcClient.java:82-87` 显式算 min · 守门 `UserRpcClientDeadlineTest` **5 例**实测在册）。核对日期 2026-10-29。 |
 
 ⚠️ 这正是 AGENTS.md §3.3.1 点名的形态：**「yaml 里没写」≠「没设」**。
 `UserRpcConf.Timeout` 就是一条藏在 struct tag 里、且**与 `ArticleRpcConf.Timeout`（显式 70000）不同**的默认值。
@@ -709,6 +727,7 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 > **当前状态（✅ **已修**（台账卫生：§0.1 已按实测更正为 **38** 个主源文件 / **4,666** 行；
 > **核对日期 2026-10-23**；⚠️ **该计数已于 2026-10-24 再过期一次** ⇒ 现为 **41** 个 / **5,733** 行，
 > 逐文件来源见 **§0.2**））**
+> ⚠️ **2026-10-29 真实性复核（W-D lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（**判定不变**：本条「台账的文件计数结论会被推翻」这一结论**恰恰又被本轮实测证实一次**）。依据：**§0.3**（本轮按 §0.2 同法实测：`src/main/java` **43** 个 `.java` / **5,447** 行 · `src/test/java` **12** 个 · 最新写入 **2026-10-29 09:10** ⇒ **§0.2 的 41 / 5,733 已第三次过期**）· 核对日期 2026-10-29。
 见 **§0.1**。`src/main/java` 实测 **38**（原文 36），主源码 **4,666** 行（原文 4,275），
 且 7 个主源文件在 **2026-10-23 当日**仍有写入。
 - **Risk**（作为台账风险）：MEDIUM —— 任何按「36 个文件 / 4,275 行」做的完备性推断都已失效。
@@ -1504,6 +1523,8 @@ chn = chn.Append(GunzipHandler)          // ⑪
 | 变异 | 结果 |
 |---|---|
 | 把 `GoStyleCpuSheddingFilter` 的 `@Order` 从 `+3` 改成 `+9` | ✅ **转红**（链序被打乱） |
+
+> ⚠️ **2026-10-29 真实性复核（W-D lane · 订正，不改结论）**：上方「真容器实测链序（2026-10-24）」的**绝对 `@Order` 数字已过期** —— 共享层后来整体重排过，**2026-10-29 实测当前值**为：`ArticleGoStyleCorsFilter` **+1** · `GoStylePathNormalizingFilter` **+2** · `GoStyleTraceparentFilter` **+3** · `GoStyleMaxConnsFilter` **+4** · `GoStyleBreakerFilter` **+5** · `GoStyleCpuSheddingFilter` **+6** · `HttpMiddlewareFilter` **+7** · `GoStyleMaxBytesFilter` **+8** · `GoStyleJsonBodyLimitFilter` **+9**（`service/common/src/main/java/com/rag/common/protection/GoStyleCpuSheddingFilter.java:63` 等，各 `@Order` 注解处）。⇒ **但本条的结论仍成立**：**这 8 个 Filter 的相对次序与 2026-10-24 快照完全一致**（仍与 Go 的 `MaxConns → Breaker → Shedding → Timeout → MaxBytes` 同序）⇒ ⇒ 「3→8 与 Go 的链序逐条一致 ✅」**不变**。⚠️ **另有一处子结论已过期**：上方「前两位同为 `@Order(HIGHEST_PRECEDENCE)` ⇒ 相对顺序由 Bean 注册序决定」—— 现已**分别**是 `+1` / `+2` ⇒ **相对顺序已由 `@Order` 显式表达**，不再是「容器决定」。核对日期 2026-10-29。
 
 > 🔴 **本条变异第一次判成「假绿」—— 是我的变异工装有问题**：
 > 被变异的是 `service/common`，而命令是 `mvn -pl service/article/article-api test`

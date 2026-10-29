@@ -15,7 +15,7 @@
 > **旧号**：`PF-ARTICLE-RPC-001` ⇒ **新号**：`PIT-ARTICLE-23`
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条的现象（「自定义 `@Select` 没有 `@ResultMap` ⇒ jsonb 列**静默变 null**」）**已在本域消除** —— 三处返回实体的自定义 `@Select` 全部已挂 `@ResultMap`，且已有关于 jsonb 非空内容的真 PG 守门 ⇒ 本轮不会再因缺 `@ResultMap` 丢列，故不单列防错约束（通用规则见本条「下次怎么防」）。
-> **依据**：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mapper/ArticleMapper.java:81,202,224`（`@ResultMap("articleEntityResultMap")`）· `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mapper/ArticlePublicMapper.java:92,193` · `.../ArticleRevisionMapper.java:220` · 台账 `docs/DRIFT/article/rpc.md:365`（`DRIFT-ARTICLE-RPC-001` ✅ 已修 · FIX-01 · 真 PG 守门 + 变异验证）⇒ **证据强度：真 PG + 变异**。
+> **依据**：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mapper/ArticleMapper.java:81,202,224`（`@ResultMap("articleEntityResultMap")`）· `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mapper/ArticlePublicMapper.java:92,193` · `.../ArticleRevisionMapper.java:48,113` · 台账 `docs/DRIFT/article/rpc.md:365`（`DRIFT-ARTICLE-RPC-001` ✅ 已修 · FIX-01 · 真 PG 守门 + 变异验证）⇒ **证据强度：真 PG + 变异**。
 
 ### 现象
 

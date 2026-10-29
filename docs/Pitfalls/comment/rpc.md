@@ -17,6 +17,8 @@
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**是** —— Go 真源里「置状态 → `tx.Commit()` → 返回错误」的两段式形态**未变**，Spring `@Transactional` 的默认回滚规则**也未变** ⇒ 任何**新增**的投递/投递失败路径若照搬 `@Transactional`，仍会把「必须落盘」变成「绝不落盘」⇒ 本轮新增同类写路径时必须用 `TransactionTemplate`。
 > **依据**：本域实例**已修**：MISMATCH-01 / MISMATCH-02 ✅ 已修（2026-10-24 · `TransactionTemplate`）· 守门 `CommentRpcGoSemanticsGateTest`（11 例 · 真 PG）+ 10 条变异全红 ⇒ `docs/DRIFT/comment/rpc.md:67,80,89` 与 `docs/DRIFT/comment/rpc.md:570-571`（U1/U2 ✅ 已闭环）⇒ **证据强度：真 PG + 变异（守门网存在）**。
+> ⚠️ **2026-10-29 真实性复核（W-D lane）**：原判 **仍生效** ⇒ **现行态 = 仍生效**（**结论不变**：Go 的两段式形态与 Spring 默认回滚规则都未变 ⇒ 形态仍在）。依据：`service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentFactDeliveryService.java:11,115`（`TransactionTemplate` 导入与用法 ⇒ MISMATCH-01/02 的**修法仍在**）· 守门 `service/comment/comment-rpc/src/test/java/com/rag/comment/comment/rpc/CommentRpcGoSemanticsGateTest.java`（**现有 14 个 `@Test`** ⇒ 原记「11 例」是 **2026-10-24 修复轮当时的陈旧计数**）· 核对日期 2026-10-29。
+> ⚠️ **指针订正（同日）**：原依据的 `docs/DRIFT/comment/rpc.md:67,80,89` **三个行号能解析但指错行**（67 = 落地形态表行、80 = 表分隔行、89 = 空行）⇒ 已改指两条 MISMATCH 的「✅ 已修」行 `:89,102`；原 `:570-571`（两条**跨域只读指针**行）⇒ 已改指 U1/U2 行 `:677,678`。
 
 ### 一句话
 
@@ -136,7 +138,9 @@ grep -rn "WithJSONNumber\|jwt.NewParser" \
 > **旧号**：`PIT-COMMENT-RPC-03` ⇒ **新号**：`PIT-COMMENT-06`
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**否** —— **不适用的具体原因**：本条描述的具体形态（「类级 `@JsonIgnoreProperties(ignoreUnknown=true)` 覆盖掉 mapper 级的 `FAIL_ON_UNKNOWN_PROPERTIES`」）**在本域已被消除** —— 类级注解已于 2026-10-24 移除、`CommentDeliveryValidator` 已改用自带严格 mapper ⇒ **本域再写同类代码时也不会复现该形态**，故本轮不需要为它再落防错约束（通用纪律仍见 AGENTS.md §3.3.3）。
-> **依据**：`service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentDomainFactService.java:267`（「🔴 2026-10-24 移除 `@JsonIgnoreProperties(ignoreUnknown = true)`」）· `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentDeliveryValidator.java:94`（自带 `STRICT_MAPPER`）· 台账 `docs/DRIFT/comment/rpc.md:570-571`（U2 ✅ 已闭环 · MISMATCH-04/05/06）⇒ **证据强度：源码行号（静态）**。
+> **依据**：`service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentDomainFactService.java:267`（「🔴 2026-10-24 移除 `@JsonIgnoreProperties(ignoreUnknown = true)`」）· `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentDeliveryValidator.java:94`（自带 `STRICT_MAPPER`）· 台账 `docs/DRIFT/comment/rpc.md:678`（U2 ✅ 已闭环 · MISMATCH-04/05/06）⇒ **证据强度：源码行号（静态）**。
+> ⚠️ **2026-10-29 真实性复核（W-D lane）**：原判 **已闭环** ⇒ **现行态 = 已闭环**（不变）。依据：`CommentDomainFactService.java:267`（移除注解的说明**仍在**）· `CommentDeliveryValidator.java:94`（`STRICT_MAPPER` **仍在**）· 核对日期 2026-10-29。
+> ⚠️ **指针订正（同日）**：原依据的 `docs/DRIFT/comment/rpc.md:570-571` **能解析但指错行**（那两行是**跨域只读指针**）⇒ 已改指 U2 行 `:678`。
 
 ### 一句话
 
@@ -214,7 +218,9 @@ RAG 侧有**两个** ObjectMapper：
 > **旧号**：`PIT-COMMENT-RPC-05` ⇒ **新号**：`PIT-COMMENT-08`
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**是** —— 「守门网断言对了结果、却是因为一条与被守行为无关的路径 ⇒ 恒绿」这一形态今天仍可能发生 ⇒ **任何新写的守门网都必须过一遍变异三态判定**，否则绿灯只是「错误答案的守卫」。
-> **依据**：本域实例**已修**：MISMATCH-06 的守门网已改写（改用「数字化之后仍合法」的 `target_type` 字段）⇒ `docs/DRIFT/comment/rpc.md:570-571`（U2 ✅ 已闭环）⇒ 但**形态未消除** ⇒ **证据强度：真 PG + 变异**。
+> **依据**：本域实例**已修**：MISMATCH-06 的守门网已改写（改用「数字化之后仍合法」的 `target_type` 字段）⇒ `docs/DRIFT/comment/rpc.md:678`（U2 ✅ 已闭环）⇒ 但**形态未消除** ⇒ **证据强度：真 PG + 变异**。
+> ⚠️ **2026-10-29 真实性复核（W-D lane）**：原判 **仍生效** ⇒ **现行态 = 仍生效**（不变：「形态未消除」这一判断仍成立）。依据：`docs/DRIFT/comment/rpc.md:678`（U2）· `service/comment/comment-rpc/src/test/java/com/rag/comment/comment/rpc/CommentRpcGoSemanticsGateTest.java:460`（「🔴 MISMATCH-06：载荷的字符串字段被数字化 ⇒ BLOCKED」用例**仍在** ⇒ 守门网**未回退**到旧版）· 核对日期 2026-10-29。
+> ⚠️ **指针订正（同日）**：原依据的 `docs/DRIFT/comment/rpc.md:570-571` **能解析但指错行** ⇒ 已改指 U2 行 `:678`。
 
 ### 一句话
 
@@ -281,7 +287,9 @@ assertThatThrownBy(...).isInstanceOf(Wire.FrozenEnvelopeBlockedException.class);
 > **旧号**：`PIT-COMMENT-RPC-06` ⇒ **新号**：`PIT-COMMENT-09`
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**是** —— 触发条件（测试夹具里 mapper 走另一条连接 ⇒ 「事务提交了没有」在测试里根本不成立）**未消除**；mybatis-spring 4.x 的包名迁移（`org.mybatis.spring`）也仍在本仓依赖里 ⇒ 本轮任何新写的「事务语义」断言仍必须先证明 SQL 与事务同连接。
-> **依据**：本域实例**已修**（MISMATCH-01/02 改用 `TransactionTemplate` + 真 PG 守门）⇒ `docs/DRIFT/comment/rpc.md:570-571`；但**形态未消除** ⇒ **证据强度：真 PG + 变异**。
+> **依据**：本域实例**已修**（MISMATCH-01/02 改用 `TransactionTemplate` + 真 PG 守门）⇒ `docs/DRIFT/comment/rpc.md:677,678`；但**形态未消除** ⇒ **证据强度：真 PG + 变异**。
+> ⚠️ **2026-10-29 真实性复核（W-D lane）**：原判 **仍生效** ⇒ **现行态 = 仍生效**（不变：「触发条件未消除」仍成立 —— 测试夹具里 mapper 走另一条连接这一形态仍在）。依据：`docs/DRIFT/comment/rpc.md:677,678`（U1/U2）· `service/comment/comment-rpc/src/test/java/com/rag/comment/comment/rpc/CommentRpcGoSemanticsGateTest.java`（**真 PG + 真 `SqlSessionTemplate` 夹具仍在** ⇒ 守门网未退化）· 核对日期 2026-10-29。
+> ⚠️ **指针订正（同日）**：原依据的 `docs/DRIFT/comment/rpc.md:570-571` **能解析但指错行**（那两行是**跨域只读指针**）⇒ 已改指 U1/U2 行 `:677,678`。
 
 ### 一句话
 
@@ -455,7 +463,7 @@ Kafka 4.x 的组协调在 JoinGroup 阶段拿不到 topic 元数据 ⇒ **指数
 > **旧号**：`PIT-COMMENT-RPC-10` ⇒ **新号**：`PIT-COMMENT-13`
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**是** —— Go 侧的 `default:` tag 与 GORM 的 `autoCreateTime` 互相覆盖这一形态**未变**（真源 `domain_fact.go:29` 的 tag 仍在，GORM 的 `callbacks/create.go` 消费规则也未变）⇒ **只贴 struct 定义行仍会得出相反结论** ⇒ 本轮任何「时间列取值来源」的论断仍须读到消费点。
-> **依据**：Go 真源 `service/comment/rpc/internal/model/domain_fact.go:29`（`gorm:"column:created_at;not null;default:CURRENT_TIMESTAMP"`）· 本域 D1 **已撤销**（⇒ `docs/DRIFT/comment/rpc.md:159,171`：Go 侧同样走 DB 默认）⇒ **不得**据此改 RAG 代码 ⇒ **证据强度：真源行号 + 活体时间戳比对（台账已记）**。
+> **依据**：Go 真源 `service/comment/rpc/internal/model/domain_fact.go:29`（`gorm:"column:created_at;not null;default:CURRENT_TIMESTAMP"`）· 本域 D1 **已撤销**（⇒ `docs/DRIFT/comment/rpc.md:172`：Go 侧同样走 DB 默认）⇒ **不得**据此改 RAG 代码 ⇒ **证据强度：真源行号 + 活体时间戳比对（台账已记）**。
 
 ### 一句话
 
@@ -626,6 +634,8 @@ def to_int(v):                            # PG 存的是有符号 int32
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**是** —— 触发条件（「看到 RAG 侧有一堆 `catch → 改写成业务码` 就登记成漂移」）今天仍会发生 ⇒ **本轮任何新的「异常改写」类登记都必须先回 Go 侧核它自己的 catch-all**，否则会让本来正确的代码去改本来正确的代码。
 > **依据**：本域**已销案**（10 处 catch 与 Go 的 catch-all 逐字同款 ⇒ 代码零改动）⇒ `docs/DRIFT/comment/rpc.md` §4.6.6（只读指针 · 归属 global 的 E47）⇒ **证据强度：Go 真源行号逐条对照**。
+> ⚠️ **2026-10-29 真实性复核（W-D lane）**：原判 **仍生效** ⇒ **现行态 = 仍生效**（**结论不变**：触发条件 —— 「看到 catch 就登记成漂移」—— 今日仍在）。依据：`docs/DRIFT/comment/rpc.md:668`（E47 只读指针行）· Go 侧 4 处锚点**逐条重核、逐字对上**：`service/comment/rpc/internal/logic/report_comment_logic.go:79-92` · `delete_comment_logic.go:76-77` · `update_subject_state_logic.go:79-80` · `like_comment_logic.go:62-63` · 核对日期 2026-10-29。
+> ⚠️ **计数订正（同日）**：正文里的「RAG 侧对应 **10 处**」与那串行号（`161/434/447/474/523/541/590/651/690/710`）**已过期** —— `CommentDomainService.java` 已重构，现为 **9 处** `throw CommentExceptions.dbXxx()` 的 catch = `:180,490,503,530,605,674,754,810,830`（另有 `:587` = `likeOwnerLookupFailed`，同为业务码改写但非 `db*` 码）⇒ **「销案」判定不变**（两侧都是「DB 错误一律改写成业务码」），**仅计数与行号按上述读**。
 
 ### 一句话
 
@@ -656,6 +666,7 @@ Go 侧**每一条 DB 错误路径都改写成业务码**，**不区分 deadline*
 ⇒ RAG 侧对应 10 处（`CommentDomainService.java:161/434/447/474/523/541/590/651/690/710`）
 **全部是** `catch (RuntimeException e) { result = "sys_fail"; … throw CommentExceptions.dbXxx(); }`
 ⇒ **与 Go 的 catch-all 逐字同款** ⇒ ✅ **一致，不是漂移 ⇒ 销案 ⇒ 代码零改动**。
+> ⚠️ **2026-10-29 计数订正（W-D lane · 真实性复核）**：上两行的「10 处」与那串行号是 **2026-10-26 的快照** ⇒ 现为 **9 处** `throw CommentExceptions.dbXxx()` 的 catch = `CommentDomainService.java:180,490,503,530,605,674,754,810,830`（另有 `:587` = `likeOwnerLookupFailed`，同为业务码改写但**非 `db*` 码**）⇒ **「与 Go 的 catch-all 逐字同款 ⇒ 一致 ⇒ 销案」的判定不变**，**代码零改动**。核对日期 2026-10-29。
 
 ### 可复用的判据
 
@@ -682,6 +693,8 @@ Go 侧**每一条 DB 错误路径都改写成业务码**，**不区分 deadline*
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**是** —— 触发条件**未消除**：链路的另一半仍收口在**共享层**（`service/common/.../communityfact/Dispatcher.java`），且共享层仍是「span 放进 Context 而从不 `makeCurrent`」⇒ 域内 `setAttribute` 仍写不进去 ⇒ **假依据仍会掩盖真回归** ⇒ 本轮任何「整条链路零 X」的断言仍须把链路的每一段核过（含共享层）。
 > **依据**：Go 侧 span 建在共享层 `service/common/communityfact/process.go:26` · RAG 侧等价 span 在 `service/common/.../communityfact/Dispatcher.java:186`（同名同 tracer）· 本域 D10 结论见 `docs/DRIFT/comment/rpc.md` §3.7（依据已整条换掉）⇒ **证据强度：静态（两侧源码行号）**。
+> ⚠️ **2026-10-29 真实性复核（W-D lane）**：原判 **仍生效** ⇒ **现行态 = 仍生效**（**结论不变**：span 拓扑两侧对齐、那两个属性写不进去，仍成立）。依据（**两侧行号已逐条重核**）：Go `service/common/communityfact/process.go:26` = `otel.Tracer("sea.rtw.communityfact").Start(ctx, "community.fact_delivery.dispatch")`（**逐字对上**）· RAG `service/common/src/main/java/com/rag/common/communityfact/Dispatcher.java:275`（同 tracer 名 `sea.rtw.communityfact`）`:293`（同 span 名 `community.fact_delivery.dispatch`）`:296`（`Context attemptCtx = ctx.with(span)`）`:279-280`（单线程池 `communityfact-dispatch`）`:299`（`supplyAsync`）⇒ **全仓 `Dispatcher.java` 零 `makeCurrent`** ⇒ 「span 放进 Context 而从不 `makeCurrent`」仍成立 · 核对日期 2026-10-29。
+> ⚠️ **指针订正（同日）**：原依据的 `Dispatcher.java:186` **能解析但指错行**（186 = 一个方法形参行，**不是** span 创建）⇒ 已改指 `:293`；正文里的 `:189`（`ctx.with(span)`）⇒ 实为 `:296`；`:172-176`（线程池）⇒ 实为 `:279-280`；`:190`（`supplyAsync`）⇒ 实为 `:299`。
 
 ### 一句话
 
@@ -704,12 +717,12 @@ attempt, span := otel.Tracer("sea.rtw.communityfact").Start(ctx, "community.fact
 ```
 
 （该文件全文 **69** 行、**零** `SetAttributes` ⇒ ⇒ span **不带属性**）
-⇒ 且 RAG 侧**等价 span 也在共享层**（`service/common/.../communityfact/Dispatcher.java:186`，**同名**同 tracer）
+⇒ 且 RAG 侧**等价 span 也在共享层**（`service/common/.../communityfact/Dispatcher.java:293`，**同名**同 tracer）
 ⇒ ⇒ **span 拓扑两侧其实是对齐的**，差的只是那两个属性。
 
 ⇒ 🔴 **真正的根因在共享层的实现细节里**，不在域内文件里：
-共享层把 span 放进 **Context**（`Dispatcher.java:189` `ctx.with(span)`）而**从不 `makeCurrent`**，
-且投递跑在**另一个线程**（`:172-176` `communityfact-dispatch` 单线程池 ＋ `:190` `supplyAsync`）
+共享层把 span 放进 **Context**（`Dispatcher.java:296` `ctx.with(span)`）而**从不 `makeCurrent`**，
+且投递跑在**另一个线程**（`:279-280` `communityfact-dispatch` 单线程池 ＋ `:299` `supplyAsync`）
 ⇒ OTel 默认 `ThreadLocalContextStorage` 用的是**普通** `ThreadLocal`（**不继承**）
 ⇒ ⇒ 投递线程上 `Span.current()` 恒为 **invalid span**
 ⇒ ⇒ 域内那两行 `setAttribute` **永远写不进去**（`if (span != null)` 恒真 ⇒ 落到 invalid span ⇒ 静默丢弃）。
@@ -757,10 +770,13 @@ attempt, span := otel.Tracer("sea.rtw.communityfact").Start(ctx, "community.fact
    ⇒ `PoolTimeout` 未设 ⇒ `options.go:380-386` `= ReadTimeout + 1s` ⇒ ReadTimeout 3s ⇒ **4s**
    ⇒ 池耗尽 ⇒ 4s 后报 `ErrPoolTimeout`。
 2. **RAG 侧默认无上限** —— 不配 `max-wait` ⇒ commons-pool2 2.12.1
-   `BaseObjectPoolConfig:59,68` `DEFAULT_MAX_WAIT = Duration.ofMillis(-1L)`
-   ⇒ 消费点 `GenericObjectPool.java:306`
+   `org/apache/commons/pool2/impl/BaseObjectPoolConfig.java:59,68` `DEFAULT_MAX_WAIT = Duration.ofMillis(-1L)`
+   ⇒ 消费点 `org/apache/commons/pool2/impl/GenericObjectPool.java:306`
    `p = negativeDuration ? idleObjects.takeFirst() : idleObjects.pollFirst(remainingWaitDuration)`
    ⇒ **负值 ⇒ `takeFirst()` ⇒ 阻塞到有人还连接为止**。
+   📌 **该源码在 jar 内**（`commons-pool2-2.12.1-sources.jar`）⇒ 机器守门把它归「📦 jar 内第三方源码」档（**不计失败**），且会**逐字打印该行内容**核对。
+   📌 **已核（2026-10-29 · W-D lane · 真实性复核）**：第 306 行内容**逐字对上**；jar = `~/.m2/repository/org/apache/commons/commons-pool2/2.12.1/commons-pool2-2.12.1-sources.jar`
+   ⇒ 复算：`unzip -p ~/.m2/repository/org/apache/commons/commons-pool2/2.12.1/commons-pool2-2.12.1-sources.jar org/apache/commons/pool2/impl/GenericObjectPool.java | sed -n '306p'`
 3. 🔴 **「命令超时会兜住」是错的** —— `CommandExpiryWriter.write(command)` **才起算**计时器
    （实测 lettuce-core 6.8.2 字节码），而**借连接发生在写命令之前**
    ⇒ ⇒ **池耗尽时，3s 命令超时根本还没开始** ⇒ ⇒ **无限挂起**。

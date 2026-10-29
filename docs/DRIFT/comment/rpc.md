@@ -12,6 +12,9 @@
 > - ✅ **真构建**：`mvn -o -pl service/comment/comment-rpc -am install` ⇒ `EXIT=0`（本轮实测）
 > - ✅ **源码逐行对照**：Go 侧 33 个 `.go`（3,620 行）逐文件读过，非抽样
 > - ✅ **真 PG + 真 MyBatis + 真事务**：`CommentRpcGoSemanticsGateTest`（11 例，**2026-10-24 修复轮新增**）
+>   —— ⚠️ **2026-10-29 真实性复核（W-D lane）**：该类**现有 14 个 `@Test`**
+>   （`service/comment/comment-rpc/src/test/java/com/rag/comment/comment/rpc/CommentRpcGoSemanticsGateTest.java:245,260,283,305,327,349,369,391,409,425,444,459,488,514`）
+>   ⇒ 上行「11 例」是 **2026-10-24 修复轮当时的计数**（**陈旧快照**）⇒ **证据强度判定不变**，**仅计数需按 14 例读**。
 >   —— 手工搭 `SqlSessionTemplate`（`SpringManagedTransactionFactory`）⇒ mapper 的 SQL 与
 >   `CommentFactDeliveryService` 的事务跑在**同一条连接**上，与生产同构
 > - ✅ **变异测试**（**2026-10-24 修复轮**：10 条变异**全部**让对应守门网变红 ⇒「测试不是假绿」已验）
@@ -50,7 +53,7 @@
 | 构建 | `mvn -o -q -pl service/comment/comment-rpc -am -DskipTests install` ⇒ **`EXIT=0`**（本轮实测） |
 | 测试 | `mvn -o -pl service/comment/comment-rpc,service/comment/comment-api,service/comment/comment-common -am test` ⇒ **BUILD SUCCESS**；**rpc 87 / api 45 / common 27，合计 159 / 0 failures / 0 errors / 0 skipped**（**2026-10-26 复测**；⚠️ 原记「rpc 85 / 合计 157」是 **2026-10-24** 的数，已过期 —— 差的 2 例是 `CommentProtectionChainWiringTest`，由**别域**提交 `21e4124`（message 域「挖出 6 个 api 的同款产物不可执行」那轮）顺手加进 `comment-rpc` 的**跨域保护层接线守网**，**不是本域新增** ⇒ 本域语义判定不变） |
 | 本台账范围 | **仅 `comment-rpc`**。`comment-api` / `comment-common` 各自独立台账 |
-| **修复轮** | **2026-10-24**：§2 的 **7 条 MISMATCH 全部已修**。守门网 = `CommentRpcGoSemanticsGateTest`（**11 例，真 PG**）；**10 条变异全部变红**。⚠️ 计数以「测试」行的 **87 例**为准（EventTime 5 / RedisMetric 5 / Alias 6 + 别域加的 ProtectionChain 2；**2026-10-26 复测校准**） |
+| **修复轮** | **2026-10-24**：§2 的 **7 条 MISMATCH 全部已修**。守门网 = `CommentRpcGoSemanticsGateTest`（**11 例，真 PG**）；**10 条变异全部变红**。⚠️ 计数以「测试」行的 **87 例**为准（EventTime 5 / RedisMetric 5 / Alias 6 + 别域加的 ProtectionChain 2；**2026-10-26 复测校准**）<br>⚠️ **2026-10-29 真实性复核（W-D lane）**：`CommentRpcGoSemanticsGateTest` **现有 14 个 `@Test`**（原记「11 例」= 2026-10-24 修复轮当时的**陈旧计数**）⇒ **「7 条 MISMATCH 全部已修」这一判定不变**（每条 MISMATCH 的守门网方法仍在，见各自条目），**仅守门网用例数按 14 例读**。 |
 | **对拍轮** | **2026-10-24**：**双侧活体对拍**已跑通（Go 真源 + RAG 四进程同跑，**23 步**矩阵，**复跑两轮一致**）。结果 **20 一致 / 8 差异**，差异**落在 3 个步骤**上：T07 / T08 根因在 **Go 侧**（SQL 必报错 + 缺 `report_record` 表）⇒ **已签字偏离**；**T20 是新增的一条**（保护层覆盖范围：未注册路径上 Go 从不返回 413 / RAG 返回 413）⇒ 登记为 D6 ⇒ **用户已签字** `SD-2026-10-24-CAND-08`（**接受 RAG 更严/更安全的一侧** ⇒ **代码零改动**）（[`api.md` §3.2](./api.md)）。对拍过程另发现并修掉 **4 个真实缺陷**（§4.6.2） |
 
 > 🟥 **最严重的 3 条（MISMATCH-01/02/03）都在「事实投递链路」上**，
@@ -271,6 +274,19 @@
 | **⚠️ 本域那半的修法（**待 Jason 拍板，本轮未实施**）** | global 给的方向：共享层在 `RpcInterceptor.onHalfClose` 把有效期限也绑进 `GoStyleRequestDeadline` ⇒ 本域把裸 stub 改成 `GoStyleRequestDeadline.applyTo(stub)`（comment / like / message 等 6 处）。<br>💡 **主会话补充一条 global 方案里没提到的关键事实**：`DeadlineState` **在 gRPC 服务端路径上已经绑定了**（`RpcInterceptor.java:281/372`）⇒ ⇒ **本域那半其实不必等共享层**：可直接用 `DeadlineState.remainingMillis()` 构造 stub deadline（**同仓既有先例**：`users/admin/AdminDomainService.java:140` · `users/user/UserDomainService.java:145` 已用 `DeadlineState.isExpired()`）⇒ **现在就能真正闭环 E65**。<br>⚠️ **两条路各有代价**：走 `applyTo` ⇒ 共享层落地前是 **no-op**（行为不变、但也没修好）· 走 `DeadlineState` ⇒ **现在就能修好**，但**偏离 global 的统一载体方向**，且会**让 global 的门禁 `check-deadline-downstream.py` 变红**（drift 键 `outgoing_carrier` 钉的是 RAG=`absent`）⇒ **必须由 global 回写台账**（global 已明示「请回来找我，我回写台账」）。⇒ **本域不擅自选边，等拍板** |
 | **⚠️ 为什么本域现在不写守门网** | `applyTo` 在**共享层那半落地前是 no-op** ⇒ 写出来的守门网**测不出任何东西**（断言恒成立）⇒ 属 §3.3「**绿测试可能是错误答案的守卫**」⇒ **不写假绿网**；等共享层落地 / 修法拍板后，一并配**能真正触发载体**的守门网 |
 
+> ⚠️⚠️ **2026-10-29 真实性复核（W-D lane · 本条拆成「两半」，一半已闭合 · 另一半仍开着 —— 原判 🔴 与原句一律保留）**
+>
+> | 半 | 现行态 | 依据（2026-10-29 实测） |
+> |---|---|---|
+> | ① **「2s 封顶」**（Go `TimeoutInterceptor` 的 per-client 默认 2s） | ✅ **已闭合（域侧已落码）** | `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/client/GoStyleClientCallTimeout.java:73`（`DEFAULT_CALL_TIMEOUT_MILLIS = 2000L`）`:90-95`（`withDeadline` = `min(2s, 剩余预算)` · 预算耗尽给 **1ms**）· **本域两个出向 client 都已接上**：`ArticleRpcClient.java:71` 与 `MessageRpcClient.java`（同包）均 `return GoStyleClientCallTimeout.withDeadline(stub);` ⇒ **不再是「裸 stub / 零期限」** |
+> | ② **「继承请求 deadline」**（Go 侧 `subject_fallback.go:17` 吃 `ctx` ⇒ 出向调用随服务端 deadline 到点即止） | 🔴 **仍开着** | `GoStyleRequestDeadline` **仍只在 HTTP worker `begin()`** ⇒ comment-rpc 是**纯 gRPC** ⇒ `remainingMillis()` 无预算 ⇒ 实际生效的是**平铺的 2s**，**不是** `min(2s, 服务端剩余)` ⇒ **不继承这一半未闭合**；该类自己的 javadoc（`GoStyleClientCallTimeout.java:60-64`）即写明「**本类只解决『2s 封顶』这一半** … 另一半点在**共享层** ⇒ 已登记为 global 的 **E65**」 |
+>
+> ⇒ **判定**：本条**核心主张（出向 gRPC 不继承请求 deadline）仍成立** ⇒ **现行态 = 🔴 仍开着**（**只开 ② 这一半**）⇒ **不因 ① 已闭合而升级整条为 ✅**。
+> ⇒ ⚠️ **上表「RAG 现状」行已过期**（原句保留）：原写「`:65` `stub.getArticle(...)` 是**裸 stub** ⇒ **零期限**」⇒ **现已不成立**（`:71` 已套 2s 封顶）⇒ **该行只能按上面 ①/② 两格读**。
+> ⇒ ⚠️ **上表「本域那半的修法（待拍板，本轮未实施）」行已过期**（原句保留）：**域侧那半已实施**（形态 = 域内 `GoStyleClientCallTimeout` 包装，**不是**原写的「直接 `GoStyleRequestDeadline.applyTo(stub)`」—— 后者在共享层落地前会是 no-op）⇒ **共享层那半（②）仍待 global**。
+> ⇒ **本域那 6 处裸 stub 的覆盖面**：D8 行所列 6 处中，**comment 域的 2 处（`ArticleRpcClient` / `MessageRpcClient`）已封顶**；其余 4 处属 like / follow / message / article 域 ⇒ **本 lane 未核**。
+> ⇒ 核对日期 2026-10-29。
+
 ### 3.6 🔴 D9（= global **E66**）：Redis 调用**不感知 deadline** ⇒ 缓存读写**照写不误**
 
 > **归属**：global 域第四十六轮（`align/global` @ **`96d94db`**）登记为 **E66** ⇒ 命中 **comment 域代码** ⇒ **本域独立复核后落账**。
@@ -440,6 +456,36 @@
 >   **不是**基线 D-07 写的「2 条（`user_id` / `target_type`）」⇒ ⇒ **D-07 的计数口径有误**。
 >   ⇒ 同一次运行里**其余 6 张共享表**的类型/长度 **0 差异** · 可空性 **0 差异** · DEFAULT **0 差异** ·
 >   索引 **Go 16 ≡ RAG 16**（2 处仅命名形态差）· 约束逐条一致 ⇒ ⇒ **除 `report_record` 外两侧一致**。
+>   ⚠️⚠️ **2026-10-29 真实性复核（W-D lane · 🔴 本段「其余 6 张共享表」结论已证伪，原句保留 + 追加订正）**
+>
+>   **本段的「机器证据」有两处问题，2026-10-29 本机实测坐实**：
+>
+>   ① 🔴 **「同一次运行」根本跑不到那 6 张表** —— `check-ddl-static.py` 的「列集合不一致」分支在
+>   **类型 / 可空性 / DEFAULT / 索引 / 约束 / 触发器** 七项对照**之前**就 `return 2`
+>   ⇒ **默认口径的产出就是 `EXIT=2` + 8 行「仅 RAG 有: `report_record.*`」**（2026-10-29 实跑复现）
+>   ⇒ ⇒ **「可空性 0 差异 · DEFAULT 0 差异 · 索引 16 ≡ 16」不可能是那一次运行的输出**。
+>   ② 🔴 **即便用补跑口径（`--rag-db` 指向去掉 `report_record` 的同源副本）重跑，结论也与本段相反** —— **2026-10-29 本机实跑：`EXIT=1`、实质差异 23 处**：
+>   **可空性 8 处差异**（`subject` / `comment_index` / `comment_content` / `comment_like` × `created_at` / `updated_at` ⇒ Go `nullable=YES` / RAG `nullable=NO`）·
+>   **DEFAULT 10 处差异**（其中 **8 处**是同族时间列 `go=<NULL>` / `rag=CURRENT_TIMESTAMP`，另 **2 处** `subject.id` / `comment_like.id` 是 IDENTITY 盲点假阳性）·
+>   类型/长度 **52 列逐字相同** · 索引 **Go 11 个 / RAG 13 个**（RAG 多 `idx_comment_fact_delivery` + `idx_comment_legacy_fact_aggregate`）·
+>   约束 **6 / 9 行**（RAG 多 `comment_new_fact_has_dc_wire` + `comment_fact_stream_version_range`，另 1 处仅命名形态差）·
+>   触发器 **0 / 1 个**（RAG 多 `comment_fact_identity_immutable`）。
+>   ⇒ ⇒ **「除 `report_record` 外两侧一致」这句话是错的**（**类型/长度**那一维度确实 0 差异，**其余六维度都不是**）。
+>
+>   ⇒ **本块「机器证据（可复算）」这一措辞作废** ⇒ 按主线要求，comment 域这 **8 处可空性差 + 8 处 DEFAULT 差（+ 2 处 IDENTITY 假阳性）目前**机器不可复算**（默认口径提前退出）⇒ 台账一律写「**需人工核对**」**，不写「可复算」。
+>   ⚠️⚠️ **2026-10-30 真实性复核（W-D lane · 二次订正：上一行原措辞与本块 ② 自相矛盾 ⇒ 原句保留 + 订正）**
+>
+>   上一行原写「**目前机器不可复算** ⇒ 台账一律写『需人工核对』，不写『可复算』」⇒ ⇒ **这句只对「默认口径」成立，对「补跑口径」不成立** ——
+>   本块 ② 自己就写了「**即便用补跑口径（`--rag-db` 指向去掉 `report_record` 的同源副本）重跑 ⇒ `EXIT=1` / 23 处**」⇒ ⇒ **同一段里两句话互斥** ⇒ ⇒ **必须订正**。
+>
+>   ⇒ ✅ **准确口径 = 「默认口径不可复算 · 补跑口径可复算」**：
+>   · **默认口径**：`python3 tools/difftest/check-ddl-static.py --domain comment --indexes` ⇒ **EXIT=2** ⇒ 在**已签字**的 `report_record` 列集合差异处**提前退出** ⇒ ⇒ **七项对照一个都跑不到** ⇒ ⇒ 这一口径下**确实不可复算**。
+>   · **补跑口径**（工具与仓内文件**零改动**，只覆盖 `--rag-db` 指向同源副本库）⇒ **EXIT=1 / 23 处** ⇒ ⇒ **可复算** ⇒ ⇒ 「一律写需人工核对、不写可复算」这句**对补跑口径是错的**。
+>   ⇒ ⇒ **台账写法（本 lane 统一口径）**：凡引用本域 DDL 数字，**写「可复算（补跑口径 `--rag-db` 覆盖）」＋ 同时记「默认口径 `EXIT=2`（列集合不一致处提前退出）」** —— **两个口径都要写**。
+>   ⇒ ⚠️ **本仓已有的同款记录（互为复算）**：`docs/DRIFT/comment/vs-common.md` §9.0（补跑口径命令原文 + `EXIT=1`）· §9.2（八个维度逐项结论）· §9.4（23 处逐条）· §9.4② 的 2026-10-29 真实性复核（「**本节数字可复算（须按 §9.0 的补跑口径）**」）⇒ ⇒ **两处口径现已一致**。
+>   ⇒ ⚠️ **2026-10-30 本 lane 独立复跑一次**（新建同源副本 `rag_comment_db_cmp6` ⇒ `DROP TABLE report_record` ⇒ `--rag-db rag_comment_db_cmp6`）⇒ **EXIT=1 / 23 处**（可空性 8 · DEFAULT 10 · 索引 2 · 约束 2 · 触发器 1）⇒ ⇒ **与 2026-10-29 那次逐条对上** ⇒ **数字可复算成立**。核对日期 2026-10-30。
+>   ⇒ **正确口径与逐条结论以 [`vs-common.md` §9.0 / §9.4](./vs-common.md) 为准**（那里已用 `--rag-db` 补跑口径记录了同一组数字：23 处 / 可空性 8 / DEFAULT 10）⇒ **本块的「差异单位是一整张表 8 列」「D-07 计数口径有误」「本项是决策不是缺陷」三条结论不变**（`report_record` 那部分确实成立）。
+>   ⇒ ⚠️ **同表上方第 435 行「9 处时间列的 NOT NULL + DEFAULT ⇒ 🔴 不一致」才是对的** ⇒ 本块与它**自相矛盾**，现以本订正段与 `vs-common.md` §9.4 为准。核对日期 2026-10-29。
 > · **归类订正**：D-07 把本项列进「§11.1 🔴 **真实实现缺陷**（代码/配置层面有确凿差异，**必须修**）」并标注「**未签字**」
 >   ⇒ ⇒ **与既有签字偏离矛盾**：`docs/Intentional_Deviations/comment/rpc.md` 的 **`SD-2026-10-24-CAND-02`**
 >   （2026-10-24 用户 Jason 签字）已覆盖**整张 `report_record` 表** ⇒ ⇒ **本项是「决策」不是「缺陷」**
@@ -447,6 +493,57 @@
 > · **处置**：**不删 V5**（删了 = 让 `ReportComment` 在全新部署上必然 5004 ⇒ 制造一个 Go 侧才有的部署缺口）
 >   ⇒ **保留现状**；基线的归类订正属**共享面**（`docs/PhaseGoal-judge.md` 是 4 条 lane 矩阵的**唯一数据源**）
 >   ⇒ ⇒ **本工作树不碰** ⇒ 记在这里，留给**合并收口执行者**订正。
+
+### 4.5.1 ⚠️ **2026-10-30 真实性复核（W-D lane）**：补跑口径 **23 处**的**逐条出处** ＋ 🔴 **根因**：Go 的「生产 DDL」根本不是那些手写 `.sql`
+
+> **性质**：上面 §4.5 的表 + 上面那段 📌 只给了**计数**；本节补齐**逐条出处**（表名 + 列名 + 两侧取值 + `文件:行号`），并给出**根因**。
+> ⚠️ **本节的数字全部来自本 lane 的实跑**（命令原文见上面 2026-10-30 二次订正段）⇒ 与 `docs/DRIFT/comment/vs-common.md` §9.2 / §9.4 **互为复算**（两处数字一致）。
+
+**逐维度逐条（机器原文 + 两侧 `文件:行号` 出处）**
+
+| # | 维度 | 机器报出 | 逐条（表 · 列 ⇒ 两侧取值） | Go 侧出处 | RAG 侧出处 |
+|---|---|---|---|---|---|
+| 1 | 列类型 / 长度 | **0 处** | 机器原文「`go_comment_db=52 列 rag_comment_db_cmp6=52 列（键集合一致 ✓）`」+「**逐字相同 52 列**」 | `service/comment/rpc/internal/model/data_model.go:5,22,42,87`（4 个 struct 定义行） | `service/comment/comment-rpc/src/main/resources/db/migration/V1..V8` |
+| 2 | **可空性（NOT NULL）** | 🔴 **8 处** | `subject.created_at` · `subject.updated_at` · `comment_index.created_at` · `comment_index.updated_at` · `comment_content.created_at` · `comment_content.updated_at` · `comment_like.created_at` · `comment_like.updated_at` —— **8 条同一形态**：`go=(nullable=YES)` vs `rag=(nullable=NO)` | `data_model.go:14-15`（Subject）· `:34-35`（CommentIndex）· `:47-48`（CommentContent）· `:95-96`（CommentLike）—— tag **只有 `autoCreateTime`/`autoUpdateTime`，无 `not null`** ⇒ 落 NULL | `V1:27,28` · `V2:22,23` · `V3:18,19` · `V4:24,25` —— 全部 `NOT NULL DEFAULT CURRENT_TIMESTAMP` |
+| 3 | **DEFAULT** | 🔴 **10 处**（**2 处经人工闭合为工具方法假阳性** ⇒ 实质 **8**） | **8 处** = 上面同样 8 列：`go=<NULL>` vs `rag=CURRENT_TIMESTAMP`；<br>**2 处假阳性** = `subject.id`（`go=nextval('subject_id_seq'::regclass)` vs `rag=<NULL>`）· `comment_like.id`（`go=nextval('comment_like_id_seq'::regclass)` vs `rag=<NULL>`） | `data_model.go:6`（`Subject.Id` = `primaryKey;autoIncrement`）· `data_model.go:88`（`CommentLike.Id`）⇒ gorm 建 `bigserial` ⇒ `column_default` = `nextval(...)` | `V1:19` · `V4:17` —— `BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY` ⇒ **IDENTITY 的默认值存在 `pg_attribute.attidentity`，不进 `column_default`** ⇒ 工具的 DEFAULT 维度**看不见 IDENTITY 列** ⇒ 报成差异 |
+| 4 | **索引**（`pg_indexes`） | 🔴 **2 处** | `comment_domain_fact_outbox.idx_comment_fact_delivery`（`cols=['delivery_status','created_at','event_id']`）· `comment_domain_fact_outbox.idx_comment_legacy_fact_aggregate`（表达式索引 `((payload`）—— **均仅 RAG 有**；机器原文「**Go 11 个 RAG 13 个**」 | **Go 生产 schema 无**（`AutoMigrate` 不建）⇒ ⚠️ Go 的**手写** `003_comment_fact_delivery.sql:12` / `002_comment_dc_wire.sql:15` **有** —— 但那两份**只被测试脚本执行**（见下「根因」）⇒ 不在生产 DDL | `V8:47-48` · `V6:42-44` |
+| 5 | **约束**（`pg_constraint`） | 🔴 **2 处** | `comment_domain_fact_outbox.comment_new_fact_has_dc_wire`（`CHECK (((aggregate_id IS NOT NULL) AND (fact_version IS NOT NULL) AND (delivery_envelope IS NOT NULL))) NOT VALID`）· `comment_fact_stream.comment_fact_stream_version_range`（`CHECK (((version >= 1) AND (version <= '9007199254740991'::bigint)))`）—— **均仅 RAG 有**；机器原文「**两侧各 6/9 行**」+「**逐条一致 6 行 ✓**」 | **Go 生产 schema 无** ⇒ ⚠️ Go 的**手写** `002_comment_dc_wire.sql:25` / `:10` **有** —— 同样**只被测试脚本执行** | `V6:63` · `V7:31` |
+| 6 | **触发器**（`pg_trigger`） | 🔴 **1 处** | `comment_domain_fact_outbox.comment_fact_identity_immutable`（`CREATE TRIGGER … BEFORE UPDATE ON public.comment_domain_fact_outbox FOR EACH ROW EXECUTE FUNCTION reject_comment_fact_identity_change()`）—— **仅 RAG 有**；机器原文「**两侧各 0/1 个**」 | **Go 生产 schema 无** ⇒ ⚠️ Go 的**手写** `003_comment_fact_delivery.sql:15,30` **有** —— 同样**只被测试脚本执行** | `V8:66`（函数体）· `V8:82`（触发器） |
+| | **合计** | **23** | **8 + 10 + 2 + 2 + 1** ⇒ 扣掉第 3 项 2 处假阳性 ⇒ **实质 21** | | |
+
+**🔴 根因（本节最重要的一条）：Go 的「生产 DDL」根本不是那些手写 `.sql`**
+
+- Go 的生产建表 = `service/comment/rpc/internal/model/db.go:15` 的 **GORM `AutoMigrate`**（**6 个 struct**）⇒ **不建**上面第 4/5/6 项那 5 个对象。
+- Go 侧**确实**有手写 `.sql`（`service/comment/rpc/internal/model/migrations/001|002|003_*.sql`）⇒ **RAG 的 `V6`/`V7`/`V8` 是逐字照抄它们的**
+  ⇒ ⇒ **§4.5 表里那几行「✅ 逐字一致」**（`idx_comment_legacy_fact_aggregate` / `comment_new_fact_has_dc_wire` / 信封不可变触发器 / `comment_fact_stream` 的 version 范围 CHECK）
+  = 「**RAG 与 Go 的手写脚本逐字一致**」 —— 而**不是**「RAG 与 Go 的**生产 schema** 一致」⇒ ⇒ **这四行的参照系需要显式改写**。
+- ⚠️ **那三份 `.sql` 在 Go 仓里只被测试脚本执行**（`service/comment/rpc/internal/model/test-community-postgres.sh:47,49`）⇒ ⇒ **不进 Go 的生产 DDL** ⇒ ⇒ **「对拍时 Go 侧看不到这些对象」不是环境缺口，是事实**。
+- ⇒ ⇒ **第 4/5/6 项那 5 处**（索引 2 + CHECK 2 + 触发器 1）= **RAG 比 Go 的生产 schema 多出来的对象** ⇒ 逐条登记，**本轮不改代码**。
+
+**⚠️ 人工复核后必须显式标注的 4 处（机器判定 ≠ 真实语义差）**
+
+| 对象 | 机器判定 | 人工复核 | 结论 |
+|---|---|---|---|
+| `comment_like.idx_user_comment_like` | **语义等价（仅命名形态差，机器不计失败）** | Go = **唯一约束**（`contype=u`）· RAG = **唯一索引** ⇒ 都保证 `(user_id, comment_id)` 唯一 | ✅ **真等价** ⇒ 不计 |
+| `subject.id` / `comment_like.id` 的 DEFAULT | 机器报成 **2 处差异** | RAG 侧 `information_schema` 实测 `is_identity=YES` · `identity_generation=BY DEFAULT` · `column_default` 为空 ⇒ **IDENTITY 的默认值不进 `column_default`** ⇒ 工具的 DEFAULT 维度**看不见 IDENTITY 列** | ✅ **非真差**（两侧「主键自动生成」语义完全一致）⇒ **机器 23 ⇒ 实质 21** |
+| `comment_fact_stream.comment_fact_stream_version_range` | 机器报成 **实质差异（仅 RAG 有）** | Go 在**应用层**强制同一条区间：`service/comment/rpc/internal/model/domain_fact.go:121` `if stream.Version < 1 \|\| stream.Version > 9007199254740991 { return fmt.Errorf("comment fact version out of DC range") }` | 🟡 **载体不同、语义等价**（Go = 应用层 `if` · RAG = DB CHECK）⇒ **不改代码**；登记为「RAG 侧多一道 DB 层防线（更严）」 |
+| `comment_new_fact_has_dc_wire` | 机器报成 **实质差异（仅 RAG 有）** | Go 侧**生产 schema 无此 CHECK**；Go 应用层靠 `service/comment/rpc/internal/model/fact_delivery.go:65-68` 的 SQL 条件实现取件路径，**没有**等价的 DB 约束 | 🔴 **RAG 侧多一道 DB 层约束（更严）** ⇒ 属 `SD-2026-10-24-CAND-09`（DDL 更严）同族 ⇒ **不删**（删了 = 撤掉一道已签字的防线） |
+
+**⚠️「索引 Go 16 ≡ RAG 16」这个数字在本域任何口径下都不成立**
+
+- 实测：**Go 11 / RAG 13**（补跑口径 6 表）· **Go 11 / RAG 15**（RAG 侧含 `report_record` 的 7 表活库）⇒ ⇒ **「16」查无出处**。
+- ⚠️ **疑似串了 `article` 域的数字** —— `check-ddl-static.py --domain article --indexes` 的机器原话正是「**Go 16 个 RAG 16 个**」（见 `docs/DRIFT/article/vs-common.md` §10）⇒ ⇒ **「同一次运行里」那句话整体作废**。
+- ⇒ ⇒ 上面那段 📌 的「**索引 Go 16 ≡ RAG 16**（2 处仅命名形态差）」**两个数字都不对**：真实是 **11 vs 13**，且**不是**「仅命名形态差」，而是 **2 处仅 RAG 有**。
+
+**⇒ 结论**
+
+1. 🔴 **本域 DDL 不是「除 `report_record` 外两侧一致」** —— 补跑口径实测 **21 处实质差异**（可空性 8 · DEFAULT 8 · 索引 2 · CHECK 2 · 触发器 1）。
+2. 🔴 其中 **16 处**（可空性 8 + DEFAULT 8）= **同族**（`SD-2026-10-24-CAND-01`，**未签字候选**）—— Go 侧时间列**可空无 DB 默认**、RAG 侧 `NOT NULL DEFAULT CURRENT_TIMESTAMP` ⇒ **RAG 更严** ⇒ 按 `docs/twoStage.md` §十 属 **C 类（阶段 2）**，**不是阶段 1 准入阻断**。
+3. 🟡 其余 **5 处**（索引 2 + CHECK 2 + 触发器 1）= **RAG 比 Go 的生产 schema 多出来的对象** ⇒ 根因见上 ⇒ **逐条登记，不在本轮改代码**。
+4. ✅ **类型 / 长度 0 差异**（52/52 逐字相同）—— 与 AGENTS.md §0 的总体结论一致，**不变**。
+5. ⛔ **`report_record` 整张表仍不计入差异**（已签字 `SD-2026-10-24-CAND-02` · 决策 = 保留 RAG 侧该表）⇒ ⇒ **不得据此删 `V5`**。
+
+**⇒ 转交主线的 1 项**：`docs/DRIFT/_cross/ddl-type-divergences.md:58` 写「**comment 的 8 处当前无法用 `check-ddl-static.py --domain comment` 复算**」⇒ ⇒ **口径需按本节订正** —— **数字 22 = users 8 + message 6 + comment 8 不变**；但「不可复算」应改为「**默认口径不可复算（提前中止）· 补跑口径可复算（`--rag-db` 覆盖）**」（补跑口径见本节与 `vs-common.md` §9.0）⇒ ⇒ **该档是共享面（主线写权）⇒ 本 lane 不碰**。
 
 ---
 
@@ -568,7 +665,7 @@
 |---|---|---|
 | **RPC 超时的错误文案不同** | Go `service/common/observability/rpc.go:69` ⇒ `context deadline exceeded`；RAG `service/common/observability/RpcInterceptor.java:187` ⇒ `rpc timeout after 2000ms`。**两侧 code 都是 4（DeadlineExceeded）** | 🔧 **已由 global 域修复（第三十轮，global 持 `service/common` 单写权）** ⇒ 落点 `RpcInterceptor.java` + 守门 `RpcInterceptorTimeoutDescriptionGateTest`（2 例，真 Netty server + 真 channel，断言**网络上真正传过来的字节**）+ 探针 `tools/semantic-probe/rpc-timeout/`（Go 半边直接 `replace` 引用冻结真源）⇒ ✅ **已提交并推双远端**（`49808ad`；分支最新 `85c4588`，`origin` + `upstream` 均已同步），**待合回 `do-my-own-gh`**；📌 **合回与否已拍板（2026-10-26）：暂不合回 ⇒ 维持「待合回」不是「忘了合」** ⇒ 销账细节与 **C-1 边界**见 §5 的 **U10** |
 | `comment-api` 缺 gRPC 熔断 | —— | ✅ **已作废**（`docs/DRIFT/_cross/new-domains-2026-10-23.md:43-45`）：实测 RAG 侧熔断**已存在** |
-| **（只读指针 · 归属 global）业务层把「SQL 被 deadline 取消」改写/吞掉** —— global 台账 **E47**（`docs/DRIFT/global/_README.md`，**按编号指**）<br>🔴🔴 **第三十六轮已全面订正：原定性方向相反** —— 原记述「RAG 把 DEADLINE_EXCEEDED 改写/吞掉」**只对了数目、错了定性** ⇒ **comment / like / follow / article 四个域的 Go 侧同样改写** ⇒ **那 21 处与 Go 一致 ⇒ 销案** ⇒ ⛔ **comment 域那 10 处 catch 不要改**。 | ⛔ **本域不重复登记**（落点在 `service/common` ⇒ **global 单写权**）。<br>🟢 **本域已逐条核过 Go 侧（2026-10-26，comment owner 独立复核）** —— Go 侧**每一条 DB 错误路径都改写成业务码**，**不区分 deadline**：<br>· `report_comment_logic.go:79-92` ⇒ `errmsg.NewGrpcErr(errmsg.ErrorDbInsert, "DB插入失败")`<br>· `delete_comment_logic.go:76-77` ⇒ `errmsg.NewGrpcErr(errmsg.ErrorDbSelect, "DB查询失败")`<br>· `update_subject_state_logic.go:79-80` ⇒ `errmsg.NewGrpcErr(errmsg.ErrorDbSelect, "DB查询失败")`<br>· `like_comment_logic.go:62-63` ⇒ `errmsg.NewGrpcErr(errmsg.ErrorInputWrong, "DB更新失败")`<br>⇒ RAG 侧对应 10 处（`CommentDomainService.java:161/434/447/474/523/541/590/651/690/710`）**全部是** `catch (RuntimeException e) { result = "sys_fail"; … throw CommentExceptions.dbXxx(); }` ⇒ **与 Go 的 catch-all 逐字同款** ⇒ **一致，不是漂移** ⇒ ✅ **销案**。<br>⚠️ **行号已核（2026-10-26）**：上述 10 行号与当前文件**逐一对上**；⚠️ **若将来 `CommentDomainService` 结构变动，先重核行号再引用**。<br>💡 **同域教训**（global 侧 `PIT-GLOBAL-051`）：**登记「某域把异常改写了」之前必须逐条核 Go 侧** ⇒ 否则会让**本来正确的域去改本来正确的代码** ⇒ **本条已销案，代码零改动**。 |
+| **（只读指针 · 归属 global）业务层把「SQL 被 deadline 取消」改写/吞掉** —— global 台账 **E47**（`docs/DRIFT/global/_README.md`，**按编号指**）<br>🔴🔴 **第三十六轮已全面订正：原定性方向相反** —— 原记述「RAG 把 DEADLINE_EXCEEDED 改写/吞掉」**只对了数目、错了定性** ⇒ **comment / like / follow / article 四个域的 Go 侧同样改写** ⇒ **那 21 处与 Go 一致 ⇒ 销案** ⇒ ⛔ **comment 域那 10 处 catch 不要改**。 | ⛔ **本域不重复登记**（落点在 `service/common` ⇒ **global 单写权**）。<br>🟢 **本域已逐条核过 Go 侧（2026-10-26，comment owner 独立复核）** —— Go 侧**每一条 DB 错误路径都改写成业务码**，**不区分 deadline**：<br>· `report_comment_logic.go:79-92` ⇒ `errmsg.NewGrpcErr(errmsg.ErrorDbInsert, "DB插入失败")`<br>· `delete_comment_logic.go:76-77` ⇒ `errmsg.NewGrpcErr(errmsg.ErrorDbSelect, "DB查询失败")`<br>· `update_subject_state_logic.go:79-80` ⇒ `errmsg.NewGrpcErr(errmsg.ErrorDbSelect, "DB查询失败")`<br>· `like_comment_logic.go:62-63` ⇒ `errmsg.NewGrpcErr(errmsg.ErrorInputWrong, "DB更新失败")`<br>⇒ RAG 侧对应 10 处（`CommentDomainService.java:161/434/447/474/523/541/590/651/690/710`）**全部是** `catch (RuntimeException e) { result = "sys_fail"; … throw CommentExceptions.dbXxx(); }` ⇒ **与 Go 的 catch-all 逐字同款** ⇒ **一致，不是漂移** ⇒ ✅ **销案**。<br>⚠️ **行号已核（2026-10-26）**：上述 10 行号与当前文件**逐一对上**；⚠️ **若将来 `CommentDomainService` 结构变动，先重核行号再引用**。<br>⚠️⚠️ **2026-10-29 真实性复核（W-D lane）**：原判 **✅ 销案** ⇒ **现行态 = ✅ 销案（结论不变）**，但**上句的行号与计数已过期** —— `CommentDomainService.java`（现 **883 行**）已重构，**原文那 10 个行号（161/434/447/474/523/541/590/651/690/710）已不再指向 catch 块** ⇒ **本行自己的预警（「若结构变动，先重核行号」）已触发**。现值：**9 处** `catch (RuntimeException e) { result = "sys_fail"; … throw CommentExceptions.dbXxx(); }` = **`CommentDomainService.java:180,490,503,530,605,674,754,810,830`**（另有 `:587` = `throw CommentExceptions.likeOwnerLookupFailed()`，同为业务码改写但**非 `db*` 码** ⇒ 未计入该 9 处）⇒ **Go 侧 4 处锚点已逐条重核、逐字对上**：`service/comment/rpc/internal/logic/report_comment_logic.go:79-92` · `delete_comment_logic.go:76-77` · `update_subject_state_logic.go:79-80` · `like_comment_logic.go:62-63`（`ErrorDbInsert=5004` / `ErrorInputWrong=2001`，见 `service/like/common/errmsg/errmsg.go:44,64`）⇒ ⇒ **两侧「DB 错误一律改写成业务码」的形态判定不变**（**销案成立**），**代码零改动**。核对日期 2026-10-29。<br>💡 **同域教训**（global 侧 `PIT-GLOBAL-051`）：**登记「某域把异常改写了」之前必须逐条核 Go 侧** ⇒ 否则会让**本来正确的域去改本来正确的代码** ⇒ **本条已销案，代码零改动**。 |
 | **（只读指针 · 归属 global）超时未继承客户端 deadline** —— global 台账 **E38**（`docs/DRIFT/global/_README.md`，**按编号指，不按行号**）<br>Go `rpc.go:38` `context.WithTimeout(ctx, timeout)` ⇒ `ctx` **携带客户端 deadline** ⇒ 有效期限 = `min(客户端 deadline, now+2s)`；RAG `RpcInterceptor.java:214-215` `deadlineEpochMs = now + timeout` ⇒ **只算服务端自己的 2s** | ⛔ **本域不重复登记**（落点在 `service/common` ⇒ **global 单写权**）。<br>🟢 **E38 第①层已由 global 落地**（`align/global` @ `d531abd`，2026-10-26）⇒ 有效期限已改成 `min(客户端 deadline, 服务端 2s)`。<br>🔴 **E38② 仍开着（global 第三十九轮回执，2026-10-26）**：架构级「**handler 挪受控 executor + 超时 interrupt**」**未做** ⇒ ⇒ **只做 ①（deadline 计算）销不了账** ⇒ ⚠️ 本行「E38 第①层已落地」**不等于**「E38 整条闭环」⇒ 与 users/admin 域 owner 的复述一致 ⇒ **本域仍只做只读指针**。<br>🔴 **残余窗口 = global 的 E46**（`docs/DRIFT/global/_README.md`，同样按编号指）—— 🟢 **E46 已由 global 落地**（`d20b377` 第三十三轮：SQL 取消时刻 == deadline 时刻 · **毫秒精度** + **已过期立即失败**）⇒ 该窗口已被压掉。<br>🟢 **状态（2026-10-26 五次复核）**：`align/global` HEAD = **`85c4588`**（第三十九轮 · **合回与否已拍板：暂不合回**），**origin + upstream 两个远端均已同步** ⇒ E38 / E46 / E47 / E30 **任何人拉分支都能看到** ⇒ 指针不会指向拉不到的编号。📌 **合回与否已拍板（2026-10-26）：暂不合回 ⇒ 维持「待合回」不是「忘了合」**。<br>—— ⚠️ **本条原写的机制归因已订正**（2026-10-26 global 复核）：RAG **不是**「PG 查询跑满到 2s」⇒ 它**有** SQL 级缓解：`service/common/.../persistence/DeadlineQueryTimeoutInjector`（拦 `StatementHandler.prepare` ⇒ 按线程 `DeadlineState.remainingMillis()` 设 `Statement.setQueryTimeout`）⇒ pgjdbc 到点发 **CancelRequest** ⇒ **查询在服务端被掐掉**；**comment-rpc 已注册**（`CommentRpcApplication.java:67`）⇒ 10 个 rpc 组件全注册。<br>⇒ **真正的差异是「秒级向上取整」留下的 ≤1s 窗口**：`DeadlineQueryTimeoutInjector.java:93-95` 用 `Math.ceil(remaining/1000.0)` **秒** ⇒ 取消时刻 = `deadline + (0~999ms)`；Go 侧 `m.conn.WithContext(ctx)` 贯穿 model 层**每一次查询/事务** ⇒ ctx 到点**立即** CancelRequest ⇒ 窗口 = **毫秒级** ⇒ **两侧差 2~3 个数量级**。<br>🟡 **对 comment 域的精确落法（条件性，不是必现）**：`comment-api` 的 per-call deadline = `min(2s, HTTP 剩余预算)`（MISMATCH-API-03 的修法）⇒ **当 HTTP 剩余预算 < 2s 时**，客户端先放弃而服务端业务线程继续跑 ⇒ 若查询耗时**恰好落在 `(remaining, ceil(remaining/1000)×1000]` 这条 ≤1s 带子里**，则 SQL 自然完成 ⇒ **事务提交** ⇒ 写 gRPC 响应时 call 已 close ⇒ **响应被丢弃** ⇒ ⇒ 两侧对「这次写入算不算成功」的答案相反（**概率性命中，不是必现**）。<br>⚠️ **现有守卫不覆盖**：`checkDeadline()` 只在**方法入口**（admin-rpc 13 处），**不在提交前**。<br>⇒ **跟踪请走 global 的 E38 / E46**，本条只做指针；**本域不重复登记** |
 
 ---
@@ -577,7 +674,7 @@
 
 | # | 事项 | 类型 |
 |---|---|---|
-| **U1** | ~~MISMATCH-01/02 需真 PG 守门测试~~ ⇒ ✅ **2026-10-24 已完成**：`CommentRpcGoSemanticsGateTest`（11 例，真 PG + 真 MyBatis + 真事务），**并做了 10 条变异验证** | ✅ 已闭环 |
+| **U1** | ~~MISMATCH-01/02 需真 PG 守门测试~~ ⇒ ✅ **2026-10-24 已完成**：`CommentRpcGoSemanticsGateTest`（11 例，真 PG + 真 MyBatis + 真事务），**并做了 10 条变异验证** | ✅ 已闭环 <br>⚠️ **2026-10-29 真实性复核（W-D lane）**：原判 **✅ 已闭环** ⇒ **现行态 = ✅ 已闭环**（判定不变）。依据：`CommentRpcGoSemanticsGateTest.java` **现有 14 个 `@Test`**（原记「11 例」= **陈旧计数**）· `CommentFactDeliveryService.java:11,115`（`TransactionTemplate` 仍在 ⇒ MISMATCH-01/02 的修法仍在）· 核对日期 2026-10-29。 |
 | **U2** | ~~MISMATCH-03/04/05/06 一次改动可解 4 条~~ ⇒ ✅ **2026-10-24 已完成**（改动落在 `CommentFactDeliveryService` / `CommentDomainFactService` / `CommentDeliveryValidator` 三处 + 两个 mapper） | ✅ 已闭环 |
 | **U3** | ~~本组件无任何投递路径测试~~ ⇒ ✅ **2026-10-24 已补**：`dispatchOnce` 的三条出口（blocked / failed / accepted）均有真 PG 守门网 | ✅ 已闭环 |
 | **U4** | Go 侧三个 `_test.go`（`domain_fact_test.go` / `fact_process_fixture_test.go` / `fact_delivery_logging_test.go`）**默认 `t.Skip`** ⇒ Go 侧投递链路的**期望行为在 Go 仓里本身也没有活体证据** | ⚠️ 真源侧缺口 |
@@ -591,7 +688,7 @@
 | **U12** | ✅ **跨栈 gRPC 路径前缀**（未知项 #5）：Go `package pb;` ⇒ `/pb.CommentService/*`，RAG `package comment;` ⇒ `/comment.CommentService/*`。**新增 `PbCommentServiceAlias`**（`@GrpcService` + `BindableService`，用 `MethodDescriptor.toBuilder().setFullMethodName()` 改名 + 复用 `getServerCallHandler()`）⇒ **只增不改**（`comment.` 路径原样保留）⇒ **不推翻**已签字的 `SD-2026-10-23-04`。守门网 `PbCommentServiceAliasGateTest` 6 例（真 in-process server，两条路径都通、同一实现、方法集合对应、未注册方法仍 UNIMPLEMENTED） | ✅ 已闭环（**半修**，见 U13） |
 | **U13** | 🔴 **U12 的伴生阻塞（不可修）**：`io.grpc.Status` **只有 17 个常量** ⇒ grpc-java **发不出** `grpc-status: 1012` ⇒ RAG 的业务码在**自定义 trailer** 里 ⇒ **Go 侧读不到** ⇒ 跨栈错误码必然退化成 `UNKNOWN(2)`。⇒ **结论：混跑必须同栈配对，别名只是兜底** | 🔴 跨栈限制（**协议层**，非本域可修） |
 | **U14** | ~~T20 保护层覆盖范围差异~~ | ✅ **已闭环**（2026-10-24 活体实测 T20 ⇒ 登记为 **`D6@comment-api`** ⇒ **用户已签字** `SD-2026-10-24-CAND-08`：**接受 RAG 更严/更安全的一侧** ⇒ **代码零改动** ⇒ 共享面 `service/common/protection` **不动**） |
-| **U15** | 🔴 **D8（= global E65）出向 gRPC 调用不继承请求 deadline** —— `ArticleRpcClient.java:65` 是**裸 stub**（Go `subject_fallback.go:17` 吃 `ctx` ⇒ deadline 到点立刻中止，RAG 照跑不误）。**本域已独立核实成立**（2026-10-26）⇒ 详见 **§3.5**。<br>⚠️ **完整闭环跨共享层**：`GoStyleRequestDeadline.begin()` 只在 HTTP 路径（`HttpMiddleware.java:263`）绑定 ⇒ gRPC 服务端路径上 `applyTo` 是 **no-op** ⇒ **共享层那半归 global**（`service/common` 单写权）⇒ **本域那半待修法拍板后落地**。<br>💡 **本域那半其实不必等共享层**：`DeadlineState` 在 gRPC 路径**已绑定**（`RpcInterceptor.java:281/372`）⇒ 可用 `DeadlineState.remainingMillis()` 直接闭环（同仓先例：`users/admin/AdminDomainService.java:140`）⇒ **两条路各有代价（会让 global 的门禁 `check-deadline-downstream.py` 变红）** ⇒ **待 Jason 拍板，本域不擅自选边**。<br>⚠️ **本域现在不写守门网**：`applyTo` 在共享层落地前是 no-op ⇒ 守门网**测不出任何东西** ⇒ 属 §3.3「绿测试可能是错误答案的守卫」⇒ **不写假绿网** | 🔴 **待修法拍板 + 待共享层**（§3.5） |
+| **U15** | 🔴 **D8（= global E65）出向 gRPC 调用不继承请求 deadline** —— `ArticleRpcClient.java:65` 是**裸 stub**（Go `subject_fallback.go:17` 吃 `ctx` ⇒ deadline 到点立刻中止，RAG 照跑不误）。**本域已独立核实成立**（2026-10-26）<br>⚠️ **2026-10-29 真实性复核（W-D lane）**：原判 **🔴 仍开着** ⇒ **现行态 = 🔴 仍开着（只开「继承」这一半）** ⇒ ①「**2s 封顶**」**已闭合**（域侧 `GoStyleClientCallTimeout.java:73,90-95` ＋ `ArticleRpcClient.java:71` / `MessageRpcClient` 均已接上 ⇒ **不再是裸 stub / 零期限**）· ②「**继承服务端 deadline**」**仍开着**（`GoStyleRequestDeadline` 仍只在 HTTP worker `begin()` ⇒ 纯 gRPC 下无预算 ⇒ 实际是平铺 2s）⇒ ⇒ **本行「`:65` 是裸 stub ⇒ 零期限」的证据已过期**，**按 D8 的两格拆读**（见 §3.5 下的 2026-10-29 订正段）⇒ **核心主张不变 ⇒ 不升级整条为 ✅**。核对日期 2026-10-29。⇒ 详见 **§3.5**。<br>⚠️ **完整闭环跨共享层**：`GoStyleRequestDeadline.begin()` 只在 HTTP 路径（`HttpMiddleware.java:263`）绑定 ⇒ gRPC 服务端路径上 `applyTo` 是 **no-op** ⇒ **共享层那半归 global**（`service/common` 单写权）⇒ **本域那半待修法拍板后落地**。<br>💡 **本域那半其实不必等共享层**：`DeadlineState` 在 gRPC 路径**已绑定**（`RpcInterceptor.java:281/372`）⇒ 可用 `DeadlineState.remainingMillis()` 直接闭环（同仓先例：`users/admin/AdminDomainService.java:140`）⇒ **两条路各有代价（会让 global 的门禁 `check-deadline-downstream.py` 变红）** ⇒ **待 Jason 拍板，本域不擅自选边**。<br>⚠️ **本域现在不写守门网**：`applyTo` 在共享层落地前是 no-op ⇒ 守门网**测不出任何东西** ⇒ 属 §3.3「绿测试可能是错误答案的守卫」⇒ **不写假绿网** | 🔴 **②「继承请求 deadline」半仍待共享层**（①「2s 封顶」半 2026-10-29 已闭合）⇒ **待修法拍板 + 待共享层**（§3.5） |
 | **U16** | 🔴 **D9（= global E66）Redis 调用不感知 deadline** —— Go 侧 `service/comment/rpc/internal/cache/*.go` **全部**带 `ctx`（`rdb.Get/Set/Scan`）⇒ deadline 到点缓存操作立即中止；RAG 侧 `CommentCacheService.java` **全部** `redis.opsForValue()…`（**含写**：`:279`/`:331`/`:433`/`:528` 的 `set`、`:619` 的 `delete`）**零 deadline 检查**（全文件 grep `deadline`/`remaining`/`timeout` ⇒ 零命中）⇒ **写路径照写不误**。**本域已独立核实成立**（2026-10-26）⇒ 详见 **§3.6**。<br>🔴 **本域单方面无法闭环**：`service/common` **无任何 Redis 相关期限载体**（`DeadlineState` 只覆盖 SQL · `GoStyleRequestDeadline` 只覆盖 HTTP + 出向 stub）⇒ ⇒ **必须等 global 的共享层那半**（global 第四十六轮的判断：共同根因是「RAG 没有 ctx 传播」⇒ 共享层补**统一载体**比逐点打补丁更对味）⇒ **本域不擅自加临时机制**（那会引入第三种载体，与统一方向相反）<br>⚠️ **证据强度**：🟡 **源码级**（全量扫描）—— global 已如实标注「未经双侧活体验证」，**本域也未做活体验证** | 🔴 **待共享层**（§3.6） |
 
 ---

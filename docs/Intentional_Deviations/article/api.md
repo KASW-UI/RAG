@@ -11,7 +11,7 @@
 ## 本组件**没有**登记在案的签字偏离（核对日期 **2026-10-29**）
 
 > **核法（可复算）**：
-> ① `grep -rn '已签字\|签字偏离\|SD-' docs/DRIFT/article/api.md` ⇒ **唯一命中**是 `:2050` 一句
+> ① `grep -rn '已签字\|签字偏离\|SD-' docs/DRIFT/article/api.md` ⇒ **唯一命中**是 `:2073` 一句
 > 「⇒ 这三条**都是要修的**（不是签字偏离）⇒ 判据『要不要修回去』= **要**。」
 > ⇒ ⇒ **`article-api` 的台账里没有任何一条「决定不对齐」的差异**。
 > ② `grep -rn '候选\|待签字' docs/DRIFT/article/` ⇒ **无一条属于 `article-api`**（命中项分别属于
@@ -22,9 +22,9 @@
 
 | 条目 | 性质 | 落点 |
 |---|---|---|
-| `DRIFT-ARTICLE-API-001` | 上传路径下游 gRPC 失败的 HTTP 状态码 | ✅ **已修**（`docs/DRIFT/article/api.md:558,1185`）⇒ 不进本档 |
-| `DRIFT-ARTICLE-API-006` | 8–10 MiB JSON body 的**错误文案** | 🟡 **已确认 LOW，不修**（`docs/DRIFT/article/api.md:1902`）⇒ ⚠️ **仍不是签字偏离** —— 它是「characterization test 锁住实测现状」的漂移，**不构成「决定不对齐」的签字** |
-| `DRIFT-ARTICLE-API-009` | Go `net/url` 的三条 query 解析行为 | ✅ **已修**（`docs/DRIFT/article/api.md:718`）⇒ 不进本档 |
+| `DRIFT-ARTICLE-API-001` | 上传路径下游 gRPC 失败的 HTTP 状态码 | ✅ **已修**（`docs/DRIFT/article/api.md:576,1204`）⇒ 不进本档 |
+| `DRIFT-ARTICLE-API-006` | 8–10 MiB JSON body 的**错误文案** | 🟡 **已确认 LOW，不修**（`docs/DRIFT/article/api.md:972`）⇒ ⚠️ **仍不是签字偏离** —— 它是「characterization test 锁住实测现状」的漂移，**不构成「决定不对齐」的签字** |
+| `DRIFT-ARTICLE-API-009` | Go `net/url` 的三条 query 解析行为 | ✅ **已修**（`docs/DRIFT/article/api.md:737`）⇒ 不进本档 |
 
 ### 核对记录
 

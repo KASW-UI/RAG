@@ -20,7 +20,7 @@
 > **但有 2 处撞号必须处理** ⇒ 见下方两条的「唯一别名 / 撞号检查」行：
 > `SD-2026-10-24-01` 与 `SD-2026-10-24-02` **各与 message 域的同名条目指向完全不同的偏离** ⇒ ⇒ 本文件两条**加唯一别名** `SD-2026-10-24-01@article` / `SD-2026-10-24-02@article`。
 
-## SD-2026-10-24-01：写路径的**全局锁序**统一为 `article → publication`
+## SD-2026-10-24-01：写路径的**全局锁序**统一为 `article → publication` ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 | 项 | 值 |
 |---|---|
@@ -161,7 +161,7 @@ RAG 侧四条路径**统一**（`service/article/article-rpc/.../service/Article
 | **RAG 侧实测（四条路径仍统一）** | `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/service/ArticleAtomicService.java:127`（`retractAndUpdate` ⇒ `selectByIdForUpdate`）· `:162`（`retractAndDelete`）· `:268`（`queueSyncOutboxWithLock`）· `:339`（`acceptSyncResult`）· `:208`（`publicationMapper.selectForUpdate`）· `:506`（`publicationMapper.upsert`）⇒ ⇒ **RAG 侧仍是 `article → publication` 单一顺序 ⇒ 差异仍在** |
 | **⚠️ 自失效条件（原文保留）** | 本条原文已写明「⚠️ **若真源日后自己统一了锁序**（Go 侧也改成 article → publication）⇒ ⇒ 本条**自动失效**」⇒ ⇒ **2026-10-29 实测：真源尚未统一** ⇒ **本条仍然有效** |
 
-## SD-2026-10-24-02：Kafka 四个通道**不能逐通道切 broker**（RAG 侧是全局单例）
+## SD-2026-10-24-02：Kafka 四个通道**不能逐通道切 broker**（RAG 侧是全局单例） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 | 项 | 值 |
 |---|---|
