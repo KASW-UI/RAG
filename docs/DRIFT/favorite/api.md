@@ -1577,3 +1577,145 @@ favorite-api **7/7 handler** 都调 `httpx.Parse` ⇒ ⇒ **7/7 端点都该在�
 | **8** | **尚未解决的问题 / 对阶段 2 的影响** | ① **compose 侧 `:?`**（**根级 ⇒ 归「合并收口执行者」** ⇒ 归属订正见第 6 项）② **根 README 的 `.env.example`**（P0 #5 · **根级 ⇒ 合并收口执行者** ⇒ 并入 G1 的 `S1-USERS-001`）③ **rpc 域**的其它明文默认值（`${POSTGRES_PASSWORD:password}` / `${MINIO_SECRET_KEY:minioadmin}` / `${*_AUTHORITY_TOKEN:}`）⇒ **本轮未动** ⇒ ⇒ **登记**（不在本轮范围：它们的落点是**部署凭据**而非 JWT 签名密钥，且 compose 已用 `:?` 强制 `POSTGRES_PASSWORD` ⇒ 实际不可达）④ **阶段 2**：完整的密钥管理（轮换 ＋ `.env.example` ＋ 部署清单） |
 
 > ⚠️ **本条的跨域性**：同一类改动落在 **favorite / article / comment 三个域的 api 组件** ⇒ ⇒ 按 AGENTS.md「一条问题只在一个档里落笔」的纪律 ⇒ **完整记录在本节**（favorite 域）⇒ ⇒ **article / comment 两域只留指针**（见各自台账）。
+
+---
+
+## 25. 🔴 P0 #8 **补正** · 验签密钥守卫**只堵了一半**：「未解析占位符」判据缺失 ⇒ **缺变量 ⇒ 应用仍能启动**（2026-10-29 · R2 轮 · 跨 4 域）
+
+> **归属**：`align/r2-secret-guard-fix` 工作树产出 · **基线 commit** `f753ff0f`（= `do-my-own-gh` @ 2026-10-29）· **核对日期** 2026-10-29
+> **证据强度**：**L4**（真 `SpringApplication` + 真 ConfigData 流程 ⇒ 真容器装配证据）＋ **变异测试**（去掉判据 ⇒ 用例**精确转红**）
+> **性质**：**P0 #8 的剩余半边**（A 类 · 安全阻断项）· **跨 4 域**：`like` / `article` / `comment` / `favorite` 的 **api** 组件
+> **写权**：`service/{like,article,comment,favorite}/*-api/**` ＋ 各域 `docs/DRIFT/<域>/api.md`（**只追加**）
+> ⚠️ **本节是这条问题的【完整记录档】**（延续 §24 的 P0 #8 线程）⇒ ⇒ `like/api.md` · `article/api.md` · `comment/api.md` **只留指针**
+
+### 25.1 缺陷本体（**实测**，不是推理）
+
+§24 记录的「去掉 yaml 明文默认值 ⇒ 缺变量 ⇒ 启动失败」**这句单靠 yaml 不成立**。
+本轮用**真 `SpringApplication` + 真 ConfigData 流程**（`spring.config.location=classpath:/application.yml`
+⇒ 等价于「产物 jar 里只有 `application.yml`」）实测出**两条**能悄悄起来的路：
+
+| # | 路径 | Spring 的**实测**行为 | 后果 |
+|---|---|---|---|
+| **1** | **变量完全没设** | `@ConfigurationProperties` **绑定器不报错**，而是把**占位符原文**（`${USER_JWT_SECRET}` 之类）**当成值绑上去** ⇒ 应用**照常启动** | 🔴 **比空密钥更危险** —— 那是**仓里公开可知的一串字符** ⇒ HMAC 密钥公开 ⇒ **谁都能伪造 token** |
+| **2** | **变量设了但值是空串** | `PropertyPlaceholderHelper` 把**空串当合法值**（**不走默认值、也不报错**）⇒ 属性绑成 `""` ⇒ 应用带着**空签名密钥**正常起来 | 🔴 **token 可伪造**（HMAC 空密钥谁都能算） |
+
+⇒ ⇒ **「去掉 yaml 默认值」只堵住了一半** ⇒ ⇒ 另一半**必须由代码堵** ⇒ ⇒ 即 §24 那个
+`@PostConstruct verifyAccessSecret()`：它的判据**只判 `null || isBlank()`** ⇒ ⇒ **上面两条都漏过去了**。
+
+> ⚠️ **口径订正（连带 §24）**：§24 第 5 项「修后：① 不设变量 ⇒ 启动失败（Spring placeholder 不可解析 ⇒ 绑定期炸）」
+> —— 这句**只对「显式给了键路径」的场景成立**；**走真 ConfigData 流程时**（= 生产路径），
+> 绑定器**不炸**，而是**把占位符原文绑上去** ⇒ ⇒ **本节是那句口径的订正**。
+
+### 25.2 修法（**照抄**已合入主线的 `message-api` / `follow-api` 模式）
+
+| 项 | 做法 | 理由 |
+|---|---|---|
+| **判据** | 扩成 **null / 空串 / 全空白 / 未解析的占位符字面量** ⇒ 四个都拒 | 「未解析占位符」是路径 1 的**唯一**拦截点 |
+| **判据实现** | `private static final Pattern UNRESOLVED_PLACEHOLDER = Pattern.compile("^\\$\\{[^}]*\\}$")` | 「整串**就是**一个 `${...}`」⇒ 只判「含 `${` 」会误伤合法密钥 |
+| **入口** | **一个** `@PostConstruct` 入口 | 同一个 bean 内**多个 `@PostConstruct` 的执行顺序不由 JVM 规范保证** ⇒ 报错内容不确定 |
+| **有序逐段校验** | ⚠️ **本轮 4 个模块都只有【单段】密钥**（`like-api.user-auth` / `article-api.auth` / `comment-api.user-auth` / `favorite-api.user-auth`）⇒ ⇒ **不涉及** message-api 那种「两段 ⇒ 顺序固定逐段校验」的问题 ⇒ 本轮**保持单段**（各模块 `verifyAccessSecret()` 一个入口） | 段数是**各模块实测**出来的，不是照抄的 |
+| **依赖** | **零新增依赖**（只用 `jakarta.annotation.PostConstruct`）⇒ **不引入** `spring-boot-starter-validation` | AGENTS.md：不为一个判据引入 starter |
+| **是否改动值** | **不改动任何值** ⇒ 变量一旦被提供，验签密钥与 Go 侧**逐字节一致** ⇒ **验签行为零变化** | 只在「不可用」时拦，不改「可用」时的取值 |
+| **报错文案** | 同时写出**配置键路径** + **环境变量名** | 运维能直接定位 |
+
+### 25.3 落点（**只动这 4 个模块**）
+
+| 域 | 守卫类 | 配置键 | 环境变量 | 守卫测试 |
+|---|---|---|---|---|
+| `like` | `service/like/like-api/…/config/LikeApiProperties.java` | `like-api.user-auth.access-secret` | `USER_JWT_SECRET` | `LikeApiPropertiesSecretGuardTest`（**4 → 10 例**） |
+| `article` | `service/article/article-api/…/config/ArticleApiProperties.java` | `article-api.auth.access-secret` | `USER_JWT_SECRET` | `ArticleApiPropertiesSecretGuardTest`（**4 → 10 例**） |
+| `comment` | `service/comment/comment-api/…/config/CommentApiProperties.java` | `comment-api.user-auth.access-secret` | `USER_JWT_SECRET` | `CommentApiPropertiesSecretGuardTest`（**3 → 10 例**） |
+| `favorite` | `service/favorite/favorite-api/…/config/FavoriteApiProperties.java` | `favorite-api.user-auth.access-secret` | `FAVORITE_JWT_SECRET` | `FavoriteApiPropertiesSecretGuardTest`（**3 → 10 例**） |
+
+每个模块的 `src/main/resources/application.yml` 同步**订正注释**：
+「`${VAR}`（无默认值）⇒ 缺变量 ⇒ 启动失败」这句**单靠 yaml 不成立** ⇒ 改成
+「**yaml 只挡空串；未解析占位符由代码守卫挡**」＋ 指向守卫类/方法名。
+⚠️ 注释**不再回贴明文密钥**（改用「36 字节 UUID」形状描述 ⇒ 脚本 `check-no-prod-secrets.py` 的 **W2 `how_to_drop`** 约定）。
+
+### 25.4 新增用例（每模块同款 **6~7 条**）
+
+| # | 用例 | 断言 |
+|---|---|---|
+| 1 | `prodLikeStartupWithoutEnvVarFails` | **真 `SpringApplication` + 真 ConfigData + 只有 `application.yml`** ＋ 变量未设 ⇒ **启动失败** ⇒ 且根因必须是守卫抛的 `IllegalStateException`，消息里**同时含配置键与环境变量名** |
+| 2 | `prodLikeStartupWithBlankEnvVarFails` | 同上 + 变量为**空串** ⇒ **启动失败** |
+| 3 | `prodLikeStartupWithLiteralPlaceholderBoundValueFails` | 同上 + **绑到的值是占位符原文** ⇒ **启动失败** |
+| 4 | `prodLikeStartupWithRealEnvVarStarts` | 同上 + 变量正常 ⇒ **正常启动**且密钥**原样绑定**（对照组：证明守卫**不误伤**） |
+| 5 | `realYamlWithoutEnvVarFailsTheContext` | **真 yaml**（`YamlPropertySourceLoader`）+ 变量未设 ⇒ 上下文起不来 |
+| 6 | `realYamlWithBlankEnvVarFailsTheContext` | **真 yaml** + 变量空串 ⇒ 上下文起不来 |
+| 7 | `guardRejectsBlankAndAcceptsRealSecret` | 判据边界（纯单元）：`null` / `""` / `"   "` / **`"${USER_JWT_SECRET}"`** ⇒ 抛；正常值 ⇒ 不抛 |
+
+> ⚠️ **第 3 条为什么注入的是「属性路径」而不是「环境变量」**（**实测**）：
+> 若把环境变量本身设成 `${USER_JWT_SECRET}`（**自引用**），Spring 会先抛
+> `PlaceholderResolutionException: Circular placeholder reference 'USER_JWT_SECRET'`
+> ⇒ ⇒ 那是 **Spring 自己**挡的 ⇒ ⇒ **证明不了本守卫有牙齿**
+> ⇒ ⇒ 第 3 条注入的是「**属性路径 = 占位符原文、环境变量未设**」——
+> 与**真实失败场景逐字节相同**的绑定结果 ⇒ ⇒ **才能证明守卫自己挡住了它**。
+
+### 25.5 实测结果（**每模块各跑一次**，条数用 surefire XML 求和）
+
+| 域 | `mvn -o -B -pl <模块> -am -DargLine=-Xmx2g test` | 模块内 **tests** | **failures** | **errors** | 守卫测试 |
+|---|---|---|---|---|---|
+| `like` | **BUILD SUCCESS**（EXIT=0） | **104** | **0** | **0** | **10/10 绿** |
+| `article` | **BUILD SUCCESS**（EXIT=0） | **112** | **0** | **0** | **10/10 绿** |
+| `comment` | **BUILD SUCCESS**（EXIT=0） | **62** | **0** | **0** | **10/10 绿** |
+| `favorite` | **BUILD SUCCESS**（EXIT=0） | **154** | **0** | **0**（**skipped 1** ⇒ `FavoriteApiFullParityTest#apiFullParity` 缺 `PROBE_GO_API` ⇒ **本轮之前就 skip**） | **10/10 绿** |
+
+**实际异常输出摘要**（4 个模块同款形态，各自带自己的键名与环境变量名）：
+
+```
+like:      like-api.user-auth.access-secret 未配置（绑到了未解析的占位符字面量 ${USER_JWT_SECRET}）：
+           请设置环境变量 USER_JWT_SECRET（必须与签发方 user-api 完全一致）—— 本模块只验签、不签发，
+           占位符原文是公开可知的「密钥」⇒ 任何人都能伪造 JWT
+article:   article-api.auth.access-secret 未配置（绑到了未解析的占位符字面量 ${USER_JWT_SECRET}）：…
+comment:   comment-api.user-auth.access-secret 未配置（绑到了未解析的占位符字面量 ${USER_JWT_SECRET}）：…
+favorite:  favorite-api.user-auth.access-secret 未配置（绑到了未解析的占位符字面量 ${FAVORITE_JWT_SECRET}）：…
+```
+
+### 25.6 变异测试（**证明守卫有牙齿**）
+
+**变异** = 把守卫里的「未解析占位符」判据**整块去掉**（`if (UNRESOLVED_PLACEHOLDER.matcher(secret).matches()) { … }`）
+⇒ **每模块 4 条用例精确转红**（改完立刻还原并核对 `sha256` ⇒ `git status` 干净）：
+
+| 域 | 变异后转红的用例 | 结果 |
+|---|---|---|
+| `like` | `guardRejectsBlankAndAcceptsRealSecret` / `prodLikeStartupWithLiteralPlaceholderBoundValueFails` / `prodLikeStartupWithoutEnvVarFails` / `realYamlWithoutEnvVarFailsTheContext` | **Tests run: 10, Failures: 4** ⇒ BUILD FAILURE |
+| `article` | 同上 4 条 | **Tests run: 10, Failures: 4** ⇒ BUILD FAILURE |
+| `comment` | 同上 4 条 | **Tests run: 10, Failures: 4** ⇒ BUILD FAILURE |
+| `favorite` | 同上 4 条 | **Tests run: 10, Failures: 4** ⇒ BUILD FAILURE |
+
+⚠️ **对照组仍绿**（证明变异只打掉了「占位符」这一条，不误伤别的判据）：
+`prodLikeStartupWithBlankEnvVarFails` / `realYamlWithBlankEnvVarFailsTheContext`
+（**空串**那条仍被 `null || isBlank()` 挡住）· `prodLikeStartupWithRealEnvVarStarts`（正常值仍能起）。
+
+### 25.7 复算命令
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r2-secret-guard-fix"
+
+# ① 四模块全量回归（每个模块一条）
+for m in service/like/like-api service/article/article-api service/comment/comment-api service/favorite/favorite-api; do
+  mvn -o -B -pl "$m" -am -DargLine=-Xmx2g test
+done
+
+# ② 条数求和（surefire XML）
+python3 - <<'PY'
+import glob, xml.etree.ElementTree as ET
+for mod in ["service/like/like-api","service/article/article-api","service/comment/comment-api","service/favorite/favorite-api"]:
+    t=f=e=0
+    for p in glob.glob(f"{mod}/target/surefire-reports/*.xml"):
+        r=ET.parse(p).getroot(); t+=int(r.get("tests",0)); f+=int(r.get("failures",0)); e+=int(r.get("errors",0))
+    print(mod, "tests=%d failures=%d errors=%d" % (t,f,e))
+PY
+
+# ③ 生产密钥守门（本轮把明文从注释里去掉 ⇒ 必须仍 EXIT=0）
+python3 tools/difftest/check-no-prod-secrets.py ; echo "EXIT=$?"
+```
+
+### 25.8 剩余缺口（**只报告 · 不在本轮写权内**）
+
+| # | 项 | 归属 | 说明 |
+|---|---|---|---|
+| **1** | 根级 `docker-compose.yaml` 的 `USER_JWT_SECRET` / `FAVORITE_JWT_SECRET` **缺 `:?`** | **根级文件 ⇒ 合并收口执行者**（§24 第 6 项已判归属） | 本轮守卫**变严** ⇒ 不设变量时容器**起不来**（安全方向 ✔）⇒ 但运维看到的是 crash-loop 而不是 compose 级的清晰报错 |
+| **2** | 根 README **无 `.env.example`**（部署方不知道要设哪些变量） | **根级 ⇒ P0 #5 ⇒ 并入 G1 的 `S1-USERS-001`** | 同上 |
+| **3** | `service/common` 的 `RpcInterceptorClientDeadlineGateTest` **已知 flaky**（时间敏感） | 共享层（G4） | 本轮 4 次全量回归**均未复现**（4/4 BUILD SUCCESS）⇒ 未触发重跑 |
+| **4** | 🔴 **`message-api` / `follow-api` 之外的其它 api 组件**是否还有同类「只判空/空白」的守卫 | 各域 lane | 本轮**只**改了任务书指定的 4 个模块 ⇒ 未全仓普查（**不做「顺手清理」**） |

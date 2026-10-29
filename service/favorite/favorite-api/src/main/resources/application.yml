@@ -149,18 +149,28 @@ grpc:
 #    Go 侧 favorite/api 只验签、不签发（没有 login 端点），签发方是 user-api。
 #    两边密钥不一致 ⇒ 验签必失败，表现为 HTTP 401。
 #
-# 🔴 2026-10-29 · G3 阶段 1：**默认明文值已去掉**（原为 `${FAVORITE_JWT_SECRET:ae0536f9-6450-4606-8e13-5a19ed505da0}`）
+# 🔴 2026-10-29 · G3 阶段 1：**默认明文值已去掉**（原为 `${FAVORITE_JWT_SECRET:<36 字节 UUID 字面量>}`）
 #    ⇒ 理由：那个 UUID 是**写在仓里的公开密钥** ⇒ 谁都能用它伪造 JWT ⇒ 而本域**只验签、不签发**
 #    ⇒ ⇒ 一旦部署时忘了覆盖 ⇒ token 可伪造（P0 #8）。
-#    ⇒ 现在 **缺变量 ⇒ 启动失败**（Spring 的 placeholder 不可解析 ⇒ 绑定期直接炸）；
-#      **变量存在但为空串 ⇒ 也启动失败**（FavoriteApiProperties#verifyAccessSecret 的 @PostConstruct 校验）
-#      ⇒ ⇒ **两条路都 fail-closed**（不再有「悄悄用默认密钥起来」这条路径）。
 #    ⚠️ 本地开发 / 测试：本域测试用 `src/test/resources/application.properties` 提供同名变量
 #      （值与测试里签发 token 用的常量一致）⇒ ⇒ **测试不依赖环境变量**。
 #    ⚠️ 部署侧：根级 `docker-compose.yaml` 需给本服务注入 `FAVORITE_JWT_SECRET`
 #      （**共享面 ⇒ G3 不写**；已登记为反馈单 ⇒ compose 侧应改用 `${FAVORITE_JWT_SECRET:?...}` 提前报错）。
 favorite-api:
   user-auth:
+    # 🔴 2026-10-29（本轮补）：**「yaml 不给默认值」只挡得住一半** ⇒ 另一半必须由**代码守卫**挡
+    #    ⇒ 守卫 = `FavoriteApiProperties#verifyAccessSecret()`（@PostConstruct）
+    #      ⇒ 下面的 `access-secret: ${FAVORITE_JWT_SECRET}` **没有默认值**
+    #      ⇒ ⚠️ **单靠 yaml，缺变量时并不会炸**：Spring 的 `@ConfigurationProperties` 绑定器
+    #        遇到**解析不出来**的占位符**不报错**，而是把**占位符原文**当成值绑上去
+    #        ⇒ ⇒ 应用**照常启动** ⇒ ⇒ 而那是**仓里公开可知的一串字符**
+    #        ⇒ ⇒ 🔴 **比空密钥更危险**（HMAC 密钥公开 ⇒ 谁都能伪造 token）。
+    #      ⇒ ⚠️ 同理，**变量存在但值为空串**时，Spring 的 PropertyPlaceholderHelper
+    #        把**空串当合法值**（不走默认值、也不报错）⇒ 属性绑成 "" ⇒ 空签名密钥 ⇒ token 可伪造。
+    #      ⇒ ⇒ 「未解析占位符」与「空串」**两条都**由 `verifyAccessSecret()` 显式拒
+    #        ⇒ ⇒ **缺变量 / 空串 / 占位符原文 三条路都 fail-closed**。
+    #    ⇒ 回归网：`FavoriteApiPropertiesSecretGuardTest#prodLikeStartupWithoutEnvVarFails`
+    #      （真 SpringApplication + 真 ConfigData + 只有 application.yml ⇒ 生产等价路径）。
     access-secret: ${FAVORITE_JWT_SECRET}
     access-expire: ${FAVORITE_JWT_EXPIRE:2592000}   # 30 天，与 Go 端 favorite.yaml:12 一致
 

@@ -1425,3 +1425,61 @@ sed -n '81,86p' "$GZ/rest/token/tokenparser.go"    # ⇒ doParseToken 函数体
 wc -l "/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/service/like/api/internal/metrics/metrics.go"  # ⇒ 21
 sed -n '39,40p;46,47p' "/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/service/like/api/internal/logic/like/likeactionlogic.go"
 ```
+
+---
+
+## 2026-10-29 · R2 轮 · 🔴 **P0 #8 补正**：验签密钥守卫**只堵了一半** —— 「未解析占位符」判据缺失 ⇒ **缺变量 ⇒ 应用仍能启动**（like-api）
+
+> **完整记录在** [`docs/DRIFT/favorite/api.md` §25](../../DRIFT/favorite/api.md)（这条问题**跨 4 域**：like / article / comment / favorite 的 api 组件 ⇒ 按「一条问题只在一个档里落笔」的纪律，本域只留指针 + 本域落点）。
+> **工作树**：`align/r2-secret-guard-fix` · **基线 commit** `f753ff0f`（= `do-my-own-gh`）· **核对日期** 2026-10-29
+> **证据强度**：**L4**（真 `SpringApplication` + 真 ConfigData 流程 ⇒ 真容器装配证据）＋ **变异测试**（去掉判据 ⇒ 用例**精确转红**）
+
+### 缺陷本体（**实测**，不是推理）
+
+§24 那条「去掉 yaml 默认值 ⇒ 缺变量 ⇒ 启动失败」**单靠 yaml 不成立**。用
+**真 `SpringApplication` + 真 ConfigData**（`spring.config.location=classpath:/application.yml`
+⇒ 等价于「产物 jar 里只有 `application.yml`」）实测出**两条**能悄悄起来的路：
+
+| # | 路径 | Spring 的**实测**行为 | 后果 |
+|---|---|---|---|
+| **1** | **变量完全没设** | `@ConfigurationProperties` **绑定器不报错**，而是把**占位符原文**（`${USER_JWT_SECRET}`）**当成值绑上去** ⇒ 应用**照常启动** | 🔴 **比空密钥更危险** —— 那是**仓里公开可知的一串字符** ⇒ HMAC 密钥公开 ⇒ **谁都能伪造 token** |
+| **2** | **变量设了但值是空串** | `PropertyPlaceholderHelper` 把**空串当合法值**（**不走默认值、也不报错**）⇒ 属性绑成 `""` ⇒ 应用带着**空签名密钥**正常起来 | 🔴 **token 可伪造**（HMAC 空密钥谁都能算） |
+
+⇒ ⇒ 既有守卫（`@PostConstruct verifyAccessSecret()`）**只判 `null || isBlank()`** ⇒ ⇒ **上面两条都漏过去了**。
+
+### 本域落点
+
+| 项 | 内容 |
+|---|---|
+| **守卫类** | `service/like/like-api/src/main/java/com/rag/like/like/api/config/LikeApiProperties.java` ⇒ 判据扩为 **null / 空串 / 全空白 / 未解析的占位符字面量**；新增 `Pattern.compile("^\\$\\{[^}]*\\}$")` |
+| **配置键 / 环境变量** | `like-api.user-auth.access-secret` / `USER_JWT_SECRET`（**单段** ⇒ 本模块**不涉及** message-api 那种「两段 ⇒ 顺序固定逐段校验」的问题 ⇒ 保持**一个** `@PostConstruct` 入口） |
+| **yml 注释订正** | `src/main/resources/application.yml`：「`${VAR}`（无默认值）⇒ 缺变量 ⇒ 启动失败」**单靠 yaml 不成立** ⇒ 改成「**yaml 只挡空串；未解析占位符由代码守卫挡**」＋ 指向 `LikeApiProperties#verifyAccessSecret()`；⚠️ 注释**不再回贴明文密钥**（改「36 字节 UUID」形状描述 ⇒ 脚本 `check-no-prod-secrets.py` 的 **W2 `how_to_drop`** 约定） |
+| **Go 出处** | `service/like/api/etc/likecenter.yaml:6`（`UserAuth.AccessSecret`）写的是**字面量** ⇒ ⇒ 本条属「**RAG 更严**」的一侧 ⇒ 登记为有意偏离（**不是**「RAG 抄错了 Go」） |
+| **语义等价** | 守卫**不改动任何值** ⇒ 变量一旦被提供，验签密钥与 Go 侧**逐字节一致** ⇒ 验签行为**零变化**（Go 侧消费点 = `service/like/api/internal/handler/routes.go` 的 `rest.WithJwt(serverCtx.Config.UserAuth.AccessSecret)`） |
+| **零新增依赖** | 只用 `jakarta.annotation.PostConstruct` ⇒ **不引入** `spring-boot-starter-validation` |
+
+### 守门（**4 → 10 例**）
+
+新增：**真 `SpringApplication` + 真 ConfigData** 的 4 条（变量未设 ⇒ 启动失败 · 变量空串 ⇒ 启动失败 · 绑到的值是占位符原文 ⇒ 启动失败 · 变量正常 ⇒ 正常启动〔对照组〕）＋ **真 yaml** 的 2 条（未设 / 空串 ⇒ 上下文起不来）＋ 判据边界补「占位符原文 ⇒ 抛」。
+
+⚠️ **「绑到的值是占位符原文」那条为什么注入「属性路径」而不是「环境变量」**（**实测**）：
+把环境变量本身设成 `${USER_JWT_SECRET}`（**自引用**）时，Spring 会先抛
+`PlaceholderResolutionException: Circular placeholder reference 'USER_JWT_SECRET'`
+⇒ ⇒ 那是 **Spring 自己**挡的 ⇒ ⇒ **证明不了本守卫有牙齿**
+⇒ ⇒ 该用例注入的是「**属性路径 = 占位符原文、环境变量未设**」—— 与**真实失败场景逐字节相同**的绑定结果。
+
+### 实测与变异
+
+| 项 | 结果 |
+|---|---|
+| **全量回归** | `mvn -o -B -pl service/like/like-api -am -DargLine=-Xmx2g test` ⇒ **BUILD SUCCESS**（EXIT=0）· 模块内 **104 tests / 0 failures / 0 errors** · 守卫 **10/10 绿** |
+| **实际异常输出** | `like-api.user-auth.access-secret 未配置（绑到了未解析的占位符字面量 ${USER_JWT_SECRET}）：请设置环境变量 USER_JWT_SECRET（必须与签发方 user-api 完全一致）—— 本模块只验签、不签发，占位符原文是公开可知的「密钥」⇒ 任何人都能伪造 JWT` |
+| **变异测试** | 去掉守卫里的「未解析占位符」判据 ⇒ **4 条精确转红**（`guardRejectsBlankAndAcceptsRealSecret` / `prodLikeStartupWithLiteralPlaceholderBoundValueFails` / `prodLikeStartupWithoutEnvVarFails` / `realYamlWithoutEnvVarFailsTheContext`）⇒ **Tests run: 10, Failures: 4** ⇒ BUILD FAILURE ⇒ ⇒ 还原后 `git status` 干净（无残留） |
+
+### 复算命令
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r2-secret-guard-fix"
+mvn -o -B -pl service/like/like-api -am -DargLine=-Xmx2g test
+python3 tools/difftest/check-no-prod-secrets.py ; echo "EXIT=$?"   # ⇒ EXIT=0（本轮把明文从注释里去掉）
+```

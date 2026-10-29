@@ -394,3 +394,23 @@
 | **守门** | **新增** `service/comment/comment-api/src/test/java/com/rag/comment/comment/api/config/CommentApiPropertiesSecretGuardTest.java`（**3 例** · **真 `ApplicationContextRunner`**） |
 | **证据强度** | **L4**（真容器装配 ⇒ 上下文起不来/起得来） |
 | **根级半边（归「合并收口执行者」）** | 根级 compose 的 `USER_JWT_SECRET` 缺 `:?` ＋ 根 README 无 `.env.example`（P0 #5 · 根级）⇒ 🔴 **2026-10-29 归属订正**：原写「已转派 G4」**归属错了** —— 根级文件**无人拥有**（既不在任何 lane 白名单，也不在 `check-wave-lane-ownership.py` 的 `SHARED` 13 条 ⇒ 该守门口径：「无人拥有 ⇒ 归合并收口执行者」）⇒ ⇒ **非 G4 写权面** ⇒ ⇒ 根因**并入 G1 的 `S1-USERS-001`**（**不另开编号**）⇒ 详见 [`favorite/api.md` §24](../favorite/api.md) 第 6 项 |
+
+---
+
+## 📌 指针 · 🔴 P0 #8 **补正** · 验签密钥守卫**只堵了一半**：「未解析占位符」判据缺失 ⇒ **缺变量 ⇒ 应用仍能启动**（2026-10-29 · R2 轮）
+
+> **完整记录在** [`docs/DRIFT/favorite/api.md` §25](../../DRIFT/favorite/api.md) —— **按 AGENTS.md「一条问题只在一个档里落笔」的纪律**，本域只留指针 + 本域落点。
+> ⚠️ **本条同时订正了上面那条「📌 指针 · P0 #8」里的「缺变量/空串 ⇒ 启动失败」** ——
+> 「缺变量」那半句**只对「显式喂键路径」成立**；**走真 ConfigData 流程时**（= 生产路径）Spring 的绑定器**不炸**，
+> 反而把**占位符原文**当值绑上去 ⇒ ⇒ **应用照常启动** ⇒ ⇒ 「yaml 不给默认值」**只堵住了一半** ⇒ ⇒ 另一半已由本轮补上。
+
+| 项 | 本域情况 |
+|---|---|
+| **落点** | `service/comment/comment-api/src/main/java/com/rag/comment/comment/api/config/CommentApiProperties.java`（`@PostConstruct verifyAccessSecret()` 的判据扩为 **null / 空串 / 全空白 / 未解析占位符字面量**；新增 `Pattern.compile("^\\$\\{[^}]*\\}$")`）＋ `src/main/resources/application.yml`（**注释订正**） |
+| **配置键 / 环境变量** | `comment-api.user-auth.access-secret` / `USER_JWT_SECRET`（**单段** ⇒ 不涉及多段有序入口） |
+| **Go 出处** | `service/comment/api/etc/commentservice.yaml:6`（`UserAuth.AccessSecret`）写的是**字面量** ⇒ ⇒ 本条属「**RAG 更严**」的一侧 ⇒ 登记为有意偏离（**不是**「RAG 抄错了 Go」） |
+| **语义等价** | 守卫**不改动任何值** ⇒ 变量一旦被提供，验签密钥与 Go 侧**逐字节一致** ⇒ 验签行为**零变化**（Go 侧消费点 = `service/comment/api/internal/handler/routes.go:54`） |
+| **守门** | `CommentApiPropertiesSecretGuardTest`：**3 → 10 例**（新增 **真 `SpringApplication` + 真 ConfigData** 的 4 条 + 真 yaml 的 3 条 ＋ 判据边界补占位符 1 例） |
+| **证据强度** | **L4**（真容器装配 ⇒ 起不来/起得来）＋ **变异测试**（去掉占位符判据 ⇒ **4 条精确转红**，还原后 `git status` 干净） |
+| **实测** | `mvn -o -B -pl service/comment/comment-api -am -DargLine=-Xmx2g test` ⇒ **BUILD SUCCESS**（EXIT=0）· 模块内 **62 tests / 0 failures / 0 errors** · 守卫 **10/10 绿** |
+| **实际异常输出** | `comment-api.user-auth.access-secret 未配置（绑到了未解析的占位符字面量 ${USER_JWT_SECRET}）：请设置环境变量 USER_JWT_SECRET（与签发方 user-api 一致）—— 本模块只验签、不签发，占位符原文是公开可知的「密钥」⇒ 任何人都能伪造 JWT` |
