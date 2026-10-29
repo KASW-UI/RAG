@@ -153,6 +153,10 @@
 ⇒ `resp.setHeader("X-Content-Type-Options", "nosniff")` **在位**（`writeTimeoutResponse` 内）。
 ⇒ 关闭。（Go 出处：`net/http.Error` 自 Go 1.11 起写该头。）
 
+> ⚠️ **2026-10-29 真实性复核（W-F lane）—— 状态不变（✅ 已修），但落点行号已漂 ⇒ 现行指针 = `:716` / `:728`**：
+> **现行落点** `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:716`（方法 `writeTimeoutResponse` 起于 `:716`）＋ **`:728`** = `resp.setHeader("X-Content-Type-Options", "nosniff");`（**在位**）⇒ ⇒ **本条的状态（✅ 已修）经两侧复核仍成立**（Go 侧 `net/http` 的 `Error()` 自 Go 1.11 起写该头 ⇒ 同形）。
+> ⚠️ **原写 `:431` 那一行现已不是本方法**（该行现为 `try (…Scope ignoredScope = …)`）⇒ **行号合法但指错位置**（**E68 同型**）⇒ ⇒ **原指针按「原值保留」不改**（AGENTS.md §6）⇒ **以本行的新指针为现行指针** · 核对日期 2026-10-29。
+
 ---
 
 ### T-4 ✅ **观测面 + 资源面均已修**（499 可见 + 在飞 gRPC 会被提前取消）—— 2026-10-25（第十轮落地 · 第十三轮订正）

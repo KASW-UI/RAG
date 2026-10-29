@@ -689,6 +689,29 @@ ERROR logger-test-omits-err -service="logger-test-omits-err" event_id="2113…"
 
 ⚠️ **不是 common 尾巴的一条（订正）**：`comment/api.md` 的 **D2**（Bearer 前缀长度边界 `> 7` vs Go `> 6`）落点是 **`service/users/users-common/.../BearerTokenExtractor.java:74-81`** ⇒ **属 `users` 域，不属 `service/common`** ⇒ 把它算作 common 的尾巴是错的（**D3** 才是）。
 
+#### ⚠️ **2026-10-29 真实性复核（W-F lane · shared-layer 收口域）—— §十二·二 这张表的「当前真实状态」列是 2026-10-25 的陈旧快照**
+
+> ⚠️ **原表头写「当前真实状态（2026-10-25 实测）」** ⇒ 逐条回**两侧源码**复核（Go 真源 `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang` ＋ RAG 本仓 `service/common/**`）后，**10 条里有 7 条的现状已变** ⇒
+> ⇒ **本表的历史叙述行一律保留**（不改写历史）⇒ **现行态**见下表 · 核对日期 **2026-10-29**。
+> ⚠️ **口径**：本表与 [`docs/DRIFT/global/_README.md`](../global/_README.md) §三 是**同一份清单的两个副本** ⇒ 后者已被 2026-10-25 逐轮订正过，**本表没跟上** ⇒ 本节即是把两者对齐。
+
+| # | **原判（2026-10-25）** | **现行态（2026-10-29 复核）** | **两侧依据（`文件:行号`）** | **是否改判** |
+|---|---|---|---|---|
+| **T-1** | 🔴 仍未修 | ✅ **已修** | RAG `service/common/src/main/java/com/rag/common/http/GoStyleJsonBodyConverter.java:331` = `inputMessage.getHeaders().getFirst(HttpHeaders.CONTENT_TYPE)`（**原始头值** ⇒ 大小写敏感）· 判据本体 `goReadsBody` `:241-244` = `contentType.contains("application/json")`（**大小写敏感**）· Go `go-zero@v1.10.2/rest/httpx/requests.go:153-155`（`withJsonBody` = `strings.Contains`）⇒ **两侧同形** | ✅→✅（**原判为陈旧快照**） |
+| **T-2** | 🔴 仍未修 | ✅ **已签字**（`SD-2026-10-25-01`）⇒ **不再是未修项** | RAG `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java:102`（`private final Semaphore latch;`）＋ `:106`（**构造期建一次** ⇒ 全进程一个）· Go `go-zero@v1.10.2/rest/handler/maxconnshandler.go`（**每路由 new 一个**）⇒ **差异仍在** ⇒ **已签字 ⇒ 是决策不是缺陷** | ✅→✅（**原判为陈旧快照**） |
+| **T-3** | ✅ 已修 | ✅ **已修**（**仅指针过期**） | RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:728` = `resp.setHeader("X-Content-Type-Options", "nosniff")`（方法体起于 `:716`）⇒ ⚠️ **原指针 `:431` 已失效**（该行现是 `try (…Scope ignoredScope = …)` ⇒ 与 `writeTimeoutResponse` 无关 ⇒ **E68 同型：行号合法但指错位置**）· Go `net/http/server.go` `http.Error` 路径同写该头 | ✅→✅（**指针订正**） |
+| **T-4** | 🔴 仍开放，且全仓无 499 守门 | ✅ **观测面 + 资源面均已修** | RAG `…/observability/HttpMiddleware.java:88`（`HTTP_CLIENT_CLOSED_REQUEST = 499`）＋ `:612`（`flushCaptured`）＋ `:458`/`:484`（`writeTimeoutResponseQuietly(499, …)`）＋ `…/observability/GoStyleClientDisconnectProbe.java`（**主动探测写** = 方案⑤ ⇒ 在飞 gRPC 会被提前取消）⇒ **wire 偏离已另签字** `SD-2026-10-25-04` | ✅→✅（**原判为陈旧快照**） |
+| **T-5** | 🔴 仍开放 | ✅ **已签字**（同 T-2） | 同 T-2 的两侧依据 | ✅→✅（**原判为陈旧快照**） |
+| **T-6** | 🟡 仍 OPEN（用户 2026-10-24 拍板「保持登记，本轮不做」） | ✅ **已修**（**原「拍板不做」已被后续拍板覆盖**） | RAG `service/common/src/main/java/com/rag/common/http/GoStyleJsonContentTypeAdvice.java:127`（`GO_JSON_CONTENT_TYPE = "application/json;charset=utf-8"`）＋ `:151`（`response.getHeaders().set(CONTENT_TYPE, …)`）· 已登记 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:2` ⇒ **10 个 api 全生效**（含 `service/like/like-api/pom.xml:61-64` 依赖 `common`）· ⇒ 挡路签字 **`SD-HOT-API-006` 已撤销**（2026-10-25 用户拍板撤销，理由即「修 T-6」）⇒ **不是「登记在册的待办」，是已闭合** | ✅→✅（**原判为陈旧快照**） |
+| **T-7** | 🟡 仍 OPEN | 🟡 **仍是登记在册的待办**（**未签字**） | RAG 侧落点 = **Tomcat 容器层**（`service/common` 够不着）⇒ 已登记为**待签字候选** `SD-2026-10-25-CAND-14`（`docs/Intentional_Deviations/global/common-tails.md`）⇒ **状态取值：⏳ 未签字**（不是 🔴 缺陷、也不是 ✅ 已修） | 🟡→🟡（**仅表述精化**：待办 ⇒ 待签字候选） |
+| **T-8** | 🟡 仍 OPEN | ✅ **已修**（残留一条已另登记） | RAG `service/common/src/main/java/com/rag/common/http/GoStyleTraceparentFilter.java`（**在位**）⇒ 「方法不匹配」出口**多带**一个 `Traceparent` 的残差已另登记为待签字候选 `SD-2026-10-25-CAND-15` | ✅→✅（**原判为陈旧快照**） |
+| **T-9** | 🔴 仍开放 | ✅ **已修**（2026-10-25 第三轮） | RAG `service/common/src/main/java/com/rag/common/protection/GoStyleGrpcClientBreakerInterceptor.java:185`（`String authority = channel.authority();`）＋ `:290`（`goBreakerName(targetOf(next), fullMethodName)`）⇒ 身份源 = `Channel.authority()` ⇒ 与 Go `path.Join(cc.Target(), method)` 同形 | ✅→✅（**原判为陈旧快照**） |
+| **T-10** | 🔴 仍未修 | ✅ **已闭环**（两步走完） | RAG `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/service/UserDomainService.java:138-151`（javadoc 明写「**2026-10-25 更正 —— 原 javadoc 误写为 `DeadlineState#markExpired(long)`，该断言为假**」＋「`markExpired(long)` **已移除**」）· `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` 现**已无 `markExpired` 方法**（仅剩 2 处 javadoc 提及）⇒ **循环依赖已断** | ✅→✅（**原判为陈旧快照**） |
+
+> ⚠️ **2026-10-29 附一条「指针过期」的独立记账**（与上表的状态无关，但同源）：上表 T-3 / T-4 / T-6 三行的**落点行号**都已漂 ⇒
+> **T-3** `HttpMiddleware.java:431` ⇒ **现 `:716`**（方法 `writeTimeoutResponse`）· **T-4** `HttpMiddleware.java:332` ⇒ **现 `:612`**（方法 `flushCaptured`）· **T-6** `HttpMiddleware.java:421` ⇒ **该行现为 `try (…Scope ignoredScope = …)`，与本条无关**（T-6 的真实落点是 `http/GoStyleJsonContentTypeAdvice.java:127`/`:151`）。
+> ⇒ 三处**行号合法但指错位置**（**E68 同型**）⇒ **上表「落点」列按历史保留，不回改**（AGENTS.md §6「原值一律保留」）⇒ **以本附注为现行指针**。
+
 ### 十二·三、9 项交接的真实状态（逐条实测，2026-10-25）
 
 > ⚠️ **§十一 只记了 #1 / #3 / #4 / #9 / #10 / #11 六条** ⇒ **#2 / #5 / #6 / #7 / #8 五条的状态从未被记录**。
@@ -999,3 +1022,22 @@ service/users/user/user-rpc/.../UserDomainService.java:113   ← 这行 javadoc 
 > ③ **U-2 是取证缺口，不是「查过没问题」**；
 > ④ **10 条外部域尾巴（§十二·二 T-1 ~ T-10）不在本节** ⇒ 它们的修法落在**别的域**或需**收口裁定**
 > ⇒ ⇒ 按 §1.1 ⑥ 第 2 条 **不计入本组件的 R3 ⑥**，但**计入域级聚合**与跨组件矩阵。
+---
+
+## 2026-10-29 · W-F lane · 🔴 **「已闭环」结论的可复算证据补齐**（不改判 · 只补证据）
+
+> ⚠️ **本节不改任何结论的状态** —— 上面各条**原判一律保留**（AGENTS.md §6）⇒ 本节只做一件事：**把「✅ 已闭环 / ✅ 已修」的证据从「叙述」补成「可复算的 `文件:行号`」**（AGENTS.md §6 的「把证据补成可复算的」这一格）。
+> **方法**：逐条回 **RAG 源码**（`service/common/**` / 域侧 `service/*/*-rpc/**`）**读消费点**（不是声明点）—— AGENTS.md §3.3.1 ③ 的要求。核对日期 **2026-10-29**。
+
+| 编号 | 原状态 | **现行态（2026-10-29 复核）** | 可复算证据（`文件:行号` · **消费点**） | 是否改判 |
+|---|---|---|---|---|
+| **`DRIFT-COMMON-001`** | ✅ 已闭环 | ✅ **维持** | `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:305`（`// 🔴 DRIFT-COMMON-001 修复：超时必须走 wrappedCall，而不是原始 call` ⇒ **超时分支走的是 wrapped call**）＋ `:396`（`// DRIFT-COMMON-001：把 wrappedCall 交给超时调度器，使超时与业务 close 共用同一条…`）⇒ ⇒ **span 的结束路径与业务路径同源** ⇒ 原判成立 | ➖ 不改判 |
+| **`DRIFT-COMMON-002`** | ✅ 已闭环 | ✅ **维持** | `service/common/src/main/java/com/rag/common/communityfact/Wire.java:351`（`// DRIFT-COMMON-002 修复：receivedAt 缺失时 Go 返回 (零值, false)，不抛`）＋ `:356`（`if (receipt.receivedAt == null \|\| receipt.receivedAt.isEmpty()) {` ⇒ **先短路**）＋ `:361`（`received = Instant.parse(receipt.receivedAt)` ⇒ **只在非空时解析**）＋ `:142`（`@JsonProperty("received_at") public String receivedAt;`）⇒ ⇒ **NPE 路径已消** | ➖ 不改判 |
+| **`DRIFT-COMMON-003`** | ✅ 已闭环 | ✅ **维持** | `service/common/src/main/java/com/rag/common/communityfact/AuthorityHandler.java:56`（`public static final class AuthorityUnavailableException extends RuntimeException` ⇒ **sentinel 存在**）＋ `:67`（`// 沿 cause 链查找 … sentinel，等价 Go 版 errors.Is(err, ErrAuthorityUnavailable)`）＋ `:69`（`private static boolean isAuthorityUnavailable(Throwable err) {`）⇒ ⇒ **判定沿 cause 链走**（Go `errors.Is` 语义）⇒ **404 误降级成 503 的路径已消** | ➖ 不改判 |
+| **`DRIFT-COMMON-004`** | ✅ 已由 hot 域 2026-10-25 认领并关闭 | ✅ **维持** | **域侧消费点**：`service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/HotRpcApplication.java:7`（`import com.rag.common.spring.RpcServerInterceptorFactory;`）＋ `:9`（`import io.grpc.ServerInterceptor;`）＋ `:30`（javadoc 明写「`@Import(RpcServerInterceptorFactory.class)`」）⇒ ⇒ **拦截器确实挂到了 hot-rpc 的 server 上**（AGENTS.md §3.3.1 ③：看**消费点**、不看注解名） | ➖ 不改判 |
+| **`DRIFT-COMMON-005`** | ✅ 已闭环（2026-10-29 修完） | ✅ **维持** | `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:852`（javadoc「当前线程的 deadline 过期时刻（**单调钟**纳秒，`System.nanoTime()` 域）」）＋ `:855`（「🔴 **为什么存『单调钟纳秒』而不是『墙钟 epoch 毫秒』**（DRIFT-COMMON-005 修复）」）＋ `:882`（`private static final ThreadLocal<Long> DEADLINE_NANOS = new ThreadLocal<>();`）＋ `:897`（单调钟读数 supplier）⇒ ⇒ **时基（墙钟→单调钟）与精度（毫秒→纳秒）两格都落地** | ➖ 不改判 |
+| **`DRIFT-COMMON-006`** | ✅ 代码 2026-10-25 已删除（`markExpired` 死代码 + 跨域 javadoc 假断言） | ✅ **维持** | `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` 全文 **`markExpired` 只剩 2 处 javadoc 提及**（`:404` 讲旧实现、`:903` 记 2026-10-25 收口提交）⇒ ⇒ **方法本体已不存在** ⇒ 跨域 javadoc 侧：`service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/service/UserDomainService.java:138-151`（javadoc 明写「原 javadoc 误写为 `DeadlineState#markExpired(long)`，该断言为假」＋「`markExpired(long)` **已移除**」）⇒ ⇒ **两边同时闭合** ⇒ **CYCLE-001 的循环依赖已断** | ➖ 不改判 |
+| **`DRIFT-SF-001`** | ✅ 已修（2026-10-29，雪花时钟源） | ✅ **维持** | `service/common/src/main/java/com/rag/common/snowflake/Snowflake.java:79`（`static java.util.function.LongSupplier wallClockMillis = System::currentTimeMillis;`）＋ `:85`（`static java.util.function.LongSupplier monotonicNanos = System::nanoTime;`）＋ `:160`（`this.anchorEpochNanos = (wallClockMillis.getAsLong() - EPOCH) * 1_000_000L;` ⇒ **锚点只取一次**）＋ `:313-320`（javadoc 引库注释「to make sure we use the monotonic clock if available」＋「旧实现的问题：`System.currentTimeMillis() - EPOCH` 是**纯墙钟**」）⇒ ⇒ **墙钟回拨 ⇒ 重复 ID 的路径已断** | ➖ 不改判 |
+| **`DRIFT-CF-018`** | 🟡 **共享层半边已修 · favorite 域半边仍待修** | 🟡 **维持（半边拆分）** | **共享层侧在位**：`service/common/src/main/java/com/rag/common/communityfact/Dispatcher.java:48`（「🔴🔴 **DRIFT-CF-018 修复：调用方先造句柄**（Go-faithful 的停止能力入口）」）＋ `:90`（「🔴 **DRIFT-CF-018（2026-10-29 修）：本重载在 `once=false` 时**不可用**」）＋ `:109`（`@deprecated 阻塞式重载在 once=false 时交不出句柄（DRIFT-CF-018）`）<br>🔴 **favorite 域半边**：落点 `service/favorite/favorite-rpc/**`（**G3 写权面 · 不在本 lane**）⇒ **本轮未核 ⇒ 不宣称已验** | ➖ **不改判**（🟡 半边拆分，**两格状态不同是有意为之**） |
+
+> ⚠️ **本节没有做的事（诚实边界）**：① **没有改任何产品代码**（本 phase 只改 `docs/`）；② **没有复跑真 PG 活体对拍**（`UNRESOLVED-USERSCOMMON-004` 那条属 users-common 台账，不在本文件）；③ **`DRIFT-CF-018` 的 favorite 域半边本轮未核** ⇒ **不写「已闭合」**。

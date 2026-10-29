@@ -8,7 +8,7 @@
 
 ---
 
-## SD-2026-10-25-01：`MaxConns` 闸门作用域 —— RAG **全局一个**，Go **每路由一个**
+## SD-2026-10-25-01：`MaxConns` 闸门作用域 —— RAG **全局一个**，Go **每路由一个** ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 | 项 | 值 |
 |---|---|
@@ -122,7 +122,7 @@ func MaxConnsHandler(n int) func(http.Handler) http.Handler {
 | **描述完整性** | 描述**完整**（Go 行为 / RAG 行为 / 理由 / 守门俱在）⇒ 无需追加订正 |
 ---
 
-## SD-2026-10-25-02 ❌ **已撤销（2026-10-25 第十轮）** —— 「框架限制」这个记录**不再成立**：T-4 资源面已被**方案⑤ 主动探测写**修掉 ⇒ **本条从未被签字，也不需再签**
+## SD-2026-10-25-02 ❌ **已撤销（2026-10-25 第十轮）** —— 「框架限制」这个记录**不再成立**：T-4 资源面已被**方案⑤ 主动探测写**修掉 ⇒ **本条从未被签字，也不需再签** ｜ **状态（核对日期 2026-10-29）：⛔ 已失效·已撤销**
 
 | 项 | 值 |
 |---|---|
@@ -202,7 +202,7 @@ func MaxConnsHandler(n int) func(http.Handler) http.Handler {
 | **证据（2026-10-29）** | `service/common/src/main/java/com/rag/common/observability/GoStyleClientDisconnectProbe.java`（**在位** · 30,493 B · `:234` 探针字节 `HTTP/1.1 103 Early Hints\r\n\r\n`）＋ `docs/Intentional_Deviations/global/common-tails.md` §`SD-2026-10-25-04` §①（「客户端断连 → 在飞 gRPC 取消」实测 **461ms**）＋ `docs/DRIFT/global/_README.md` §三 T-4 行（✅ **资源面已修**） |
 | **结论** | **撤销仍成立 · 状态不变**（❌ 已撤销 ⇒ **不计入计数**，与 `_INDEX.md` 的口径一致） |
 | **🔴 附带订正** | 本条被撤销后，**它原来的「差异描述」仍留在本档**（现位于 §`SD-2026-10-25-02` 的**遗留描述段**）⇒ 本轮**已把该段标为 ⚫ 已失效**并说明「保留 Go 出处、废弃 RAG 侧现状断言」⇒ ⇒ **原句保留、历史不抹掉**，但**不得再被当作当前差异引用** |
-## SD-2026-10-25-04 ✅ **已签字（2026-10-25，用户拍板）** —— 方案⑤「主动探测写」带来的 **wire 偏离**：客户端先收到 N 行 `103 Early Hints`
+## SD-2026-10-25-04 ✅ **已签字（2026-10-25，用户拍板）** —— 方案⑤「主动探测写」带来的 **wire 偏离**：客户端先收到 N 行 `103 Early Hints` ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 | 项 | 值 |
 |---|---|
@@ -352,7 +352,7 @@ if (!processor.isAsync()) {
 
 ---
 
-## ⚫ `SD-2026-10-25-02` 的**遗留描述段**（**已失效** —— 被签字描述的行为**已不存在**）
+## ⚫ `SD-2026-10-25-02` 的**遗留描述段**（**已失效** —— 被签字描述的行为**已不存在**） ｜ **状态（核对日期 2026-10-29）：⛔ 已失效·已撤销**
 
 > **2026-10-29 对齐（W-F lane · 共享层台账面）**：🔴 **本段描述的行为已不存在** ⇒ **原签字自动失效**
 > （判据：`docs/Intentional_Deviations/_INDEX.md:34`）⇒ ⇒ **本段只作历史留档，不得再被当作「当前差异」引用**。
@@ -433,7 +433,7 @@ req := r.WithContext(ctx)
 
 ---
 
-## SD-2026-10-25-CAND-14 · 🏷 **待签字候选** —— HTTP 状态行**缺 reason phrase**（Go `HTTP/1.1 200 OK` / RAG `HTTP/1.1 200`）
+## SD-2026-10-25-CAND-14 · 🏷 **待签字候选** —— HTTP 状态行**缺 reason phrase**（Go `HTTP/1.1 200 OK` / RAG `HTTP/1.1 200`） ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**
 
 | 项 | 值 |
 |---|---|
@@ -505,8 +505,9 @@ req := r.WithContext(ctx)
 | **核「被签字描述的那个行为现在还存在吗」** | 🟡 **源码级成立 · 运行时字节本轮未复测 ⇒ 待核实**<br>① **RAG 侧仍不产生 reason phrase** —— RAG 侧**没有任何代码**能补它（状态行由容器写）⇒ 源码级结论不变；② **容器层仍是省略**（Tomcat `Http11OutputBuffer` 的「The reason phrase is optional but the space before it is not. Skip sending the reason phrase」原文） |
 | **证据（2026-10-29）** | RAG 侧**零命中**：实测 `grep -rn 'reason phrase\|status_line\|StatusLine\|HTTP/1.1 200' tools/` ⇒ 仅命中 `tools/api-full-parity-probe/users/http1xx.py`（**该文件是 1xx interim 跳过器，与 reason phrase 无关**）⇒ ⇒ **仓内既无实现也无守门** · 容器侧出处沿用原档（`tomcat-embed-core 11.0.24` 的 `org/apache/coyote/http11/Http11OutputBuffer.java:358-374`） |
 | **🔴 缺口登记（待核实）** | ⚠️ **本条没有任何机器守门** ⇒ 「是否仍成立」**只能靠源码推理**⇒ 本轮**未跑真 Tomcat 取字节** ⇒ **不写「已复测」** ⇒ 标 **待核实（缺真容器字节复测）** |
+| **🟢 2026-10-29 补充（W-F lane · 独立复核）—— 容器侧出处本轮**真的解出来核了**（原档只是「沿用」）** | ⚠️ **原写「容器侧出处沿用原档（`tomcat-embed-core 11.0.24` 的 `org/apache/coyote/http11/Http11OutputBuffer.java:358-374`）」** ⇒ **现行态 = 该出处已独立核对通过**（**行号**从 `358-374` 收窄为 **`:372-374`**）：<br>取自 **`~/.m2/repository/org/apache/tomcat/embed/tomcat-embed-core/11.0.24/tomcat-embed-core-11.0.24-sources.jar`**（**jar 内第三方源码，不在本仓树内**）⇒ `org/apache/coyote/http11/Http11OutputBuffer.java` 的<br>**`:370`** `headerBuffer.put(Constants.SP);`<br>**`:372-374`** `// The reason phrase is optional but the space before it is not. Skip` / `// sending the reason phrase. Clients should ignore it (RFC 7230) and it` / `// just wastes bytes.`<br>**`:376`** `headerBuffer.put(Constants.CR).put(Constants.LF);`<br>⇒ ⇒ **逐字节确认：Tomcat 只写「状态码 + 一个空格 + CRLF」，不写 reason phrase** ⇒ ⇒ **「RAG 侧状态行无 reason phrase」这个描述成立** ⇒ ⇒ **「源码级成立」这一格由「沿用原档」升级为「独立核对通过」**；<br>⚠️ **但「运行时字节」那一格仍然开着** ⇒ **待核实（缺真容器字节复测）** 的定性**不变**（本轮**未跑真 Tomcat** ⇒ **不写「已复测」**）· 核对日期 2026-10-29 |
 | **结论** | **状态不变**（仍是 🏷 候选 · 未签字）· 描述**完整** ⇒ 无需追加订正 |
-## SD-2026-10-25-CAND-15 · 🏷 **待签字候选** —— 「方法不匹配」这个出口，RAG 比 Go **多带**一个 `Traceparent`
+## SD-2026-10-25-CAND-15 · 🏷 **待签字候选** —— 「方法不匹配」这个出口，RAG 比 Go **多带**一个 `Traceparent` ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**
 
 | 项 | 值 |
 |---|---|

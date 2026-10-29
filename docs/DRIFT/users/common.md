@@ -279,7 +279,7 @@ Go 验 RAG 签的： 同上                                     → 全部 VERIF
 
 ---
 
-### DRIFT-USERSCOMMON-005 ⚠️ bcrypt 接受 `$1$` / `$2x$` 前缀，RAG 拒收 —— ✅ **已签字（2026-10-24）⇒ `SD-USERSCOMMON-001`**
+### DRIFT-USERSCOMMON-005 ⚠️ bcrypt 接受 `$1$` / `$2x$` 前缀，RAG 拒收 —— ✅ **已签字（2026-10-24）⇒ `SD-USERSCOMMON-001`**<br>🟢 **2026-10-29 复核（W-F lane · users-common）**：**状态不变（✅ 已签字）** —— 签字条 **两侧逐行重核已落档**（[`../../Intentional_Deviations/users/common.md`](../../Intentional_Deviations/users/common.md) §「🔴 逐条重核（核对日期 2026-10-29）」）：Go `golang.org/x/crypto@v0.53.0/bcrypt/bcrypt.go:57`（`majorVersion = '2'`）＋ `:265-279`（`decodeVersion` 用 **`>`** ⇒ **major < `'2'` 的 `$0$`/`$1$` 放行** · minor **存而不校验** ⇒ `$2x$` 放行） ⇔ RAG `service/users/users-common/src/main/java/com/rag/users/common/cryptx/PasswordUtil.java:37`（Spring `BCRYPT_PATTERN`）＋ `:49` ＋ `:101`（`ENCODER.matches` ⇒ **拒 `$1$`/`$2x$`**） ⇒ ⇒ **被签字描述的行为仍存在 ⇒ 签字有效**；守门 `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/service/LoginMalformedHashDrift004Test.java` **在位** ⇒ ⇒ **核对日期 2026-10-29**
 
 > 决定：**保留 RAG 的 fail-closed**（拒收 `$1$` / `$2x$`），**不对齐 Go 的 fail-open**。
 > 签字档 ⇒ [`docs/Intentional_Deviations/users/common.md`](../../Intentional_Deviations/users/common.md) 的 `SD-USERSCOMMON-001`。
@@ -834,3 +834,24 @@ Go 侧返回 `""`（剥成空串）。
   `docs/RoundPlan/**` · `AGENTS.md` · `docs/Worktree.md` · `docs/DRIFT/_cross/**` · `docs/DRIFT/global/**`
   · `tools/difftest/check-*.py`；
 - ❌ **没有**把「本轮 17 条已登记差异」写成「已对齐」⇒ 按 §0 的口径，它们一律读作「**在该证据强度下一致**」。
+
+---
+
+## 2026-10-29 · W-F lane · 🔴 **真实性复核（逐条回到两侧源码）**
+
+> ⚠️ **本节是「追加的订正面」** —— 上文各条**原判一律保留**（AGENTS.md §6「原值一律保留」）⇒ 本节只给**现行态**。
+> **方法**：① 回 **Go 真源**（`/Users/pr/Documents/java&golang/Sea-RideTheWind_golang`，**只读**）+ **go-zero 依赖源码**（`~/go/pkg/mod/github.com/zeromicro/go-zero@*`）与 **RAG 本仓** `service/users/users-common/**` **两侧**看；② 核**证据指针能不能落到**（`tools/difftest/ledger-claim-audit.py --domain users --strict` ⇒ **落空 0**）；③ 核**状态与事实是否一致**。
+> ⚠️ **一条口径提醒（对全篇适用）**：**go-zero 的行号只在**本机缓存的那个版本**上核过** —— 本机 `~/go/pkg/mod` 里是 **v1.10.0**，而真源 `go.mod:17` pin 的是 **v1.10.2** ⇒ ⇒ **本节引用的 go-zero 行号 = v1.10.0 实测**（已核对一致）⇒ **v1.10.2 是否逐行相同，未核** ⇒ 按 AGENTS.md §6「带核对日期」纪律 ⇒ **该口径写在正文里，不静默**。
+
+| 编号 | 原状态 | **现行态（2026-10-29 复核）** | 两侧依据（`文件:行号`） | 是否改判 |
+|---|---|---|---|---|
+| **`DRIFT-USERSCOMMON-001`** | ✅ **2026-10-27 销号：两侧均不可观察 ⇒ 本条不成立（证伪关闭）** | ✅ **维持销号**（**代码差异本身确实存在**，但**两侧都进不了 wire** ⇒ 不构成可观察漂移） | **Go** `service/user/common/errmsg/errmsg.go:30-31`（`ErrorRequestParam = 1017` / `ErrorAvatarHistoryNotExist = 1018`）＋ `:38-68` 的 `codeMsg` map **逐条核对确认不含这两个键** ＋ `:70-76` `GetErrMsg`（`if !ok { return codeMsg[Error] }` ⇒ 回落到 `"FAIL"`）<br>**RAG** `service/users/users-common/src/main/java/com/rag/users/common/errmsg/ErrorCode.java:34-35`（`ERROR_REQUEST_PARAM(1017, "请求参数错误")` / `ERROR_AVATAR_HISTORY_NOT_EXIST(1018, "头像历史不存在")`）⇒ ⇒ **「RAG 有文案 / Go 无」这个差异本身成立**；**销号**的理由（wire 不可观察）也成立 | ➖ **不改判**（但把「差异成立」与「不构成漂移」两件事分开写清） |
+| **`DRIFT-USERSCOMMON-002`** | ✅ **已修（首轮）** | ✅ **维持已修** | **RAG** `service/users/users-common/src/main/java/com/rag/users/common/jwt/JwtUtil.java:24` = `.header().add("typ", "JWT").and()` ⇒ **在位** | ➖ 不改判 |
+| **`DRIFT-USERSCOMMON-003`** | ✅ **判为不修（字节级语义等价）** | ✅ **维持不修** | 本条性质 = **claim 顺序不同** ⇒ 语义等价、字节不等价 ⇒ **登记在案即可** ⇒ 本轮**未发现**任何把它升级成漂移的证据 | ➖ 不改判 |
+| **`DRIFT-USERSCOMMON-004`** | ✅ **已修（首轮）** | ✅ **维持已修** | **RAG** `…/jwt/JwtUtil.java:28` = `.signWith(key, SignatureAlgorithm.HS256)`（**显式钉死签名算法** ⇒ 不再随密钥长度漂移）＋ `:17-21` 的 javadoc（「`signWith(Key)` 单参重载会照着 key 的 JCA 算法名选签名算法 ⇒ `header.alg` 会随密钥长度漂」）⇒ **该条要防的回归点仍在代码里被显式钉死** | ➖ 不改判 |
+| **`DRIFT-USERSCOMMON-005`** | ✅ **已签字（2026-10-24）⇒ `SD-USERSCOMMON-001`** | ✅ **维持已签字** | 签字条的逐条重核**已在** [`../../Intentional_Deviations/users/common.md`](../../Intentional_Deviations/users/common.md) §「🔴 逐条重核（核对日期 2026-10-29）」落档（两侧逐行 + 守门在位）⇒ 本条**不重复登记**<br>🟢 **本轮独立复核到的一致点**：**RAG** `service/users/users-common/src/main/java/com/rag/users/common/cryptx/PasswordUtil.java:37`（javadoc 载明 Spring `BCRYPT_PATTERN`）＋ `:49`（`ENCODER = new BCryptPasswordEncoder(STRENGTH)`）＋ `:101`（`ENCODER.matches(rawPassword, dbHash)`）⇒ **文件与路径在位** | ➖ 不改判 |
+| **`DRIFT-USERSCOMMON-006`** | 🔴 **潜伏 · wire 不可观察 · 共享层写权**（2026-10-29 新抓到） | 🔴 **仍成立（未修）** —— **本条是本轮唯一「改判后仍为 🔴」的活跃缺陷** | **RAG** `service/users/users-common/src/main/java/com/rag/users/common/jwt/BearerTokenExtractor.java:35`（`BEARER_PREFIX = "Bearer "` ⇒ **7 字符**）＋ `:75`（`authHeader.length() > BEARER_PREFIX.length()` ⇒ **判据 = `> 7`**）⇒ ⇒ **`"Bearer "`（7 字符）不被剥**；🔴 **同一个类自己的 javadoc `:64` 写的就是 Go 的语义**（「判定是 `len(tok) > 6`（严格大于）。`"Bearer "` 正好 7 字符会被剥成空串」）⇒ ⇒ **代码与自己的注释矛盾 ⇒ 是实现写错，不是设计取舍** | ➖ **不改判**（🔴 仍成立）· **处置不变**：落点 `service/users/users-common/**` = **G4 写权面** ⇒ 按「反馈单 7 项」**转派 G4** ⇒ **本 lane 不落码** |
+| **`UNRESOLVED-USERSCOMMON-005`** | ✅ **已关闭（2026-10-23 第五轮）** | ✅ **维持关闭** | **Go** `go-zero@v1.10.0/rest/token/tokenparser.go:122-123`（`func newParser() *jwt.Parser { return jwt.NewParser(jwt.WithJSONNumber()) }` ⇒ `claims["userId"]` 的动态类型是 `json.Number` ⇒ `claim.Int64()` **精确**）＋ `:81-86`（`doParseToken` → `request.WithParser(newParser())`）⇒ ⇒ **「Go 在 2^53 以上丢精度」那条假发现被推翻**这一步**在本轮复核中再次成立**<br>⚠️ **版本口径**：本机 mod cache 是 **v1.10.0**，真源 `go.mod:17` pin **v1.10.2** ⇒ **行号在 v1.10.0 上核对**（一致）⇒ **v1.10.2 未逐行核** | ➖ 不改判（+ 补版本口径） |
+| **`UNRESOLVED-USERSCOMMON-004`** | 🟡 **部分关闭**（33 列逐列实测 · 24 列逐字节相同 · 9 列 = 3 类已登记差异） | 🟡 **维持部分关闭** | 两侧真 PG 活体对拍结论**本轮未复跑**（该探针属 G4 写权面 + 需要真 PG 容器）⇒ ⇒ **本轮不重复核、不改判** | ➖ 不改判（**未复跑 ⇒ 不宣称已验**） |
+
+> ⚠️ **本节没有做的事（诚实边界）**：① **没有改任何产品代码**（`service/users/users-common/**` = G4 写权面；`DRIFT-USERSCOMMON-006` 只登记不落码）；② **没有复跑真 PG 活体对拍**（`UNRESOLVED-USERSCOMMON-004` 的 33 列结论**沿用上一轮**，本轮**未验**）；③ **没有核 go-zero v1.10.2 的逐行内容**（本机只有 v1.10.0 ⇒ 口径已写进上表）。

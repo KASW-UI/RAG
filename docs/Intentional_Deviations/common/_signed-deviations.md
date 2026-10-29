@@ -15,10 +15,10 @@ Go ↔ RAG 对照审计 `service/common` 全部 8 个 Go 非测试源文件与 R
 
 ##### A. 有意偏离（需签字）
 
-| # | 位置 | 差异 | Go 行为 | Java 行为 | 理由 | 关闭条件 |
-|---|---|---|---|---|---|---|
-| A-1 | `Logger.doLogFatal` / `LoggerFactoryBean.logFatal` | **等价域收窄** | `logger.go:293-296` 输出 `fatal_error` 后无条件 `os.Exit(1)`，**永远终止** | 抛 `FatalError`，**仅在无人 catch 时**终止 | 用户 2026-10-21 拍板：`System.exit` 会绕过 Spring graceful shutdown 与 `@PreDestroy` | 若业务出现 `catch (FatalError)` 后继续运行的写法，等价性即被打破 |
-| A-2 | `Logger.isFiltered` / `LoggerFactoryBean.isFiltered` | **`call_chain` 内容比 Go 少框架帧** | `logger.go:53-58` 的 `github.com/zeromicro/go-zero/` 前缀**本身是死的**（`getFuncName` 同样剥掉包路径），只有 `runtime.`/`testing.` 生效 | 按该列表的**意图**执行，6 条前缀全部可命中 | Go 侧是 bug；Java 照抄会让「过滤」永远不生效。已在 javadoc 留档 | 若要求逐字复刻 Go 的**实际行为**（即不过滤），需回退本项 |
+| # | 位置 | 差异 | Go 行为 | Java 行为 | 理由 | 关闭条件 | **状态** |
+|---|---|---|---|---|---|---|---|
+| A-1 | `Logger.doLogFatal` / `LoggerFactoryBean.logFatal` | **等价域收窄** | `logger.go:293-296` 输出 `fatal_error` 后无条件 `os.Exit(1)`，**永远终止** | 抛 `FatalError`，**仅在无人 catch 时**终止 | 用户 2026-10-21 拍板：`System.exit` 会绕过 Spring graceful shutdown 与 `@PreDestroy` | 若业务出现 `catch (FatalError)` 后继续运行的写法，等价性即被打破 | **状态（核对日期 2026-10-29）：✅ 仍成立** |
+| A-2 | `Logger.isFiltered` / `LoggerFactoryBean.isFiltered` | **`call_chain` 内容比 Go 少框架帧** | `logger.go:53-58` 的 `github.com/zeromicro/go-zero/` 前缀**本身是死的**（`getFuncName` 同样剥掉包路径），只有 `runtime.`/`testing.` 生效 | 按该列表的**意图**执行，6 条前缀全部可命中 | Go 侧是 bug；Java 照抄会让「过滤」永远不生效。已在 javadoc 留档 | 若要求逐字复刻 Go 的**实际行为**（即不过滤），需回退本项 | **状态（核对日期 2026-10-29）：✅ 仍成立** |
 
 ##### 🔴 逐条重核（核对日期 **2026-10-29** · W-F lane · 共享层台账面）
 
@@ -153,7 +153,7 @@ ACCESS EXCLUSIVE 表锁持 10s，三组对照：
 | C-1 | `RpcInterceptor.goStyleStatusMessage` | gRPC Java 的 `Code.name()` 返回 `NOT_FOUND`，Go 的 `codes.Code.String()` 返回 `NotFound`。code 与 desc 均已保留（Go 出处 `rpc.go:95`），仅常量表示不同，不做臆造映射<br>**第四十三轮补全（users/admin 域 owner 回执带出 deadline 同款）**：deadline 场景**同款** —— gRPC Java `Code.name()` = **`DEADLINE_EXCEEDED`**（`RpcInterceptor.java:274` / `:486` 调 `goStyleStatusMessage(Code.DEADLINE_EXCEEDED, …)`）vs Go `codes.Code.String()` = **`DeadlineExceeded`**（Go 出处 `rpc.go:68`：`status.Error(codes.DeadlineExceeded, timeoutCtx.Err().Error())`⇒ `err.Error()` = `"rpc error: code = DeadlineExceeded desc = context deadline exceeded"`）⇒ ⇒ **两侧的 `sea.biz_msg` 只差这一个字符串的大小写风格**（Go 驼峰 · Java 全大写）<br>⚠️ **已核：差异只在「文本」，不在「码值」，也不在 wire** —— ① **wire 不含码名**（gRPC 只编码**数字 code + message**）② **两侧的遥测属性都存数字 code**（Go `rpc.go:116-121` `attribute.Int("rpc.grpc.status_code", int(code))`；RAG `RpcInterceptor.java:307` / `:384` / `:636` 全部用 `code.value()`）⇒ ⇒ **不是行为差异 ⇒ 属 ③ 表述差异（无需签字）** ⇒ **不做臆造映射、不为对齐它去改 grpc-java 的命名** |
 
 
-##### 🔴 C-1 逐条重核（核对日期 **2026-10-29**）
+##### 🔴 C-1 逐条重核（核对日期 **2026-10-29**） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立（表述差异 · 不计入签字数）**
 
 | 项 | 值 |
 |---|---|
@@ -165,13 +165,13 @@ ACCESS EXCLUSIVE 表锁持 10s，三组对照：
 
 ##### D. UNRESOLVED（证据不足，**不得**按「已对齐」处理）
 
-| # | 项 | 未知点 | 需要什么才能定 |
-|---|---|---|---|
-| D-1 | `Wire.canonicalHash` 的 JCS 库 | ✅ **已关（2026-10-21）**。`service-common` 的 `JcsDifferentialTest`(5/5 通过)用 cyberphone 出版 testdata 作 oracle:**复制 6 对(input,expected-output)到 `src/test/resources/jcs-fixture/{input,output}/`,erdtman 跑同样输入,断言 byte-equal**。这是真正的 Go vs Java 差分 —— 期望值就是 cyberphone 自身的 canonical 字节输出。覆盖:6 个 KAT 文件(数组/法文字符/嵌套/Unicode/数值宽度/边界) + 4 条针对性(键序/空白/指数大小端/数值塌缩) + 锁住 `Wire.canonicalHash` 全链 JCS→SHA-256→hex 与 cyberphone hash path 一致。离线无外部依赖。**实质成果**:erdtman 与 cyberphone 在 RFC 8785 KAT 上 byte-equal —— 签发/校验链两端产同一 canonical,D-1 承诺实证成立。**留档**:erdtman 在 parse 阶段对未转义 ASCII 控制字符 fail-fast,cyberphone 不 fail —— 这是 erdtman 的额外输入校验质保,**不是** D-1 想要的 canonical 差异,见 `JcsDifferentialTest` 末尾注释 |
-| D-2 | `communityfact` 整体 | RAG 侧**零消费者**。代码层面已对齐，但**没有任何运行证据**，不能算行为对齐 | 接入 `comment` / `article` 等域后补集成测试 |
+| # | 项 | 未知点 | 需要什么才能定 | **状态** |
+|---|---|---|---|---|
+| D-1 | `Wire.canonicalHash` 的 JCS 库 | ✅ **已关（2026-10-21）**。`service-common` 的 `JcsDifferentialTest`(5/5 通过)用 cyberphone 出版 testdata 作 oracle:**复制 6 对(input,expected-output)到 `src/test/resources/jcs-fixture/{input,output}/`,erdtman 跑同样输入,断言 byte-equal**。这是真正的 Go vs Java 差分 —— 期望值就是 cyberphone 自身的 canonical 字节输出。覆盖:6 个 KAT 文件(数组/法文字符/嵌套/Unicode/数值宽度/边界) + 4 条针对性(键序/空白/指数大小端/数值塌缩) + 锁住 `Wire.canonicalHash` 全链 JCS→SHA-256→hex 与 cyberphone hash path 一致。离线无外部依赖。**实质成果**:erdtman 与 cyberphone 在 RFC 8785 KAT 上 byte-equal —— 签发/校验链两端产同一 canonical,D-1 承诺实证成立。**留档**:erdtman 在 parse 阶段对未转义 ASCII 控制字符 fail-fast,cyberphone 不 fail —— 这是 erdtman 的额外输入校验质保,**不是** D-1 想要的 canonical 差异,见 `JcsDifferentialTest` 末尾注释 | **状态（核对日期 2026-10-29）：⛔ 已失效·已撤销（UNRESOLVED · 不计入签字数）** |
+| D-2 | `communityfact` 整体 | RAG 侧**零消费者**。代码层面已对齐，但**没有任何运行证据**，不能算行为对齐 | 接入 `comment` / `article` 等域后补集成测试 | **状态（核对日期 2026-10-29）：待核实（UNRESOLVED · 未签字 · 不计入签字数）** |
 
 
-##### 🔴 D-1 / D-2 逐条重核（核对日期 **2026-10-29**）
+##### 🔴 D-1 / D-2 逐条重核（核对日期 **2026-10-29**） ｜ **状态（核对日期 2026-10-29）：⛔ 已失效·已撤销（UNRESOLVED · 不计入签字数）**
 
 | 编号 | **唯一别名** | 核 | 结论 |
 |---|---|---|---|
