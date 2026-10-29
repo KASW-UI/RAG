@@ -8,7 +8,7 @@
 
 ---
 
-## P-MSGAPI-001 🔴 同一个组件、同一种形态，**第二次**「绿测试守卫错误答案」 ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-01 🔴 同一个组件、同一种形态，**第二次**「绿测试守卫错误答案」 ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`P-MSGAPI-001` ⇒ **新号**：`PIT-MESSAGE-01`
 > **核对日期**：2026-10-29
@@ -64,7 +64,7 @@ RAG 侧 `dto/AdminSendNotificationResp.java:13` 的 javadoc 手抄成了
 
 ---
 
-## P-MSGAPI-002 🔴 Jackson 的 `FAIL_ON_NULL_FOR_PRIMITIVES` 默认为 `true`，go-zero 的 `,optional` 对显式 null 是**放行** ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-02 🔴 Jackson 的 `FAIL_ON_NULL_FOR_PRIMITIVES` 默认为 `true`，go-zero 的 `,optional` 对显式 null 是**放行** ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`P-MSGAPI-002` ⇒ **新号**：`PIT-MESSAGE-02`
 > **核对日期**：2026-10-29
@@ -110,7 +110,7 @@ Go 走的是 tag 的 optional」**。只测其中一半，结论必然是错的�
 
 ---
 
-## P-MSGAPI-003 ⚠️ `CoercionAction` 是**白名单式的 Fail 补丁**，漏一个形状就是一条静默漂移 ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-03 ⚠️ `CoercionAction` 是**白名单式的 Fail 补丁**，漏一个形状就是一条静默漂移 ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`P-MSGAPI-003` ⇒ **新号**：`PIT-MESSAGE-03`
 > **核对日期**：2026-10-29
@@ -148,7 +148,7 @@ builder.withCoercionConfig(LogicalType.Boolean, cfg -> cfg.setCoercion(CoercionI
 
 ---
 
-## P-MSGAPI-004 ⚠️ Go 对 **map 元素**的类型判据与 **顶层标量字段**不是同一段代码 ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-04 ⚠️ Go 对 **map 元素**的类型判据与 **顶层标量字段**不是同一段代码 ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`P-MSGAPI-004` ⇒ **新号**：`PIT-MESSAGE-04`
 > **核对日期**：2026-10-29
@@ -190,7 +190,7 @@ builder.withCoercionConfig(LogicalType.Boolean, cfg -> cfg.setCoercion(CoercionI
 
 ---
 
-## P-MSGAPI-005 ⚠️ MockMvc 的 `.contentType(MediaType.APPLICATION_JSON)` 对 **charset 完全不敏感** ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-05 ⚠️ MockMvc 的 `.contentType(MediaType.APPLICATION_JSON)` 对 **charset 完全不敏感** ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`P-MSGAPI-005` ⇒ **新号**：`PIT-MESSAGE-05`
 > **核对日期**：2026-10-29
@@ -228,7 +228,7 @@ response 已 committed 后 `setHeader` 被静默忽略 ⇒ text/plain 400 丢 Co
 
 ---
 
-## P-MSGAPI-006 ⚠️ 探针的用例是**人工枚举**的，而字段数远大于用例数 ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-06 ⚠️ 探针的用例是**人工枚举**的，而字段数远大于用例数 ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`P-MSGAPI-006` ⇒ **新号**：`PIT-MESSAGE-06`
 > **核对日期**：2026-10-29
@@ -260,7 +260,7 @@ response 已 committed 后 `setHeader` 被静默忽略 ⇒ text/plain 400 丢 Co
 
 ---
 
-## P-MSGAPI-007 ⚠️ 否定式断言 + 「默认值藏在 tag 里」：本组件已被咬过两次 ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-07 ⚠️ 否定式断言 + 「默认值藏在 tag 里」：本组件已被咬过两次 ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`P-MSGAPI-007` ⇒ **新号**：`PIT-MESSAGE-07`
 > **核对日期**：2026-10-29
@@ -293,7 +293,7 @@ response 已 committed 后 `setHeader` 被静默忽略 ⇒ text/plain 400 丢 Co
 
 ---
 
-## P-MSGAPI-008 ⚠️ 「Bean 存在 / 注解在 / 依赖有」仍不等于「机制生效」——本轮再次触发 ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-08 ⚠️ 「Bean 存在 / 注解在 / 依赖有」仍不等于「机制生效」——本轮再次触发 ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`P-MSGAPI-008` ⇒ **新号**：`PIT-MESSAGE-08`
 > **核对日期**：2026-10-29

@@ -45,7 +45,10 @@ INDEX = PITFALLS / "_INDEX.md"
 
 # 二~四级标题
 HEADING_RE = re.compile(r"^#{2,4}\s+(.+)$", re.M)
-# 编号 token：PIT-…/PF-…/P-… 且以 -<数字> 结尾（允许 `PIT-LANE-05` / `PITFALL-TASK-01` / `P-ARTICLE-003`）
+# 编号 token：PIT-…/PF-…/P-… 且以 -<数字> 结尾（允许 `PIT-LANE-05` / `P-ARTICLE-003`）
+# ⚠️ **2026-10-29 订正**：本注释原写「允许 `PITFALL-TASK-01`」⇒ **假的** —— 该形态 `PIT` 后**不带 `-`**，
+#    ⇒ 正则的 `(?:-[A-Za-z0-9]+)*` 匹配零段 ⇒ 整个 token 失配 ⇒ **这类标题对本工具是隐形的**。
+#    ⇒ 编号**必须**用 `PIT-…` / `PF-…` / `P-…` 三种前缀之一（本轮已把仓内 28 条 `PITFALL-MSG-R-*` 归一为 `PIT-MESSAGE-*`）。
 TOKEN_RE = re.compile(r"^(?:PIT|PF|P)(?:-[A-Za-z0-9]+)*-\d+\b")
 # 索引里那一行的三处数字
 IDX_ENTRIES_RE = re.compile(r"\*\*(\d+) 条\*\*")

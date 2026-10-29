@@ -119,8 +119,8 @@
 
 | 项 | 值 |
 |---|---|
-| **全域坑位条目** | **400 条** / **31 份编号式台账**（另 **17 份散文式台账**用散文标题、不计入条数 · **0 份 0 字节**坑位待填）⇒ **口径由 `tools/check-ledger-count.py` 写死**（标题文本以 `PIT-`/`PF-`/`P-` 开头且以 `-<数字>` 结尾）⇒ **数字是机器生成的，不是手抄的** |
-| **编号前缀族** | **21 个具体前缀**（实测 2026-10-27 · 口径同上）：`P-` · `P-HOTAPI-` · `P-HOTRPC-` · `P-MSGAPI-` · `PF-ARTICLE-RPC-` · `PIT-COMMENT-API-` · `PIT-COMMENT-RPC-` · `PIT-COMMON-` · `PIT-FAV-API-` · `PIT-FAV-COMMON-` · `PIT-FAV-PROTO-` · `PIT-FAV-RPC-` · `PIT-FOLLOW-` · `PIT-GLOBAL-` · `PIT-LANE-` · `PIT-LIKE-RPC-` · `PIT-LIKEAPI-` · `PIT-TASK-` · `PIT-USERS-` · `PIT-USERSADM-` · `PIT-USERSCOMMON-` |
+| **全域坑位条目** | **428 条** / **32 份编号式台账**（另 **16 份散文式台账**用散文标题、不计入条数 · **0 份 0 字节**坑位待填）⇒ **口径由 `tools/check-ledger-count.py` 写死**（标题文本以 `PIT-`/`PF-`/`P-` 开头且以 `-<数字>` 结尾）⇒ **数字是机器生成的，不是手抄的** |
+| **编号前缀族** | **21 个具体前缀**（实测 2026-10-27 · 口径同上）：`P-` · `P-HOTAPI-` · `P-HOTRPC-` · `PF-ARTICLE-RPC-` · `PIT-COMMENT-API-` · `PIT-COMMENT-RPC-` · `PIT-COMMON-` · `PIT-FAV-API-` · `PIT-FAV-COMMON-` · `PIT-FAV-PROTO-` · `PIT-FAV-RPC-` · `PIT-FOLLOW-` · `PIT-GLOBAL-` · `PIT-LANE-` · `PIT-LIKE-RPC-` · `PIT-LIKEAPI-` · `PIT-MESSAGE-` · `PIT-TASK-` · `PIT-USERS-` · `PIT-USERSADM-` · `PIT-USERSCOMMON-` |
 | **编号撞号** | **22 处** —— 见下方「编号撞号」 |
 
 > ⚠️ **2026-10-25 第二十五轮复核（口径已复现）**：本表原先写 **280 条 / 29 份 / 16 份 0 字节**，其中
@@ -141,8 +141,8 @@
 | **唯一机器判据** | `python3 tools/difftest/ledger-status-coverage.py` ⇒ **EXIT=0** 才算达标（**该工具不是 `check-*` ⇒ 不计入 §6.3 的 27 个守门计数** · 先例 `scan-bash-legacy-vars.py`） |
 | **条目识别口径** | **与 `tools/check-ledger-count.py` 同源**（标题 `^#{2,4}\s+(.+)$` ⇒ 去装饰字符后以 `PIT`/`PF`/`P` 开头并跟编号段）⇒ ⚠️ **不要用宽正则** —— 宽正则（`^#+ *P[A-Za-z0-9_-]*-[0-9]+`）会把同批条目**多算** ⇒ **判据永远对不上** |
 | **开工基线（2026-10-29）** | **336 条 / 74 条有状态 / 262 条无状态（77%）**；**0 字节坑位文件 11 个** |
-| **本轮收工（2026-10-29）** | ✅ **400 条 / 400 条有状态 / 0 条无状态（100%）**；**0 字节坑位文件 0 个**；分域：`_cross` 7/7 · `article` 38/38 · `comment` 19/19 · `common` 13/13 · `favorite` 61/61 · `follow` 16/16 · `global` 68/68 · `hot` 28/28 · `like` 30/30 · `message` 36/36 · `task` 34/34 · `users` 78/78 ⇒ **12 域全绿**（编号式条目 **400** 条；另有散文式台账 **17** 份不计入） |
-| 🔴 **计数器的已知口径缺口（2026-10-29 实测 · 未修）** | `tools/check-ledger-count.py` 的 `TOKEN_RE = ^(?:PIT|PF|P)(?:-[A-Za-z0-9]+)*-\d+\b` **认不出 `PITFALL-` 这类前缀**（`PIT` 后面没有 `-` ⇒ 整个 token 失配）⇒ **旧形态 `PITFALL-MSG-R-001` 等 28 条对计数器是隐形的**；而**该工具自己的 docstring 却写着「允许 `PITFALL-TASK-01`」** ⇒ **文档口径与实际口径不符**（工具自己的一类病）。⇒ 本轮各域已把 `PITFALL-*` 归一成 `PIT-*` ⇒ **当前隐形条目为 0**；但**工具 docstring 仍需主线订正**（本轮未改 `tools/`，超出「只改台账」范围） |
+| **本轮收工（2026-10-29）** | ✅ **428 条 / 428 条有状态 / 0 条无状态（100%）**；**0 字节坑位文件 0 个**；分域：`_cross` 7/7 · `article` 38/38 · `comment` 19/19 · `common` 13/13 · `favorite` 61/61 · `follow` 16/16 · `global` 68/68 · `hot` 28/28 · `like` 30/30 · `message` 36/36 · `task` 34/34 · `users` 78/78 ⇒ **12 域全绿**（编号式条目 **428** 条；另有散文式台账 **16** 份不计入）<br>⚠️ **「428」才是真实总数** —— 中途一度显示 400，那是 **`PITFALL-MSG-R-*` 这 28 条对计数器隐形**的结果（见下行）⇒ **主线已把这 28 条标题归一为 `PIT-MESSAGE-09..36`**（旧号在条目内保留）⇒ 数字从 400 变 **428**。 |
+| 🔴 **计数器的已知口径缺口（2026-10-29 实测 · 未修）** | `tools/check-ledger-count.py` 的 `TOKEN_RE = ^(?:PIT|PF|P)(?:-[A-Za-z0-9]+)*-\d+\b` **认不出 `PITFALL-` 这类前缀**（`PIT` 后面没有 `-` ⇒ 整个 token 失配）⇒ **旧形态 `PITFALL-MSG-R-001` 等 28 条对计数器是隐形的**；而**该工具自己的 docstring 却写着「允许 `PITFALL-TASK-01`」** ⇒ **文档口径与实际口径不符**（工具自己的一类病）。⇒ 本轮各域已把 `PITFALL-*` / `P-MSGAPI-*` 归一成 `PIT-*` ⇒ **当前隐形条目 = 0**；⚠️ **工具 docstring 里的假承诺也已订正**（`tools/check-ledger-count.py` 的注释原写「允许 `PITFALL-TASK-01`」⇒ 实为失配 ⇒ 已改成写实的说明）⇒ **口径与说明现在一致** |
 | **「有状态」的判定** | 条目**正文段**（到下一条标题为止）出现 `仍生效` / `已闭环` / `已撤销` / `待核实` / `已失效` **任一**标记 |
 
 ⚠️ **2026-10-29 的口径纠错（自己踩的坑，记在这里防止再犯）**：本轮对齐前曾用**宽正则**数出

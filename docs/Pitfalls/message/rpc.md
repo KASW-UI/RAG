@@ -7,7 +7,7 @@
 
 ---
 
-## PITFALL-MSG-R-001 「测试全绿」与「一次没起过」可以同时成立 ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-09 「测试全绿」与「一次没起过」可以同时成立 ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`PITFALL-MSG-R-001` ⇒ **新号**：`PIT-MESSAGE-09`
 > **核对日期**：2026-10-29
@@ -44,7 +44,7 @@ Mockito 替换掉 `NotificationMapper` / `ConversationMapper` 这些 Bean 之后
 
 ---
 
-## PITFALL-MSG-R-002 「断言 Bean 存在」≠「断言机制生效」——本模块的完整样本 ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-10 「断言 Bean 存在」≠「断言机制生效」——本模块的完整样本 ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`PITFALL-MSG-R-002` ⇒ **新号**：`PIT-MESSAGE-10`
 > **核对日期**：2026-10-29
@@ -82,7 +82,7 @@ Mockito 替换掉 `NotificationMapper` / `ConversationMapper` 这些 Bean 之后
 
 ---
 
-## PITFALL-MSG-R-003 MyBatis 的 `#{...}` 与 MP 的 `Entity::method` 用**两套**属性名规则 ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-11 MyBatis 的 `#{...}` 与 MP 的 `Entity::method` 用**两套**属性名规则 ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`PITFALL-MSG-R-003` ⇒ **新号**：`PIT-MESSAGE-11`
 > **核对日期**：2026-10-29
@@ -127,7 +127,7 @@ Mockito 替换掉 `NotificationMapper` / `ConversationMapper` 这些 Bean 之后
 
 ---
 
-## PITFALL-MSG-R-004 注释里的**默认行为**必须读到消费点，不能只贴 struct 定义行 ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-12 注释里的**默认行为**必须读到消费点，不能只贴 struct 定义行 ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`PITFALL-MSG-R-004` ⇒ **新号**：`PIT-MESSAGE-12`
 > **核对日期**：2026-10-29
@@ -158,7 +158,7 @@ Mockito 替换掉 `NotificationMapper` / `ConversationMapper` 这些 Bean 之后
 
 ---
 
-## PITFALL-MSG-R-005 「关掉一个框架开关」不等于「关掉这个框架」 ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-13 「关掉一个框架开关」不等于「关掉这个框架」 ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`PITFALL-MSG-R-005` ⇒ **新号**：`PIT-MESSAGE-13`
 > **核对日期**：2026-10-29
@@ -190,7 +190,7 @@ Mockito 替换掉 `NotificationMapper` / `ConversationMapper` 这些 Bean 之后
 
 ---
 
-## PITFALL-MSG-R-006 Spring Boot 4 把自动配置拆模块后，**依赖在 ≠ 能力在**，且**不报错** ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-14 Spring Boot 4 把自动配置拆模块后，**依赖在 ≠ 能力在**，且**不报错** ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`PITFALL-MSG-R-006` ⇒ **新号**：`PIT-MESSAGE-14`
 > **核对日期**：2026-10-29
@@ -228,7 +228,7 @@ MP **先于** DataSource 求值 ⇒ `@ConditionalOnSingleCandidate(DataSource)` 
 
 ---
 
-## PITFALL-MSG-R-007 自动配置的排序是一条**有向图**，不是「谁先扫到谁先生效」 ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-15 自动配置的排序是一条**有向图**，不是「谁先扫到谁先生效」 ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`PITFALL-MSG-R-007` ⇒ **新号**：`PIT-MESSAGE-15`
 > **核对日期**：2026-10-29
@@ -254,7 +254,7 @@ MybatisPlusAutoConfiguration:
 
 ---
 
-## PITFALL-MSG-R-008 变异测试会先证明「你自己的新测试也是假绿」 ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-16 变异测试会先证明「你自己的新测试也是假绿」 ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`PITFALL-MSG-R-008` ⇒ **新号**：`PIT-MESSAGE-16`
 > **核对日期**：2026-10-29
@@ -290,7 +290,7 @@ MybatisPlusAutoConfiguration:
 
 ---
 
-## PITFALL-MSG-R-009 「分页接口的 `total` 与 `items` 必须成对断言」 ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-17 「分页接口的 `total` 与 `items` 必须成对断言」 ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`PITFALL-MSG-R-009` ⇒ **新号**：`PIT-MESSAGE-17`
 > **核对日期**：2026-10-29
@@ -316,7 +316,7 @@ RAG 写成了无条件拼接 `w.last("LIMIT n OFFSET m")` —— **负数直接�
 
 ---
 
-## PITFALL-MSG-R-010 跨组件不变量**无法单侧验完**（Flyway 账本） ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-18 跨组件不变量**无法单侧验完**（Flyway 账本） ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`PITFALL-MSG-R-010` ⇒ **新号**：`PIT-MESSAGE-18`
 > **核对日期**：2026-10-29
@@ -342,7 +342,7 @@ RAG 写成了无条件拼接 `w.last("LIMIT n OFFSET m")` —— **负数直接�
 
 ---
 
-## PITFALL-MSG-R-011 附带的稳健性缺口：`TIMESTAMP` 不自描述瞬时 ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-19 附带的稳健性缺口：`TIMESTAMP` 不自描述瞬时 ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`PITFALL-MSG-R-011` ⇒ **新号**：`PIT-MESSAGE-19`
 > **核对日期**：2026-10-29
@@ -434,7 +434,7 @@ RAG message_notification.created_at | timestamp   | NOT NULL | DEFAULT CURRENT_T
 
 <!-- @new 2026-10-23 23:5x 第六轮（V-016 recover）新增 2 条 -->
 
-## PITFALL-MSG-R-012 grpc-java 的 unary 响应**必须** `onNext` + `onCompleted` 成对 —— 漏了会**挂死**而不是失败 ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-20 grpc-java 的 unary 响应**必须** `onNext` + `onCompleted` 成对 —— 漏了会**挂死**而不是失败 ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`PITFALL-MSG-R-012` ⇒ **新号**：`PIT-MESSAGE-20`
 > **核对日期**：2026-10-29
@@ -488,7 +488,7 @@ panic / error 路径靠 recover 兜住时尤其容易漏 —— 因为那条路�
 
 ---
 
-## PITFALL-MSG-R-013 判「有没有等价实现」必须 grep **实现**，不是 grep **依赖** ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-21 判「有没有等价实现」必须 grep **实现**，不是 grep **依赖** ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`PITFALL-MSG-R-013` ⇒ **新号**：`PIT-MESSAGE-21`
 > **核对日期**：2026-10-29
@@ -539,7 +539,7 @@ forcePassDuration=1s`）与 `accept()` 的同构运算顺序，还专门标出�
 
 <!-- @new 2026-10-24 00:0x 第七轮（V-016 breaker/shedding）新增 3 条 -->
 
-## PITFALL-MSG-R-014 串拦截器链时**不能把 `next` 直接透传** —— 那样内层 interceptor 永远不被调用 ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-22 串拦截器链时**不能把 `next` 直接透传** —— 那样内层 interceptor 永远不被调用 ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`PITFALL-MSG-R-014` ⇒ **新号**：`PIT-MESSAGE-22`
 > **核对日期**：2026-10-29
@@ -583,7 +583,7 @@ return breaker.interceptCall(call, headers, delegateToInner);
 
 ---
 
-## PITFALL-MSG-R-015 拒绝必须关「**本层包装过的** call」—— 关原始 call ⇒ 外层看不到 ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-23 拒绝必须关「**本层包装过的** call」—— 关原始 call ⇒ 外层看不到 ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`PITFALL-MSG-R-015` ⇒ **新号**：`PIT-MESSAGE-23`
 > **核对日期**：2026-10-29
@@ -616,7 +616,7 @@ Go 的 `defer` 是在 `Allow()` 成功**之后**才注册的（`sheddingintercep
 
 ---
 
-## PITFALL-MSG-R-016 被 recover 兜住的异常，会让链路看起来「没被调用」 ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-24 被 recover 兜住的异常，会让链路看起来「没被调用」 ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`PITFALL-MSG-R-016` ⇒ **新号**：`PIT-MESSAGE-24`
 > **核对日期**：2026-10-29
@@ -647,7 +647,7 @@ Go 的 `defer` 是在 `Allow()` 成功**之后**才注册的（`sheddingintercep
 
 ---
 
-## PITFALL-MSG-R-017 `set -euo pipefail` + 命令替换里的 `lsof` ⇒ **脚本静默消失** ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-25 `set -euo pipefail` + 命令替换里的 `lsof` ⇒ **脚本静默消失** ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`PITFALL-MSG-R-017` ⇒ **新号**：`PIT-MESSAGE-25`
 > **核对日期**：2026-10-29
@@ -673,7 +673,7 @@ Go 的 `defer` 是在 `Allow()` 成功**之后**才注册的（`sheddingintercep
 
 ---
 
-## PITFALL-MSG-R-018 占位符名字**跨模块不统一** ⇒ 一整类模块在测试环境里**根本起不来** ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-26 占位符名字**跨模块不统一** ⇒ 一整类模块在测试环境里**根本起不来** ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`PITFALL-MSG-R-018` ⇒ **新号**：`PIT-MESSAGE-26`
 > **核对日期**：2026-10-29
@@ -702,7 +702,7 @@ Go 的 `defer` 是在 `Allow()` 成功**之后**才注册的（`sheddingintercep
 
 ---
 
-## PITFALL-MSG-R-019 `baseline-on-migrate: true` 会**顶掉 V1** ⇒ 核心表永远建不出来 ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-27 `baseline-on-migrate: true` 会**顶掉 V1** ⇒ 核心表永远建不出来 ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`PITFALL-MSG-R-019` ⇒ **新号**：`PIT-MESSAGE-27`
 > **核对日期**：2026-10-29
@@ -741,7 +741,7 @@ Go 的 `defer` 是在 `Allow()` 成功**之后**才注册的（`sheddingintercep
 
 ---
 
-## PITFALL-MSG-R-020 `mvn package` 成功 ≠ **产物可运行** ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-28 `mvn package` 成功 ≠ **产物可运行** ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`PITFALL-MSG-R-020` ⇒ **新号**：`PIT-MESSAGE-28`
 > **核对日期**：2026-10-29
@@ -765,7 +765,7 @@ Go 的 `defer` 是在 `Allow()` 成功**之后**才注册的（`sheddingintercep
 
 ---
 
-## PITFALL-MSG-R-021 多工作树**共用同一个 `~/.m2`** ⇒ 共享模块的 SNAPSHOT 会被**别人**覆盖 ⇒ 单模块测试随机报 `NoClassDefFoundError` ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-29 多工作树**共用同一个 `~/.m2`** ⇒ 共享模块的 SNAPSHOT 会被**别人**覆盖 ⇒ 单模块测试随机报 `NoClassDefFoundError` ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`PITFALL-MSG-R-021` ⇒ **新号**：`PIT-MESSAGE-29`
 > **核对日期**：2026-10-29
@@ -820,7 +820,7 @@ unzip -l ~/.m2/repository/com/rag/common/0.0.1-SNAPSHOT/common-0.0.1-SNAPSHOT.ja
 
 ---
 
-## PITFALL-MSG-R-022 「Go 侧有 X 指标」这句话本身**要核到 Go 源码的消费点** —— 否则会照抄出一套 Go 没有的能力 ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-30 「Go 侧有 X 指标」这句话本身**要核到 Go 源码的消费点** —— 否则会照抄出一套 Go 没有的能力 ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`PITFALL-MSG-R-022` ⇒ **新号**：`PIT-MESSAGE-30`
 > **核对日期**：2026-10-29
@@ -856,7 +856,7 @@ unzip -l ~/.m2/repository/com/rag/common/0.0.1-SNAPSHOT/common-0.0.1-SNAPSHOT.ja
 
 ---
 
-## PITFALL-MSG-R-023 **给别的组件挂熔断/降载之前，必须先核它的兜底码口径** ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-31 **给别的组件挂熔断/降载之前，必须先核它的兜底码口径** ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`PITFALL-MSG-R-023` ⇒ **新号**：`PIT-MESSAGE-31`
 > **核对日期**：2026-10-29
@@ -890,7 +890,7 @@ unzip -l ~/.m2/repository/com/rag/common/0.0.1-SNAPSHOT/common-0.0.1-SNAPSHOT.ja
 
 ---
 
-## PITFALL-MSG-R-024 用**字符串下标**断言 XML / YAML 结构 ⇒ 会被**注释里提到的同名字符串**打败 ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-32 用**字符串下标**断言 XML / YAML 结构 ⇒ 会被**注释里提到的同名字符串**打败 ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`PITFALL-MSG-R-024` ⇒ **新号**：`PIT-MESSAGE-32`
 > **核对日期**：2026-10-29
@@ -929,7 +929,7 @@ private static String stripXmlComments(String xml) {
 
 ---
 
-## PITFALL-MSG-R-025 变异验证后用 `shutil.copy2` 还原源码 ⇒ **保留旧 mtime** ⇒ maven 增量编译跳过 ⇒ 后续跑的是**变异过的 class** ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-33 变异验证后用 `shutil.copy2` 还原源码 ⇒ **保留旧 mtime** ⇒ maven 增量编译跳过 ⇒ 后续跑的是**变异过的 class** ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`PITFALL-MSG-R-025` ⇒ **新号**：`PIT-MESSAGE-33`
 > **核对日期**：2026-10-29
@@ -979,7 +979,7 @@ private static String stripXmlComments(String xml) {
 
 ---
 
-## PITFALL-MSG-R-026 `pg_isready` **不是**「Postgres 可以用了」的判据 —— 它会在 initdb 的临时服务上**返回 0** ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-34 `pg_isready` **不是**「Postgres 可以用了」的判据 —— 它会在 initdb 的临时服务上**返回 0** ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`PITFALL-MSG-R-026` ⇒ **新号**：`PIT-MESSAGE-34`
 > **核对日期**：2026-10-29
@@ -1033,7 +1033,7 @@ docker exec "$CONTAINER" psql -U admin -d postgres -tAc 'select 1' >/dev/null 2>
 
 ---
 
-## PITFALL-MSG-R-027 bash 里 `$VAR` 后面紧跟**中文标点** ⇒ 变量名被吞进去 ⇒ `unbound variable` ｜ **状态（核对日期 2026-10-29）：已闭环**
+## PIT-MESSAGE-35 bash 里 `$VAR` 后面紧跟**中文标点** ⇒ 变量名被吞进去 ⇒ `unbound variable` ｜ **状态（核对日期 2026-10-29）：已闭环**
 
 > **旧号**：`PITFALL-MSG-R-027` ⇒ **新号**：`PIT-MESSAGE-35`
 > **核对日期**：2026-10-29
@@ -1074,7 +1074,7 @@ echo "=== 1. 起 PG（${CONTAINER}，端口 ${PG_PORT}）==="
 
 ---
 
-## PITFALL-MSG-R-028 「RAG 侧**少了**某个响应头 / 响应体」—— **静态读源码极容易判反** ｜ **状态（核对日期 2026-10-29）：仍生效**
+## PIT-MESSAGE-36 「RAG 侧**少了**某个响应头 / 响应体」—— **静态读源码极容易判反** ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`PITFALL-MSG-R-028` ⇒ **新号**：`PIT-MESSAGE-36`
 > **核对日期**：2026-10-29
