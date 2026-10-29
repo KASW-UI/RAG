@@ -1506,3 +1506,102 @@ G4 共享层 **5** · G3 **11**（article 3 · comment 4 · hot 4）· G1 **9**�
 ⇒ **净结论**：G2 侧 6 条候选里**只有 2 条是真错**（① 版本号 · ③ 路径）⇒ **另 4 条经核对是守门假阳性 ⇒ 一行都不用改** ⇒ ⇒ **建议：候选清单收敛为 2 条**；并把「**补 `PINNED`（`gorm.io/driver/postgres v1.6.0` ＋ `github.com/lovoo/goka v1.1.16`）**」作为**独立的一件事**处理（落点属 G3 私有目录 `tools/g3-anchor-check/`）。
 
 ⚠️ **这 4 条的假阳性判定本身也留痕**：它们与本 lane 上一轮在 `docs/DRIFT/like/rpc.md` §12.2 坐实的「**多候选任一通过 ⇒ 假绿**」是**同一个根因的两面** —— 上次是「**真身不满足、干扰项满足 ⇒ 判过**」（假绿），这次是「**真身满足、干扰项不满足 ⇒ 报错**」（假错）⇒ ⇒ **同一个候选解析缺陷，两个方向都会出错** ⇒ ⇒ **候选解析必须按域消歧 ＋ 命中后必须回真源读那一行**（该结论已由调度员转述进 `docs/CLOSEOUT-2026-10-29.md` §8.3；本回执只做**我域内的逐条核对**）。
+
+---
+
+# 2026-10-29 · R2 · task 域**失败路径矩阵**落仓（`TaskApiFailurePathMatrixTest` · 33 用例）＋ **变异验证**
+
+> **归属**：R2 lane（`align/r2-like-task` 工作树）· **核对日期** 2026-10-29
+> **写权**：✅ `service/task/**` ＋ `docs/DRIFT/task/**`（共享层 `service/common/**` **只读**）
+> **证据强度**：**R3（源码级逐条对照 Go 出处）＋ E4（真 Tomcat 容器里的真 HTTP 往返）**
+> ⚠️ **本节不是「双侧活体」** —— 期望值取自 **Go 出处**（逐条列在下表），**不是**同一时刻两侧进程并跑的产物
+> ⇒ ⇒ **不得**把本节读成 L4；本域的双侧活体是 `docs/DRIFT/task/api.md` §二·五 的 **44 条**（2026-10-24，本轮未重跑）。
+
+## ① 为什么做（缺口定位）
+
+| 项 | 事实 |
+|---|---|
+| 端点数 | **1 个** —— Go `service/task/api/internal/handler/routes.go:15-25` 只有 `POST /taskcenter/v1/task/get`（**无 `WithJwt`**）⇒ ⇒ **task 域的行为面几乎全是失败路径** |
+| 既有守门 | `task-api` 有 102 条测试（`api.md:30`）⇒ 但**没有一条**按「端点 × 失败维度」铺开的矩阵 ⇒ 失败路径是**散点**覆盖，**没有一处能一眼看出「这个端点的失败面覆盖到哪了」** |
+| 既有双侧对拍 | `api.md` §二·五 的 44 条双侧活体在 `tools/difftest/`（**仓外脚本**）⇒ ⇒ **不是版本控制内的回归网** ⇒ 「跑绿与否」取决于人记不记得跑 |
+| **本轮落点** | 把失败路径**固化进模块测试**（`service/task/task-api/src/test/java/com/rag/task/task/api/TaskApiFailurePathMatrixTest.java`）⇒ ⇒ `mvn test` 就会跑 ⇒ **回归网进版本控制** |
+
+## ② 矩阵（**1 端点 × 6 失败维度 · 33 用例**）
+
+| 维度 | 用例数 | 断言的真实值 | Go 出处（**逐条读消费点**） |
+|---|---|---|---|
+| **① 参数缺失 / 非法** | **9** | 400 + `text/plain` + `user_id invalid\n` / `id must be a string or integer\n`（**且 RPC 完全不被调用**） | `service/task/api/internal/types/types.go:16-50`（`UnmarshalJSON` 两段判定 `:18-21` / `:38-50`）· `gettaskhandler.go:21-24`（空 body ⇒ `io.EOF`、畸形 JSON ⇒ Decode 失败 ⇒ **两侧文案不同 ⇒ 只断言状态码**） |
+| **② 边界值** | **8** | 400 + `user_id invalid\n`（`0` / `-1` / `1.5` / `1.0` / 超 int64 上下界；数字与**字符串**两种写法各算一条） | `types.go:45-47`（`uid <= 0` 一律拒）· `:45-46`（`ParseInt` 失败 / 溢出） |
+| **③ body 形态** | **2**（含在①内） | 同上：空 body 400、畸形 JSON 400 | `gettaskhandler.go:19`（裸 `json.NewDecoder(r.Body)` ⇒ **不校验 Content-Type**）· `:21-24` |
+| **④ 下游 gRPC 失败** | **9** | **真实 HTTP 状态码**：`UNAUTHENTICATED`⇒401 · `ALREADY_EXISTS`⇒409 · `RESOURCE_EXHAUSTED`⇒429 · `INTERNAL`⇒500 · `DEADLINE_EXCEEDED`⇒504 等（`go-zero@v1.10.2/rest/internal/errcode/grpc.go:12-42` 的 **15 分支映射**逐条）＋ **grpc-go 的错误原文** `rpc error: code = X desc = Y` | `errcode/grpc.go:12-42` · `httpx/responses.go:145-159`（**本域未注册 `httpx.SetErrorHandler`** ⇒ 走默认分支 ⇒ 非 gRPC 错误 ⇒ **400** 不是 500） |
+| **⑤ 路由层** | **2** | 未注册路径 ⇒ **404 + 有 body** 的 `"404 page not found\n"` + `text/plain` + `nosniff`；方法不对 ⇒ **405 + 裸状态码**（**无 body、无 Content-Type**） | `go-zero@v1.10.2/rest/patrouter.go:73` / `:79-82` |
+| **⑥ 鉴权** | **2** | **零鉴权**：不带 `Authorization` 头 ⇒ **200**；带一个**乱写的** `Authorization` 头 ⇒ **200**（Go 根本不读这个头） | `routes.go:15-25`（**没有 `WithJwt`**） |
+| **＋ 业务语义** | **2** | 「查无任务」⇒ **200 + `{"tasks":[]}`**（Go **没有 not-found 这个概念**）；`uid = Long.MAX_VALUE` ⇒ **放行**且 RPC 收到同一个值 | `gettaskhandler.go`（成功路径恒 200）· `types.go:45`（`ParseInt` 上界之内） |
+| **＋ 端口段守门** | **1** | 真容器必须绑到本域专用端口段 `21800-21899`（`RANDOM_PORT` 会落进 OS 临时段 ⇒ 与 Docker 发布端口同段） | —（本仓约定，见 `support/RealTomcatPort.java`） |
+
+⇒ **合计 33 条**（9 + 8 + 9 + 2 + 2 + 2 + 1）。
+
+## ③ 实跑结果（**真实命令 + 真实输出** · 2026-10-29）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r2-like-task"
+mvn -o -B -pl service/task/task-api -am -DargLine=-Xmx2g \
+    -Dtest=TaskApiFailurePathMatrixTest -Dsurefire.failIfNoSpecifiedTests=false test
+```
+
+```
+[INFO] Tests run: 33, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 5.693 s -- in com.rag.task.task.api.TaskApiFailurePathMatrixTest
+[INFO] Tests run: 33, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+```
+
+⇒ **EXIT=0** · reactor：`task-api SUCCESS [19.386 s]` · `Total time: 24.782 s`。
+
+### ③·一 **模块级回归**（新增 33 条后，**task-api 全量**）
+
+```bash
+mvn -o -B -pl service/task/task-api -am -DargLine=-Xmx2g -DfailIfNoTests=false test
+```
+
+```
+[INFO] Tests run: 135, Failures: 0, Errors: 0, Skipped: 0
+[INFO] BUILD SUCCESS
+```
+
+⇒ **EXIT=0** · **135 = 原 102 + 本轮 33** ⇒ ⇒ **本轮新增没有打破任何既有守门**。
+⇒ `docs/DRIFT/task/api.md:30` 的条数已同步改成 **135**（原文 102 保留在括号里作历史口径）。
+
+## ④ 变异验证（AGENTS.md §3.3.3 · **证明矩阵不是假绿**）
+
+脚本落仓：`service/task/task-api/src/test/probe/failure-path-matrix-mutation/run.sh`（**仓内** ⇒ 可复算；落点沿用本仓既有惯例 `service/hot/hot-rpc/src/test/probe/redis-disconnect/run.sh`）
+
+```bash
+bash service/task/task-api/src/test/probe/failure-path-matrix-mutation/run.sh
+```
+
+| 变异 | 手法 | 实测结果 |
+|---|---|---|
+| **基线** | 未变异 | `Tests run: 33, Failures: 0` · `BUILD SUCCESS` ⇒ **exit 0** |
+| **T-M1** | 改 RAG 的 `GetTaskReq.USER_ID_INVALID` 文案（`"user_id invalid"` ⇒ `"user_id invalid MUTATED"`） | 🔴 **精确转红**：`Tests run: 33, Failures: 12, Errors: 0` · `BUILD FAILURE` · exit 1<br>红在 `expected: <user_id invalid> but was: <user_id invalid MUTATED>` |
+| **T-M2** | 改 RAG 的 `X-Content-Type-Options` 值（`"nosniff"` ⇒ `"sniff"`） | 🔴 **精确转红**：`Tests run: 33, Failures: 18, Errors: 0` · `BUILD FAILURE` · exit 1<br>红在 `Go 的 http.Error 写死 X-Content-Type-Options: nosniff ==> expected: <nosniff> but was: <sniff>` |
+| **还原** | 复制回备份 | `Tests run: 33, Failures: 0` · `BUILD SUCCESS` ⇒ **exit 0** |
+
+⇒ **脚本最终 EXIT=0**（两条变异都精确转红 + 还原后转绿）⇒ ⇒ **「文案」与「响应头」这两类断言都真有牙齿**。
+⚠️ 还原一律用「文件备份 + 复制回来」，**不用 `git checkout --`**（本 lane 改动未提交 ⇒ `checkout` 会一起回滚）。
+
+## ⑤ `DRIFT-TASK-API-004` 的**复验**（**仍开放 · 容器层不可修 · 不在本域单独修**）
+
+| 项 | 本轮实测 |
+|---|---|
+| 现象 | Go `text/plain; charset=utf-8`（**分号后有空格**） vs RAG `text/plain;charset=utf-8`（**无空格**） |
+| 本轮处理 | 矩阵**断言当前实际值**（`text/plain;charset=utf-8`）⇒ **不把已登记偏差变成永久假红**；断言旁注明指向 `DRIFT-TASK-API-004` / `FB-G2-04` |
+| 结论 | **仍开放**。根因 = **Tomcat 的 `Response.setContentType(String)` 把 Content-Type 解析成 MediaType 再序列化** ⇒ **吃掉空格**；`setHeader("Content-Type", …)` 在 Tomcat 内部也被转手调成 `setContentType` ⇒ ⇒ **没有任何写法能产出带空格的 Content-Type** ⇒ ⇒ **容器层限制 ⇒ 不可修** ⇒ 与 like/message 等域**同款共性** ⇒ **不在本域单独修**（单改会造成本域与其它域不一致） |
+| 复验证据 | 本轮矩阵 **33 条全部断言了 nosniff 与 Content-Type 媒体类型**（T-M2 变异 ⇒ **18 条转红** ⇒ 说明这层断言**确实在生效**） |
+
+## ⑥ 边界（**本矩阵不覆盖什么** —— 必须一起读）
+
+1. **不是双侧活体** ⇒ 期望值是「Go 出处的字面值」，不是「同一时刻两侧进程的产物」⇒ ⇒ **不写 L4**（双侧活体见 `api.md` §二·五 的 44 条，2026-10-24）。
+2. **下游 gRPC 全部是 `@MockitoBean` 桩** ⇒ 维度④ 验的是「**RAG 侧把 gRPC 状态码映射成 HTTP 状态码**」这条**映射面**，**不验**真实下游的可用性 ⇒ ⇒ 与「双侧活体」不冲突、也不互相替代。
+3. **空 body / 畸形 JSON 两条只断言状态码**（400），**不比对文案** ⇒ 理由 = Go `encoding/json` 与 Jackson 的解析错误措辞不同（`api.md` §二·五 已登记为**全域共性**）⇒ **不是漏测，是有意不锁**。
+4. **路径变体**（`/task/get` vs `/taskcenter/v1/task/get` 等）**不在本矩阵** ⇒ 由本域既有 `TaskApiPathNormalizationRealTomcatTest`（真 Tomcat）＋ `TaskApiPathNormalizationControlTest`（A/B 对照组）守。
+5. **本矩阵只锁 HTTP 面的失败路径** ⇒ **不覆盖** task-rpc 侧（Kafka / Redis / PG 断连等）⇒ 那部分见 [`rpc.md`](rpc.md) 与 `docs/DRIFT/task/vs-common.md` §4·十二 之后的各轮。

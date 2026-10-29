@@ -2283,3 +2283,139 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end clean test \
   -pl service/message/message-api,service/message/message-rpc,service/message/message-common,\
 service/like/like-api,service/like/like-rpc,service/like/like-common,service/task/task-api,service/task/task-rpc -am
 ```
+
+---
+
+# 2026-10-29 · R2 · like 域**双侧活体对拍探针**落仓（`tools/api-full-parity-probe/like/`）—— **E60 / 003-A 拿到双侧活体证据**（`E59` 复验 · `003-B`/`003-C` 仍开放）
+
+> **归属**：R2 lane（`align/r2-like-task` 工作树）· **核对日期** 2026-10-29
+> **落点**：`tools/api-full-parity-probe/like/`（**like 域真私有目录** ⇒ 按 §5.3f「共享判据 = 依赖度数，不是目录位置」⇒ **不属共享层** ⇒ 本 lane 可写）
+> **写权**：✅ `tools/api-full-parity-probe/like/**` ＋ `docs/DRIFT/like/**` ＋ `service/like/**`；🔴 `service/common/**` **只读**
+> **证据强度**：**L4（双侧活体 · 真 Go 栈 + 真 RAG 栈 · 同请求逐字节）** ＋ **变异验证（M1~M3 精确转红）** ⇒ 但**只对本探针覆盖的那几条**成立（覆盖面见下「边界」）
+
+## ① 探针是什么（**先说清它能证什么、不能证什么**）
+
+| 项 | 内容 |
+|---|---|
+| 结构 | `run.sh`（10 步）· `expected.txt`（9 条冻结期望）· `mutate-parity.sh`（M1~M3）· `README.md`（含 13 条踩坑）· `lib/{make_jwt.py,fake_dc.py,seed_fact.py}` |
+| 两侧 | **Go 真源栈**（`go build ./service/like/api ./service/like/rpc ./service/like/rpc/cmd/fact-dispatch` ⇒ 真二进制）＋ **RAG 栈**（真 fat jar）⇒ **各自独立的 PG / Redis 容器**（`r2like-{go,rag}-{pg,redis}-$$`）⇒ **互不污染** |
+| 真源冻结 | 🔴 第 3 步**断言** `git status --porcelain -- service/like` 为空 ⇒ 真源仓全程**零写入**（配置改的是**副本**） |
+| 播种 | **两侧播种同一批数据**（`lib/seed_fact.py` 生成同一份 payload + 信封 + INSERT SQL）⇒ **绝不用空库**（空库 ⇒ 两侧都返「没数据」⇒ 假绿） |
+| 判定 | `Go == RAG == expected.txt` —— **逐字节**（比 hex，**不是**「JSON 语义相同」）＋ **状态码** |
+
+## ② 真实运行结果（**2026-10-29 · EXIT=0**）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r2-like-task"
+bash tools/api-full-parity-probe/like/run.sh          # ⇒ EXIT=0
+```
+
+### 阶段 A · HTTP 业务面（9 条冻结期望 ⇒ 逐字节）
+
+```
+== 8/10 阶段 A · HTTP 业务面（Go vs RAG vs expected.txt ⇒ 逐字节） ==
+   ✅ getlikecount  Go == RAG == expected.txt（逐字节 · HTTP 200）
+   ✅ getlikestate  Go == RAG == expected.txt（逐字节 · HTTP 200）
+   ✅ gettargetlikerlist  Go == RAG == expected.txt（逐字节 · HTTP 200）
+   ✅ getuserlikelist  Go == RAG == expected.txt（逐字节 · HTTP 200）
+   ✅ getusertotallike  Go == RAG == expected.txt（逐字节 · HTTP 200）
+   ✅ likeaction  Go == RAG == expected.txt（逐字节 · HTTP 200）
+   ✅ no_token  Go == RAG == expected.txt（逐字节 · HTTP 401）
+   ✅ missing_required  Go == RAG == expected.txt（逐字节 · HTTP 200）
+   ✓ 阶段 A 全绿
+```
+
+| CASE | HTTP | 字节数 | 端点（Go 出处） |
+|---|---|---|---|
+| `getlikecount` | 200 | **97** | `GET /like/v1/likecount`（`routes.go`） |
+| `getlikestate` | 200 | **64** | `GET /like/v1/getlikestate` |
+| `gettargetlikerlist` | 200 | **107** | `GET /like/v1/gettargetlikerlist` |
+| `getuserlikelist` | 200 | **147** | `GET /like/v1/getuserlikelist` |
+| `getusertotallike` | 200 | **53** | `GET /like/v1/getusertotallike` |
+| `likeaction` | 200 | **107** | `POST /like/v1/likeaction`（**写路径 ⇒ 每侧只发一次**） |
+| `no_token` | **401** | **0**（合法空 body） | 无 `Authorization` ⇒ `rest.WithJwt` 拦下 |
+| `missing_required` | 200 | **52** | `{"code":5001,"msg":"系统内部错误","data":null}`（Go `SetErrorHandler` 信封） |
+| `likeaction_double_failure` | 200 | **107** | **阶段 C** 用例（E60） |
+
+### 阶段 C · E60 · Redis 与 DB **同时**失败
+
+```
+== 9/10 阶段 C · E60 · Redis 与 DB **同时**失败 ⇒ 业务错误码必须两侧都是 5011 ==
+   ✓ 两侧已注入故障：ZCARD 被 ACL 禁用 ＋ like_record 表被删除
+   ✅ 响应字节：Go == RAG == expected.txt（HTTP 200）⇒ {"code":200,"msg":"OK","data":{"success":true,"message":"action success","like_count":4,"dislike_count":1}}
+   ✅ 双失败业务错误：Go 记了 5011（ErrorRedisSelect）"error_code":5011 · RAG 记了 business_error × 1
+   ✓ 阶段 C 全绿
+```
+
+⇒ **故障注入是确定性的**：Redis 侧 `ACL SETUSER default -zcard`（ZCARD ⇒ NOPERM，但 Lua 的 ZADD/HGET/INCR 仍工作）＋ PG 侧 `DROP TABLE like_record` ⇒ ⇒ **正好落在 Go 的双失败分支**（`likeactionlogic.go:345-364`：`dbErr != nil && err != nil` ⇒ `return 0, dbErr`）。
+
+### 阶段 B · 事实投递链路（`003-A`）
+
+```
+== 10/10 阶段 B · 事实投递链路（003-A）· 两侧投给 DC 的字节 ==
+[seed-fact] event_id=rtw.like.9007199254740993001 payload_fields=17 envelope_canonical_sha256=38b38328d978fdd0f6563ae731283af90495e60b7d818d82b8d14a2f653cb8c8
+   ✓ 两侧播了同一条冻结事实（event_id=rtw.like.9007199254740993001）
+   ✓ Go fact-dispatch 退出码 0（DC 收到 970 字节）
+   ✓ RAG 侧事实已投递并结算为 ACCEPTED（DC 收到 970 字节）
+   ✅ DC 收到的字节：Go == RAG（970 bytes · sha256 3685ca3017df6b436253d4632608631aa36915a597f25a756bd937fd2c1606d0）
+   ✅ outbox 终态（不含墙钟列）：Go == RAG ⇒ rtw.like.9007199254740993001|community.target.interaction|like-state/9007199254740993/article/9007199254740994|1|1|0|rcpt-38b38328d978fdd0|38b38328d978fdd0f6563ae731283af90495e60b7d818d82b8d14a2f653cb8c8|1
+   ✓ 阶段 B 全绿
+```
+
+⇒ **DC 收到的字节**：**970 bytes** · sha256 **`3685ca3017df6b436253d4632608631aa36915a597f25a756bd937fd2c1606d0`**（两侧**逐字节相同**）
+⇒ **outbox 终态**（`event_id|topic|subject|…|delivery_status=1|…|receipt_id|receipt_sha256|…`）两侧**逐字段相同**
+⇒ 比对**按 `event_id` 定位文件**（不按文件序号 ⇒ 与投递顺序无关）＋ **排除墙钟列**（`technical_received_at` / `delivered_at`）。
+
+### 变异验证（`mutate-parity.sh` · **证明探针不是假绿**）
+
+```bash
+bash tools/api-full-parity-probe/like/mutate-parity.sh   # ⇒ EXIT=0
+```
+
+| 变异 | 手法 | 实测 |
+|---|---|---|
+| **基线** | 未变异 | `exit 0` ✅ |
+| **M1** | 改 `expected.txt` 一枚 hex（`7b22` ⇒ `7b23`） | 🔴 **精确转红**（exit 1）· `❌ getlikecount` / `Go != expected` / `RAG != expected` |
+| **M2** | 改 RAG `LikeErrorMessages` 的 5001 文案（「系统内部错误」→「内部错误」） | 🔴 **精确转红**（exit 1）· `❌ missing_required` / `RAG != expected` |
+| **M3** | 把 `LikeTaskProgressPublisher` 的 `logger.logBusinessErr(...)` 降级成普通 `LOG.warn`（≈ **E60 修前行为**） | 🔴 **精确转红**（exit 1）· `❌ 双失败业务错误没在两侧都出现（Go='"error_code":5011' · RAG business_error 行数=0）` |
+| **还原** | 复制回备份 | `exit 0` ✅ ⇒ **三条全红 + 还原转绿 ⇒ 探针非假绿** |
+
+⇒ M1 证「**冻结的期望值**在参与判定」；M2 证「**Go == RAG 不是恒等式**」；M3 证「**E60 已销案不是台账上的空话**」。
+⇒ ⚠️ 还原一律用「文件备份 + 复制回来」，**不用 `git checkout --`**（本 lane 改动未提交 ⇒ `checkout` 会一起回滚）；还原后已核验 `git diff` 为空。
+
+## ③ 五条 verdict（**逐条：闭合 / 重开 / 仍开放 ＋ 证据强度 ＋ 日期**）
+
+| # | 条目 | **verdict** | 证据强度 | 依据（本轮） |
+|---|---|---|---|---|
+| 1 | **`E60`**（`currentUserLikeTotal` 双失败少传 error） | ✅ **闭合（销案，证据加强）** —— 仍**不重开** | **E4 ＋ L4（分支层）** · 2026-10-29 | 阶段 C：Go 真 server 记 `"error_code":5011`（Go `likeactionlogic.go:313-320` + `service/like/common/errmsg/errmsg.go:51` `ErrorRedisSelect = 5011`）· RAG 真 server 记 `business_error` 行（`LikeTaskProgressPublisher.java:145` 是 like-rpc **唯一** `logBusinessErr` 调用点）⇒ **两侧都走了「记业务错误」这条分支**。⚠️ **码值 5011 在 RAG 侧读不到**（见 §④）⇒ ⇒ 「分支一致」= L4，「码值 = 5011」仍由进程内守门 `LikeUserLikeTotalDoubleFailureGateTest`（Logback `ListAppender` 抓**真实日志行**）钉住 = E4 |
+| 2 | **`E59`**（message-rpc：deadline 的原始错误被改写成 `INTERNAL` + `ERROR_DB_UPDATE`） | ✅ **闭合（销案，本轮复验）** —— **不重开**；⚠️ **落点不在本域**（`service/message/**` ⇒ 本 lane **只读** ⇒ **未改其代码**） | **E3（复跑）** · 2026-10-29 | 本轮只**复跑它的守门**：`mvn -o -B -pl service/message/message-rpc -am -DargLine=-Xmx2g -Dtest='MessageDomainServiceDbFailureStatusTest' -Dsurefire.failIfNoSpecifiedTests=false test` ⇒ **`Tests run: 4, Failures: 0, Errors: 0, Skipped: 0`** · **BUILD SUCCESS**（EXIT=0）⇒ ⇒ **修复仍在**。⚠️ **双侧活体仍缺**（Go 侧真 server 与 RAG 侧真 server 同一条 DB 故障的 status 逐字节比对）⇒ ⇒ **不写 L4**（沿用 `docs/DRIFT/message/rpc.md:2800` 的口径） |
+| 3 | **`DRIFT-LIKE-003-A`**（事实投递链路） | ✅ **闭合（销号）** —— 证据从 **E4 升到 L4** | **L4（双侧活体）＋ 变异验证** · 2026-10-29 | 阶段 B：两侧投给 DC 的**字节**相同（**970 bytes** · sha256 `3685ca30…`）＋ **outbox 终态逐字段相同**（`delivery_status` / receipt_id / receipt_sha256）⇒ ⇒ 「**事实一旦投递，两侧产生的字节与回写状态完全一致**」已双侧活体取证 |
+| 4 | **`DRIFT-LIKE-003-B`**（权威读语义 Java 化 · 12 道校验） | 🟡 **仍开放**（**取证缺口**，**非行为漂移**）—— **不重开** | **E3（既有守门 11/11）** · 2026-10-29 | 本轮探针**不产生新证据**：RAG 侧**没有**权威读 HTTP 端点（= `003-C` 未落地）⇒ ⇒ **「同一条 `event_id` 两侧 `AuthorityFact` 逐字段相等」这一格仍缺** ⇒ ⇒ **该格的解锁前提是 `003-C` 先拍板**（见 §5） |
+| 5 | **`DRIFT-LIKE-003-C`**（权威读的**暴露形态**：独立进程 / 同进程独立 HTTP 端口） | 🔴 **仍开放**（**形态决策**）—— **不因本轮探针而改变** | — · 2026-10-29 | 本轮**未触碰**：落地需改 **2 处共享面**（新建模块要动 `check-wave-lane-ownership.py` 白名单 ＋ 根 `docker-compose.yml`）⇒ **本 lane 无写权** ⇒ ⇒ **仍须收口执行者 / 用户拍板**（两种形态二选一） |
+
+## ④ 🔴 本轮**新登记**的一条**共享层可观测性缺口**（**本 lane 不修 ⇒ 转 G4**）
+
+| 项 | 内容 |
+|---|---|
+| 现象 | **RAG 侧的业务错误码（`error_code`）从 stdout 读不到** ⇒ 探针只能观测到「**出现了 `business_error` 这行**」，**读不到码值 5011**；Go 侧 go-zero 文件日志是 **JSON 行** ⇒ `"error_code":5011` **码值可直接读** |
+| 根因 | RAG 用 SLF4J **fluent API** 的 key-value（`service/common/src/main/java/com/rag/common/logger/Logger.java:277` `addKeyValue("error_code", code)`）⇒ **key-value 不进默认 logback pattern** ⇒ 而 **全仓没有任何 logback 配置**（实测 `find service -name "logback*.xml"` = **空**）⇒ ⇒ **十组件共性** |
+| 为什么**不在本域单修** | 单改本域 ⇒ **本域与其它九域的日志形态不一致** ⇒ ⇒ 按既有先例（五域共性的 `DRIFT-TASK-API-004`、message 域的 `-012` 容器层共性）⇒ **不在本域单独修** ⇒ **归 G4（共享层写权唯一）** |
+| 对本轮结论的影响 | **只影响「RAG 侧码值」这一格** ⇒ 「**两侧都走双失败分支**」这一格 **仍是 L4** ⇒ ⇒ **E60 仍判闭合**（码值由进程内守门钉住） |
+| 本轮**没有**做的 | 未改 `service/common/**`（写权在 G4）⇒ **本条只登记**，**不改代码** |
+
+## ⑤ 覆盖边界（**这 9 条 + 970 bytes 不等于「like 域双侧活体全闭合」**）
+
+1. **只覆盖 HTTP 业务面 + 事实投递 + E60** 三段 ⇒ **不覆盖**：gRPC 服务端方法的 status 逐字节、权威读端点（`003-C` 未落地）、Kafka 后续消息真被继续处理（`L-U9`）、proto 消费方式（`like/proto.md` 的 `P-U-1/2/3`）。
+2. **`likeaction` 的「通知文章被赞」分支不在比较面内**（`author_id` 固定取 `"0"` ⇒ 避免触发 `notifyArticleLiked` → `message.rpc`，宿主无该服务 ⇒ Go 等 client timeout 吃满 3s REST 预算 ⇒ 两侧耗时不可比）。
+3. **`no_token` 的 401 body 为空是 Go 的行为**（`rest.WithJwt` 拦在 handler 外 ⇒ 未经 `SetErrorHandler` 信封）⇒ **不是** RAG 少写了 body。
+4. **阶段 C 的「双失败」是注入出来的**（Redis ACL + DROP TABLE）⇒ ⇒ **覆盖的是「Redis 与 DB 同时不可用」这一条路径**，**不是**所有组合（单边失败另有路径，Go `likeactionlogic.go:345-364` 单边失败时**降级用 Redis 值**）。
+5. **阶段 B 只取样了 `ACCEPTED` 终态** ⇒ `BLOCKED` / `FAILED` 两个分支**未取样**（Go `fact_delivery.go:52-126`）⇒ ⇒ **`003-A` 的结论限于「成功投递这一条路径」**。
+
+## ⑥ 未闭合项清单的**增量**（§7 增补）
+
+| # | 未闭合项 | 性质 | 优先级 | 阶段归属 | 是否**阻断**本域判 ✅ | 归谁 |
+|---|---|---|---|---|---|---|
+| 8 | **RAG 侧业务错误码读不到**（SLF4J key-value 不进默认 pattern ⇒ 全仓无 logback 配置 ⇒ 十组件共性） | **共享层可观测性缺口** | P3 | C 类 | ❌ 否 | **G4**（本 lane 只登记，见 §④） |
+
+⇒ §7 的 **1~7 条状态不变**（`003-C` 仍开放 · `L-U9` 仍开放 · `003-B` 双侧活体仍开放 · `P-U-1/2/3` 仍开放 · `D-08` 变异验证仍开放 · Redis 池 `max-active` 残留不变 · message 三条仍归 G4）。
+⇒ **本域必相对齐项 = 0** ⇒ like-rpc 仍判 **✅**。

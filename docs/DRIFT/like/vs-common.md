@@ -1469,3 +1469,49 @@ G4 共享层 **5** · G3 **11**（article 3 · comment 4 · hot 4）· G1 **9**�
 ⇒ **净结论**：G2 侧 6 条候选里**只有 2 条是真错**（① 版本号 · ③ 路径）⇒ **另 4 条经核对是守门假阳性 ⇒ 一行都不用改** ⇒ ⇒ **建议：候选清单收敛为 2 条**；并把「**补 `PINNED`（`gorm.io/driver/postgres v1.6.0` ＋ `github.com/lovoo/goka v1.1.16`）**」作为**独立的一件事**处理（落点属 G3 私有目录 `tools/g3-anchor-check/`）。
 
 ⚠️ **这 4 条的假阳性判定本身也留痕**：它们与本 lane 上一轮在 `docs/DRIFT/like/rpc.md` §12.2 坐实的「**多候选任一通过 ⇒ 假绿**」是**同一个根因的两面** —— 上次是「**真身不满足、干扰项满足 ⇒ 判过**」（假绿），这次是「**真身满足、干扰项不满足 ⇒ 报错**」（假错）⇒ ⇒ **同一个候选解析缺陷，两个方向都会出错** ⇒ ⇒ **候选解析必须按域消歧 ＋ 命中后必须回真源读那一行**（该结论已由调度员转述进 `docs/CLOSEOUT-2026-10-29.md` §8.3；本回执只做**我域内的逐条核对**）。
+
+---
+
+# 2026-10-29 · R2 · like 域**双侧活体对拍探针**落仓 —— 对本 lane「跨域读数」的更新（`E59` / `003-A` / `003-B` / `003-C` / `E60`）
+
+> **归属**：R2 lane（`align/r2-like-task` 工作树）· **核对日期** 2026-10-29
+> **落点**：`tools/api-full-parity-probe/like/`（like 域真私有）· **写权**：✅ `service/like/**` ＋ `docs/DRIFT/like/**` ＋ `tools/api-full-parity-probe/like/**`；🔴 `service/common/**` ＋ `service/users/users-common/**` **只读**
+> **完整证据** ⇒ [`rpc.md`](rpc.md) 末节「2026-10-29 · R2 · like 域双侧活体对拍探针落仓」（**命令 + 真实输出 + 变异表**）
+
+## ① 本轮开工前置回执（R2 lane）
+
+| 档 | 读到的、与本轮**直接相关**的结论 |
+|---|---|
+| `docs/DRIFT/` | `like/rpc.md`：**`E60` 已销案**（`LikeTaskProgressPublisher.publish` 三段式分流）＋ **`DRIFT-LIKE-003` 拆三段**（A 投递链路 / B 权威读语义 Java 化 / C 暴露形态待拍板）⇒ ⇒ **本轮的任务就是把 A 从 E4 推到 L4、并给 E60 补双侧活体**；`message/rpc.md`：**`E59` 已销案**（DB 失败原样上抛 ⇒ `UNKNOWN`＋1015 ＝ Go）⇒ ⇒ **本轮只复跑它的守门，不改 message 代码** |
+| `docs/Intentional_Deviations/` | `like/{api,proto,rpc}.md`：**`SD-2026-10-23-06`**（gRPC 业务码迁到自定义 trailer）· **`SD-2026-10-23-07`**（Nacos 注册失败不退出进程）· **`SD-2026-10-23-05`**（proto `package` 归一）⇒ ⇒ **本轮探针若撞到它们 ⇒ 属签字项，不当回归修**；`task/{api,rpc}.md`：**`SD-2026-10-23-TASK-01`** 等 ⇒ ⇒ **task 矩阵不得「顺手改回 Go 行为」** |
+| `docs/PhaseGoal/` ＋ `docs/PhasedGoal.md` ＋ `docs/twoStage.md` | 阶段 1 准入线 P0/P1/P2 + 两阶段全流程 ⇒ ⇒ 本轮**只做阶段 1、只做本域** ⇒ **不碰** 阶段 2 的形态决策（`003-C`）⇒ ⇒ **不预支** |
+| `docs/Pitfalls/` | `_cross/testing-pitfalls.md`（**变异测试是另一半**）· `_cross/fix-round-lessons.md`（「**跑绿 ≠ 判据活着**」）· `like/rpc.md` `P-07`（「**只跑 RAG 侧探针只能证明『代码写成了这样』**」）⇒ ⇒ **本轮必须有两侧同时跑的探针，且必须有变异** |
+
+**批准依据**：本 lane 的任务由调度会话下达（**范围 = `tools/api-full-parity-probe/like/**` ＋ `docs/DRIFT/like/**` ＋ `service/like/**` ＋ `docs/DRIFT/task/**` ＋ `service/task/**`**）⇒ **未超出写权面开工**。
+
+## ② 五条 verdict（**与 `rpc.md` 末节同源**）
+
+| 条目 | verdict | 证据强度 | 日期 | **本 lane 的动作** |
+|---|---|---|---|---|
+| **`E60`** | ✅ **闭合**（证据加强，不重开） | E4 ＋ **L4（分支层）** | 2026-10-29 | 探针阶段 C：Go 真 server `"error_code":5011` · RAG 真 server `business_error` 行 |
+| **`E59`** | ✅ **闭合**（本轮复验守门，不重开） | **E3（复跑）** | 2026-10-29 | `MessageDomainServiceDbFailureStatusTest` ⇒ **4/0F/0E/0S · BUILD SUCCESS**（EXIT=0）⇒ **修复仍在**；⚠️ **落点在 message 域 ⇒ 本 lane 未改其代码**；⚠️ **双侧活体仍缺 ⇒ 不写 L4** |
+| **`DRIFT-LIKE-003-A`** | ✅ **闭合**（E4 ⇒ **L4**） | **L4 ＋ 变异验证** | 2026-10-29 | 探针阶段 B：**970 bytes** · sha256 `3685ca30…` 两侧相同 ＋ outbox 终态逐字段相同 |
+| **`DRIFT-LIKE-003-B`** | 🟡 **仍开放**（取证缺口，**非行为漂移**） | E3（既有守门 11/11） | 2026-10-29 | **本轮不产生新证据** ⇒ 该格的解锁前提 = `003-C` 先拍板 |
+| **`DRIFT-LIKE-003-C`** | 🔴 **仍开放**（形态决策） | — | 2026-10-29 | **本轮未触碰**（落地要改 2 处共享面 ⇒ 本 lane 无写权） |
+
+## ③ 🆕 本轮**新登记**的共享层可观测性缺口（**⇒ 转 G4 · 本 lane 只登记不改**）
+
+| 项 | 内容 |
+|---|---|
+| 现象 | **RAG 侧业务错误码（`error_code`）从 stdout 读不到** ⇒ 双侧探针只能观测「出现了 `business_error` 这行」，**读不到码值 5011**；Go 侧 go-zero JSON 日志行 ⇒ 码值**可直接读** |
+| 根因 | `service/common/src/main/java/com/rag/common/logger/Logger.java:277` 用 SLF4J **fluent API** 的 key-value ⇒ **key-value 不进默认 logback pattern**；而 **全仓无 logback 配置**（实测 `find service -name "logback*.xml"` = 空）⇒ ⇒ **十组件共性** |
+| 归属 | 🔴 **共享层**（`service/common/**` ⇒ 写权在 **G4**）⇒ **本 lane 只登记，不编辑** |
+| 为什么不单修 | 单改本域 ⇒ **本域与其它九域日志形态不一致** ⇒ 与既有先例同处置（`DRIFT-TASK-API-004` / message `-012` 容器层共性） |
+| 对结论的影响 | 只影响「**RAG 侧码值**」这一格 ⇒ 「**两侧都走双失败分支**」仍是 **L4** ⇒ ⇒ **`E60` 仍判闭合**（码值由进程内守门 `LikeUserLikeTotalDoubleFailureGateTest` 钉住） |
+
+## ④ 与本 lane 另一项任务（task 域失败路径矩阵）的**边界**
+
+| 项 | 内容 |
+|---|---|
+| task 矩阵的证据强度 | **R3（逐条读 Go 出处）＋ E4（真 Tomcat 容器里的真 HTTP 往返）** ⇒ ⇒ **不是双侧活体 ⇒ 不写 L4**（task 域的双侧活体是 `docs/DRIFT/task/api.md` §二·五 的 **44 条**，2026-10-24，本轮未重跑） |
+| 两者**不互相替代** | like 探针 = **双侧活体**（含事实投递 + E60 双失败）；task 矩阵 = **版本控制内的失败路径回归网**（33 条，含变异验证）⇒ ⇒ **两条证据线各自成立，合并后才是「像域 + task 域」的阶段 1 证据** |
