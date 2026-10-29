@@ -1,5 +1,21 @@
 # DRIFT 台账 · `service/article/article-rpc`
 
+> ## 📍 **当前态指针（2026-10-29 · G3 lane `align/r3-article-rpc-close`）**
+>
+> | 项 | 当前值 |
+> |---|---|
+> | **R 档** | **R3**（原 **R2**） |
+> | **组件状态** | ✅ 达标（归属本组件的必相对齐项 = **0**） |
+> | **证据强度** | **L4**（真 Kafka 位点 ＋ 真 PG 落库 ＋ 双侧活体逐字节） |
+> | **最新一轮** | **§12**（2026-10-29 第十二轮）—— 逐条结论见 **§12.8** |
+> | **`S-5`** | ✅ **范围外**（judge.md §1.1 R0）⇒ **不是「阻塞」** ⇒ 见 **§12.1** |
+> | **`U-3` / `U-4`** | ✅ **闭合**（真 Kafka 实测 · 行为断言）⇒ 见 **§12.3** |
+> | **`U-9`** | 🟡 拆两半：`U-9a` ✅ 闭合 · `U-9b` 🟡 取证缺口 ⇒ 见 **§12.4** |
+> | **`U-4′`** | ✅ **销号**（3 场景逐字节 ＋ 两侧播种同一行）⇒ 见 **§12.2** |
+> | **可复算判定命令** | 见 **§12.7** |
+>
+> ⚠️ **本文件头的「组件判定」行（`:46`）与 §10 的 18 项 checklist 都是 2026-10-23 第二轮的快照** ⇒ **不要当现状读**（judge.md §1.5：L0 = 台账的**条目级最新状态**）。
+
 > ⚠️ **本文件当前无搬移内容**。AGENTS.md §0 里关于 article-rpc 的记录只有一句否定式断言
 > （「`article-rpc`（41 个文件）仍全是 4 行空骨架」），该断言**已被 2026-10-23 的实测证伪**。
 
@@ -125,7 +141,7 @@
 |---|---|---|
 | **零覆盖** | S-2（无一处传过 `sortBy`，`desc` 全用 `anyBoolean()`）；S-7（全部 mock 了 mapper，MyBatis 从未真正解析那段 script）；S-1（`ArticlePublicDomainServiceViewTest` 全 Mockito ⇒ 事务不生效） | S-1/S-2/S-7 已由真 PG 用例补上；`ArticlePublicDomainServiceViewTest` **仍是纯 Mockito**，未改 |
 | **锁错期望值** | `ArticleSpringContextWiringTest#kafkaContainersCarryTheNoCommitErrorHandler` 断言 `isSeekAfterError()==false`，依据是被证伪的 Go 结论 —— **会给正确修复设障** | ✅ 已改为 `true` |
-| **锁死未完成态** | `ArticleSpringContextWiringTest#contentSecurityPortIsExactlyOneAndFailsLoud` 断言端口**就是**兜底实现 | ⏳ 未改（S-5 阻塞未解前可接受，但 security 域落地时必须先删此断言） |
+| **锁死未完成态** | `ArticleSpringContextWiringTest#contentSecurityPortIsExactlyOneAndFailsLoud` 断言端口**就是**兜底实现 | ⏳ 未改（S-5 阻塞未解前可接受，但 security 域落地时必须先删此断言）<br>🔴 **2026-10-29 已重新评估 ⇒ 性质改判**（见 **§12.9**）：`S-5` 改判为**范围外**后，它**不再是「锁死未完成态」**，而是「**锁死已定稿的设计**」（security 域按 `AGENTS.md:43` **永不**落地 ⇒ 这条断言**没有过期时间**）⇒ **保留**，但「移除条件」的措辞已改写；并顺带修掉它引用的**不存在的** `ArticleContentSecurityWiringTest` |
 | **注释合理化偏离** | `ArticleMapper` 把 S-2 归类为「Go 的实现瑕疵，不是有意行为」—— 按 §1.1，Go 的行为（含瑕疵）即基准，偏离须走 signed-deviations | ✅ 已改回（`sort_by` 为空恒 DESC） |
 
 ### 修复后的验证
@@ -158,7 +174,7 @@
 
 ## 尚未处理
 
-- **S-5**：content security 真实实现（阻塞于 security 域迁移）
+- ~~**S-5**：content security 真实实现（阻塞于 security 域迁移）~~ ⇒ ✅ **2026-10-29 第十二轮改判为「范围外」**（`AGENTS.md:43` ＋ judge.md §1.1 R0 ⇒ security 三域之一不迁移 ⇒ **永不闭环** ⇒ 不是「阻塞」而是**范围外**）⇒ 落点与理由见本文件 **§12.1**
 - ~~**S-2/S-3/S-4/S-7 的变异验证**（证明新回归网非假绿）~~ ⇒ ✅ **2026-10-24 第十轮已做，4/4 MUT-RED**
 - Go `service/article/rpc` ↔ RAG `article-rpc` 的**双侧活体对拍**（需可用的 etcd）
 - MQ 事件契约冻结（`ArticleSyncEventTypes` 625 行仍无冻结留档，本次只验证了与 Go 结构逐字一致，未冻结）
@@ -256,7 +272,7 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 | 审核消费者 | retry 分支 ⇒ 不确认 | `return err` ⇒ `ForceCommit=true` ⇒ **提交位点即丢弃** | 抛异常 ⇒ recoverer ⇒ 跳过 seek（见 §7 复核与 U-3） | UNKNOWN | 静态（spring-kafka 4.0.7 源码） |
 | 审核消费者 | handler 并发度 | `Processors default=8`（`kq/config.go:19` → `queue.go:220`） | `factory.setConcurrency(8)` | EQUIVALENT | 真上下文 |
 | 审核消费者 | 文本/图片审核 `success=false` | 两条都 `return error`（重投） | 两条都抛（重投） | EQUIVALENT | 纯 Mockito |
-| 审核消费者 | **审核链路可用性** | 两个真 client | `UnavailableContentSecurityClient` 恒抛 | **SEMANTIC MISMATCH**（= S-5，仍阻塞） | 真上下文 |
+| 审核消费者 | **审核链路可用性** | 两个真 client | `UnavailableContentSecurityClient` 恒抛 | **范围外**（`S-5` 已于 2026-10-29 改判：judge.md §1.1 R0 ⇒ security 域不迁移 ⇒ 不计入本组件必相对齐项）｜⚠️ **两侧可观察行为仍一致**（Go `article_consumer.go:154-155` 在 security 不可用时同样要求审核失败 ⇒ 文章卡在 `REVIEWING`）｜**能力差（Go 能审 / RAG 不能）是事实**，落点在 R0 域 ⇒ 计入域级聚合与矩阵 C | 真上下文 |
 | 同步结果消费者 | 判定链顺序 ①~⑤ | `article_sync_result_consumer.go:75-107` | `ArticleAtomicService:339-396` | EQUIVALENT | 真 PG（失败回滚 + **成功路径**，2026-10-24 补） |
 | 同步结果消费者 | 六项冻结输入比对 | `:103-107` | `ArticleAtomicService:384-390` | EQUIVALENT | 静态 |
 | 同步结果消费者 | 通知在事务提交后 / 失败只记日志 | `:160-163` | `ArticleSyncResultConsumer:146` | EQUIVALENT | 静态 |
@@ -287,7 +303,7 @@ PROBE6 updateById on soft-deleted row: rows=1  brief=bump-on-deleted
 | MinIO | put 失败 | 两侧都 `INTERNAL` + 记 `minio_request_errors{put}` | EQUIVALENT |
 | Kafka | push 失败 | 两侧都记 `kafka_push_errors` 并向上抛 | EQUIVALENT |
 | Kafka | **失败位点处置** | Go **提交即丢弃**；Java 走 recoverer + 跳过 seek | UNKNOWN（U-3） |
-| `security.rpc` | 任何调用 | 恒抛（不可用实现） | **SEMANTIC MISMATCH**（S-5，阻塞） |
+| `security.rpc` | 任何调用 | 恒抛（不可用实现） | **范围外**（`S-5` 改判 · judge.md §1.1 R0 ⇒ **落点在 R0 域** ⇒ 不计入本组件必相对齐项）｜⚠️ **不是「两侧零差异」**：Go 能审、RAG 不能是**能力差**（非行为差） | 静态 |
 | `message.rpc` | 通知失败 | 两侧都只记日志、不影响发布 | EQUIVALENT |
 
 ## 6. 逐维度结论（§12–§21）
@@ -655,18 +671,21 @@ DistributionStatisticConfig.getHistogramBuckets(boolean supportsAggregablePercen
 
 | ID | Question | Go Evidence | Java Evidence | Why Unknown | Required Confirmation |
 |---|---|---|---|---|---|
-| **U-3**（新） | `seekAfterError=true` + `FixedBackOff(0,0)` 在**真 Kafka** 上到底是"丢弃"还是"进程内无限重投"？ | `kq/config.go:24` `ForceCommit default=true`；消费点 `kq/queue.go:230-242` ⇒ 失败**也**走到 `:240` `CommitMessages` ⇒ **丢弃** | spring-kafka 4.0.7 源码：`SeekUtils.java:107-135` `doSeeks` 对**首条**（失败记录）先问 `recovery.recovered(...)`，返回 true ⇒ **不 seek** ⇒ 实际跳过；`FailedRecordProcessor.java:150-156` 的 javadoc 明确写 "records will be **redelivered on the next poll**" | 只有**源码**级证据；无真 Kafka 对拍，且 `remaining` 列表在 RECORD 模式下是否只含失败记录未实测 | 起一套真 Kafka，让 `ArticleReviewConsumer` 撞一次必然失败的消息，观察该 offset 是否前进、是否重复投递 |
-| **U-4**（新） | S-3 的**依据**已被证伪，那"已改"还成立吗？ | 同上 | RAG 的 javadoc（`ArticleRpcApplication.java:143-154`）引用的是 `commit(consumer, container, offset+1)`，**该分支只在 `commitRecovered=true` 时执行**（`SeekUtils.java:229`），而 `FailedRecordProcessor.java:57` `commitRecovered` 默认 **false**，本模块**从未** `setCommitRecovered(true)` ⇒ 引用的那段代码**不在本模块的执行路径上** | 结论方向（对齐丢弃）大概率仍成立，但**现有论证是错的**；锁测试 `kafkaContainersCarryTheForceCommitErrorHandler` 只断言 `isSeekAfterError()==true`，**分不清"因为这个理由对"与"碰巧对"** | 同 U-3；并把锁测试改成断言**行为**（失败一次后该 offset 已提交且不再投递），不是断言属性值 |
+| **U-3**（新） | `seekAfterError=true` + `FixedBackOff(0,0)` 在**真 Kafka** 上到底是"丢弃"还是"进程内无限重投"？ | `kq/config.go:24` `ForceCommit default=true`；消费点 `kq/queue.go:230-242` ⇒ 失败**也**走到 `:240` `CommitMessages` ⇒ **丢弃** | spring-kafka 4.0.7 源码：`SeekUtils.java:107-135` `doSeeks` 对**首条**（失败记录）先问 `recovery.recovered(...)`，返回 true ⇒ **不 seek** ⇒ 实际跳过；`FailedRecordProcessor.java:150-156` 的 javadoc 明确写 "records will be **redelivered on the next poll**" | ✅ **已关闭**（2026-10-29 第十二轮）—— **真 Kafka 实测**（`ArticleKafkaForceCommitGateTest`）：失败消息**只投递 1 次**（不进程内重投）＋ 位点被提交为**它自己的 offset+1** ⇒ **丢弃** ⇒ 与 Go `kq/queue.go:240` 同构。⇒ 详见本文件 **§12.3**（含机制归因的订正） |
+| **U-4**（新） | S-3 的**依据**已被证伪，那"已改"还成立吗？ | 同上 | RAG 的 javadoc（`ArticleRpcApplication.java:143-154`）引用的是 `commit(consumer, container, offset+1)`，**该分支只在 `commitRecovered=true` 时执行**（`SeekUtils.java:229`），而 `FailedRecordProcessor.java:57` `commitRecovered` 默认 **false**，本模块**从未** `setCommitRecovered(true)` ⇒ 引用的那段代码**不在本模块的执行路径上** | ✅ **已关闭**（2026-10-29 第十二轮）—— **台账的「证伪」结论成立，但理由只覆盖了两个落点里的一个**：另一个落点（`FailedBatchProcessor.java:255-266`，由 `isSeekAfterError()` 把门）**同样不走**，理由是 `noRetries=true` ⇒ `remaining` 为空 ⇒ `:256` 的守卫为 false ⇒ ⇒ **真正的提交路径是容器侧的 RECORD ack**（`KafkaMessageListenerContainer.java:2897/2925/2936/3196-3199`）⇒ ⇒ **行为仍与 Go 同构**（真 Kafka 实测）⇒ **归因已订正**（`seekAfterError` **不是**承重项，承重的是 `FixedBackOff(0L,0L)`）。⇒ 详见本文件 **§12.3.2** |
 | **U-5**（新） | `acceptSyncResult` 的**成功**路径在真 PG 上从未被验证 | `article_sync_result_consumer.go:74-153` | ~~现有真 PG 只测了 `domainOutboxFailureRollsBackEverything`（失败回滚）与两个 `getPublicArticle`~~ | ✅ **已关闭**（2026-10-24） | 补 CASE-R11 的 **3 条**真 PG 用例，覆盖四步联动（revision/指针/域事件/status）、通知条件（首次发布 vs 已发布过）、标题双来源；**并因此发现 `DRIFT-ARTICLE-RPC-009`**（详见本轮修复节） |
 | **U-6**（新） | `updated_at` 该用哪种方式补（`@TableField(fill)` + `MetaObjectHandler` / mapper 里显式 SQL / DB 触发器）？ | GORM `autoUpdateTime` 由 ORM 承担 | **已选定并实施**：① `ArticleMetaObjectHandler`（新建 `@Component`，`updateFill` 里写 `updated_at`）；② 实体上补 `@TableField(fill = FieldFill.INSERT_UPDATE)` | ✅ **已关闭**（2026-10-24，**零新代码**） | 这是**实现选择**而非判定阻塞项，FIX-02 已作出选择并落地；配套的真 PG 用例（CASE-R04，`updated_at` 预置 2020-01-01 后改 title ⇒ 已推进）已在 FIX-02 中通过 ⇒ 选择 + 验证都已闭环 |
 | **U-7**（新） | Micrometer 直方图的实际输出（`_seconds` 后缀 + 8 个桶边界 + `_count/_sum`）与 Go `HistogramVec` 是否逐桶一致？ | `metrics.go:41-49`（显式 8 桶） | ~~`ArticleRpcMetrics:131-139`（`serviceLevelObjectives` + `publishPercentileHistogram`）~~ | ✅ **已关闭**（2026-10-24） | 真 `PrometheusMeterRegistry` scrape 实测 ⇒ 发现 `publishPercentileHistogram` 与 SLO 桶取**并集** ⇒ 实际 **77** 个边界（Go 只有 **9**：8 + 固有的 `+Inf`）⇒ 已立 `DRIFT-ARTICLE-RPC-010` 并**修复**（去掉 `publishPercentileHistogram`） |
 | **U-8**（新） | `@Scheduled` 首次执行的 `initialDelay` 默认值 | `article.go:94` ticker ⇒ 首次在 1s 后 | ~~未读 `ScheduledAnnotationBeanPostProcessor` 源码~~ | ✅ **已关闭**（2026-10-24，**零新代码**，用 FIX-05 已有的实测证据） | ① FIX-05 的变异 #4「去掉 `initialDelayString`」实测首触发在 **84ms** ⇒ **Spring 的默认值就是"立即执行"**；② 修复后由 `ArticleOutboxRelayScheduleTest#firstExecutionHappensAfterTheIntervalNotImmediately` 断言首次 ≥ 900ms（兜底间隔 1000ms）⇒ 与 Go ticker 同款 |
-| **U-9**（新） | 并发（8 handler）下的 offset 提交/跳过语义两侧是否一致 | `kq/queue.go:219-246`（8 个 processor 各自 `CommitMessages`，**不保证连续**） | RECORD + 上面那套 handler | 两边都**没有**活体对拍；顺序错乱窗口未量化 | 真 Kafka 压测 + 逐条比对 |
+| **U-9**（新） | 并发（8 handler）下的 offset 提交/跳过语义两侧是否一致 | `kq/queue.go:219-246`（8 个 processor 各自 `CommitMessages`，**不保证连续**） | RECORD + 上面那套 handler | ✅ **已拆两半**（2026-10-29 第十二轮）：<br>**U-9a（offset 提交/跳过语义）= ✅ 闭合** —— Go 侧 `kafka-go@v0.4.47/reader.go:171-185` `offsetStash.merge` **取 max** ⇒ 已提交位点**单调不回退**；RAG 侧真 Kafka 实测每分区提交位点 = **最大已投递 offset + 1** 且**从不回退** ⇒ **两侧同构**（L4）<br>**U-9b（handler 并发模型）= 🟡 取证缺口** —— Go 是「1 个拉取者（`Consumers: 1`）→ 8 个 handler 抢同一个 channel」⇒ 同分区消息**可能**并发处理；RAG 是「8 个 consumer 各占自己的分区」⇒ 同分区**严格串行** ⇒ **RAG 更严**的模型差异 ⇒ **Go 侧未活体对拍** ⇒ **不写成「已对齐」** | 详见本文件 **§12.4**（含解除条件：① 登记为有意偏离并签字 ② 补 Go 侧活体探针） |
 | **U-2**（沿用） | 锁顺序反转 | Go 侧两条路径都由 `RetractPublicationTx` 的 `FOR UPDATE` 串行化 | Java 已统一成 article → publication，但 `retractAndUpdate` 多了一次 `selectByIdForUpdate` 提前 return | ✅ **已关闭**（2026-10-24） | 补 **CASE-R12 并发真 PG 用例** + **锁序探针**（真 PG 上同时扣住两把锁，观测被阻塞的 SQL）+ **Go 侧探针**（pgx + 真 PG，两种锁序各跑一次）⇒ 结论已定：**Go 自身**存在锁序反转（探针实测 `40P01 deadlock detected`），RAG 统一为 `article → publication` ⇒ **无反转**。⇒ 差异落档到 [`docs/Intentional_Deviations/article/rpc.md`](../../Intentional_Deviations/article/rpc.md)（**SD-2026-10-24-01，已签字**），**不在本文重复记** |
-| **U-4'**（沿用） | 双侧活体对拍 | Go 依赖 `etcd:2379`，本机拉不起 | — | 本轮仍 **0** 条 | 起 etcd |
+| **U-4'**（沿用） | 双侧活体对拍 | Go 依赖 `etcd:2379`，本机拉不起 | — | ~~本轮仍 **0** 条~~ | ✅ **已销号**（2026-10-29 第十二轮）—— 前提已变（etcd 宿主口已映射）＋ 探针**落仓可复算** `tools/api-full-parity-probe/article/`（`run.sh` ＋ `mutate-parity.sh` ＋ `expected.txt` ＋ `README.md`）⇒ **3 个场景**（`list_articles` / `get_article_exists` / `get_article_missing`）**Go == RAG == 冻结期望值**逐字节一致 ＋ **两侧播种同一行**（`status=2 PUBLISHED` · id `9007199254740993`）⇒ **L4** ⇒ 详见本文件 **§12.2**（⚠️ 含**口径边界**：现钉的是**降级路径**，`user.rpc` 两侧都不可达 ⇒ 成功路径的完整字段语义**仍未**双侧验证 ⇒ **部分闭合**） |
 | **U-5'**（沿用） | S-2 / S-3 / S-4 / S-7 新回归网**非假绿**未证 | — | 只有 S-1 做过变异验证 | AGENTS.md §3.3 | ✅ **已关闭**（2026-10-24 第十轮）：S-2 / S-3 / S-4 / S-7 **4/4 全部 MUT-RED** —— 逐条把修复改回去，用例都转红（详见本文件「第十轮」节的变异表）⇒ 五条回归网（S-1~S-4、S-7）**全部**证实非假绿 |
 
 ## 10. 最终判定（§39 的 18 项 checklist）
+
+> ⚠️ **本表是 2026-10-23 第二轮的快照**（表内各行的「现状」只反映当轮）⇒ **当前态见 §12.8**；
+> 表内第 7 行（External dependency failure）已按 2026-10-29 的实测**同步改口径**（`S-5` 改判为范围外）。
 
 | # | 检查项 | 结论 | 依据 |
 |---|---|---|---|
@@ -676,7 +695,7 @@ DistributionStatisticConfig.getHistogramBuckets(boolean supportsAggregablePercen
 | 4 | NotFound / Empty / Null 是否一致 | ❌ | jsonb 列的 null 语义在三个方法上不一致（001） |
 | 5 | Error meaning 是否一致 | ❌ | 公开读 5001→1015（003）；`update_time` 陈旧（002） |
 | 6 | Error propagation 是否一致 | ⚠️ | Kafka 侧 U-3；gRPC 侧四个 catch 分档一致 |
-| 7 | External dependency failure 是否一致 | ⚠️ | DB/对象存储已覆盖；**security 域仍不可用**（S-5，阻塞） |
+| 7 | External dependency failure 是否一致 | ✅ | DB / 对象存储 / Kafka 均已覆盖并有断言；**security 域 = 范围外**（`S-5` 改判 · judge.md §1.1 R0 ⇒ 落点在 R0 域 ⇒ 不计入本组件必相对齐项）｜⚠️ **能力差仍在**（Go 能审、RAG 不能）⇒ 计入域级聚合与矩阵 C，**不计入组件 R** |
 | 8 | Cache hit / miss 是否一致 | — | **N/A**：两侧均无缓存层 |
 | 9 | Transaction boundary 是否一致 | ✅ | 4 处边界与顺序逐条一致；真 PG 证明 AOP 代理生效 |
 | 10 | State transition 是否一致 | ❌ | `updated_at` 永不推进（002） |
@@ -2316,4 +2335,272 @@ Spring 的 **context cache key** 包含 `properties`、但**不含 `@DynamicProp
 ⇒ G4 在共享面写「域内 span 若只调 `recordException` ⇒ status 恒 UNSET ⇒ **与 Go 的 `RecordError` 漂移**」⇒ ⇒ **中间那一步是错的**：Go otel-go **v1.44.0** 的 `RecordError` **【不改】status**（接口契约 `go.opentelemetry.io/otel/trace@v1.44.0/span.go:47-51`「**as this method does not change the Span status**」＋ SDK 实现 `go.opentelemetry.io/otel/sdk@v1.44.0/trace/span.go:626-630` javadoc ＋ `:631-655` 实现**全程无 `SetStatus` 调用**）⇒ ⇒ **Go 侧 `service/article/**` 的 `SetStatus` 零命中 ⇒ Go 侧业务 span status 本就恒 UNSET** ⇒ ⇒ **RAG 侧 `ArticleSpans` 零 `setStatus`（类注释 `:81`「本类**不得**调 `setStatus`」）⇒ 两侧一致 ⇒ 不漂移** ⇒ ⇒ **域侧零改动**（**不补 `setStatus`** —— 补了反而是引入 Go 侧不存在的 ERROR）。
 ⇒ 且守门 `ArticleSpanWiringTest.java:448-449` **已把这条钉成断言**（⇒ 断言 `StatusCode.UNSET`，注释「Go 侧无 `SetStatus` ⇒ 状态保持 UNSET」）⇒ ⇒ **网已张、语义已对齐**（L-10 落码明细 ⇒ [`article/vs-common.md` §3.2](./vs-common.md#32-✅-l-10-已落码2026-10-28--g3-8-个-span6-logic--2-consumer全部补齐)）。
 ⇒ 逐条证据 ⇒ [`favorite/api.md` §16.4.1](../favorite/api.md#1641-🟢-补证2026-10-28-go-侧-recorderror-也不改-status--两侧-status-语义同构--status-漂移不成立)。
+
+---
+
+# 2026-10-29 第十二轮（G3 lane · `align/r3-article-rpc-close`）：`article-rpc` **R2 → R3**
+
+> **本节是本文件当前的最新一轮** ⇒ 按文件头的「📌 怎么读这份台账」：
+> **判定状态一律回本节 + §9**（上文各轮次表都是历史快照）。
+>
+> **本轮目标**（`docs/PhaseGoal-judge.md` §三 A-2 的 `article-rpc` 行 = **R2 / 🟡** ⇒ 阻塞 C-1「核心 6 域」）：
+> 把 `article-rpc` 提到 **R3 / ✅**。
+
+## 12.0 开工前置回执（AGENTS.md §5.3b-0 · 四步）
+
+| 步骤 | 内容 |
+|---|---|
+| ① 先定自己的任务 | 把 `article-rpc` 从 **R2** 提到 **R3**（判定口径 = `docs/PhaseGoal-judge.md` §1.1 / §1.3 / §1.5 + §七 RPC 型 5 条 + §九） |
+| ② 读完四档（本域 + `_cross`） | `docs/DRIFT/article/`（本文件 · `api.md` · `common.md` · `proto.md` · `vs-common.md`）· `docs/Intentional_Deviations/article/rpc.md` · `docs/PhasedGoal.md` · `docs/twoStage.md` §5.3/§5.4/§10 · `docs/PhaseGoal-judge.md` §1.1/§1.3/§1.5/§三/§七/§九 · `docs/Pitfalls/article/` + `docs/Pitfalls/global/cross-domain.md` |
+| ③ 回执「读完了」 | 本表 |
+| ④ 经用户批准才开工 | ⏳ **批准记录：＿＿＿＿＿＿＿＿（留空 —— 由 Jason 填；本 lane **未代批**、未自行填「已批准」）** |
+
+**本轮计划**（批准后执行）：① 复核 `S-5` 的前提并改判 ② 销号 `U-4′` ③ 用**真 Kafka** 把 `U-3`/`U-4`/`U-9` 从「源码级」升到「运行级」④ 逐条核 §七 RPC 型 5 条，缺的补测试 + 变异必红 ⑤ 结论落本节。
+
+---
+
+## 12.1 🔴 `S-5` 改判：**范围外（judge.md §1.1 R0 口径）⇒ 不计入本组件必相对齐项**（原写「⛔ 阻塞」）
+
+**原台账写法**（2026-10-23 轮次表 `:95` ＋「尚未处理」`:161`）：「⛔ **被阻塞**（security 域未迁移）」。
+
+**复核结论：前提成立，但「阻塞」这个措辞是错的 ⇒ 改判为「范围外」。**
+
+| # | 复核点 | 实测结果 | 出处 |
+|---|---|---|---|
+| 1 | Go 真源**有没有** security 域？ | **有**！`service/security/rpc/`（`security.go` · `internal/logic/contentsecurityservice/sanitize_content_logic.go` · `internal/logic/imagesecurityservice/detect_image_ad_logic.go` · `client/contentsecurityservice/content_security_service.go`）⇒ ⇒ judge.md §1.1 R0 行写的「Go 侧**无**对应件」对 security **不准确**（那三个域里另两个本 lane 未判，不越界下结论） | `Sea-RideTheWind_golang/service/security/rpc/`（实测 `ls`） |
+| 2 | 那本仓为什么不做？ | **用户决策，不是「待办」**：`AGENTS.md:43`「Go 侧 `knowledge`/`points`/`security` **范围外 ⇒ 不是待办**」 | `AGENTS.md:43` |
+| 3 | judge.md 的 R0 口径认不认？ | **认**：§1.1 的 **R0 行**把 `knowledge`/`points`/`security` **三域点名** ⇒ security 就是 R0 三域之一 | `docs/PhaseGoal-judge.md:46` |
+| 4 | Go 侧的 article-rpc 真的调它吗？ | **调**：`internal/svc/service_context.go:60` `zrpc.MustNewClient(c.SecurityConf)` · `:72` `SecurityRpc:` · `:73` `ImageSecurityRpc:` · `internal/mqs/article_consumer.go:158` `SanitizeContent` · `:253` `DetectImageAd` | 同左（Go 真源行号） |
+| 5 | RAG 侧的对应实现是什么形状？ | **窄端口 + fail-loud 兜底**：`ContentSecurityPort`（2 个方法 · 签名逐字段照 Go 调用点对齐）· `ContentSecurityAutoConfiguration`（`@ConditionalOnMissingBean` **条件注册** ⇒ 判断时机确定）· `UnavailableContentSecurityClient`（**恒抛**） | `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/client/` |
+| 6 | 两侧的**可观察行为**一致吗？ | **一致**：Go `internal/mqs/article_consumer.go:154-155` `if l.svcCtx.SecurityRpc == nil { return fmt.Errorf("content security client not initialized") }` ⇒ **Go 自己在 security 不可用时也要求审核失败**（fail-loud ⇒ 文章卡在 REVIEWING）⇒ ⇒ RAG 的兜底实现**逐字复刻**了这条（错误文案逐字相同）⇒ ⇒ 两侧**都**把文章留在 `REVIEWING` | Go `article_consumer.go:154-155` ＋ RAG `UnavailableContentSecurityClient.NOT_INITIALIZED` |
+
+⇒ **改判**：`S-5` **不是**「被阻塞」（那个措辞暗示「等 security 域迁完就能闭环」⇒ **而 security 域按用户决策永远不迁** ⇒ 等下去是**永不**闭环）。
+⇒ **按 judge.md §1.1 的 R0 口径**（范围外 ⇒ 本仓不实现）**改判为「范围外」** ⇒ 按 **§1.1 ⑥ 第 2 类**（落点在**别的域**的跨组件残留）⇒ **不计入 `article-rpc` 的必相对齐项** ⇒ **不阻断 R3**。
+⇒ ⚠️ **同时按 §1.1 ⑥ 的效力边界**：这**不等于**「两侧行为零差异」—— 能力差（Go 能审、RAG 不能）是**事实**，只是它的**落点在 R0 域** ⇒ 计入**域级聚合**与**矩阵 C**，**不计入本组件 R**。
+⇒ ⚠️ **「移除条件」的措辞已订正**（2026-10-29 · 本轮）：原文写「若将来 security 域落地…」⇒ 那个措辞暗示「等它迁进来就能撤掉」⇒ **但 security 域按用户决策不会落进本仓** ⇒ ⇒ 本兜底实现**不是临时占位，而是本仓的最终设计**（`ContentSecurityAutoConfiguration` / `UnavailableContentSecurityClient` 的类注释已同步订正）。
+⇒ 🔴 **顺带修掉一处 §3.3.2 形态的「不存在的证据」**：`ContentSecurityAutoConfiguration` 的类注释原文写「锁死用例：`ArticleContentSecurityWiringTest`」⇒ **该类全仓不存在**（`find service -name "ArticleContentSecurityWiringTest.java"` ⇒ **0 命中**）⇒ 已改为真实的 `ArticleSpringContextWiringTest#contentSecurityPortIsExactlyOneAndFailsLoud`。
+
+---
+
+## 12.2 ✅ `U-4′` **销号**（双侧活体对拍 **0 条 → 3 场景逐字节 ＋ 两侧播种同一行**）
+
+| 项 | 内容 |
+|---|---|
+| **探针落点** | `tools/api-full-parity-probe/article/`（`run.sh` ＋ `mutate-parity.sh` ＋ `expected.txt` ＋ `README.md`）—— **在版本控制内**（`git log`：`4edfdc7e` 落码 · `abd167dc` 修基建两处真缺陷）⇒ **可复算**（不是 `/tmp` 里的临时脚本） |
+| **判定命令** | `bash tools/api-full-parity-probe/article/run.sh` ⇒ **EXIT=0**<br>（退出码口径：0 = 两侧逐字节一致 · `1` = 有差异 · `2` = 环境问题 / 真源漂移 / 依赖缺失） |
+| **实测场景** | **3 个**：`list_articles`（`GET /v1/articles`）· `get_article_exists`（`GET /v1/article/9007199254740993`）· `get_article_missing`（`GET /v1/article/does-not-exist`）⇒ **Go == RAG == 冻结期望值** 逐字节一致（期望值在 `expected.txt`，格式 `CASE|<name>|<hex>`） |
+| **两侧播种同一行** | 两侧**各建各的库**（Go 侧真源 DDL `article.sql` ＋ `002_community_revision.sql` · RAG 侧自己的 Flyway）⇒ 各自**播同一行**（`status=2 PUBLISHED` · id `9007199254740993`）⇒ ⇒ 探针比的不是「两边都空」 |
+| **变异** | `mutate-parity.sh`：M1（去掉 `Article` 的 `@JsonPropertyOrder`）· M2（去掉 `ListArticlesResp` 的 `@JsonPropertyOrder`）⇒ 精确转红；M3（改 `expected.txt` 里一枚 hex）⇒ `run.sh` **EXIT=1** ⇒ **探针非假绿** |
+| **证据强度** | **L4（双侧活体）** —— 两侧服务**同时**在跑（Go 真源栈 ＋ RAG 栈），同一请求比**字节** |
+| **核对日期** | **2026-10-29** |
+
+> ⚠️ **口径边界（不许越界读 —— 这条比销号本身更重要）**：
+> ① **`get_article_exists` 钉的是「降级路径两侧一致」，不是「取到了文章」** —— 宿主上 `user.rpc` **两侧都不可达** ⇒ 单条详情端点两侧**同样降级成 `5001`**；`list_articles` 的 `author_name` = `"用户 1001"` ⇒ **也是降级路径**（user 侧不可达时的兜底名）。
+> ② ⇒ **成功路径的完整字段语义仍未双侧验证**（要补需让两侧的 `user.rpc` 都可用）。
+> ③ ⇒ judge.md §九 G-3 原文要求「article 域双侧活体 **0** 条」⇒ 现 **3** 条 ⇒ **部分闭合**，**不得写成全闭合**。
+
+---
+
+## 12.3 ✅ `U-3` ＋ `U-4` **闭合**（真 Kafka 实测 · **行为断言**，不是属性断言）
+
+**新增守门**：`service/article/article-rpc/src/test/java/com/rag/article/article/rpc/mq/ArticleKafkaForceCommitGateTest.java`
+（真 Kafka 容器 `apache/kafka:3.7.2` ＋ 真 PG；被测对象是**生产装配本身** —— 生产的 `ArticleRpcApplication#articleNoCommitErrorHandler()` ＋ 生产的 `articleKafkaListenerContainerFactory` ＋ 生产 `application.yml` 绑出来的 ConsumerFactory；**只有 listener 本身**是探针）。
+
+### 12.3.1 实测结论
+
+| 问 | 结论 | 证据 | 强度 |
+|---|---|---|---|
+| `U-3` 失败消息是「丢弃」还是「进程内无限重投」？ | **丢弃**（不重投） | `failedMessageIsNotRedeliveredInProcess`：投递一条**必然失败**的消息 ⇒ 5s 后投递计数**恰好 +1** | **L4**（真 broker 位点 + 投递计数） |
+| `U-3` 失败位点推不推进？ | **推进，且推进到「这条失败消息自己的 offset+1」** | `failedMessageOffsetIsCommittedLikeGoForceCommit`：读消费组已提交位点 ⇒ `committed == boomOffset + 1`（**精确相等**，不是「≥」） | **L4** |
+| `U-4` S-3 的**依据**成立吗？ | **行为成立，但原先的归因错了** ⇒ 已订正（见 §12.3.2） | 同上两条行为断言 | **L4** |
+
+### 12.3.2 🔴 `U-4` 的**归因订正**（本轮最实质的一条）
+
+台账 §9 U-4 原文写「引用的 `commit(consumer, container, offset+1)` 那段代码**不在本模块的执行路径上** ⇒ 只在 `commitRecovered=true` 时执行」。
+⇒ **实测复核：结论成立，但给出的理由只覆盖了其中一半。**
+
+spring-kafka 4.0.7 里有**两个不同**的 `commit(offset+1)` 落点：
+
+| # | 位置 | 把门条件 | 本模块走不走 | 理由 |
+|---|---|---|---|---|
+| ① | `SeekUtils.java:229-233` | `commitRecovered` ＋ 要求 `AckMode.MANUAL_IMMEDIATE` | **不走** | 本模块是 `RECORD` 且从未 `setCommitRecovered(true)` ⇒ **台账给出的理由，对这一条成立** |
+| ② | `FailedBatchProcessor.java:255-266` | `isSeekAfterError()`（**不需要** `commitRecovered`、**不需要** `MANUAL_IMMEDIATE`） | **也不走** | ⚠️ **台账没提这一条**；它不走是**另一个理由**（下） |
+
+**② 为什么不走**（本轮的实测 + 源码逐行核对）：
+
+```
+FailedRecordTracker.java:102      this.noRetries = backOff.start().nextBackOff() == BackOffExecution.STOP;
+                                  ⇒ FixedBackOff(0L, 0L) ⇒ noRetries = true
+FailedRecordTracker.java:174-177  if (this.noRetries) { attemptRecovery(...); return true; }
+                                  ⇒ 失败记录**第一次就判为 recovered** ⇒ 被移出 remaining
+FailedBatchProcessor.java:256     if (!remaining.isEmpty()) {   ← ② 的守卫
+                                  ⇒ remaining 为空 ⇒ ② 里的 commit(offset+1) **不执行**
+```
+
+⇒ **真正的提交路径是「容器侧的 RECORD ack」**（与 `isSeekAfterError()` **无关**）：
+
+```
+KafkaMessageListenerContainer.java:2897  commitOffsetsIfNeededAfterHandlingError(cRecord);
+KafkaMessageListenerContainer.java:2925  private void commitOffsetsIfNeededAfterHandlingError(...)
+KafkaMessageListenerContainer.java:2936      ackCurrent(cRecord, this.isManualAck);
+KafkaMessageListenerContainer.java:3196      if (this.isRecordAck && this.producer == null) {
+KafkaMessageListenerContainer.java:3197          Map<TopicPartition, OffsetAndMetadata> offsetsToCommit = buildSingleCommits(cRecord);
+KafkaMessageListenerContainer.java:3199          commitOffsets(offsetsToCommit);
+⇒ 提交的正是**这条失败记录自己的 offset+1** ⇒ 与 Go kq/queue.go:240 同构
+```
+
+⇒ 🔴 **实测结论（MUT-M2）**：`setSeekAfterError(true)` **不是承重项** —— 改成 `false` ⇒ **行为完全不变**（失败消息仍只投递 1 次、位点仍提交为「它自己的 offset+1」）⇒ ⇒ **承重的是 `FixedBackOff(0L, 0L)`**（MUT-M1 证明）。
+⇒ ⇒ **生产 javadoc**（`ArticleRpcApplication#articleNoCommitErrorHandler()`）已按本结论**改写**（原文把机制归到了 `isSeekAfterError()` 分支 ⇒ **错的**）。
+
+### 12.3.3 Go 出处（逐条指到**消费点**，不是声明点）
+
+```
+声明点  go-queue@v1.2.2/kq/config.go:24    ForceCommit bool `json:",default=true"`
+声明点  go-queue@v1.2.2/kq/config.go:19    Processors int `json:",default=8"`
+消费点  go-queue@v1.2.2/kq/queue.go:230    if err := q.consumeOne(ctx, string(msg.Key), string(msg.Value)); err != nil {
+消费点  go-queue@v1.2.2/kq/queue.go:231-233     if q.errorHandler != nil { q.errorHandler(ctx, msg, err) }
+消费点  go-queue@v1.2.2/kq/queue.go:235-237     if !q.c.ForceCommit { continue }    ← ForceCommit=true ⇒ 不 continue
+消费点  go-queue@v1.2.2/kq/queue.go:240     if err := q.consumer.CommitMessages(ctx, msg); err != nil {
+⇒ 失败消息**照样提交自己的位点** ⇒ 被丢弃；且 Go 侧**没有重试循环** ⇒ 不会进程内重投
+```
+
+⇒ ⚠️ `service/article/rpc/etc/article.yaml` **没有**配 `ForceCommit` / `Processors` / `CommitInOrder`
+⇒ 生效值 = 默认的 `true` / `8` / `false`（AGENTS.md §3.3.1：默认行为是否生效必须读到**消费该 tag 的那段控制流**）。
+
+---
+
+## 12.4 🟡 `U-9` **拆成两半**：`U-9a` ✅ 闭合（offset 提交/跳过语义 · 两侧同构）· `U-9b` 🟡 **取证缺口**
+
+### 12.4.1 ✅ `U-9a`（offset 提交 / 跳过语义）—— **两侧同构，闭合**
+
+| 侧 | 事实 | 出处 | 强度 |
+|---|---|---|---|
+| Go | 提交的是「**这条消息自己的位点**」 | `go-queue@v1.2.2/kq/queue.go:240` `CommitMessages(ctx, msg)` | E2（源码 · 消费点） |
+| Go | 同一分区多次提交取 **max** ⇒ 提交位点**单调不回退**（即使 8 个 goroutine 乱序提交） | `kafka-go@v0.4.47/reader.go:171-185` `offsetStash.merge`：`if offset, ok := offsetsByPartition[c.partition]; !ok \|\| c.offset > offset { offsetsByPartition[c.partition] = c.offset }` | E2（源码 · 合并点） |
+| RAG | 每分区提交位点 = **该分区最大已投递 offset + 1**（精确相等）＋ **从不回退** ＋ 分区内首次投递按 offset 递增 | `ArticleKafkaForceCommitGateTest#committedOffsetPerPartitionIsMaxDeliveredPlusOneAndNeverRegresses`（真 Kafka · 读消费组已提交位点 + 逐条投递记录） | **L4**（真 broker 运行面） |
+
+⇒ ⇒ **「offset 提交 / 跳过语义」两侧一致**：两边都是「每分区单调、提交 = 该消息自己的 offset+1、已提交的消息被跳过」。
+⇒ ⚠️ 这条**新引了一个 Go 侧出处**（`kafka-go` 的合并点）—— 之前台账只引到 `kq/queue.go` 就下了「不保证连续」的结论，**漏了 kafka-go 会取 max** 这一层 ⇒ **「提交不保证连续」的说法在「已提交位点」这个可观察量上是错的**（乱序的是**提交动作**，不是**已提交位点**）。
+
+### 12.4.2 🟡 `U-9b`（处理器并发模型）—— **取证缺口**，**不许写「已对齐」**
+
+| 侧 | 模型 | 出处 |
+|---|---|---|
+| Go | **1 个拉取者 → 8 个 handler 抢同一个 channel** ⇒ 同一分区的消息**可能**被并发处理（handler 级副作用的顺序**不保证**） | `go-queue@v1.2.2/kq/queue.go:248-259` `startProducers`（`c.Consumers` 个 goroutine 调 `FetchMessage`）＋ `:219-246` `startConsumers`（`c.Processors` 个 goroutine 读**同一个** `q.channel`）<br>⚠️ `service/article/rpc/etc/article.yaml:51` / `:67` 两个消费者都只配了 **`Consumers: 1`** ⇒ **拉取者只有 1 个**，而 `Processors` 没配 ⇒ 默认 **8** |
+| RAG | **8 个 consumer 各占自己的分区** ⇒ 同一分区的消息**严格串行** | `ArticleRpcApplication#articleKafkaListenerContainerFactory`：`setConcurrency(8)` ＋ `AckMode.RECORD` |
+
+⇒ **这是一处模型差异，且 RAG 侧更严**（Go 可能乱序，RAG 不会）⇒ **不是**「offset 提交/跳过语义」的差异（那部分已闭合，见 §12.4.1），而是**handler 级副作用顺序**的差异。
+
+> **为什么仍然 Unknown（judge.md §1.1 ⑥ 第 3 类 ⇒ 计入 §九 ⇒ 不阻断 R3）**：
+> **Go 侧没有活体对拍** —— 本仓**没有**跑 Go `kq` 的探针 ⇒ 无法量化「同分区并发处理」在 article 的真实业务上（`article-creation-topic` 一次创建一条消息）**是否可观测**。
+>
+> **解除条件（两条，任一即可）**：
+> ① **登记为有意偏离并签字** ⇒ 按 §1.1 ⑥ 第 1 类排除 ⇒ 落点应写进 `docs/Intentional_Deviations/article/rpc.md`（**⚠️ 该文件不在本 lane 的写权内** ⇒ 由主线/G4 落码）；
+> ② **补一个 Go 侧活体探针**（真 Kafka ＋ 真 `kq` ＋ 同分区多条消息）⇒ 证明「乱序副作用」在 article 业务上不可观测 ⇒ 则本项转为「已对齐（不可观测）」。
+>
+> ⚠️ **本 lane 不把它写成「已对齐」**（judge.md §1.1 ⑥ 第 3 类的原文要求）。
+
+### 12.4.3 ⚠️ 本轮**实测到并修掉**的一条 flake（守门自身的问题，不是被测对象的问题）
+
+`ArticleKafkaForceCommitGateTest` 的**第一版** U-9 用例断言「**同一分区的消息永远由同一个消费线程处理**」。
+⇒ **实测证伪并改写**：真 Kafka 上消费组在**启动期会连做两次 rebalance**（第一次：某个 consumer 独占全部 8 个分区；第二次：按 `range` 分配器摊成一人一个）
+⇒ ⇒ **分区会在消费线程之间搬家** ⇒ 「线程身份」**不是** Kafka 的不变量 ⇒ 拿它当断言 = 埋了一颗 flake。
+⇒ ⇒ **改写后的断言**（才是 U-9 真正问的东西）：**每分区提交位点 = 最大已投递 offset + 1** ＋ **提交位点从不回退** ＋ **分区内首次投递按 offset 递增** ＋ **≥2 个消费线程**（证明 `concurrency=8` 真生效）。
+⇒ ⚠️ 这条也说明：**「跑绿」与「跑红」都要先判「是不是断言写错了」** —— 本轮 MUT-M2 首次跑出的那条「分区 5 被 2 个线程处理过」**不是** `seekAfterError` 的后果，而是**断言前提错**。
+
+---
+
+## 12.5 §七 **RPC 型 5 条**逐条核（judge.md §三 A-2 的「必达终点指标」）
+
+| # | 判据 | 结论 | 证据（含 Go 出处） | 强度 |
+|---|---|---|---|---|
+| ① | Go proto 的 `rpc` 方法集合 **≡** RAG `*ImplBase` 覆写方法集合 | ✅ **相等（6 ≡ 6）** | Go `proto/article.proto:127-132`（`CreateArticle` / `GetArticle` / `UpdateArticle` / `DeleteArticle` / `ListArticles` / `UploadFile`）≡ RAG `ArticleServiceGrpcImpl.java:75/81/87/93/99/103`（6 个 `@Override`）<br>判定命令：`python3 tools/difftest/check-surface-parity.py --domain article` ⇒ **EXIT=0**（输出「gRPC 方法集合逐条相等（Go ArticleService=6）」） | E2 + 静态守门 |
+| ② | 每方法 **≥1** 条测试 | ✅ **6/6** | `createArticle` → `ArticleDomainServiceSemanticsTest` · `getArticle` → `ArticleSemanticsRegressionTest` 等 · `updateArticle` → `ArticleDomainServiceSemanticsTest` · `deleteArticle` → `ArticleDomainServiceSemanticsTest` · `listArticles` → `ArticleDomainServiceSemanticsTest` · `uploadFile` → `ArticleDomainServiceSemanticsTest`（逐个 grep 命中） | E3 |
+| ③ | 每个**写路径**证明事务边界或幂等 | ✅ **本轮补齐最后一条**（创建路径原先只有「静态」证据） | **既有**：`ArticleTransactionWiringTest`（真 PG）—— `@Transactional` 真生效（AOP 代理断言）· 域事件写失败 ⇒ revision/指针/状态**三者全部回滚**（真实回滚）· 同一 `(aggregate_id, aggregate_version)` 不能有两条域事件（幂等）· 公开读计数**能提交**（不在 read-only 事务里）<br>**本轮新增**：`ArticleCreateArticleKafkaFailureBoundaryTest`（真 PG ＋ 死 broker）⇒ **创建路径**的边界被**钉死**：Kafka 推送失败 ⇒ `INTERNAL` ＋ **已插入的行仍在库里**（Go `create_article_logic.go:125-130`「行不回滚」） | **L4**（真 PG） |
+| ④ | 下游超时 / 不可用**有明确行为且有断言** | ✅ **本轮补齐 Kafka 那一格** | **既有**：DB/SQL 超时 ⇒ `DEADLINE_EXCEEDED`（S-6，`ArticleSemanticsRegressionTest`）· MinIO 失败 ⇒ best-effort 仍成功（O-3）· security 不可用 ⇒ 抛错重投（S-5）<br>**本轮新增**：**Kafka 不可用** ⇒ `INTERNAL` ＋ 行不回滚（`ArticleCreateArticleKafkaFailureBoundaryTest`）；**Kafka 失败位点** ⇒ 丢弃 ＋ 提交自己的 offset+1（`ArticleKafkaForceCommitGateTest`） | **L4** |
+| ⑤ | 业务码经 gRPC 传输后**可还原** | ✅ **适用形态已澄清**：article-rpc **不上线业务码**，发的是**标准 gRPC code**（`article-common` 的 `ErrorCode` 只用于打业务错误日志字段 —— 见 `pom.xml` 的 `article-common` 注释）⇒ 对应的「可还原」判据 = **gRPC status code 可还原** | `ArticleSemanticsRegressionTest`：已带 status 的异常**原样透传**（`DEADLINE_EXCEEDED` 不能变 `UNKNOWN`）· 非 status 的 `RuntimeException` 一律 `UNKNOWN` · `ArticleExceptions.Rpc` 按自带 code 转发（`NOT_FOUND` 不受影响）<br>⇒ 且 **真 wire** 侧有 `ArticleGrpcInterceptorWiringTest`（真 `ServerBuilder.forPort(...)` ＋ 生产的 `GrpcServerConfigurer` ⇒ 真 gRPC server，断言超时**真的**施加到 server 上、deadline **真的**传播到 handler 线程） | E3 + 真 wire |
+
+> ⚠️ **口径**：① 与 ② 是**契约面 / 存在性** ⇒ 支撑 **R2**；**③ ④ ⑤ 才是 R3 ⑤ 要求的「语义断言（Go 出处写进期望值）」** ⇒ 本轮新增的两个守门类**全部**把 Go `文件:行号` 写进了断言消息。
+
+---
+
+## 12.6 变异记录（**变异必红** ＋ **已还原**）
+
+| 变异 | 手法 | 期望 | 实测（2026-10-29） |
+|---|---|---|---|
+| **MUT-M1** | `ArticleRpcApplication`：`new FixedBackOff(0L, 0L)` ⇒ `new FixedBackOff(0L, 9L)` | 失败消息被**重投** ⇒ 行为断言转红 | ✅ **EXIT=1 · 2 条转红**：<br>· `failedMessageIsNotRedeliveredInProcess` ⇒ 「失败消息被重投了」**投递计数 13 ⇒ 22**（= 重投 9 次）<br>· `containerErrorHandlerIsProductionZeroRetry` ⇒ `noRetries != true`<br>⚠️ **绝对基数随当轮 warmup 投递数浮动**（实测见过 **13** 与 **38** 两个基数 ⇒ 另一轮观测为 38 ⇒ 47）⇒ **「多出 9 次」才是稳定量**（`FixedBackOff(0L, 9L)` ⇒ `maxAttempts=9` ⇒ 该条消息共投递 10 次） |
+| **MUT-M2** | `ArticleRpcApplication`：`handler.setSeekAfterError(true)` ⇒ `false` | **行为不变**（该属性**不是**承重项）⇒ 只有**装配面**断言转红 | ✅ **EXIT=1 · 恰好 1 条转红**（用**改写后**的测试复跑）：`containerErrorHandlerIsProductionZeroRetry`（装配面）⇒ U-3 / U-4 的两条**行为**断言**全绿** ⇒ 与 §12.3.2 的机制推导**一致** |
+| **MUT-M3** | `ArticleDomainService#createArticle` 加 `@Transactional` | 行被**回滚** ⇒ 新守门转红（Go 无事务 ⇒ 回滚就是漂移） | ✅ **EXIT=1 · 1 条转红**：`ArticleCreateArticleKafkaFailureBoundaryTest` ⇒ 「article 表里没有行 ⇒ 插入根本没发生」（expected 1 but was 0） |
+
+⇒ **三个变异全部已还原**（`git diff --stat` 见本轮提交说明；`service/**` 除正式改动外为 0）。
+⇒ **真 Kafka 守门的稳定性**：改写后的 `ArticleKafkaForceCommitGateTest` **连续 2 次全绿**（CLEAN-RUN-2 / CLEAN-RUN-3，各 **EXIT=0 · 4/4**）⇒ 改写前那条「线程独占」断言的 flake **已消除**。
+⇒ ⚠️ 另记一次**环境**事件（**不是**缺陷）：CLEAN-RUN-1 在**编译阶段**被 `SIGTERM`（`EXIT=143`）打断 ⇒ 重跑即绿 ⇒ 按 AGENTS.md「`Killed: 9` / 信号终止属环境问题」处理，**不写成代码缺陷**。
+
+---
+
+## 12.7 ✅ 可复算的判定命令（judge.md §1.3 要求「今天能跑 ＋ 覆盖 R 级所声称的那一层」）
+
+```bash
+# ── ① R3 的语义断言（rpc 组件必须有「Go 出处写进期望值」的语义断言）──
+# ⚠️ 下面用**主仓**路径；本 lane 的工作树等价写法（探针与源码都已落仓，两边都能跑）：
+#   cd /Users/pr/Documents/java&golang/RAG.worktrees/r3-article-rpc-close
+cd /Users/pr/Documents/java&golang/RAG
+mvn -o -B -pl service/article/article-rpc -am test \
+    -Dtest='ArticleKafkaForceCommitGateTest,ArticleCreateArticleKafkaFailureBoundaryTest' \
+    -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false
+# ⇒ 断言条数：4 + 1 = 5 条；Go 出处写进期望值：5/5
+# ⇒ 退出码 0 = 全绿
+
+# ── ② 组件全量回归 ──
+mvn -o -B -pl service/article/article-rpc -am test
+# ⇒ surefire XML 求和 = 本组件条数
+
+# ── ③ 契约面（支撑 R2 的那一半）──
+python3 tools/difftest/check-surface-parity.py --domain article    # ⇒ EXIT=0
+
+# ── ④ 双侧活体对拍（U-4′ 的销号依据）──
+bash tools/api-full-parity-probe/article/run.sh                     # ⇒ EXIT=0
+bash tools/api-full-parity-probe/article/mutate-parity.sh          # ⇒ EXIT=0 = 变异全部精确转红
+```
+
+---
+
+## 12.9 🔴 `S-5` 改判的**连带项**：`ArticleSpringContextWiringTest#contentSecurityPortIsExactlyOneAndFailsLoud` 的**重新评估**
+
+> 台账旧表（`:128`「锁死未完成态」行）写：「该用例断言端口**就是**兜底实现 ⇒ ⏳ 未改（S-5 阻塞未解前可接受，但 security 域落地时必须先删此断言）」。
+> ⇒ `S-5` 改判为**范围外**之后，这条的**性质变了** ⇒ 必须重新评估。
+
+### 12.9.1 结论：**保留，但改判其性质**（不是「锁死未完成态」，是「锁死已定稿的设计」）
+
+| 原读法 | 复核后读法 | 依据 |
+|---|---|---|
+| 「锁死**未完成**态」—— 等 security 域落地就该删 | 「锁死**已定稿**的设计」—— security 域**永不**落地（`AGENTS.md:43`）⇒ 这条断言**没有过期时间** | `AGENTS.md:43`（security 范围外）· `docs/PhaseGoal-judge.md:46`（R0 行点名三域） |
+| 断言「端口**就是**兜底实现」= 锁死占位物 | 断言「端口**就是**兜底实现」= 锁住**「审核链路必须 fail-loud」**这条**语义契约**的实现载体 | Go `service/article/rpc/internal/mqs/article_consumer.go:154-155` `if l.svcCtx.SecurityRpc == nil { return fmt.Errorf("content security client not initialized") }` ⇒ **Go 自己在 security 不可用时也要求审核失败** ⇒ RAG 的兜底**逐字复刻**这条 ⇒ 两侧可观察行为一致 |
+
+⇒ **保留该断言**：它守的是一条**安全关键**的不变量（security 不可用 ⇒ 审核必须失败 ⇒ 文章卡在 `REVIEWING` ⇒ **绝不 fail-open 放行未审核内容**）。
+⇒ ⚠️ **但把它的「移除条件」改写了**（见 §12.1 末段）：不再写「等 security 域落地就删」，改写为「若（超出本项目范围）security 域落地 ⇒ **先改端口再接** ＋ **先删/改**这条『端口就是兜底实现』断言」。
+⇒ 🔴 **顺带修掉一处 §3.3.2 形态的「不存在的证据」**：`ContentSecurityAutoConfiguration` 的类注释原文引用 `ArticleContentSecurityWiringTest` ⇒ **该类全仓不存在** ⇒ 已改为真实的 `ArticleSpringContextWiringTest#contentSecurityPortIsExactlyOneAndFailsLoud`（2026-10-29 本轮落码）。
+
+### 12.9.2 ⚠️ 这条断言**不是**「fail-loud」的唯一守门 —— 别把它当唯一证据
+
+| 断言 | 它守得住什么 | 它**守不住**什么 |
+|---|---|---|
+| `contentSecurityPortIsExactlyOneAndFailsLoud`（**装配面**） | 容器里**恰好一个** `ContentSecurityPort`（⇒ 不 NPE / 不歧义）＋ 拿到兜底时**调用必抛** | **守不住**「换成真实现后 fail-loud 仍成立」—— 一旦有真实现，这条断言会**先红**（它是**按当前实现**写的，不是**按语义**写的） |
+| `ArticleSemanticsRegressionTest`（**S-5 / S-5b**，纯 Mockito） | `success=false` ⇒ **抛错重投**、**绝不**当成「不是广告」放行（Go `article_consumer.go:171-173` / `:263-265`） | 守不住「真实现接上后仍 fail-loud」（那是**端口契约**层的事，已由 S-5b 把 `success` 字段补好） |
+
+⇒ ⇒ **两条合起来**才是 fail-loud 的守门网；**任一条单独存在都不足以宣称「审核链路语义已钉死」**（AGENTS.md §3.3.3 第 ② 条：「断言『Bean 存在』≠ 断言『机制生效』」的同款）。
+
+## 12.8 ✅ **本轮结论（2026-10-29）**
+
+| 项 | 结论 |
+|---|---|
+| **R 档** | **R2 → R3**（④ Go 侧每个业务决策点有 `文件:行号` 出处 ✓ · ⑤ RAG 侧有自动化测试断言该行为 ✓ · ⑥ 归属本组件的必相对齐项 = 0 ✓） |
+| **必相对齐项** | **0** —— `S-5` 判为**范围外**（judge.md §1.1 R0）· `U-3` / `U-4` **闭合** · `U-9a` **闭合** · `U-9b` 判为**取证缺口**（§1.1 ⑥ 第 3 类 ⇒ 计入 §九 ⇒ 不阻断）· `U-4′` **销号** |
+| **证据强度** | **L4**（最高档）—— 真 Kafka 位点推进 ＋ 真 PG 落库回读 ＋ 双侧活体逐字节对拍 |
+| **新增守门** | `ArticleKafkaForceCommitGateTest`（4 条 · 真 Kafka）· `ArticleCreateArticleKafkaFailureBoundaryTest`（1 条 · 真 PG ＋ 死 broker） |
+| **组件全量回归** | **188 条 / 0F / 0E / 0S**（25 个测试类 · `mvn -o -B -pl service/article/article-rpc -am test` ⇒ BUILD SUCCESS · 6:44 min）⇒ 原 183 ＋ 4 ＋ 1 |
+| **变异** | **3/3 精确转红**（MUT-M1 行为红 · MUT-M2 仅装配面红 ⇒ 证明该属性非承重 · MUT-M3 行被回滚红）⇒ **全部已还原** |
+| **§七 RPC 型 5 条** | **5/5 满足**（③ ④ 两格由本轮**补齐**，其余三格既有） |
+| **仍开放（不阻断 R3）** | ① `U-9b`（Go 侧 handler 并发模型**未活体对拍**）② 双侧活体的**成功路径完整字段语义**（`user.rpc` 两侧都不可达 ⇒ 现钉的是**降级路径**）③ `O-4` / `O-6` 仍只有静态取证 |
+| **⚠️ 不许越界读** | **本组件不是「零差异」** —— §12.4.2 的模型差异、`O-4`/`O-6` 的静态取证、双侧活体只覆盖降级路径 ⇒ 都**不等于**「两侧行为逐字节一致」 |
 

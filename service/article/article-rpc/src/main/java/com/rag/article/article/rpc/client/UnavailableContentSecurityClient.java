@@ -4,8 +4,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 内容安全审计的<b>默认实现</b> —— 在 {@code security-rpc} 尚未落地到本仓时，
- * <b>让审核链路 fail-loud 而不是 fail-open</b>。
+ * 内容安全审计的<b>默认实现</b> —— 让审核链路 <b>fail-loud 而不是 fail-open</b>。
+ *
+ * <h2>🔴 2026-10-29 订正：本类不是「临时占位」，是本仓的<b>最终设计</b></h2>
+ * <p>原文写「在 {@code security-rpc} <b>尚未落地到本仓</b>时」⇒ 那个措辞暗示「等它迁进来就能撤掉」。
+ * <b>但</b> {@code AGENTS.md:43} 写明 {@code security} 域<b>范围外 ⇒ 不是待办</b>
+ * （并见 {@code docs/DRIFT/article/rpc.md} 的 {@code S-5} 改判：<b>范围外（judge.md §1.1 R0 口径）</b>）
+ * ⇒ ⇒ 本仓<b>永远不会有</b>真的 {@code security.rpc} 可调
+ * ⇒ ⇒ 本类<b>不是占位</b>，而是<b>永久的</b>「审核链路 fail-loud」契约载体。
  *
  * <h2>为什么必须有这个类（而不是干脆不注册 Bean）</h2>
  * {@link ContentSecurityPort} 是审核消费者的<b>唯一</b> security 出口。
@@ -34,9 +40,12 @@ import org.slf4j.LoggerFactory;
  * 并且在 {@code article_status_total} 上完全看不出来（因为审核"成功"了）。
  * 这是本组件里后果最严重的可能改动。
  *
- * <h2>接入真实 security-rpc 后的移除方式</h2>
- * {@code security-proto} 模块落地后，新增一个 {@code @Component} 实现
- * {@link ContentSecurityPort}；本类<b>自动退场</b>，审核消费者的代码<b>一行都不用改</b>。
+ * <h2>「接入真实 security-rpc」这件事<b>不在本项目范围内</b></h2>
+ * <b>如果</b>（超出本项目范围）security 域落地并新增一个 {@code @Component} 实现
+ * {@link ContentSecurityPort}，本类<b>自动退场</b>（{@code @ConditionalOnMissingBean}），
+ * 审核消费者的代码<b>一行都不用改</b>。
+ * <br>⚠️ 但在那之前，<b>不得</b>把本类改成「返回 {@code isAd=false} 就算通过」——
+ * 详见上面「🔴 严禁改成 fail-open」那一段。
  *
  * <h2>⚠️ 为什么注册在自动配置里而不是直接 {@code @Component}</h2>
  * {@code @ConditionalOnMissingBean} <b>只在自动配置类上才有确定语义</b>。

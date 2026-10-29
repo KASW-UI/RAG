@@ -242,6 +242,17 @@
             <artifactId>testcontainers-junit-jupiter</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+            🔴 真 Kafka 守门用（U-3 / U-4 / U-9）：article-rpc 的「失败位点处置」语义
+            （seekAfterError + FixedBackOff(0,0)）**只有真 broker 的位点推进能证明**。
+            版本由 spring-boot-dependencies BOM 管理，不显式写 version（同 hot-rpc）。
+            镜像固定 apache/kafka:3.7.2 —— 本地已有，不需要拉（见 hot-rpc 的同款说明）。
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-kafka</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
