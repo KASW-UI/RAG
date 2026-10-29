@@ -21,8 +21,14 @@
 |---|---|---|---|---|---|
 | `BLK-01` | **P0 #5 覆盖缺口** —— 判据主语是「**项目**」不是「某个域」 | 旧结论只覆盖 users 域 **1/10 域**、**2/20 服务** ⇒ 实测照 `README.md:127-147` §三 原文起 `article-api` ⇒ `nacos registry … serverAddr='nacos:8848'` → `ErrCode:-401 Client not connected` → `Application run failed`（进程退出）；只用 shell 覆盖地址 + 错开端口 ⇒ article-api 正常启动（`Tomcat started on port 8899` ＋ Nacos 注册成功 ＋ `/actuator/health` 200 `{"status":"UP"}`）⇒ **缺陷面 = 地址 + 端口两类，不是代码问题** | `P0 #5`（`docs/PhasedGoal.md:46`）· `X-12`（judge §五）· `P0 #8`（`:49`，fail-closed 不得被本次改动弄坏）· `S1-1` / `S1-4` / `S1-6` | `docs/PhasedGoal.md:46` · `docs/PhaseGoal-judge.md:436` · `README.md:127-147` · `docs/RoundPlan/round-01/README.md:12` | **Round 1**（`P1-T01`~`P1-T05`） |
 | `BLK-02` | **E65 出向 gRPC 不继承请求 deadline** —— Go 到点立刻失败，RAG 出向调用可无限挂住 | 🔴 **L4 双侧活体坐实**：Go 到点立刻失败（`failed_fast=true, code=4`），RAG 出向调用**无 deadline 上界 ⇒ 可无限挂住**（实测 `failed_fast=false, code=0`）⇒ **根因 = RAG 没有 ctx 传播 ⇒ 非 SQL 的 I/O 全部不感知 deadline** | `P0 #4`（`docs/PhasedGoal.md:45`）· `X-6`（judge §五）· `C-2` / `C-3` · `S1-1` / `S1-4` / `S1-6` | `docs/DRIFT/global/vs-common.md:30` · `docs/DRIFT/global/vs-common.md:46` · `docs/DRIFT/global/_README.md:391` · `docs/PhaseGoal-judge.md:259` | **Round 2**（`P2-T01`~`P2-T05`） |
+| `BLK-03` | **`S1-FOLLOW-007` —— 基线仍把「已签字偏离」记成开放缺陷** ⇒ 机器生成的派单指令会让 G4 去改掉用户已决定保留的行为 | 🔴 **维持仍开着**（2026-10-30 users lane 重核：基线里那条「已签字偏离」**仍被记成开放缺陷**）· 阶段归属 **A**（派单错误 ⇒ 共享层被改坏）· 优先级 **P1** | `S1-1` / `S1-4`（阶段 1 准入面）· 判据基线 = `docs/PhaseGoal-judge.md`（§1.5：**四层状态只认一个来源**） | `docs/DRIFT/users/stage1-admission.md:524` · `docs/PhaseGoal-judge.md:192`（`follow-api` 的 A-2 行「残留」列仍写 `DRIFT-FOLLOW-008`） | **Round 3**（基线复判订正面 · `P3-T01`~`P3-T09`）—— ⚠️ **Round 3 已在「基线行改判」范围内** ⇒ 本条**不是新工作**，而是**派生链没连上** ⇒ 动作 = 把 `S1-FOLLOW-007` 接进 Round 3 的条目清单（`P3-T02` / `P3-T07` 的行） |
 
 > ⚠️ `BLK-02` 的守门 `check-deadline-downstream.py` 的 **PASS 语义是「漂移还在」** ⇒ **不能拿它的 PASS 证明 X-6 成立**（见 `docs/RoundPlan/round-02/README.md` `P2-T05`）。
+
+> 🆕 **2026-10-30 · 派生层真缺口轮（`docs/DRIFT/_cross/stage1-derivation.md` §4.1）**
+> ⇒ 本类新增 `BLK-03`（**1 条**）。判定口径 = **状态开放**（🔴 / 仍生效 / ⏳ 未签字）
+> **且** 阶段归属 ∈ {A, B} **且** `_task-universe.md` 的 37 条任务**都没有指向它**。
+> ⇒ ⚠️ 派生层口径下 **A/B 类未排期共 3 条**（本类 1 条 ＋ 第 2 类 2 条）⇒ **已全部登记**。
 
 ---
 
@@ -34,6 +40,13 @@
 | `GAP-02` | **G-17 `like-common` 专属台账缺失** | 🟡 **记录缺口**（非行为缺口）—— 「从未与 Go 对照」的判定已被仓内证据推翻（它有 Go 派生的契约测试 `LikeErrorContractTest`：29 个码逐条 1:1 ＋ 文案表 ＋ 未知码回落 ＋ `CodeError` 序列化）⇒ 缺的只是**逐条台账记录** | `like-common` 组件的**可审计性** · 不计入 `R3 ⑥`（judge §1.1 ⑥ 第 3 条） | `docs/PhaseGoal-judge.md:481` | **阶段二**（见本清单第 6 类）· 本阶段只登记 |
 | `GAP-03` | **`U-01` 的「DC → 第三仓」一段**（`Sea-BreakTheWaves`） | 🟡 取证缺口（部分闭合）—— like → DC 那一跳已 L4 闭合（两侧 970 B sha256 相同 ＋ outbox 终态逐字段相同）；**DC → 第三仓消费端那一跳仍未取证**（需 pinned checkout ＋ 40-hex SHA）⇒ **仓外、本机不可核验** ⇒ **不是缺陷** | 不计入 `X-1` 判定 · 不阻阶段一 | `docs/DRIFT/like/api.md:801` · `docs/DRIFT/like/rpc.md:9` | **阶段一之外**（见本清单第 6 类） |
 | `GAP-04` | **共享层 28 项里的「证据缺口 1」** —— `LoggerFactoryBean` 各模块注册方式不一致 | 🟡 **U-2** —— 各模块的注册方式不一致（有的显式 `@Import`，有的只靠 `scanBasePackages`）⇒ **是否有模块漏注册「未验」**（跨模块，未验）⇒ 属**取证缺口**而非行为差异 | 不计入 `R3 ⑥`（judge §1.1 ⑥ 第 3 条）· 须登记进 judge §九 证据缺口清单 | `docs/DRIFT/common/alignment-2026-10-23.md:957` · `docs/DRIFT/common/alignment-2026-10-23.md:525` | **Round 5** `P5-T02`（台账对账面）· 跨模块复核归各域 lane |
+| `GAP-05` | **`S1-FOLLOW-008` —— `check-surface-parity.py` 的两个静默假绿口子** | 🔴 **维持仍开着**（2026-10-30 users lane 重核：**工具在位**（`tools/difftest/check-surface-parity.py` · 23,215 B · 2026-10-29 03:27），但**「两个口子」的具体位置本轮未逐条复现**）⇒ 属**取证缺口**（不是已证实的缺陷）· 阶段归属 **B**（阶段 1 竞争力补强）· 优先级 **P2** | 阶段 1 契约面判据的**守门可信度** · 不阻阶段 1 | `docs/DRIFT/users/stage1-admission.md:525` · `tools/difftest/check-surface-parity.py` | **Round 5** `P5-T02` 口径（取证与台账对齐）—— **共享工具面** ⇒ 落点 `tools/difftest/`（**G4 写权面**）⇒ 按 §5.3e 走共享层反馈单 |
+| `GAP-06` | **`S1-FOLLOW-009` —— 5 个 api 模块缺 `TESTCONTAINERS_RYUK_DISABLED`** | 🔴 **维持仍开着**（2026-10-30 users lane 重核：`grep -rln "TESTCONTAINERS_RYUK_DISABLED" service/ --include='*.yml' --include='*.yaml'`（排除 target）⇒ **0 命中**；逐模块实测仍缺）· 阶段归属 **B** · 优先级 **P2** | 阶段 1 的**验证手段可用性**（Testcontainers 清理容器会拖慢/挂住本地跑测）· 不阻阶段 1 | `docs/DRIFT/users/stage1-admission.md:526` | **Round 4 / Round 5** —— **各域域侧**（5 个 api 模块）⇒ 归各域 lane，**不是**共享层 |
+
+> 🆕 **2026-10-30 · 派生层真缺口轮** —— 本类新增 `GAP-05` / `GAP-06`（**2 条**）。
+> ⇒ 连同第 1 类的 `BLK-03`，派生层口径下 **A/B 类未排期共 3 条 ⇒ 已全部登记**（无遗漏）。
+> ⇒ ⚠️ 派生层另有 **453 条「状态开放但未定级」**（**不在施工单、也未推给阶段 2**）
+> ⇒ 它们**需要人工定级才能进施工单** ⇒ 清单见 [`docs/DRIFT/_cross/stage1-derivation.md`](../DRIFT/_cross/stage1-derivation.md) §4.2。
 
 ---
 
