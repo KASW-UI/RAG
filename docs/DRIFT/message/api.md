@@ -45,7 +45,7 @@
 
 | # | 输入 | Go 实测 | 修复前 RAG | 性质 | 状态 |
 |---|---|---|---|---|---|
-| **DRIFT-MSGAPI-001** | `{"conversation_id":123}`（JSON **数字**） | **接受 → 123** | **拒绝 → 5001** | SEMANTIC MISMATCH / HIGH-RISK | ✅ 已修 |
+| **DRIFT-MSGAPI-001** | `{"conversation_id":123}`（JSON **数字**） | **接受 → 123** | **拒绝 → 5001** | SEMANTIC MISMATCH / HIGH-RISK | ✅ 已修<br>⚠️ **2026-10-30 真实性复核（message+like lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（**不改判**）。**本条段内原无可复算指针，本轮补齐**：RAG `service/message/message-api/src/main/java/com/rag/message/message/api/dto/ConversationMessagesReq.java:64-66`（`@JsonProperty("conversation_id")` + `setConversationId(Object raw)` → `GoStyleStringInt64.parse(raw, "conversation_id")` ⇒ **接受** JSON 数字）· RAG `service/message/message-api/src/main/java/com/rag/message/message/api/dto/GoStyleStringInt64.java:74`（`public static Long parse(Object raw, String fieldName)`）· Go `go-zero@v1.10.2/core/mapping/unmarshaler.go:1113-1125`（`case json.Number:` → `setValueFromString(baseType.Kind(), value, v.String())` ⇒ Go 的 `,string` 入参方向**宽松**，接受数字）· Go `go-zero@v1.10.2/core/jsonx/json.go:74-77`（`decoder.UseNumber()` ⇒ 解出来是 `json.Number`，不是 `float64`/`int`）· 核对日期 2026-10-30。 |
 | **DRIFT-MSGAPI-002** | `{"offset":"10"}`（**无** `,string`，JSON 字符串） | **拒绝 → 5001** | **接受 → 10** | SEMANTIC MISMATCH / HIGH-RISK | ✅ 已修 |
 | **DRIFT-MSGAPI-003** 🆕 | `{"extra":null}`（字段 tag 是 **`optional`**） | **接受** | **拒绝 → 5001** | SEMANTIC MISMATCH | ✅ 已修 |
 
@@ -1048,6 +1048,7 @@ RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFie
 - ⚠️ **为什么这一条拖了这么久**：它当时的卡点是「Go 侧未读、归 message-rpc 组件的审查范围」——
   **跨组件的同一个问题被拆成两个组件的待办，就等于永远没人答**（§3.5 的同源坑）。
   ⇒ 教训：**问题归属要按「问题」分，不能按「组件」分**。
+- ⚠️ **2026-10-30 真实性复核（message+like lane）**：原判 **✅ 已关闭（2026-10-24 第十轮）** ⇒ **现行态 = ✅ 已关闭**（**不改判**；短确认）。依据：RAG `service/message/message-common/src/main/java/com/rag/message/message/common/errmsg/MessageGrpcError.java:255`（`mapStatusCodeToBizCode(Status.Code)`）· RAG `service/message/message-common/src/main/java/com/rag/message/message/common/errmsg/MessageGrpcError.java:244`（反查未命中 ⇒ 走 code class 映射）· RAG `service/message/message-common/src/main/java/com/rag/message/message/common/errmsg/MessageGrpcError.java:247`（兜底 `CODE_SERVER_BUSY`）· Go `service/message/common/errmsg.go:117-132`（同一张 switch：`InvalidArgument` / `Unauthenticated` / `PermissionDenied` / `AlreadyExists` / `NotFound` / `Internal` + `default`）· Go `service/message/common/errmsg.go:31`（`CodeServerBusy = 1015`）· 核对日期 2026-10-30。
 
 ### UNRESOLVED-002 ✅ **已关闭（2026-10-24 第九轮）**
 - ~~**Question**：RAG 侧 `MessageGoStyleCoercion` 的规则**是否真的作用在 Spring MVC 实际使用的那个 mapper 上**？~~
@@ -1059,6 +1060,7 @@ RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFie
   - 1 例必填 `title:null` ⇒ 仍 5001
   ⇒ 它证明的是「**规则真挂在 Spring MVC 用的那个 mapper 上**」
   —— 探针只证明「规则是什么」，**装配层断言才证明「MVC 用的是这条规则」**（§3.3.3）。
+- ⚠️ **2026-10-30 真实性复核（message+like lane）**：原判 **✅ 已关闭（2026-10-24 第九轮）** ⇒ **现行态 = ✅ 已关闭**（**不改判**）。**本条段内原无可复算指针，本轮补齐**：RAG `service/message/message-api/src/main/java/com/rag/message/message/api/config/MessageGoStyleCoercion.java:97`（`builder.withCoercionConfig(LogicalType.Integer, cfg -> cfg.setCoercion(CoercionInputShape.String, CoercionAction.Fail))` ⇒ JSON 字符串不进整数字段）· RAG `service/message/message-api/src/main/java/com/rag/message/message/api/config/MessageGoStyleCoercion.java:101`（`LogicalType.Boolean` 同款规则）· 守门 RAG `service/message/message-api/src/test/java/com/rag/message/message/api/MessageApiGoStyleCoercionWiringTest.java:69`（类）+ `:115`/`:140`/`:168`/`:210`/`:236`/`:254`（**6 例 `@Test`**，全部走真实 MVC 管线）· Go `go-zero@v1.10.2/core/mapping/unmarshaler.go:1113-1125`（Go 侧入参方向的判据出处）· 核对日期 2026-10-30。
 
 ### UNRESOLVED-003 ✅ **已关闭（2026-10-24 第八轮）**
 - ~~**Question**：响应头在**真容器**下的完整形状两侧是否逐字节一致？~~
@@ -1067,6 +1069,7 @@ RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFie
   `401 未带 token` / `404 未知路径` / `405 方法不匹配` / `415 Content-Type 不对` / `200 正常 envelope`（带 JWT）。
   原始响应头产物在 `/tmp/difftest-msg-headers/`。
 - **⇒ 取证结论见第八轮第 2 节的对照表**（3 处真实差异 + 1 处框架限制）。
+- ⚠️ **2026-10-30 真实性复核（message+like lane）**：原判 **✅ 已关闭（2026-10-24 第八轮）** ⇒ **现行态 = ✅ 已关闭**（**不改判**）。**本条段内原无可复算指针，本轮补齐**：工具 RAG `tools/difftest/exp-http-headers-message.sh`（在位，8007 字节，可执行位 `-rwxr-xr-x`）· Go `go-zero@v1.10.2/rest/handler/tracehandler.go:61`（`propagator.Inject(spanCtx, propagation.HeaderCarrier(w.Header()))` ⇒ Go 侧响应头注入点）· RAG `service/common/src/main/java/com/rag/common/http/GoStyleTraceparentFilter.java:188-190`（`@Component` + `@Order(Ordered.HIGHEST_PRECEDENCE + 3)`）· RAG `service/common/src/main/java/com/rag/common/http/GoStyleTraceparentFilter.java:261-285`（`Extract` → `Start` → `Inject` 三步）· 核对日期 2026-10-30。
 
 ### UNRESOLVED-004 ✅ **已关闭（2026-10-24 第八轮）**
 - ~~**Question**：3s 超时触发时，RAG 是否真的写出 `503 + text/plain; charset=utf-8 + "Request Timeout\n"`？~~
@@ -1084,6 +1087,8 @@ RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFie
   Tomcat 的 `setContentType` 会把 Content-Type 解析成 MediaType 再序列化、**吃掉空格**；
   实测 `setHeader("Content-Type", …)` 也一样（Tomcat 内部转手调 `setContentType`）
   ⇒ RAG 侧最多只能发 `text/plain;charset=utf-8`，Go 是 `text/plain; charset=utf-8`。
+- ⚠️ **2026-10-30 真实性复核（message+like lane）**：原判 **✅ 已关闭（2026-10-24 第八轮）** ⇒ **现行态 = ✅ 已关闭**（**不改判**）。**本条段内原无可复算指针，本轮补齐**：RAG `service/message/message-api/src/test/java/com/rag/message/message/api/MessageApiTimeoutRealTomcatTest.java:67`（类声明）· RAG `service/message/message-api/src/test/java/com/rag/message/message/api/MessageApiTimeoutRealTomcatTest.java:91`（`GO_TIMEOUT_BODY = "Request Timeout"`）· RAG `service/message/message-api/src/test/java/com/rag/message/message/api/MessageApiTimeoutRealTomcatTest.java:147`（`slowDownstreamYieldsGoTimeoutContract` ⇒ 503 契约）· RAG `service/message/message-api/src/test/java/com/rag/message/message/api/MessageApiTimeoutRealTomcatTest.java:183`（`fastDownstreamStillReturns200` ⇒ 快路径对照）· RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:388`（`httpResp.setStatus(503)` ⇒ 503 出口）· Go `go-zero@v1.10.2/rest/config.go:55`（`Timeout int64 json:",default=3000"` ⇒ 3s 阈值同源）· 核对日期 2026-10-30。
+- 🔴 **口径订正（本轮）**：本条正文写「新增 `MessageApiTimeoutRealTomcatTest`（**2 例**，真 Tomcat）」⇒ 实测该类有 **3 个 `@Test`**（`:106` `bindsToDedicatedPortSegment` / `:147` 503 契约 / `:183` 200 快路径）⇒ 精确口径 = **2 条契约断言 + 1 条端口绑定前置检查**。**结论不变**，仅计数口径订正。
 
 ### UNRESOLVED-005
 - **Question**：`extra` 落库后的**键序**是否影响客户端？
@@ -1094,6 +1099,7 @@ RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFie
   且 proto map 的迭代顺序本就不保证。
 - **Impact**：仅字节级差异，JSON 语义等价。首轮已留档，本轮维持。
 - **Required Confirmation**：若未来出现按字节比对 body 的契约测试，需先决定「是否排序」。
+- ⚠️ **2026-10-30 真实性复核（message+like lane）**：原判 **🟡 仍未定论（Why Unknown：只确认两侧语义等价，未做字节级对拍）** ⇒ **现行态 = 🟡 仍未定论**（**不改判** —— 本条是「待决」而非「已闭合」，按 §4.5「判不了就写待核实」不擅自升级）。短确认：RAG `service/message/message-api/src/main/java/com/rag/message/message/api/service/MessageApiSupport.java:237`（`new java.util.LinkedHashMap<>(item.getExtraMap())` ⇒ RAG 侧用 `LinkedHashMap` 包 proto map）· Go 侧口径 = `encoding/json` 对 `map[string]string` **按键排序**输出（Go 标准库行为；⚠️ **本机无 Go 标准库源码副本 ⇒ 该条无法在本机复算**，只作口径说明，不作证据）· 核对日期 2026-10-30。
 
 ---
 

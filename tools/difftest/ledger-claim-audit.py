@@ -66,8 +66,13 @@ ID_RE = re.compile(
 TABLE_ROW_RE = re.compile(r"^\s*\|\s*\*{0,2}`?([A-Za-z][A-Za-z0-9_.\-]*)`?\*{0,2}\s*\|")
 
 # 证据指针：<path>:<numbers>
+# ⚠️ **2026-10-30 补 `@`（message+like lane 报的缺口）**：原字符集**不含 `@`** ⇒
+#    `go-zero@v1.10.2/rest/httpx/util.go` 这类 **module@version** 形态的指针
+#    **只能匹配到 `@` 之后的后缀**（`rest/httpx/util.go`）⇒ **版本信息被整个丢掉**
+#    ⇒ 而本机 mod cache 里 `go-zero` / `go-zero@v1.10.0` / `go-zero@v1.10.2` **同时存在**
+#    ⇒ 不带版本 ⇒ 核到的可能**不是项目实际 pin 的那版**（真源 `go.mod:17` pin = `v1.10.2`）。
 PTR_RE = re.compile(
-    r"([A-Za-z0-9_./\-*]+(?:\.java|\.go|\.py|\.sh|\.md|\.yml|\.yaml|\.sql|\.xml|\.json|\.txt|\.class)):(\d+(?:\s*[-–,]\s*\d+)*)"
+    r"([A-Za-z0-9_./\-*@]+(?:\.java|\.go|\.py|\.sh|\.md|\.yml|\.yaml|\.sql|\.xml|\.json|\.txt|\.class)):(\d+(?:\s*[-–,]\s*\d+)*)"
 )
 # 「实体」：指针同句里出现的大驼峰 / 下划线标识符（用于第 4+ 层）
 ENTITY_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_]{3,})`")
