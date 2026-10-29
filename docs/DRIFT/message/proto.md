@@ -135,3 +135,22 @@ grep -rn 'getDescriptor|FieldNumber|setField(|getNumber()' service/message/*/src
 `Intentional_Deviations` 侧现有 **7 条**（`SD-2026-10-24-01/02/03/04` + `SD-2026-10-23-06/07/08`，其中 `SD-07` 已撤销；正本在 [`Intentional_Deviations/message/rpc.md`](../../Intentional_Deviations/message/rpc.md)），
 ⚠️ **2026-10-24 第十一轮更正**：本句原先写「只有 api 一条指针（指向 `_cross` 里的 SD-03）」—— **已过期**；
 `Pitfalls` 侧 api / rpc 两份本轮已追加。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W6
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| SD-04 | D（经分析确认：本域从未引入该偏离 ⇒ 不适用） | P1 | 否（不阻断阶段一） | Go `proto/message.proto:3`（`package message;` ⇒ proto package 本来就是 `message`）＋ `proto/message.proto:5`（`option go_package = "./pb";` ⇒ Go 生成物的语言包名 `pb` 来自这里，**不是** proto package、也不是 gRPC 服务名前缀）＋ `service/message/rpc/pb/message_grpc.pb.go:383`（`ServiceName: "message.MessageService",` ⇒ 生成后的 gRPC 服务名前缀就是 `message.MessageService`）vs RAG `service/message/message-proto/src/main/proto/message.proto:3`（`package message;` ⇒ 与 Go 逐字相同）＋ `:4`（`option java_package = "com.rag.message.message.proto";`）＋ `:5`（`option java_multiple_files = true;`）＋ `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/service/impl/MessageRpcServiceImpl.java:62`（`extends MessageServiceGrpc.MessageServiceImplBase` ⇒ 生成物同样落在 proto package `message` 下 ⇒ 服务名前缀与 Go 同为 `message.MessageService`）⇒ ⇒ **差异已消失**：`comment`/`like` 两域那种「proto package 由遗留名 `pb` 归一为域名」的偏离**在本域从未被引入** ⇒ 台账 `docs/DRIFT/message/proto.md:34` 的那一行本身就是一条**澄清**（「本域**没有** SD-04 / SD-05 那类 `package` 归一偏离」）⇒ 派生器把标题里的交叉引用当成了登记 ⇒ 逐条回源后确认本域无待实现内容 ⇒ 归 D、不阻断阶段一 | 2026-10-30 |

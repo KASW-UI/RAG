@@ -2938,3 +2938,24 @@ sed -n '201p'     "$GOMOD/gorm.io/gorm@v1.31.1/callbacks/update.go"
 sed -n '22p'      "/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/service/common/observability/http.go"
 ```
 
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W6
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-MSG-012 | C（阶段 2 最终工程建设项 · 部署面收敛） | P2 | 否（不阻断阶段一） | Go `service/message/rpc/message.go:25`（`func main()` ⇒ 纯 gRPC 进程）＋ `:37`（`s := zrpc.MustNewServer(c.RpcServerConf, …)` ⇒ **无 servlet 容器**、无 HTTP 监听面）vs RAG `service/message/message-rpc/pom.xml:86`（`<artifactId>spring-boot-web-server</artifactId>` ⇒ 引了 web-server 构件）＋ `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/bootstrap/NacosRegistration.java:33`（javadoc 明写「**本服务不带 web**，要走纯手动注册路径」）⇒ ⇒ **差异仍成立**：pom 引入的 web-server 构件与本模块自述「不带 web」互相矛盾（属部署面差异，不影响 gRPC 行为面）⇒ 阶段二收敛（移除该依赖或改口径，二选一）⇒ 归 C、不阻断阶段一；⚠️ 本条在 2026-10-30 活体对拍轮里 `tools/difftest/run.sh` ⇒ EXIT=0，但退出码只证该探针自身断言成立、不等于本条全量成立 | 2026-10-30 |
+| DRIFT-MSG-V-020 | D（差异已消失 ⇒ 无待实现内容） | P1 | 否（不阻断阶段一） | Go `service/message/rpc/internal/model/db.go:22`（DSN 钉 `TimeZone=Asia/Shanghai` ⇒ GORM 迁出的 `timestamptz` 存绝对时刻，`time.Time.Unix()` 读出真实 epoch）＋ `:42`（`db.AutoMigrate(&Notification{}, &Conversation{}, &ConversationMessage{})` ⇒ 三张表随实体声明迁出）vs RAG `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/service/MessageRpcSupport.java:107`（`private static long toEpochSecond(OffsetDateTime instant)` ⇒ 实体字段已由 `LocalDateTime` 改为 `OffsetDateTime`）＋ `:110`（`return instant.toEpochSecond();` ⇒ **与时区无关**、持有真实瞬时 ⇒ 等价于 Go 的 `time.Time.Unix()`）＋ `service/message/message-rpc/src/main/resources/db/migration/V5__message_time_columns_timestamptz.sql:2`（8 个时间列 `TIMESTAMP ⇒ TIMESTAMPTZ`）⇒ ⇒ **差异已消失**：2026-10-23 第五轮按 users 域规格落码（改已应用迁移会撞 Flyway 校验和 ⇒ 新写 V5 而非改 V1~V3）⇒ 类型与可空性两侧 0 差异；⚠️ 残留（不在本条范围）= `DEFAULT CURRENT_TIMESTAMP` 残留（Go 侧无 DB 层默认 ⇒ 已登记不修，两侧 INSERT 均显式绑定该列 ⇒ 不可观测） | 2026-10-30 |
+| DRIFT-MSG-V-027 | D（差异已消失 ⇒ 无待实现内容） | P0 | 否（不阻断阶段一） | Go `service/message/rpc/internal/model/db.go:42`（`db.AutoMigrate(&Notification{}, &Conversation{}, &ConversationMessage{})` ⇒ Go 侧**无版本化迁移账本** ⇒ 不存在「非空 schema 上 baseline 把 V1 整条跳过」这个失效面）vs RAG `service/message/message-rpc/src/main/resources/application.yml:102`（`baseline-version: 0` ⇒ baseline 标记打在 version 0 ⇒ V1 之后全部迁移照常执行）＋ `:105`（`table: flyway_schema_history_message` ⇒ 独立账本表名）＋ `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageFlywaySharedSchemaWiringTest.java:164`（`assertEquals("0", versions.get(i), …)` ⇒ 断言账本里 baseline 行是 version 0）＋ `:179`（`assertEquals("SQL", types.get(versions.indexOf("1")), …)` ⇒ 断言 V1 真的以 SQL 执行过、不是被 baseline 顶掉）＋ `:187`（`assertTrue(tableExists("message_notification"), …)`）⇒ ⇒ **差异已消失**：2026-10-24 起真栈时暴露的「Flyway baseline 跳过 V1 ⇒ `message_notification` 永远建不出来 ⇒ 服务起不来」已由 `baseline-version: 0` ＋ 独立账本表名闭合 ⇒ 本域不再阻断阶段一 | 2026-10-30 |

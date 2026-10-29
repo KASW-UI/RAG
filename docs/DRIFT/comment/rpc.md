@@ -1255,3 +1255,22 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 #### 🟡 **口径订正（2026-10-28 · G3）**：G2 报的本域数字与本树实测**不一致**
 
 ⇒ ⇒ **G2 报的「comment = 2 处」** vs **本树实测「5 处」（本轮迁的）** ⇒ ⇒ 两边数的**树不同**（本树另有上一轮已迁的 `grpc.server.port` 形态）⇒ ⇒ ⇒ **不是谁数错，是「比的不是同一份」** ⇒ ⇒ **口径**：迁**前**以本树实测为准，迁**后**以「各形态 = 0」为准。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W6
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| E66 | C（阶段 2 最终工程建设项 · 落点 100% 在共享层，本域无法自修） | P1 | 否（不阻断阶段一） | Go `service/comment/rpc/internal/cache/comment_subject_cache.go:76`（`GetSubjectCache(ctx context.Context, subjectID string)` ⇒ 带 ctx）＋ `:84`（`c.rdb.Get(ctx, SubjectKey(subjectID))`）＋ `:103`（`SetSubjectCache(ctx, …)`）＋ `service/comment/rpc/internal/cache/comment_invalidation_cache.go:10`（`InvalidateTargetCaches(ctx, …)`）＋ `:37`（`DeleteCommentIndexCache(ctx, …)`）＋ `:56`（`deleteKeys(ctx, …)`）⇒ go-redis 的这些调用都吃 ctx ⇒ deadline 到点缓存读写立即中止 vs RAG `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentCacheService.java:250`（`redis.opsForValue().get(...)`）＋ `:279`（`set`）＋ `:331`（`set`）＋ `:341`（`get`）＋ `:376`（`get`）＋ `:433`（`set`）＋ `:479`（`multiGet`）＋ `:528`（`set`）⇒ 读与写**全部零 deadline 检查**（全文件 grep `deadline`/`remaining`/`timeout` ⇒ **0 命中**）⇒ ⇒ **差异仍成立**：Go 到点后不再发生缓存读写、RAG 照写不误（写路径尤其明显）⇒ 根因在共享层（`service/common` 无任何 Redis 期限载体：`DeadlineState` 只覆盖 SQL、`GoStyleRequestDeadline` 只覆盖 HTTP 与出向 stub）⇒ global 侧登记为 🔴 OPEN · 本轮转立项 · 待拍板 ⇒ 阶段二由 G4 落码 ⇒ 归 C | 2026-10-30 |

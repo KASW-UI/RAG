@@ -233,3 +233,22 @@
 | [`../../DRIFT/comment/api.md`](../../DRIFT/comment/api.md) | 需要对齐的差异在本域的落点 |
 | [`../../DRIFT/comment/rpc.md`](../../DRIFT/comment/rpc.md) | `comment-rpc` 的台账 |
 | [`../comment/proto.md`](./proto.md) | `SD-2026-10-23-04`（已签字） |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W6
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| SD-2026-10-24-CAND-05 | C（阶段 2 最终工程建设项 · 共享层判据对齐或改判签字） | P3 | 否（不阻断阶段一） | Go `golang-jwt/jwt/v4@v4.5.2/request/oauth2.go:8`（`func stripBearerPrefixFromTokenString(tok string) (string, error)`）＋ `:10`（`if len(tok) > 6 && strings.ToUpper(tok[0:7]) == "BEARER "` ⇒ 判据是 **长度 > 6** ⇒ 长度恰为 7 的头（`"Bearer "`）被剥成空串 ⇒ 后续解析失败 ⇒ **401**）vs RAG `service/users/users-common/src/main/java/com/rag/users/common/jwt/BearerTokenExtractor.java:74`（`tokenForSignatureVerification(String authHeader)`）＋ `:75`（`if (authHeader.length() > BEARER_PREFIX.length()` ⇒ `BEARER_PREFIX` 长度为 7 ⇒ 判据是 **长度 > 7** ⇒ 长度恰为 7 的头保留整串 ⇒ 解析失败 ⇒ **401**）⇒ ⇒ **差异仍成立**：两侧判据不同（`> 6` vs `> 7`）；但**结局相同**（都 401，只是错误文本不同）⇒ 当前**完全不可观察** ⇒ 本条为 ⏳ 未签字候选（不因位于 `docs/Intentional_Deviations/` 而归 D）⇒ 阶段二二选一：把共享层判据改成 `> 6` 与 Go 对齐（不改变任何可观察行为），或改判为「表述差异、结局一致」并签字 ⇒ 落点 `service/users/users-common`（共享层，写权归 G4）⇒ 归 C、不阻断阶段一 | 2026-10-30 |

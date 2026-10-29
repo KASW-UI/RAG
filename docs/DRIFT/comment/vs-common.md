@@ -654,3 +654,24 @@ git diff --stat -- service/        # ⇒ 0 行
 | 本文件的 **§2 A8 轴** | ⚠️ 本节**不改** A8 的结论（A8 记的是 DDL 列级一致面）⇒ ⇒ **A8 原结论不变**；本节是**在其之上补了约束 / 索引 / 触发器 / 源码↔活库四层**，且**把 21 处加强型差异显式登记**（A8 原行**未提**这些）⇒ ⇒ **A8 那格的「✅ DDL 列级一致」应读作「列级（类型/长度）一致」**，**不含**约束 / 索引 / 触发器面 |
 
 ---
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W6
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| C-3 | A（阶段一准入阻断项 · 现行开放面 = `:112` 的 global E65） | P1 | 是（阻断阶段一） | 同一编号在本文件有三处登记，**现行开放面 = `:112` 的「C-3 / U15（= global E65）出向 gRPC 不继承请求 deadline」**：Go `service/comment/rpc/internal/logic/subject_fallback.go:12`（`resolveSubjectFallback(ctx context.Context, …)`）＋ `:17`（`articleRPC.GetArticle(ctx, …)` ⇒ 父 deadline 经 ctx 传播 ⇒ 到点即止）＋ `go-zero@v1.10.2/zrpc/internal/client.go:115`（`if c.middlewares.Timeout { interceptors = append(interceptors, clientinterceptors.TimeoutInterceptor(timeout)) }` ⇒ 客户端无条件 2s）vs RAG `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/client/ArticleRpcClient.java:71`（`GoStyleClientCallTimeout.withDeadline(stub)` ⇒ **只做到 2s 封顶**，不继承服务端剩余预算）＋ `service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java:110`（`applyTo`）＋ `:112`（`Long d = DEADLINE_NANOS.get()` ⇒ 为 null 时原样返回 stub ⇒ 恒 no-op）＋ `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:324`（`GoStyleRequestDeadline.begin(deadlineNanos)` ⇒ **全仓主代码唯一绑定点** ⇒ 只覆盖 HTTP worker）⇒ ⇒ **差异仍成立**：gRPC 服务端路径上 `applyTo` 恒 no-op ⇒ 实际生效的是平铺的 2s 而非 `min(2s, 服务端剩余)` ⇒ 已由 `docs/PhaseGoal-judge.md` v5 §五 X-6 判为 🔴 A 类（双侧活体：Go `outgoing_carrier=present_expired` vs RAG `outgoing_carrier=absent`）⇒ 跨组件不变量 C-3 破 ⇒ 阶段一判「❌ 未通过」⇒ 归 A 且阻断阶段一；另两处登记（`:59` 的「6 个业务 span 已补齐」＝ 2026-10-27 已落码闭合，`:220` 的「U10 RPC 超时 status description 两侧不同」＝ 同 global E30，已在另一 lane 判为闭合）不改变本行结论 | 2026-10-30 |
+| C-6 | C（阶段 2 最终工程建设项 · 共享台账订正） | P2 | 否（不阻断阶段一） | 同一编号两处登记。`:62` 面（comment-api 的 JWT 验签被计入 3s 预算）已闭合：Go `service/common/observability/http.go:32`（`conf.Middlewares.Timeout = false` ⇒ 关掉 go-zero 原生 TimeoutHandler）＋ `:53`（`ctx, cancel := context.WithTimeout(r.Context(), timeout)` ⇒ 3s 计时器在**用户中间件**里起算）＋ `service/comment/api/commentservice.go:36`（`server.Use(observability.NewHTTPMiddleware(c.Name, httpTimeout, …))` ⇒ 用户中间件在链上排在 Authorize **之后**：`go-zero@v1.10.2/rest/engine.go:108` 先 `appendAuthHandler`、`:110` 再 `chn.Append(middleware)` ⇒ 后 Append = 更靠内 = 更晚执行）＋ `go-zero@v1.10.2/rest/handler/authhandler.go:54`（`parser.ParseToken(r, secret, …)` ⇒ 验签在 Authorize 内 ⇒ 在 3s 预算**之外**）vs RAG `service/comment/comment-api/src/main/java/com/rag/comment/comment/api/auth/GoStyleJwtAuthFilter.java:93`（`@Order(Ordered.HIGHEST_PRECEDENCE + 6)` ⇒ 验签 Filter）＋ `service/common/src/main/java/com/rag/common/spring/HttpMiddlewareFilter.java:40`（`@Order(Ordered.HIGHEST_PRECEDENCE + 7)` ⇒ 3s 计时器）⇒ 2026-10-27 已落码对齐（验签在计时器之前 ⇒ 预算外）。`:223` 面（共享台账的过期结论）**仍开着**：`docs/DRIFT/_cross/new-domains-2026-10-23.md:43` 至今仍写「已登记**未修**：gRPC client 熔断缺失」⇒ 而 RAG 侧熔断已存在（`service/common/src/main/java/com/rag/common/protection/GoStyleGrpcClientBreakerInterceptor.java:109`（`@GrpcGlobalClientInterceptor`）＋ `service/comment/comment-api/src/main/java/com/rag/comment/comment/api/CommentApiApplication.java:68`（`scanBasePackages` 含 `com.rag.common`）⇒ 该链已在 comment-api 装配）⇒ ⇒ **差异仍成立**：过期结论仍在共享台账里未订正 ⇒ 落点 = `docs/DRIFT/_cross/**`（共享文件）⇒ 属阶段二收口订正 ⇒ 归 C、不阻断阶段一 | 2026-10-30 |
+| G4-16 | C（阶段 2 最终工程建设项 · 派单本体；落点 100% 在共享层） | P1 | 否（不阻断阶段一） | Go `service/comment/rpc/internal/cache/comment_subject_cache.go:84`（`c.rdb.Get(ctx, …)` ⇒ Go 侧缓存读写吃 ctx ⇒ deadline 到点即止）＋ `service/comment/rpc/internal/logic/subject_fallback.go:17`（`articleRPC.GetArticle(ctx, …)` ⇒ 出向 gRPC 吃 ctx ⇒ 到点即止）＋ `go-zero@v1.10.2/zrpc/internal/client.go:115`（客户端无条件 2s 封顶）vs RAG `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentCacheService.java:250`（`redis.opsForValue().get(...)` ⇒ 零 deadline 检查）＋ `service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java:112`（`DEADLINE_NANOS.get()` 为 null ⇒ `applyTo` 原样返回 stub ⇒ gRPC 服务端路径恒 no-op）＋ `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:324`（`GoStyleRequestDeadline.begin(...)` 是主代码唯一绑定点 ⇒ 只覆盖 HTTP worker）⇒ ⇒ **差异仍成立**：本单两半（`D8`＝出向 gRPC 不继承请求 deadline、`D9`＝Redis 调用不感知 deadline）都仍成立，落点 100% 在 `service/common` ⇒ 本域无法自修 ⇒ 阶段二由 G4 落码 ⇒ 归 C；⚠️ 其 `D8` 半边（= global `E65`）已由 `docs/PhaseGoal-judge.md` v5 判为 🔴 A 类、已在本表 `C-3` 行按 A 类登记（阻断阶段一），本行只承载派单本体 ⇒ 不重复计第二个阻断项 ⇒ 阻断阶段一 = 否 | 2026-10-30 |

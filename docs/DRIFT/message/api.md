@@ -1850,3 +1850,23 @@ mvn -o -B -pl service/message/message-api -am -DargLine=-Xmx2g \
 # ③ 域内全量
 mvn -o -B -pl service/message/message-api -am -DargLine=-Xmx2g test
 ```
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W6
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-MSGAPI-009 | D（已签字偏离 ⇒ 决策不是缺陷） | P1 | 否（不阻断阶段一） | Go `service/message/api/internal/types/types.go:22`（`Affected int64 \`json:"affected"\`` ⇒ **无 `,string`** ⇒ `encoding/json` 输出 JSON **数字** `{"affected":3}`）vs RAG `service/message/message-api/src/main/java/com/rag/message/message/api/dto/AdminSendNotificationResp.java:43`（`@JsonFormat(shape = JsonFormat.Shape.STRING)`）＋ `:44`（`private long affected;` ⇒ 序列化为 JSON **字符串** `{"affected":"3"}`）⇒ ⇒ **差异仍成立**（wire 契约的 JSON 类型确实不同）；但该条**已于 2026-10-23 签字**（`SD-2026-10-23-03` · 用户逐条拍板「保留 RAG 的字符串形态，不改 wire 契约」· 登记见 `docs/Intentional_Deviations/_cross/signed-deviations.md:71` · 状态 ✅ 仍成立）⇒ 按 `docs/DRIFT/_cross/grading/_README.md` 纪律 5「已签字偏离 ⇒ 是决策不是缺陷」⇒ 归 D；⚠️ 探针把 `X1`/`X2` 放进 `known-dev` 白名单 ⇒ 对拍时恒红但不计失败 ⇒ 不作为待办、不阻断阶段一 | 2026-10-30 |
+| DRIFT-MSGAPI-011 | D（经分析确认不可修 · 容器层框架限制 ⇒ 无待实现内容） | P2 | 否（不阻断阶段一） | Go `go-zero@v1.10.2/rest/httpx/responses.go:183`（`w.WriteHeader(code)` ⇒ reason phrase 由 Go 标准库 `net/http` 补 ⇒ 状态行 = `HTTP/1.1 200 OK` / `401 Unauthorized` / `404 Not Found`）vs RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:943`（`public void setStatus(int sc)` ⇒ 应用层只写码不带 reason）＋ `:956`（`resp.setStatus(sc)`）⇒ ⇒ **差异仍成立**（两侧状态行确实不同：RAG = `HTTP/1.1 200` / `401`）；但**经分析确认不可修**：Tomcat 的 `Response` 在 11.x **已移除 `setStatus(int, String)`**（实测 `javap`：`tomcat-embed-core` 9.0.63 有 `setStatus(int)` ＋ `setStatus(int,String)`；10.1.52 与 11.0.24 **只剩 `setStatus(int)`**；本项目 Boot 4.0.8 ⇒ `tomcat.version=11.0.24`）⇒ 应用层**没有任何写法**能补出 reason phrase ⇒ 落点不在 `service/common`（共享层够不着）⇒ 已在 `docs/Intentional_Deviations/global/common-tails.md` 登记 `SD-2026-10-25-CAND-14`（🏷 待签字候选 · 框架限制）⇒ 影响面 = 全部 10 个 api 的**展示面**（非功能面）⇒ 经分析确认对本项目不适用 ⇒ 归 D、不阻断阶段一 | 2026-10-30 |

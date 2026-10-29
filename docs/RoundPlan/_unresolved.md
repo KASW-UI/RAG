@@ -43,10 +43,21 @@
 | `GAP-05` | **`S1-FOLLOW-008` —— `check-surface-parity.py` 的两个静默假绿口子** | 🔴 **维持仍开着**（2026-10-30 users lane 重核：**工具在位**（`tools/difftest/check-surface-parity.py` · 23,215 B · 2026-10-29 03:27），但**「两个口子」的具体位置本轮未逐条复现**）⇒ 属**取证缺口**（不是已证实的缺陷）· 阶段归属 **B**（阶段 1 竞争力补强）· 优先级 **P2** | 阶段 1 契约面判据的**守门可信度** · 不阻阶段 1 | `docs/DRIFT/users/stage1-admission.md:525` · `tools/difftest/check-surface-parity.py` | **Round 5** `P5-T02` 口径（取证与台账对齐）—— **共享工具面** ⇒ 落点 `tools/difftest/`（**G4 写权面**）⇒ 按 §5.3e 走共享层反馈单 |
 | `GAP-06` | **`S1-FOLLOW-009` —— 5 个 api 模块缺 `TESTCONTAINERS_RYUK_DISABLED`** | 🔴 **维持仍开着**（2026-10-30 users lane 重核：`grep -rln "TESTCONTAINERS_RYUK_DISABLED" service/ --include='*.yml' --include='*.yaml'`（排除 target）⇒ **0 命中**；逐模块实测仍缺）· 阶段归属 **B** · 优先级 **P2** | 阶段 1 的**验证手段可用性**（Testcontainers 清理容器会拖慢/挂住本地跑测）· 不阻阶段 1 | `docs/DRIFT/users/stage1-admission.md:526` | **Round 4 / Round 5** —— **各域域侧**（5 个 api 模块）⇒ 归各域 lane，**不是**共享层 |
 
-> 🆕 **2026-10-30 · 派生层真缺口轮** —— 本类新增 `GAP-05` / `GAP-06`（**2 条**）。
-> ⇒ 连同第 1 类的 `BLK-03`，派生层口径下 **A/B 类未排期共 3 条 ⇒ 已全部登记**（无遗漏）。
-> ⇒ ⚠️ 派生层另有 **453 条「状态开放但未定级」**（**不在施工单、也未推给阶段 2**）
-> ⇒ 它们**需要人工定级才能进施工单** ⇒ 清单见 [`docs/DRIFT/_cross/stage1-derivation.md`](../DRIFT/_cross/stage1-derivation.md) §4.2。
+| `GAP-07` | **派生层 A/B 类「U8 指针口径歧义」3 条** —— `B-10`（A/P0/阻断是）· `B-11`（A/P0/阻断是）· `G4-A4-05`（A/P0/阻断是） | 🟡 **已被任务覆盖，派生层认不出**（2026-10-30 U5-O 逐条 Go 对照轮实测）：三条的**定级依据里明确点名** `_task-universe.md` 的 `P2-T01` / `P2-T03` / `P2-T04`（E65 族「出向 gRPC 不继承 deadline / 零硬上界」）⇒ **不是新漏排**；但它们在台账里是 `global/vs-common.md` 的**表行编号**（`B-xx` / `G4-A4-xx`），而任务的「原始编号」列写的是 `E65` / `X-6` / `P0 #4` ⇒ **两套编号不是一一对应** ⇒ 派生层 `U8` 只认「任务块里直接写了编号」⇒ 判「未排期」 | 阶段 1 的**准入阻断面**（A 类 ⇒ 不处理无法通过阶段一验收）· **与 `PhaseGoal-judge.md` v5 的「❌ 阶段一未通过」一致** | `docs/DRIFT/global/vs-common.md:3846`（`B-10`）· `:3847`（`B-11`）· `:3755`/`:3812`（`G4-A4-05`）· 派生层 `docs/DRIFT/_cross/stage1-derivation.md` §4.1 | **Round 5** —— 处置 = **要么**在 `_task-universe.md` 的「原始编号」列补上这三个表行编号（**指针口径对齐**）**要么**在派生层 `U8` 增加「改造面内条目」语义连接 ⇒ **本层不猜**（§七 盲区第 8 条）⇒ 落点 `docs/RoundPlan/`（主线写权） |
+| `GAP-08` | **派生层 A/B 类「依据里无任务指针」4 条** —— `G4-A4-07`（A/P0/阻断是 · article-rpc 裸 stub）· `G4-A4-01`（B/P2 · A6 错误码契约在共享层无对口探针）· `DRIFT-ARPC-009`（B/P2 · admin-rpc 缺 Stat + Prometheus 两层）· `DRIFT-USERSCOMMON-006`（B/P2 · JWT Bearer 前缀剥离长度边界 `> 6` vs `> 7`） | 🔴 **待人工确认排期归属**（2026-10-30 U5-O 逐条 Go 对照轮）：四条的定级依据里**未点名任何任务编号** ⇒ 派生层**无法自动判定**它是否已被别的任务覆盖 ⇒ **本层不猜**。⚠️ 已知线索：`G4-A4-07` 与 `GAP-07` 的三条**同族**（E65 出向 stub）⇒ 很可能同属 `P2-T03`/`P2-T04` 的改造面；`G4-A4-01` 在 `PhaseGoal-judge.md` 中 A6 已判 **🟡 不阻断阶段一** | 阶段 1 的**准入阻断面**（`G4-A4-07` = A ⇒ 不处理无法通过阶段一验收）· 其余三条 = 竞争力补强 | `docs/DRIFT/global/vs-common.md:3757`/`:3878`（`G4-A4-07`）· `:3751`/`:3761`（`G4-A4-01`）· `docs/DRIFT/users/admin/rpc.md:2947`（`DRIFT-ARPC-009`）· `docs/DRIFT/users/common.md:788`/`:869`（`DRIFT-USERSCOMMON-006`） | **Round 5** —— 人工确认后归入既有任务或新开任务 ⇒ 落点按各条域写权（`G4-A4-07` 落 `service/article` · `DRIFT-ARPC-009` 落 `service/users/admin` · `DRIFT-USERSCOMMON-006` 落 `service/users/users-common` = **G4 写权面** ⇒ 走共享层反馈单） |
+
+> 🆕 **2026-10-30 · U5-O 显式定级轮（129 条逐条 Go 对照）** —— 本类新增 `GAP-07` / `GAP-08`（**2 条**）。
+> ⇒ **129 条「状态开放但未定级」已全部逐条与 Go 真源对照并定级**（用户 2026-10-30 拍板口径）
+> ⇒ 派生层「**未定级且状态开放**」= **0 条**（原 129 条）。
+> ⇒ 新识别的 A/B 类开放条目 = **7 条**（4 A + 3 B）⇒ 分两条登记：
+> **`GAP-07`** = **3 条已被 `_task-universe.md` 点名**（`U8` 指针口径歧义 ⇒ 不是新漏排）
+> · **`GAP-08`** = **4 条依据里无任务指针**（需人工确认）。
+> ⇒ ⚠️ 另有 **75 条「差异已消失」**（台账仍写 🔴 未闭合，但逐条回源后差异早已不存在）
+> ⇒ **不是「阶段 2 承接」**，而是**已闭合 · 无待实现项** ⇒ 处置 = **回写台账销账**
+> （已随各域台账的「阶段归属定级附录」落文）⇒ 清单见
+> [`docs/DRIFT/_cross/stage1-derivation.md`](../DRIFT/_cross/stage1-derivation.md) §4.4。
+> ⇒ **证据层**：本次 129 条定级全部为 **B 档静态**（无活体对拍）⇒ 按 **2026-10-30 拍板「声明证据边界、接受静态证据」**
+> 执行（见派生层 §5.2 证据边界声明）⇒ **引用这些条目作前提时必须标注「前提未回源」**。
 
 ---
 

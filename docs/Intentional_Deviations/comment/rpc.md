@@ -358,3 +358,24 @@
 | 项 | 说明 |
 |---|---|
 | `SD-2026-10-23-04`（proto `package` 归一） | ✅ **已签字**，明细在 [`comment/proto.md`](./proto.md) —— **本轮复核结论不变**，但其「无实际影响」的前提已过期，见该文件 §3 |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W6
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| SD-2026-10-24-CAND-01 | C（阶段 2 最终工程建设项 · 与 Stage1/05 的 S1-DDL-010 同口径） | P2 | 否（不阻断阶段一） | Go `service/comment/rpc/internal/model/data_model.go:14`（`CreatedAt time.Time \`gorm:"column:created_at;autoCreateTime;…"\`` ⇒ **无 `not null`**、**无 DB 层 default** ⇒ GORM 迁出可空、无默认）＋ `:15`（`UpdatedAt … autoUpdateTime`）＋ `:34`／`:35`（CommentIndex 同款）＋ `:47`／`:48`（CommentContent 同款）＋ `:95`／`:96`（CommentLike 同款）vs RAG `service/comment/comment-rpc/src/main/resources/db/migration/V1__create_comment_subject.sql:27`（`created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP`）＋ `:28`（`updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP`）＋ `V2__create_comment_index.sql:22`／`:23` ＋ `V3__create_comment_content.sql:18`／`:19` ＋ `V4__create_comment_like.sql:24`／`:25` ＋ `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/mapper/CommentIndexMapper.java:50`（`created_at` 显式绑 `#{createdAt}`、`updated_at` 绑 `CURRENT_TIMESTAMP`）＋ `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/mapper/SubjectMapper.java:86`（两列都显式绑 `CURRENT_TIMESTAMP` ⇒ 当前写路径**不依赖 DB 层 DEFAULT**）⇒ ⇒ **差异仍成立**：8 处可比对（`subject`／`comment_index`／`comment_content`／`comment_like` × `created_at`／`updated_at`）两侧可空性与 DEFAULT 都不同（第 9 处 `report_record.created_at` 因 Go 侧整表不存在 ⇒ 不可比）⇒ 但 RAG 是**更严**的一侧，且当前 5 条写路径全部显式传值 ⇒ 行为等价 ⇒ 与 `docs/Stage1/05-差异与暂缓项清单.md` 的 `S1-DDL-010`（🟡 **C 类** · 是否阻断阶段一 = 否）同口径 ⇒ 阶段二再决策（在「Go 可空 + RAG 严格」与「两侧都严格」之间二选一）⇒ 归 C、不阻断阶段一 | 2026-10-30 |
+| SD-2026-10-24-CAND-03 | C（阶段 2 最终工程建设项 · 部署形态） | P1 | 否（不阻断阶段一） | Go `service/comment/rpc/cmd/fact-authority/main.go:23`（`func main() { os.Exit(execute()) }` ⇒ **独立进程**）＋ `:52`（`listen := os.Getenv("COMMENT_FACT_AUTHORITY_LISTEN")` ⇒ 独立监听端口）＋ `service/comment/rpc/cmd/fact-dispatch/main.go:23`（同样是独立进程）＋ `:53`（`endpoint := os.Getenv("DC_PLATFORM_EVENT_URL")` ⇒ 独立投递进程）⇒ Go 侧 authority / dispatch 默认就在跑、默认就在向 DC 投递事实 vs RAG `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/bootstrap/CommentAuthorityEndpointConfig.java:42`（`@ConditionalOnProperty(prefix = "comment.authority", name = "enabled", havingValue = "true")`）＋ `service/comment/comment-rpc/src/main/resources/application.yml:284`（`enabled: false` ⇒ 权威读端点默认关闭）＋ `:266`（`dispatch-enabled: false` ⇒ 整条事实投递链路默认不参与运行）⇒ ⇒ **差异仍成立**：默认部署形态下 RAG 不向 DC 投递任何事实 ⇒ DC 侧看到的事实流与 Go 不一致（残留风险，登记在册）⇒ 落点是部署形态与对外暴露面（打开 authority 端点 = 新增一个 HTTP 端口 = wire 面变更 ⇒ 须人工拍板）⇒ 本条为 ⏳ 未签字候选 ⇒ 按问题本身定级归 C、不阻断阶段一 | 2026-10-30 |
+| SD-2026-10-24-CAND-09 | D（经分析确认：RAG 更严的 5 个对象当前不可观察 ⇒ 无代码待办；与 Stage1/05 的 S1-DDL-011 同口径） | P2 | 否（不阻断阶段一） | Go `service/comment/rpc/internal/model/db.go:15`（`db.AutoMigrate(&Subject{}, &CommentContent{}, &CommentIndex{}, &CommentLike{}, &CommentDomainFactOutbox{}, &CommentFactStream{})` ⇒ Go **生产** DDL 的权威来源，无触发器、无 CHECK、无那 3 个索引；Go 那三份手写 `001/002/003` 只被测试脚本执行 ⇒ 不进生产）vs RAG `service/comment/comment-rpc/src/main/resources/db/migration/V6__create_comment_domain_fact_outbox.sql:42`（`idx_comment_legacy_fact_aggregate` 部分索引）＋ `:63`（`ADD CONSTRAINT comment_new_fact_has_dc_wire … NOT VALID`）＋ `V7__create_comment_fact_stream.sql:31`（`CONSTRAINT comment_fact_stream_version_range CHECK (version BETWEEN 1 AND 9007199254740991)`）＋ `V8__align_comment_fact_delivery_with_go.sql:47`（`idx_comment_fact_delivery`）＋ `:82`（`CREATE TRIGGER comment_fact_identity_immutable`）＋ `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/mapper/CommentDomainFactOutboxMapper.java:23`（javadoc：业务写入只写 `event_id`/`event_type`/`payload`/`aggregate_id`/`fact_version`/`delivery_envelope`，投递链路只写 `delivery_status`/`retry_count`/`technical_*`/`delivered_at` ⇒ 两个写者字段集合不交叠）＋ `:120`（「只改 `delivery_status`，绝不碰信封列 ⇒ 触发器不会拦」）⇒ ⇒ **差异仍成立**：RAG 生产库比 Go 生产库多这 5 个对象（根因 = RAG 抄的是 Go 的**测试夹具** DDL，不是生产 `AutoMigrate` 产物）；但**经分析确认**：2 个索引 = 纯性能、2 个 CHECK 在现有写入路径下不可触发、触发器只禁改受保护列而现有 UPDATE 只写 `delivery_status`/`retry_count` 等列 ⇒ **唯一原则上可观察的面当前也不可达** ⇒ RAG 是「更严」的一侧、当前行为等价 ⇒ 与 `docs/Stage1/05-差异与暂缓项清单.md` 的 `S1-DDL-011`（✅ **D 类** · 是否阻断阶段一 = 否 · 处置 = 不修不改回）同口径 ⇒ 本条作为待签字候选的剩余动作是一次**签字**（阶段二收口动作，非代码待办）⇒ 归 D、不阻断阶段一 | 2026-10-30 |
