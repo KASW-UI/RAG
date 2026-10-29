@@ -135,16 +135,20 @@ RAG 建 `users_user` / `users_user_avatar_history`
 | **1** | **有漂移** | 存在非超时形态的差异 |
 | **2** | **本轮不可判定**（环境问题） | 有差异，**且** RAG 侧出现过**超时形态** |
 
-**超时形态** = 三者之一（`diff.py` 的 `timeout_shaped()`）：
+**超时形态** = 两种之一（`diff.py` 的 `timeout_shaped()`）：
 
 * HTTP **503** + body `Request Timeout` ⇒ 共享层 `HttpMiddleware` 的 HTTP 超时分支
   （Go 侧同一份文案 `httpTimeoutBody`）；
-* 业务码 **1015**「服务繁忙」⇒ gRPC deadline 超时；
-* HTTP **0**（传输层失败）。
+* 业务码 **1015**「服务繁忙」⇒ gRPC deadline 超时。
+
+⚠️ **传输层失败（HTTP 0 / `<<transport error>>`）** ⇒ **不在**超时形态里
+⇒ ⇒ **「一侧被 kill 掉」必须判红（exit 1）**，不能被当成「环境问题」打发
+（2026-10-29 实测踩过：M2 变异曾被误判成 exit 2 ⇒ 修正后 M2 = `EXIT=1`）。
+⇒ 理由：**「对方没答话」是硬差异**；「对方答了但太慢」才是负载形态。
 
 ⚠️ **为什么必须分开**（2026-10-29 实测踩过）：
-本机**负载飙到 load average 78** 时，RAG 侧（api → rpc → PG **三跳**）的请求会撞上
-**2s gRPC deadline / 3s HTTP 超时**，而 **Go 侧少一跳**、不撞
+本机**负载飙到 load average 78** 时，RAG 侧的请求会撞上
+**2s gRPC deadline / 3s HTTP 超时**，而 **Go 侧不撞**
 ⇒ 探针报出 **5 条 DIFF**（`user.get` 503 · `user.logout` 1015 · `admin.logout` 1015
 ＋ 两条连带的 `afterlogout`）
 ⇒ ⇒ **那是环境问题，不是漂移** ⇒ 报成「漂移」就是把**跑红当缺陷**（AGENTS.md §3.3.3）。
@@ -240,14 +244,16 @@ EXIT=0
 
 AGENTS.md §3.3.3：新增的每个探针都必须配一个**能真正触发它**的变异，否则无法排除「假绿」。
 
-| 变异 | 手法 | 期望 | 实测 |
+| 变异 | 手法 | 期望 | 实测（2026-10-29 · `align/r4-users-probe`） |
 |---|---|---|---|
-| **M0** 基线 | 无 | 绿（`unexpected=0`） | ✅ `unexpected=0` |
-| **M1** 篡改一侧的库 | 把 RAG 侧 `users_user` 里 `dt_user1` 的 email 改掉 | 红，且**精确**指出 `user.get` | ✅ `unexpected=1`，DIFF 就在 `user.get` |
-| **M2** 停掉一侧的进程 | `kill -9` RAG 侧 `user-api` | 红（不得「一侧挂了还报绿」） | ✅ `unexpected=13`（transport error） |
-| **M3a** 让一侧变慢 | 给 RAG 侧 `users_user` 加 `ACCESS EXCLUSIVE` 锁持 2s ⇒ 请求必 > 500ms ⇒ **必命中 1xx** | **绿**（1xx 被跳过，最终响应正常） | ✅ `unexpected=0`，`1xx_命中_step数=1` |
-| **M4** 同 M3a，但**关掉探针的 1xx 感知**（`PROBE_DISABLE_1XX_SKIP=1 PROBE_MAX_RETRY=0`） | | **红**（1xx 被当成终态 ⇒ 读不到最终响应） | ✅ `unexpected=20`，`1xx_命中_step数=5` |
-| **M5** 还原后再跑基线 | 无 | 绿 | ✅ `unexpected=0` |
+| **M0** 基线 | 无 | 绿（`unexpected=0`） | ✅ `EXIT=0` · `steps=39 asserted=10 byte_equal=29 inconclusive=0 unexpected=0` |
+| **M1** 篡改一侧的库 | 把 RAG 侧 `users_user` 里 `dt_user1` 的 email 改掉 | 红，且**精确**指出 `user.get` | ✅ `EXIT=1` · `unexpected=1` · DIFF 就在 `user.get` |
+| **M2** 停掉一侧的进程 | `kill -9` RAG 侧 `user-api` | 红（不得「一侧挂了还报绿」） | ✅ `EXIT=1` · `unexpected=13` · **10 步传输层失败**（⇒ 判红，不是「环境问题」） |
+| **M3a** 让一侧变慢 | 给 RAG 侧 `users_user` 加 `ACCESS EXCLUSIVE` 锁持 2s ⇒ 请求必 > 500ms ⇒ **必命中 1xx** | **绿**（1xx 被跳过，最终响应正常） | ✅ `EXIT=0` · `unexpected=0` · `1xx_命中_step数=1`（2 行） |
+| **M4** 同 M3a，但**关掉探针的 1xx 感知**（`PROBE_DISABLE_1XX_SKIP=1 PROBE_MAX_RETRY=0`） | | **红**（1xx 被当成终态 ⇒ 读不到最终响应） | ✅ `EXIT=1` · `unexpected=12` · `1xx_命中_step数=3` |
+| **M5** 还原后再跑基线 | 无 | 绿 | ✅ `EXIT=0` · `unexpected=0` |
+
+⇒ **6/6 全按预期**（`mutate-parity.sh` ⇒ `PASS=6 FAIL=0`）。
 
 ⇒ **M3a / M4 这一对是本探针最关键的证据**：
 **同一个场景（同样慢、同样命中 1xx），只因为「1xx 怎么处理」不同 ⇒ 一个绿一个红**

@@ -555,27 +555,32 @@ def parse_json(text):
 def timeout_shaped(status, body, text):
     """判断「这一侧的响应是**超时形态**」⇒ 用来把**环境负载**与**语义漂移**分开。
 
-    三种形态：
+    两种形态（**故意不含「传输层失败」**）：
       * HTTP **503** + body `Request Timeout`
         —— 共享层 `HttpMiddleware` 的 HTTP 超时分支（Go 侧同一份文案：`httpTimeoutBody`）；
       * 业务码 **1015**「服务繁忙」
-        —— gRPC deadline 超时（共享层把 `DEADLINE_EXCEEDED` 翻成 1015）；
-      * HTTP **0**（传输层失败：连不上 / 读不到响应）。
+        —— gRPC deadline 超时（共享层把 `DEADLINE_EXCEEDED` 翻成 1015）。
 
     ⚠️ **为什么必须有这个判据**（2026-10-29 实测踩过）：
-      本机负载飙到 **load average 78** 时，RAG 侧（api→rpc→PG **三跳**）的请求会
-      撞上 **2s gRPC deadline / 3s HTTP 超时**，而 Go 侧（**少一跳**）不撞
-      ⇒ 探针会报出 **5 条 DIFF**（503 / 1015 / 连带的两条 afterlogout）
+      本机负载飙到 **load average 78** 时，RAG 侧（api→rpc→PG）的请求会
+      撞上 **2s gRPC deadline / 3s HTTP 超时**，而 Go 侧（**同层数**，只是少一层
+      500ms 的切片量化）不撞 ⇒ 探针会报出若干条 DIFF（503 / 1015 / 连带的 afterlogout）
       ⇒ ⇒ **那是环境问题，不是漂移** ⇒ 报成「漂移」会把**跑红当缺陷**（AGENTS.md §3.3.3）。
-    ⇒ 本函数**只用于分类与退出码**，**不改变任何一步的判定结果**（DIFF 照样逐条打印）。
+
+    ⚠️ **传输层失败（HTTP 0）不在本函数里** ⇒ **「一侧被 kill 掉」必须判红（exit 1）**，
+      不能被当成「环境问题」（2026-10-29 实测踩过：M2 变异曾被误判成 exit 2）。
+      ⇒ 理由：**「对方没答话」是硬差异**；「对方答了但太慢」才是负载形态。
     """
-    if status == 0:
-        return True
     if status == 503 and "Request Timeout" in (text or ""):
         return True
     if isinstance(body, dict) and body.get("code") == 1015:
         return True
     return False
+
+
+def transport_failed(status, text):
+    """传输层失败（HTTP 0）⇒ **硬差异**（不是负载形态）⇒ 必须判红。"""
+    return status == 0 or "<<transport error" in (text or "")
 
 
 # ---------------------------------------------------------------- 归一化
@@ -865,6 +870,7 @@ def main():
 
     asserted = byte_equal = diffs = inconclusive = 0
     timeout_steps = []
+    transport_steps = []
     for i, s in enumerate(steps):
         gs, gb, gtext, ghead, gmiss = raw["go"][i]
         rs, rb, rtext, rhead, rmiss = raw["rag"][i]
@@ -876,6 +882,8 @@ def main():
         # ── 超时形态登记（**只用于分类/退出码**，不改变本步的判定）─────────
         if timeout_shaped(rs, rb, rtext):
             timeout_steps.append((s["id"], rs, (rtext or "")[:60]))
+        elif transport_failed(rs, rtext):
+            transport_steps.append((s["id"], rs, (rtext or "")[:60]))
 
         if s["id"] in BODY_EXPECTATION:
             # E-1 收口：不再是「只比状态码」，而是按已签字的边界逐项断言两侧 body。
@@ -1006,15 +1014,24 @@ def main():
     #    才把退出码从 1 改成 2 ⇒
     #    * 退出码 2 = 「**本轮不可判定**」（环境负载）⇒ **不是绿**，主线必须复跑；
     #    * 退出码 0 仍然只在「零差异」时给 ⇒ **绝不会**把超时当通过；
-    #    * ⚠️ 若差异**不是**超时形态（哪怕同时有别的步骤超时）⇒ 仍按 1（漂移）报。
-    if diffs and timeout_steps:
+    #    * ⚠️ 若差异**不是**超时形态（哪怕同时有别的步骤超时）⇒ 仍按 1（漂移）报；
+    #    * ⚠️ **传输层失败（HTTP 0）不属于超时形态** ⇒ 「一侧被 kill」⇒ **判红（1）**。
+    if transport_steps:
+        print("")
+        print("!! 🔴 RAG 侧出现 **%d 步传输层失败**（连不上 / 读不到响应）⇒ **硬差异**，不是负载形态"
+              % len(transport_steps))
+        for sid, st, tx in transport_steps:
+            print("     · %-32s HTTP=%s %s" % (sid, st, tx.replace("\n", " ")))
+        print("   ⇒ 退出码 = **1（漂移）**：**一侧没答话**就是硬差异 ⇒ 绝不当成「环境问题」打发")
+    if diffs and timeout_steps and not transport_steps:
         print("")
         print("!! ⚠️ 本轮有 %d 条差异，且 RAG 侧出现 **%d 步超时形态**"
-              "（HTTP 503 'Request Timeout' / 业务码 1015「服务繁忙」/ 传输层失败）："
+              "（HTTP 503 'Request Timeout' / 业务码 1015「服务繁忙」）："
               % (diffs, len(timeout_steps)))
         for sid, st, tx in timeout_steps:
             print("     · %-32s HTTP=%s %s" % (sid, st, tx.replace("\n", " ")))
-        print("   ⇒ 这**多半是环境负载**（RAG 侧 api→rpc→PG 三跳，Go 侧少一跳）")
+        print("   ⇒ 这**多半是环境负载**（RAG 侧的 HTTP 层有 500ms「切片等待」量化 ⇒ 尾延迟被放大；"
+              "两侧调用链**层数相同**，都是 api→rpc→PG）")
         print("   ⇒ 退出码 = **2（环境问题 · 本轮不可判定）**，**不是** 1（漂移）")
         print("   ⇒ ⚠️ **绝不是 0** ⇒ 「超时」永远不会被当成「两侧一致」")
         print("   ⇒ 请在**空载**机器上复跑；复跑后仍超时 ⇒ 那才是真差异")
