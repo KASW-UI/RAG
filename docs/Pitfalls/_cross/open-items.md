@@ -11,6 +11,12 @@
 
 - 跨域开放项本体 = [`../../DRIFT/_cross/open-items.md`](../../DRIFT/_cross/open-items.md)
   ⇒ 其中的 `P2`（`DRIFT-HOTAPI-030`）**已于 2026-10-29 收敛为 ✅ 已落地**（共享层修法 · favorite 零触碰）
+  —— ⚠️ **2026-10-29 真实性复核：原写「收敛为 ✅ 已落地」⇒ 现行态 = 🟡 部分闭合**
+  （**主轴** 2049~10000 且非空值 ≤2048 **已闭合**；**残留窗口 = 恰好 10001 段** ——
+  共享层 `MAX_PARAMETER_COUNT = 10001` **至今未改 10000** ⇒ Go 拒 / RAG 放行；
+  依据 `service/common/src/main/java/com/rag/common/http/GoStyleTomcatParameterLimitCustomizer.java:170`
+  ＋ Go SDK `net/url/url.go:1001` `defaultMaxParams = 10000`）
+  ⇒ **本文件与 `docs/DRIFT/_cross/open-items.md:15` 的口径必须一致**（两处以前分叉成 ✅ / 🟡）。
 - 全仓 `docs/Pitfalls/**` 中**专属于「开放项管理」**的独立条目 = **0 条** ⇒ 本文件**没有需要另行登记的坑位**
 
 ## 内容在哪（指针）
