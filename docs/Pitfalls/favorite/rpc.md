@@ -65,6 +65,8 @@ func (l *XxxLogic) Xxx(in *pb.Req) (resp *pb.Resp, err error) {
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/metrics-probe/favorite/run.sh` ⇒ **EXIT=0**（2026-10-30 03:17:11 · 1s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ Go 语义如预期：错误路径记 fail（⇒ U5 撤销，Go 与 RAG 本来就一致）。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
 ## PIT-FAV-RPC-002 · 🕳️ **指标名以 `_total` 结尾与否，决定 Micrometer 会不会再加一次** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
 
 > **旧号**：`PIT-FAV-RPC-002` ⇒ **新号**：`PIT-FAV-23`
@@ -621,6 +623,8 @@ FavoriteApiEnvelopeParityTest.tooManyFormParamsMatchGoByteForByte:341->getWithTo
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-envelope-probe/favorite/run.sh` ⇒ **EXIT=0**（2026-10-30 03:17:43 · 30s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✓ Go 侧输出与 expected.txt 逐字节一致（sha256=c5dc8761884acfa0…） ⏐ 2026-10-30T03:17:54.779+08:00  INFO 47811 --- [favorite-api] [.0-21300-exec-2] c.r.common.observability.HttpMiddleware  : [HTTP] 1xx 探针行数预算用尽（cap=4）⇒ 本请求不再写探针字节（客户；<br>`tools/ddl-parity-probe/favorite/run.sh` ⇒ **EXIT=0**（2026-10-30 03:20:09 · 5s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ OBS 段逐条一致（13 条） ⏐ [ddl-probe] ⇒ 结论：**执行顺序是行为的一部分** —— app-first 下 001 的 CREATE TABLE 变 no-op ⏐ [ddl-probe]   ⇒ 001 里**内联**的 CHECK (aggregate_version IN (1,2)) 建不出来； ⏐ [ddl-probe]   ⇒ 且 favorite_fact_outbox 的**列顺序**也不同（；<br>`tools/errmsg-probe/favorite/run-parity.sh` ⇒ **EXIT=0**（2026-10-30 03:16:02 · 4s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 双侧逐字节一致（sha256 相同，diff 无输出）；OBS 段 obs_custom_grpcstatus obs_ok_status 差异仍在登记状态。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
 ## PIT-FAV-RPC-014 · 🔴 **测「两个 gRPC 实现之间的差异」≠ 测「RAG 是否忠实复刻 Go」** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
 
 > **旧号**：`PIT-FAV-RPC-014` ⇒ **新号**：`PIT-FAV-35`
@@ -845,6 +849,8 @@ RAG 侧两个模块**都是 `java -jar` 真起的** ⇒ ① ② 这类问题**�
 （见 `docs/DRIFT/favorite/rpc.md` §22.4 的跨域清单）⇒ 那部分归 `global`。
 
 ---
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/favorite/run.sh` ⇒ **EXIT=0**（2026-10-30 03:28:29 · 48s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 两侧种子就绪 ⏐ ✅ 黑名单对照 token 就绪（Redis exists=1） ⏐ ✅ 两侧各产出 31 个 case ⏐ SAME 25 条 / SAME_CODE 1 条 / SAME_BODY 2 条 / SAME_STATUS 4 条 / OBS 0 条 / SKIP 0 条（共 32 个 case） ⏐ ✅ api 整域两侧一致（SAME 全等；SAME_CODE 业务码等；SAME_BODY body 等；SAME_。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
 
 ## PIT-FAV-RPC-019 · 🔴 **「关掉 Nacos discovery」在 rpc 侧与 api 侧是**相反**的两件事** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
 
@@ -1118,6 +1124,8 @@ error_code=5203
 ⚠️ **注意**：这份种子被 `tools/api-full-parity-probe/favorite/run.sh` **共用**
 ⇒ 改它必须**两个探针一起复跑**（本轮已复跑，冻结值不变 —— 因为响应体里本就没有 `id`）。
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/favorite/run.sh` ⇒ **EXIT=0**（2026-10-30 03:28:29 · 48s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 两侧种子就绪 ⏐ ✅ 黑名单对照 token 就绪（Redis exists=1） ⏐ ✅ 两侧各产出 31 个 case ⏐ SAME 25 条 / SAME_CODE 1 条 / SAME_BODY 2 条 / SAME_STATUS 4 条 / OBS 0 条 / SKIP 0 条（共 32 个 case） ⏐ ✅ api 整域两侧一致（SAME 全等；SAME_CODE 业务码等；SAME_BODY body 等；SAME_。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
 ## PIT-FAV-RPC-025 · 🐚 **bash 3.2 的 `${arr[@]+"${arr[@]}"}` 多一个 `"` ⇒ 整份脚本 `unexpected EOF`** · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
 
 > **旧号**：`PIT-FAV-RPC-025` ⇒ **新号**：`PIT-FAV-46`
@@ -1245,6 +1253,8 @@ GO_PORT="$(pick_free_port ${USED_PORTS[@]+"${USED_PORTS[@]}"}")"
 ⇒ 元教训：
 > **台账上写「已修」时，要能指出「修在哪一层」**：
 > **改了被测物**（配置 / 代码 / 依赖）才算修；**只改了观测手段**（探针参数）**不算**。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/favorite/run.sh` ⇒ **EXIT=0**（2026-10-30 03:28:29 · 48s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 两侧种子就绪 ⏐ ✅ 黑名单对照 token 就绪（Redis exists=1） ⏐ ✅ 两侧各产出 31 个 case ⏐ SAME 25 条 / SAME_CODE 1 条 / SAME_BODY 2 条 / SAME_STATUS 4 条 / OBS 0 条 / SKIP 0 条（共 32 个 case） ⏐ ✅ api 整域两侧一致（SAME 全等；SAME_CODE 业务码等；SAME_BODY body 等；SAME_；<br>`tools/prod-startup-probe/favorite/run.sh` ⇒ **EXIT=0**（2026-10-30 03:33:47 · 28s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ PG 就绪（127.0.0.1:55096）· 库 first_db ⏐ ✅ gRPC 监听端口 21300（专用段 21300-21399 · 双绑定自检通过） ⏐ ❌ A-before：**启动即炸**（devh URI 校验 · 两斜杠） ⏐ ✅ B-after：**启动成功** ⏐ ❌ C-before：**启动即炸**（Boot 判定成 SERVLET 但没有 servlet 容器） ⏐ ✅ A/B/C 成立：两斜杠 ⇒ 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
 
 ## PIT-FAV-RPC-027 · 🔴 **「借来的工具」只能当探针，不能当门禁**（且它的第一版输出要逐条核证） · 状态：**仍生效** · 核对日期：**2026-10-29** · 影响当前轮次：**是**
 

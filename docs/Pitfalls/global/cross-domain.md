@@ -495,6 +495,8 @@ mvn -o test -pl service/article/article-api
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/semantic-probe/run-parity.sh` ⇒ **EXIT=0**（2026-10-30 03:16:43 · 4s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：（未抓到结论行）。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
 ## PIT-GLOBAL-017 🔴 **用「被测的那个常量」构造测试输入 ⇒ 变异常量时测试跟着变 ⇒ 恒绿**  ·  🔴 **仍生效**  ·  核对日期 **2026-10-29**  ·  本轮影响：**否**
 
 > **2026-10-29 对齐**：🔴 **仍生效**（核对日期 **2026-10-29**）· **本轮影响：否** —— 本轮**不做变异** ⇒「用被测的那个常量构造测试输入」本轮不发生。
@@ -1150,6 +1152,8 @@ task-rpc   |  83,827 B | <<无 Main-Class>>   ← L11 报了
 - 同族：**PIT-GLOBAL-029**（守门自身的缺陷 ⇒ 恒红 / 覆盖不全）。
 
 ---
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/check-jar-executable.sh` ⇒ **EXIT=0**（2026-10-30 04:55:19 · 2s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅  service/task/task-api                       64M   Main-Class: org.springframework.boot.loader.launch.JarLauncher ⏐ ✅  service/task/task-rpc                       96M   Main-Class: org.springframework.boot.loader.launc；<br>`tools/difftest/check-jar-executable.sh` ⇒ **EXIT=0**（2026-10-30 04:55:19 · 2s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅  service/task/task-api                       64M   Main-Class: org.springframework.boot.loader.launch.JarLauncher ⏐ ✅  service/task/task-rpc                       96M   Main-Class: org.springframework.boot.loader.launc。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
 
 ## PIT-GLOBAL-031 🔴 **守门断言的字符串可能同时出现在被测文件的注释里 ⇒ 断言恒真 ⇒ 变异测不出来**  ·  🔴 **仍生效**  ·  核对日期 **2026-10-29**  ·  本轮影响：**否**
 
@@ -2543,6 +2547,8 @@ RAG 侧明明实现了「毫秒级 SQL 超时」（pgjdbc 的 `setQueryTimeoutMs
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/check-deadline-downstream.py` ⇒ **EXIT=0**（2026-10-30 03:48:11 · 12s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ sql_carrier        Go=present_expired | RAG=present_expired  （两侧一致） ⏐ ✅ failed_fast        Go=true | RAG=false  （已登记的漂移形态） ⏐ ✅ code               Go=4 | RAG=0  （已登记的漂移形态） ⏐ ✅ outgoing_carrier   Go=present_expired | RAG。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
 ## PIT-GLOBAL-061 🔴 **「去噪」是那条判据的「计账规则」，不是「放弃检查」** ⇒ 让**另一条判据**失去覆盖 ⇒ 变异样本被相邻行吃掉 ⇒ **假绿**  ·  🔴 **仍生效**  ·  核对日期 **2026-10-29**  ·  本轮影响：**否**
 
 > **2026-10-29 对齐**：🔴 **仍生效**（核对日期 **2026-10-29**）· **本轮影响：否** —— 本轮不改复核器的去噪逻辑 ⇒ 本轮不触发。
@@ -2819,3 +2825,5 @@ BusinessException code=5001 msg=系统内部错误
 **PIT-GLOBAL-067**（守门的「展开函数」混用绝对/相对路径 ⇒ 交集恒空 ⇒ **假绿** ⇒ 与本条同属「**环境/解析面把结论染歪**」族）。
 
 **出处**：2026-10-29 08:35~08:45（R3·C-2 复判时，主线独立复验 G3 lane 的 article 双侧活体探针时踩到）。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/article/run.sh` ⇒ **EXIT=0**（2026-10-30 03:21:39 · 34s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：== 2/8 构建 Go 侧二进制（真源**只读** ⇒ 产物落临时目录） == ⏐ == 8/8 请求矩阵（Go vs RAG vs expected.txt ⇒ 逐字节） == ⏐ ✅ list_articles  Go == RAG == expected.txt（逐字节） ⏐ ✅ get_article_exists  Go == RAG == expected.txt（逐字节） ⏐ ✅ get_article_missing 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。

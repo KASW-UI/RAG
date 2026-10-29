@@ -434,6 +434,8 @@ red = "Failures: 0" not in summary          # ← summary 是所有测试类的�
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/exp-difftest-grpc-user9.sh` ⇒ **EXIT=1**（2026-10-30 03:53:22 · 20s）—— 🔴 **探针判定为「不一致」**；覆盖断言：==> [1/5] 准备自己的容器与两个库（**不碰共享的 go_db / rag_db**） ⏐ ==> [2/5] 生成 Go 运行配置副本（端口与库名都指向本脚本自己的资源） ⏐ ==> [3/5] 构建（Go 二进制 + RAG jar） ⏐ ==> [4/5] 起两套 user-rpc（Go :19005 / RAG :59211） ⏐ ==> [5/5] 编译并跑双端口对拍。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
 ## PIT-USERS-08 🔴 bash + UTF-8 locale ⇒ **全角括号会被算进变量名** · **状态：仍生效**
 
 > **旧号**：`PIT-USERS-SHARED-008` ⇒ **新号**：`PIT-USERS-08`
@@ -481,6 +483,8 @@ PY
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run.sh` ⇒ **EXIT=0**（2026-10-30 03:29:45 · 137s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [3b/3] 判定器（🔴 E48 · 第三十九轮：判定从「注释里的承诺」变成「可执行的代码」） ⏐ PASS —— 未复现差异（两侧 Δ_end 一致 ⇒ RAG 侧继承了客户端 deadline） ⏐ ⇒ E38① 的运行期结论成立 ⏐ ⇒ 退出码 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ⇒ 判定退出码 = 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ==> 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
 ## PIT-USERS-09 🔴 共享的 difftest 容器会被**别的会话回收** ⇒ 对拍脚本要自带容器 · **状态：仍生效**
 
 > **旧号**：`PIT-USERS-SHARED-009` ⇒ **新号**：`PIT-USERS-09`
@@ -520,6 +524,8 @@ Error response from daemon: No such container: difftest-postgres
   **自己建库**比「清理共享库」安全得多。
 
 ---
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run.sh` ⇒ **EXIT=0**（2026-10-30 03:29:45 · 137s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [3b/3] 判定器（🔴 E48 · 第三十九轮：判定从「注释里的承诺」变成「可执行的代码」） ⏐ PASS —— 未复现差异（两侧 Δ_end 一致 ⇒ RAG 侧继承了客户端 deadline） ⏐ ⇒ E38① 的运行期结论成立 ⏐ ⇒ 退出码 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ⇒ 判定退出码 = 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ==> 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
 
 ## PIT-USERS-10 🔴 「端口在监听」≠「这是我刚起的进程」⇒ `wait_port` 会**误判 OK** · **状态：仍生效**
 
@@ -573,6 +579,8 @@ Error response from daemon: No such container: difftest-postgres
 ⇒ **复现失败时，先做「第一次 vs 第 N 次」的对照**，比直接读实现快得多。
 
 ---
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/exp-difftest-concurrent-schema.sh` ⇒ **EXIT=0**（2026-10-30 04:12:54 · 32s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [2/6] 生成 Go 运行配置副本（两份：user-rpc / admin-rpc） ⏐ ==> [3/6] 构建（Go 二进制 + 两个 RAG jar） ⏐ ==> [4/6] Go 侧：go-user-rpc 与 go-admin-rpc **并发**对同一个空库启动 ⏐ ==> [5/6] RAG 侧：user-rpc 与 admin-rpc **并发**对同一个空库启动 ⏐ ==> [6/6] 判定 ⏐ ⇒ 关键判定。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
 
 ## PIT-USERS-11 🔴 函数名里的「Must」**不构成证据** —— Go 的 struct tag 默认值会**静默改写**行为 · **状态：仍生效**
 
@@ -636,6 +644,8 @@ Go 的 `conf` 包会按 struct tag 施加默认值（`default=` / `options=`）�
 ⇒ **一条「看起来很确定」的结论，越顺手越要拿实验去撞它。**
 
 ---
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/exp-difftest-redis-failfast.sh` ⇒ **EXIT=0**（2026-10-30 04:13:57 · 20s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [3/5] RAG 侧：把 REDIS_PORT 指到死端口后启动 user-rpc ⏐ ==> [4/5] 判定 ⏐ ❌ Go 侧**起来了**（与静态证据矛盾！） ⏐ ✅ RAG 侧**起来了**（懒连接 ⇒ 与静态证据一致） ⏐ ==> [5/5] 汇总 ⏐ ⇒ 若 Go 失败 / RAG 成功 ⇒ 这就是 UNRESOLVED-USERRPC-004② 的**实测形态**：。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
 
 ## PIT-USERS-12 🔴 故障注入的「**断连形态**」决定测不测得到目标分支 —— `container.stop()` 发 RST ⇒ **假守卫** · **状态：仍生效**
 
@@ -760,6 +770,8 @@ RAG 探测：t=4.19 起 → PAUSE 早已结束 → 0.042s 返回「正常」
 ⚠️ **只能 `wait "$具体PID"`**：裸 `wait` 会把 Go/RAG 服务进程也一起等 ⇒ 脚本永远卡死。
 
 ---
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/exp-difftest-redis-neverup.sh` ⇒ **EXIT=0**（2026-10-30 04:12:27 · 27s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [7/7] 两侧日志里的 Redis 失败证据（证明确实查了黑名单，而不是压根没查） ⏐ · Go  ：黑名单 EXISTS 失败 ⇒ err != nil ⇒ **fail-open 放行**（200） ⏐ ⇒ 关键看**耗时是否 < 3s**：超过 3s 就撞 Go 的 HTTP 预算（rest/config.go:55 default=3000） ⏐ · RAG ：黑名单查询失败 ⇒ fail-open（JwtAuthIn。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
 
 ## PIT-USERS-16 🔴 `surefire-reports/*.xml` 里有**陈旧报告** ⇒ 求和会**多算**测试数 · **状态：仍生效**
 
@@ -916,6 +928,8 @@ UserApiProtectionMvcTest.normalRequestReachesBusinessLogic
   ⇒ **「外部依赖故障」类对照，必须按「故障形态」逐个测，不能测一个就宣布对齐。**
 
 ---
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/exp-difftest-redis-neverup.sh` ⇒ **EXIT=0**（2026-10-30 04:12:27 · 27s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [7/7] 两侧日志里的 Redis 失败证据（证明确实查了黑名单，而不是压根没查） ⏐ · Go  ：黑名单 EXISTS 失败 ⇒ err != nil ⇒ **fail-open 放行**（200） ⏐ ⇒ 关键看**耗时是否 < 3s**：超过 3s 就撞 Go 的 HTTP 预算（rest/config.go:55 default=3000） ⏐ · RAG ：黑名单查询失败 ⇒ fail-open（JwtAuthIn。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
 
 ## PIT-USERS-19 🔴 机器复核工具的「路径存在性」层会**误判** ⇒ 先分类再动手，别为迎合工具改台账 · **状态：仍生效**
 

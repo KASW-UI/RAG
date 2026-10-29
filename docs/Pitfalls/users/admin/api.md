@@ -411,6 +411,8 @@
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run.sh` ⇒ **EXIT=0**（2026-10-30 03:29:45 · 137s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [3b/3] 判定器（🔴 E48 · 第三十九轮：判定从「注释里的承诺」变成「可执行的代码」） ⏐ PASS —— 未复现差异（两侧 Δ_end 一致 ⇒ RAG 侧继承了客户端 deadline） ⏐ ⇒ E38① 的运行期结论成立 ⏐ ⇒ 退出码 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ⇒ 判定退出码 = 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ==> 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
 ## PIT-USERSADM-12 · `docker exec` 不带 `-i` ⇒ **heredoc 里的 SQL 根本没进去**，而且**不报错** · **状态：仍生效**
 
 > **旧号**：`P-ADMINAPI-012` ⇒ **新号**：`PIT-USERSADM-12`

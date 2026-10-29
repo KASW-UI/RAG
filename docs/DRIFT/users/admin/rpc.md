@@ -593,6 +593,8 @@ Recommended:   在 AdminSchemaBootstrap 的 javadoc 里明确写「本模块比 
 > ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **已关闭为「IMPLEMENTATION DIFFERENCE，不是缺陷」** ⇒ **现行态 = ✅ 维持「已关闭（非缺陷）」**（**RAG 侧仍重放全部 4 份**）。
 > 依据（两侧，当场核过）：**RAG** `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/bootstrap/AdminSchemaBootstrap.java:55` = `SchemaInitializer.applyAll(connection, "admin-rpc");` ⇒ **重放的是 users 域全套 DDL（含 `users_user_avatar_history`）⇒ 4 张** · **Go** `service/user/admin/rpc/internal/model/db.go:15` = `err = db.AutoMigrate(&Admin{}, &AdminInvite{}, &User{})` ⇒ **3 张**。⇒ **「3 vs 4」这个计数差仍在** ⇒ **按原判：实现差异，不是缺陷**（全部 `CREATE … IF NOT EXISTS` ⇒ 多建一张不破坏任何东西）。核对日期 2026-10-30。
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run.sh` ⇒ **EXIT=0**（2026-10-30 03:29:45 · 137s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [3b/3] 判定器（🔴 E48 · 第三十九轮：判定从「注释里的承诺」变成「可执行的代码」） ⏐ PASS —— 未复现差异（两侧 Δ_end 一致 ⇒ RAG 侧继承了客户端 deadline） ⏐ ⇒ E38① 的运行期结论成立 ⏐ ⇒ 退出码 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ⇒ 判定退出码 = 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ==> 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../_cross/live-parity-2026-10-30.md)。
+
 ### DRIFT-ARPC-006 —— 无 gRPC span：Go 逐 Logic 手写 `tracer.Start`，RAG 侧业务方法无 span 属性 —— ✅ **已修（2026-10-23 实施轮 §2 · 8 处 span）**
 
 > 🟢 **2026-10-29 收敛订正（同一编号只有一种状态）**：本条标题**原文不带状态**，而同一文件 `:1377` / `:1588` 两处状态表均记 **「✅ 已修（8 处，非 13 处）」**，`vs-common.md:35` 亦记 **✅ 已修** ⇒ **本轮以「已修」为准**并把状态**写进标题**（原文一律保留）。
@@ -703,6 +705,8 @@ Required Confirm: 跑 tools/difftest/exp-difftest-grpc-errors.sh（该脚本此�
 > **本轮起：每轮结束必须回头销 UNRESOLVED。**
 > ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已关闭（2026-10-23 22:4x · `exp-difftest-grpc-admin-errors.sh` 18 用例）** ⇒ **现行态 = ✅ 维持已关闭**（**对拍脚本与执行体都还在**）。
 > 依据（当场核过）：**RAG/工具** `tools/difftest/exp-difftest-grpc-admin-errors.sh` ✅ **存在**（**编排脚本**）＋ `tools/difftest/GrpcAdminDualPortRunner.java` ✅ **存在**（**双端口执行体**）。⚠️ **效力边界仍在**：那 18 个用例**只覆盖错误路径**（成功路径只有 `login.ok` / `logout.ok` / `getself.ok` / `getuserlist.empty`）⇒ **「13 个 RPC 的错误路径已双侧活体对拍」成立，「13 个 RPC 全部闭环」不成立**。⇒ **本条维持关闭**（⚠️ **本轮未复跑该脚本** ⇒ 数字 `cases=18 / code_mismatch=0 / payload_diff=0` 沿用上一轮 ⇒ 按 §0 读作「在该证据强度下一致」）。核对日期 2026-10-30。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/exp-difftest-grpc-admin-errors.sh` ⇒ **EXIT=0**（2026-10-30 04:30:58 · 6s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [1/4] 编译 admin-proto 桩 + 计算 classpath ⏐ ==> [2/4] 编译 GrpcAdminDualPortRunner ⏐ ==> [3/4] 种 probe user（go_db.users / rag_db.users_user） ⏐ ==> [4/4] 跑实验(写入 grpc-admin-results.txt) ⏐ code_mismatch>0 ⇒ 语义级差异，exit 1 ⏐ des；<br>`tools/difftest/exp-difftest-grpc-admin-errors.sh` ⇒ **EXIT=0**（2026-10-30 04:30:58 · 6s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [1/4] 编译 admin-proto 桩 + 计算 classpath ⏐ ==> [2/4] 编译 GrpcAdminDualPortRunner ⏐ ==> [3/4] 种 probe user（go_db.users / rag_db.users_user） ⏐ ==> [4/4] 跑实验(写入 grpc-admin-results.txt) ⏐ code_mismatch>0 ⇒ 语义级差异，exit 1 ⏐ des。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../_cross/live-parity-2026-10-30.md)。
 
 ### UNRESOLVED-ARPC-002 —— 超时是否 min 客户端 deadline
 
@@ -1598,6 +1602,8 @@ RAG  AdminCreateAtomicService:124-127 （修复前同构，LocalDateTime 版）
 ⚠️ 顺序上本轮是**先改实现、后改断言**，与 §3.3.3「先改错误断言」的顺序相反，**结论一致**，已在 javadoc 里注明。
 
 ## 3. 📌 本轮关闭为「非缺陷」的项
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run.sh` ⇒ **EXIT=0**（2026-10-30 03:29:45 · 137s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [3b/3] 判定器（🔴 E48 · 第三十九轮：判定从「注释里的承诺」变成「可执行的代码」） ⏐ PASS —— 未复现差异（两侧 Δ_end 一致 ⇒ RAG 侧继承了客户端 deadline） ⏐ ⇒ E38① 的运行期结论成立 ⏐ ⇒ 退出码 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ⇒ 判定退出码 = 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ==> 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../_cross/live-parity-2026-10-30.md)。
 
 ### DRIFT-ARPC-005（启动期建表 3 张 vs 4 张）⇒ 关闭
 

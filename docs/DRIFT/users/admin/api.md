@@ -976,6 +976,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 > ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已关闭（2026-10-24）** ⇒ **现行态 = ✅ 维持已关闭**（**守门脚本已在位且含 admin 入口**）。
 > 依据（两侧，当场核过）：**RAG/工具** `tools/difftest/check-plaintext400-headers.sh` ✅ **存在**（脚本头 `:2` 明写「真实 Tomcat 下断言 text/plain 400 的响应头 —— E-1 收口的端到端守门脚本」）· **RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/advice/GlobalExceptionHandler.java:59`（`@ExceptionHandler(AuthenticationException.class)` ⇒ 401 路径在位）+ `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:728`（`nosniff` 在位）⇒ **「已关闭」所依赖的两件东西都还在**。⚠️ **本轮未复跑真 Tomcat 守门** ⇒ 按 AGENTS.md §0 读作「在该证据强度下一致」。核对日期 2026-10-30。
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run.sh` ⇒ **EXIT=0**（2026-10-30 03:29:45 · 137s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [3b/3] 判定器（🔴 E48 · 第三十九轮：判定从「注释里的承诺」变成「可执行的代码」） ⏐ PASS —— 未复现差异（两侧 Δ_end 一致 ⇒ RAG 侧继承了客户端 deadline） ⏐ ⇒ E38① 的运行期结论成立 ⏐ ⇒ 退出码 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ⇒ 判定退出码 = 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ==> 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../_cross/live-parity-2026-10-30.md)。
+
 ### UNRESOLVED-ADMINAPI-003 · Go 的 `omitempty` 对 struct 无效这一条，本轮只做了静态判定
 
 > ✅ **已关闭（2026-10-24）** ⇒ 见本文件新增 **§1**（逐字节副本 + `go run` 实测）。
@@ -1408,7 +1410,9 @@ assertEquals("text/plain", asPlainText.getResponse().getContentType(),
 | 签字 | 管什么 | 不管什么 |
 |---|---|---|
 | **N-4** | `operator_id` **取值** —— Go 恒 0，RAG 传真实 uid | 不管 claim 校验 |
-| **SD-2026-10-23-01** | claim **校验** —— Go 不校验，RAG 严格校验 | 不管取值<br>⚠️ **2026-10-30 真实性复核（users lane）**：原判（作为 N-4 / SD-2026-10-23-01 的分工说明）**不变** ⇒ **现行态 = ✅ 维持「✅ 仍成立」**（**两侧的校验语义差仍在**）。依据：**RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/IdentityResolver.java:93`（`claimedUID`）＋ `:99`（`!(v instanceof Long)` ⇒ 拒绝）＋ `:104`（`uid <= 0` ⇒ 拒绝）＋ `:132`（`admin == null || admin.equals(getDefaultInstance())` ⇒ 拒绝）＋ `:135`（`admin.getUid() != uid` ⇒ 拒绝）⇒ **「RAG 严格校验」在位** · **Go** `service/user/admin/api/internal/logic/admin/banuserlogic.go:36-39`（取不到 `uid` 即**恒 0、不报错**）⇒ **「Go 不校验」在位**。⇒ **差异仍在 ⇒ 签字仍有效 ⇒「✅ 仍成立」**（签字档取值域，非 DRIFT 的 ✅/🔴）。核对日期 2026-10-30。|
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run.sh` ⇒ **EXIT=0**（2026-10-30 03:29:45 · 137s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [3b/3] 判定器（🔴 E48 · 第三十九轮：判定从「注释里的承诺」变成「可执行的代码」） ⏐ PASS —— 未复现差异（两侧 Δ_end 一致 ⇒ RAG 侧继承了客户端 deadline） ⏐ ⇒ E38① 的运行期结论成立 ⏐ ⇒ 退出码 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ⇒ 判定退出码 = 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ==> 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../_cross/live-parity-2026-10-30.md)。
+| **SD-2026-10-23-01** | claim **校验** —— Go 不校验，RAG 严格校验 | 不管取值<br>⚠️ **2026-10-30 真实性复核（users lane）**：原判（作为 N-4 / SD-2026-10-23-01 的分工说明）**不变** ⇒ **现行态 = ✅ 维持「✅ 仍成立」**（**两侧的校验语义差仍在**）。依据：**RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/IdentityResolver.java:93`（`claimedUID`）＋ `:99`（`!(v instanceof Long)` ⇒ 拒绝）＋ `:104`（`uid <= 0` ⇒ 拒绝）＋ `:132`（`admin == null || admin.equals(getDefaultInstance())` ⇒ 拒绝）＋ `:135`（`admin.getUid() != uid` ⇒ 拒绝）⇒ **「RAG 严格校验」在位** · **Go** `service/user/admin/api/internal/logic/admin/banuserlogic.go:36-39`（取不到 `uid` 即**恒 0、不报错**）⇒ **「Go 不校验」在位**。⇒ **差异仍在 ⇒ 签字仍有效 ⇒「✅ 仍成立」**（签字档取值域，非 DRIFT 的 ✅/🔴）。核对日期 2026-10-30。<br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/probe-go-omitempty.sh` ⇒ **EXIT=0**（2026-10-30 03:44:00 · 2s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 逐字节相同；<br>`tools/difftest/run.sh` ⇒ **EXIT=0**（2026-10-30 03:29:45 · 137s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [3b/3] 判定器（🔴 E48 · 第三十九轮：判定从「注释里的承诺」变成「可执行的代码」） ⏐ PASS —— 未复现差异（两侧 Δ_end 一致 ⇒ RAG 侧继承了客户端 deadline） ⏐ ⇒ E38① 的运行期结论成立 ⏐ ⇒ 退出码 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ⇒ 判定退出码 = 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ==> 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../_cross/live-parity-2026-10-30.md)。|
 
 ## 4. 上文 §3~§5 各条的现状（2026-10-23 核对）
 
@@ -1545,6 +1549,17 @@ SCENARIO=map_empty         JSON={}          ← 对照：map 形态才会被省�
 > 可复现：`bash tools/difftest/exp-admin-worker-pool-load.sh 300` ⇒ `EXIT=0`。
 > 两轮实测均为：Tomcat 并发峰值 **200** / 池并发峰值 **200** / **裸 503 = 0**。
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）订正 —— 原判保留不改**：
+> 本轮实跑 `bash tools/difftest/exp-admin-worker-pool-load.sh 300` ⇒ **EXIT=1**（2026-10-30 04:27:57 · 159s），
+> 两轮实测：Tomcat 并发峰值 **200** / 池并发峰值 **200**（**与上文完全一致**）/ **裸 503 = 95（开）与 100（关）**。
+> ⇒ **① 上面那两个 200 复现了** ⇒ **「池饱和分支在默认配置下不可达」这条结论仍成立**（`200 < 512`）。
+> ⇒ **② 「裸 503 = 0」这一行不可复现** —— 裸 503 是 **CPU shedding 自适应**出来的
+> （`GoStyleAdaptiveShedder` 读整机 CPU，threshold=900‰）⇒ **取决于当时机器有多忙**，负载相关。
+> ⇒ **③ 探针自己的注释也这么写**（"第 1 轮与第 2 轮的裸 503 数可能都是 0，也可能差很多"），
+> **但它的退出码却由这个指标决定** ⇒ 本次判红 ⇒ **EXIT=1 ≠ 结论为假**
+> ⇒ 判读本探针**必须看它自己的判定行**（`✓ 池实际并发峰值 200 < 512 ⇒ 池饱和分支不可达`），不能只看退出码。
+> ⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../_cross/live-parity-2026-10-30.md) §三·⑯-b。
+>
 > ⚠️ **别用「exec 线程号上界」当并发上限**：Tomcat 线程**只增不复用**，
 > 线程号会随累计请求数一直涨（实测见过 390），与并发无关。
 > 正确口径是**同一时刻不同 exec 线程的个数**。

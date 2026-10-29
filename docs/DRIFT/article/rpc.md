@@ -2641,3 +2641,5 @@ bash tools/api-full-parity-probe/article/mutate-parity.sh          # ⇒ EXIT=0 
 | **§七 RPC 型 5 条** | **5/5 满足**（③ ④ 两格由本轮**补齐**，其余三格既有） |
 | **仍开放（不阻断 R3）** | ① `U-9b`（Go 侧 handler 并发模型**未活体对拍**）② 双侧活体的**成功路径完整字段语义**（`user.rpc` 两侧都不可达 ⇒ 现钉的是**降级路径**）③ `O-4` / `O-6` 仍只有静态取证 |
 | **⚠️ 不许越界读** | **本组件不是「零差异」** —— §12.4.2 的模型差异、`O-4`/`O-6` 的静态取证、双侧活体只覆盖降级路径 ⇒ 都**不等于**「两侧行为逐字节一致」 |
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/article/run.sh` ⇒ **EXIT=0**（2026-10-30 03:21:39 · 34s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：== 2/8 构建 Go 侧二进制（真源**只读** ⇒ 产物落临时目录） == ⏐ == 8/8 请求矩阵（Go vs RAG vs expected.txt ⇒ 逐字节） == ⏐ ✅ list_articles  Go == RAG == expected.txt（逐字节） ⏐ ✅ get_article_exists  Go == RAG == expected.txt（逐字节） ⏐ ✅ get_article_missing 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。

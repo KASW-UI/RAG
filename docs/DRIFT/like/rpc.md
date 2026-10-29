@@ -1392,7 +1392,7 @@ Java 侧用默认（按 key 哈希）分区器、**未配 Snappy**。
 
 | ID | 内容 | 为什么留着 |
 |---|---|---|
-| **DRIFT-LIKE-003** | 事实投递链路 6 个骨架文件 | 本轮**有意不碰**（需新建独立进程，scope 过大）；链路末端真 DC 接收服务**不在任何仓**，投递环节只能对 stub 验证 |
+| **DRIFT-LIKE-003** | 事实投递链路 6 个骨架文件 | 本轮**有意不碰**（需新建独立进程，scope 过大）；链路末端真 DC 接收服务**不在任何仓**，投递环节只能对 stub 验证 <br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/like/run.sh` ⇒ **EXIT=0**（2026-10-30 03:27:30 · 59s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 响应字节：Go == RAG == expected.txt（HTTP 200）⇒ {"code":200,"msg":"OK","data":{"success":true,"message":"action success","like_count":4,"dislike_count":1}} ⏐ ✅ 双失败业务错误：Go 记了 5011（ErrorRedisSelect）"error_code":5011 · RAG 记了 b。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。|
 | **L-U9** | 「失败消息之后，后续消息是否真的被继续处理」**无活体证据** | 本轮**没有真 Kafka**。源码链已钉死（`recovered` 返回 `true` ⇒ `doSeeks` 不 seek），但那是**源码级**不是**活体级** |
 | **L-U10** | 分区器 `LeastBytes` + Snappy | OBSERVABLE，见 §2.11 |
 | **L-U11** | `rpcInterceptorConfigurer` / `@EnableScheduling` 无守门测试 | 错误断言 F 已标注为**已知测试缺口**（需真实 gRPC server / 调度器才能验）<br>🔴 **2026-10-24 第五轮：`@EnableScheduling` 那半已修**（见 §6.5）⇒ **只剩 `rpcInterceptorConfigurer` 一处**<br>🔴 **2026-10-24 审计更正：「需真实 gRPC server 才能验」这个理由已过时** —— like-rpc 的测试里 gRPC server **早就起了**（`grpc.server.port=0`）；真正的路径是「发一个慢请求，看客户端是否在 `observability.rpc-timeout: 2s` 后收到 `DEADLINE_EXCEEDED`」⇒ **它从「环境受阻」降级为「尚未实现」**（详见审计章节 §3.2） |

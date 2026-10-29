@@ -46,7 +46,7 @@
 | # | 输入 | Go 实测 | 修复前 RAG | 性质 | 状态 |
 |---|---|---|---|---|---|
 | **DRIFT-MSGAPI-001** | `{"conversation_id":123}`（JSON **数字**） | **接受 → 123** | **拒绝 → 5001** | SEMANTIC MISMATCH / HIGH-RISK | ✅ 已修<br>⚠️ **2026-10-30 真实性复核（message+like lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（**不改判**）。**本条段内原无可复算指针，本轮补齐**：RAG `service/message/message-api/src/main/java/com/rag/message/message/api/dto/ConversationMessagesReq.java:64-66`（`@JsonProperty("conversation_id")` + `setConversationId(Object raw)` → `GoStyleStringInt64.parse(raw, "conversation_id")` ⇒ **接受** JSON 数字）· RAG `service/message/message-api/src/main/java/com/rag/message/message/api/dto/GoStyleStringInt64.java:74`（`public static Long parse(Object raw, String fieldName)`）· Go `go-zero@v1.10.2/core/mapping/unmarshaler.go:1113-1125`（`case json.Number:` → `setValueFromString(baseType.Kind(), value, v.String())` ⇒ Go 的 `,string` 入参方向**宽松**，接受数字）· Go `go-zero@v1.10.2/core/jsonx/json.go:74-77`（`decoder.UseNumber()` ⇒ 解出来是 `json.Number`，不是 `float64`/`int`）· 核对日期 2026-10-30。 |
-| **DRIFT-MSGAPI-002** | `{"offset":"10"}`（**无** `,string`，JSON 字符串） | **拒绝 → 5001** | **接受 → 10** | SEMANTIC MISMATCH / HIGH-RISK | ✅ 已修 |
+| **DRIFT-MSGAPI-002** | `{"offset":"10"}`（**无** `,string`，JSON 字符串） | **拒绝 → 5001** | **接受 → 10** | SEMANTIC MISMATCH / HIGH-RISK | ✅ 已修 <br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/semantic-probe/run-parity.sh` ⇒ **EXIT=0**（2026-10-30 03:16:43 · 4s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：（未抓到结论行）。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。|
 | **DRIFT-MSGAPI-003** 🆕 | `{"extra":null}`（字段 tag 是 **`optional`**） | **接受** | **拒绝 → 5001** | SEMANTIC MISMATCH | ✅ 已修 |
 
 ⚠️ 前两条是**方向相反**的 —— 一条该收不收、一条不该收却收，所以「粗看都能跑通」，
@@ -1050,6 +1050,8 @@ RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFie
   ⇒ 教训：**问题归属要按「问题」分，不能按「组件」分**。
 - ⚠️ **2026-10-30 真实性复核（message+like lane）**：原判 **✅ 已关闭（2026-10-24 第十轮）** ⇒ **现行态 = ✅ 已关闭**（**不改判**；短确认）。依据：RAG `service/message/message-common/src/main/java/com/rag/message/message/common/errmsg/MessageGrpcError.java:255`（`mapStatusCodeToBizCode(Status.Code)`）· RAG `service/message/message-common/src/main/java/com/rag/message/message/common/errmsg/MessageGrpcError.java:244`（反查未命中 ⇒ 走 code class 映射）· RAG `service/message/message-common/src/main/java/com/rag/message/message/common/errmsg/MessageGrpcError.java:247`（兜底 `CODE_SERVER_BUSY`）· Go `service/message/common/errmsg.go:117-132`（同一张 switch：`InvalidArgument` / `Unauthenticated` / `PermissionDenied` / `AlreadyExists` / `NotFound` / `Internal` + `default`）· Go `service/message/common/errmsg.go:31`（`CodeServerBusy = 1015`）· 核对日期 2026-10-30。
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/exp-difftest-grpc-errors-message.sh` ⇒ **EXIT=0**（2026-10-30 04:27:11 · 4s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [1/3] 生成 proto 桩 + 计算 classpath ⏐ ==> [2/3] 编译 GrpcMessageDualPortRunner ⏐ ==> [3/3] 跑对拍。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
+
 ### UNRESOLVED-002 ✅ **已关闭（2026-10-24 第九轮）**
 - ~~**Question**：RAG 侧 `MessageGoStyleCoercion` 的规则**是否真的作用在 Spring MVC 实际使用的那个 mapper 上**？~~
 - **✅ 关闭依据**：新增 `MessageApiGoStyleCoercionWiringTest`（**6 例，全部走真实 MVC 管线**，不是「同构但不同实例」的探针）：
@@ -1070,6 +1072,8 @@ RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFie
   原始响应头产物在 `/tmp/difftest-msg-headers/`。
 - **⇒ 取证结论见第八轮第 2 节的对照表**（3 处真实差异 + 1 处框架限制）。
 - ⚠️ **2026-10-30 真实性复核（message+like lane）**：原判 **✅ 已关闭（2026-10-24 第八轮）** ⇒ **现行态 = ✅ 已关闭**（**不改判**）。**本条段内原无可复算指针，本轮补齐**：工具 RAG `tools/difftest/exp-http-headers-message.sh`（在位，8007 字节，可执行位 `-rwxr-xr-x`）· Go `go-zero@v1.10.2/rest/handler/tracehandler.go:61`（`propagator.Inject(spanCtx, propagation.HeaderCarrier(w.Header()))` ⇒ Go 侧响应头注入点）· RAG `service/common/src/main/java/com/rag/common/http/GoStyleTraceparentFilter.java:188-190`（`@Component` + `@Order(Ordered.HIGHEST_PRECEDENCE + 3)`）· RAG `service/common/src/main/java/com/rag/common/http/GoStyleTraceparentFilter.java:261-285`（`Extract` → `Start` → `Inject` 三步）· 核对日期 2026-10-30。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/exp-http-headers-message.sh` ⇒ **EXIT=0**（2026-10-30 04:13:26 · 5s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：（未抓到结论行）；<br>`tools/difftest/exp-http-headers-message.sh` ⇒ **EXIT=0**（2026-10-30 04:13:26 · 5s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：（未抓到结论行）。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
 
 ### UNRESOLVED-004 ✅ **已关闭（2026-10-24 第八轮）**
 - ~~**Question**：3s 超时触发时，RAG 是否真的写出 `503 + text/plain; charset=utf-8 + "Request Timeout\n"`？~~
@@ -1335,6 +1339,8 @@ Jackson 3 的 `FAIL_ON_NULL_FOR_PRIMITIVES` **默认 true** ⇒ `{"offset":null}
 
 | 编号 | 状态 | 依据 |
 |---|---|---|
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/semantic-probe/run-parity.sh` ⇒ **EXIT=0**（2026-10-30 03:16:43 · 4s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：（未抓到结论行）。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
 | `UNRESOLVED-002` | ✅ **关闭** | 新增 `MessageApiGoStyleCoercionWiringTest`（**6 例，全部走真实 MVC 管线**：2 例 `,optional` 显式 null 放行并落零值、1 例 admin `kind:null`、1 例 `extra` 元素收数字并断言下游 proto 里的**字面量**、1 例 `extra` 元素 null → 5001 **且零次下游调用**、1 例必填 `title:null` 仍 5001）。它证明的是「规则真挂在 Spring MVC 用的那个 mapper 上」——探针只证明「规则是什么」 |
 
 ### 八、本轮实测数据

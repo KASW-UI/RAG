@@ -1629,6 +1629,36 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 ⇒ 探针里：**#1 用 `SAME_BODY` 档**（status 与 body 两侧全等，只有 Content-Type 不同）、
 **#2 用 `OBS` 档**（单独量化，不混进业务用例）⇒ **真差异被量化、被冻结、可见**，但没被「顺手修掉」。
 
+> 🔴🔴 **2026-10-30 活体对拍轮订正 —— 上表 #2 的「RAG 侧没有」已经陈旧，#2 实为「已闭合」**
+>
+> **活体证据**：`bash tools/api-full-parity-probe/favorite/run.sh` ⇒ **EXIT=1**（2026-10-30 03:22 · 45s）
+> —— 探针自己打出的判定是：
+> `· h01_response_header_surface —— OBS 段期望两侧不同，但变成一样了 ⇒ 请重评台账`
+> ⇒ **两侧现在响应头 key 集合已完全相同**（`hkeys=content-length,content-type,date,traceparent`）。
+>
+> **根因（不是「探针误报」，是台账漏同步）**：**共享层 T-8 已于 2026-10-25 第十九轮落地**
+> —— `service/common` 新增 `com/rag/common/http/GoStyleTraceparentFilter.java`
+> （`@Order(Ordered.HIGHEST_PRECEDENCE + 3)`）⇒ **10 个 api 全生效** ⇒ **RAG 侧现在也发 `traceparent`**。
+> 台账登记这条时（第十四轮）T-8 还没落地 ⇒ **登记的是当时的事实 ⇒ 现在是陈旧事实**。
+> （共享层那条的权威登记 ⇒ `docs/DRIFT/global/_README.md` 的 **T-8** 行 /
+> `docs/DRIFT/global/common-tails.md` §一·T-8 ⇒ **✅ 已修**。）
+>
+> **判定**：#2 **不是缺陷，是一条已闭合的历史差异** ⇒ 现行态 = **⛔ 已失效·差异已消失**。
+> ⚠️ **不是「RAG 多出来了」**（那会变成**反向**漂移）—— 是**两侧都多** ⇒ **与 Go 侧一致**。
+> ⚠️ **一处仍存的口径差**：Go 的头名 canonical 成 **`Traceparent`**（首字母大写），
+> RAG 侧由 `GoStyleTraceparentFilter` **主动 canonical 化**（见其 javadoc 的「头名大小写」段）
+> ⇒ **两边都是 `Traceparent` ⇒ 字节级一致**；而探针的 `hkeys` 只比**小写归一后的 key 集合**。
+>
+> **探针侧同步处置**（`tools/`）：`tools/api-full-parity-probe/favorite/expected.txt`
+> 的 h01 档位已由 **`OBS`（要求两侧**必须不同**）改为 `SAME`（要求**全等**）**
+> ⇒ ⚠️ **不改会出事**：留在 `OBS` 档 ⇒ 任何「RAG 侧不再发 `traceparent`」的回归
+> **会被静默放过**（因为 `OBS` 只要求两侧**不同**）⇒ 改档后该用例从「量化差异」变成「**守住闭合态**」。
+> ⇒ `tools/api-full-parity-probe/favorite/README.md` §五/§六③/§七 已同步。
+>
+> **#1（405 多一个 `Content-Type`）本轮未复测**：该用例在 `favorite` 域探针里是 `SAME_BODY` 档
+> ⇒ 本轮实测仍为 **SAME_BODY 2 条**（`r02` / `r03` 两条 405）⇒ **#1 仍然成立**（未闭合）。
+
+
 ### 22.5 ✅ A-2：写入方盘点工具**拓宽覆盖面** + 产出**人工确认清单**
 
 第十三轮 §18.2 的「可动项 B」已落地为机检工具，但只覆盖 `favorite_fact_outbox` 的**字面量 SQL**。
@@ -1650,7 +1680,7 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 
 | 项 | 结果 |
 |---|---|
-| `tools/api-full-parity-probe/favorite/run.sh`（新） | **EXIT=0** · 32 case · 24 SAME / 1 SAME_CODE / 2 SAME_BODY / 4 SAME_STATUS / 1 OBS |
+| `tools/api-full-parity-probe/favorite/run.sh`（新） | **EXIT=0** · 32 case · 24 SAME / 1 SAME_CODE / 2 SAME_BODY / 4 SAME_STATUS / 1 OBS<br>🔴 **2026-10-30 活体对拍轮订正**：本轮实跑 **EXIT=1** ⇒「OBS 段期望两侧不同，但变成一样了 ⇒ 请重评台账」⇒ **h01（`traceparent` 那条）已闭合**（共享层 T-8 已于 2026-10-25 落地）⇒ 档位改 **`SAME`** ⇒ **复跑 EXIT=0**（2026-10-30 03:28 · 48s）⇒ 计数相应变为 **25 SAME / 0 OBS** ⇒ 详见 §22.4 订正块 |
 | ↳ **变异验证** | 打掉「文案反查」⇒ **EXIT=1** · **4 个 case 转红**（5201→5002 · 5301→5002 · 5304→1015）⇒ 非假绿 |
 | `tools/grpc-contract-probe/favorite/run.sh` | **EXIT=0**（c35 / c36 重新冻结后复跑） |
 | `tools/outbox-writer-audit/favorite/check-outbox-writers.py` | **EXIT=0**（扩面后复跑） |
@@ -1680,7 +1710,7 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 
 > ⚠️ **本轮新增的 2 条跨域项**（§22.4）收口在 `global`：
 > ① **405 响应多一个 `Content-Type`**（落点 `service/common` 的 `GoStyleRouterErrorResponses` —— 它的 javadoc 说「容器不会补 Content-Type」，**实测被证伪**）；
-> ② **Go 响应多一个 W3C `traceparent`**（可观测层）。
+> ② **Go 响应多一个 W3C `traceparent`**（可观测层）。<br>🔴 **2026-10-30 活体对拍轮订正**：② 已 **⛔ 失效**（差异已闭合）⇒ 根因 = 共享层 **T-8** 已于 2026-10-25 第十九轮落地（`GoStyleTraceparentFilter` ⇒ 10 个 api 全生效）⇒ **两侧现在都有 `traceparent`** ⇒ 活体实测「OBS 段期望两侧不同，但变成一样了」⇒ 详见 §22.4 订正块。<br>（⚠️ 上面这句是**第十四轮当时的事实**，保留不改写；**现行态以本行订正为准**。）
 > ⇒ 两条**本域只登记不修**（`service/common/**` 是共享面）。
 > ⚠️ 另有一条**更广的跨域清单**（§22.3 的 `grpc-inprocess` 运行时缺失 ⇒ **全仓 13 个别域模块**同样起不来）⇒ 归 `global`。
 
@@ -1800,7 +1830,7 @@ bash tools/grpc-contract-probe/favorite/run.sh     # EXIT=0
 |---|---|---|---|
 | **A · 已识别且可修的漂移** | **0 ⇒ 3 ⇒ 0**（🔴 第二十轮补上「SQL 语句层」后新增 3 处 ⇒ ✅ **第二十三轮全部修掉**） | 已修：rpc 6 处 L2 + 2 处真 bug；api 4 处（L2×2 + javadoc 假断言×2 + L1×1）；DDL 14 处 DEFAULT + 3 条索引（**性能非行为**）<br>已签字 **9** 条（API-001/002 · COMMON-001/002 · RPC-001/003/004/006/007）· 已撤销 2 条（RPC-002/005）· 🏷 候选 **0**<br>🔴 **第二十轮新增 3 处** ⇒ ✅ **第二十三轮全修**：① `favorite_folder` INSERT 不绑 `create_time`/`update_time` ② `favorite_item` INSERT 不绑 `create_time` ③ 改名不推进 `update_time`（+1 处低影响：outbox 两个投递列 `NULL` vs `''`）⇒ 修完**探针转绿**（语义差异 10 → 0 · L1 3 → 0）⇒ **§29 / §32** | §2 / §3 · `api.md` §2 · `docs/Intentional_Deviations/favorite/` · **§29 / §32** |
 | **B · 域内能补的证据缺口** | ~~**1 + 1**~~ ⇒ **0 + 1** | **B1 = U8**：create / create_item 的**成功路径**未双侧对拍（⇒ 见 §24.2）—— ✅ **已于第十六轮闭合**（15 case 全 SAME ⇒ **§25**）<br>**B2**：V7 上线前的 **6 条域外写入方人工确认**（**流程项，不是代码项** ⇒ **仍待办，但不是「未知项」**） | §24.2 · §25 · [`tools/outbox-writer-audit/favorite/CHECKLIST.md`](../../../tools/outbox-writer-audit/favorite/CHECKLIST.md) |
-| **C · 跨域（本域只读）** | **5 ⇒ 6** | ① 容器层参数上限口径（与 hot 域 `DRIFT-HOTAPI-030` 同一格）② 405 多一个 `Content-Type`（落点 `service/common`，其 javadoc 被实测证伪）③ Go 多一个 `traceparent`（落点 `service/common` 的 `HttpMiddlewareFilter`）④ 🔴 **别域模块**运行时缺 `grpc-inprocess` ⇒ 可部署 jar 起不来 —— ⚠️ **本条数字已被同节 §24.4 归因翻案**：真缺 = **3 个可执行应用模块**（article-rpc / like-rpc / task-rpc）+ **4 个 `-common` 库**（不算可执行模块）；原写「13 个」**是错的**（详见 §24.4） ⑤ `like-api` 的熔断注释 ⑥ 🔴 **E65（第二十八轮）**：**favorite-rpc 的出向 gRPC 调用不继承请求 deadline** —— Go 侧出向调用吃 otel span 的 `depCtx`（父 ctx deadline 原样保留）vs RAG 侧 `applyTo` 在 gRPC 服务端路径**从未绑定**（`begin` 主代码调用点只有 HTTP 一处）⇒ 出向调用**零期限** ⇒ 死线到点后 Go **立刻失败不写**、RAG **照跑会写** ⇒ 🔴 两侧对「这次操作算不算成功」可能**相反**；⇒ 但**概率小**（R = 整预算 − δ）· **后果轻**（两处出向调用都在**事务外**）⇒ ⇒ **修法完全在共享层 ⇒ favorite 零改动即受益**（**§37**） | §22.3 / §22.4 · `api.md` §3 / §9.5 · **§37** ⇒ **收口在 `global`** |
+| **C · 跨域（本域只读）** | **5 ⇒ 6** | ① 容器层参数上限口径（与 hot 域 `DRIFT-HOTAPI-030` 同一格）② 405 多一个 `Content-Type`（落点 `service/common`，其 javadoc 被实测证伪）③ Go 多一个 `traceparent`（落点 `service/common` 的 `HttpMiddlewareFilter`）<br>　🔴 **2026-10-30 活体对拍轮订正**：**③ 已闭合** ⇒ 落点就是共享层 **T-8**，而 **T-8 已于 2026-10-25 第十九轮落地**（`service/common` 新增 `GoStyleTraceparentFilter` ⇒ 10 个 api 全生效）⇒ **两侧现在都有 `traceparent`** ⇒ 活体实测「OBS 段期望两侧不同，但变成一样了 ⇒ 请重评台账」⇒ 本项**不再需要收口** ⇒ **C 类计数相应 -1** ⇒ 详见 §22.4 订正块④ 🔴 **别域模块**运行时缺 `grpc-inprocess` ⇒ 可部署 jar 起不来 —— ⚠️ **本条数字已被同节 §24.4 归因翻案**：真缺 = **3 个可执行应用模块**（article-rpc / like-rpc / task-rpc）+ **4 个 `-common` 库**（不算可执行模块）；原写「13 个」**是错的**（详见 §24.4） ⑤ `like-api` 的熔断注释 ⑥ 🔴 **E65（第二十八轮）**：**favorite-rpc 的出向 gRPC 调用不继承请求 deadline** —— Go 侧出向调用吃 otel span 的 `depCtx`（父 ctx deadline 原样保留）vs RAG 侧 `applyTo` 在 gRPC 服务端路径**从未绑定**（`begin` 主代码调用点只有 HTTP 一处）⇒ 出向调用**零期限** ⇒ 死线到点后 Go **立刻失败不写**、RAG **照跑会写** ⇒ 🔴 两侧对「这次操作算不算成功」可能**相反**；⇒ 但**概率小**（R = 整预算 − δ）· **后果轻**（两处出向调用都在**事务外**）⇒ ⇒ **修法完全在共享层 ⇒ favorite 零改动即受益**（**§37**） | §22.3 / §22.4 · `api.md` §3 / §9.5 · **§37** ⇒ **收口在 `global`** |
 | **D · 库级 / 不可观测（明确「不做」）** | **3** | ① gRPC **措辞**（grpc-go 区分未知方法/未知服务，grpc-java 共用一种）② gRPC **响应头 key 集合**（grpc-java 多 `grpc-accept-encoding` / `grpc-encoding`）③ percent-encoding 的 `~` 边界差 1 字节（L0 帧层；本域 24 条文案**无 `~`** ⇒ 客户端不可观测） | §20.4 / §20.5 ⇒ 两侧 `code` 语义一致 ⇒ **属库级，不是不一致** |
 
 ⇒ ~~**域内没有「已知但没改」的语义漂移了**~~；剩下的只有 **U8**（一条路径）+ **B2**（一条流程）+ 跨域与库级。
@@ -2247,7 +2277,7 @@ Nacos 故意指向 `127.0.0.1:1` ⇒ 顺便证明「**注册中心不在也能�
 | 项 | 结果 |
 |---|---|
 | **本域全量测试** | ✅ **BUILD SUCCESS** —— `mvn -o -pl service/favorite/favorite-{proto,common,rpc,api} -am test -Dsurefire.failIfNoSpecifiedTests=false`：<br>favorite-rpc **17 个测试类 / 99 例**（含 2 skip，**+3 类 / +14 例** = 本轮三个守门类）· favorite-api **8 类 / 94 例**（含 1 skip）· favorite-common **4 类 / 29 例** ⇒ **全绿，0 失败 0 错误** |
-| **生产启动探针（新建）** | ✅ `bash tools/prod-startup-probe/favorite/run.sh` ⇒ **EXIT=0**（A 炸(uri) · C 炸(servlet) · B 起来 + 端口 LISTEN） |
+| **生产启动探针（新建）** | ✅ `bash tools/prod-startup-probe/favorite/run.sh` ⇒ **EXIT=0**（A 炸(uri) · C 炸(servlet) · B 起来 + 端口 LISTEN）<br>🔴 **2026-10-30 活体对拍轮订正**：本轮实跑 **EXIT=1** ⇒ 探针的 `servlet` **分类器只认 Boot 3 的措辞**（本项目已升 **Boot 4.0.8** ⇒ 失败签名变成 `ResponseBodyAdvice.class` 缺失）⇒ **假红** ⇒ **产品无缺陷**（同轮 B-case 真启动成功 + 21300 LISTEN）⇒ 修分类器 + 加**决策路径自检**（6/6）后 **复跑 EXIT=0**（2026-10-30 03:33 · 28s）⇒ ⚠️ **这个 EXIT=0 是 2026-10-30 才重新成立的** —— 在 03:18～03:33 之间它**不成立** ⇒ 详见 §三·①② |
 | **变异验证** | ✅ **4 条**（M1/M2/M3/M4）⇒ 全部按预期转红 ⇒ **守门网不是假绿** |
 | **gRPC 契约探针（两轮）** | ✅ `bash tools/grpc-contract-probe/favorite/run.sh` ⇒ **EXIT=0**（第一轮 36 case；第二轮 15 case 全 SAME） |
 | **api 整域探针** | ✅ `bash tools/api-full-parity-probe/favorite/run.sh` ⇒ **EXIT=0** |

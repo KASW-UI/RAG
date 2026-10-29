@@ -25,7 +25,7 @@
 | **决定** | **保留 RAG 的正常中文**，不复刻 Go 的乱码字节 |
 | **性质** | ① 有意偏离 —— RAG 侧**输出的是正确信息**，不是「忘了做」；Go 侧那一份是**仓库级数据损坏**，不是设计 |
 | **影响面** | **仅 gRPC `status.description`**（Go api 层只按 `status.Code` 分支、不透传 message ⇒ **不进 HTTP body**） |
-| **守门网** | `tools/difftest/exp-difftest-grpc-user9.sh` 双侧活体对拍：**43 场景 / 39 等价 / 4 处差异，4 处全是本条已签字的 Go 乱码** ⇒ 对拍脚本与本条共用一次证据 |
+| **守门网** | `tools/difftest/exp-difftest-grpc-user9.sh` 双侧活体对拍：**43 场景 / 39 等价 / 4 处差异，4 处全是本条已签字的 Go 乱码** ⇒ 对拍脚本与本条共用一次证据 |<br>🔴 **2026-10-30 活体对拍轮：守门网被独立复跑，签字内容逐条仍成立** —— `bash tools/difftest/exp-difftest-grpc-user9.sh` ⇒ **43 场景 / 差异 4**（2026-10-30 03:53 · 20s）⇒ 4 处差异 = `UploadAvatar: 查无此人` / `GetAvatarHistory: 查无此人` / `SelectAvatar: 不存在的 history_id` / `SelectAvatar: 查无此人`⇒ **全部是本条已签字的 Go 源码 GBK 乱码文案**（Go `鐢ㄦ埛涓嶅瓨鍦?`=`e990a2…` / `澶村儚鍘嗗彶涓嶅瓨鍦?`=`e6beb6…` vs RAG `用户不存在`=`e794a8…` / `头像历史不存在`=`e5a4b4…`）⇒ **签字描述的行为仍然存在 ⇒ 现行态 = ✅ 仍成立（不变）**<br>⚠️ **但守门网本身在 2026-10-30 之前是「跑不起来」的**（缺 fail-closed 密钥 env ⇒ RAG 侧进程起不来 ⇒ 探针到不了比对阶段）⇒ **「有守门网」≠「守门网现在还活着」** ⇒ 本轮已修（`tools/difftest/lib/rag-secrets.sh`）⇒ 修后**复现原数字** ⇒ 签字与守门网**双活**
 
 ### 2026-10-29 重核（台账对齐轮）
 

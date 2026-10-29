@@ -2734,3 +2734,5 @@ bash tools/api-full-parity-probe/favorite/run.sh   # 现成骨架
 | **证据强度** | **L4**（真容器装配 ⇒ 起不来/起得来）＋ **变异测试**（去掉占位符判据 ⇒ **4 条精确转红**，还原后 `git status` 干净） |
 | **实测** | `mvn -o -B -pl service/article/article-api -am -DargLine=-Xmx2g test` ⇒ **BUILD SUCCESS**（EXIT=0）· 模块内 **112 tests / 0 failures / 0 errors** · 守卫 **10/10 绿** |
 | **实际异常输出** | `article-api.auth.access-secret 未配置（绑到了未解析的占位符字面量 ${USER_JWT_SECRET}）：请设置环境变量 USER_JWT_SECRET（与签发方 user-api 一致）—— 本模块只验签、不签发，占位符原文是公开可知的「密钥」⇒ 任何人都能伪造 JWT` |
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/favorite/run.sh` ⇒ **EXIT=0**（2026-10-30 03:28:29 · 48s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 两侧种子就绪 ⏐ ✅ 黑名单对照 token 就绪（Redis exists=1） ⏐ ✅ 两侧各产出 31 个 case ⏐ SAME 25 条 / SAME_CODE 1 条 / SAME_BODY 2 条 / SAME_STATUS 4 条 / OBS 0 条 / SKIP 0 条（共 32 个 case） ⏐ ✅ api 整域两侧一致（SAME 全等；SAME_CODE 业务码等；SAME_BODY body 等；SAME_。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
