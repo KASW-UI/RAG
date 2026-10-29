@@ -339,10 +339,23 @@ def scan_ledgers(exclusions: dict[str, str]):
                 seg = title
             line_index[str(rel)].append((i + 1, end, ident))
             excl = next((why for pre, why in exclusions.items() if ident.startswith(pre)), None)
+            # ⚠️ **条目自己的「标题/首格」里也可能写着它的定级** ——
+            #   实测（2026-10-30）：`### \`S1-FOLLOW-004\` 🟡 **B 类** · …`
+            #   ⇒ 定级在**标题行**里 ⇒ 段内「阶段归属/定级」关键词扫不到
+            #   ⇒ 域侧台账**已经写好的 B 类定级被派生层读成「未定级」**
+            #   ⇒ 报成「真缺口」⇒ **假的**。
+            #   ⇒ 读法：**标题型**读标题行；**表格行型**读**第 2 格**（表型各异，
+            #     整行扫会把「引用别的条目/任务的类」误读成本条的类）。
+            if unit == "heading":
+                head_class = extract_class(title)
+            else:
+                _c = _cells(title)
+                head_class = class_from_cell(_c[1]) if len(_c) > 1 else ""
             entries.append({
                 "id": ident, "dir": rel.parts[0], "domain": dom,
                 "file": str(rel), "line": i + 1, "unit": unit,
                 "title": title[:200], "seg": seg, "excluded": excl,
+                "head_class": head_class,
             })
     return entries, line_index
 
@@ -1126,6 +1139,10 @@ def entry_stage_decl(entry) -> tuple[str, str]:
         st = extract_class(line)
         if st:
             return st, line.strip()[:90]
+    # ⚠️ **兜底：条目自己的标题 / 表格首格**（域侧台账常把定级直接写在标题里）
+    st = entry.get("head_class", "")
+    if st:
+        return st, entry["title"][:90]
     return "", ""
 
 
@@ -1506,7 +1523,13 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     L: list[str] = []
     a = L.append
     idx = {r["id"]: r for r in rows}
-    open_states = ("🔴 未闭合", "仍生效", "⏳ 未签字")
+    # ⚠️ **2026-10-30 口径修正 · 🟡 部分闭合 计入「开放」** ——
+    #   原口径只认 🔴/仍生效/⏳ ⇒ **🟡「部分闭合」被排除在「开放」之外**
+    #   ⇒ 实测后果：**55 条 🟡 条目（其中 50 条未排期）**被统计成「未定级且状态开放 = 0」
+    #   ⇒ **掩盖了 50 条仍有剩余工作量的条目**（数字漂亮、内容是假的）。
+    #   ⇒ 判据依据：🟡 = 「修了一部分，**还剩一部分**」⇒ **仍有待实现项** ⇒ 属开放。
+    #   ⇒ 仍不计入开放的：✅ 已一致 / ⚫ 已签字偏离（决策不是缺陷）/ N/A 元教训。
+    open_states = ("🔴 未闭合", "🟡 部分闭合", "仍生效", "⏳ 未签字")
 
     a("# 阶段一施工单派生层 · 三目录台账 → 施工单（2026-10-30）")
     a("")
@@ -1873,11 +1896,11 @@ def main() -> int:
     stats["n_staged_pct"] = (stats["n_staged"] * 100 // max(stats["n_problem_ids"], 1))
     stats["n_unstaged"] = stats["stage_counts"].get("—", 0)
     stats["n_meta"] = stats["stage_counts"].get("N/A（不适用）", 0)
-    open_states = ("🔴 未闭合", "仍生效", "⏳ 未签字")
+    open_states = ("🔴 未闭合", "🟡 部分闭合", "仍生效", "⏳ 未签字")
     stats["n_unstaged_open"] = sum(1 for r in rows if r["stage"] == "—" and r["status"] in open_states)
     stats["n_to_grade"] = stats["n_unstaged_open"]
     stats["n_conflict"] = sum(1 for r in rows if r.get("_conflict", 1) > 1)
-    _op = ("🔴 未闭合", "仍生效", "⏳ 未签字")
+    _op = ("🔴 未闭合", "🟡 部分闭合", "仍生效", "⏳ 未签字")
     stats["n_gap_ab"] = sum(1 for r in rows if r["status"] in _op and r["schedule"] == "未排期"
                              and r["stage"] in ("A", "B") and not r.get("_closed"))
     stats["n_gap_cd"] = sum(1 for r in rows if r["status"] in _op and r["schedule"] == "未排期"
