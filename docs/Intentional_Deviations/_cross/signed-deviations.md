@@ -40,7 +40,9 @@
 > 不是 agent 自行决定的。每条都写明 **Go 行为 / RAG 行为 / 为什么接受不一致**，
 > 并指向对应的 DRIFT 台账（**台账里仍保留原始差异记录，不因签字而删除**）。
 
-### SD-2026-10-23-01 · admin-api `OperatorId`：Go 恒 0 且不校验 claim，RAG 严格校验
+### SD-2026-10-23-01 · admin-api `OperatorId`：Go 恒 0 且不校验 claim，RAG 严格校验 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
+
+> ⚠️ **2026-10-29 真实性复核（主线 · 逐字对照两侧）⇒ 原判「✅ 已签字」⇒ 现行态 = ✅ 仍成立** —— **被签字描述的行为今天两侧都还在**：Go 侧 `service/user/admin/api/internal/logic/admin/resetuserpasswordlogic.go:38-39` `adminUid, _ = uidNumber.Int64()`（**忽略解析错误 ⇒ claim 缺失时恒为 0**）＋ `:43` `OperatorId: adminUid`；RAG 侧 `service/users/admin/admin-api/src/main/java/com/rag/users/admin/admin-api/service/AdminResetUserPasswordService.java:37` `operatorId = IdentityResolver.claimedUID(httpRequest)`（**严格取 claim**）（同族 5 处：`AdminDeleteUserService.java:37` · `AdminBanUserService.java:37` · `AdminUnBanUserService.java:37` · `AdminUpdateUserService.java:53` · `AdminCreateInviteCodeService.java:44`）⇒ 差异未消除（**RAG 更严**）⇒ **仍成立、不计入「失效」** · 核对日期 2026-10-29
 
 | 项 | 内容 |
 |---|---|
@@ -52,7 +54,9 @@
 | **⚠️ 代价（必须知情）** | 两侧**可观察行为确实不同**：Go 接受而 RAG 拒绝的请求存在。任何跨实现对拍在这条上都会红，**属预期差异，不是回归** |
 | **⚠️ 不得做的事** | 不要为了让对拍变绿而给 RAG 放宽校验。若日后 Go 侧补上校验，则应反向收敛 RAG，而不是保持差异 |
 
-### SD-2026-10-23-02 · user-api `uid`：Go 有两套解析语义，RAG 统一拒绝
+### SD-2026-10-23-02 · user-api `uid`：Go 有两套解析语义，RAG 统一拒绝 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
+
+> ⚠️ **2026-10-29 真实性复核（主线 · 逐字对照两侧）⇒ 原判「✅ 已签字」⇒ 现行态 = ✅ 仍成立** —— RAG 侧 `service/users/user/user-api/src/main/java/com/rag/users/user/api/service/IdentityResolver.java:129`（**统一走严格拒绝**，注释直接引 Go `identity/resolve.go:75-77` `if err != nil || uid <= 0 { return 0, ErrInvalidClaim }`）＋ `auth/JwtSignatureVerifier.java:114` 同款引用⇒ **两侧语义未收敛** ⇒ **仍成立**（RAG 取更严那一侧）· 核对日期 2026-10-29
 
 | 项 | 内容 |
 |---|---|
@@ -64,7 +68,9 @@
 | **⚠️ 代价** | 与 Go「静默转 0」那条路径的输入，Go 会继续执行（通常随后失败或误判），RAG 直接拒绝。可观察行为不同，**属预期** |
 | **⚠️ 不得做的事** | 不要为对齐而引入「静默转 0」——那会把 Go 的缺陷固化成 RAG 的行为 |
 
-### SD-2026-10-23-03 · message-api `AdminSendNotification` 的 `affected`：Go 返 `int64`，RAG 输出字符串
+### SD-2026-10-23-03 · message-api `AdminSendNotification` 的 `affected`：Go 返 `int64`，RAG 输出字符串 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
+
+> ⚠️ **2026-10-29 真实性复核（主线 · 逐字对照两侧）⇒ 原判「✅ 已签字」⇒ 现行态 = ✅ 仍成立** —— RAG 侧 `service/message/message-api/src/main/java/com/rag/message/message/api/dto/AdminSendNotificationResp.java:43-44` `@JsonFormat(shape = JsonFormat.Shape.STRING)` + `private long affected;` ⇒ 输出 `{"affected":"3"}`（**字符串**）；Go 侧 `service/message/api/internal/types/types.go:22` `Affected int64 \`json:"affected"\`` ⇒ 输出 `{"affected":3}`（**数字**）⇒ 差异未消除 ⇒ **仍成立**（**不得「以 proto 里写着 int64 为由」单方面改回数字** ⇒ 改须重新签字）。⚠️ **别被 proto 误导**：两侧 proto 的该字段**都是** `int64 affected = 3;`（`proto/message.proto:98`）⇒ **JSON 形态由 Jackson 注解决定，不由 proto 决定** · 核对日期 2026-10-29
 
 | 项 | 内容 |
 |---|---|

@@ -72,6 +72,8 @@ REVOKE_RE = re.compile(r"⛔|已撤销|已失效|已关闭|❌|撤销记录")
 CAND_RE = re.compile(r"⏳|候选|未签字|待签字|🏷")
 SIGNED_RE = re.compile(r"✅|已签字|仍成立|用户拍板|留痕")
 TRANSCRIPT_RE = re.compile(r"转录自|同族条目|同族\s*`")
+# 「附记」= 挂在**另一条**条目下的补充说明 ⇒ **不是独立条目**（不计数）
+APPENDIX_RE = re.compile(r"附记")
 
 
 # 规范状态字段（**只认这些形态**，不猜）
@@ -156,6 +158,8 @@ def _entries() -> list[dict]:
             kind, field = _classify(title, seg)
             if TRANSCRIPT_RE.search(title):
                 kind = "转录（不独立计数）"
+            elif APPENDIX_RE.search(title):
+                kind = "附记（不独立计数）"
             out.append({
                 "file": str(p.relative_to(ROOT)),
                 "line": i + 1,

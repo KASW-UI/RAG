@@ -42,7 +42,7 @@ python3 tools/difftest/ledger-claim-audit.py --strict     # 落空 ⇒ EXIT=1
 |---|---|---|
 | `docs/DRIFT/<域>/**` | `DRIFT-XXX-nnn` · `SD-…` · `UNRESOLVED-nnn` · `E-nn` · `S1-…` · `CYCLE-nnn` | ✅ / 🟡 / 🔴 / ⚫ |
 | `docs/Pitfalls/<域>/**` | `PIT-…` · `PF-…` · `P-…` | 仍生效 / 已闭环 / 已撤销 / 待核实 |
-| `docs/Intentional_Deviations/<域>/**` | `SD-…` · `DEV-…` · `N-n` · `A/C/D-n` | ✅ 仍成立 / ⛔ 已失效·已撤销 / ⏳ 未签字 |
+| `docs/Intentional_Deviations/<域>/**` | `SD-…` · `DEV-…` · `N-n` · `A/C/D-n` | ✅ 仍成立 / ⛔ 已失效·已撤销 / ⏳ 未签字（**+ `待核实`**，用于「判不了」时 —— §二③） |
 
 **边界**：
 - **「历史快照」行不算结论**（明确标了「本表是某轮快照」的历史表）⇒ 只需在**活状态**处给准。
