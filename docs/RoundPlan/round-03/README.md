@@ -22,7 +22,7 @@
 
 | 项 | 内容 |
 |---|---|
-| **处理哪些已知问题** | ① `P0 #4` 的证据覆盖缺口（E65 命中「核心失败路径具有明确行为」）② `P0 #5` 的证据覆盖缺口（1/10 域）③ `X-6` 的状态（判定命令 PASS 的语义是「漂移还在」）④ `C-2` / `C-3` 聚合 ⑤ `§8.3` 四结论 ⑥ `§8.4` 阶段一准入结论 + S1-1~S1-6 逐条 ⑦ `D-02` 格内的过期断言 ⑧ `§十` 变更记录 + `§十·二` 冻结基线 ⑨ 生成器与 Stage1 交付物 2/6 的同步 |
+| **处理哪些已知问题** | ① `P0 #4` 的证据覆盖缺口（E65 命中「核心失败路径具有明确行为」）② `P0 #5` 的证据覆盖缺口（1/10 域）③ `X-6` 的状态（判定命令 PASS 的语义是「漂移还在」）④ `C-2` / `C-3` 聚合 ⑤ `§8.3` 四结论 ⑥ `§8.4` 阶段一准入结论 + S1-1~S1-6 逐条 ⑦ `D-02` 格内的过期断言 ⑧ `§十` 变更记录 + `§十·二` 冻结基线 ⑨ 生成器与 Stage1 交付物 2/6 的同步 ⑩ **版本号自洽**（judge 内部三处版本号互相矛盾 `:6`/`:426`/`:536` ＋ 生成器 `:345` 硬编码「基线 v3」） |
 | **产生哪些可检查的结果** | ① 判据基线**与现状一致**（不是与期望一致）② 每条改判都带**证据指针 + 证据强度 + 日期** ③ **变更记录追加 v5**（两条 A 类阻断的「发现 → 定级 → 改判」全过程可追溯）④ **冻结基线解除**（原冻结建立在「通过」结论上）⑤ 4 份 lane 矩阵由生成器重出且与基线一致 ⑥ Stage1 交付物 2/6 与 §8.4 一致 |
 | **为什么是下一轮的必要前提** | ① Round 5 的台账对账**要知道哪些是「过期快照」**（依据是复判后的判据）② Round 6 的收口回归**跑完才知道基线有没有新的不一致** ③ Round 7 的最终验收**以复判后的基线为输入** |
 | **本轮不做** | **不改判据原文** · 不改任何产品代码 · 不改各域台账（域写权面 ⇒ Round 5）· 不做阶段二 · 不动 `tools/difftest/` 的守门清单计数口径 |
@@ -228,18 +228,18 @@
 |---|---|
 | **任务 ID** | `P3-T09` |
 | **原始编号** | 生成器 `check-phasegoal-lanes.py` · 交付物 2 · 交付物 6 |
-| **来源** | `tools/difftest/check-phasegoal-lanes.py` · `docs/Stage1/02-阶段1简历项目验收总览.md:111`（写「✅ 阶段一通过」）· `docs/Stage1/06-最小可行实施计划及验收结果.md:169`（写「S1-1 ~ S1-6 逐条对应 §8.4」） |
+| **来源** | `tools/difftest/check-phasegoal-lanes.py`（含 `:345` 硬编码「基线 v3」）· `docs/PhaseGoal-judge.md:6`（v3）/ `:426`（v4）/ `:536`（v4）· `docs/Stage1/02-阶段1简历项目验收总览.md:111`（写「✅ 阶段一通过」）· `docs/Stage1/06-最小可行实施计划及验收结果.md:169`（写「S1-1 ~ S1-6 逐条对应 §8.4」） |
 | **当前状态** | 生成器 4 份 lane 矩阵与基线一致；**Stage1 交付物 2/6 仍写「✅ 阶段一通过」** ⇒ 与基线**不同步** |
 | **执行目的** | 交付物是基线的**下游产物** ⇒ 基线一改，交付物必须同步，否则读者读到的是旧结论 |
-| **具体操作** | ① `python3 tools/difftest/check-phasegoal-lanes.py --write` ⇒ 重生成 4 份 lane 矩阵（**⚠️ 必须用当前基线，不能用任何一棵 lane 树的旧生成器** —— 否则会把 G4 的 `--domain users` 错名写回去，那正是假绿来源）② `python3 tools/difftest/check-phasegoal-lanes.py` ⇒ 校验 EXIT=0 ③ 交付物 2（`02-*.md`）的结论句改成与 §8.4 一致（**未通过 + 两类硬阻断 + 关联轮次**）④ 交付物 6（`06-*.md`）的 S1-1~S1-6 对应说明同步 ⑤ 交付物 1/3/4/5 若含「阶段一通过」字样**一并订正**（⚠️ **只改结论句，不改事实与数据**） |
+| **具体操作** | ① `python3 tools/difftest/check-phasegoal-lanes.py --write` ⇒ 重生成 4 份 lane 矩阵（**⚠️ 必须用当前基线，不能用任何一棵 lane 树的旧生成器** —— 否则会把 G4 的 `--domain users` 错名写回去，那正是假绿来源）② `python3 tools/difftest/check-phasegoal-lanes.py` ⇒ 校验 EXIT=0 ③ 交付物 2（`02-*.md`）的结论句改成与 §8.4 一致（**未通过 + 两类硬阻断 + 关联轮次**）④ 交付物 6（`06-*.md`）的 S1-1~S1-6 对应说明同步 ⑤ 交付物 1/3/4/5 若含「阶段一通过」字样**一并订正**（⚠️ **只改结论句，不改事实与数据**） ⑥ **版本号自洽（2026-10-29 核验新增）**：judge 内部**三处版本号互相矛盾** —— `:6`「**修订版 v3**」 vs `:426`(§8.4 标题)「**v4**」 vs `:536`(§十·二)「本文件（**v4**）」⇒ **三处统一为同一个版本号**（本轮改判后即 v5）⑦ **生成器不再硬编码版本号**：`tools/difftest/check-phasegoal-lanes.py:345` 把「阶段一终点指标基线 **v3**」**写死在代码里** ⇒ judge 升版后 `docs/PhaseGoal/g{1..4}.md:5` **永远显示 v3** ⇒ **改成从 judge 头部解析版本号再渲染**（解析失败 ⇒ 门红，**不许静默回落成某个字面值**） |
 | **具体落点** | `docs/PhaseGoal/g{1..4}.md`（**机器生成，不手改**）· `docs/Stage1/0{1..6}-*.md` |
 | **执行主体** | 主线 |
 | **前置条件** | `P3-T06` ∧ `P3-T08` |
 | **并行关系** | 同 `P3-T01`（生成器要在基线全部改完后跑） |
 | **写权限** | `docs/PhaseGoal/**` = 主线（生成器产物）· `docs/Stage1/**` = 主线 |
-| **验收命令** | ```bashpython3 tools/difftest/check-phasegoal-lanes.py --write\npython3 tools/difftest/check-phasegoal-lanes.py        # EXIT=0\npython3 tools/difftest/check-phasegoal-consistency.py  # EXIT=0\npython3 tools/check-doc-links.py                      # EXIT=0\n# 全仓不得残留「阶段一通过」作为当前结论\ngrep -rn '阶段一通过' docs/ | grep -v '_legacy' | head``` |
-| **验收证据** | ① 4 份 lane 矩阵与基线一致（校验 EXIT=0）② 一致性门 EXIT=0 ③ 链接门 EXIT=0 ④ 全仓无「阶段一通过」作为当前结论（**历史段落允许，但必须标历史**） |
-| **完成条件** | 基线 / 生成器 / 交付物**三处结论一致** |
+| **验收命令** | ```bashpython3 tools/difftest/check-phasegoal-lanes.py --write\npython3 tools/difftest/check-phasegoal-lanes.py        # EXIT=0\npython3 tools/difftest/check-phasegoal-consistency.py  # EXIT=0\npython3 tools/check-doc-links.py                      # EXIT=0\n# 全仓不得残留「阶段一通过」作为当前结论\ngrep -rn '阶段一通过' docs/ | grep -v '_legacy' | head\n# ⑧ 版本号自洽：judge 头部 / §8.4 标题 / §十·二 三处同号，且生成物跟随\nv=$(grep -oE '修订版 v[0-9]+' docs/PhaseGoal-judge.md | head -1 | grep -oE 'v[0-9]+')\necho "judge 头部版本号 = ${v}"\ngrep -c "阶段一终点指标基线 ${v}" docs/PhaseGoal/g1.md   # 必须 >= 1（生成物跟随，不得写死旧号）\ngrep -nE '修订版 v[0-9]+|本文件（v[0-9]+）|阶段一准入结论（v[0-9]+' docs/PhaseGoal-judge.md``` |
+| **验收证据** | ① 4 份 lane 矩阵与基线一致（校验 EXIT=0）② 一致性门 EXIT=0 ③ 链接门 EXIT=0 ④ 全仓无「阶段一通过」作为当前结论（**历史段落允许，但必须标历史**）⑤ **judge 三处版本号同号**（`:6` / `:426` / `:536`）⑥ **生成物版本号跟随 judge**（`g{1..4}.md:5` 不再显示旧号） |
+| **完成条件** | 基线 / 生成器 / 交付物**三处结论一致** ＋ **版本号自洽**（judge 三处同号 + 生成物跟随） |
 | **失败处理** | 校验红 ⇒ **不能用 `--write` 掩盖** ⇒ 读报错修基线；链接红 ⇒ 改链接不删链接 |
 | **状态更新** | 即本任务 |
 | **后续任务** | Round 5（台账对账的依据）· Round 6 · Round 7 |
