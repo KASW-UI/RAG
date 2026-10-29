@@ -605,6 +605,21 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 | **守门 / 探针 / 变异** | 守门 `RpcInterceptorClientDeadlineGateTest`（2 条：① 客户端 deadline 早于服务端预算 ⇒ 有效期限必须落在**客户端那一档** ② 客户端**没带** deadline ⇒ 仍是服务端预算 ⇒ 防「把无 deadline 错当成有 deadline」）· 探针 `client_deadline_ctx`（Go 半边**直接引用冻结仓真源** ⇒ 修前 `Go=client_100ms` vs `RAG=server_own` ⇒ **漂移坐实**；修后两侧一致）· 变异 1 条（退回 `serverBudgetMs` ⇒ 守门 1 条红且红在目标断言 + 探针 EXIT=1） |
 | **§5.3 共享层改动 ⇒ 影响面记账** | 🔴 本条改的是 **`service/common`** ⇒ **10 个 rpc 组件全部受影响**（含 favorite）⇒ 按 §5.3「共享层改动必须记账并告知 owner」逐条核过：<br>① **favorite 域：favorite owner 做了「叠上去跑」的跨域实测**（比 global 自己的回归更强）—— 把 global 的 `RpcInterceptor.java` **临时叠到 `align/favorite` 分支**上跑 ⇒ favorite 全量测试 **rpc 99 / api 94 / common 29 ⇒ 0 失败 0 错误**（与基线逐项一致）· `api-full-parity-probe` **EXIT=0**（32 case 冻结值一条没动）· `grpc-contract-probe` **EXIT=0**（36 case + 第二轮 15 case 全 SAME）⇒ ⇒ **零红**；叠完已 `git checkout` 还原 ⇒ favorite 分支 `service/common` **零改动**、工作树与 HEAD 完全一致<br>② **favorite 域自身已是 min 语义** ⇒ `favorite-api → favorite-rpc` 的 client deadline 由 `FavoriteRpcClient.capByClientTimeout` 压成 `min(ctx 预算, 2s)`，而服务端预算也是 `rpc-timeout: 2s` ⇒ `min(2s,2s)=2s` ⇒ **常见路径下本次改动对 favorite 幂等** ⇒ 只有 ctx 预算 **< 2s** 时才提前掐断（那正是 E38 要的 Go 同款行为）⇒ 且**全仓无跨域调用方**（`FavoriteServiceGrpc` / `favorite.proto` 除 favorite 域内部零命中）<br>③ **favorite 域唯一触及 `DEADLINE_EXCEEDED` 的守门** `FavoriteGrpcErrorRoundTripTest` 是把它当**业务码**做错误码往返（入参就写 `"DEADLINE_EXCEEDED\|文案已丢失"` ⇒ 不关心 description）⇒ **不碰超时路径**<br>④ ⇒ **favorite 域零改动**（`git status` + 写权门禁 `check-global-lane-ownership.py` 双证）⇒ 本条**未碰 favorite 的任何代码/配置/测试**<br>⑤ ⇒ **已直接通知 favorite 域会话**（`mvs_96b399362f7b4f05b433a2f1acdb1498`）⇒ favorite owner 已回执并**做了上面那轮「叠上去跑」的实测** |
 
+### T-17 🟡 **已定性（2026-10-29 · R4 轮 · N4）** —— `CF-003` 的**对端契约不可得** ⇒ 「尾 `\n` + HTML 转义要不要对齐 Go」**无法定论**
+
+| 项 | 内容 |
+|---|---|
+| **落点** | `service/common`（`AuthorityHandler.java` 的响应体写出）⇒ **global 单写权**；本条**只登记、不落码** |
+| **来源** | `docs/CLOSEOUT-2026-10-29.md` §N4（登记为「唯一需要 Jason 回话的新增项」· 🟡 不阻塞阶段一）· 共享层台账 `docs/DRIFT/common/alignment-2026-10-23.md` §十三·一 `CF-003` |
+| **Go 侧** | `service/common/communityfact/authority_http.go:71-72`（`json.NewEncoder(w).Encode(fact)`）＋ Go 标准库 `encoding/json/stream.go` ⇒ **`escapeHTML: true`**（`&`→`\u0026`、`<`→`\u003c`）＋ `Encode` 追加**尾 `\n`** |
+| **RAG 侧** | `AuthorityHandler.java:217` `MAPPER.writeValueAsBytes(fact)` ⇒ **无尾 `\n`**；Jackson 默认**不做** HTML 转义 ⇒ ⇒ **两侧响应体字节不同** |
+| **🔴 为什么「不可证」（本条的核心）** | **对端不在仓内** —— Go 全仓只有服务端 + 自带测试，**无任何客户端**；真实对端是**第三个仓库**（BTW / `Sea-BreakTheWaves`，见 `COMMUNITY_FACTS_ACCEPTANCE.md:43`）⇒ ⇒ **「该产出是否真被消费」在本机不可证** ⇒ ⇒ **「要不要对齐 Go」在拿到对端契约前无法定论** |
+| **影响面（四维问法 · `twoStage.md` §10）** | 业务正确性 ❌ / 安全 ❌ / 数据一致性 ❌ / 可靠性 ❌ ⇒ **但最可能的对端形态下影响为零**：**尾 `\n` 对任何 JSON 解析器无害** ⇒ ⇒ 实际影响**高度依赖对端契约** |
+| **定级** | **P3 · C 类**（阶段二）⇒ 按 `PhaseGoal-judge.md` §1.1 ⑥ 第 4 条**不计入**必相对齐项 ⇒ ⇒ **不阻断阶段一** |
+| **解除条件** | ① 向 BTW 侧确认是否**逐字节**比对；② 若是 ⇒ `AuthorityHandler.java:217` 后补 `'\n'`（低成本）＋ 给 Jackson 注册自定义 `CharacterEscapes`（**Jackson 无内建开关**）⇒ 测试：含 `<`/`&` 的 payload ⇒ 双侧响应体**逐字节**比对 |
+| **证据与缺口** | **E2**（源码级双侧对照**已做**）⇒ **剩余缺口 = 对端契约未取** ⇒ 属**外部依赖**（**不是本仓能自行消除的取证缺口**） |
+| **本轮处置** | ✅ **已登记**（本节）⇒ **不落码、不预支** ⇒ 长期挂「**仓内无消费方**」这个**搜索范围**结论（**不是**「两侧一致」） |
+
 ## 二、本轮复核汇总表
 
 | # | 条目 | 复核前 | 复核后 | 本轮动了？ |
@@ -621,6 +636,7 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 | T-10 | UserDomainService 假断言 | ❌ 未销账 | ✅ **已闭环** | ✅ |
 | **T-11** | **trace 导出链路整体缺失** | 🟢 **此前无人登记** | ✅ **已修**（**第二十一~二十四轮**：全局 OTel SDK + 采样/batcher 补齐 + **Go 侧活体对拍**）⇒ 见 §一·T-11 | ✅ **已修** |
 | **T-12** | **「方法不匹配」出口多带 `Traceparent`** | 🟢 **此前无人登记** | 🔴 **第十九轮新发现（随 T-8 落地暴露），未修**（Go 的该出口在 router 层 ⇒ 不带；RAG 在 DispatcherServlet 内 ⇒ 多带）⇒ **共享层改不动 ⇒ 签字候选**（定性由 L5 落档）⇒ 见 §一·T-12 | 🟢 **签字候选** |
+| **T-17** | **`CF-003` 的对端契约不可得**（尾 `\n` + HTML 转义） | 🟢 **此前 global 0 跟踪**（只在 `service/common` 台账） | 🟡 **已定性 = P3 · C 类**（对端 BTW / `Sea-BreakTheWaves` **不在本机** ⇒ 「是否被消费」**不可证** ⇒ 「要不要对齐 Go」**无法定论**）⇒ **不落码** ⇒ 见 §一·T-17 | ✅ **已登记** |
 
 ⇒ **首轮净效果**：10 条里 **1 条闭环**（T-10）· **3 条从「待复核」升级为「已确认的真漂移」并补齐 Go 出处**
 （T-1 / T-2+T-5 / T-9）· **6 条维持原状**（未展开）。
@@ -639,6 +655,8 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 ⇒ ⇒ 🔴 **顺带自曝错账 #2**：本文档原写的「`SD-HOT-API-006` 的理由已被本仓自己证伪」**不成立**
 （真实原因是 **Tomcat 11 归一化** ⇒ 应用层拿不到那个空格 ⇒ 原始理由**成立且更强**）
 ⇒ ⇒ ⇒ 撤销的性质 = **纯用户决策**（「技术上仍不可逐字节复刻，但选择向 Go 靠拢」）
+
+⇒ **第三十二轮净效果（2026-10-29 · R4）**：**新增 T-17**（`CF-003` 的**对端契约不可得** ⇒ 定性 **P3 · C 类** ⇒ **不阻断阶段一** ⇒ 长期挂「**仓内无消费方**」的搜索范围结论）
 
 ⇒ **第十九轮 · 第二轮净效果（2026-10-25）**：**T-8 的「链上位置」定案**
 ⇒ ① 🔴 **链上位置是承重的**（不是随手挑的）：CORS **之前** / MaxConns·Breaker·Shedding **之后** /
