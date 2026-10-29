@@ -17,6 +17,10 @@
   依据 `service/common/src/main/java/com/rag/common/http/GoStyleTomcatParameterLimitCustomizer.java:170`
   ＋ Go SDK `net/url/url.go:1001` `defaultMaxParams = 10000`）
   ⇒ **本文件与 `docs/DRIFT/_cross/open-items.md:15` 的口径必须一致**（两处以前分叉成 ✅ / 🟡）。
+  —— 🔴 **2026-10-29 主线收口（逐域两侧复核）⇒ 再订正：残留格不是「恰好 10001 段」，而是「task 域 >10001 段」**
+  ⇒ 「恰好 10001 段」已闭合（8+favorite 应用层按 Go 段数判据拒；task 两侧同放行）
+  ⇒ 残留 = **task 域 >10001 段**（Go 放行 / RAG 容器 400+HTML ⇒ RAG 更严）⇒ **活体证据缺失 ⇒ 待核实**
+  ⇒ 逐格依据见 `docs/DRIFT/_cross/open-items.md:15` 的「主线收口」订正块。
 - 全仓 `docs/Pitfalls/**` 中**专属于「开放项管理」**的独立条目 = **0 条** ⇒ 本文件**没有需要另行登记的坑位**
 
 ## 内容在哪（指针）
