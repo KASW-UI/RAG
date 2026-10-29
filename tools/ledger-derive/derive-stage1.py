@@ -109,6 +109,17 @@ LEDGER_DIRS = ("DRIFT", "Pitfalls", "Intentional_Deviations")
 #   ⇒ 产物路径必须**显式排除**，且这个排除要**写在代码里**（不是靠「生成后再过滤」）。
 SELF_ARTIFACTS = ("docs/DRIFT/_cross/stage1-derivation.md",)
 
+# ⚠️ **2026-10-30 扩展** —— 「显式定级叠加层」目录也必须挡：
+#   `docs/DRIFT/_cross/grading/*.md` 是**本轮人工定级**的落地处（U5-O 的输入），
+#   它**长得像台账**（Markdown 表格、编号列）⇒ 若被 `scan_ledgers` 扫进去
+#   ⇒ 凭空多出「条目」⇒ 计数虚高；被 `scan_grading_tables` 扫进去
+#   ⇒ 会把自己的定级当成「台账已写的定级」⇒ **自证循环**。
+#   ⇒ 两个扫描器**都要挡**（同族教训：自噬防护漏一个扫描器就等于没防护）。
+SELF_ARTIFACT_DIRS = ("docs/DRIFT/_cross/grading/",)
+
+# ── U5-O · 显式定级叠加层（人工本轮定级的落地处） ──────────────────────────
+GRADING_DIR = ROOT / "docs/DRIFT/_cross/grading"
+
 # ── U2 状态取值域（**按目录**限定） ───────────────────────────────────────
 STATUS_SETS = {
     "DRIFT": {
@@ -228,6 +239,8 @@ def scan_ledgers(exclusions: dict[str, str]):
             continue
         if f"docs/{rel}" in SELF_ARTIFACTS:
             continue          # ⚠️ 自噬防护（见 SELF_ARTIFACTS 注释）
+        if any(f"docs/{rel}".startswith(d) for d in SELF_ARTIFACT_DIRS):
+            continue          # ⚠️ 自噬防护 · 目录级（U5-O 叠加层）
         dom = rel.parts[1] if len(rel.parts) > 1 else "_root"
         lines = p.read_text(encoding="utf-8", errors="ignore").split("\n")
         # 候选起点
@@ -511,6 +524,71 @@ def load_shared_grading() -> dict[str, dict]:
     return out
 
 
+def load_grading_overlay() -> dict[str, dict]:
+    """U5-O · **显式定级叠加层** ⇒ {编号: {stage, prio, blocking, basis, date, src}}
+
+    ⚠️ **为什么需要这一层（而不是把定级写回各域台账）**：
+      台账里绝大多数条目是**表格行型**（实测 129 条待定级里 **71 条是表格行**），
+      而表格行的「段」在扫描器里 = **该行本身**（见 `scan_ledgers` 注释）⇒
+      想给它挂定级，只有三条路：
+        ① 把定级**塞进单元格** ⇒ 但表格通常**已有「阶段归属」列** ⇒
+           U5-0（表格定级）**优先于** U5-f（条目正文声明）⇒ **塞了也不生效**；
+        ② 改**表格结构**（加一列）⇒ 破坏原台账、且各域表型不一 ⇒ 不可取；
+        ③ **另立叠加层** ⇒ 不动原表、零破坏、可逐条回源。⇒ **选 ③**。
+    ⚠️ **叠加层的效力 = 人工本轮显式定级** ⇒ 优先级**最高**（高于 U5-0 的台账表格），
+      理由：台账里的「阶段归属」列是**历史**判定；本轮是**逐条与 Go 源码对照**后的重判
+      （用户 2026-10-30 拍板：「逐个和 golang 版本的对比」）⇒ 新的应压过旧的。
+    ⚠️ **格式**：Markdown 表格，列 = 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期。
+      「依据」列必须写 **Go 侧 `文件:行号` + RAG 侧 `文件:行号` + 结论**
+      ⇒ 没有双侧行号的行**视为无效**（否则「定级」又变成无出处的断言）。
+    """
+    out: dict[str, dict] = {}
+    if not GRADING_DIR.exists():
+        return out
+    for p in sorted(GRADING_DIR.glob("*.md")):
+        if p.name.startswith("_"):
+            continue          # ⚠️ `_` 前缀 = 说明文件（格式规范/示例）⇒ **不是数据**
+        rel = p.relative_to(ROOT)
+        for ln, line in enumerate(p.read_text(encoding="utf-8").split("\n"), 1):
+            if not line.lstrip().startswith("|"):
+                continue
+            cs = _cells(line)
+            if len(cs) < 5:
+                continue
+            ident = cs[0].strip().strip("*` ").strip()
+            if not ident or ident in ("编号", "---"):
+                continue
+            if ident.startswith("-"):        # 分隔行
+                continue
+            stage = class_from_cell(cs[1])
+            if stage not in ("A", "B", "C", "D"):
+                continue                      # ⚠️ 无效归属 ⇒ 整行丢弃（不猜）
+            prio = cs[2].strip().strip("*` ").split()[0] if cs[2].strip() else ""
+            if prio not in ("P0", "P1", "P2", "P3"):
+                prio = ""
+            blk = cs[3].strip().strip("*` ")
+            if blk.startswith("不") or "不阻断" in blk:
+                blocking = "否"
+            elif blk.startswith("是"):
+                blocking = "是"
+            else:
+                blocking = ""
+            basis = cs[4].strip()
+            date = cs[5].strip() if len(cs) > 5 else ""
+            # ⚠️ **依据必须含双侧 `文件:行号`** —— 否则「定级」是无出处的断言
+            has_go = re.search(r"[\w./\-]+\.go:\d+", basis)
+            has_rag = re.search(r"[\w./\-]+\.java:\d+", basis)
+            if not (has_go and has_rag):
+                continue
+            rec = {"stage": stage, "prio": prio, "blocking": blocking,
+                   "basis": basis[:400], "date": date,
+                   "src": f"{rel}:{ln}"}
+            old = out.get(ident)
+            if old is None or (rec["date"], rec["src"]) > (old["date"], old["src"]):
+                out[ident] = rec
+    return out
+
+
 def load_stage1_05() -> dict[str, dict]:
     """`Stage1/05` §一（域级）与 §三（本轮新增）⇒ {编号: {stage, blocking}}"""
     out: dict[str, dict] = {}
@@ -663,6 +741,8 @@ def scan_grading_tables():
             continue
         if f"docs/{rel}" in SELF_ARTIFACTS:
             continue          # ⚠️ 自噬防护（**两个扫描器都要挡** —— 见 SELF_ARTIFACTS 注释）
+        if any(f"docs/{rel}".startswith(d) for d in SELF_ARTIFACT_DIRS):
+            continue          # ⚠️ 自噬防护 · 目录级（**两个扫描器都要挡**）
         lines = p.read_text(encoding="utf-8", errors="ignore").split("\n")
         heading = ""
         i = 0
@@ -970,12 +1050,17 @@ def entry_stage_decl(entry) -> tuple[str, str]:
 
 
 def entry_blocking_decl(entry) -> str:
-    """U5-g · 条目自己正文里的「阻断阶段 1」声明 ⇒ 是 / 否"""
-    seg = entry["seg"]
-    if ("不阻断阶段 1" in seg or "不阻断阶段一" in seg or "不计入阶段一" in seg
-            or "不阻断阶段 1 准入" in seg):
+    """U5-g · 条目自己正文里的「阻断阶段 1」声明 ⇒ 是 / 否
+
+    ⚠️ **先把 `*` 与空格剥掉再判** —— 台账里常写成 `**不阻断**阶段一`
+    （粗体只包住「不阻断」三个字）⇒ 直接子串匹配会**漏判** ⇒ 阻断标志回落到
+    「A 类 ⇒ 是」⇒ **把一条明确不阻断的条目报成阻断**。
+    """
+    seg = re.sub(r"[*`\s]", "", entry["seg"])
+    if ("不阻断阶段1" in seg or "不阻断阶段一" in seg or "不计入阶段一" in seg
+            or "不阻断阶段1准入" in seg):
         return "否"
-    if ("阻断阶段 1" in seg or "阻断阶段一" in seg) and "不阻断" not in seg:
+    if ("阻断阶段1" in seg or "阻断阶段一" in seg):
         return "是"
     return ""
 
@@ -1025,7 +1110,7 @@ def detect_evidence(entry, live_probes: dict[str, str], all_tools: set[str]) -> 
 
 
 def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, all_tools, grading,
-           judge_closed=frozenset()):
+           judge_closed=frozenset(), overlay=None):
     # 任务 → 条目 反查表
     task_of: dict[str, list[str]] = collections.defaultdict(list)
     for tid, t in tasks.items():
@@ -1059,9 +1144,21 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
         explicit_prio = ""
         explicit_final = ""
         explicit_evidence = ""
+        # ⚠️ **U5-O · 显式定级叠加层 = 最高优先级**（人工本轮逐条 Go 对照后的重判）
+        #   ⇒ 压过 U5-0（台账表格里的历史「阶段归属」列）—— 台账那列是**历史**判定，
+        #     本轮是**回源核对**后的判定 ⇒ 新的应压过旧的。
+        #   ⇒ 但 **status 不改** —— 定级不改变事实状态（🔴 仍是 🔴，除非有人真的修）。
+        ov = overlay.get(ident)
+        ov_prio = ""
+        if ov:
+            stage = ov["stage"]
+            blocking = ov["blocking"]
+            stage_src = f"{ov['src']}（U5-O 显式定级 · {ov['date'] or '无日期'}）"
+            ov_prio = ov["prio"]
+            rules.append("U5-O")
         # U5-0：**台账里已经写好的施工单行**（十一项表 / 阶段归属列表）⇒ **最高优先级**
         g = grading.get(ident)
-        if g:
+        if g and not stage:
             stage = g.get("stage", "")
             blocking = g.get("blocking", "")
             hint = g.get("status_hint", "")
@@ -1077,7 +1174,7 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
             explicit_evidence = g.get("evidence", "")
             stage_src = f"{g['source']}（{g['kind']}）"
             rules.append("U5-0")
-        # U5：权威定级表优先（**U5-0 已经定级 ⇒ 后面几路都不覆盖**）
+        # U5：权威定级表优先（**U5-O 已经定级 ⇒ 后面几路都不覆盖**）
         if not stage and ident in shared_grading:
             g = shared_grading[ident]
             stage = g["stage"]; blocking = g["blocking"]; stage_src = g["src"]
@@ -1122,7 +1219,10 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
         else:
             rules.append("U6b")
         # U4
-        if explicit_prio:
+        if ov_prio:
+            prio = ov_prio
+            rules.append("U4-O")
+        elif explicit_prio:
             prio = explicit_prio
             rules.append("U4-0")
         elif entry_prio_decl(e):
@@ -1339,6 +1439,7 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a("| **U3 证据强度** | A 活体 / B 静态 / C 无指针 | 段内点名**已在活体台账实跑过**的探针 ⇒ A；否则有 `文件:行号` ⇒ B；否则 C | `live-parity-2026-10-30.md` §二 |")
     a("| **U4 优先级** | P0-P3 | 台账已写 ⇒ 用台账的；否则 A 类⇒P0 · 🔴/仍生效/⏳未签字⇒P1 · 🟡/待核实⇒P2 · 其余⇒P3 | `twoStage.md` §10 |")
     a("| **U5 阶段归属** | A-D | ①台账里的**十一项表** ②共享层定级表 ③`Stage1/05` ④已签字偏离⇒D ⑤条目**自己正文**的归属声明 | `twoStage.md` §10 |")
+    a("| **U5-O 显式定级叠加层** | A-D | `docs/DRIFT/_cross/grading/*.md` 里**逐条与 Go 源码对照后**的人工定级 ⇒ **优先级最高**（压过 U5-0 的历史表格判定）· **依据列必须含 Go + RAG 双侧 `文件:行号`**，否则整行丢弃 | `docs/DRIFT/_cross/grading/` |")
     a("| **U6 是否阻断** | 是/否 | ①权威表的「阻断」列 ②条目正文自己的「不阻断阶段 1」声明 ③A⇒是 | `Stage1/05` 字段 8 |")
     a("| **U7 最终目标影响** | 影响/不影响/间接/未判定 | 台账已写 ⇒ 用台账的；否则 C⇒影响 · D⇒不影响 · A/B⇒间接 | `twoStage.md` §10 |")
     a("| **U8 排期指针** | 任务 ID ｜ BLK/GAP/ENV/DEC-xx | 任务块里**直接写了本条目编号**，或任务块的**台账指针落在本条目段内** | `_task-universe.md` + `_unresolved.md` |")
@@ -1499,6 +1600,27 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a("")
     a("---")
     a("")
+    a("### 5.2 证据边界声明（**C 档 = 今天不可复算**）")
+    a("")
+    a(f"> **本节是「效力边界」的正式声明** —— 用户 2026-10-30 拍板：**C 档条目"
+      f"（{stats['evid_counts'].get('C 无指针', 0)} 条）本轮不做活体取证，"
+      f"接受其静态证据**。声明如下：")
+    a(">")
+    a("> 1. **C 档条目的状态 = 台账自述**，不是本轮可复算的结论。")
+    a(">    ⇒ 任何引用 C 档条目作为**前提**的结论，必须标注「前提未回源」。")
+    a("> 2. **C 档条目不得单独构成「已证实」** —— 它只是「被登记过」，不是「被核对过」。")
+    a(">    ⇒ 与 AGENTS.md §3.3.3 第 ② 条同源：**指针能解析 ≠ 结论为真**。")
+    a("> 3. **C 档条目的阶段归属（本轮 U5-O 定级）只解决「排不排期」，不解决「对不对」。**")
+    a(">    ⇒ 定为 A/B 只表示「阶段一要处理」，**不表示已证明它成立**。")
+    a("> 4. **本声明不等于「C 档条目已被否定」** —— 它们仍是**待回源**状态，")
+    a(">    且**回源是逐条与 Go 源码对照**（Q1 拍板口径），不是抽样。")
+    a("> 5. **已签字偏离（`Intentional_Deviations`）不受本声明影响** —— 它们的效力来自**签字**，")
+    a(">    不来自「今天能不能复算」（AGENTS.md §0 第 1 条）。")
+    a(">")
+    a("> ⇒ **可复算性分级见 §五 表**；本声明只界定**效力**，不改任何条目的状态。")
+    a("")
+    a("---")
+    a("")
     a(f"## 六、全量派生表（{len(rows)} 条问题项）")
     a("")
     a("> 机读请用 [`stage1-derivation.tsv`](stage1-derivation.tsv)（同一次生成，15 列）。")
@@ -1560,12 +1682,13 @@ def main() -> int:
     s105 = load_stage1_05()
     grading = scan_grading_tables()
     judge_closed = load_judge_closed()
+    overlay = load_grading_overlay()
     all_tools = {str(p.relative_to(ROOT)) for p in (ROOT / "tools").rglob("*")
                  if p.is_file() and p.suffix in (".sh", ".py")}
 
     problems = [e for e in entries if detect_status(e) and not e["excluded"]]
     rows, task_of, unres_of = derive(entries, live, tasks, unresolved, shared, s105, all_tools,
-                                    grading, judge_closed)
+                                    grading, judge_closed, overlay)
 
     evid_counts = collections.Counter(r["evidence"] for r in rows)
     stats = {
@@ -1602,6 +1725,8 @@ def main() -> int:
                              and r["stage"] in ("A", "B"))
     stats["n_gap_cd"] = sum(1 for r in rows if r["status"] in _op and r["schedule"] == "未排期"
                              and r["stage"] in ("C", "D"))
+    stats["n_overlay"] = len(overlay)
+    stats["n_overlay_used"] = sum(1 for r in rows if "U5-O" in r["rules"])
 
     print("── 派生层统计 ──")
     print(f"  条目（宽口径扫描）      {stats['n_entries']:5d}   唯一 {stats['n_ids']:5d}")
@@ -1619,6 +1744,8 @@ def main() -> int:
     print(f"  同编号状态冲突          {stats['n_conflict']:5d}")
     print(f"  真缺口 A/B 类未排期     {stats['n_gap_ab']:5d}   ← 阶段一范围内的漏排")
     print(f"  真缺口 C/D 类未排期     {stats['n_gap_cd']:5d}   （阶段 2 承接，不计阶段一）")
+    print(f"  U5-O 显式定级叠加层      {stats['n_overlay']:5d} 条登记 · "
+          f"{stats['n_overlay_used']:5d} 条命中派生表")
 
     if args.report:
         return 0
