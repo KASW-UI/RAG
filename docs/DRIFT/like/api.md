@@ -825,6 +825,10 @@ Servlet Filter 在路由匹配**之前** ⇒ 本 Filter 会对 `/like/v1/**` 下
 
 ### ④ 🔴 本轮**新发现**的两条**探针可复现性缺陷**（**只登记，不动手**）
 
+> 🟢 **2026-10-29 · R4 lane 后续**：**这两条都已在 `tools/api-full-parity-probe/like/` 修掉**
+> （本 lane 有该目录写权）⇒ **本表原文保留**（快照价值），但**「只登记、不动手」的前提已过期**
+> ⇒ 修法与验证见本文件末尾「**R4 lane · 双侧活体探针可复算 ＋ 两个探针真缺陷已修**」一节。
+
 | 项 | 内容 |
 |---|---|
 | 现象 | **`tools/api-full-parity-probe/like/run.sh` 在当前代码基线上跑不起来** ⇒ **EXIT=2**（`RAG like-api` 启动失败） |
@@ -1550,3 +1554,136 @@ cd "/Users/pr/Documents/java&golang/RAG.worktrees/r2-secret-guard-fix"
 mvn -o -B -pl service/like/like-api -am -DargLine=-Xmx2g test
 python3 tools/difftest/check-no-prod-secrets.py ; echo "EXIT=$?"   # ⇒ EXIT=0（本轮把明文从注释里去掉）
 ```
+
+---
+
+## 2026-10-29 · R4 lane（`align/r4-like-probe-fix`）· 🟢 **like-api 双侧活体探针「可复算 ＋ 三个探针真缺陷已修」⇒ R4 ⑦⑧ 成立**
+
+> **本节只登记「探针事实」** ⇒ **不新增任何行为结论**（像域的行为判定见上文各轮，原文一条未删）。
+> ⚠️ **口径纪律（必须一起读，否则会把这节读成「like-api 全闭合」）**：
+> 本节**只**覆盖 **HTTP 业务面 ＋ 事实投递链路 ＋ E60 双失败** 三段；
+> **「输入解释矩阵」（旧 `/tmp/likeprobe/{main.go,RagProbe.java,NullElem.java}` 的 56 条 E-Go/E-Rag）
+> 仍然不可复算** ⇒ `docs/PhaseGoal-judge.md` §九 **G-2**（like 域 0 个落仓双侧对拍入口）
+> **不因本轮闭合** —— 本轮只是**新增**了一个落仓入口，不是**补回**了旧探针。
+
+### ① R 档 / E 档依据（**R 与 E 分开记，不互相推导** —— `docs/PhaseGoal-judge.md:25`）
+
+| 项 | 结论 | 依据（命令与结果） | 证据强度 |
+|---|---|---|---|
+| **R4 ⑦**（**双侧同时运行**的探针对拍通过 ＋ **该探针在版本控制内** ＋ **现在可复算**） | ✅ **成立** | ① **在版本控制内**：`git ls-files tools/api-full-parity-probe/like/` 命中 **7 个文件**（`run.sh` · `mutate-parity.sh` · `expected.txt` · `README.md` · `lib/make_jwt.py` · `lib/fake_dc.py` · `lib/seed_fact.py`）⇒ 判据见 `docs/PhaseGoal-judge.md:50` 的 ⑦<br>② **双侧同时跑**：`bash tools/api-full-parity-probe/like/run.sh` ⇒ **EXIT=0**（Go 真源栈 ＋ RAG 栈 ＋ 真 Nacos/etcd/PG/Redis/Kafka ＋ **真 gRPC 网络请求**）<br>③ **现在可复算**：脚本自带全部依赖（真源路径 / 端口窗口 / 密钥默认值）⇒ **不需要手工 export 任何东西** | **E4（运行证据）** |
+| **R4 ⑧**（有**变异验证**记录：改实现 ⇒ 探针必红） | ✅ **成立** | `bash tools/api-full-parity-probe/like/mutate-parity.sh` ⇒ **EXIT=0**：**M1 / M2 / M3 三条变异全部精确转红** ＋ **还原后转绿**（逐条见 ④） | **E4（运行证据）** |
+| ⚠️ **明确不写的档** | **不写 E5** | ① **DC → 第三仓消费端那一跳**仍未取证（对端仓不在本项目范围）⇒ **U-01 仍是 🟡**<br>② **「真 Tomcat ＋ 慢下游」的超时用例本探针没有** ⇒ **U-03 仍是 🟡**（本轮**不销号**）<br>③ 无生产运行数据 ⇒ **不写 E5** | — |
+
+### ② 覆盖的场景 / case 数 / 字节数（**本轮实跑**）
+
+| 阶段 | 覆盖什么 | case 数 | 字节数 | 实测结果 | 证据强度 |
+|---|---|---|---|---|---|
+| **A · HTTP 业务面** | Go 真源 api ↔ RAG like-api ↔ 冻结的 `expected.txt` **三方逐字节**（body hex ＋ HTTP 状态码） | **8**：`getlikecount` / `getlikestate` / `gettargetlikerlist` / `getuserlikelist` / `getusertotallike` / `likeaction` / `no_token`(401) / `missing_required` | **627 B**（97 / 64 / 107 / 147 / 53 / 107 / **0**（`no_token` 空 body）/ 52） | ✅ **8/8**：`Go == RAG == expected.txt` | **E4** |
+| **B · 事实投递链路（`DRIFT-LIKE-003-A`）** | 两侧把**同一条**冻结事实投给假 DC ⇒ 比**字节** ＋ 比 **DB outbox 终态** | **1** 条事实（`event_id=rtw.like.9007199254740993001`） | **970 B** · sha256 `3685ca3017df6b436253d4632608631aa36915a597f25a756bd937fd2c1606d0`（**两侧同**）＋ outbox 终态 **9 个字段**逐字段相同 | ✅ | **E4** |
+| **C · E60 双失败** | Redis **与** DB **同时**失败（`ACL SETUSER default -zcard` ＋ `DROP TABLE like_record`，**两侧同注入**）⇒ 两侧都必须走「记业务错误」分支 | **1**（`likeaction_double_failure`） | **107 B**（响应体，两侧相同）＋ Go `"error_code":5011` · RAG `business_error` **≥1 行** | ✅ 两侧都走到了「记业务错误」 | **E4**（⚠️ RAG 侧**码值 5011 不在 stdout** ⇒ 由进程内守门 `LikeUserLikeTotalDoubleFailureGateTest` 钉住 ⇒ **本节不单独断言 RAG 的码值**） |
+
+### ③ 三个**真缺陷**（**都在探针侧**，不是 like 域缺陷）—— **已修**
+
+| 缺陷 | 现象 | 根因（**带 Go 出处**） | 修法（**文件:行号**） | 验证 |
+|---|---|---|---|---|
+| **缺陷 1**：**没给 RAG 的 like-api 传验签密钥** | 探针 **EXIT=2**（`RAG like-api` 起不来）⇒ 「like 域双侧活体探针 ⇒ EXIT=0」**按当时脚本不可复算** | 探针只导了 `JWT_SECRET`（**签发侧**）⇒ **从未给验签侧**传 `USER_JWT_SECRET` ⇒ RAG 侧 `service/like/like-api/src/main/resources/application.yml:85` 是 `access-secret: ${USER_JWT_SECRET}`（**无默认值**）⇒ 守卫 `service/like/like-api/src/main/java/com/rag/like/like/api/config/LikeApiProperties.java:112`（`@PostConstruct verifyAccessSecret()`）**fail-closed** ⇒ `requireSecret`（`:124`）的「未解析占位符」判据（`:131`）命中 ⇒ 抛 `IllegalStateException`（`:132`）⇒ **进程起不来**<br>⚠️ **Go 出处（消费点）**：`service/like/api/internal/handler/routes.go:49` `rest.WithJwt(serverCtx.Config.UserAuth.AccessSecret)`；**声明点** `service/like/api/etc/likecenter.yaml:6` `AccessSecret` ⇒ **两侧同值** ⇒ 验签行为**零变化** | `tools/api-full-parity-probe/like/run.sh`：① 新增 `USER_JWT_SECRET="${USER_JWT_SECRET:-${JWT_SECRET}}"`（**签发/验签同值**）② 起 like-api 那步补 `USER_JWT_SECRET="${USER_JWT_SECRET}"` | 探针 **EXIT=0**（连续多轮）⇒ 缺陷消失 |
+| **缺陷 2**：收尾**只收容器** ⇒ **Go 的 api/rpc 变孤儿**、继续占端口 | 跑完一轮后 `:18121` / `:18122` **仍在 LISTEN** ⇒ 下一轮起 Go api **撞端口** ⇒ 看起来像「环境坏了」 | `( cd X && cmd ) &` ⇒ `$!` 是**子 shell** 的 PID（bash 对**异步**子 shell 会**再 fork 一次**）⇒ 真服务进程是它的**儿子** ⇒ `kill $!` 只杀得掉子 shell ⇒ **孤儿继续占口** | ① **启动侧改 `exec`**（子 shell 被**替换**成服务进程 ⇒ `$!` 就是服务 PID）② **收尾侧按端口复核**（kill 后端口还在 ⇒ 再按**签名**清一遍，**只杀本探针的**）③ **收尾后断言** `lsof -nP -iTCP:<端口> -sTCP:LISTEN` 为空 ⇒ 不绿就 **EXIT=2**（`assert_no_leftover`） | 每轮跑完 **9 个端口零残留**（见 ⑤） |
+| **缺陷 3（本轮变异复跑时暴露）**：**就绪等待按「迭代次数」** ⇒ 负载高时**误判成环境坏了** | 变异套件**第一次**复跑时 M2 那轮跑出 **EXIT=2**（`RAG 侧 PG 起来了但没就绪`）⇒ 套件**误报「探针是假绿」** | 就绪等待写成 `for _ in $(seq 1 60); do docker exec … ; sleep 1; done` ⇒ 机器负载高时（**实测 load average 一度打到 58**）单次 `docker exec` 要 1~3s ⇒ **「60 次」远小于 60 秒** ⇒ PG 还没 init 完就被判「没就绪」 | ① **改成墙钟 deadline**（`PG_READY_TIMEOUT` 默认 **240s** / `REDIS_READY_TIMEOUT` 默认 60s）② 轮询里**看容器状态**（`exited`/`dead` ⇒ 真的起不来 ⇒ 立刻失败，别白等）③ **`mutate-parity.sh` 对 EXIT=2 重跑该轮**（最多 3 次，每次隔 60s）⇒ **环境问题不再被误判成「变异没被抓到」** | 复跑后 **M2 精确转红（exit 1）**；套件 **EXIT=0** |
+
+> ⚠️ **三条都是探针侧缺陷**（AGENTS.md §3.3.3 的「假绿」防线：探针自己坏了 ⇒ 结论不可信）⇒
+> **本轮之前**凡引用「like 域双侧活体探针 ⇒ EXIT=0」的台账，都必须附带「**脚本当时不可复算**」这条前提。
+
+### ④ 变异验证记录（**R4 ⑧** —— 逐条）
+
+| 变异 | 改哪一处 | 期望（探针必须红在哪） | 实测（**本轮**） | 已还原 |
+|---|---|---|---|---|
+| **M1** | `tools/api-full-parity-probe/like/expected.txt` 里 `getlikecount` 的**一枚 hex**（`7b22` → `7b23`） | 阶段 A「Go != expected」⇒ **EXIT=1** | ✅ **EXIT=1** —— 红在 `❌ getlikecount` / `Go != expected` / `RAG != expected` | ✅ |
+| **M2** | **RAG 侧** `service/like/like-common/src/main/java/com/rag/like/like/common/errmsg/LikeErrorMessages.java` 的 5001 文案（「系统内部错误」→「内部错误」） | 阶段 A「RAG != expected」⇒ **EXIT=1**（证明「Go == RAG」**不是**恒等式） | ✅ **EXIT=1** —— 红在 RAG 侧字节漂移 | ✅ |
+| **M3** | **RAG 侧** `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeTaskProgressPublisher.java`：`logger.logBusinessErr(...)` → `LOG.warn("e60 path degraded to plain warn", ...)`（≈ **还原 E60 修前行为**） | 阶段 C「RAG `business_error` 行数 = 0」⇒ **EXIT=1** | ✅ **EXIT=1** —— 红在 `❌ 双失败业务错误没在两侧都出现（Go='"error_code":5011' · RAG business_error 行数=0）` | ✅ |
+| **还原** | 三个文件全部还原 | 必须**重新转绿** | ✅ **EXIT=0** | — |
+
+⇒ **`git diff --stat -- tools/api-full-parity-probe/like/expected.txt` = 0 行**（变异目标已回到原样）⇒
+**Go 真源一个字都没改**（探针第 3 步自带「真源仓 `service/like` 必须干净」的断言 ⇒ 真源仓 `git status --porcelain -- service/like` 实测为空）。
+
+> ⚠️ **本轮复跑时踩到过一次「假红」**（**留档，避免下一个人再踩**）：
+> 变异套件**第一次**复跑时 **M2 那轮跑出 EXIT=2**（`RAG 侧 PG 起来了但没就绪`）⇒
+> **不是**「探针看不见 RAG 侧的字节漂移」，而是**那轮环境没跑起来**（机器负载 load average 一度 **58**）
+> ⇒ 若不处理，套件会**误报「探针是假绿」** ⇒ 修法见 ③ 的「缺陷 3」（墙钟等待 ＋ 对 EXIT=2 重跑该轮）
+> ⇒ **修完复跑：M2 精确转红（exit 1）· 套件 EXIT=0**。
+
+> ⚠️ **还原手法**：一律「**文件备份 ＋ 复制回来**」⇒ **绝不用 `git checkout --`**（本 lane 的修复**还没提交** ⇒ `git checkout` 会把它们一起回滚掉）。
+> ⚠️ **变异目标全部落在 RAG 侧 / 冻结值上** ⇒ **不动真源**。
+
+### ⑤ 收尾断言：**端口零残留**（已固化进脚本）
+
+探针跑完 ⇒ 先 `teardown`（kill → 等端口关 → 删容器 → 按签名兜底清）⇒ 再
+**断言本探针真正用过的 9 个端口**（5 服务口 ＋ 4 容器宿主口）在
+`lsof -nP -iTCP:<port> -sTCP:LISTEN` 下**一个都不剩** ⇒ 有残留 ⇒ **EXIT=2**。
+
+| 项 | 内容 |
+|---|---|
+| **落点** | `tools/api-full-parity-probe/like/run.sh` ⇒ `all_probe_ports()` ＋ `assert_no_leftover()`（收尾第 11 步） |
+| **只算「真正用过的」口** | ⚠️ **不含**候选池里没绑上的口 ⇒ 否则别的 lane 的容器恰好占着候选池 ⇒ 会把**别人的**占用算成「本探针的残留」⇒ **假红** |
+| **绝不按端口无差别 kill** | 容器发布端口时是 `com.docker.backend` 持有该宿主口 ⇒ 无差别 kill 会**当场杀掉 Docker daemon** ⇒ 只杀**签名匹配本探针**的进程；别人的进程占口 ⇒ **报错退出（exit 2）**，不越界动手 |
+| **「等端口释放」的判据** | 用 **`lsof -nP -iTCP:<port> -sTCP:LISTEN`**（问「谁在 LISTEN」）⇒ **不用 `nc -z`**（后者在 docker 保留着口时会**误报已释放** ⇒ 2026-10-29 实测踩过） |
+| **断言确实会红**（**自测**，非推断） | 把 `run.sh` 里的 `all_probe_ports()` ＋ `assert_no_leftover()` **原样抽出**（`awk` 取函数体，**不是重写**）⇒ 起一个 `python3 -m http.server` 占住其中一个口 ⇒ 三态实测：**① 无残留 ⇒ 返回 0（绿）② 有残留 ⇒ 返回 1（红，红在 `❌ 端口 :18991 仍有残留`）③ 清掉后 ⇒ 返回 0（绿）** ⇒ ⇒ **断言有牙齿，不是摆设** |
+| **实跑残留** | 独立探针跑完（EXIT=0）后实测：`lsof -nP -iTCP:18161-18170 -sTCP:LISTEN` **为空** · `docker ps -a \| grep r2like` **为空** ⇒ **零残留** |
+
+### ⑥ 复算命令（本 lane）
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r4-like-probe-fix"
+bash tools/api-full-parity-probe/like/run.sh          ; echo "EXIT=$?"   # ⇒ 0
+bash tools/api-full-parity-probe/like/mutate-parity.sh ; echo "EXIT=$?"   # ⇒ 0
+git diff --stat -- tools/api-full-parity-probe/like/expected.txt          # ⇒ 空（已还原）
+```
+
+**本轮实跑的关键行（原样）**：
+
+```text
+== 8/11 阶段 A · HTTP 业务面（Go vs RAG vs expected.txt ⇒ 逐字节）==
+   ✅ getlikecount  Go == RAG == expected.txt（逐字节 · HTTP 200）
+   ✅ getlikestate  Go == RAG == expected.txt（逐字节 · HTTP 200）
+   ✅ gettargetlikerlist  Go == RAG == expected.txt（逐字节 · HTTP 200）
+   ✅ getuserlikelist  Go == RAG == expected.txt（逐字节 · HTTP 200）
+   ✅ getusertotallike  Go == RAG == expected.txt（逐字节 · HTTP 200）
+   ✅ likeaction  Go == RAG == expected.txt（逐字节 · HTTP 200）
+   ✅ no_token  Go == RAG == expected.txt（逐字节 · HTTP 401）
+   ✅ missing_required  Go == RAG == expected.txt（逐字节 · HTTP 200）
+   ✓ 阶段 A 全绿
+== 9/11 阶段 C · E60 · Redis 与 DB **同时**失败 ⇒ 业务错误码必须两侧都是 5011==
+   ✅ 响应字节：Go == RAG == expected.txt（HTTP 200）⇒ {"code":200,"msg":"OK","data":{"success":true,"message":"action success","like_count":4,"dislike_count":1}}
+   ✅ 双失败业务错误：Go 记了 5011（ErrorRedisSelect）"error_code":5011 · RAG 记了 business_error × 1
+   ✓ 阶段 C 全绿
+== 10/11 阶段 B · 事实投递链路（003-A）· 两侧投给 DC 的字节==
+   ✅ DC 收到的字节：Go == RAG（970 bytes · sha256 3685ca3017df6b436253d4632608631aa36915a597f25a756bd937fd2c1606d0）
+   ✅ outbox 终态（不含墙钟列）：Go == RAG ⇒ rtw.like.9007199254740993001|community.target.interaction|like-state/9007199254740993/article/9007199254740994|1|1|0|rcpt-38b38328d978fdd0|38b38328d978fdd0f6563ae731283af90495e60b7d818d82b8d14a2f653cb8c8|1
+   ✓ 阶段 B 全绿
+== 11/11 收尾复核（服务真停 · 端口零残留） ==
+   ✓ 收尾复核：本探针的 9 个端口**零残留**
+✅ 阶段 A（HTTP 业务面）+ 阶段 B（事实投递链路）+ 阶段 C（E60 双失败）双侧逐字节一致
+EXIT=0
+```
+
+```text
+== 基线（未变异）必须转绿 ==        ✅ 基线绿（exit 0）
+== M1 冻结的 expected.txt 被改 ⇒ 必须转红 ==
+   ✅ 精确转红（exit 1 · Go 侧与冻结值不符）   | ❌ getlikecount / Go != expected / RAG != expected
+== M2 RAG 侧的 5001 文案被改 ⇒ 必须转红 ==
+   ✅ 精确转红（exit 1 · RAG 侧字节漂移被抓到） | ❌ missing_required / RAG != expected
+== M3 E60 的业务错误日志被降级成普通 warn（≈ 还原 E60 修前行为）⇒ 必须转红 ==
+   ✅ 精确转红（exit 1 · E60 的业务错误分支没被观测到）
+   | ❌ 双失败业务错误没在两侧都出现（Go='"error_code":5011' · RAG business_error 行数=0）
+== 还原后必须重新转绿 ==            ✅ 还原后绿（exit 0）
+✅ 三条变异全部精确转红 + 还原后转绿 ⇒ 探针非假绿
+```
+
+### ⑦ ⚠️ 本轮**没有**做的（留档，含原因）
+
+| 项 | 原因 |
+|---|---|
+| **旧 `/tmp/likeprobe` 的 56 条输入解释矩阵**没有重建 | 本轮作用域 = **探针可复算性**；那 56 条覆盖的是「输入解释 / 必填判定」，与本轮三段**不重叠** ⇒ ⇒ **G-2 不闭合**（见本节开头口径） |
+| **「真 Tomcat ＋ 慢下游」的超时用例**没有补 | ⇒ **U-03 不销号**（仍是 🟡 取证缺口）⇒ 属阶段二 |
+| **DC → 第三仓消费端那一跳**没有取证 | 对端仓（`Sea-BreakTheWaves`）**不在本项目范围** ⇒ ⇒ **U-01 仍是 🟡** |
+| **`docs/PhaseGoal/g2.md` / `docs/PhaseGoal-judge.md` 的基线措辞**没有改 | ① 那是**机器生成物 ＋ 主线写权**（AGENTS.md §5.3）② 本 lane 只写 `tools/api-full-parity-probe/like/**` ＋ `docs/DRIFT/like/**` ⇒ ⇒ **上报收口**：基线 P0#1 现状栏写「`like` / `follow` / `users-common` 的**双侧活体探针不在版本控制内**（G-1/G-2/G-4）」⇒ **对 `like` 这半句已过期**（现在有落仓入口了）⇒ 但 **G-2 仍未闭合**（旧探针没回来）⇒ **改法请主线斟酌**（不能直接删 `like` ⇒ 会把「旧矩阵仍不可复算」这个事实抹掉） |
+
