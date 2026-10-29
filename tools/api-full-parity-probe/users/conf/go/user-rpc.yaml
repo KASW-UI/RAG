@@ -1,0 +1,49 @@
+Name: user.rpc
+ListenOn: 0.0.0.0:19004
+
+Log:
+  ServiceName: user-rpc
+  Mode: console          # difftest: 绝不写进冻结仓库
+
+Postgres:
+  Host: "127.0.0.1"
+  Port: "55432"
+  User: "admin"
+  # 真源写的是 "${POSTGRES_PASSWORD}"，这里换成字面值。
+  # 原因：user.go:29 调的是 conf.MustLoad(*configFile, &c)，**没带 conf.UseEnv()**，
+  # 而 go-zero v1.10.2 core/conf/config.go:62-63 只在 opt.env 为真时才 os.ExpandEnv，
+  # properties.go:58-59 同理。所以真源的占位符不会被展开，密码会被当成
+  # 字面量字符串 "${POSTGRES_PASSWORD}" ⇒ SASL 认证失败。
+  # 这是冻结仓库里的既有状态（只读，不改），对拍副本必须写字面值才能连上库。
+  Password: "difftest"
+  DBName: "go_db"
+  Mode: "disable"
+
+BizRedis:
+  Host: 127.0.0.1:56379
+  Type: "node"
+  Pass: ""
+  
+
+DevServer:
+  Enabled: true
+  Host: 0.0.0.0
+  Port: 19094
+  MetricsPath: /metrics
+  HealthPath: /healthz
+  EnableMetrics: true
+  EnablePprof: true
+
+
+UserAuth:
+  AccessSecret: ae0536f9-6450-4606-8e13-5a19ed505da0
+  AccessExpire: 2592000
+
+Telemetry:
+  Name: user-rpc
+  Endpoint: jaeger:4317
+  Sampler: 1.0
+  Batcher: otlpgrpc
+
+
+# difftest: Etcd 整块移除 —— zrpc/server.go:42 `if c.HasEtcd()` 不成立 ⇒ 不做注册

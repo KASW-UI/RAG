@@ -1272,3 +1272,76 @@ RAG 侧原本**照抄**成 yaml 的**默认值**（`${USER_JWT_SECRET:<明文>}`
 - **没有任何一条白名单条目整体失效**（W1 / W2 仍被其它域命中）⇒ **无须删条目**。
 - ⚠️ 但 **users 域对 W1 / W2 的命中已归零**（明细见本 lane 的交接说明）⇒ ⇒ 若日后要「按域收窄白名单」，
   users 域的 W1 / W2 部分**已可删**。
+
+---
+
+## 2026-10-29 · R4·T-0.4（align/r4-users-probe）· `DRIFT-USERS-LAT-001` —— 🟡 **RAG 侧 HTTP 响应延迟被「500ms 切片等待」量化** ⇒ 负载放大时比 Go 侧更早撞 2s/3s 超时
+
+> **本条是「延迟形态差」，不是「语义漂移」，也不是「跑红即缺陷」。**
+> 两侧**最终响应内容**一致（`byte_equal=28/29`）⇒ 不产生数据丢失/重复处理/状态错误。
+> ⇒ **定级 = P3 · D 类**（`docs/twoStage.md` §10：P3「改进项，不构成当前明确的验收阻断条件」· D 类「经分析确认可不实现或不适用的事项，必须有明确理由」）。
+
+### 1. 现象（**两侧同时跑**的实测，不是推演）
+
+探针 `tools/api-full-parity-probe/users/run.sh`（**本轮落仓**）在同一台机器、同一批请求上**同时起 Go 真源栈与 RAG 栈**，
+逐请求记录**端到端耗时**（ms）：
+
+| 侧 | n | min | med | max |
+|---|---|---|---|---|
+| **Go 真源** | 39 | 0 | **50** | **319** |
+| **RAG** | 39 | 4 | **51** | **2046** |
+
+⇒ **中位数几乎相同（50 vs 51ms）⇒ 快路径等价**
+⇒ **但 RAG 侧的尾部被拉长到 6.4 倍（319 → 2046ms），且 2046ms 紧贴 users 域的 2s gRPC deadline**
+⇒ ⇒ 负载放大时，**RAG 侧先返回 1015「服务繁忙」/ 503 `Request Timeout`，Go 侧仍返回 200**。
+
+RAG 侧 > 500ms 的步骤（**实测**）：
+
+| 步骤 | Go | RAG | ≈ k×500ms + base |
+|---|---|---|---|
+| `admin.logout` | 89ms | **2046ms** | 4 片 |
+| `admin.getself` | 135ms | **1986ms** | 4 片 |
+| `user.logout` | 47ms | **1337ms** | 3 片 |
+| `user.get` | 156ms | **1333ms** | 3 片 |
+| `admin.login` | 304ms | **910ms** | 2 片 |
+| `user.register` | 134ms | **778ms** | 2 片 |
+| `admin.updateuser` | 319ms | 559ms | 1 片 |
+| `user.login` | 124ms | 557ms | 1 片 |
+
+⇒ **每个慢值都落在 500ms 的整数倍附近** ⇒ 这是**量化**，不是随机抖动。
+
+### 2. 根因（**消费点**，不是声明点）
+
+* **RAG 侧**：`service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:415-419`
+  ```java
+  long sliceMs = Math.max(1L, Math.min(
+          GoStyleClientDisconnectProbe.probeIntervalMillis(),   // = 500ms
+          TimeUnit.NANOSECONDS.toMillis(remainingNanos)));
+  workerDone = doneLatch.await(sliceMs, TimeUnit.MILLISECONDS);
+  ```
+  ⇒ 容器线程**每片最多等 500ms**；worker 若在片边界**之后**才完成 ⇒ 响应被**多等最多一片** ⇒ **延迟被向上量化到 500ms 的整数倍**。
+  间隔常量出处：`GoStyleClientDisconnectProbe.java:187` `DEFAULT_PROBE_INTERVAL_MILLIS = 500L`。
+  ⇒ 该机制本身是**已签字偏离 `SD-2026-10-25-04`**（「主动探测写」）的**组成部分**（同一份代码，见 `docs/Intentional_Deviations/global/common-tails.md`）。
+* **Go 侧**：`net/http` 把请求交给 handler goroutine，**handler 返回即写响应** ⇒ **没有轮询切片** ⇒ **尾延迟不被量化**。
+  ⇒ ⚠️ **两侧的调用链层数相同**（都是 api → rpc → PG **三跳**）⇒ ⇒ **本条不是「Go 两跳 vs RAG 三跳」**；**真正的差是「RAG 侧多一层 500ms 的等待量化」**。
+
+### 3. 影响面
+
+* **仅延迟形态**（超时的**阈值**被提前触达）⇒ **响应内容不受影响**（`byte_equal=28/29`；另有 10 步走「按已签字边界分别断言」路径）。
+* 触发条件：**机器有其它负载**（本轮两跑：load average **78** ⇒ 5 条超时形态差异；load average **31** ⇒ 2 条；load average 低时 ⇒ **0 条**）。
+* 归属：**落点在共享层 `service/common`**（`HttpMiddleware`）⇒ **写权归 G4**；本条在 users 域台账登记（可观察面在 users 域）⇒ **修法若要动，归 G4**。
+
+### 4. **怎么解除**（**必须先做这一步，才谈是不是真差异**）
+
+1. 在**空载机器**上复跑 `bash tools/api-full-parity-probe/users/run.sh`
+   ⇒ 若 `unexpected=0` ⇒ **归为纯负载敏感**，本条按「可观察的延迟形态差」留档即可；
+2. 若复跑**仍**出现 1015 / 503 ⇒ 那才是**真差异**（RAG 侧恒定更慢）⇒ **另立项**（届时需比 Go 侧多花的 500ms 量化是不是可接受）。
+
+### 5. 本条的诚实边界
+
+* ⚠️ **本轮只拿到「同一台机器、负载不同」的对照** ⇒ **没有**「两侧同机同负载下 RAG 恒定慢 4 片」的**隔离**证明
+  ⇒ ⇒ **定性为「延迟形态差 · 负载敏感」**，**不写成「RAG 侧恒定慢」**。
+* ⚠️ **同一轮里的另一条对照**（**同一批请求、同一台机器**）：Go max=319ms vs RAG max=2046ms
+  ⇒ 这两条数据**同机同时**，⇒ **量化形态本身**是同机可比的；**跨负载**的只有「触发与否」那部分。
+* ⚠️ **不属于**本条的：上一轮遗留的「RAG 的 `user.register` 实际没落库」—— **已证伪**：两侧各恰好 1 行、`extra_info` 逐字节相同
+  （证据：`tools/api-full-parity-probe/users/check_register_landed.py` + 同目录 README「register 落库对照」节）。
