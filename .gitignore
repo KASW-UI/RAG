@@ -40,3 +40,9 @@ __pycache__/
 ### 对拍运行产物（2026-10-23 加）###
 # difftest 的实测结果文件（含两侧 uid / 端口 / 匹配表），是日志不是源码
 tools/difftest/*-results.txt
+
+### 本地环境变量（**含 JWT 密钥 / DB 密码** ⇒ 绝不入库）###
+# 模板见 .env.example（**已入库**）；本地 .env 由使用者自建
+.env
+.env.*
+!.env.example
