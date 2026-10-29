@@ -440,6 +440,24 @@ RAG message_notification.created_at | timestamp   | NOT NULL | DEFAULT CURRENT_T
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**是** —— grpc-java 的 unary 响应「`onNext` + `onCompleted` 必须成对」是**框架硬约束**，不会消失 ⇒ 仍生效；本轮若写任何 gRPC 侧的实现/测试结论，仍须先核这条。
 > **依据**：`service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcRecoverInterceptorWiringTest.java`（真 in-process gRPC server · 含 class 级 `@Timeout` 与 stub deadline 两道护栏） ⇒ **证据强度：守门在仓**。
+>
+> ⚠️ **2026-10-29 真实性复核 · 三个 jar 内指针的可复算证据（**行号不变，只补证据**）**：
+> 下方栈帧里的 `ClientCalls.java:717`（`io.grpc.stub.ClientCalls$ThreadlessExecutor.waitAndDrain`）·
+> `ClientCalls.java:159`（`io.grpc.stub.ClientCalls.blockingUnaryCall`）· `ServerCalls.java:394`
+> （`io.grpc.stub.ServerCalls` 的 `onCompleted`）—— 这三个类**只存在于 grpc-java 的 jar 里**（本仓无同名 `.java`）
+> ⇒ 早期版本的本审计工具会把它们报成「🔴 落空」⇒ **那是工具缺第 4 个解析根，不是台账写错**。
+> ⇒ **行号一律不改**（改成别的行号会与 jstack 现场对不上）；**证据补成可复算**：
+>
+> | 指针 | jar（`~/.m2/repository/io/grpc/grpc-stub/`） | 那一行的实际内容 | 与本条现象的对应 |
+> |---|---|---|---|
+> | `ClientCalls.java:717` | `grpc-stub-1.66.0-sources.jar` ⇒ `io/grpc/stub/ClientCalls.java` | `LockSupport.park(this);` | 对上 jstack 里的 `WAITING (parking)` |
+> | `ClientCalls.java:159` | 同上 | `executor.waitAndDrain();` | 对上 `blockingUnaryCall` 那一帧 |
+> | `ServerCalls.java:394` | 同上 | `public void onCompleted() {` | 对上本条引用的 `onCompleted()` 代码块 |
+>
+> ⇒ **本条结论站得住**；新版本审计工具已把它们归入「📦 jar 内第三方源码」单列档（**不计失败**）。
+> ⚠️ 注意：**仓内另有 grpc-stub 1.62.2 / 1.63.0** ⇒ 引用时须写明版本（本条以 **1.66.0** 为准）。
+> 本条的**仓内可核验证据**仍是上面的守门测试（真 in-process gRPC server 实跑）。
+> 核对日期 2026-10-29。
 
 **现象**：本轮新写 `MessageRpcRecoverInterceptorWiringTest`（真 in-process gRPC server），
 第一次跑 —— **不报失败、不报错，整轮 surefire 挂死 4 分钟**（只能 `jstack` 找到）。

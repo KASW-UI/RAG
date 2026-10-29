@@ -355,7 +355,8 @@ Boot 4 `LettuceConnectionConfiguration.createClientOptions` 的字节码顺序 =
 #### ③ `MqConsumer` 增 `like` = **真生产依赖**（本轮阶段 2 A9 落码引入）
 
 - `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/mq/LikeUpdateKafkaListener.java` ⇒ **`src/main`** 新增 `import com.rag.common.observability.MqConsumer;` ＋ 直接调用 `MqConsumer.traceConsumer(Context.current(), LikeSpans.MQ_TRACER_NAME, LikeSpans.MQ_SPAN_NAME, LikeSpans.messagingAttributes(record.key()), ctx -> consume(value))`
-- ⇒ **Go 出处**：`service/like/rpc/internal/mq/likemq.go:83-84` 的 `observability.TraceConsumer(ctx, "like-mq", "LikeUpdateService.Consume", likeMessageAttrs("like-topic", key), func(ctx) error { … })`
+- ⇒ **Go 出处**：`service/like/rpc/internal/mq/internal/mqs/likemq.go:83-84` 的 `observability.TraceConsumer(ctx, "like-mq", "LikeUpdateService.Consume", likeMessageAttrs("like-topic", key), func(ctx) error { … })`
+  ⚠️ **2026-10-29 真实性复核 · 出处路径订正**：原写 `service/like/rpc/internal/mq/likemq.go` ⇒ **该路径不存在**（Go 真源里它在 **`internal/mq/internal/mqs/`**）⇒ **结论不变，仅出处路径订正** ⇒ `:83` = `func (l *LikeUpdateService) Consume(ctx context.Context, key, val string) error {`、`:84` = 那行 `observability.TraceConsumer(...)`（2026-10-29 当场核对）。
 - ⇒ ⇒ 🔴 **影响面（给 G4）**：**`MqConsumer` 现在是 like-rpc 的生产依赖** ⇒ **共享层改 `MqConsumer` ⇒ 会影响 like-rpc 的生产 MQ 消费路径** ⇒ ⇒ **合并后我域需复跑 like-rpc 的 MQ 相关测试**（`LikeSpansAttributeGateTest` ＋ MQ 监听相关用例）⇒ ⇒ 这是**本轮真实新增的共享层耦合**，请计入快照
 - ⇒ ⇒ 📌 **对照**：task 域的两个 sink（`UserLikeProgressSink` / `ArticleLikeProgressSink`）也包 `MqConsumer.traceConsumer` ⇒ **`MqConsumer` 的域级引用方 = comment-rpc / hot-rpc / like-rpc / task-rpc（4 个域）**
 

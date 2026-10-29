@@ -1506,7 +1506,7 @@ RAG ： HTTP/1.1 200    / 401             / 404            / 405
 > | 项 | 事实 | 证据 |
 > |---|---|---|
 > | **Go 侧** | 状态行写 `code + 空格 + StatusText(code)`，reason phrase 由**标准库**补 | `go-zero@v1.10.2/rest/httpx/responses.go:183` → Go 标准库 `net/http/server.go:1596-1611`（`:1602-1605` 写 `StatusText(code)`）+ `net/http/status.go:81` |
-> | **RAG 侧（应用层）** | 只写码，**不带 reason** | `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:907`（`public void setStatus(int sc)`）+ `:920`（`resp.setStatus(sc)`） |
+> | **RAG 侧（应用层）** | 只写码，**不带 reason** | `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:943`（`public void setStatus(int sc)`）+ `:956`（`resp.setStatus(sc)`）<br>⚠️ **2026-10-29 真实性复核 · 行号订正**：原写 **`:907` / `:920`** ⇒ **行号已漂移**（该文件此后增补了 ~36 行）⇒ **结论不变，仅出处行号订正** ⇒ 现在的 `public void setStatus(int sc)` 在 **`:943`**、`resp.setStatus(sc)` 在 **`:956`**（2026-10-29 当场核对） |
 > | **RAG 侧（容器层 · 决定性事实）** | Tomcat 的 `Response` **已没有 `setStatus(int, String)`** ⇒ 应用层**无法**补 reason phrase | **实测 `javap`**：`tomcat-embed-core` **9.0.63** 有 `setStatus(int)` **+** `setStatus(int,String)`；**10.1.52** 与 **11.0.24** **只剩 `setStatus(int)`** ⇒ 本项目 **Boot 4.0.8 ⇒ `tomcat.version=11.0.24`**（`spring-boot-dependencies-4.0.8.pom`）⇒ **无路可走** |
 >
 > ⇒ **性质 = 框架限制（容器层）** ⇒ 共享层 `service/common` **够不着**

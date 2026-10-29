@@ -504,6 +504,18 @@ Failure:     Go 裸 error 透传（grpc Unknown(2)）；RAG 非 StatusRuntimeExc
 | **OP-08** | 9 个校验/分支逐条对齐 ✅；**两条写路径的 `msg.setConversationId(conv.getId())` 都在 `@Transactional` 独立 Bean `MessageAtomicService` 内**（DRIFT-MSG-001/002 已修）；语句序（先 UPDATE 会话后 INSERT 消息）与 Go 一致 | `MessageDomainService.java:183-388`；`MessageAtomicService.java:102-140` |
 | **OP-09** | 单条 `@Update`，**不再触碰 conversation 表** ✅（V-006 已修，§6.7.7） | `MessageAtomicService.java:222-227` |
 
+> ⚠️ **2026-10-29 真实性复核（`DRIFT-MSG-V-018`）**：上表 **OP-06 行**原判「逐条 item 组装时
+> `countUnreadMessagesByConversation` **不在 try/catch 内** ⇒ 无 `observeDbError`；`peerOf` 的失败判定
+> **被推迟到** `buildConversationItem`」⇒ **现行态 = ✅ 已修（2026-10-24 第九轮）**。
+> **依据（RAG 侧）**：`service/message/message-rpc/src/main/java/com/rag/message/message/rpc/service/MessageDomainService.java:572`
+> （**先** `MessageRpcSupport.peerOf(conv, …)`，失败即 `PERMISSION_DENIED` + 5005 短路）
+> · `:580-586`（`countUnreadMessagesByConversation` **在 try/catch 内** + `catch` 里
+> `metrics.observeDbError("conversation", "count_unread")` 后**原样上抛**）
+> · 守门 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/service/MessageListConversationsParityTest.java`（在仓）。
+> ⇒ **原指针 `MessageDomainService.java:546-561` 已随修复漂移** ⇒ **现指针 = `:572-586`**。
+> **Go 侧（真源）**：`service/message/rpc/internal/logic/helper.go:160-186`（`peerOf` 先判 → count 带 `ObserveDBError` → `loadProfile`）。
+> 核对日期 2026-10-29。⚠️ **原描述保留不改**（§三.2）—— 上表 OP-06 行的历史文字按「当时快照」读。
+
 **框架层（RAG 侧）**
 
 | 维度 | 现状 | Evidence |
@@ -869,6 +881,18 @@ RAG 侧**看不到** ⇒ 熔断/降载**上线后无法确认它在工作**（�
 
 ### DRIFT-MSG-V-029 🆕 **跨组件待办**：`like-rpc` 有与 V-027 同款的 Flyway baseline 缺陷（`article-rpc` 经核实**不受影响**，已从本条剔除）
 
+> ⚠️ **2026-10-29 真实性复核**：原判 **🔴 跨组件待办（缺陷成立，2026-10-24 实测）**
+> ⇒ **现行态 = ✅ 已修（2026-10-25 · global 收口域 X-1）** —— **原值是陈旧快照**。
+> **依据**：`service/like/like-rpc/src/main/resources/application.yml:78` = `baseline-version: 0`
+> （**已显式钉 0**，与 `message-rpc` 同款；`:81` 独立账本 `table: flyway_schema_history_like` 仍在）
+> ⇒ **Flyway 的 baseline 标记会打在 version 0 ⇒ `V1__create_like_record.sql` 不再被整条跳过**
+> ⇒ **本条描述的缺陷今天已不存在**。
+> ⚠️ **登记说明**：本条登记时明确「属别的域，本工作树不得改 ⇒ 交给 like 域自己的 session」——
+> **该交接已于 2026-10-25 完成**（`like-rpc/application.yml:59` 的注释自记「2026-10-25 实测修掉的真缺陷 · global 收口域 X-1」）。
+> **Go 侧（真源）**：无对应物（Go 侧用 GORM `AutoMigrate`，不跑 Flyway）⇒ 本条**不是**「与 Go 的语义差」，
+> 是**建表机制的生命周期差**（与 `DRIFT-MSG-V-027` 同源，已修）。
+> 核对日期 2026-10-29。⚠️ **下方正文保留不改**（§三.2）—— 按「当时（2026-10-24）实测」读。
+
 **Component**: `like-rpc`（**别的域，本轮不改**）
 **Category**: DDL / Lifecycle　**Classification**: **`SEMANTIC MISMATCH`（运行期缺表）**
 **Risk**: **HIGH**
@@ -982,6 +1006,20 @@ spring:
 ---
 
 ### ✅ DRIFT-MSG-V-026 ✅ **已修（2026-10-24 第九轮）** **其余 9 个 rpc 组件尚未接入**熔断 / 降载链（跨组件不变量未闭合）
+
+> ⚠️ **2026-10-29 真实性复核（数量订正）**：本条标题原写「**其余 9 个** rpc 组件尚未接入」⇒
+> **现行态 = ✅ 已修，且「已接入」的范围比第九轮记录的更大**。
+> **实测（2026-10-29）**：全仓 **10 个**带 gRPC server 的 rpc 组件**全部**已挂 `GoStyleRpcProtectionChain`
+> （逐个 grep `GoStyleRpcProtectionChain` 于各自 `src/main/java`，各命中 1 处）：
+> `service/article/article-rpc` · `service/comment/comment-rpc` · `service/favorite/favorite-rpc` ·
+> `service/follow/follow-rpc` · `service/hot/hot-rpc` · `service/like/like-rpc` · `service/message/message-rpc` ·
+> `service/task/task-rpc` · `service/users/admin/admin-rpc` · `service/users/user/user-rpc` ⇒ **10/10**。
+> ⇒ 第九轮小节标题写的「**8 个** rpc 组件全部接入」是**当时的计数**（users 域那两个是之后补上的）
+> ⇒ **现计数 = 10**，**结论方向不变（已修）**，**仅数字订正**。
+> **依据**：各 rpc 组件的 `GoStyleRpcProtectionChain.build(...)` 接线点（静态 grep，当日实测）；
+> 共享链定义 `service/common/src/main/java/com/rag/common/protection/GoStyleRpcProtectionChain.java`
+> （含 recover → breaker → shedding 三层；`GoStyleRecoverInterceptor` 在 `service/common/src/main/java/com/rag/common/observability/GoStyleRecoverInterceptor.java`）。
+> 核对日期 2026-10-29。⚠️ **下方正文保留不改**（§三.2）。
 
 > **⚠️ 2026-10-24 状态更新**：本轮**全部 8 个**带 gRPC server 的 rpc 组件已接入共享链
 > （`hot-rpc` 是 Kafka 架构、无 `GrpcServerConfigurer`，不适用）⇒ 跨组件不变量**已闭合**。
@@ -1566,6 +1604,16 @@ Flyway 本身每个迁移只跑一次，生产上不会重放。
 | `DRIFT-MSG-V-018`（`ListConversations` 少一次 `count_unread` 埋点） | 🔴 **OPEN** | 确认仍缺。**副作用已加重**：本轮把时间列与会话时区都摊开（V-019/V-020）后可以确定，该路径当前**不可达**（列表已按参与者过滤，`peerOf` 不会失败），所以它今天只表现为「一条永远不会增长的指标」。修它的收益低于风险，**建议与 V-016 一起决策** |
 | `UNRESOLVED-MSG-004`（三项「起不来」缺陷无点名式防回退） | 🔴 仍成立 | 本轮新增的 `MessageGrpcReflectionExposureWiringTest` 是**配置绑定**层的点名式用例，可作为该条「点名式守门」的样板；`@MapperScan` / `NacosRegistration` Bean 名两项目前仍未点名 |
 | `UNRESOLVED-MSG-006`（「RAG 抛 Error 时客户端看到什么」未取证） | ✅ **已关闭**（2026-10-23 23:5x） | recover 落地后**顺带关掉**：实测 `throw new StackOverflowError()`（`Error` 而非 `Exception`）也被兜住 ⇒ 客户端看到 `INTERNAL` + `"panic: "` 前缀（`MessageRpcRecoverInterceptorWiringTest#nonRuntimeExceptionErrorIsAlsoRecovered`）。⚠️ 关闭口径 = **在 recover 已装配的前提下**；若哪天 recover 被摘掉，这条要重新打开 |
+> ⚠️ **2026-10-29 真实性复核（`DRIFT-MSG-V-018`）**：上表 `DRIFT-MSG-V-018` 行原判 **🔴 OPEN「确认仍缺」**
+> ⇒ **现行态 = ✅ 已修（2026-10-24 第九轮）** —— **原值是 2026-10-23 第四轮的判断，是陈旧快照**
+> （该表已由上方 1568 行的前向指针标注为「快照表」，但**行内仍写着旧状态** ⇒ 本段补上单一现行态）。
+> **依据（RAG 侧）**：`service/message/message-rpc/src/main/java/com/rag/message/message/rpc/service/MessageDomainService.java:572`
+> （**先** `peerOf` ⇒ 失败即短路）· `:580-586`（`count_unread` **在 try/catch 内** + `metrics.observeDbError("conversation","count_unread")`）
+> · 守门 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/service/MessageListConversationsParityTest.java`（在仓）。
+> **Go 侧（真源）**：`service/message/rpc/internal/logic/helper.go:160-186`（`peerOf` 先判 → count 带 `ObserveDBError`）。
+> ⇒ **`DRIFT-MSG-V-018` 的现行态在全域内只有这一份**：§7 正文（`### ✅ DRIFT-MSG-V-018 ✅ 已修`）与
+> 「第九轮 · V-018 已修」小节**同向**，**本行是唯一异向的一处** ⇒ 已收敛。
+> 核对日期 2026-10-29。
 
 ### 🟡 附带观察（不改，只记）
 
@@ -2352,6 +2400,11 @@ func buildConversationItem(ctx, svcCtx, conv, operatorRole, operatorID) (*pb.Con
 ---
 
 ### 3. ✅ `DRIFT-MSG-V-026` 已修：**8 个 rpc 组件全部接入**熔断 / 降载链
+
+> ⚠️ **2026-10-29 真实性复核（数量订正）**：本小节标题写的「**8 个** rpc 组件」是**第九轮当时的计数**；
+> **实测（2026-10-29）已接入的是全仓 10 个带 gRPC server 的 rpc 组件（10/10）**（users 域的
+> `admin-rpc` / `user-rpc` 是之后补上的）⇒ **结论方向不变（已修），现计数 = 10**。
+> 依据与逐条组件清单见 §7 `DRIFT-MSG-V-026` 条目的 2026-10-29 订正段。核对日期 2026-10-29。
 
 #### 🔴 关键发现：**挂 breaker 有一个逐组件的前置条件**（差点就做错了）
 

@@ -27,7 +27,7 @@
 
 ---
 
-### SD-2026-10-24-01 🆕 · `message_conversation` 两个索引的**名字**与 Go 不同（列完全相同）
+### SD-2026-10-24-01 🆕 · `message_conversation` 两个索引的**名字**与 Go 不同（列完全相同） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > **唯一别名**：`SD-2026-10-24-01@message`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/article/rpc.md`](../article/rpc.md) 指向**另一条**偏离（写路径的**全局锁序**）⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-24-01@message`** 为准）
 > **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：RAG 侧两个索引仍是**短名**，Go 侧仍是 GORM 的 `idx_<表名>_<列名>` 长名 ⇒ **名字差异未消除、列完全相同**
@@ -49,7 +49,7 @@
 
 ---
 
-### SD-2026-10-24-02 🆕 · `message_rpc_request_duration_seconds` 的直方图**桶边界零交集**
+### SD-2026-10-24-02 🆕 · `message_rpc_request_duration_seconds` 的直方图**桶边界零交集** ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > **唯一别名**：`SD-2026-10-24-02@message`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/article/rpc.md`](../article/rpc.md) 指向**另一条**偏离（Kafka 四个通道不能逐通道切 broker）⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-24-02@message`** 为准）
 > **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：RAG 侧仍是 Micrometer 的**指数默认桶**（`publishPercentileHistogram()`），与 Go 的 11 个 `prometheus.DefBuckets` **桶边界零交集**
@@ -70,7 +70,7 @@
 
 ---
 
-### SD-2026-10-24-03 🆕 · 嵌在 cause 链里的 `CodeError`：Go `errors.As` **穿透** / RAG `instanceof` **不穿透**
+### SD-2026-10-24-03 🆕 · 嵌在 cause 链里的 `CodeError`：Go `errors.As` **穿透** / RAG `instanceof` **不穿透** ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > **唯一别名**：`SD-2026-10-24-03@message`（无跨域撞号（该编号只出现在本文件）⇒ 为与本域其它 `@message` 别名保持一致，仍加域内别名）
 > **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：RAG 侧 `bizCodeFromError` 仍用 `instanceof`（**不穿透**），Go 侧 api 全局错误处理器仍用 `errors.As`（**穿透**）⇒ 差异未消除（仍是 latent）
@@ -93,7 +93,7 @@
 
 ---
 
-### SD-2026-10-24-04 🆕 · 6 个时间列的 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧**多出来的**（Go 侧无默认）
+### SD-2026-10-24-04 🆕 · 6 个时间列的 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧**多出来的**（Go 侧无默认） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > **唯一别名**：`SD-2026-10-24-04@message`（无跨域撞号（该编号只出现在本文件）⇒ 为与本域其它 `@message` 别名保持一致，仍加域内别名）
 > **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：那 **6 个**列仍带 `DEFAULT CURRENT_TIMESTAMP`，Go 侧仍无默认 ⇒ 差异未消除（当前仍不可观测）
@@ -116,7 +116,7 @@
 
 ---
 
-### SD-2026-10-23-08 · CPU 采样读不到时 **fail-open**（不降载）
+### SD-2026-10-23-08 · CPU 采样读不到时 **fail-open**（不降载） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > **唯一别名**：`SD-2026-10-23-08@message`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/like/api.md`](../like/api.md)（响应 Content-Type）与 [`docs/Intentional_Deviations/users/admin/api.md`](../users/admin/api.md)（黑名单 401 业务码）指向**三条完全不同**的偏离 ⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-23-08@message`** 为准）
 > **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：RAG 侧 CPU 读不到时仍 **fail-open**（视作「未过载」⇒ 不降载），Go 侧 `stat.CpuUsage()` 永远不返回 -1 ⇒ 差异未消除
@@ -137,7 +137,7 @@
 
 ---
 
-### SD-2026-10-23-07 🗄️ **已撤销（2026-10-24）** · 服务端熔断 / CPU 自适应降载：原「本轮不实施（挂起式签字）」
+### SD-2026-10-23-07 🗄️ **已撤销（2026-10-24）** · 服务端熔断 / CPU 自适应降载：原「本轮不实施（挂起式签字）」 ｜ **状态（核对日期 2026-10-29）：⛔ 已失效·已撤销**
 
 > **唯一别名**：`SD-2026-10-23-07@message`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/like/rpc.md`](../like/rpc.md)（Nacos 注册失败不退出）与 [`docs/Intentional_Deviations/users/admin/rpc.md`](../users/admin/rpc.md)（gRPC description 中文）指向**三条完全不同**的偏离 ⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-23-07@message`** 为准）
 > **签字复核（核对日期 2026-10-29）**：**撤销有效 ⇒ 撤销的那个行为「今天真的没了」已核实 ⇒ 不计入计数**（记录保留）：服务端 breaker / CPU shedding **确已实施**（链已接到 gRPC server 上）⇒ 原「本轮不实施（挂起）」的状态**确已消失**
@@ -157,7 +157,7 @@
 > ② 真正该做的不是"引框架"，而是**各包一层 `ServerInterceptor` 薄壳** ——
 >    这正是 2026-10-24 落地的东西（`GoStyleRpcBreakerInterceptor` / `GoStyleRpcSheddingInterceptor`）；
 > ③ 降载阈值的**前置条件**（CPU 采样源 fail-open）已由
->    [`SD-2026-10-23-08`](#sd-2026-10-23-08--cpu-采样读不到时-fail-open不降载) 解决。
+>    [`SD-2026-10-23-08`](#sd-2026-10-23-08--cpu-采样读不到时-fail-open不降载--状态核对日期-2026-10-29✅-仍成立) 解决。
 
 | 项 | 内容 |
 |---|---|
@@ -169,7 +169,7 @@
 
 ---
 
-### SD-2026-10-23-06 · `idx_notification_recipient_read` 的列数：Go 1 列 / RAG 2 列
+### SD-2026-10-23-06 · `idx_notification_recipient_read` 的列数：Go 1 列 / RAG 2 列 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > **唯一别名**：`SD-2026-10-23-06@message`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/like/rpc.md`](../like/rpc.md)（gRPC 业务码迁 trailer）与 [`docs/Intentional_Deviations/users/admin/rpc.md`](../users/admin/rpc.md)（`resetUserPassword` 空守卫）指向**三条完全不同**的偏离 ⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-23-06@message`** 为准）
 > **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：RAG 侧该索引仍是 **2 列**，Go 侧仍只有 **1 列**

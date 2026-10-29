@@ -10,7 +10,7 @@
 
 ---
 
-## SD-2026-10-23-06：gRPC 业务码的载体迁移（`grpc-status` → 自定义 trailer）
+## SD-2026-10-23-06：gRPC 业务码的载体迁移（`grpc-status` → 自定义 trailer） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > **唯一别名**：`SD-2026-10-23-06@like`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/message/rpc.md`](../message/rpc.md)（索引列数）与 [`docs/Intentional_Deviations/users/admin/rpc.md`](../users/admin/rpc.md)（`resetUserPassword` 空守卫）指向**三条完全不同**的偏离 ⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-23-06@like`** 为准）
 > **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：RAG 侧业务码仍走**自定义 trailer** `rag-like-biz-code`，不是 `grpc-status`
@@ -79,7 +79,7 @@ go-zero 客户端的 `codes.Acceptable` 把 `DeadlineExceeded / Internal / Unava
 
 ---
 
-## SD-2026-10-23-07：Nacos 注册失败时**不退出进程**（有意偏离）
+## SD-2026-10-23-07：Nacos 注册失败时**不退出进程**（有意偏离） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > **唯一别名**：`SD-2026-10-23-07@like`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/message/rpc.md`](../message/rpc.md)（**已撤销**的 breaker/shedding）与 [`docs/Intentional_Deviations/users/admin/rpc.md`](../users/admin/rpc.md)（gRPC description 中文）指向**三条完全不同**的偏离 ⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-23-07@like`** 为准）
 > **签字复核（核对日期 2026-10-29）**：**仍成立 ⇒ 签字有效，继续计入计数** —— 被签字描述的行为**今天仍存在**：Nacos 注册失败仍被 `catch` 住并**只记日志、不退出进程**

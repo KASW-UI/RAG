@@ -46,6 +46,18 @@
 | **测试** | like-api **81 / 0 failures**；like-rpc **57 / 0 failures**（真 PG Testcontainers） |
 | **本轮改动落点** | 工作树 `RAG.worktrees/like` 分支 `align/like`，**未 push、未建 issue、未开 PR** |
 
+> ⚠️ **2026-10-29 真实性复核（「待签字」计数）**：上表「**待签字**」行原写「**4 条** ⏳ 待签字候选：021 / 022 / SD-2026-10-24-10 / SD-2026-10-24-11」
+> ⇒ **现行态 = 3 条** —— **`021` 所对应的 `SD-2026-10-23-08@like` 已判 ⛔ 已失效**（共享层 T-6 已给**全部 10 个 api** 的 JSON 响应补上 `charset=utf-8`
+> ⇒ 「RAG 侧响应 `Content-Type` **不带** charset」这个行为今天已不存在）⇒ **021 降级为「仅残留『分号后空格』」**
+> （属框架限制，与 `DRIFT-MSGAPI-012` 同款，**已在 DRIFT 台账单列，不再需要独立签字**）。
+> ⇒ 剩下仍待签字的 3 条 = **`022`（裸 503）** · **`SD-2026-10-24-10`（毫秒粒度取整）** · **`SD-2026-10-24-11`（网关层拒绝计数）**，
+> 三条经 2026-10-29 当场复核**描述的行为今天仍存在** ⇒ **候选仍有效**。
+> **依据**：`service/common/src/main/java/com/rag/common/http/GoStyleJsonContentTypeAdvice.java:127`（常量）+ `:151`（消费点）
+> · `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:154`（`MAX_HTTP_WORKERS = 512`）+ `:369`（`catch (RejectedExecutionException saturated)`）
+> · `service/like/like-api/src/main/java/com/rag/like/like/api/client/LikeRpcClient.java:136` / `:154`（`remainingMillis()`）
+> · `service/like/like-api/src/main/java/com/rag/like/like/api/metrics/LikeApiMetrics.java:75`（`Counter.builder("like_api_reject_total")`）。
+> 核对日期 2026-10-29。
+
 ---
 
 ## 1. Component Contract
@@ -582,6 +594,17 @@ Go `RpcClientConf` **没有** `Retries` 字段；RAG 也未配任何重试。
 | **Recommended Verification** | 保持现状；在 `docs/Intentional_Deviations/_cross/signed-deviations.md` 追加一行留档 |
 | **Evidence** | E-Go F01/F04 `ct="application/json; charset=utf-8"`；E-Rag A03 `ct=application/json`。消费点：`core/jsonx` + `go-zero@v1.10.2/rest/httpx/responses.go:182` `w.Header().Set(ContentType, header.ContentTypeJson)` |
 | **状态** | ⏳ **已建档为待签字候选**（**不是**已签字）—— `docs/Intentional_Deviations/like/api.md` 的 SD-2026-10-23-08 / -09。⚠️ 2026-10-24 更正：本节原写「在 `docs/Intentional_Deviations/_cross/signed-deviations.md` 追加一行留档」—— **该文件里没有任何 like 条目**，实际建档位置是 `docs/Intentional_Deviations/like/api.md`。 |
+
+> ⚠️ **2026-10-29 真实性复核（`DRIFT-LIKEAPI-021`）**：本条原判「⏳ 待签字候选（`SD-2026-10-23-08`）」⇒
+> **现行态 = ⏳ **降级为「残留「分号后空格」」**：**「RAG 侧响应 `Content-Type` **不带** charset」这一半已不存在**
+> ⇒ `SD-2026-10-23-08@like` 已判 **⛔ 已失效**（共享层 T-6 已给**全部 10 个 api** 的 JSON 响应补上 `charset=utf-8`）。
+> **依据（RAG 侧）**：`service/common/src/main/java/com/rag/common/http/GoStyleJsonContentTypeAdvice.java:127`
+> （`GO_JSON_CONTENT_TYPE = "application/json;charset=utf-8"`）+ `:151`（`response.getHeaders().set(HttpHeaders.CONTENT_TYPE, GO_JSON_CONTENT_TYPE)`）⇒ **RAG 今天返回 `application/json;charset=utf-8`**。
+> ⇒ **两侧剩下的唯一差异 = 「分号后有没有空格」**（Go `application/json; charset=utf-8` / RAG `application/json;charset=utf-8`）
+> ⇒ 该半边属**框架限制**（Tomcat 序列化行为），与 `DRIFT-MSGAPI-012` 同款，**已在 DRIFT 台账单列** ⇒ **不再需要一条独立签字偏离**。
+> ⚠️ **上表三列（`Java Behavior` / `Difference` / `Observable Impact`）是修复前的快照**，保留不改（§三.2）。
+> **Go 侧（真源）**：`go-zero@v1.10.2/rest/httpx/responses.go:182` `w.Header().Set(ContentType, header.ContentTypeJson)`。
+> 核对日期 2026-10-29。
 
 ---
 

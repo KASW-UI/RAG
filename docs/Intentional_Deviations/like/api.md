@@ -17,7 +17,7 @@
 > 处置依据见 [`../../DRIFT/like/api.md`](../../DRIFT/like/api.md) 的 `DRIFT-LIKEAPI-021 / -022`、
 > 第五轮章节的「017 精度取舍」，以及**台账审计**章节 §2.1（网关层拒绝计数的暴露面）。
 
-### ⏳ SD-2026-10-23-08（候选）：响应 `Content-Type` 不带 `charset=utf-8`
+### ⏳ SD-2026-10-23-08（候选）：响应 `Content-Type` 不带 `charset=utf-8` ｜ **状态（核对日期 2026-10-29）：⛔ 已失效·已撤销**
 
 > **唯一别名**：`SD-2026-10-23-08@like`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/message/rpc.md`](../message/rpc.md)（CPU fail-open）与 [`docs/Intentional_Deviations/users/admin/api.md`](../users/admin/api.md)（黑名单 401 业务码）指向**三条完全不同**的偏离 ⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-23-08@like`** 为准）
 > **签字复核（核对日期 2026-10-29）**：**已失效（签字描述的行为已不存在）⇒ 不计入计数** —— 共享层 T-6 已给**全部 10 个 api** 的 JSON 响应补上 `charset=utf-8` ⇒ 「RAG 侧响应 `Content-Type` **不带** charset」这个行为**今天已不存在**。**现在是什么样**：RAG 侧返回 `Content-Type: application/json;charset=utf-8`（**分号后无空格**），Go 侧是 `application/json; charset=utf-8`（**分号后有空格**）⇒ **剩下的只是「分号后有没有空格」**（属**框架限制**，与 `DRIFT-MSGAPI-012` 同款，已在 DRIFT 台账单列）⇒ **本条应从「⏳ 待签字」中剔除**⇒ **索引计数由主线更新**（本 lane 不写共享索引）
@@ -26,7 +26,7 @@
 
 | 项 | 值 |
 |---|---|
-| 状态 | ⏳ **待签字**（台账 §7.2 建议登记，尚未获批） |
+| 状态 | ⏳ **待签字**（台账 §7.2 建议登记，尚未获批）<br>⚠️ **2026-10-29 真实性复核**：**现行态 = ⛔ 已失效·已撤销**（原值保留）—— 共享层 T-6 已给全部 10 个 api 的 JSON 响应补上 `charset=utf-8` ⇒ 「RAG 侧响应 `Content-Type` **不带** charset」这个被签字描述的行为**今天已不存在** ⇒ ⇒ **本条已从「⏳ 待签字」中剔除，不计入签字数** · 核对日期 2026-10-29 |
 | 原台账编号 | DRIFT-LIKEAPI-021（OBSERVABLE DIFFERENCE，🟢 LOW） |
 | 组件 | `service/like/like-api`（6 个端点的成功与业务错误响应） |
 | 性质 | **表述差异**（台账已判定语义等价） |
@@ -51,10 +51,10 @@
 
 ---
 
-### ⏳ SD-2026-10-23-09（候选）：worker 池饱和时的**裸 503**
+### ⏳ SD-2026-10-23-09（候选）：worker 池饱和时的**裸 503** ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**
 
 > **唯一别名**：`SD-2026-10-23-09@like`（⚠️ **撞号事实**：`SD-2026-10-23-09` 在 [`docs/Intentional_Deviations/common/deadline.md`](../common/deadline.md) 只是**引用本条**（不是另一条偏离）⇒ **不构成跨域撞号**；为唯一定位仍加域内别名）
-> **签字复核（核对日期 2026-10-29）**：**仍成立（候选仍待签字）** —— 被描述的行为**今天仍存在**：worker 池饱和时仍抛 `RejectedExecutionException` 并被转成**裸 503**（无业务码、无 envelope）
+> **签字复核（核对日期 2026-10-29）**：**仍成立（候选仍待签字）** —— 被描述的行为**今天仍存在**：worker 池饱和时仍抛 `RejectedExecutionException` 并被转成**裸 503**（无业务码、无 envelope） · **现行态 = ⏳ 未签字**（本条是**候选**、用户尚未拍板 ⇒ 不计入已签字计数）
 > **依据**：`service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:154`（`static final int MAX_HTTP_WORKERS = 512`）+ `:369`（`catch (RejectedExecutionException saturated)`）+ `:193`（注释「饱和 ⇒ 抛 RejectedExecutionException，由调用点转成**裸 503**」）⇒ **证据强度：源码行号（静态）**。
 
 
@@ -84,10 +84,10 @@
 
 ---
 
-### ⏳ SD-2026-10-24-10（候选）：单次 RPC deadline 的**毫秒粒度**取整
+### ⏳ SD-2026-10-24-10（候选）：单次 RPC deadline 的**毫秒粒度**取整 ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**
 
 > **唯一别名**：`SD-2026-10-24-10@like`（无跨域撞号（该编号只出现在本文件）⇒ 为唯一定位仍加域内别名）
-> **签字复核（核对日期 2026-10-29）**：**仍成立（候选仍待签字）** —— 被描述的行为**今天仍存在**：`GoStyleRequestDeadline` 的公开 API 仍只暴露**毫秒**粒度，而 Go 的 `context` 是**纳秒** ⇒ 两侧的 deadline 传播精度仍不同
+> **签字复核（核对日期 2026-10-29）**：**仍成立（候选仍待签字）** —— 被描述的行为**今天仍存在**：`GoStyleRequestDeadline` 的公开 API 仍只暴露**毫秒**粒度，而 Go 的 `context` 是**纳秒** ⇒ 两侧的 deadline 传播精度仍不同 · **现行态 = ⏳ 未签字**（本条是**候选**、用户尚未拍板 ⇒ 不计入已签字计数）
 > **依据**：`service/like/like-api/src/main/java/com/rag/like/like/api/client/LikeRpcClient.java:136`（类注释：「**ms 粒度**：`remainingMillis()` 是毫秒精度（Go 的 ctx 是纳秒）」）+ `:154`（`GoStyleRequestDeadline.remainingMillis()`）· 共享层 `service/common/.../GoStyleRequestDeadline.java`（公开 API 只有 `isPresent()` / `remainingMillis()`，**只读**）⇒ **证据强度：源码行号（静态）**。
 
 
@@ -130,10 +130,10 @@
 ---
 
 
-### ⏳ SD-2026-10-24-11（候选）：网关层拒绝计数 —— **Java 侧比 Go 侧多暴露一个指标**
+### ⏳ SD-2026-10-24-11（候选）：网关层拒绝计数 —— **Java 侧比 Go 侧多暴露一个指标** ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**
 
 > **唯一别名**：`SD-2026-10-24-11@like`（无跨域撞号（该编号只出现在本文件）⇒ 为唯一定位仍加域内别名）
-> **签字复核（核对日期 2026-10-29）**：**仍成立（候选仍待签字）** —— 被描述的行为**今天仍存在**：RAG 侧仍多暴露一个 Go 侧没有的 Prometheus 指标 `like_api_reject_total`（且 Prometheus 渲染成 `like_api_reject_total_total`）
+> **签字复核（核对日期 2026-10-29）**：**仍成立（候选仍待签字）** —— 被描述的行为**今天仍存在**：RAG 侧仍多暴露一个 Go 侧没有的 Prometheus 指标 `like_api_reject_total`（且 Prometheus 渲染成 `like_api_reject_total_total`） · **现行态 = ⏳ 未签字**（本条是**候选**、用户尚未拍板 ⇒ 不计入已签字计数）
 > **依据**：`service/like/like-api/src/main/java/com/rag/like/like/api/metrics/LikeApiMetrics.java:75`（`Counter.builder("like_api_reject_total")`）+ `:17-20`（注释说明渲染形态）⇒ **证据强度：源码行号（静态）**。
 
 

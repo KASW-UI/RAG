@@ -40,6 +40,23 @@
 | **测试** | like-rpc **57 / 0 failures**（含真 PG Testcontainers）；like-api **81 / 0** |
 | **本轮改动落点** | 工作树 `RAG.worktrees/like` 分支 `align/like`，**未 push、未建 issue、未开 PR** |
 
+> ⚠️ **2026-10-29 真实性复核（`DRIFT-LIKE-003` 收敛 · 本表为该文件的「当前状态」面）**：
+> 上表「**仍未修的漂移**」行原判 **🔴 `DRIFT-LIKE-003`（事实投递链路 6 个骨架）** ⇒
+> **现行态 = 🟡 三段拆分（A ✅ / B 🟡 / C 🟡），不再是一条「🔴 事实投递链路缺失」**。
+> ⇒ **原值是 2026-10-24 第五轮后的陈旧快照**（漏读了 global 域第二十轮 `CD-4` 与本文件 §2 的三段拆分订正）。
+>
+> | 段 | 现行态 | 依据（2026-10-29 当场实测） |
+> |---|---|---|
+> | **`DRIFT-LIKE-003-A` 投递链路** | ✅ **已实现**（证据强度 **E4**：5 个专属守门 + 真容器） | `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeFactDispatchService.java`（**275 行**）· `.../service/LikeDeliveryValidator.java`（**383 行**）· `.../mq/LikeFactDispatchScheduler.java`（**138 行**）⇒ **三个都已实现，不再是骨架** |
+> | **`DRIFT-LIKE-003-B` 权威读语义** | 🟡 **语义已实现，取证有缺口**（**E3**：11 条守门实跑全绿，**未做双侧活体对拍** ⇒ **不写 L4**） | `.../service/LikeAuthorityLookupService.java`（**407 行**，Go `fact_authority.go:12-146` 的 12 道校验逐字翻译）· 守门 `service/like/like-rpc/src/test/java/com/rag/like/like/rpc/service/LikeAuthorityLookupServiceGateTest.java`（**11 条** `@Test`，当场实测） |
+> | **`DRIFT-LIKE-003-C` 暴露形态** | 🟡 **C 类暂缓（阶段二）** —— **不是「待拍板」，也不是 🔴** | `.../mq/LikeAuthorityEndpointConfig.java`（**29 行纯注释占位**，实测无一行可执行代码）· 实测 `service/like/like-rpc/src/main/java/**` 的 `@RestController` / `@RequestMapping` / `@Controller` / `@GetMapping` = **0 命中** ⇒ **like-rpc 确无 HTTP 端点** |
+>
+> ⚠️ **「6 个 4 行骨架」已实测过时**：6 个文件里 **`LikeFactDispatchService` / `LikeDeliveryValidator` /
+> `LikeFactDispatchScheduler` / `LikeAuthorityLookupService` 四个已实现** ⇒ **今天仍为骨架的只有 2 个**：
+> `LikeFactProcessLogging`（**4 行**，日志角色，**不属 A/B/C 任一段**）· `LikeAuthorityEndpointConfig`（**29 行**注释占位 = C 段）。
+> ⇒ **本文件 §0~§10 里所有「6 个骨架 / 仍是 4 行」的表述，一律按「当时快照」读，不是现行态。**
+> 核对日期 2026-10-29。⚠️ **C 段不因「C 类」被升级成 🔴**（§三.3）。
+
 ⚠️ **本文件按「轮次」追加**：§0~§10 是**首/二轮**的原始记录、**原文不改**；
 第三轮与第五轮的结论在文件末尾对应章节。⇒ **不要**把 §10.2 的判定表当成当前构成。
 
@@ -132,6 +149,16 @@ Sea-BreakTheWaves/service/async/rpc/cmd/worker                        │
 但性质从「UNKNOWN 待拍板」降级为「按已冻结契约实现，端口走配置」。
 
 #### 🔴 DRIFT-LIKE-003 改判：事实投递链路缺失，**由「建议关停」翻转为「必须补齐」**
+
+> ⚠️ **2026-10-29 真实性复核（收敛为单一现行态）**：本条标题原判 **🔴「事实投递链路缺失」**
+> ⇒ **现行态 = 🟡 三段拆分**：`003-A` 投递链路 **✅ 已实现（E4）** · `003-B` 权威读语义 **🟡 语义已实现、取证有缺口（E3）**
+> · `003-C` 暴露形态 **🟡 C 类暂缓（阶段二）** ⇒ **母条目不再是一条「🔴 缺失」**。
+> ⚠️ **原标题与下方正文保留不改**（§三.2）—— 它们描述的是 **2026-10-22 首轮**的实测。
+> **本条描述「6 个文件是 4 行骨架」已实测过时**：见文件头「当前状态」表的 2026-10-29 订正段（逐个行数已列）。
+> **依据**：`LikeFactDispatchService.java`（275 行）· `LikeDeliveryValidator.java`（383 行）·
+> `LikeFactDispatchScheduler.java`（138 行）· `LikeAuthorityLookupService.java`（407 行）⇒ **四个已实现**；
+> 仍为骨架的只有 `LikeFactProcessLogging.java`（4 行）· `LikeAuthorityEndpointConfig.java`（29 行纯注释）。
+> 核对日期 2026-10-29。
 
 Java 侧 **6 个文件**是 4 行骨架（verifier 报 5 个，**漏计 `LikeFactDispatchScheduler`**）：
 `LikeFactProcessLogging` / `LikeAuthorityEndpointConfig` / `LikeFactDispatchScheduler` /
@@ -274,6 +301,10 @@ like-rpc 复制了同一套装配代码（`@MapperScan` / `@Import` / `GrpcServe
 | **推翻的历史结论** | **3 条**：① 首轮 U1「上下文能否启动」→ **已证实不能**（实测 4 个独立硬阻塞）；② 首轮 U3「Flyway 是否真建表」→ **已证实会**（真 PG 16 建出 `flyway_schema_history_like` + 5 张表）；③ AGENTS.md §3.3.3 与 `docs/Pitfalls/like/rpc.md` 对本组件的「**静默**失效」表述 → **修正为「硬启动失败」**（详见 DRIFT-LIKE-015） |
 | **Boot 4 Kafka 缺依赖** | **实测失效**，且失效形态与既有记载**不同**：不是「上下文照常启动、一行消息都不消费」，而是 **Spring 上下文直接启动失败**（`NoSuchBeanDefinitionException: No qualifying bean of type 'org.springframework.kafka.core.KafkaTemplate'`） |
 | **关键 unresolved** | 事实投递链路在 Java 侧**仍是 6 个 4 行骨架**（投递侧 + 权威读侧）；真 DC `/v1/events` 接收服务不在任何仓内 ⇒ 链路末端不可验证（U9） |
+
+> ⚠️ **2026-10-29 真实性复核**：上行「**仍是 6 个 4 行骨架**」是**第三轮（2026-10-24）当时的快照**，**已实测过时**
+> ⇒ 现行态见文件头「当前状态」表的 2026-10-29 订正段（`DRIFT-LIKE-003` 三段拆分）
+> ＋ §9 `U9`/`U10` 行的订正段。核对日期 2026-10-29。
 
 ### 0.1 证据强度声明（本轮）
 
@@ -891,6 +922,16 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 | **首轮 8 条错误断言** | **仍然全部在位**（A/B/C/D/E/F/G/H 的原文仍留在源码注释里）⇒ **本轮新增第 9 条错误断言 I**：`V4__create_like_domain_fact_outbox.sql` 的「GORM 对无 size 的整数统一取 bigint」（见 DRIFT-LIKE-017） |
 | **AGENTS.md §3.3.3 / `docs/Pitfalls/like/rpc.md`** | **2026-10-23 复核：原结论修正为 ——** 「只引 `spring-kafka` 时 `@KafkaListener` 被完全静默忽略」这一**机制层**描述成立；但**对 like-rpc 这个组件**，`KafkaTemplate` / `ConsumerFactory` 是**必需**依赖 ⇒ 真实失效形态是 **Spring 上下文启动失败**，比「静默不消费」更早、更响。原表述「上下文照常启动、容器正常起来、一行消息都不消费」**不适用于本组件**，保留原文并在此修正 |
 
+> ⚠️ **2026-10-29 真实性复核**：上表 `DRIFT-LIKE-003` 行原判 **🔴「仍然成立：6 个骨架，逐个复核仍是 4 行」**
+> ⇒ **现行态 = 🟡 三段拆分**（A ✅ 已实现 E4 / B 🟡 语义已实现·取证有缺口 E3 / C 🟡 C 类暂缓·阶段二）
+> ⇒ **原值是 2026-10-22 首轮的陈旧快照**（漏读 global 域第二十轮 `CD-4` 与本文件 §2 的三段拆分订正）。
+> **依据（2026-10-29 当场实测行数）**：`LikeFactDispatchService.java` **275 行** ·
+> `LikeDeliveryValidator.java` **383 行** · `LikeFactDispatchScheduler.java` **138 行** ·
+> `LikeAuthorityLookupService.java` **407 行** ⇒ **四个已实现，不再是骨架**；
+> 仍为骨架的只有 `LikeFactProcessLogging.java`（**4 行**）· `LikeAuthorityEndpointConfig.java`（**29 行**纯注释 = C 段）。
+> ⇒ **母条目不再是一条「🔴 缺失」**；「投递链路的**暴露形态**」仍缺，但那是 **C 类（阶段二）**，**不升级成 🔴**。
+> 核对日期 2026-10-29。⚠️ **上表原文保留不改**（§三.2）。
+
 ## 8. Test Cases
 
 > 状态列：`PASS` = 本轮已实测；`STATIC` = 静态可判定；`BLOCKED` = 被启动失败阻塞，未能运行。
@@ -932,6 +973,16 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 | **U9（本轮新增）** | **事实投递链路的末端由谁实现、能不能验证** | `cmd/fact-dispatch/main.go:52-57,72`（`DC_PLATFORM_EVENT_URL` + 8s 超时）；`internal/model/fact_delivery.go:52-126`（SKIP LOCKED 认领 / BLOCKED / FAILED） | `LikeFactDispatchService` / `LikeDeliveryValidator` / `LikeFactDispatchScheduler` **仍是 4 行骨架** | **真 DC 接收服务 `/v1/events` 在 `Sea-RideTheWind_golang` 与 `Sea-BreakTheWaves` 两个仓里都只有发送方/客户端** ⇒ 投递环节只能对 stub server 验证 | Java 侧事实**只写不送**：`delivery_status` 恒 0、`retry_count` 恒 0、5 个技术回执列恒空 | 对着**已冻结的权威端点契约**（`GET /internal/v1/community/facts`）补齐 Java 侧投递与权威读；投递目标用 stub DC 验证 |
 | **U10（本轮新增）** | **Java 侧的权威读端点是否会被 `Sea-BreakTheWaves` 回调** | `cmd/fact-authority/main.go:51-55,71`（`LIKE_FACT_AUTHORITY_LISTEN` + token ≥32 字节） | `LikeAuthorityEndpointConfig` **仍是 4 行骨架** | Java 侧**根本没有这个 HTTP 端点** ⇒ 链路在 Java 侧**断开** | 第三仓的 usermodel 画像**永远拿不到 Java 侧产生的 like 事实**（静默缺失） | 决定「Java 侧要不要提供权威读端点」；若要，端口与鉴权按已冻结契约走 |
 | **U11（本轮新增）** | 修完 4 个启动阻塞后，**运行时**语义（超时 / 事务 / 指标 / Kafka 位点）是否与 Go 一致 | — | — | 全部依赖「上下文能起」 | 本轮所有静态结论都缺运行时闭环 | 启动阻塞修完 ⇒ 补**一次真实启动 + 一次真实请求**的活体对拍 |
+
+> ⚠️ **2026-10-29 真实性复核（`U9` / `U10`）**：上两行原判「`LikeFactDispatchService` / `LikeDeliveryValidator` /
+> `LikeFactDispatchScheduler` **仍是 4 行骨架**」（`U10`：`LikeAuthorityEndpointConfig` **仍是 4 行骨架**）
+> ⇒ **现行态 = `U9` 的「Java Evidence」列已过时（投递侧三个类已实现）**；**`U9` 剩下的真缺口只剩「末端真 DC 不可验证」这一条**
+> （该条**至今仍成立**：真 DC `/v1/events` 在两个仓里都只有发送方/客户端）⇒ **`U9` 仍是 🟡 未闭合，但缺的不是「骨架」**。
+> **依据（2026-10-29 当场实测行数）**：`LikeFactDispatchService.java` **275 行** · `LikeDeliveryValidator.java` **383 行** ·
+> `LikeFactDispatchScheduler.java` **138 行** ⇒ **三个都已实现**；
+> `LikeAuthorityEndpointConfig.java` **29 行**（**纯注释占位**，仍是骨架，但**不是 4 行**）⇒ **`U10` 的「骨架」定性仍成立，行数已过时**。
+> ⇒ 归属：`U9` 的投递侧 ⇒ **`DRIFT-LIKE-003-A`（✅ 已实现）**；`U10` 的暴露形态 ⇒ **`DRIFT-LIKE-003-C`（🟡 C 类暂缓·阶段二）**。
+> 核对日期 2026-10-29。⚠️ **上两行原文保留不改**（§三.2）—— 按「当时（2026-10-24）实测」读。
 | **U12（本轮新增）** | `payload_hash` / `occurred_at` 等跨语言字节是否**逐字节**一致 | `like_message_hash.go:9-27`、`domain_fact.go:85,96,128` | `LikeMessageDigest.java:65-79`、`GoCompatibleJson.java:56-71,120-143` | 逻辑逐条对齐，但**未双侧对拍** | 灰度期同 msg_id 重投会被误判成「ID 被复用」⇒ 消息卡死 | 双侧跑同一组输入，比对 `payload_hash` 与 `occurred_at` 字节 |
 | **U13（本轮新增 · 跨组件不变量）** | **三模块共 schema 共存时，Flyway 账本是否真的互不干扰** | Go 侧无 Flyway | `like-rpc` 单体已证：建出 `flyway_schema_history_like`（E-PG）；`message-rpc` / `article-rpc` 侧**本轮未验** | 跨组件 ⇒ **不属于本组件**，且需要三个模块**同时**对同一 schema 启动才能证 | 任一方账本没按配置表名建 ⇒ 后启动者把自己的迁移当「已应用」静默跳过 | 三模块同时对同一个 `first_db` 启动一次，验三本账本并存 |
 | **U14（本轮新增）** | **DRIFT-LIKE-014 的正确修法** | — | — | 三个候选：换 Boot-4 专用 MP starter / 手写 `SqlSessionFactory` Bean / 用 `spring.autoconfigure.exclude` 之外的手段补排序 | 修法不同 ⇒ 后续维护成本与风险不同 | 拍板后由实现者落地 |
@@ -1786,7 +1837,7 @@ mvn -o -B -DargLine=-Xmx2g -pl service/like/like-rpc -am \
 | 项 | **段 1：投递链路** | **段 2：权威读语义** | **段 3：权威读暴露形态** |
 |---|---|---|---|
 | **① 唯一编号** | `DRIFT-LIKE-003-A` | `DRIFT-LIKE-003-B` | `DRIFT-LIKE-003-C` |
-| **② 原项目文件/契约** | Go `service/like/rpc/internal/logic/fact_delivery.go:52-126`（SKIP LOCKED 认领 / BLOCKED / FAILED） | Go `service/like/rpc/internal/model/fact_authority.go:12-146`（12 道全链路重放校验） | Go `service/like/rpc/cmd/fact-authority/main.go:52-80`（**独立进程**）+ `service/common/communityfact/authority_http.go`（`GET /internal/v1/community/facts` · Bearer token） |
+| **② 原项目文件/契约** | Go `service/like/rpc/internal/model/fact_delivery.go:52-126`（SKIP LOCKED 认领 / BLOCKED / FAILED）<br>⚠️ **2026-10-29 真实性复核 · 出处路径订正**：原写 `service/like/rpc/internal/logic/fact_delivery.go` ⇒ **该路径不存在**（Go 真源里它在 **`internal/model/`**，不在 `internal/logic/`）⇒ **结论不变，仅出处路径订正** ⇒ `:52` = `func (m *LikeFactModel) DispatchFactOnce(...)`、`:126` = 函数闭合（2026-10-29 当场核对；本文件其余各处早已用正确的 `internal/model/` 路径） | Go `service/like/rpc/internal/model/fact_authority.go:12-146`（12 道全链路重放校验） | Go `service/like/rpc/cmd/fact-authority/main.go:52-80`（**独立进程**）+ `service/common/communityfact/authority_http.go`（`GET /internal/v1/community/facts` · Bearer token） |
 | **③ 原始行为** | 认领 → 投递 → 回写 `delivery_status` / `technical_*` | 按 `event_id` 重放校验，产出 `AuthorityFact`（含 `TechnicalReceipt`） | **独立 HTTP 进程**：`LIKE_DATABASE_URL` + `LIKE_FACT_AUTHORITY_LISTEN` + `LIKE_FACT_AUTHORITY_TOKEN`（**token 长度 ≥ 32**，否则启动失败）；`NewAuthorityHandler("rtw.like-mq", token, …)` |
 | **④ 阶段 1 当前行为** | ✅ **已实现**（`CD-4`〔旧号 `X-4`〕落地 + 5 守门） | ✅ **本轮 Java 化**：`LikeAuthorityLookupService`（407 行）逐字翻译 12 道校验 | ⬜ **未做**（本轮只做语义层） |
 | **⑤ 具体差异** | **无**（本轮未动） | 本轮**修复前**：`LikeAuthorityLookupService` 是 4 行骨架 ⇒ 权威读**返回不了事实** | RAG 侧**没有**独立进程 ⇒ **HTTP 端点不存在** ⇒ 「谁能问权威」无对应物 |
