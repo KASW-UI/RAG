@@ -991,6 +991,30 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 - **Required Confirmation**：在 §9 UNRESOLVED-ADMINAPI-001 得到答复后，跑一轮**只针对本文件 10 条新发现**
   的定向对拍（预期 ~15 步），而不是重跑全量 273 条。
 
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）· §9 的 6 条 UNRESOLVED 逐条核过**
+> （本块是**只加不改**；每条的原始「为什么本组件无法确定」段落**一律保留**）。
+>
+> | 编号 | 台账写的状态 | 现行态 | 2026-10-29 实测依据 |
+> |---|---|---|---|
+> | `UNRESOLVED-ADMINAPI-001` | 「得到答复（从 admin-rpc 侧）⇒ 三条 api 侧漂移前提不可达」 | ✅ **维持** | 答复所依赖的事实**仍在**：Go `service/user/admin/rpc/internal/logic/getselflogic.go:44-51` **总是**构造 `Admin: &pb.AdminInfo{…}`；Go `service/user/admin/rpc/internal/logic/getuserlogic.go:42-50` **总是**构造 `User: &pb.UserInfo{…}`；Go `service/user/user/rpc/internal/logic/updateuserlogic.go:81-88` **总是**构造 `User: &pb.UserInfo{…}`；RAG `AdminServiceGrpcImpl.toProtoAdmin` / `toProtoUser` 同样总是 set ⇒ **「前提不可达」的判定仍成立** |
+> | `UNRESOLVED-ADMINAPI-002` | ✅ 已关闭（真实 Tomcat 守门） | ✅ **维持** | `tools/difftest/check-plaintext400-headers.sh` ✅ **存在**，且**已含 admin 入口**（`:67` `RAG_ADMIN=…:58889` · `:68` `GO_ADMIN=…:18889` · `:175-177` `SCOPE=admin` 分支打 `/admin/v1/create` 缺 `username`）⇒ **admin 侧已纳入真实 Tomcat 守门** ✔ |
+> | `UNRESOLVED-ADMINAPI-003` | ✅ 已关闭（Go `omitempty` 对 struct 无效） | ✅ **维持** | 结论本身仍成立：Go `service/user/admin/api/internal/types/types.go` 的 `json:"user,omitempty"` 挂在 **struct** 上 ⇒ `encoding/json` 不省略 struct ⇒ 且 RAG `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/IdentityResolver.java:132-134` 的 `admin == null \|\| admin.equals(AdminInfo.getDefaultInstance())` 守卫**仍在** ⇒ **「前提不可达」仍成立** |
+> | `UNRESOLVED-ADMINAPI-004` | ✅ 已关闭（worker-pool 饱和分支默认配置下不可达） | ✅ **维持** | 机制**仍在**（`service/common/.../observability/HttpMiddleware.java` 的 worker 池 + 池满 → `setStatus(503)` 不写 body）；**可达性结论本轮未复测**（需并发压测）⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」 |
+> | `UNRESOLVED-ADMINAPI-005` | ✅ 已关闭（①②） | ✅ **维持** | ① 「Nacos 不可达 ⇒ 起不来」：机制**仍在**（`service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/` 侧的启动期失败语义未变）；② counter 名：本轮**未复跑** `/actuator/prometheus` ⇒ 按 §0 读作「在该证据强度下一致」 |
+> | `UNRESOLVED-ADMINAPI-006` | ✅ 已关闭（admin 22 步 + 全量 39 步定向对拍） | ✅ **维持** | 复现入口**仍在**：`tools/difftest/exp-admin-startup-failfast.sh` ✅ **存在**；`tools/difftest/check-plaintext400-headers.sh` ✅ **存在**（已含 admin 域）⇒ **对拍装置未消失**；⚠️ **本轮未复跑对拍**（需起两套真栈）⇒ 不升级证据强度 |
+>
+> - **🔴 顺带核到的一条已闭合漂移**：`DRIFT-ADMINAPI-007`（503 超时响应缺 `X-Content-Type-Options: nosniff`）⇒ **✅ 已闭合这半边仍成立**：
+>   `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:728`
+>   `resp.setHeader("X-Content-Type-Options", "nosniff");` ✔（`:720` 是解释 Go 出处的注释）
+>   ＋ 守门 `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiRealTomcatResponseBytesTest.java` ✅ **存在**
+>   ⇒ **状态维持 ✅**；残差（`Content-Type` 分号后空格）**仍归「框架限制、不改」**（Tomcat `setContentType` 会重渲染）⇒ 维持不另开条目。
+> - **不改判的理由**：本节 6 条断言的都是「**某个具体事实还在不在**」；逐条实测后**全部与台账所写一致** ⇒ **状态全部维持**。
+> - ⚠️ **指针订正（保留原值）**：本文件 §2「✅ UNRESOLVED-ADMINAPI-001 得到答复」那张表里写的
+>   Go 出处 **`updateuserlogic.go:106-113`** ⇒ **该文件全文只有 88 行，`:106` 已越界** ⇒
+>   **现行 `:81-88`**（`:81` `User: &pb.UserInfo{` … `:88` 收尾）。
+>   ⇒ ⚠️ 机器审计报「0 落空」是因为该 basename 在仓里有其它候选（`admin/rpc` 那份更长）⇒
+>   **这是 E68 同型（「行号合法但指错文件」）** ⇒ **按本块的现行位置读**。
+
 ---
 
 ## 10. 最终判定

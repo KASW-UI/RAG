@@ -383,7 +383,7 @@ Result 只用 5 个枚举值。Evidence 列的强度标记见文件头。
 | 36 | 鉴权 | HTTP 状态码 401 | `authhandler.go:121` / `checkblacklistmiddleware.go:38` | `handleAuthentication:73-78` | **EQUIVALENT** | 静态源码 + `UserApiMvcPipelineTest` |
 | 37 | 鉴权 | 401 的 **body 形状** | JWT: **空 body**；黑名单: `{code:401,msg}` | 统一完整 envelope | OBSERVABLE DIFFERENCE（**已签字 N-1**） | `signed-deviations` / `docs/DRIFT/users/user/api.md` §0 · 静态源码 |
 | 38 | 鉴权 | 黑名单 key 前缀 | `user:jwt_blacklist:%s`（`checkblacklistmiddleware.go:34`） | `BLACKLIST_KEY_PREFIX`（`JwtAuthInterceptor.java:70`） | **EQUIVALENT** | 静态源码 + `UserApiMvcPipelineTest:456`（真 Redis） |
-| 39 | 鉴权 | 黑名单 **fail-open**（err → 放行） | `checkblacklistmiddleware.go:36` `err == nil && exists` | `JwtAuthInterceptor.java:204-208` 吞异常→null | **EQUIVALENT** | 静态源码 |
+| 39 | 鉴权 | 黑名单 **fail-open**（err → 放行） | `checkblacklistmiddleware.go:36` `err == nil && exists` | `JwtAuthInterceptor.java:178-185` 吞异常→null | **EQUIVALENT** | 静态源码 |
 | 40 | 鉴权 | 验签先于黑名单 | `engine.go:101-113` | `JwtAuthInterceptor.java:132-182` | **EQUIVALENT** | 静态源码 + `UserApiMvcPipelineTest:371` |
 | 41 | 鉴权 | Bearer 前缀两套取法（验签大小写不敏感 / 黑名单敏感） | `golang-jwt/request/oauth2.go` vs `strings.TrimPrefix` | `BearerTokenExtractor:74-81` vs `:95-99` | **EQUIVALENT** | 静态源码 + 2 条 `UserApiMvcPipelineTest` |
 | 42 | 鉴权 | 黑名单 401 的 `Content-Type` | `appliaction/json;charset=utf-8`（**Go 侧拼写错误**） | `application/json` | OBSERVABLE DIFFERENCE（有意不复刻） | **DRIFT-USERAPI-010** · 静态源码 |
@@ -437,7 +437,7 @@ Expected Result: true / false
 Failure Result:  error
 Semantic:        ⚠️ **error ≠ 黑名单命中**。Go 的判据是 `err == nil && exists`，
                  所以 Redis 挂了会 **fail-open 放行**（checkblacklistmiddleware.go:36）。
-                 RAG `JwtAuthInterceptor.java:204-208` 把异常吞成 null，判据同构 ⇒ fail-open。
+                 RAG `JwtAuthInterceptor.java:178-185` 把异常吞成 null，判据同构 ⇒ fail-open。
 Does Failure Block Operation: ⚠️ **两侧都不「误拦」，但 RAG 会「被拖住」** ——
                  「fail-open」只保证**不拒绝请求**，**不保证请求不被延迟/打挂**：
                  · Go：Redis 失败耗时 ~1.8~1.9s（5 次拨号快速失败）⇒ **< 3s 预算 ⇒ 仍 200**；
@@ -642,7 +642,16 @@ Go Behavior:
   authhandler.go:81      next.ServeHTTP ⇒ 请求**到达 Logic**
   identity/resolve.go:70-73   ClaimedUID: ctx["userId"].(json.Number) 失败 ⇒ ErrInvalidClaim
   deleteuserlogic.go:38-41    同上 ⇒ return nil, errmsg.ErrorTokenRuntime
-  handler *.go:27-31           httpx.OkJson ⇒ **HTTP 200** + {"code":1006,...,"data":null}
+  handler service/user/user/api/internal/handler/user/deleteuserhandler.go:27-31   httpx.OkJson(w, &response.Response{…}) ⇒ **HTTP 200** + {"code":1006,…,"data":null}
+    ⚠️ **2026-10-29 真实性复核（指针订正 · 原值保留）**：原文此处写的是**通配指针**
+    （handler 目录下所有 `*.go` 文件的 27–31 行）⇒ 机器复核无法展开 ⇒ **已写成具体路径**。
+    实测（2026-10-29 逐文件核过）：**8 个 handler 的 `httpx.OkJson` 在 `:27`**，
+    **唯一例外是 `getavatarhistoryhandler.go` ⇒ 在 `:20`**（该文件全文只有 26 行）
+    （其余 8 个：`deleteuser` / `getuser` / `login` / `logout` / `register` /
+    `selectavatar` / `updateuser` / `uploadavatar`，均在 `service/user/user/api/internal/handler/user/`）
+    ⇒ 本行以 `deleteuserhandler.go` 为代表（与本文件「RAG 修法」处已引的 `deleteuserhandler.go:27` 同款）。
+    ⚠️ **订正一处同块内的错误断言**：本块曾写「**9 个** handler 文件的 `httpx.OkJson` 都在 `:27`」
+    ⇒ **实测为 8 个**，`getavatarhistoryhandler.go` 是 `:20` ⇒ 原句**不成立**（原值保留于此）。
   ⇒ 结论：**token 签名合法但 userId claim 缺失/是字符串 ⇒ 200 + 1006**
 
 Spring Boot Behavior:
@@ -667,6 +676,26 @@ Must Preserve: 「签名合法 + claim 畸形」必须走业务层产出 200 + 1
 Recommended Verification: 用 JwtUtil.getToken 造一个**不含 userId** / `userId` 为字符串的 token，
                双侧各打一次请求，断言 HTTP 状态码与 body 全文。
 ```
+
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）**：原判 **✅ 已修（第三轮）** ⇒ **现行态 = ✅ 维持**；
+> ⚠️ **但上面「Spring Boot Behavior」段与 ② 里的行号全是【修复前】的形态 ⇒ 现已全部指不到所述内容**（E68 同型）。
+> - **被描述的行为是否还在**：**不在了** ⇒ 正是本条「已修」的含义 ✔。
+>   **现状（2026-10-29 逐行核过）**：验签已搬进 `GoStyleJwtAuthFilter`（`@Order(+6)`），
+>   `JwtAuthInterceptor` **只消费** Filter 放进 request attribute 的验签结果
+>   （`:30` javadoc 明写「验签搬到 `GoStyleJwtAuthFilter`」· `:33` `<ol>` 三件事清单）⇒
+>   **拦截器里已无 `jws.getPayload().get("userId")` / `claim instanceof Number` 这套写法**。
+> - **指针订正（保留原值）**：
+>   | 原文写的 | 现行实际 | 说明 |
+>   |---|---|---|
+>   | `JwtAuthInterceptor.java:138`（`Object claim = jws.getPayload().get("userId")`） | `:138` = `if (result.claimUsable()) {` | 原文描述的代码**已不存在** |
+>   | `JwtAuthInterceptor.java:139`（`if (claim instanceof Number) {...} else {`） | `:139` = `request.setAttribute("userId", Long.valueOf(result.uid()));` | 同上 |
+>   | `JwtAuthInterceptor.java:149-152`（`throw new AuthenticationException(1006, …)`） | `:149-152` 现是注释 + `String jwtToken = result.trimmedToken();`；**抛异常在 `:155-158`** | 现行抛点在黑名单分支 |
+>   | `GlobalExceptionHandler.java:73-78`（`⇒ HTTP 401 + {…}`） | `:73-78` 现是 javadoc；**现行 handler 在 `:76-81`** | 见 `SD-USERAPI-003` 的同源订正 |
+> - **② 里「javadoc 自陈矛盾」的现状**：`JwtAuthInterceptor.java:33,38` 与 `:44-46` **今已不是那段 javadoc** ——
+>   `:33` = `<ol>` · `:38` = 「黑名单检查（仍在预算之内 ⇒ 与 Go 一致）」· `:44-45` = 「protected 路径 … 验签由 `GoStyleJwtAuthFilter` 完成，本类消费结果，失败一律 HTTP 401」（`:46` 起是 `<ul>` 子列表）
+>   ⇒ **那段「claim 缺失/类型不对 → 401」的旧 javadoc 已被整体改写** ⇒ **② 这一格描述的「自相矛盾」已不复存在**（原值保留）。
+> - ⇒ **不改判的理由**：本条断言的是「RAG 曾把畸形 claim 在鉴权层就 401 掉、现已改为走业务层」——
+>   这一点由 **`GoStyleJwtAuthFilter` 存在 + `JwtVerificationResult.claimUsable` 承载**（§「RAG 修法」处的现行落点）**两侧仍成立** ⇒ 状态维持 ✅。
 
 ### DRIFT-USERAPI-002 —— delete / update 的 `uid` 合法域被收窄（Go 不拒绝 `uid <= 0`） —— ✅ **已修（第三轮）**
 
@@ -986,6 +1015,23 @@ Must Preserve: 至少要明确 500 的 body 形状是「有意统一」还是「
 Recommended Verification: 双侧各制造一次 panic（临时端点或测试钩子），比对原始响应。
 ```
 
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）**：原判 **✅ 已签字保留（`SD-USERAPI-001`，2026-10-23）** ⇒ **现行态 = ✅ 仍成立（维持）**；
+> ⚠️ **本块里的 RAG 侧行号已漂移 ⇒ 需追加现行位置**。
+> - **被签字描述的行为是否还在**：**仍在** ——
+>   RAG 侧 `service/users/user/user-api/src/main/java/com/rag/users/user/api/advice/GlobalExceptionHandler.java:333-343`
+>   `@ExceptionHandler(Exception.class)` → `handleAny` ⇒
+>   `ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(new Response(ErrorCode.ERROR_SERVER_COMMON.getCode(), …, null))`
+>   ⇒ **HTTP 500 + `{"code":5001,"msg":"系统内部错误","data":null}`**（**完整 envelope**）。
+>   Go 侧 `go-zero@v1.10.2/rest/handler/recoverhandler.go:12-23` 的 `RecoverHandler` **仍只 `w.WriteHeader(500)`、全函数无 `w.Write(...)`**
+>   ⇒ **HTTP 500 + 空 body** ⇒ **两侧差异仍在** ⇒ **签字有效**。
+> - **指针订正（保留原值）**：本块写的 `GlobalExceptionHandler.java:262-272` ⇒ **现行 `:333-343`**；
+>   `GlobalExceptionHandler.java:270-271` ⇒ **现行 `:341-342`**（`return ResponseEntity.status(…)` / `.body(new Response(…))`）。
+>   ⚠️ 同一处订正**已在** [`docs/Intentional_Deviations/users/user/api.md`](../../../Intentional_Deviations/users/user/api.md)
+>   的 `SD-USERAPI-001` 条目下记录（2026-10-29 台账对齐轮）⇒ **两处口径一致**。
+>   ⚠️ **精确口径（2026-10-29 复核补记）**：SD 档记的是 **`:334-342`**（= 方法体），
+>   本块记的是 **`:333-343`**（= 含 `@ExceptionHandler` 注解行与收尾 `}`）——
+>   **同一处代码、端点各差一行** ⇒ **不是两处不同的指针** ⇒ 按上表任一行读都成立。
+
 ### DRIFT-USERAPI-008 —— 过载保护层 —— ❌ **原断言「RAG 侧没有任何对应物」已证伪（2026-10-24 04:0x）**
 
 > **原断言的证据基础是错的**：它写「RAG 侧 **user-api 模块内**零命中」——
@@ -1145,6 +1191,40 @@ Recommended Verification: 真进程各打一次无 token 请求，比对 access 
                             （HttpMiddlewareFilter.java:36-37 的 @Order vs WebMvcConfig.java:56-59 的 addInterceptor），
                             而非运行时指标比对。
 ```
+
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）**：原判 **✅ ① 已签字（2026-10-24）⇒ `SD-USERAPI-002`** ⇒ **现行态 = ✅ 仍成立（维持）**；
+> ⚠️ **两处证据指针已漂移**（结论不变）。
+> - **被签字描述的行为是否还在（结构前提）**：**仍在** ——
+>   - `service/common/src/main/java/com/rag/common/spring/HttpMiddlewareFilter.java:40-41`
+>     `@Order(Ordered.HIGHEST_PRECEDENCE + 7)` ＋ `public class HttpMiddlewareFilter implements Filter` ⇒ **观测面在 DispatcherServlet 之外** ✓；
+>   - `service/users/user/user-api/src/main/java/com/rag/users/user/api/interceptor/JwtAuthInterceptor.java:87`
+>     `public class JwtAuthInterceptor implements HandlerInterceptor` ⇒ **鉴权在 DispatcherServlet 之内** ✓；
+>   - `service/users/user/user-api/src/main/java/com/rag/users/user/api/config/WebMvcConfig.java:56-57`
+>     `addInterceptors(InterceptorRegistry registry)` → `registry.addInterceptor(jwtAuthInterceptor)` ✓。
+>   ⇒ **「观测面在外、鉴权在内」这一相对关系未变** ⇒ **签字的前提仍成立 ⇒ `SD-USERAPI-002` 继续有效、无需销号**。
+> - **② 的修法也已落地（原判「已修」维持）**：`service/users/user/user-api/src/main/java/com/rag/users/user/api/auth/GoStyleJwtAuthFilter.java:92`
+>   `@Order(Ordered.HIGHEST_PRECEDENCE + 6)` ⇒ **在 3s 预算的 `+7` 之外** ✓（与本块正文 2026-10-27 那条一致）。
+> - **指针订正（保留原值）**：`HttpMiddlewareFilter.java:36-37` ⇒ **现行 `:40-41`**；
+>   `WebMvcConfig.java:56-59` ⇒ **现行 `:56-57`**（`:59` 现是别处的常量）。
+> - ⚠️ **新记一条事实（本轮实测，**不影响本条结论**）**：`service/common` 的 `GoStyleCpuSheddingFilter` 也是
+>   `@Order(HIGHEST_PRECEDENCE + 6)`（`service/common/src/main/java/com/rag/common/protection/GoStyleCpuSheddingFilter.java:63`）
+>   ⇒ **JwtAuthFilter 与 CpuSheddingFilter 的 `@Order` 数值相同（并列 +6）** ⇒ 二者之间的先后**不由 `@Order` 决定**。
+>   ⚠️ 但这**不影响**本条的两句结论：① 401 仍在观测面之内（`+6 < +7`，与 CpuShedding 的相对次序无关）、
+>   ② 验签仍在 3s 预算之外（同理）⇒ **`SD-USERAPI-002` 的结论维持 ✅**；
+>   ⚠️ 若将来有人依赖「JwtAuthFilter 早于/晚于 CpuSheddingFilter」，那**必须先实测**（`@Order` 相同 ⇒ 不可从数值推）。
+>   🔴 **2026-10-29 收尾复核 · 上面 ① 的推断方向存疑 ⇒ 标【待核实】（不改判本条状态）**：
+>   ① 写「**401 仍在观测面之内**」并给出理由「`+6 < +7`」——
+>   ⚠️ **按 Spring Filter 的排序语义（`@Order` 数值小者先执行），`+6 < +7` 意味着验签 Filter（`+6`）跑在观测 Filter（`+7`）**之前**
+>   ⇒ **它自己抛的 401 反而不落在观测面之内** ⇒ **该理由与所断言的方向相反**。
+>   ⇒ **本块不重审「RAG 的观测面比 Go 大（401 计入）」这一结论本身**（它是 `SD-USERAPI-002` 的**签字内容**，
+>   且该条断言的是**结构前提**「观测面在 DispatcherServlet 之外 / 鉴权在之内」——该前提**已核仍在**）
+>   ⇒ **只把 ① 标为待核实** ⇒ 要坐实「哪一类 401 被计入」需**真栈实测**（本轮未做）。
+>   ⇒ ②（**3s 预算不覆盖验签**）**不受影响**：`JwtAuthFilter`（`+6`）与 `HttpMiddlewareFilter`（`+7`）**数值不同** ⇒
+>   验签层**确定**早于预算层 ⇒ 该半边仍成立 ✔。
+>   ⇒ 逐条见 [`docs/Intentional_Deviations/users/user/api.md`](../../../Intentional_Deviations/users/user/api.md)
+>   的 `SD-USERAPI-002` 同日复核块（含共享层 Filter 链的**全量 `@Order` 实测表**）。
+> - **不改判的理由**：本条断言的是「**RAG 的观测面比 Go 大**（401 计入）」与「**② 3s 预算不覆盖验签**」，
+>   两者在当前代码里**都仍然成立**（结构证据如上）⇒ 状态维持 ✅。
 
 ### 9.x `DRIFT-USERAPI-009 ②` 的修法推导（2026-10-24 · 逐行核实 Go 链序）
 
@@ -1470,6 +1550,20 @@ Evidence:     静态源码（checkblacklistmiddleware.go:37-39）。
 Must Preserve: 不复刻拼写错误。若要求逐字复刻，需在拦截器里为黑名单路径单写响应。
 Recommended Verification: 无需验证（属已决策项），但建议在 N-1 的「关闭条件」里补上这一句。
 ```
+
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）**：原判 **✅ 已签字（`SD-2026-10-23-01/02/03` 的 N-1）** ⇒ **现行态 = ✅ 仍成立（维持）**；
+> ⚠️ **RAG 侧一处行号已漂移**。
+> - **被签字描述的行为是否还在**：**仍在** ——
+>   Go 侧 `service/user/user/api/internal/middleware/checkblacklistmiddleware.go:37`
+>   `w.Header().Set("Content-Type", "appliaction/json;charset=utf-8")`（**拼写错误 `appliaction` 仍在**）
+>   ＋ `:39` `w.Write([]byte(\`{"code":401,"msg":"登录已失效,请重新登陆"}\`))` ⇒ **Go 侧未变**。
+>   RAG 侧 `service/users/user/user-api/src/main/java/com/rag/users/user/api/advice/GlobalExceptionHandler.java:76-81`
+>   `@ExceptionHandler(AuthenticationException.class)` ⇒ `handleAuthentication`
+>   ⇒ `ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new Response(e.getCode(), e.getMessage(), null))`
+>   ⇒ **`Content-Type: application/json`（拼写正确）＋ 完整 envelope** ⇒ **「不复刻拼写错误」这一决策的前提仍在** ⇒ **签字有效**。
+> - **指针订正（保留原值）**：本块写的 `handleAuthentication:73-78` ⇒ **现行 `:76-81`**。
+>   ⚠️ 同一处订正**已在** [`docs/Intentional_Deviations/users/user/api.md`](../../../Intentional_Deviations/users/user/api.md)
+>   的 `SD-USERAPI-003` 条目下记录 ⇒ **两处口径现已一致**。
 
 ### DRIFT-USERAPI-014 —— Redis **断连**时 Lettuce 把命令**排队**等重连 ⇒ 撞 HTTP 3s 预算 ⇒ 503（Go 是 fail-open 200） —— ✅ **已修（2026-10-24 第九轮）**
 
@@ -1966,7 +2060,13 @@ Required Confirmation: 与 user-rpc 审计会话合并判读 —— 逐个 RPC �
 Question:    Redis 不可用（不是报错，而是慢到超过预算）时，两侧分别返回什么？
 Go Evidence: checkblacklistmiddleware.go:36 判据 `err == nil && exists` ⇒ 出错即放行（fail-open）。
              该查询在 observability 的 3s 预算**之内**（黑名单由 WithMiddleware 包进 route.Handler）。
-RAG Evidence: JwtAuthInterceptor.java:204-208 异常吞成 null ⇒ 同样 fail-open。
+RAG Evidence: JwtAuthInterceptor.java:178-185 异常吞成 null ⇒ 同样 fail-open。
+             ⚠️ **2026-10-29 真实性复核（指针订正 · 原值保留）**：原文写 `:204-208`，
+             但 `service/users/user/user-api/src/main/java/com/rag/users/user/api/interceptor/JwtAuthInterceptor.java`
+             全文**只有 187 行** ⇒ 越界 ⇒ **现行 `:178-185`**
+             （`:180` `exists = redisTemplate.hasKey(blacklistKey);` · `:181` `catch (Throwable t) {` ·
+             `:183` `exists = null;` · `:185` `return exists != null && exists;`）
+             ⇒ **「异常吞成 null ⇒ fail-open」这半边仍成立** ✔（与 Go 的 `err == nil && exists` 同形）。
              但整个拦截器在 HttpMiddleware 的 3s 预算**之内**（DRIFT-USERAPI-009）。
              Redis 客户端超时由 application.yml:18 `timeout: 3s` 控制。
 Why Unknown: 若 Lettuce 的命令超时与 3s 预算同量级，谁先触发取决于线程调度；
@@ -2265,11 +2365,30 @@ Go ↔ RAG 对照审计 `service/users` 全部 5 个子模块（22 个 RPC / 22 
 - `service/user/user/api/internal/handler/user/deleteuserhandler.go:27` ——
   `httpx.OkJson(w, &response.Response{...})` ⇒ **HTTP 200**（不是 401）。
 
-**RAG 修法**（`interceptor/JwtAuthInterceptor.java:153-195`）：
+**RAG 修法**（`interceptor/JwtAuthInterceptor.java:137-140` + `:152-154`）：
+claim 不是 `Number` 时**不写 `userId` attribute、不抛异常**（`:138` `if (result.claimUsable()) {`
+→ `:139` `request.setAttribute("userId", …)` ⇒ claim 不可用时**整段跳过**），
+继续走黑名单检查（`:153` `if (!jwtToken.isEmpty() && isBlacklisted(jwtToken))`），把判定交给业务层。
 claim 不是 `Number` 时**只 `log.warn`（`:194`）、不写 `userId` attribute、不抛异常**，
 继续走黑名单检查（`:220`），把判定交给业务层。
 ⚠️ 注意：**黑名单检查没有因此被跳过** —— 这与 Go 一致（Go 的黑名单中间件在 JWT 之后独立跑，
 拿不到 `userId` 时用别的键；本实现的 `:220` 用 `claimUsable ? uid : "n/a"` 表达同一件事）。
+
+> ⚠️ **2026-10-29 真实性复核（指针订正 · 原值保留）**：上面这段**原文**写的是
+> `interceptor/JwtAuthInterceptor.java` 的 **`:153-195`**，
+> 且原文引的 `:194`（畸形 claim 的 `log.warn`）与 `:220`（黑名单检查）**都越界** ——
+> `JwtAuthInterceptor.java` **全文只有 187 行** ⇒ **指针已订正为上面的现行写法**。
+> - **现行落点**（2026-10-29 逐行核过）：
+>   - `:137-140` = 「claim 可用才写 `userId` attribute」—— `:138` `if (result.claimUsable()) {` ·
+>     `:139` `request.setAttribute("userId", Long.valueOf(result.uid()));` ⇒ claim 不可用时**整段跳过** ✔；
+>   - `:152-154` = 黑名单检查 —— `:152` `String jwtToken = result.trimmedToken();` ·
+>     `:153` `if (!jwtToken.isEmpty() && isBlacklisted(jwtToken)) {` ·
+>     `:154` `log.warn("token in blacklist, uid={}", result.claimUsable() ? result.uid() : "n/a");`
+>     ⇒ 原文说的「`claimUsable ? uid : "n/a"`」这个表达式**现行在 `:154`**（不是 `:220`）✔；
+>   - 「畸形 claim 只 `log.warn`」这件事**已改形态** ⇒ 改由
+>     `service/users/user/user-api/src/main/java/com/rag/users/user/api/auth/JwtVerificationResult.java:30`
+>     （`boolean claimUsable`）承载 ⇒ **拦截器里已无那条 `log.warn`** ✔。
+> - ⇒ **语义结论不变**：「签名合法 + claim 畸形 ⇒ 走业务层出 200 + 1006」这半边**仍成立** ⇒ **本条不改判**。
 
 **可证伪性**：把 `:154` 的分支改回抛 `AuthenticationException` ⇒ 守门用例 1 / 2 立刻红。
 
@@ -3398,6 +3517,14 @@ RAG 侧的完整机制链（**消费点**）：
 `ClientOptions.DisconnectedBehavior.REJECT_COMMANDS`
 ⇒ 命中 `DefaultEndpoint:314`（`Currently not connected. Commands are rejected.`）
 与 `DefaultEndpoint:692`（断连瞬间取消排队命令）⇒ 失败耗时 ~1ms ⇒ 进业务层 ⇒ fail-open 200。
+⚠️ **2026-10-29 真实性复核（指针订正 · 原值保留）**：上面写的 `RedisDisconnectedBehaviorConfig`
+（`service/users/user/user-api`）是**当时的域内副本** ⇒ **该文件现已不存在**
+（Redis 收编轮删除 5 份域内副本 ⇒ 共享层接管）
+⇒ **现行生产代码只在** `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java:96`（`@AutoConfiguration`）＋ `:98`（`afterBeanInitialization(LettuceClientOptionsBuilderCustomizer.class, …)`）
+⇒ 由 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:5` 注册
+⇒ **实测 `find service/users -name "RedisDisconnectedBehaviorConfig.java"` = 0 命中**；
+⚠️ `grep -rn "REJECT_COMMANDS" service/users/ --include="*.java"` 有命中，**但全部在 `src/test/` 守门里**（`/src/main/` 下 **0 命中**）
+⇒ **本段读作「历史修法」**，现行落点如上。
 
 ⚠️ **Boot 4 的包名变了**：`LettuceClientOptionsBuilderCustomizer` 在
 `org.springframework.boot.data.redis.autoconfigure`（**不在** `spring-boot-autoconfigure` 里 ——

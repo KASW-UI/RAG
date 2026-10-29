@@ -5,7 +5,7 @@
 
 ---
 
-## SD-2026-10-23-08@users · 黑名单 401 的**业务码**为 `1006`（Go 是 `401`）
+## SD-2026-10-23-08@users · 黑名单 401 的**业务码**为 `1006`（Go 是 `401`） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > **2026-10-29 重核（台账对齐轮）**：
 > - **别名**：`SD-2026-10-23-08@users`（域内唯一别名）。**撞号事实**：同一编号在本域被引用 **2 处** ——
@@ -95,10 +95,54 @@
 `admin-api` 的 `operator_id`：Go 恒为 `0` 且**不校验** claim，RAG **严格校验**、缺失即拒绝。
 
 > 完整表（含 Go/RAG 行为、类别、关闭条件）⇒
-> [`_cross/signed-deviations.md`](../../_cross/signed-deviations.md#sd-2026-10-23-01--admin-api-operatoridgo-恒-0-且不校验-claimrag-严格校验)。
+> [`_cross/signed-deviations.md`](../../_cross/signed-deviations.md#sd-2026-10-23-01--admin-api-operatoridgo-恒-0-且不校验-claimrag-严格校验--状态核对日期-2026-10-29✅-仍成立)。
 >
 > **⚠️ 2026-10-23 复核后严重度下调**：下游 admin-rpc **不读** `operator_id`
 > （只有 `createInviteCode` 拿它去查 admin；`banUser`/`unBanUser`/`deleteUser`/
 > `resetUserPassword`/`updateUser` 只当审计字段）⇒ 真正的差异只剩
 > 「**claim 无效时 Go 照常发 RPC、RAG 不发**」这一条。
 > 取值那一半由 **N-4** 签字；**校验**这一半由本条签字。两者不是同一条。
+---
+
+## ⚠️ 2026-10-29 真实性复核（台账结论 ↔ 代码）· 本档两条签字
+
+> 本轮把本文件的两条签字（`SD-2026-10-23-08` / `SD-2026-10-23-01`）逐条回 Go 真源 + 回 RAG 源码两侧复核。
+> **结论：两条签字都仍然有效（✅ 仍成立），状态不变**；**但两处 Go/RAG 证据指针需要订正**（原值保留）。
+
+### ① `SD-2026-10-23-08@users` —— 黑名单 401 的业务码 `1006`（Go 是 `401`）
+
+- **被签字描述的行为是否还在**：**仍在** ⇒ **签字有效**。
+- **两侧证据（2026-10-29 逐行核过）**：
+  - RAG ⇒ `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/advice/GlobalExceptionHandler.java:59-68`
+    （`:59` `@ExceptionHandler(AuthenticationException.class)` ⇒ `:60-61` `handleAuthentication` ⇒
+    `:66-67` `ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new Response(e.getCode(), e.getMessage(), null))`
+    ⇒ body 的 `code` = `e.getCode()` = `ErrorCode.ERROR_TOKEN_RUNTIME` = **1006** ⇒ `{"code":1006,"msg":"TOKEN已过期","data":null}`）；
+  - Go ⇒ `service/user/admin/api/internal/middleware/checkblacklistmiddleware.go:37-39`
+    （`:37` `w.Header().Set("Content-Type", "appliaction/json;charset=utf-8")` ·
+    `:38` `w.WriteHeader(http.StatusUnauthorized)` · `:39` `w.Write([]byte(\`{"code":401,"msg":"登录已失效,请重新登陆"}\`))`）
+    ⇒ **HTTP 401 + `{"code":401,…}`** ⇒ **两侧 HTTP 状态码都是 401、差异只在 body 的 `code`** ⇒ **本条的前提仍在** ✔。
+- **指针订正（保留原值）**：本条 2026-10-29 重核块写的 RAG 侧 `GlobalExceptionHandler.java:59-70` ⇒ **现行 `:59-68`**（`:70` 现是下一个 handler 的空行）。
+
+### ② `SD-2026-10-23-01@users` —— 身份解析**严格校验** JWT claim
+
+- **被签字描述的行为是否还在**：**仍在** ⇒ **签字有效**。
+- **两侧证据（2026-10-29 逐行核过）**：
+  - RAG（**严格校验**这一半，两道检查都还在）⇒
+    `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/IdentityResolver.java:102-104`
+    （`if (uid <= 0) { throw new ErrInvalidClaimException(MSG_INVALID_CLAIM); }`）
+    ＋ 同文件 `:132-137`（`:132-134` `if (admin == null || admin.equals(AdminInfo.getDefaultInstance())) { throw new ErrAdminNotFoundException(…); }` ·
+    `:135-137` `if (admin.getUid() != uid) { throw new ErrIdentityMismatchException(MSG_IDENTITY_MISMATCH); }`）
+    ⇒ **claim 无效即拒** ✔；
+  - Go（**恒 0 且不校验**这一半）⇒ **两处出处，各管一半**：
+    | 半边 | 现行出处 | 内容 |
+    |---|---|---|
+    | **「恒 0」**（取不到 ⇒ 保持零值 ⇒ **不报错**） | **`service/user/admin/api/internal/logic/admin/banuserlogic.go:36-39`**（**api 侧**） | `var adminUid int64` / `if uidNumber, ok := l.ctx.Value("uid").(json.Number); ok { adminUid, _ = uidNumber.Int64() }` ⇒ ctx 里**没有** `"uid"` 这个 key ⇒ **`adminUid` 恒 0 且不报错** |
+    | **「不校验」**（拿到就当审计字段，不与任何东西比对） | `service/user/admin/rpc/internal/logic/banuserlogic.go:38-39`（**rpc 侧**） | `span.SetAttributes(attribute.Int64("audit.operator_id", in.OperatorId), …)` ⇒ **只当审计属性，不比对、不拒绝** |
+    | **ctx key 为什么取不到** | `service/user/common/jwt/jwt.go:11` + `service/user/user/identity/resolve.go:66-79` | token 里只有 claim **`userId`**（`claims["userId"] = userId`）；go-zero 注入 ctx 时**用 claim 名当 key** ⇒ Go 侧读得到的是 `ctx.Value("userId")`（`resolve.go:70` 正是这么读的）⇒ **admin/api 读的 `"uid"` 永远不存在** |
+    | **Go 侧没有 identity 层** | `service/user/user/identity/` | `identity.ClaimedUID` / `identity.ResolveUser` **不被 admin/api 引用**（全目录 grep `identity.` **0 命中**）⇒ Go 侧**没有** RAG 那两道校验的对应物 ✔ |
+- 🔴 **指针订正（保留原值）**：本条 2026-10-29 重核块写的 Go 出处 **`service/user/admin/rpc/internal/logic/banuserlogic.go:36-39`** ⇒
+  **「恒 0」这一半在 api 侧** `service/user/admin/api/internal/logic/admin/banuserlogic.go:36-39`；
+  **rpc 侧那份 `:38-39` 只支撑「不校验」这一半**（它是审计属性写法，不是取 uid 的地方）。
+  ⇒ ⚠️ **原指针的行号合法、但指的不是讲这件事的那一行**（E68 同型）⇒ **不改原值，以本块为准**。
+- **不改判的理由**：本条断言的是「Go 恒 0 且不校验 / RAG 严格校验」，**两个半边在两侧都仍成立**
+  （Go：ctx 取不到 ⇒ 恒 0、不报错、不比对；RAG：两道检查都还在）⇒ **签字继续有效**。

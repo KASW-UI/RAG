@@ -5,7 +5,7 @@
 
 ---
 
-## SD-2026-10-23-06@users · `resetUserPassword` 保留空 `default-password` 守卫
+## SD-2026-10-23-06@users · `resetUserPassword` 保留空 `default-password` 守卫 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > **2026-10-29 重核（台账对齐轮）**：
 > - **别名**：`SD-2026-10-23-06@users`（域内唯一别名）。**撞号事实**：同一编号在本域被引用 **2 处** ——
@@ -69,7 +69,7 @@
 
 ---
 
-## SD-2026-10-23-07@users · gRPC `status.description` 保留正常中文，不复刻 Go 的乱码字节
+## SD-2026-10-23-07@users · gRPC `status.description` 保留正常中文，不复刻 Go 的乱码字节 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > **2026-10-29 重核（台账对齐轮）**：
 > - **别名**：`SD-2026-10-23-07@users`（域内唯一别名）。**撞号事实**：同一编号在本域被引用 **2 处** ——
@@ -132,3 +132,59 @@
 - `#createAdminUsernameTakenDescriptionIsStillChinese` 覆盖第 6 处损坏字面量。
 
 ⚠️ 有人把 RAG 的 description 改成乱码 ⇒ **立刻红** ⇒ 逼他先改台账。
+---
+
+## ⚠️ 2026-10-29 真实性复核（台账结论 ↔ 代码）· 本档两条签字
+
+> 本轮把本文件的两条签字（`SD-2026-10-23-06` / `SD-2026-10-23-07`）逐条回 Go 真源 + 回 RAG 源码两侧复核。
+> **两条签字本身都仍然有效（✅ 仍成立），状态不变**；**但「守门网」一栏与「处数」一栏各有一处需要订正**（原值保留）。
+
+### ① `SD-2026-10-23-06@users` —— `resetUserPassword` 保留空 `default-password` 守卫
+
+- **被签字描述的行为是否还在**：**仍在** ⇒ **签字有效**。
+  - RAG ⇒ `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminDomainService.java:1150-1151`
+    （`String defaultPassword = properties.getSystem().getDefaultPassword();` ＋
+    `if (defaultPassword == null || defaultPassword.isEmpty()) {`）⇒ **`:1171`** `throw Status.INTERNAL.withDescription("密码加密失败").asRuntimeException();` ✔
+  - Go ⇒ `service/user/admin/rpc/internal/logic/resetuserpasswordlogic.go:55-56`
+    （`var password string` → `password, err = cryptx.PasswordEncrypt(l.svcCtx.Config.System.DefaultPassword)`，**无空值判断**）✔
+    ＋ `service/user/common/cryptx/password.go:7-13`（`bcrypt.GenerateFromPassword` 只在 `len > 72` 时报错 ⇒ **空串合法**）✔
+    ＋ `service/user/admin/rpc/etc/admin.yaml:41` `DefaultPassword : "123456"` ⇒ **默认配置下两侧都不触发** ✔
+- 🔴 **订正（本轮新发现）**：本条「守门」一栏写
+  > 「`AdminSemanticDriftRegressionTest` 的**空 `default-password` 用例**：断言配置为空时抛 INTERNAL「密码加密失败」」
+  **该用例在仓内不存在**。
+  - **实测（2026-10-29，`grep -rn "default-password|defaultPassword" service/users/**/src/test/**/*.java` 全域枚举）**：
+    | 位置 | 实际断言的方向 |
+    |---|---|
+    | `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/service/AdminSemanticDriftRegressionTest.java:134` | 「seeder 造的 admin 密码是 admin，**不是** `system.default-password` 的 123456」⇒ **方向相反**（防 seeder 误用） |
+    | 同文件 `:386` | 「`resetUserPassword` **仍读** `system.default-password`，而非 seeder 硬编码常量」⇒ **方向相反**（断言它**读**配置，不测空值） |
+    | `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/bootstrap/AdminRpcContainerWiringTest.java:187` / `:226` | 同上两个方向 |
+    ⇒ **`AdminSemanticDriftRegressionTest` 全部 13 条 `@Test` 里，没有一条断言「空 `default-password` ⇒ INTERNAL」**。
+  - ⇒ **后果**：本条末尾那句「**该用例是决策 tripwire —— 有人删掉守卫让它立刻红**」**当前不成立**：
+    **把 `AdminDomainService.java:1151` 的空值守卫删掉，当前不会让任何测试变红** ⇒ 这是**守网覆盖缺口**（不是行为缺陷）。
+  - ⇒ **不改判的理由**：本条签字的对象是「**RAG 拒绝空口令，Go 不拒绝**」这个**行为差异**，该差异**两侧都仍成立** ✔ ⇒ **签字继续有效**；
+    **只订正「守门网」这一栏**（原值保留）⇒ ⚠️ **补守门之前不要把本条读成「有人删掉它会红」**。
+
+### ② `SD-2026-10-23-07@users` —— gRPC `status.description` 保留正常中文
+
+- **被签字描述的行为是否还在**：**仍在** ⇒ **签字有效**。
+  - Go 侧乱码**仍在**（2026-10-29 逐字节复核）⇒ 4 个文件里的 `status.Error(..., "<乱码>")` **共 21 处**：
+    | Go 文件 | 乱码 `status.Error` 处数 | 行号 |
+    |---|---|---|
+    | `service/user/admin/rpc/internal/logic/getselflogic.go` | **2** | `:37` `:40` |
+    | `service/user/admin/rpc/internal/logic/updateselflogic.go` | **8** | `:37` `:40` `:47` `:51` `:63` `:77` `:83` `:86` |
+    | `service/user/admin/rpc/internal/logic/createinvitecodelogic.go` | **5** | `:55` `:60` `:70` `:94` `:101` |
+    | `service/user/admin/rpc/internal/logic/createadminlogic.go` | **6** | `:50` `:59` `:67` `:73` `:99` `:119` |
+    | **合计** | **21** | （去重后 **10** 个不同字面量） |
+  - RAG 侧仍是**正常中文** ⇒ `service/users/admin/admin-rpc/.../service/AdminDomainService.java:212` / `:296` / `:332`（「用户不存在」）·
+    `:347`（「该用户名已被使用」）✔
+  - **守门在位**：`service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcGoWireParityTest.java`
+    ✅ **存在**（6 条 `@Test`）⇒ `:212` `errorStatusTableMatchesGoWireBytes` ✔ ＋ `:320` `createAdminUsernameTakenDescriptionIsStillChinese` ✔
+    ⇒ **「有人把 RAG 的 description 改成乱码 ⇒ 立刻红」这一条仍成立** ✔
+- ⚠️ **订正（本轮新发现 · 「处数」这一栏的计数单位需要写明）**：
+  本条写「Go 侧 **4 个文件 / 12 处**乱码」「逐文件重数仍是 **1+3+3+5 = 12**」——
+  **按「这 4 个文件里 `status.Error` 的乱码字面量处数」这个读法，实测是 2+8+5+6 = 21 处（见上表），不是 12**。
+  ⇒ **12 是另一个计数单位**：`AdminRpcGoWireParityTest#errorStatusTableMatchesGoWireBytes` 的**对拍表行数**（`table.put(...)` **12 行**），
+  而那 12 行覆盖的 Go logic 文件**不止这 4 个**（还有 `login` / `logout` / `getuser` / `banuser` / `unbanuser` / `deleteuser` / `resetuserpassword` / `updateuser`）。
+  ⇒ ⇒ **「12」= 守门表行数**（口径：wire 可观察的 status 映射条数）；**「21」= Go 源码里的乱码字面量处数**（口径：源码出现次数）。
+  ⚠️ **两个数都不是错的**，但**混在一句里会让人以为「12 = 乱码处数」** ⇒ **保留原值 + 以本块写明两个口径**。
+- ⇒ **不改判的理由**：签字的对象是「**RAG 吐正常中文、不复刻乱码字节**」，该行为**两侧都仍成立**（Go 乱码仍在、RAG 中文仍在、守门在位）⇒ **签字继续有效**。

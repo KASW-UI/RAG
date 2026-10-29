@@ -28,10 +28,10 @@
 | **N-1** | `admin-api` | 鉴权失败的响应体形状统一为 `{code,msg,data}`，且**业务码为 `1006`** | 2026-10-21 | 见下 |
 | **N-4** | `admin-api` | 5 个端点的 `operator_id` **不恒为 0**，传真实 uid | 2026-10-21 | 见下 |
 | **N-5** | `admin-api` | JWT HMAC 密钥 zero-pad 到 32 字节 | 2026-10-21 | 见下 |
-| **SD-2026-10-23-01** | `admin-api` | 身份解析**严格校验** JWT claim（Go 恒 0 且不校验） | 2026-10-23 | 见 [`_cross/signed-deviations.md`](../../_cross/signed-deviations.md#sd-2026-10-23-01--admin-api-operatoridgo-恒-0-且不校验-claimrag-严格校验) |
-| **SD-2026-10-23-06** | `admin-rpc` | `resetUserPassword` 保留空 `default-password` 守卫 | 2026-10-23 | [`rpc.md`](./rpc.md) |
-| **SD-2026-10-23-07** | `admin-rpc` | gRPC `status.description` 保留正常中文，不复刻 Go 乱码 | 2026-10-23 | [`rpc.md`](./rpc.md) |
-| **SD-2026-10-23-08** | `admin-api` | 黑名单 401 的**业务码**为 `1006`（Go 是 `401`） | 2026-10-23 | [`api.md`](./api.md) |
+| **SD-2026-10-23-01** | `admin-api` | 身份解析**严格校验** JWT claim（Go 恒 0 且不校验） | 2026-10-23 | 见 [`_cross/signed-deviations.md`](../../_cross/signed-deviations.md#sd-2026-10-23-01--admin-api-operatoridgo-恒-0-且不校验-claimrag-严格校验--状态核对日期-2026-10-29✅-仍成立) ｜ 📌 **索引行**（总表目录行 · 正本见本行「落点」列 ⇒ **不独立计数**） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立** |
+| **SD-2026-10-23-06** | `admin-rpc` | `resetUserPassword` 保留空 `default-password` 守卫 | 2026-10-23 | [`rpc.md`](./rpc.md) ｜ 📌 **索引行**（总表目录行 · 正本见本行「落点」列 ⇒ **不独立计数**） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立** |
+| **SD-2026-10-23-07** | `admin-rpc` | gRPC `status.description` 保留正常中文，不复刻 Go 乱码 | 2026-10-23 | [`rpc.md`](./rpc.md) ｜ 📌 **索引行**（总表目录行 · 正本见本行「落点」列 ⇒ **不独立计数**） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立** |
+| **SD-2026-10-23-08** | `admin-api` | 黑名单 401 的**业务码**为 `1006`（Go 是 `401`） | 2026-10-23 | [`api.md`](./api.md) ｜ 📌 **索引行**（总表目录行 · 正本见本行「落点」列 ⇒ **不独立计数**） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立** |
 
 ### 🆕 2026-10-29 重核（台账对齐轮 · 逐条核「被签字描述的那个行为现在还存在吗」）
 
@@ -62,7 +62,7 @@
 > ⚠️ **另注**：`N-1` / `N-4` / `N-5` **不是 `SD-` 编号**，但它们在 `docs/DRIFT/users/admin/_shared.md` 与本档**两处**都有登记
 > ⇒ 同样是「同一处偏离的两个落点」，**不是两条不同偏离**；本轮以**本档为签字档权威面**（`docs/DRIFT/**` 记差异、`docs/Intentional_Deviations/**` 记决策，§7.2）。
 
-### N-1 · 鉴权失败的响应体形状（2026-10-21 用户拍板）
+### N-1 · 鉴权失败的响应体形状（2026-10-21 用户拍板） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 Go 侧两处 401 的 body **互不相同**：
 - `rest.WithJwt` → `authhandler.go:106 unauthorized()` 写 **HTTP 401 + 空 body**
@@ -81,7 +81,7 @@ RAG 两侧统一成 **HTTP 401 + 完整 `{code,msg,data}`**，**业务码仍是 
 **关闭条件**：若要求逐字复刻 Go 的两种 body，需在拦截器里区分
 「JWT 验签失败」与「黑名单命中」两条路径分别写 body。
 
-### N-4 · `operator_id` 不恒为 0（2026-10-21 用户拍板）
+### N-4 · `operator_id` 不恒为 0（2026-10-21 用户拍板） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 Go 的 `updateuser` / `banuser` / `unbanuser` / `delete` / `resetuserpassword` 读 `ctx["uid"]`，
 而 `rest.WithJwt` 写入 ctx 的 key 是 JWT claim 名 **`userId`** ⇒ 永远取不到
@@ -96,7 +96,7 @@ Go 的 `updateuser` / `banuser` / `unbanuser` / `delete` / `resetuserpassword` �
 
 **关闭条件**：若要求审计 span 与 Go 逐字一致，需在这 5 个 Service 里刻意丢弃 token 中的 uid。
 
-### N-5 · JWT HMAC 密钥长度（2026-10-21 用户拍板）
+### N-5 · JWT HMAC 密钥长度（2026-10-21 用户拍板） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 Go 用 15 字节原始 secret 参与 HS256；RAG 用 `JwtUtil.padToHmacKeySize` zero-pad 到 32 字节。
 jjwt 0.12 强制 key ≥256 bit。
@@ -112,13 +112,26 @@ jjwt 0.12 强制 key ≥256 bit。
 
 | # | 原偏离 | 撤销原因 |
 |---|---|---|
-| **N-3** | 「`uid=0` 被归类为业务不存在」 | **证伪**：RAG 代码里**没有** uid=0 拦截。实测 RAG 与 Go 三态逐条相同（不传→400 / `uid=abc`→400 / `uid=0`→`200 {code:1003}`）⇒ 不是偏离 |
-| **N-6** | 「uid 格式非法时 body 形状 ≠ envelope」 | **证伪**：Jackson 在反序列化阶段就抛错，压根到不了 `parseUid`。两侧都是 `400 + text/plain` ⇒ 不是偏离 |
+| **N-3** | 「`uid=0` 被归类为业务不存在」 | **证伪**：RAG 代码里**没有** uid=0 拦截。实测 RAG 与 Go 三态逐条相同（不传→400 / `uid=abc`→400 / `uid=0`→`200 {code:1003}`）⇒ 不是偏离 ｜ **状态（核对日期 2026-10-29）：⛔ 已失效·已撤销** |
+| **N-6** | 「uid 格式非法时 body 形状 ≠ envelope」 | **证伪**：Jackson 在反序列化阶段就抛错，压根到不了 `parseUid`。两侧都是 `400 + text/plain` ⇒ 不是偏离 ｜ **状态（核对日期 2026-10-29）：⛔ 已失效·已撤销** |
 
 > **这两条都经过签字、都有防回退测试、javadoc 出处写得很完整，而它们描述的行为从未存在过。**
 > ⇒ **元教训**（已写进 `docs/Pitfalls/users/`）：任何留档声称「RAG 的行为是 X」时，
 > **都必须有一条断言 X 的运行测试**；该测试不存在或从未跑过 ⇒ 它只是推测，不得当作事实引用。
 > 区分「代码里写了什么」与「运行时真的发生什么」—— 前者 grep 得到，后者只有真进程能证明。
+
+> ⚠️ **2026-10-29 真实性复核（补规范状态字段时**当场回代码**复验 · 原值保留）**：N-3 / N-6 两条的**撤销前提当场成立**
+> ⇒ **维持撤销**、**不计入签字计数** ⇒ **现行态 = ⛔ 已失效·已撤销**。
+> - **N-3**（`uid=0` 被归类为业务不存在）：RAG 侧 `service/users/admin/admin-api/src/main/java/**` 全目录实测**无 uid=0 拦截**
+>   —— `AdminApiSupport.java:83-96` 的 `parseUid` 只在 `uidStr` 为空 / 非数字时抛 1017，而 `Long.parseLong("0")` **正常返回 0**
+>   ⇒ `uid=0` 直接进 rpc ⇒ 落 `1003 用户不存在` ⇒ **RAG 与 Go 同为 `uid=0 → 200 {code:1003}`**
+>   ⇒ 被签字描述的行为**两侧相同** ⇒ **不是偏离**。
+> - **N-6**（uid 格式非法时 body 形状 ≠ envelope）：RAG 侧 uid 是 **`Long`** 字段（`GetUserReq.java:26-27`）
+>   ⇒ `uid=abc` 在 **Jackson 反序列化阶段**就抛 `InvalidFormatException` ⇒ 落到 `GlobalExceptionHandler.java:121-125`
+>   的 `400 + text/plain` ⇒ **到不了**业务层的 `parseUid` ⇒ 两侧 body 形状**无分叉** ⇒ **不是偏离**。
+> - ⚠️ **登记一条「代码注释已过期」（本轮**不改代码**，只登记）**：`GetUserReq.java:20-21` 与 `GlobalExceptionHandler.java:138-140`
+>   的 javadoc 仍写「uid=0 → 1017 请求参数错误」⇒ 与上面核出的**现行行为**（uid=0 → `1003 用户不存在`）不符
+>   ⇒ **下次 grep 到这两处注释的人，不要据此复活 N-3**。
 
 ### 🆕 2026-10-29 重核 · 已撤销的两条（N-3 / N-6）
 

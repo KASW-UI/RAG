@@ -734,6 +734,22 @@ Required Confirm: 用 exp-difftest-grpc-errors.sh 对同一用例分别用 100ms
 > > 🔴 **整条定性已改判**（2026-10-26 复核）—— 原文写「定性不变（第 ③ 层未修 ⇒ 可观察差距仍在）」⇒ **错**：
 > > **`Δ_end` 测的是「SQL 超时上限有没有继承客户端 deadline」，不是「业务线程有没有被取消」** ⇒ ② + 第三十三轮已把它压到 ≈0（**推导，未实测**）。
 
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）**：原判「子项『是否 min 客户端 deadline』✅ 已闭环 / ② 期限计算 ✅ 已修（`af416d9`，已合回主干）」⇒ **现行态 = ✅ 维持**；
+> ⚠️ **但上表 ② 层记的符号名在当前代码里已全部不存在 ⇒ 属于「指针能解析、但记的不是现行写法」（E68 同型）。**
+> - **实测（2026-10-29 逐行核过）**：`service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`
+>   **不存在** `effectiveTimeoutMs` / `serverBudgetMs` / `clientDeadlineRemainingMs()` 这三个符号
+>   ⇒ 「`effectiveTimeoutMs = Math.min(serverBudgetMs, clientDeadlineRemainingMs())`」这一行**记的不是现行代码**。
+> - **现行写法**（单位是**纳秒**）：
+>   - `:291-292` `long serverBudgetNanos = (timeout != null && timeout.compareTo(Duration.ZERO) > 0) ? toNanosSaturated(timeout) : Long.MAX_VALUE;`
+>   - `:293` `long effectiveTimeoutNanos = Math.min(serverBudgetNanos, clientDeadlineRemainingNanos());`  ← **这一行就是「min」的现行实现**
+>   - `:319` `long timeoutNanos = effectiveTimeoutNanos;`（超时调度器延时用**它** ⇒ 两处消费点都改到了，与本表 ② 层描述一致）
+>   - `:471` / `:476` `if (effectiveTimeoutNanos == Long.MAX_VALUE) { … DeadlineState.bindRemainingNanos(effectiveTimeoutNanos) … }`
+>   - `:707` `private static long clientDeadlineRemainingNanos() {`（取值点 `:710` `io.grpc.Context.current().getDeadline()`）
+> - ⇒ **语义（min(服务端预算, 客户端 deadline 剩余)）仍然成立** ⇒ **本条状态不改判**；
+>   **订正方式 = 保留上表原符号名与原行号，以本块为现行写法**。
+> - ⚠️ **另注**：本表 ② 层末尾引的「取值点 `io.grpc.Context.current().getDeadline()` 服务端实测可用（客户端 1s ⇒ 读到 932ms 剩余）」
+>   **本轮未复跑**（需起真栈）⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」，不升级。
+
 > ✅ **2026-10-24 验证轮续 §1：本条从「静态推断」升级为「运行期实证」**（结论**未变**，证据强度**变了**）。
 >
 > **实测（2026-10-24 00:44~00:46，两套 admin-rpc 同时在跑，主仪器 = PG 服务端日志）**：
@@ -858,6 +874,21 @@ Required Confirm: 与 user-rpc 台账合并；并跑一次「两个 rpc 同时�
 > **两边都连库失败、一张表都没建出来** ⇒ 判定列全是「?」，
 > 也就是**实验根本没发生**（不是「Go 没问题」）。修法：带 `-d "$PG_DB"` 再等一轮 + 沉降 2s。
 > —— 这是 AGENTS.md §3.3「跑绿/跑通 ≠ 结论对」的又一个形态：**实验失败时它看起来像结论**。
+
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）**：原判「✅ 2026-10-23 验证轮 §1 已关闭」⇒ **现行态 = ✅ 已关闭（维持）**；
+> ⚠️ **但本条正文「已知」栏写的证据指针 `SchemaInitializer.java:70-91` 已漂移 ⇒ 需追加现行位置**。
+> - **被描述的机制是否还在**：**仍在** ——
+>   `service/users/users-common/src/main/java/com/rag/users/common/ddl/SchemaInitializer.java:91`
+>   `private static final long ADVISORY_LOCK_KEY = 8_675_309L;`（**锁号 8675309 未变**）；
+>   同文件 `:115` `st.execute("select pg_advisory_lock(" + ADVISORY_LOCK_KEY + ")");`
+>   ＋ `:128` `pg_advisory_unlock(...)` ⇒ **「advisory lock 串行化建表」这一形态仍在**。
+> - **指针订正（保留原值）**：`SchemaInitializer.java:70-91` ⇒ **现行 `:91`（锁号常量）+ `:115`（取锁消费点）+ `:128`（释放）**。
+>   ⚠️ 按 AGENTS.md §3.3.1，行号应指向**消费点** ⇒ 关键那行是 **`:115`**。
+> - **复现入口核实（2026-10-29）**：`tools/difftest/exp-go-concurrent-automigrate.sh` ✅ **存在**，
+>   且本条正文说的那个坑**确已修**（`:49-55` 有「2026-10-23 修正」注释块 · `:56` `pg_isready -U "$PG_USER" -d "$PG_DB"` · `:57` `sleep 2`）
+>   ⇒ **「实验根本没发生」那个坑已闭环**。
+> - **不改判的理由**：本条断言的是「两侧并发建表不会撞，且 RAG 侧是机制性保证」，
+>   而**机制（advisory lock 8675309 + 阻塞语义）仍在**、**复现脚本仍在且坑已修** ⇒ 状态维持 ✅。
 
 ---
 
@@ -1526,9 +1557,14 @@ RAG  AdminCreateAtomicService:124-127 （修复前同构，LocalDateTime 版）
 ⇒ **这正说明 HTTP 对拍全绿推不出 gRPC 层已对齐**（与 `docs/DRIFT/users/admin/rpc.md` 审计轮 §1 的效力边界一致）。
 
 **顺带订正一条错误出处**：RAG 的 `AdminUpdateUserService` 原注释写
-「与参考侧 `UpdateUserLogic.java:129` 1:1」—— **引错了文件与行号**（§3.3.2 形态）。
+「与参考侧 `UpdateUserLogic.java` 的第 129 行 1:1」—— **引错了文件与行号**（§3.3.2 形态）。
+（⚠️ 原注释写的就是这个**不存在的文件名 + 不存在的行号** ⇒ 本处是「**引用一条已被本节指错的错误引用**」，
+**它不是一个活的证据指针** ⇒ 机器复核报「文件找不到」属**预期**，不是台账缺陷。）
 正确出处是 `service/user/admin/api/internal/logic/admin/updateuserlogic.go:68`（**api 层**，
 不是 rpc 层的 `updateuserlogic.go:105-113`）。已改。
+⇒ **2026-10-29 复核补记**：RAG 侧的对应落点现已核到
+`service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/AdminUpdateUserService.java:99`
+`resp.setSuccess(true);` ⇒ **两侧「api 层都硬编码 `success=true`」这半边仍成立** ✔（与上文 §2 的 HTTP 面结论一致）。
 
 ### 🔴 本条同时是一个「绿测试锁死错误答案」的实例（§3.3.3 原型案例）
 
@@ -4265,7 +4301,7 @@ catch (Exception e) { log.error("admin logout Redis setex failed", e);          
 
 | 项 | 内容 |
 |---|---|
-| **落码** | `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/config/RedisDisconnectedBehaviorConfig.java`（**新建** · 域内副本）：`LettuceClientOptionsBuilderCustomizer` ⇒ `REJECT_COMMANDS` |
+| **落码** | `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/config/RedisDisconnectedBehaviorConfig.java`（**新建** · 域内副本）：`LettuceClientOptionsBuilderCustomizer` ⇒ `REJECT_COMMANDS` —— ⚠️ **2026-10-29 真实性复核（指针订正 · 原值保留）**：**该域内副本文件已不存在**（Redis 收编轮删除 5 份域内副本 ⇒ 共享层接管）⇒ **现行生产代码只在** `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java:96`（`@AutoConfiguration`）＋ `:98`（`afterBeanInitialization(LettuceClientOptionsBuilderCustomizer.class, …)`）⇒ 由 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:5` 注册 ⇒ **实测 `find service/users -name "RedisDisconnectedBehaviorConfig.java"` = 0 命中**、`grep -rn "REJECT_COMMANDS" service/users/ --include="*.java" \| grep "/src/main/"` = **0 命中**（其余命中全在 `src/test/` 守门里）⇒ **本行读作「历史落点」**，现行落点见下一行 |
 | **落点决策** | 载体文件住在**本域内** ⇒ **域侧自修**，不等 G4（判据：被改的那份文件本来住在哪） |
 | **共享层收编** | ✅ 已作为反馈单派给 G4（`GoStyleRedisClientAutoConfiguration` ＋ `AutoConfiguration.imports`）⇒ **共享层那份先合进各域的树**，才能删域内副本 ⇒ 现共 **5** 份域内副本（3 api + 2 rpc）⇒ **收编时须一并删掉**（否则双份配置）<br>🟢 **2026-10-27 订正：收编【已完成】** —— 5 份域内副本**已全部删除**（共享层那份接管；见 [`../vs-common.md` §26](../vs-common.md)）⇒ ⇒ **本行的「现共 5 份副本 / 收编时须一并删掉」是历史状态** |
 | **守门** | `AdminRpcRedisDisconnectedFastFailTest`（**新** · 2 例）：① `REJECT_COMMANDS` 真被装配 ＋ Redis 可达时写黑名单通；② 断连（**FIN** 形态）时写命令**快速失败**（<1500ms）**且**异常**不是** `RedisCommandTimeoutException` |

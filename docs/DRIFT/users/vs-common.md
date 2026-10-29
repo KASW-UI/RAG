@@ -653,6 +653,26 @@ G4 落码 ⇒ 共享层行为变 ⇒ **G1 这域的 A1~A9 结论要复核**（�
 > ⇒ 逐条证据（`GoStyleCoercion` **刻意不做 `@Configuration`** · hot-api 零 `@RequestBody` · task-api 的 Go 侧带自定义 `UnmarshalJSON` · Go 全仓仅 1 个自定义 `UnmarshalJSON`）
 > ⇒ 见 [`users/common.md` 的 2026-10-27 订正块](common.md) 与 §1.1 表。
 
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）· `UNRESOLVED-USERSCOMMON-003` 的口径订正**
+> ⇒ 原判「**已关闭**（2026-10-27 收口：跨域前提不成立，不必协调 G2/G3 打请求矩阵）」⇒ **现行态 = ✅ 已关闭（维持）**。
+> - **被描述的事实是否还在**：**仍在** ⇒ **关闭依据仍成立**。
+>   **实测（2026-10-29 全仓 grep）** —— `GoStyleCoercion::applyTo` 的注册点**恰好 8 处**，与本节表格逐行一致：
+>   | 域 | 注册的 customizer | 现行出处 |
+>   |---|---|---|
+>   | `user-api` | `GoStyleCoercion::applyTo` | `service/users/user/user-api/src/main/java/com/rag/users/user/api/config/WebMvcConfig.java:48` |
+>   | `admin-api` | `GoStyleCoercion::applyTo` | `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/config/WebMvcConfig.java:52` |
+>   | `favorite-api` | `GoStyleCoercion::applyTo`（**外域复用 users 通用版**） | `service/favorite/favorite-api/src/main/java/com/rag/favorite/favorite/api/config/WebMvcConfig.java:67` |
+>   | `article-api` | `ArticleGoStyleCoercion::applyTo` | `service/article/article-api/src/main/java/com/rag/article/article/api/config/WebMvcConfig.java:71` |
+>   | `comment-api` | `CommentGoStyleCoercion::applyTo` | `service/comment/comment-api/src/main/java/com/rag/comment/comment/api/config/WebMvcConfig.java:69` |
+>   | `follow-api` | `FollowGoStyleCoercion::applyTo` | `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/config/WebMvcConfig.java:69` |
+>   | `like-api` | `LikeGoStyleCoercion::applyTo` | `service/like/like-api/src/main/java/com/rag/like/like/api/config/WebMvcConfig.java:54` |
+>   | `message-api` | `MessageGoStyleCoercion::applyTo` | `service/message/message-api/src/main/java/com/rag/message/message/api/config/WebMvcConfig.java:75` |
+>   ⇒ **「不是全局施加」（各域是独立进程）与「真正跨域的是类复用（favorite 复用 users 通用版）」这两点都仍成立** ✔
+>   ⇒ **「验证跨域」的待办仍然不需要做** ✔（前提不成立）。
+> - ⚠️ **效力边界（不变）**：**半边②（通用版 `GoStyleCoercion::applyTo` 的规则内容）仍开放、落点仍在 `service/users/users-common/**` ⇒ 归 G4**；
+>   **本域只登记、不落码**。
+> - **不改判的理由**：本条断言的是「**跨域前提不成立**」这一**事实**，该事实经 8 个注册点逐条复核**仍成立** ⇒ 状态维持 ✅。
+
 #### 6.4.2 🔴 **槽位联动警告**（给共享层写权方 · 2026-10-27）
 
 > **一句话**：本轮刚在 `user-api` 落了一个**依赖共享层 Filter 槽位**的机制
@@ -4226,6 +4246,19 @@ mvn -B -o -DargLine=-Xmx1g -am -pl service/users/user/user-rpc,service/users/adm
 - 本条 5 处改动**全部在我写权面**（`service/users/user/user-rpc/**` ＋ `service/users/admin/admin-rpc/**`）⇒ **域内自闭环，零派单**
 - 共享层 `service/common` **未动**（`Observability` 的显式 `SetStatus` 与 Go 一致）
 - 逐条组件台账 ⇒ [`user/rpc.md` §11 `DRIFT-USERRPC-V-015`](user/rpc.md) · [`admin/rpc.md` §2.5 订正](admin/rpc.md)
+
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）· `DRIFT-USERRPC-V-015`**
+> ⇒ 原判「**已域内修完 5 处**（🔴🟢）」⇒ **现行态 = ✅ 已修（维持）**。
+> - **修法依据（Go 全仓 `SetStatus` 落点表）是否还成立**：**成立** ⇒ **实测（2026-10-29 逐条 grep）**：
+>   | 断言 | 实测 |
+>   |---|---|
+>   | Go `service/user/`（user-rpc + admin-rpc）**零处**显式 `span.SetStatus` | ✅ **0 处**（`grep -rn "span.SetStatus\|\.SetStatus(" service/user/ --include="*.go"` ⇒ 0） |
+>   | Go 全仓合计 **9** 处 | ✅ **9 处**（`service/comment/` 4 ＋ `service/common/` 3 ＋ `service/knowledge/` 2 ＋ `service/user/` 0） |
+>   | RAG `service/users/**` 主源码**零处** `span.setStatus` | ✅ **0 处**（`grep -rn "setStatus(StatusCode\|span.setStatus" service/users/ --include="*.java"`，排除 `target/` 与 `src/test/` ⇒ 0）⇒ **那 5 处确已删净** |
+> - ⇒ **「我域 Go 侧零处显式 `SetStatus` ⇒ 那 5 处是 RAG 独有 ⇒ 全部该删」的判据与结论都仍成立** ✔
+> - **不改判的理由**：本条断言的是「**RAG 多置了 span 的 ERROR 状态（遥测面漂移），已删净**」——
+>   两侧源码实测（Go 0 处 / RAG 0 处）**与该结论一致** ⇒ 状态维持 ✅。
+> - ⚠️ **本轮未复跑** §59.8 的域级全量回归（需 6 模块 `mvn clean test`，本轮只改台账）⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」。
 
 ### 59.8 🟢 **本轮域级全量回归 + 条数重测（双路径逐模块相等）**
 

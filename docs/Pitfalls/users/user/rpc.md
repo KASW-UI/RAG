@@ -250,3 +250,20 @@ grep -rn 'PasswordMismatchException\|UsernameExistsException\|TokenBlacklistedEx
 | `UserRpcContainerWiringTest` 会建出 `admin_admin` / `admin_invite` | 有意为之：对齐 Go 的「每个 rpc 都 AutoMigrate 全套」 | `db.go:33`（Go 侧 `users` 排第 1，`admin` 排第 3，**靠时序侥幸**） |
 
 ⇒ 这张表的唯一用途：**让「看起来该修的东西」先在这里查一遍再动手。**
+
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）**：本条状态 **仍生效** ⇒ **维持**；
+> ⚠️ **但表里最后一行（`UserRpcContainerWiringTest` 那条）的「Go 出处」一栏写错了 ⇒ 需订正**。
+> - **实测（2026-10-29 逐行核过 Go 侧两个 `db.go`）**：
+>   | Go 文件 | 行 | 实际内容 | 迁走的表 |
+>   |---|---|---|---|
+>   | `service/user/user/rpc/internal/model/db.go` | **`:33`** | `err = db.AutoMigrate(&User{}, &UserAvatarHistory{})` | **只有 `users` + `user_avatar_history` 两张** ⇒ **该文件里根本没有 `admin` / `admin_invite`** |
+>   | `service/user/admin/rpc/internal/model/db.go` | **`:15`** | `err = db.AutoMigrate(&Admin{}, &AdminInvite{}, &User{})` | **`admins` 第 1 · `admin_invites` 第 2 · `users` 第 3** |
+> - ⇒ **原文的括注「Go 侧 `users` 排第 1，`admin` 排第 3」是反的**：在 Go 侧真实存在的那份 `db.go`
+>   （`admin/rpc` 的 `:15`）里，**`admin` 排第 1、`users` 排第 3**；
+>   而原文引的 `db.go:33` 指的是 **`user/rpc` 那份**（**只迁 `users` + `user_avatar_history`** ⇒ **不含 admin 表**）。
+> - ⇒ **这一行真正要说的**（RAG 的 `UserRpcContainerWiringTest` 会建出 `admin_admin` / `admin_invite`，
+>   为的是对齐 Go「**每个 rpc 各自 AutoMigrate 自己那套**」的形态 ⇒ 靠**两个 rpc 进程的启动时序**决定谁先建）
+>   **仍然成立**（两个 Go `db.go` 的 `AutoMigrate` 调用都还在，**无变化**）⇒ **本条状态不改判**；
+>   ⚠️ **但「Go 出处」那一栏必须按上表读**（`:33` ⇒ user/rpc 那份；`:15` ⇒ admin/rpc 那份）。
+> - ⚠️ **方法论提醒（本条自身的主题）**：这正是 `PIT-USERSADM-17` 说的「**假订正比漏订正更危险**」的同型 ——
+>   原文那句括注**读起来自洽**，但它把**两个不同文件**的迁表顺序揉成了一句 ⇒ **不能照抄**。

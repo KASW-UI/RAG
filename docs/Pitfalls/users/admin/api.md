@@ -90,6 +90,28 @@
   3. 逐端点对照时**按「拒绝分支」而不是按「成功分支」列清单** ——
      成功路径两侧几乎总是相同，差异全在拒绝分支上。
 
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）**：本条状态 **仍生效** ⇒ **维持**；
+> ⚠️ **但正文引的 Go 出处 `getselflogic.go:62-69` **指错文件**（E68 同型：「行号合法但指错文件」）⇒ 需订正。**
+> - **实测（2026-10-29 全 Go 仓枚举 `getselflogic.go`）**：**只有两份**，行数如下 ——
+>   | Go 文件 | 行数 | `:62-69` 是否存在 |
+>   |---|---|---|
+>   | `service/user/admin/api/internal/logic/admin/getselflogic.go`（**api 侧**） | **70** | ✅ **存在** ← **机器审计就是被它「救活」的** |
+>   | `service/user/admin/rpc/internal/logic/getselflogic.go`（**rpc 侧**） | **52** | ❌ **不存在**（`:62` 已越界） |
+> - ⇒ **本条要论证的是「Go 侧一道身份一致性校验都没有」，而那指的是 rpc 侧**（api 侧只是转发）
+>   ⇒ **正确的 Go 出处是 `service/user/admin/rpc/internal/logic/getselflogic.go:32-51`**
+>   （`GetSelf` 全函数：`FindOneAdminByUid` → 两个错误分支（`:37` NotFound / `:40` Internal）→ `:44-51` **总是**构造 `Admin: &pb.AdminInfo{Uid, Username, Email, ExtraInfo}`）
+>   ⇒ **「Go 侧没有 uid 一致性校验、没有『admin 为空』校验」这个事实本身成立** ✔（rpc 侧全函数内**零处**此类比较）。
+> - ⇒ **不改判的理由**：本条断言的是「**更严格的校验**这一类漂移仍会复现」，而 RAG 侧那两道检查**仍在**
+>   （`service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/IdentityResolver.java:100-103` 与 `:133-136`）
+>   ⇒ **状态维持「仍生效」**；**只订正 Go 出处的文件指向**（`:62-69` ⇒ rpc 侧 `:32-51`）。
+> - ⚠️ **顺带订正本块上方「证据」栏的 RAG 侧行号**（保留原值）：
+>   `IdentityResolver.java:100-103` ⇒ **现行 `:102-104`**（`if (uid <= 0) { throw new ErrInvalidClaimException(MSG_INVALID_CLAIM); }`）；
+>   `IdentityResolver.java:133-136` ⇒ **现行 `:132-137`**（`:132-134` = `if (admin == null || admin.equals(AdminInfo.getDefaultInstance()))`；
+>   `:135-137` = `if (admin.getUid() != uid) { throw new ErrIdentityMismatchException(MSG_IDENTITY_MISMATCH); }`）
+>   ⇒ **两道检查都仍在** ✔。
+> - ⚠️ **这正是本条自身的主题的同型风险**（「更严格的校验写得太自然 ⇒ 最难自查」）：
+>   **指针指错文件**与**行为漂移**一样会让人下错结论 ⇒ 引用跨文件同名符号时**必须带路径**。
+
 ---
 
 ## PIT-USERSADM-03 · 读 `json:",omitempty"` 时不能只看 tag 名：它对 struct 无效 · **状态：仍生效**

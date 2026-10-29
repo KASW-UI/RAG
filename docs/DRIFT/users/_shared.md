@@ -865,8 +865,48 @@ RAG `3047ms/4455ms`，量级一致、可复现，**但以复测值为准**：
   ⇒ **RAG 略强**（Go 只有单列 `uid`），属表达层增强，**不算漂移**。
 - `users_user_avatar_history`：Go `PRIMARY KEY (id)` ↔ RAG 同；RAG 另有 `history_id` 唯一索引，
   Go 侧同样是 tag 生成 ⇒ 等价。
+
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）· 🔴 上面那条「索引」描述**不完整**（不是状态问题，是**事实描述问题**）**：
+> 原文「**Go 只有单列 `uid`**」**不成立** —— Go 侧**还有**一条单列 `is_current` 索引 `idx_user_avatar_history_is_current`，
+> 而 **RAG 侧没有对应的一条** ⇒ ⇒ **「RAG 略强」只对 `uid` 这一列成立，对 `is_current` 那一列是 RAG 缺一条**。
+> - **实测（2026-10-29 真 PG 活体 · `python3 tools/difftest/check-ddl-static.py --domain users --indexes`）**：
+>   **仅 Go 有**的 **3 条非唯一普通索引**：
+>   | 索引 | 表 | 列 | Go 出处（tag 里的 `index`） |
+>   |---|---|---|---|
+>   | `idx_admin_invites_expires_at` | `admin_invite` | `expires_at` | `service/user/admin/rpc/internal/model/data_model.go:24`（`ExpiresAt time.Time \`gorm:"column:expires_at;index;not null"\``） |
+>   | `idx_admin_invites_inviter_uid` | `admin_invite` | `inviter_uid` | `service/user/admin/rpc/internal/model/data_model.go:23`（`InviterUid int64 \`gorm:"column:inviter_uid;index;not null"\``） |
+>   | `idx_user_avatar_history_is_current` | `users_user_avatar_history` | `is_current` | `service/user/user/rpc/internal/model/data_model.go:29`（`IsCurrent bool \`gorm:"column:is_current;index;not null;default:false"\``） |
+>
+>   **仅 RAG 有**的 **4 条非唯一普通索引**：`idx_users_user_uid` · `idx_admin_admin_uid` · `idx_admin_invite_code`
+>   · `idx_users_user_avatar_history_uid_is_current`（前三条与 Go 侧的**唯一约束/唯一索引**语义等价 ⇒ 不计失败）。
+> - ⇒ **两侧索引总数 Go 16 / RAG 17**，**实质差异 7 处**（3 缺 + 4 多）；与
+>   [`vs-common.md` §「残留 ②」](vs-common.md)（已把两条并列登记）与
+>   [`docs/DRIFT/_cross/ddl-type-divergences.md`](../_cross/ddl-type-divergences.md)（`AGENTS.md` §0 那条清单）**口径一致**。
+> - **定级（不变）**：三条都是**非唯一**普通索引 ⇒ **不改变任何写入语义、冲突行为、唯一性判定** ⇒ **不是 A 类**；
+>   属**查询计划差异（性能非行为）** ⇒ **C 类** ⇒ **阶段 2**。
+>   ⚠️ 但 `is_current` 那条**有业务语义**（查询形态 `WHERE uid=? AND is_current=true`）
+>   ⇒ RAG 侧现由**复合索引** `idx_users_user_avatar_history_uid_is_current` 覆盖 ⇒ **实际不慢**，只是索引构成与 Go 不同。
+> - ⇒ **本节不改判任何条目状态**（本节没有以索引为状态判据的条目）；**只订正上面那半句事实描述**，
+>   **权威的索引逐条登记在 [`vs-common.md`](vs-common.md)**（本节只做指针）。
 - **V-011 的可观察性**：两侧写入路径都**显式写该列** ⇒ 当前**不可观察**，
   故本轮**不修**（改了也没有守门能证明，且可能干扰 admin 侧的写入路径）。
+
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）**：原判「`UNRESOLVED-USERRPC-006` 关闭（真库对照）」⇒ **现行态 = ✅ 已关闭（维持）**；
+> ⚠️ **但本节引用的探针脚本 `ddl_compare.py` 已不在仓内 ⇒「复现入口」这一格已失效**。
+> - **实测（2026-10-29）**：`ddl_compare.py` 在 RAG 仓与 Go 真源仓**均不存在**（`find` 全仓 0 命中）；
+>   本文件该行未带路径前缀 ⇒ 后人会当成仓内资产去找 ⇒ **找不到**。
+>   ⚠️ 同一脚本名在 [`user/rpc.md`](user/rpc.md) 的探针清单里被标为 **`/tmp/userprobe/` 下的一组一次性脚本**
+>   ⇒ 与本节「对两个真库跑」一致地指向 **`/tmp` 的一次性探针** ⇒ **`/tmp` 被清 ⇒ 复现入口没了**。
+> - **仓内现存的等价工具**：`tools/difftest/check-ddl-static.py`（AGENTS.md §7.2 已登记：「DDL 列级对照（类型/可空性/DEFAULT/索引/触发器）· 9 域 · 源码↔活库」）
+>   ⇒ **要复跑请用它**，不要找 `ddl_compare.py`。
+> - **表格里的结论逐条复核（源码侧，2026-10-29 逐行核过）**：
+>   | 表内项 | 复核结果 |
+>   |---|---|
+>   | `users.status` 可空性 | ✅ 仍成立：RAG `service/users/users-common/src/main/resources/db/01_create_user.sql:39` = `status      BIGINT NOT NULL DEFAULT 0,`；Go `service/user/user/rpc/internal/model/data_model.go:11` = `Status int64 \`gorm:"column:status;default:0"\``（**无 `not null`** ⇒ 可空） |
+>   | `users.extra_info` 类型 | ✅ 仍成立：RAG `01_create_user.sql:41` = `extra_info  TEXT,`；Go `data_model.go:13` = `ExtraInfo map[string]string \`gorm:"column:extra_info;serializer:json"\``（⇒ `serializer:json` ⇒ GORM 强制 `String` ⇒ `text`） |
+>   | `create_time`/`update_time` 的 DEFAULT | ✅ 仍成立：RAG `01_create_user.sql:42-43` = `TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP`（×2）；Go `data_model.go:14-15` 只有 `autoCreateTime`/`autoUpdateTime`（**无 `default`**）⇒ 差异仍在 ⇒ **V-011 / `SD-2026-10-25-CAND-16` 仍然有效** |
+> - **不改判的理由**：本节要断言的是「两侧 DDL 的逐列对照结论」，而该结论**逐条仍与当前源码一致**（上表）⇒ 状态维持 ✅；
+>   **只有「用什么脚本复跑」这一格需要改指向**。
 
 ### 3. 🔴 关闭 `DRIFT-USERRPC-V-005`（上一轮结论**被证伪**）
 
@@ -883,6 +923,19 @@ RAG `3047ms/4455ms`，量级一致、可复现，**但以复测值为准**：
 `gorm.io/gorm@v1.31.1/callbacks/update.go:235-252` 会**无条件**把 `UpdateTime`（autoUpdateTime）放进 SET，
 RAG 曾用 `if (!any) return 0;` 把它挡掉了。修复后双侧实测：空 body / `extra_info={}` / 改 email
 **三种情况两侧 `update_time` 都推进**。
+
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）**：原判「🔴 关闭 `DRIFT-USERRPC-V-005`（结论被证伪）」⇒ **现行态 = ✅ 关闭（维持）**。
+> - **被描述的行为是否还在**：**结论仍成立** —— RAG 侧
+>   `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/mapper/UserAvatarHistoryMapper.java:114`
+>   的 INSERT 绑的是 `#{createTime}, #{updateTime}`（**应用侧时钟**），
+>   `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/mapper/UserMapper.java:167`
+>   `wrapper.setSql("update_time = CURRENT_TIMESTAMP")` **无条件**进 SET、
+>   且 `:133` 的 `default int updateUserById(...)` **没有** `if (!any) return 0;` 早退
+>   ⇒ **「Go 会写 `extra_info`、RAG 不写」这半边与「`update_time` 恒推进」这半边都仍与 Go 同形**。
+> - **Go 侧未变**：`service/user/user/rpc/internal/logic/updateuserlogic.go:58-60`
+>   `if in.ExtraInfo != nil { toUpdate.ExtraInfo = in.ExtraInfo }`（**未漂**）。
+> - ⚠️ **一条残留（不影响本条状态）**：`gorm.io/gorm@v1.31.1/callbacks/update.go:235-252` 这个指针指向
+>   **go module cache 里的第三方源码**（本机 `~/go/pkg/mod`）⇒ **仓内不可查、随依赖版本漂移** ⇒ 读它要带版本号。
 
 ### 4. `users/user` 半边本轮修掉的全部漂移
 
@@ -1345,3 +1398,22 @@ RAG 侧 > 500ms 的步骤（**实测**）：
   ⇒ 这两条数据**同机同时**，⇒ **量化形态本身**是同机可比的；**跨负载**的只有「触发与否」那部分。
 * ⚠️ **不属于**本条的：上一轮遗留的「RAG 的 `user.register` 实际没落库」—— **已证伪**：两侧各恰好 1 行、`extra_info` 逐字节相同
   （证据：`tools/api-full-parity-probe/users/check_register_landed.py` + 同目录 README「register 落库对照」节）。
+
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）**：原判 **🟡 延迟形态差 · P3 · D 类** ⇒ **现行态 = 🟡 维持（不变）**。
+> - **被描述的机制是否还在**：**仍在** ——
+>   `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:416-419`
+>   仍是 `long sliceMs = Math.max(1L, Math.min(GoStyleClientDisconnectProbe.probeIntervalMillis(), …));`
+>   ＋ `workerDone = doneLatch.await(sliceMs, TimeUnit.MILLISECONDS);`；
+>   `service/common/src/main/java/com/rag/common/observability/GoStyleClientDisconnectProbe.java:187`
+>   仍是 `public static final long DEFAULT_PROBE_INTERVAL_MILLIS = 500L;` ⇒ **「500ms 切片等待」这一机制仍在** ⇒ 量化形态的成因仍在。
+> - **指针订正（保留原值）**：本节写 `HttpMiddleware.java:415-419` ⇒ **现行 `:416-419`**（`:415` 现为上一行的开括号/语句起始，差 1 行）。
+> - **复现入口逐条核实（2026-10-29）**：
+>   | 引用的资产 | 现状 |
+>   |---|---|
+>   | `tools/api-full-parity-probe/users/run.sh` | ✅ **存在**（探针脚本，已落仓） |
+>   | `tools/api-full-parity-probe/users/check_register_landed.py` | ✅ **存在**（见 §5 最后一条） |
+>   | `tools/difftest/exp-b1-timeout-cancel.sh` | ✅ **存在** |
+> - **不改判的理由**：本条断言的是「**量化形态的成因（500ms 切片等待）仍在**」，
+>   而该成因**逐行仍在共享层代码里**（`HttpMiddleware` + `GoStyleClientDisconnectProbe`）；
+>   至于「空载复跑是否 `unexpected=0`」—— 本轮**未复跑**（需起两套真栈，代价高）
+>   ⇒ ⇒ **该一格维持「未实测」，不写成已解除**（与本节 §4「怎么解除」的原文口径一致）。

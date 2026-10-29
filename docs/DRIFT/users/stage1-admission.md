@@ -120,6 +120,21 @@ admin-api (HTTP :8889)   ──gRPC plaintext──▶  admin-rpc (:8081)  ─�
 | 10 | 阶段 2 的测试场景和通过标准 | 场景：9 个 rpc 模块在**不设** `POSTGRES_PASSWORD` 时**全部启动失败并给出明确的配置缺失错误**（不是 SQL 认证错误）；通过标准 = 缺 env 时的失败信息指向「缺配置」而非「口令错」 |
 | 11 | 当前证据及剩余证据缺口 | **证据**：`grep` 逐文件枚举 9 处（排除 `target/` 副本，见 §9 复现）；`go-zero@v1.10.2/core/conf/config.go:63`；`tools/difftest/run.sh:196` 导出 `POSTGRES_PASSWORD=difftest` ⇒ **装置不依赖 fallback**。**缺口**：取消 fallback 的跨域改动不在 G1 写权面 |
 
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）**：原判 **🟡 B 类** ⇒ **现行态 = 🟡 维持（本条的「未闭环」半边仍在）**；
+> ⚠️ **但第 4 / 第 5 行的描述已被 2026-10-29 R4 轮的落码作废 ⇒ 属陈旧快照**。
+> - **实测（2026-10-29，全仓 grep 非 target 副本）**：**9 个 rpc 模块现已全部**是 `${POSTGRES_PASSWORD:password}`，**共 10 处**：
+>   `like-rpc:20` · `comment-rpc:53` · `follow-rpc:27` · `message-rpc:29` · `favorite-rpc:55` ·
+>   `users/admin/admin-rpc:21` · `users/user/user-rpc:24` · `task-rpc:16` · `article-rpc:20` 与 `article-rpc:171`（**该模块 2 处**）
+>   ⇒ **「`Sea-TryGo` ×2 vs `password` ×7」这个「默认值分裂」已不存在** ⇒ 第 4 / 第 5 行写的是**修复前**的形态。
+> - **仍然成立的半边（⇒ 所以本条维持 🟡 而不是改判 ✅）**：**fallback 本身没取消** ——
+>   9 个模块**仍然**写的是 `${POSTGRES_PASSWORD:password}` ⇒ **未设 env 时静默用硬编码口令 `password`**
+>   （与 Go 的 `os.ExpandEnv` 展开成空串 ⇒ fail-fast 相反）⇒ **「失败时机」这半边差异仍在**。
+> - ⇒ **本条现状应读作**：「**默认值分裂已消除（域内自修已完成）** ＋ **fallback 未取消（跨域，属阶段 2）」**；
+>   修复动作已记录在本文件 **§4.1 `T2`**（`application.yaml:24` / `admin-rpc application.yml:21` 各 1 行）。
+> - ⚠️ **复算入口**（机器可复算，不依赖本条的文字）：
+>   `grep -rn "POSTGRES_PASSWORD:" --include="*.yml" --include="*.yaml" service/ | grep -v "/target/"`
+>   ⇒ **应得 10 行、且全部为 `${POSTGRES_PASSWORD:password}`**（2026-10-29 实测一致）。
+
 ### `S1-USERS-003` ✅ **B 类（已闭合）** · `.env` 不在 `.gitignore` ⇒ 照说明做会把密钥提交进仓 —— **2026-10-29 订正：`.gitignore` 已实有 `.env` 规则、`.env.example` 已入库 ⇒ 本条已闭环**
 
 | # | 项 | 内容 |
@@ -167,6 +182,17 @@ admin-api (HTTP :8889)   ──gRPC plaintext──▶  admin-rpc (:8081)  ─�
 | 9 | 阶段 2 的恢复或替换方案 | 域内 1 行改完（`${FOLLOW_RPC_PORT:8082}`）⇒ 本轮即做（T3）；阶段 2 可把 6 个组件的端口**统一**为可覆盖（`users`/`admin` 侧也补） |
 | 10 | 阶段 2 的测试场景和通过标准 | 场景：`FOLLOW_RPC_PORT=18082` 启动 ⇒ Nacos 注册地址**同步**为 18082 且 `follow-api` 能发现；通过标准 = 注册地址与监听端口一致且链路通 |
 | 11 | 当前证据及剩余证据缺口 | **证据**：`application.yml:103` 硬编码；`lsof -nP -iTCP:8082 -sTCP:LISTEN` ⇒ PID 9391 = `python -m http.server 8082`（已运行 34 天）；`follow-api` 的 `${FOLLOW_API_PORT:8891}` 先例。**缺口**：注册地址是否随 env 端口同步，待 T3 落码后真启动实测 |
+
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）· `S1-USERS-001` / `-003` / `-004` / `-005` 四条一并核过**
+> （`S1-USERS-002` 另见上一块的独立订正块）。
+> | 条目 | 原判 | 现行态 | 2026-10-29 实测依据（两侧/两侧或源码+活体） |
+> |---|---|---|---|
+> | `S1-USERS-001` | 🟡 A 类（部分闭合） | 🟡 **维持** | README.md **9815 字节** ✓；`.env.example` **6626 字节**且**已入库**（`git ls-files \| grep '^\.env'` = **1**，就是 `.env.example`）✓；`.gitignore:45-48` 实有 `.env` / `.env.*` / `!.env.example` 三条规则 ✓ ⇒ **「三处陈旧事实已被推翻」这半边成立**；**残留**仍是 `Infrastructure.md` 里的 `api-gateway/` 与 `sea_user` 两处 ⇒ **A 类未闭合** |
+> | `S1-USERS-003` | ✅ B 类（已闭合） | ✅ **维持** | 同上三行 `.gitignore` 规则 + `.env.example` 已入库 ⇒ **「照说明做会把密钥提交进仓」这一风险确已消除** ✓ |
+> | `S1-USERS-004` | 🟡 B 类 | 🟡 **维持** | `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/mapper/UserAvatarHistoryMapper.java:146` `default UserAvatarHistoryEntity createAvatarHistory(` ＋ `:216` `default UserAvatarHistoryEntity selectAvatarHistory(...)` ⇒ **`@Transactional` 仍挂在 mapper 接口的 `default` 方法上**（**必须经 Spring 代理**才生效）⇒ **本条描述的形状仍在** ⇒ 维持 🟡 |
+> | `S1-USERS-005` | ✅ B 类（已闭合） | ✅ **维持** | `service/follow/follow-rpc/src/main/resources/application.yml:143` `port: ${FOLLOW_RPC_PORT:8082}` ⇒ **已可 env 覆盖** ✓（`:131` 是 `${FOLLOW_RPC_MANAGEMENT_PORT:16065}`，不是本条对象） |
+> - **不改判的理由**：四条断言的都是「**某一个具体事实还在不在**」，逐条实测后**全部与台账所写一致** ⇒ 状态全部维持。
+> - ⚠️ **指针漂移一处**：`S1-USERS-004` 第 4 行写 `UserAvatarHistoryMapper.java:118` / `:174` ⇒ **现行 `:146` / `:216`**（`:118` / `:174` 现是 javadoc）。
 
 ---
 

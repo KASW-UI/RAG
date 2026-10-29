@@ -9,7 +9,7 @@
 
 ---
 
-## SD-USERAPI-001@users（2026-10-23 用户签字）—— 未捕获异常的 500 响应**带完整 envelope**，不复刻 Go 的空 body
+## SD-USERAPI-001@users（2026-10-23 用户签字）—— 未捕获异常的 500 响应**带完整 envelope**，不复刻 Go 的空 body ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > **2026-10-29 重核（台账对齐轮）**：
 > - **别名**：`SD-USERAPI-001@users`（域内唯一别名）。**撞号检查**：本编号在本域**只出现于本文件**（标题 + 守门表引用）⇒ **无同域撞号**；
@@ -103,7 +103,7 @@ func RecoverHandler(next http.Handler) http.Handler {
 4. 在本文件追加一条「撤销记录」，保留历史。
 ---
 
-## SD-USERAPI-002@users（2026-10-24 用户签字）—— 接受「RAG 的观测面比 Go 大」：401 计入 access log / span / HTTP 指标
+## SD-USERAPI-002@users（2026-10-24 用户签字）—— 接受「RAG 的观测面比 Go 大」：401 计入 access log / span / HTTP 指标 ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > **2026-10-29 重核（台账对齐轮）**：
 > - **别名**：`SD-USERAPI-002@users`（域内唯一别名）。**撞号检查**：本编号在本域**只出现于本文件** ⇒ **无同域撞号**。
@@ -124,6 +124,45 @@ func RecoverHandler(next http.Handler) http.Handler {
 > - ⚠️ **本条的「适用范围前提」仍成立**：观测面在 DispatcherServlet **之外**、鉴权在**之内** ⇒
 >   「若有人把 `JwtAuthInterceptor` 改成 Filter（或把 `HttpMiddlewareFilter` 的 order 挪到 DispatcherServlet 之后），
 >   本条的差异存在前提就变了」——2026-10-29 复核：**两处形态都未变** ⇒ 前提成立。
+
+> ⚠️ **2026-10-29 真实性复核（台账结论 ↔ 代码）**：原判 **✅ 仍成立（2026-10-24 用户签字）** ⇒ **现行态 = ✅ 维持**；
+> ⚠️ **但「相对次序」这一侧需补一条事实：域内 `GoStyleJwtAuthFilter` 与共享层 `GoStyleCpuSheddingFilter` 的 `@Order` 数值相同（并列 `+6`）。**
+> - **被签字描述的结构前提是否还在**：**仍在** ⇒ **签字有效**。逐条实测（2026-10-29）：
+>   `service/common/src/main/java/com/rag/common/spring/HttpMiddlewareFilter.java:40-41`
+>   （`:40` `@Order(Ordered.HIGHEST_PRECEDENCE + 7)` ＋ `:41` `public class HttpMiddlewareFilter implements Filter`
+>   ⇒ **Servlet Filter ⇒ 在 DispatcherServlet 之外**）·
+>   `service/users/user/user-api/src/main/java/com/rag/users/user/api/interceptor/JwtAuthInterceptor.java:87`
+>   （`implements HandlerInterceptor` ⇒ **在 DispatcherServlet 之内**）·
+>   `service/users/user/user-api/src/main/java/com/rag/users/user/api/config/WebMvcConfig.java:56-57`
+>   （`:56` `public void addInterceptors(InterceptorRegistry registry) {` · `:57` `registry.addInterceptor(jwtAuthInterceptor)`）
+>   ⇒ **「观测面在外、鉴权在内」这一相对关系未变** ✔。
+> - **共享层 Filter 链的现行全量实测**（2026-10-29 逐个 `grep "@Order(" service/common/src/main/java/`）：
+>   | `@Order` | 类 | 出处 |
+>   |---|---|---|
+>   | `+2` | `GoStylePathNormalizingFilter` | `service/common/.../http/GoStylePathNormalizingFilter.java:70` |
+>   | `+3` | `GoStyleTraceparentFilter` | `service/common/.../http/GoStyleTraceparentFilter.java:190` |
+>   | `+4` | `GoStyleMaxConnsFilter` | `service/common/.../protection/GoStyleMaxConnsFilter.java:96` |
+>   | `+5` | `GoStyleBreakerFilter` | `service/common/.../protection/GoStyleBreakerFilter.java:87` |
+>   | **`+6`** | **`GoStyleCpuSheddingFilter`** | `service/common/.../protection/GoStyleCpuSheddingFilter.java:63` |
+>   | **`+6`（并列）** | **`GoStyleJwtAuthFilter`（本域 · user-api）** | `service/users/user/user-api/.../auth/GoStyleJwtAuthFilter.java:92` |
+>   | `+7` | `HttpMiddlewareFilter`（3s 预算所在层） | `service/common/.../spring/HttpMiddlewareFilter.java:40` |
+>   | `+8` | `GoStyleMaxBytesFilter` | `service/common/.../protection/GoStyleMaxBytesFilter.java:83` |
+>   | `LOWEST_PRECEDENCE` | `GoStyleTomcatParameterLimitCustomizer` | `service/common/.../http/GoStyleTomcatParameterLimitCustomizer.java:161` |
+>   ⇒ **与本条上方写的链（`+2 → +3 → +4 → +5 → +6 → +7 → +8`）逐项一致** ✔。
+>   （admin-api 侧同款：`service/users/admin/admin-api/.../auth/GoStyleJwtAuthFilter.java:89` = `+6` ⇒ **并列同样成立**。）
+> - ⚠️ **新记一条事实（不影响本条结论）**：`GoStyleCpuSheddingFilter`（`+6`）与 `GoStyleJwtAuthFilter`（`+6`）
+>   **`@Order` 数值相同** ⇒ 二者先后**不由 `@Order` 决定**（Spring 同值时按注册顺序兜底）⇒ **不可从数值推断「谁先谁后」**。
+>   ⚠️ 这**不影响**本条的前提：`JwtAuthFilter`（`+6`）与 `HttpMiddlewareFilter`（`+7`）**数值不同** ⇒
+>   验签层**确定**早于 3s 预算层 ⇒ **「3s 预算不覆盖验签」仍成立** ✔。
+> - ⚠️ **一处推断方向存疑 ⇒ 标【待核实】（不改判本条）**：
+>   [`docs/DRIFT/users/user/api.md`](../../../DRIFT/users/user/api.md) 的同条订正块里写
+>   「① **401 仍在观测面之内**（`+6 < +7`，与 CpuShedding 的相对次序无关）」——
+>   ⚠️ **按 Spring 的 Filter 排序语义，`+6 < +7` 意味着验签 Filter（`+6`）跑在观测 Filter（`+7`）**之前**
+>   ⇒ **它自己抛的 401 反而不在观测面之内**（该推断的方向与句子相反）。
+>   ⇒ ⚠️ **本块不重审「RAG 观测面比 Go 大」这一结论本身**（**签字内容**；且本条断言的是**结构前提**，该前提已核仍在）；
+>   ⇒ **只把这一格标为「待核实」** ⇒ 若后续要坐实「哪一类 401 被计入」，需**真栈实测**（本轮未做）。
+> - ⇒ **不改判的理由**：本条断言的是「**观测面在 DispatcherServlet 之外、鉴权在之内**」这一**结构前提**——
+>   该前提经三个落点逐条复核**仍成立** ⇒ **签字继续有效、无需销号**。
 
 | 项 | 值 |
 |---|---|
@@ -223,7 +262,7 @@ public class HttpMiddlewareFilter implements Filter {
 
 ---
 
-## SD-USERAPI-003@users（2026-10-24 用户签字）—— **JWT 验签失败的 401 保持完整 envelope**，不复刻 Go 的空 body
+## SD-USERAPI-003@users（2026-10-24 用户签字）—— **JWT 验签失败的 401 保持完整 envelope**，不复刻 Go 的空 body ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > **2026-10-29 重核（台账对齐轮）**：
 > - **别名**：`SD-USERAPI-003@users`（域内唯一别名）。**撞号检查**：本编号在本域**只出现于本文件** ⇒ **无同域撞号**。
