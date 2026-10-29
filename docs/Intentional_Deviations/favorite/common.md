@@ -20,7 +20,7 @@
 
 | ID | 结论 | 证据（核对日期 2026-10-29） |
 |---|---|---|
-| `DEV-FAV-COMMON-001` | ✅ **仍成立** | Go 侧仍返回 **nil**：`service/favorite/common/errmsg.go:104-106` 的 `GRPCError` = `status.Error(grpcCode, GetErrMsg(bizCode))`；grpc-go `status/status.go:58-60` `func Error(c codes.Code, msg string) error { return New(c, msg).Err() }` ⇒ `codes.OK` 时 `Err()` 返回 **nil** ⇒ 上游 `if err != nil` 不成立 ⇒ 「当成功」。RAG 侧仍返回**非 nil** 的 `StatusException`（grpc-java `Status#asException()` 对 OK 也返回对象）⇒ 调用方的 `err != null` **成立** ⇒ 「当失败」。⇒ 差异未变 |
+| `DEV-FAV-COMMON-001` | ✅ **仍成立** | Go 侧仍返回 **nil**：`service/favorite/common/errmsg.go:104-106` 的 `GRPCError` = `status.Error(grpcCode, GetErrMsg(bizCode))`；grpc-go `status/status.go:58-60` `func Error(c codes.Code, msg string) error { return New(c, msg).Err() }` ⇒ `codes.OK` 时 `Err()` 返回 **nil** ⇒ 上游 `if err != nil` 不成立 ⇒ 「当成功」。RAG 侧仍返回**非 nil** 的 `StatusException`（grpc-java `Status#asException()` 对 OK 也返回对象）⇒ 调用方的 `err != null` **成立** ⇒ 「当失败」。⇒ 差异未变<br>⚠️ **2026-10-30 真实性复核（favorite+hot lane）**：✅ **仍成立**（未改判）。两侧依据当场复核过：Go `service/favorite/common/errmsg.go:104-106`（`GRPCError` = `status.Error(...)`）· grpc-go `status/status.go:57-60`（注释明写「If the error is OK, returns nil」）· 核对日期 2026-10-30。 |
 | `DEV-FAV-COMMON-002` | ✅ **仍成立** | Go 侧仍**只认顶层**：`status.FromError(err)`（grpc-go）不沿 cause 链回溯 ⇒ 一个「被包过一层」的 `StatusException` 落 `ok=false` ⇒ `BizCodeFromError` 返回 **1015**。RAG 侧仍**刻意不回溯**：`service/favorite/favorite-common/src/main/java/com/rag/favorite/favorite/common/errmsg/FavoriteGrpcError.java:234-241`（`extractStatus` 只认 `StatusException` / `StatusRuntimeException` 两个具体类）⇒ 差异未变 |
 
 > ⚠️ **计数影响**：本域 **2 条全部仍成立** ⇒ **主线更新 `docs/Intentional_Deviations/_INDEX.md` 时本域无需减项**（本 lane 不写共享索引）。
