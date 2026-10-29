@@ -1,0 +1,46 @@
+# users 域双侧探针专用基建 —— 只起 postgres + redis，**刻意不起 etcd / Nacos / jaeger**。
+#
+# 为什么不需要 etcd：
+#   Go 侧 api 的 zrpc 客户端在 conf/go/*.yaml 里用 Endpoints 直连，
+#   go-zero v1.10.2 zrpc/config.go:91-95 RpcClientConf.BuildTarget() 对 Endpoints **短路**，
+#   不进 Etcd 分支；server 侧把 Etcd 整块删掉，zrpc/server.go:42 `if c.HasEtcd()` 不成立 ⇒ 不注册。
+# 为什么不需要 Nacos：
+#   RAG 侧用命令行参数把 grpc.client.*.address 覆盖成 static://127.0.0.1:<port>，绕开 discovery:///。
+#
+# ⚠️ **容器名与端口都做成可覆盖的**（并行 lane 必备）：
+#   别的 lane（r2like / r2probe / ddl-* / r4m-*）都在同时跑 ⇒ 固定名 + 固定端口
+#   会互相踩（实测踩过：容器名冲突 + `port is already allocated`）。
+#   本探针默认落在 **18211~18224** 段（与其它 lane 错开），且全部可用 env 覆盖。
+#
+# ⚠️ **卷是临时的**：`run.sh` 每轮开头 `down -v` ⇒ 库是**全新**的
+#   ⇒ 不用像 tools/difftest/reset-admin-fixtures.sh 那样复位 admin 夹具
+#   （那条脚本复位的是「admin.update 改了密码」+「admin.create 建了 dt_admin2」，
+#    在全新库里根本不存在）。
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ${UPPROBE_CONTAINER_PREFIX:-r4upprobe}-postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: difftest
+      POSTGRES_DB: go_db
+    ports:
+      - "127.0.0.1:${UPPROBE_PG_PORT:-18211}:5432"
+    volumes:
+      - ./initdb.sql:/docker-entrypoint-initdb.d/10-initdb.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d go_db"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${UPPROBE_CONTAINER_PREFIX:-r4upprobe}-redis
+    ports:
+      - "127.0.0.1:${UPPROBE_REDIS_PORT:-18212}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
