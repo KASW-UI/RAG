@@ -1156,3 +1156,119 @@ users 域与其它 9 个域**共用 `do-my-own-gh` 这条共享主干** ⇒ 各�
 （`admin` 域已把 33 处展开为完整路径；本域新增引用也一律写全路径）；
 ② **Go 侧 `file:line` 的行号正确性**（不只是「悬空」）—— 第 4 层只查「该行是否存在」，
 **不查「该行的内容是不是台账说的那件事」** ⇒ 这是 §3.3.1 的残余缺口，本域目前靠人工核。
+
+## 2026-10-29 · G1 阶段 1 · P0 #8（security）· users 域「去明文默认 JWT 密钥 ⇒ 缺变量/空串 ⇒ 启动失败」
+
+> **落点**：`service/users/{user/user-api,user/user-rpc,admin/admin-api,admin/admin-rpc}`
+> **性质**：**RAG 侧比 Go 更严** ⇒ 属「有意偏离」一侧（不是「抄错 Go」）⇒ 登记待签字。
+> **分支**：`align/r2-users-secret`（worktree `../RAG.worktrees/r2-users-secret`）。
+
+### 1. 问题（为什么要改）
+
+Go 侧把 user / admin 两把 JWT 密钥**明文写在 yaml 里**：
+
+| Go 出处 | 字段 | 形状 |
+|---|---|---|
+| `service/user/user/api/etc/usercenter.yaml:11` | `UserAuth.AccessSecret` | 36 字节 UUID |
+| `service/user/user/rpc/etc/user.yaml:34` | `UserAuth.AccessSecret` | 36 字节 UUID（与上一条同值） |
+| `service/user/admin/api/etc/admincenter.yaml:11` | `AdminAuth.AccessSecret` | 15 字节口令 |
+| `service/user/admin/rpc/etc/admin.yaml:28` | `AdminAuth.AccessSecret` | 15 字节口令（与上一条同值） |
+
+RAG 侧原本**照抄**成 yaml 的**默认值**（`${USER_JWT_SECRET:<明文>}` / `${ADMIN_JWT_SECRET:<明文>}`）
+⇒ ⇒ **那把密钥是公开在 git 里的常量** ⇒ ⇒ 任何拿到仓库的人都能伪造 user / admin token
+⇒ ⇒ P0 #8（token 伪造 / 越权）。
+
+⚠️ **消费点（谁真的用它签名/验签）**：
+
+| RAG 侧 | 角色 | Go 侧对应 |
+|---|---|---|
+| `service/users/user/user-api/.../service/UserLoginService.java:127` | **签发** user token | `service/user/user/api/internal/logic/user/loginlogic.go:71` |
+| `service/users/user/user-api/.../auth/JwtSignatureVerifier.java:67` | **验签** | `service/user/user/api/internal/handler/routes.go:73` |
+| `service/users/admin/admin-api/.../service/AdminLoginService.java:84` | **签发** admin token | `service/user/admin/api/internal/logic/admin/loginlogic.go:61` |
+| `service/users/admin/admin-api/.../auth/AdminJwtSignatureVerifier.java:64` | **验签** | `service/user/admin/api/internal/handler/routes.go:93` |
+| `service/users/user/user-rpc` | **只绑不消费**（Go 侧亦然：只消费 `AccessExpire`，`internal/logic/logoutlogic.go:36`） | `service/user/user/rpc/internal/config/config.go:20` |
+| `service/users/admin/admin-rpc` | **只绑不消费**（Go 侧亦然：只消费 `AccessExpire`，`internal/logic/logoutlogic.go:37`） | `service/user/admin/rpc/internal/config/config.go:16` |
+
+⇒ ⇒ **`user-api` / `admin-api` 既是签发方也是验签方** ⇒ 泄漏 = 可伪造任意 token。
+
+### 2. 落码（4 个模块，同一套四件套）
+
+| 模块 | yaml | 属性类 | test scope 配置 | 守门测试 |
+|---|---|---|---|---|
+| `user/user-api` | `src/main/resources/application.yml` ⇒ `user-api.user-auth.access-secret: ${USER_JWT_SECRET}` | `UserApiProperties#verifyAccessSecret` | `src/test/resources/application.properties` | `UserApiPropertiesSecretGuardTest` |
+| `user/user-rpc` | `src/main/resources/application.yaml` ⇒ `user-rpc.user-auth.access-secret: ${USER_JWT_SECRET}` | `UserRpcProperties#verifyAccessSecret` | 同上 | `UserRpcPropertiesSecretGuardTest` |
+| `admin/admin-api` | `src/main/resources/application.yml` ⇒ `admin-api.admin-auth.access-secret: ${ADMIN_JWT_SECRET}` | `AdminApiProperties#verifyAccessSecret` | 同上 | `AdminApiPropertiesSecretGuardTest` |
+| `admin/admin-rpc` | `src/main/resources/application.yml` ⇒ `admin-rpc.admin-auth.access-secret: ${ADMIN_JWT_SECRET}` | `AdminRpcProperties#verifyAccessSecret` | 同上 | `AdminRpcPropertiesSecretGuardTest` |
+
+- **零新增依赖**（只用 `jakarta.annotation.PostConstruct` ⇒ 不引 `spring-boot-starter-validation`）。
+- **绑定路径零改动**：yaml 的嵌套层级（`… → user-auth/admin-auth → access-secret`）与属性类字段结构
+  （`@NestedConfigurationProperty` 的 `UserAuth` / `AdminAuth`）**逐字保持** ⇒ 只改**值**。
+- **test scope 不进产物 jar** ⇒ 生产**拿不到**默认值 ⇒ 生产必须由环境变量提供。
+
+### 3. 🔴 判据为什么是「空 / 空白 / 仍是占位符」三条（**与参考实现 `45e0af4` 不同**）
+
+参考实现（`45e0af4` · article-api / comment-api / favorite-api）的判据只有 **null / 空串 / 全空白**。
+⚠️ **本轮实测发现：那条判据堵不住「变量没设」这条最主���的路** ——
+
+| 环节 | 框架实测口径（Spring Boot **4.0.8** / Spring Framework **7.0.x**） |
+|---|---|
+| 取值 | `SpringConfigurationPropertySource#getConfigurationProperty` → `getPropertySourceProperty` → `propertySource.getProperty(name)` ⇒ 拿到的是**原始标量**（此处 = `${USER_JWT_SECRET}`），**不在此处解析占位符** |
+| 解析 | `PropertySourcesPlaceholdersResolver` 的 `PropertyPlaceholderHelper(..., ignoreUnresolvablePlaceholders = **true**)` ⇒ ⇒ **解析不出来时占位符原样留下** |
+
+⇒ ⇒ **变量没设时绑上去的不是 `null`，而是字面量 `${USER_JWT_SECRET}`**
+⇒ ⇒ 「只判 null/空串」⇒ **属性非空、非空白** ⇒ **判据放行** ⇒ ⇒ 应用带着**公开在仓里的常量**当密钥正常起来
+⇒ ⇒ **「缺变量 ⇒ 启动失败」这条承诺是假的**。
+
+⇒ ⇒ 本轮四个模块的判据**额外加一条**：**值里仍含 `${` ⇒ 判失败**。
+
+🔴 **变异实测（user-api，2026-10-29）**：把「仍含 `${`」那条删掉 ⇒
+`guardRejectsUnresolvedPlaceholder` 与 `realYamlWithoutEnvVarFailsTheContext` **两条立刻变红**
+（后者报「上下文起来了」⇒ 证明只判 null/空串**确实会放行**）⇒ ⇒ 该条**不是冗余**。
+
+⚠️ **该缺陷同样存在于已合入的 `45e0af4`（article-api / comment-api / favorite-api）**
+⇒ ⇒ 那三个域的「去明文默认」**尚未真正 fail-closed** ⇒ **建议转派 G3 复核**（本 lane 无那三域写权）。
+
+### 4. 证据强度（**只声称实际跑过的**）
+
+| 结论 | 证据强度 | 证据 |
+|---|---|---|
+| 缺变量 ⇒ 启动失败 | **真 ApplicationContext 装配**（不是源码断言） | `realYamlWithoutEnvVarFailsTheContext`：读**真** yaml + 不给变量 ⇒ `hasFailed()` 且失败栈含 `access-secret` |
+| 空串 ⇒ 启动失败 | **真 ApplicationContext 装配** | `blankSecretFailsTheContext`：`withPropertyValues("…access-secret=")` ⇒ `hasFailed()` |
+| 正常密钥 ⇒ 正常启动 | **真 ApplicationContext 装配**（对照组） | `properSecretStartsTheContext`：`hasNotFailed()` 且值等于期望 |
+| yaml 嵌套路径没写错 | **读真 yaml** | `realYamlBindsSecretIntoNestedAuth`：断言**嵌套字段** `getUserAuth()/getAdminAuth().getAccessSecret()` 真拿到值 |
+| 判据本身有效 | **变异实测**（见 §3） | 删掉占位符那条 ⇒ 2 条变红 |
+| 全模块不回归 | **mvn 实跑** | 见 §5 |
+
+⚠️ **诚实边界**：本轮**没有**做「两侧同时跑」的 Go↔RAG 探针 —— 因为本条改的是**RAG 侧更严**的一侧
+（Go 侧仍写字面量）⇒ ⇒ **不存在「行为等价」命题** ⇒ ⇒ 属 §3.1 的「**有意偏离**」而非「对齐」。
+
+### 5. 测试实跑（2026-10-29）
+
+`mvn -o -B -pl <module> -am -DargLine=-Xmx2g test`
+
+| 模块 | Tests run | Failures | Errors | Skipped | BUILD | exit |
+|---|---|---|---|---|---|---|
+| `service/users/user/user-api` | **133** | 0 | 0 | 0 | SUCCESS | 0 |
+| `service/users/user/user-rpc` | **168** | 0 | 0 | 0 | SUCCESS | 0 |
+| `service/users/admin/admin-api` | **155** | 0 | 0 | 0 | SUCCESS | 0 |
+| `service/users/admin/admin-rpc` | **128** | 0 | 0 | 0 | SUCCESS | 0 |
+
+**合计 584 条 · 0 失败 · 0 错误 · 0 跳过 · 4 个模块 exit code 全为 0。**
+
+（每个模块含**新增 6 条**守门用例 ⇒ 改前基线分别为 127 / 162 / 149 / 122）
+
+### 6. 顺带落账的两件事
+
+1. **`admin-rpc` 的 `${ADMIN_DEFAULT_PASSWORD:123456}` 未动** ⇒ 那是「默认账号密码」，不是 JWT 密钥
+   ⇒ 属**另一个议题**（已登记在别处）⇒ 本轮**不扩范围**。
+2. **本仓已不再持有 users 域那两把密钥的明文**（`src/main/**` 零命中；实测 `grep` 退出码 1）
+   ⇒ ⚠️ **但 `src/test/**` 仍有**（4 个 test scope `application.properties` + 4 个守门测试类 + 既有测试夹具）
+   ⇒ ⇒ 那是 **test scope**（不进产物 jar）⇒ 属 `check-no-prod-secrets.py` 的 **W3** 条目
+   ⇒ ⇒ 后续若要彻底清掉 ⇒ 换成**等长夹具**（36 / 15 字节形状）并显式钉住长度。
+
+### 7. 机器守门现状（`tools/difftest/check-no-prod-secrets.py`）
+
+- 脚本**未改**（本 lane 无 `tools/` 写权）⇒ 实测仍 **✅ PASS**，豁免命中 **112 → 113**。
+- **没有任何一条白名单条目整体失效**（W1 / W2 仍被其它域命中）⇒ **无须删条目**。
+- ⚠️ 但 **users 域对 W1 / W2 的命中已归零**（明细见本 lane 的交接说明）⇒ ⇒ 若日后要「按域收窄白名单」，
+  users 域的 W1 / W2 部分**已可删**。

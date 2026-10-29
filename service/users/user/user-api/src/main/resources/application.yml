@@ -144,9 +144,24 @@ grpc:
 # ===== 4. 业务配置（对齐 Go 端 UserAuth.*）=====
 # 对应 Go: UserAuth.AccessSecret / UserAuth.AccessExpire
 # gRPC channel 目标由 devh starter 通过 grpc.client.user-rpc.address 装配（见上面 §3.5）
+#
+# 🔴 2026-10-29 · G1 阶段 1 · P0 #8：**默认明文值已去掉**（原为**带明文默认值**的 `${USER_JWT_SECRET}`；
+#    那个 36 字节 UUID 明文已从本仓清除 ⇒ 本仓不再持有那把密钥）
+#    ⇒ 理由：那把 UUID 是**写在仓里的公开密钥** ⇒ 谁都能用它伪造 JWT ⇒ 而本模块**既签发又验签**
+#      （`UserLoginService.java:127` 签发 / `JwtSignatureVerifier.java:67` 验签）
+#      ⇒ ⇒ 一旦部署时忘了覆盖 ⇒ **任何人都能签出任意 user token**（P0 #8 · token 伪造）。
+#    ⇒ 现在 **缺变量 ⇒ 启动失败**（Spring Boot 4 的 `SpringConfigurationPropertySource` 取**原始标量**
+#      ⇒ 占位符**解析不出来时原样留下** ⇒ 绑上去的是字面量 `${USER_JWT_SECRET}` ⇒
+#      ⇒ 由 `UserApiProperties#verifyAccessSecret` 的 @PostConstruct **判掉** ⇒ **启动失败**）；
+#      **变量存在但为空串 ⇒ 也启动失败**（同上：@PostConstruct 判空 ⇒ 抛 IllegalStateException）
+#      ⇒ ⇒ **两条路都 fail-closed**（不再有「悄悄用默认密钥起来」这条路径）。
+#    ⚠️ 本地开发 / 测试：本模块测试用 `src/test/resources/application.properties` 提供同名变量
+#      （值与测试里签发 token 用的常量一致）⇒ ⇒ **测试不依赖环境变量**。
+#    ⚠️ 部署侧：根级 `docker-compose.yaml` 已按 `USER_JWT_SECRET: ${USER_JWT_SECRET}`（**无默认**）注入
+#      ⇒ ⇒ 缺变量时 compose 侧就先报错 ⇒ 与本处的 fail-closed 是同一条路。
 user-api:
   user-auth:
-    access-secret: ${USER_JWT_SECRET:ae0536f9-6450-4606-8e13-5a19ed505da0}
+    access-secret: ${USER_JWT_SECRET}
     access-expire: ${USER_JWT_EXPIRE:2592000}    # 30 天，与 Go 端 etc/usercenter.yaml 一致
 
 # ===== 5. Metrics：暴露 /actuator/prometheus =====
