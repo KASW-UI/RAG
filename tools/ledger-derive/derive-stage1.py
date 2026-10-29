@@ -120,6 +120,11 @@ SELF_ARTIFACT_DIRS = ("docs/DRIFT/_cross/grading/",)
 # ── U5-O · 显式定级叠加层（人工本轮定级的落地处） ──────────────────────────
 GRADING_DIR = ROOT / "docs/DRIFT/_cross/grading"
 
+# ⚠️ **U5-O 保护字段** —— 这些字段一旦有「显式定级」，就**不许**被无定级的登记覆盖。
+#   依据见 `derive()` 合并段的注释：同一编号在**汇总文件**与**主文件**两处登记时，
+#   汇总文件那条日期更新就会把主文件的 U5-O 定级**静默覆盖**掉。
+OV_FIELDS = ("stage", "blocking", "prio", "gap", "_stage_src", "_closed", "basis")
+
 # ── U2 状态取值域（**按目录**限定） ───────────────────────────────────────
 STATUS_SETS = {
     "DRIFT": {
@@ -630,8 +635,17 @@ def load_grading_overlay() -> dict[str, dict]:
             has_rag = re.search(r"[\w./\-]+\.java:\d+", basis)
             if not (has_go and has_rag):
                 continue
+            # ⚠️ **结论三态单独抽字段** —— **不许靠全文搜**。
+            #   实测坑（2026-10-30）：依据列原被截断到 400 字符，而结论词在**末尾**
+            #   ⇒ 71 条定级里只有 9 条被判成「差异已消失」⇒ **静默漏判 22+ 条**。
+            #   ⇒ 判据 = 依据里的**唯一**三态词（实测 71/71 条都恰好命中一个）。
+            verdict = ""
+            _hits = [(t, basis.rfind(t)) for t in ("差异仍成立", "差异已消失", "无法证实")
+                     if t in basis]
+            if _hits:
+                verdict = max(_hits, key=lambda x: x[1])[0]
             rec = {"stage": stage, "prio": prio, "blocking": blocking,
-                   "basis": basis[:400], "date": date,
+                   "basis": basis[:2000], "verdict": verdict, "date": date,
                    "src": f"{rel}:{ln}"}
             old = out.get(ident)
             if old is None or (rec["date"], rec["src"]) > (old["date"], old["src"]):
@@ -1204,12 +1218,20 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
         #   ⇒ 但 **status 不改** —— 定级不改变事实状态（🔴 仍是 🔴，除非有人真的修）。
         ov = overlay.get(ident)
         ov_prio = ""
+        closed = False
         if ov:
             stage = ov["stage"]
             blocking = ov["blocking"]
             stage_src = f"{ov['src']}（U5-O 显式定级 · {ov['date'] or '无日期'}）"
             ov_prio = ov["prio"]
             rules.append("U5-O")
+            # ⚠️ **「差异已消失」= 已闭合 · 无待实现项** ⇒ 它**不属于任何阶段**。
+            #   实测（W1 轮）：16 条里 15 条是「台账还写 🔴 未闭合，但逐条回源后差异已不存在」。
+            #   ⇒ 若把它们按 D 类塞进「阶段 2 承接」清单 ⇒ **阶段二工作量被虚增**
+            #   ⇒ 那份清单会变成**假的待办**（同族教训：口径错位 ⇒ 数字最漂亮但内容是假的）。
+            if ov.get("verdict") == "差异已消失":
+                closed = True
+                rules.append("U2-4")
         # U5-0：**台账里已经写好的施工单行**（十一项表 / 阶段归属列表）⇒ **最高优先级**
         g = grading.get(ident)
         if g and not stage:
@@ -1320,7 +1342,9 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
             schedule = "未排期"
             rules.append("U8c")
         # U9
-        if evid.startswith("C"):
+        if closed:
+            gap = "已闭合 · 差异已消失 ⇒ 无待实现项"
+        elif evid.startswith("C"):
             gap = "无可复算指针 · 结论不可复算"
         elif evid.startswith("B") and status == "🔴 未闭合":
             gap = "静态取证 · 缺活体对拍"
@@ -1340,6 +1364,9 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
             "schedule": schedule, "gap": gap,
             "rules": ",".join(sorted(set(rules))),
             "title": e["title"].replace("\t", " ")[:160],
+            "_closed": closed,
+            "_ov": "U5-O" in rules,
+            "basis": (overlay.get(ident) or {}).get("basis", ""),
             "_excluded": e["excluded"] or "",
             "_date": _date,
             "_auth": _auth,
@@ -1378,12 +1405,24 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
                 for f in ("status", "evidence", "prio", "stage", "blocking",
                           "final_goal", "schedule", "gap", "_stage_src",
                           "_evidence_src", "rules"):
+                    # ⚠️ **U5-O 保护（2026-10-30）** —— **显式定级不被无定级的登记覆盖**。
+                    #   实测成因：同一编号常在**汇总文件**（如 `DRIFT/global/_README.md`）
+                    #   与**条目的主文件**两处登记；U5-O 只写在主文件那条 ⇒
+                    #   若汇总文件那条的核对日期更新 ⇒ 合并会把它覆盖回去
+                    #   ⇒ **人工定级静默失效**（数字变好看，内容全错）。
+                    if f in OV_FIELDS and merged[k].get("_ov") and not r.get("_ov"):
+                        continue
                     merged[k][f] = r[f]
+                merged[k]["_ov"] = merged[k].get("_ov", False) or r.get("_ov", False)
             if r["_date"] > merged[k]["_date"]:
                 for f in ("status", "evidence", "prio", "stage", "blocking",
                           "final_goal", "schedule", "gap", "_stage_src",
-                          "_evidence_src", "_date", "rules", "_auth"):
+                          "_evidence_src", "_date", "rules", "_auth", "_closed"):
+                    # ⚠️ 同上：U5-O 保护 —— 日期更新的**无定级**登记不得覆盖显式定级
+                    if f in OV_FIELDS and merged[k].get("_ov") and not r.get("_ov"):
+                        continue
                     merged[k][f] = r[f]
+                merged[k]["_ov"] = merged[k].get("_ov", False) or r.get("_ov", False)
             elif r["_date"] == merged[k]["_date"] and merged[k]["stage"] == "—" and r["stage"] != "—":
                 merged[k]["stage"] = r["stage"]
                 merged[k]["blocking"] = r["blocking"]
@@ -1391,6 +1430,29 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
                 merged[k]["final_goal"] = r["final_goal"]
                 merged[k]["rules"] = r["rules"]
     out = list(merged.values())
+    # ⚠️ **U5-O 第二阶段合并（2026-10-30）** —— **显式定级独立于「日期 / 权威度」生效**。
+    #   实测成因：同一编号常在**汇总文件**与**主文件**两处登记，**两条的核对日期不同**
+    #   ⇒ 第一阶段（取最新日期）会把**带 U5-O 的那一条整个挤掉**
+    #   ⇒ **人工定级静默失效**（实测：W1/W3/W5/W7 合计 71 条定级，
+    #      第一阶段之后只剩少数几条命中 ⇒ 「已闭合」数从应有的 ~30 掉到 9）。
+    #   ⇒ U5-O 是**本轮显式裁定**，日期必然最新 ⇒ 它**必须**独立于日期胜出。
+    #   ⇒ 若同编号有多条 U5-O ⇒ 取「日期最新 + 权威度最高」的那条。
+    ov_best: dict[str, dict] = {}
+    for r in rows:
+        if not r.get("_ov"):
+            continue
+        k = r["id"]
+        cur = ov_best.get(k)
+        if cur is None or (r["_date"], r["_auth"]) > (cur["_date"], cur["_auth"]):
+            ov_best[k] = r
+    for k, r in ov_best.items():
+        if k not in merged:
+            continue
+        for f in ("stage", "prio", "blocking", "gap", "_stage_src", "_closed", "final_goal", "basis"):
+            merged[k][f] = r[f]
+        merged[k]["rules"] = ",".join(sorted(set(merged[k]["rules"].split(","))
+                                            | set(r["rules"].split(","))))
+        merged[k]["_ov"] = True
     for r in out:
         r["source"] = ";".join(r.pop("_sources")[:3])
         r.pop("_date", None)
@@ -1409,7 +1471,7 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
 
 TSV_COLS = ["id", "dir", "domain", "source", "unit", "status", "evidence",
             "prio", "stage", "blocking", "final_goal", "schedule", "gap",
-            "rules", "title"]
+            "rules", "title", "basis"]
 
 STAGE_ORDER = {"A": 0, "B": 1, "C": 2, "D": 3, "—": 4, "N/A（不适用）": 5}
 PRIO_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
@@ -1438,7 +1500,7 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a("")
     a("> **本文件是「派生层」** —— 每个值都**从** `docs/DRIFT` / `docs/Intentional_Deviations` /")
     a("> `docs/Pitfalls` **投影**而来，**不重新裁定任何结论**（每个派生值都带 `rules` 规则号）。")
-    a("> **机器层** = [`stage1-derivation.tsv`](stage1-derivation.tsv)（全量问题项 × 15 列）")
+    a("> **机器层** = [`stage1-derivation.tsv`](stage1-derivation.tsv)（全量问题项 × 16 列）")
     a("> **生成器 + 守门** = [`tools/ledger-derive/derive-stage1.py`](../../../tools/ledger-derive/derive-stage1.py)")
     a("> （`--check` 模式：源台账改了而本层没重生成 ⇒ **EXIT=1**）")
     a("> **规范来源** = [`docs/twoStage.md`](../../twoStage.md) §10（11 字段 · P0-P3 × A-D）＋ §5.3（暂缓项 11 字段）")
@@ -1566,12 +1628,20 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a("> ⇒ **不是「没发现」，是「发现了但没进施工单」** —— 旧口径下它们**不可见**。")
     a("")
     g_open = [r for r in rows if r["status"] in open_states and r["schedule"] == "未排期"]
-    g_ab = [r for r in g_open if r["stage"] in ("A", "B")]
-    g_cd = [r for r in g_open if r["stage"] in ("C", "D")]
-    g_unstaged = [r for r in g_open if r["stage"] == "—"]
+    g_closed = [r for r in g_open if r.get("_closed")]
+    g_open_nc = [r for r in g_open if not r.get("_closed")]
+    g_ab = [r for r in g_open_nc if r["stage"] in ("A", "B")]
+    g_cd = [r for r in g_open_nc if r["stage"] in ("C", "D")]
+    g_unstaged = [r for r in g_open_nc if r["stage"] == "—"]
     a(f"**合计 {len(g_open)} 条** —— ① **A/B 类**（阶段 1 范围内）**{len(g_ab)}** 条")
     a(f"· ② C/D 类（**阶段 2 承接**，§5.3 暂缓项清单已登记）**{len(g_cd)}** 条")
     a(f"· ③ 未定级 **{len(g_unstaged)}** 条")
+    a(f"· ④ **已闭合**（逐条 Go 对照后「**差异已消失**」⇒ **无待实现项**）**{len(g_closed)}** 条")
+    a("")
+    a("> ⚠️ **第 ④ 档必须与 C/D 分开** —— 实测（W1/W5 轮）：台账里大量条目仍写 🔴 未闭合，")
+    a("> 但逐条回源后**差异早已不存在**（只是台账没销账）⇒ 它们**不是**「阶段 2 承接」，")
+    a("> 而是**已闭合、无待实现项** ⇒ 混进阶段二工作量清单会把那份清单变成**假待办**。")
+    a("> ⇒ 本档的处置 = **回写台账销账**（状态订正），**不进任何阶段的工作量**。")
     a("")
     a("### 4.1 ① A/B 类 · 开放且未排期（**真缺口 —— 阶段 1 范围内的漏排**）")
     a("")
@@ -1588,6 +1658,15 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a(f"> C/D 类 **{len(g_cd)}** 条另有去向（阶段 2 恢复方案已在各条台账的 §5.3 十一项表里）")
     a("> ⇒ **不计入阶段一判定**（`PhaseGoal-judge.md` §1.1 ⑥ 第 4 条）⇒ 不列。")
     a("")
+    a(f"### 4.4 ④ 已闭合（**逐条 Go 对照后差异已消失 · 无待实现项**）")
+    a("")
+    a("> **不是「阶段 2 承接」** —— 是台账**没销账**。处置 = **回写台账订正状态**。")
+    a("")
+    a("| 归属 | ID | 域 | 台账状态 | 源位置 |")
+    a("|---|---|---|---|---|")
+    for r in sort_rows(g_closed):
+        a(f"| {r['stage']} | `{r['id']}` | {r['domain']} | {r['status']} | `{r['source']}` |")
+    a("")
     a("### 4.2 ③ 未定级（**需人工定级才能进施工单**）")
     a("")
     a("> 派生层**不猜**归属 ⇒ 这一档必须人工定级。")
@@ -1598,7 +1677,7 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     for r in sort_rows(g_unstaged):
         a(f"| {r['prio']} | {r['evidence']} | `{r['id']}` | {r['domain']} | {r['status']} | `{r['source']}` |")
     a("")
-    a("### 4.3 同编号多态（**同一编号在多处登记、状态不一致**）")
+    a("### 4.5 同编号多态（**同一编号在多处登记、状态不一致**）")
     a("")
     a("> 这是派生层**刻意不替人做决定**的地方：同一编号在多个文件登记，状态可能不同。")
     a("> 合并口径 = **取最新核对日期的那条**（`PhaseGoal-judge.md` §1.5 L0）；")
@@ -1677,14 +1756,16 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a("")
     a(f"## 六、全量派生表（{len(rows)} 条问题项）")
     a("")
-    a("> 机读请用 [`stage1-derivation.tsv`](stage1-derivation.tsv)（同一次生成，15 列）。")
+    a("> 机读请用 [`stage1-derivation.tsv`](stage1-derivation.tsv)（同一次生成，16 列）。")
     a("")
-    a("| ID | 目录 | 域 | 状态 | 证据 | 优先级 | 归属 | 阻断 | 最终目标 | 排期 | 缺口 | 源位置 |")
-    a("|---|---|---|---|---|---|---|---|---|---|---|---|")
+    a("| ID | 目录 | 域 | 状态 | 证据 | 优先级 | 归属 | 阻断 | 最终目标 | 排期 | 缺口 | 源位置 | 依据（Go ↔ RAG） |")
+    a("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for r in sort_rows(rows):
+        _b = (r.get("basis") or "").replace("|", "／").replace("\n", " ")
+        _b = (_b[:150] + "…") if len(_b) > 151 else _b
         a(f"| `{r['id']}` | {r['dir'][:4]} | {r['domain']} | {r['status']} | {r['evidence']} | "
           f"{r['prio']} | {r['stage']} | {r['blocking']} | {r['final_goal']} | {r['schedule']} | "
-          f"{r['gap']} | `{r['source']}` |")
+          f"{r['gap']} | `{r['source']}` | {_b or '—'} |")
     a("")
     a("---")
     a("")
@@ -1776,9 +1857,10 @@ def main() -> int:
     stats["n_conflict"] = sum(1 for r in rows if r.get("_conflict", 1) > 1)
     _op = ("🔴 未闭合", "仍生效", "⏳ 未签字")
     stats["n_gap_ab"] = sum(1 for r in rows if r["status"] in _op and r["schedule"] == "未排期"
-                             and r["stage"] in ("A", "B"))
+                             and r["stage"] in ("A", "B") and not r.get("_closed"))
     stats["n_gap_cd"] = sum(1 for r in rows if r["status"] in _op and r["schedule"] == "未排期"
-                             and r["stage"] in ("C", "D"))
+                             and r["stage"] in ("C", "D") and not r.get("_closed"))
+    stats["n_closed"] = sum(1 for r in rows if r.get("_closed"))
     stats["n_overlay"] = len(overlay)
     stats["n_overlay_used"] = sum(1 for r in rows if "U5-O" in r["rules"])
 
@@ -1798,6 +1880,7 @@ def main() -> int:
     print(f"  同编号状态冲突          {stats['n_conflict']:5d}")
     print(f"  真缺口 A/B 类未排期     {stats['n_gap_ab']:5d}   ← 阶段一范围内的漏排")
     print(f"  真缺口 C/D 类未排期     {stats['n_gap_cd']:5d}   （阶段 2 承接，不计阶段一）")
+    print(f"  已闭合（差异已消失）     {stats['n_closed']:5d}   ← 台账没销账 · 无待实现项")
     print(f"  U5-O 显式定级叠加层      {stats['n_overlay']:5d} 条登记 · "
           f"{stats['n_overlay_used']:5d} 条命中派生表")
 
