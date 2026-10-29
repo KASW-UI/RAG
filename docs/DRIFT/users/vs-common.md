@@ -5026,3 +5026,21 @@ wc -l /tmp/g1-gocite.txt        # ⇒ 819 行命中 / 177 个文件 / 展开后 
 ⚠️ **本节 ⑤ 留空 = 未获批准**（**留空不等于已批准**）；⇒ **本节 ⑤ 已由调度员于 2026-10-29 03:45 依据 Jason 的明示代填**（批准人 / 时间 / 范围见 ⑤ 行）⇒ **代填 ≠ 代批准**：批准来自 Jason 在本 lane 会话内的明示，调度员只负责落笔。
 
 **⑤ 批准记录：Jason · 2026-10-29 03:45 · 批准范围：本 lane 回执 ① 所列候选任务（修 §8.7 登记的 Go 出处真缺陷）—— §8.7 实测口径 = **23 条**（15 版本写错 + 5 越界 + 3 路径；回执 ① 的「21 条」已被本 lane ③ 第 1 条订正为 23）· ③ 第 4 项 `admin_invite.update_time` **已纳入**（Jason **2026-10-29 04:0x 追加拍板** ⇒ `admin-rpc` 的 `admin_invite.update_time` 不推进 ⇒ **域侧可自修**；与 `docs/Pitfalls/users/admin/rpc.md` **P-2** 同型：**user-rpc 修过、admin-rpc 漏修**）** · ⚠️ **2026-10-29 04:2x 实测结论：该项已闭合 ⇒ 本轮为它 0 行改动**（`AdminCreateAtomicService.java:201` 已有 `.setSql("update_time = CURRENT_TIMESTAMP")` ＋ `AdminRpcGoWireParityTest.createAdminAdvancesInviteUpdateTimeLikeGo()` 真 PG + 真 gRPC 前后对比断言 `after > before` ＋ **变异测精确红在目标用例** ⇒ 网有牙） ⇒ **「已批准但实测无需改动」是合法结果**，非漏做　← 由**调度员代填**（依据：Jason 于 2026-10-29 03:45 在**本 lane 会话内**明示「继续」· 消息 id `182057`；**回执人不得自批**· **代填 ≠ 代批准**）
+
+---
+
+<!-- @new 2026-10-29 · `align/r2-users-common` · Round-2 T-2.6（G-4）· **指针块**（正文在 users-common 自己的台账里） -->
+
+## 2026-10-29 指针：`users-common` 组件的活体证据**已落仓**（Round-2 T-2.6 / G-4）
+
+> ⚠️ **本节是「指针」而不是本 lane 的对账主体** —— 本文件是「users ↔ `service/common`」的
+> **跨层**台账；**`users-common` 组件自己的**台账是 [`common.md`](common.md)。
+
+| 项 | 结论 |
+|---|---|
+| 缺口 | `docs/PhaseGoal-judge.md` §九 **G-4**：「`users-common` 的 176 条双侧活体证据在 `/tmp/commonprobe/**`，**已消失** ⇒ 不可复算」 |
+| 本轮补的 | 探针**落进仓库** ⇒ `tools/api-full-parity-probe/users-common/{run.sh,mutate-parity.sh,expected.txt,compare.py,go/,java/,README.md}` |
+| 实跑 | `bash tools/api-full-parity-probe/users-common/run.sh` ⇒ **EXIT=0**（218 条两侧逐字节相同 · 25 条单侧专属 · 17 条已登记不同）<br>`bash tools/api-full-parity-probe/users-common/mutate-parity.sh` ⇒ **EXIT=0**（M1~M4 各**精确**转红 + 还原后转绿） |
+| 证据强度 | **L4 双侧活体** ＋ 🆕 **可复算**（原 176 条的载体已消失 ⇒ 只能读作「声明」） |
+| 新抓到的一条 | 🔴 **`DRIFT-USERSCOMMON-006`**：`BearerTokenExtractor.tokenForSignatureVerification("Bearer ")` 差一（Go 剥成空串 / RAG 不剥）⇒ **潜伏 · wire 不可观察** ⇒ **共享层写权归 G4** ⇒ 只登记不落码 |
+| 逐条证据 | ⇒ [`common.md` 的「2026-10-29 第六轮」](common.md) |
