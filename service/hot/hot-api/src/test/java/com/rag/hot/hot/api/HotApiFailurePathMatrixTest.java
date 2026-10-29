@@ -244,7 +244,7 @@ class HotApiFailurePathMatrixTest {
     void int32OverflowYieldsEmptyPage() throws Exception {
         stubHappyPath();
 
-        // Go: getHotArticlesLogic.go:196 `start := int((page - 1) * pageSize)`
+        // Go: getHotArticlesLogic.go:197 `start := int((page - 1) * pageSize)`
         //   ⇒ (1000000-1)*50 在 int32 里溢出成负 ⇒ start<0 ⇒ 返回 [0,0] ⇒ 空页
         HttpResponse<String> r = get("/hot/v1/articles?page=1000000&page_size=50");
 

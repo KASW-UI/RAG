@@ -212,7 +212,7 @@
 |---|---|---|---|
 | **认证（零鉴权）** | `api/internal/handler/routes.go:16-25`（`AddRoutes` **只有** `WithPrefix`，**没有** `WithJwt` / `WithCors` / `WithMaxBytes`） | 无 token / 乱 token ⇒ **进业务**（**不得 401/403**） | 2 |
 | **参数校验** | `getHotArticlesHandler.go:18-20`（`httpx.Parse` 失败 ⇒ `httpx.ErrorCtx`）＋ `hotcenter.go:53-66`（**注册了** `SetErrorHandler`） | `page=abc` / `page_size=abc` ⇒ **HTTP 200 + `{code:5001,msg:"internal server error"}`**（**不是 400**）＋ **RPC 完全未被调用** | 3 |
-| **边界值** | `getHotArticlesLogic.go:172-190`（`normalizePagination`）· `:196`（`paginate` 的 **int32 乘法**） | `page≤0` ⇒ 回落 **1**；`page_size≤0` ⇒ 回落 **20**；`page_size>50` ⇒ **夹取 50**；`page=1000000` ⇒ **int32 溢出 ⇒ 空页（不是错误）**；同名多值 ⇒ **取第一个**（**不是 400**） | 4 + 1 + 1 + 1 + 1 |
+| **边界值** | `getHotArticlesLogic.go:172-190`（`normalizePagination`）· `:197`（`paginate` 的 **int32 乘法**） | `page≤0` ⇒ 回落 **1**；`page_size≤0` ⇒ 回落 **20**；`page_size>50` ⇒ **夹取 50**；`page=1000000` ⇒ **int32 溢出 ⇒ 空页（不是错误）**；同名多值 ⇒ **取第一个**（**不是 400**） | 4 + 1 + 1 + 1 + 1 |
 | **下游 fatal** | `getHotArticlesLogic.go:65-69`（rpc 出错）· `:70-75`（`hotResp == nil`） | 两条都是 **fatal** ⇒ **200 + `{code:5001}`** | 2 |
 | **下游 best-effort** | `getHotArticlesLogic.go:137-142`（RPC 出错 ⇒ skip）· `:143-147`（文章缺失 ⇒ skip）· `:150-154`（未发布 ⇒ skip）· `:127-130`（空 `article_id` ⇒ skip） | **只跳过该条**，其余照常返回 ⇒ **200 + `{code:200}`**，`total` 相应减少（**不得**整包 5001） | 3 |
 | **路由层** | `rest/router/patrouter.go:73`（未注册路径）· `:79-82`（方法不匹配） | 404 ⇒ **`404 page not found\n` + text/plain + nosniff**；405 ⇒ **裸状态码 + `Allow: GET` + 空 body + 无 Content-Type** | 2 |
