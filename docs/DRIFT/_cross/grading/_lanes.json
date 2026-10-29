@@ -1,0 +1,1728 @@
+{
+ "W1": {
+  "轮": "第 1 轮 · W1~W7",
+  "条目": [
+   {
+    "id": "E9",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:340",
+    "title": "| **E9** | 🔴 **T-6 的实现缺陷**：写的原始串**只在真 Tomcat 上**成立 ⇒ **MockMvc 路径**分叉 | `service/common`（`GoStyleJsonContentTypeAdvice`） | ✅ **第二十六轮已修**（改写**无空格**形态 = 各域自己 advi",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "E10",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:341",
+    "title": "| **E10** | 🔴 **守门自身的缺陷**：`LikeFactDispatchContractGateTest` 的调度器**句柄永远拿不到** ⇒ 跨用例泄漏 ⇒ 偶发红 | `service/like/like-rpc/src/test/**`（测试文件） | ✅ **第二十六轮已修**（改用 `Dispa",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "E18",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:358",
+    "title": "| **E18** | 🔴 **整合者修的两处跨 lane 守门缺陷** | 7 份 slow 轴守门 | ✅ **第二十七轮整合阶段已修** ⇒ ① **慢轴守门缺预热** ⇒ 绿是**执行顺序的副产品** ② **慢轴守门不断言前提成立** ⇒ 将来会以「找不到 span」变红 ⇒ 连带 **自曝错账 #4**（O",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "E20",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:368",
+    "title": "| **E20** | 🔴 **N6**：`discovery://<name>` 两斜杠 ⇒ devh 要求 `path` 长度 > 1 ⇒ **真 fat jar 起不来**（连 Flyway 都跑不到） | 7 个 rpc 模块的 `application.yml` | ✅ **已修**（L12 修 5 处 + ",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "E22",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:370",
+    "title": "| **E22** | 🔴 **N8**：`task-rpc` / `hot-rpc` 的 jar **没有 `Main-Class`** | 2 个 `pom.xml` | ✅ **已修**（L13 + L14）⇒ 🔴 **L11 漏报了 `hot-rpc`**（逐个解包 10 个 rpc 才看出来）⇒ **根因 =",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "E23",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:371",
+    "title": "| **E23** | 🔴 **守门缺口①**：`check-jar-executable.sh` 只扫 `*-api` ⇒ **10 个 rpc 模块的产物可执行性从来没被守门查过** | `tools/difftest/check-jar-executable.sh` | ✅ **已闭合**（L15）⇒ 枚举 10",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 绿(0)"
+   },
+   {
+    "id": "E24",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:372",
+    "title": "| **E24** | 🔴 **守门缺口②**：`check-grpc-runtime-classpath.py` 扫到 `target/classes` ⇒ 同一违规算两遍 ⇒ **门禁恒红**（实测 `EXIT=1`，而源码树只有 9 处违规） | `tools/difftest/check-grpc-runtim",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E25",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:373",
+    "title": "| **E25** | 🔴 **盘点口径漏了第五个来源** | `global/_README.md` §七之二 | ✅ **已订正** ⇒ 口径 = ① 四桶（域内）＋ ② 各域台账的域外交接段 ⇒ 连带订正：第 27 轮的 N6/N7 是**重发现**（follow 域 2026-10-24 已写明并点名同样 5 ",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "E26",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:374",
+    "title": "| **E26** | 🔴 **整合者修的守门缺陷**：`HotRpcJarExecutableWiringTest` 的一条断言**没剥 XML 注释** ⇒ 而 pom 的注释里就写着那个字符串 ⇒ **M1 变异时它居然是绿的** ⇒ 恒真 | `service/hot/hot-rpc/src/test/**` ",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "E30",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:378",
+    "title": "| **E30** | 🔴 **RPC 超时文案不对齐**（**第三十轮已修**） | `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` | ✅ **已修**（第三十轮 · `align/global` 持 `",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E31",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:379",
+    "title": "| **E31** | 🔴 **`DRIFT-FOLLOW-006` 未被 global 跟踪** | `follow-rpc` 指标出口（落点 = 全仓 rpc 层统一方案） | 🔴 5 个 `follow_rpc_*` 指标**无任何抓取出口**（Go 有 DevServer `/metrics`，RAG 的 fo",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "E32",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:380",
+    "title": "| **E32** | 🔵 **AGENTS.md §0 users 行的过期快照** | `AGENTS.md:20` | 🔴 原写「⚠️ admin-rpc `status=0L` 未修」⇒ ✅ **users/admin/rpc.md 已备好双侧活体对拍 + 独立 Go 探针**（GORM 造的是 `**int6",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E36",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:385",
+    "title": "| **E36** | 🔴 **C-1 边界**（E30 修完后剩下的差异） | `docs/Intentional_Deviations/common/_signed-deviations.md` C 类 C-1 | 🔴 **已登记 ⇒ 不得动** —— 修 E30 时守门抓出**更深一层**：RAG 的 `goSt",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E40",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:418",
+    "title": "| **E40** | 🔴 **第 1 层零去噪**（其它层 255+ 条去噪） | `tools/check-ledger-selfcheck.py` | ✅ **已修** —— 第 1 层新增 **N8~N13 六条**去噪规则：**N8** 含 `...` 的省略写法 · **N9** `service/<Nam",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E41",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:419",
+    "title": "| **E41** | 🔴 **第 4 层的输出**不可复现** | 同上 | ✅ **已修** —— 根因 = `for sf in srcs:` 遍历的是 **set** ⇒ Python **字符串 hash 每进程随机化** ⇒ 拼出的 `src_text` 顺序每次不同 ⇒ `_is_noise_ref` 的",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "E46",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:421;DRIFT/global/_README.md:452",
+    "title": "| **E46** | 🔴 **SQL 取消时刻的精度差** ⇒「客户端已放弃但事务仍可能提交」的窗口比 Go **大 2~3 个数量级** | `service/common/.../persistence/DeadlineQueryTimeoutInjector.java`（`setQueryTimeout` 取整",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   }
+  ]
+ },
+ "W2": {
+  "轮": "第 1 轮 · W1~W7",
+  "条目": [
+   {
+    "id": "E44",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:424",
+    "title": "| **E44** | 🔴 **工具自检的阳性对照是**分支相关**的 ⇒ `--mutation-test` 在任何非 task 分支上恒红** | `tools/check-ledger-selfcheck.py` | ✅ **已修** —— 阳性对照原来要求「复原后第 3 层 == **0**」，而第 3 层含*",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E47",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:426;DRIFT/global/_README.md:858;DRIFT/users/admin/rpc.md:3335",
+    "title": "| **E47** | 🔴 **业务层把「SQL 被 deadline 取消」改写/吞掉** ⇒ 事务 / 指标 / wire 三重口径失真 | 5 个 rpc 域的 `catch (Exception e) → INTERNAL` + **3 处静默降级** | 🔴🔴 **第三十六轮全面订正（逐条核 Go 侧 ⇒ 原",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 绿(0)"
+   },
+   {
+    "id": "E48",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:427;DRIFT/global/_README.md:750;DRIFT/global/_README.md:776",
+    "title": "| **E48** | 🔴 **「客户端 deadline 档」双侧活体探针没进常规编排** ⇒ E38 的运行期回归网缺这一环 | `tools/difftest/run.sh` / `tools/difftest/verdict-grpc-admin-deadline.py` | ✅ **已修**（**第三十九~四",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 混(0/4)"
+   },
+   {
+    "id": "E64",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:429",
+    "title": "| **E64** | 🔴 **探针的「就绪判定 = 端口在监听」会被**上一轮遗留的栈进程**满足 ⇒ 实验在**环境重建中途**开跑 ⇒ 观测无效 | `tools/difftest/exp-grpc-admin-deadline-probe.sh`（`[0/3]` 起栈段）+ `tools/difftest/ru",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 绿(0)"
+   },
+   {
+    "id": "E69",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:434;DRIFT/global/_README.md:563",
+    "title": "| **E69** | 🔴 **共享复核器的「扫描范围」只配了 task / users / users-admin 三个域 ⇒ `docs/DRIFT/global/_README.md`（**global 自己写的台账**）根本不在扫描范围里** ⇒ ⇒ 「我的 Go 锚点都核过」这句话当时**不成立**（**真空",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E70",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:435",
+    "title": "| **E70** | 🔴 **第 4 层的解析器只认「自己索引过的位置」⇒ 索引外的合法锚点一律报「文件在真源与全部第三方库里都找不到」** ⇒ ⇒ **16 条跨域假 FAIL**（13 条 Go 标准库裸 basename + 3 条**真源之外的第三个仓库**）⇒ ⇒ **假 FAIL 比不报更坏**（别的域会",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E50",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:438",
+    "title": "| **E50** | 🔴 **第 4 层的去噪是「文件级」的** ⇒ 真缺陷被噪声淹没 ⇒ **假阴性**（门禁最该抓的东西没抓到） | `tools/check-ledger-selfcheck.py`（`_source_context` / `_is_noise_ref`） | ✅ **已修** —— 根因 = ",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E51",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:439",
+    "title": "| **E51** | 🔴 **第 4 层的第三方库清单是「手写表」** ⇒ 真源 `go.mod` 里的模块判成「找不到」⇒ **假 FAIL** | 同上（`THIRD_PARTY` / 新增 `_go_mod_requires`） | ✅ **已修** —— 根因 = 第三方库清单是**手写表** ⇒ 覆盖不到写",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "E52",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:440",
+    "title": "| **E52** | 🔴 **第 4 层的索引按 basename 建** ⇒ 写成完整模块路径反而**反查不到** ⇒ **假 FAIL** | 同上（新增 `_direct_module_candidate`） | ✅ **已修** —— 根因 = 层 4 的索引**按 basename** 建（`idx[bas",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E53",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:441",
+    "title": "| **E53** | 🔴 **第 4 层的索引不含 Go 标准库** ⇒ 引用标准库的台账行必然**假 FAIL** | 同上（新增 `_detect_goroot` / `_stdlib_candidate`） | ✅ **已修** —— 根因 = 索引只含**真源 + 第三方库** ⇒ **Go 标准库不在里面*",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E55",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:443",
+    "title": "| **E55** | 🔴 **第 2/3 层根本没有接住 `--domain`** ⇒ 别的域跑这个工具，拿到的是 **task 域的结论** ⇒ **结论不可用** | `tools/check-ledger-selfcheck.py`（`layer2_claims` / `layer3_numbers`） | ✅",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E56",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:444",
+    "title": "| **E56** | 🔴 **第 3 层 commit 清单的「本分支」口径硬编码 `do-my-own-gh`** ⇒ **主干上窗口恒空** ⇒ **恒红 45 处** ⇒ 一个恒红的守门等于没有守门 | 同上（`layer3_numbers` 的 commit 清单段） | ✅ **已修** —— 🔴 **触发",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E58",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:446;DRIFT/users/user/rpc.md:2257;DRIFT/users/user/rpc.md:2328",
+    "title": "| **E58** | 🟡 **user-rpc / admin-rpc 把 `DEADLINE_EXCEEDED` 原样上抛** ⇒ wire 上是 `DEADLINE_EXCEEDED`；而 **Go 侧改写成 `codes.Internal` + \"DB查询失败\"** ⇒ 两侧不同，**但 RAG 这一侧更准确*",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E61",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:449;DRIFT/global/_README.md:839",
+    "title": "| **E61** | 🔴 **第 1 层的「状态叙述」词表太窄** ⇒ 用**正常中文**写状态叙述（「查不到 / 悬空 / 预期状态 / 尚未存在 / 待合入」）仍被判成**悬空引用** ⇒ ⇒ **别的域只能改写台账措辞去迎合工具**（本末倒置：台账是**给人读的**） | `tools/check-ledger",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "E63",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:450",
+    "title": "| **E63** | 🔴 **共享复核工具的第 5/6 层写死 `service/task`** ⇒ 别的域跑它 ⇒ 输出的是 **task 域的类** ⇒ 别的域 owner 会误读成「我们域的覆盖缺口」 | `tools/check-ledger-selfcheck.py`（`layer5_unmentioned",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   }
+  ]
+ },
+ "W3": {
+  "轮": "第 1 轮 · W1~W7",
+  "条目": [
+   {
+    "id": "DRIFT-INFRA-001",
+    "dir": "DRIFT",
+    "domain": "_cross",
+    "source": "DRIFT/_cross/open-items.md:59",
+    "title": "## 🔴 DRIFT-INFRA-001：Flyway 账本撞号（2026-10-23 新发现 · **跨 3 个模块**）",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 绿(0)"
+   },
+   {
+    "id": "T-12",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/common-tails.md:519;DRIFT/global/common-tails.md:642;DRIFT/global/lanes/L5-signoff.md:118",
+    "title": "### T-12 🔴 **已定性（第二十六轮 L5）= 出口层级差异 · 共享层改不动** —— 「方法不匹配」这个出口，RAG 比 Go **多带**一个 `Traceparent`",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "SD-2026-10-24-10",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/common-tails.md:547;Intentional_Deviations/like/api.md:87",
+    "title": "### 📎 附 · 2026-10-25 第十九轮末核实：`like` 域 `SD-2026-10-24-10` 的**描述**需订正（**不是新漂移**，是既有签字候选的措辞）",
+    "status": "⏳ 未签字",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "T-13",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/common-tails.md:561;DRIFT/global/lanes/L1-delivery.md:296",
+    "title": "### T-13 🔴 **已修（第二十二轮，2026-10-25）** —— 超时路径的「响应撕裂 / 状态码被抢」",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "PIT-GLOBAL-018",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/lanes/L12-rpcboot-article-comment-like.md:247;DRIFT/global/lanes/L2-rpcgate.md:81;DRIFT/global/lanes/_PROTOCOL.md:182",
+    "title": "### 8.4 变异结果表（PIT-GLOBAL-018 三道闸 + PIT-GLOBAL-021 只认 surefire XML）",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "L4-01",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/lanes/L4-flyway.md:172",
+    "title": "| **L4-01** | 🔴 **`favorite-rpc` 的故障形态被修正**：上一轮台账写的是「后续迁移失败 ⇒ **服务起不来**」。**实测不是** —— `favorite` 的 V2~V6 **全部成功**（它的迁移里**没有**指向 `favorite_folder` 的外键）⇒ **进程正常退出*",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "SD-2026-10-23-09",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/lanes/L5-signoff.md:190;Intentional_Deviations/like/api.md:54",
+    "title": "## 十、C 组 · A6 订正（**B6**：like 域 `SD-2026-10-23-09` 的描述）",
+    "status": "⏳ 未签字",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "SD-2026-10-25-CAND-10",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/lanes/L5-signoff.md:245;Intentional_Deviations/hot/api.md:33;Intentional_Deviations/hot/api.md:421",
+    "title": "### ① `docs/Intentional_Deviations/hot/api.md` —— `SD-2026-10-25-CAND-10` **补 Go 出处**（C1）",
+    "status": "⏳ 未签字",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "PIT-GLOBAL-022",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/lanes/L5-signoff.md:309;Pitfalls/global/cross-domain.md:706",
+    "title": "| **PIT-GLOBAL-022** | 🔴 **抄来的「同形态先例」编号也要复核** —— 指针不是证据，它本身是一条**待核对的断言**；**错的指针比空指针更贵** | [`docs/Pitfalls/global/cross-domain.md`](../../../Pitfalls/global/cros",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "PIT-GLOBAL-023",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/lanes/L5-signoff.md:310;Pitfalls/global/common-tails.md:288",
+    "title": "| **PIT-GLOBAL-023** | 🔴 **「这个出口在 XX 层 ⇒ 不经过 X」是推断，不是证据** —— 「层」的判断必须落到**注册点** | [`docs/Pitfalls/global/common-tails.md`](../../../Pitfalls/global/common-tails.",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-018",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/lanes/L9-interrupt.md:260;DRIFT/users/_shared.md:67",
+    "title": "#### 问 4：L2 的 javadoc 自陈（「DRIFT-018 框架限制」）是否成立？",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "PIT-GLOBAL-019",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/lanes/_PROTOCOL.md:180;Pitfalls/global/cross-domain.md:618",
+    "title": "| **PIT-GLOBAL-019** | 构建**进行中**改源码 ⇒ 绿的是**旧字节码**<br> ⚠️ **2026-10-30 复核（global+common lane）**：**本行是 Pitfall 的引用** ⇒ 状态以 canonical 档为准 = 🔴 **仍生效**（`docs/Pitfall",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "PIT-GLOBAL-020",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/lanes/_PROTOCOL.md:181;Pitfalls/global/cross-domain.md:785",
+    "title": "| **PIT-GLOBAL-020** | 变异测试在**共享工作树**里跑 ⇒ 变异态被**提交进 HEAD**（实测：`Dispatcher.runAsync` 被误提交成阻塞式 `Dispatcher.run` ⇒ 开关一开 like-rpc 起不来）<br> ⚠️ **2026-10-30 复核（global",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "G4-A4-01",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/vs-common.md:3751;DRIFT/global/vs-common.md:3761",
+    "title": "| **G4-A4-01** | A6「错误码契约」的 L4 证据**绑定错层** ⇒ 「56 例全绿」里**错误码用例 = 0** | 🔴 **假绿证据** | 摘要表 A6 行已降级 🟡 |",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 绿(0)"
+   },
+   {
+    "id": "G4-A4-02",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/vs-common.md:3752;DRIFT/global/vs-common.md:3774",
+    "title": "| **G4-A4-02** | Redis 命令超时守门 ③ 断言 `getTimeoutOptions() != null` ⇒ **结构上恒真** | 🔴 **零判别力的断言** | **批次 B 已换成有判别力的断言**（§4.11.2） |",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "G4-A4-05",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/vs-common.md:3755;DRIFT/global/vs-common.md:3812",
+    "title": "| **G4-A4-05** | 出向 stub 全表：**21 个类 / 30 处零 deadline**（上一轮写 20 类 / 7 处）⇒ **E65 的改造面被低估 4 倍** | 🔴 **计数错** | 摘要表 A1 / E65 行已订正（§4.11.5） |",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "G4-A4-06",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/vs-common.md:3756;DRIFT/global/vs-common.md:3867",
+    "title": "| **G4-A4-06** | 「38 个组件真启动过」不成立 —— **进程级真启动门禁只有 3/38** | 🔴 **过度声称** | 本层核对清单已订正（§4.11.6） |",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "G4-A4-07",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/vs-common.md:3757;DRIFT/global/vs-common.md:3878",
+    "title": "| **G4-A4-07** | 🆕 `grpc.client.*.deadline` 是**空配** —— devh `3.1.0.RELEASE` **没有这个属性** ⇒ article-rpc 的 `2s` / `10s` 上界**从未生效** | 🔴 **真漂移**（AGENTS.md §3.3.1 形态） ",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "B-05",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/vs-common.md:3841",
+    "title": "| B-05 | `favorite/favorite-rpc/.../client/UserRpcClient.java` | `applyTo`（🔴 **rpc 进程 ⇒ `GoStyleRequestDeadline` 的 ThreadLocal 恒 `null` ⇒ 恒 no-op** ⇒ 实际零） | `:5",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "B-10",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/vs-common.md:3846",
+    "title": "| B-10 | `users/user/user-api/.../client/UserRpcClient.java` | 🔴 **裸 provider**（api 侧也有零的 —— 上一轮只记了 rpc 侧） | `:143` | **8** |",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "B-11",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/vs-common.md:3847",
+    "title": "| B-11 | `users/admin/admin-api/.../client/AdminRpcClient.java` | 🔴 **裸 provider**（同上） | `:173` | **12** |",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "FB-03",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/vs-common.md:402;DRIFT/like/vs-common.md:439;DRIFT/like/vs-common.md:448",
+    "title": "#### FB-03 · A2 保护链的「链构成」只读入口",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 环境(2)"
+   },
+   {
+    "id": "UTF-8",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/vs-common.md:949",
+    "title": "#### 4.10.10 🟢 **U+FFFD（UTF-8 替换字符）**：G3 的全仓扫描 ⇒ **2 条落在 G4 写权面 ⇒ 本层自修**（核对日期 2026-10-27）",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "SD-2026-10-25-CAND-14",
+    "dir": "Intentional_Deviations",
+    "domain": "global",
+    "source": "Intentional_Deviations/global/common-tails.md:436",
+    "title": "## SD-2026-10-25-CAND-14 · 🏷 **待签字候选** —— HTTP 状态行**缺 reason phrase**（Go `HTTP/1.1 200 OK` / RAG `HTTP/1.1 200`） ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**",
+    "status": "⏳ 未签字",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "SD-2026-10-25-CAND-15",
+    "dir": "Intentional_Deviations",
+    "domain": "global",
+    "source": "Intentional_Deviations/global/common-tails.md:510",
+    "title": "## SD-2026-10-25-CAND-15 · 🏷 **待签字候选** —— 「方法不匹配」这个出口，RAG 比 Go **多带**一个 `Traceparent` ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**",
+    "status": "⏳ 未签字",
+    "evidence": "B 静态"
+   }
+  ]
+ },
+ "W4": {
+  "轮": "第 1 轮 · W1~W7",
+  "条目": [
+   {
+    "id": "F-3",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/api.md:1291;DRIFT/favorite/vs-common.md:225",
+    "title": "| **F-3** | `DRIFT-ARTICLE-API-003` 重复 query key → 400 | ❌ 未修 | ✅ **已修** | `ArticleApiMvcPipelineTest` × 3 | ✅ **2/2 转红** |",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "FIX-10",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/api.md:1839;DRIFT/article/api.md:1914",
+    "title": "### ✅ FIX-10 —— 新增 `GoStyleFormParamCountFilter`（Go 的 2048 判据落到应用层）",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "FIX-11",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/api.md:1966;DRIFT/article/api.md:1980",
+    "title": "### ✅ FIX-11 —— `UNRESOLVED-007` 关闭（`SecurityRpc` 的 `NonBlock` 条件性差异）",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "FIX-13",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/api.md:2011;DRIFT/article/api.md:2080;DRIFT/article/rpc.md:1423",
+    "title": "### ✅ FIX-13 —— `DRIFT-006` 8–10 MiB body 文案：**确认 LOW，不修**",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "Latin-1",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/api.md:2302",
+    "title": "## 2026-10-24 第十二轮：**台账审计** —— 逐条核对「现状权威面」，并修掉一条**源码级偏离**（`strconv.Quote` 的 Latin-1 补充段）",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "DRIFT-001",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/api.md:877;DRIFT/article/api.md:894;DRIFT/common/deadline.md:2",
+    "title": "### 7.6 上游实现期的内部编号（`DRIFT-001…007`）对照 —— 本轮**未独立验证**",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "FIX-06",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/rpc.md:1161;DRIFT/article/rpc.md:1207",
+    "title": "### ✅ FIX-06 —— `U-5` 关闭（成功路径真 PG）+ `DRIFT-ARTICLE-RPC-009` 已修（通知标题取当前行）",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "O-5",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/rpc.md:129",
+    "title": "### ⚠️ O-5 证伪（上一版 grep 被 `head -30` 截断导致的误报）",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "FIX-08",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/rpc.md:1345;DRIFT/article/rpc.md:1394",
+    "title": "### ✅ FIX-08 —— `U-7` 关闭（真 scrape 实测）+ `DRIFT-ARTICLE-RPC-010` 已修（桶边界对齐 Go）",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "FIX-17",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/rpc.md:1875;DRIFT/article/rpc.md:1950",
+    "title": "### ✅ FIX-17 —— `P-U-2` 关闭（`article-proto`）+ 第十轮那条「不可观察」结论的**第三条独立论据**",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "S-5",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/rpc.md:2400;DRIFT/article/rpc.md:2606",
+    "title": "## 12.1 🔴 `S-5` 改判：**范围外（judge.md §1.1 R0 口径）⇒ 不计入本组件必相对齐项**（原写「⛔ 阻塞」）",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 绿(0)"
+   },
+   {
+    "id": "S-3",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/rpc.md:332",
+    "title": "| **S-3** | `ForceCommit default=true` ⇒ 失败也提交位点；已把 `seekAfterError` 设为 `true` | **Go 侧结论成立**：`kq/config.go:24`（声明点）+ `kq/queue.go:230-242`（**消费点**）复核无误，yaml 确实",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "L-10",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:100;DRIFT/article/vs-common.md:104;DRIFT/article/vs-common.md:191",
+    "title": "| **L-10** | 🔴 **补 article 域自己的 otel 业务 span**（Go 侧 `article-rpc` 有 **6 个**手写 span，RAG 侧 **0 个**）| **单一类** `service/article/article-rpc/src/main/java/com/rag/ar",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "G4-2",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:275;DRIFT/comment/vs-common.md:78;DRIFT/favorite/vs-common.md:109",
+    "title": "| **G4-2** | 🔴 **MyBatis-Plus 自动收集 `Interceptor[]` Bean 的机制** —— 全仓**无任何测试**证明 `@Import` 的 `DeadlineQueryTimeoutInjector` 真进了 MyBatis-Plus 执行链 | `service/common",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "G4-6",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:279;DRIFT/favorite/vs-common.md:112",
+    "title": "| **G4-6** | 🔴 **`GoStyleGrpcClientBreakerInterceptor` 在 rpc 侧无装配路径** ⇒ `article-rpc` 出向调用无熔断（**本轮补记**） | `service/common/src/main/java/com/rag/common/protectio",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "G4-8",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:290",
+    "title": "| **G4-8** | 🔴 **单 4（正式派单）：排序桥下沉共享层**（Jason 2026-10-27 拍板「排序桥要下沉共享层（跨 9 个域写权）」）| **第 1 步（共享层 · G4 写权）** = `service/common/src/main/java/com/rag/common/persisten",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "G4-9",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:293",
+    "title": "| **G4-9** | 🔴 **跨域耦合矩阵的 `common_radiation` 快照过期**（本轮 L-10 落码带来的**真实新共享层依赖** ⇒ 只更新快照，不改代码） | `docs/DRIFT/_cross/cross-domain-coupling.md` 的 `common_radiation` 段",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "G4-10",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:295",
+    "title": "| **G4-10** | 🔴 **共享脚本 `check-surface-parity.py` 在工作树里指错 Go 真源 ⇒ 假红 / 假绿**（**跨 G1~G4 全域** · 2026-10-29 · G3 实测） | **现象**：在**工作树**（`../RAG.worktrees/<lane>`）里跑 `",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "A-3",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:362",
+    "title": "| **A-3** | **`DRIFT-HOTAPI-030` 后续格**（判定权口径差 1：总「值」数超过 Go 的 10000 段上限） | 🔴 **仍 OPEN** | 🔴 **global / G4**（共享层的段数闸门；本域 = `OFF` ⇒ 闸门不装） | 否 | [`favorite/vs-commo",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "A-4",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:363",
+    "title": "| **A-4** | **P0 #8 的共享面半边**（根级 compose 的 `:?` ＋ 根 README 的 `.env.example`） | 🔴 **仍开**（**域侧那半已修**：`application.yml` 去明文默认值 ＋ `@PostConstruct verifyAccessSecret(",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "L-6",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:76;DRIFT/favorite/vs-common.md:89",
+    "title": "| **L-6** | 🔴 **删本域 rpc 组件的域侧排序桥**（桥下沉共享层后的冗余清理）|<br>⚠️ **删除时必须连带处理 javadoc（G1 提醒 · 2026-10-27 已逐条核实）**：① 该文件的「**什么时候可以删**：升级到已用 Boot 4 新包名声明 `@AutoConfiguratio",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "L-7",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:97;DRIFT/favorite/vs-common.md:91",
+    "title": "| **L-7** | 🔴 **删 article-api 的域内路径归一副本**（共享层已有一份 ⇒ 全仓只应有一份）| `service/article/article-api/src/main/java/com/rag/article/article/api/config/GoStylePathNormalizi",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "L-8",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:98;DRIFT/favorite/vs-common.md:94",
+    "title": "| **L-8** | 🔴 **article-api 的 JWT 验签被计入 70s 预算**（Go 的计时器在 Authorize **之后**起算 ⇒ 验签在预算**之外**）⚠️ **本域预算是 70s 不是 3s**（`application.yml:234` `http-timeout: 70s` ≡ Go",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E62",
+    "dir": "DRIFT",
+    "domain": "favorite",
+    "source": "DRIFT/favorite/rpc.md:3111;DRIFT/favorite/vs-common.md:28;DRIFT/global/_README.md:428",
+    "title": "## 34. 2026-10-26 第二十五轮（`align/favorite` 工作树 · 承 `a4a7ee0`）—— 🔴 **核 `global` 第四十一轮 E62：毫秒精度在本域生产路径上到底生效没有**",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "G4-13",
+    "dir": "DRIFT",
+    "domain": "favorite",
+    "source": "DRIFT/favorite/vs-common.md:120",
+    "title": "| **G4-13** | 🔴 **favorite-api 现在「消费」共享层的 Go query 判据** ⇒ 共享层该类的语义变成**跨域承重** ⇒ **改它就会改 favorite 域的可观察行为**（本轮 G3 落码引入的新依赖面，**G4 需要知道**） | **现象**：G3 本轮把 `favorite",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "F-5",
+    "dir": "DRIFT",
+    "domain": "favorite",
+    "source": "DRIFT/favorite/vs-common.md:227",
+    "title": "| **F-5** | **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现） | 🔴 **仍开** | 🔴 **global / 收口**（落点在 `service/common` ⇒ **不在 G3 写权面**） | 否 | [`api.md` 头部「未决」行](../fa",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "E68",
+    "dir": "DRIFT",
+    "domain": "favorite",
+    "source": "DRIFT/favorite/vs-common.md:30;DRIFT/global/_README.md:433;DRIFT/global/_README.md:541",
+    "title": "| `E68` | 「行号合法但指错文件」的错锚点判据（共享复核器第 4+ 层补判据） | 共享工具 | ✅ **已落**（`97a1fa8` / `0107845`）⇒ favorite 域**抓出 1 条**，已订正 | [`rpc.md`](rpc.md) |",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   }
+  ]
+ },
+ "W5": {
+  "轮": "第 1 轮 · W1~W7",
+  "条目": [
+   {
+    "id": "V-004",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/_shared.md:777",
+    "title": "### 🔴 仍然 OPEN：V-004 的**可观察半边**在 `users_user_avatar_history`",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 绿(0)"
+   },
+   {
+    "id": "ADJ-01",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/_shared.md:965",
+    "title": "#### ADJ-01 🔴 `users_user.status` 的 NOT NULL 与 admin-rpc 的 `status = 0L` **必须同时改**",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-ADMINAPI-013",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/admin/api.md:2448",
+    "title": "## 🔴 `DRIFT-ADMINAPI-013` · **「OS 盲选口」族** · 本组件 **3 处**（2026-10-28 · G1 lane）",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-ARPC-007",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/admin/rpc.md:1203",
+    "title": "## 2. 🔴 DRIFT-ARPC-007 —— Go 真源的 12 处字面量被转码损坏，RAG 吐的是正常中文",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 绿(0)"
+   },
+   {
+    "id": "DRIFT-ARPC-008",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/admin/rpc.md:1302",
+    "title": "## 3. 🔴 DRIFT-ARPC-008 —— `status IS NULL` 的读法：Go 读成 **0**，不是「读不出来」",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-ARPC-009",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/admin/rpc.md:2947",
+    "title": "## 1. 🔴 新增 DRIFT-ARPC-009 · admin-rpc 的 **gRPC 服务端拦截器链**缺 6 层（Go zrpc 框架级自带 vs RAG 只有 1 个）",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-ARPC-010",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/admin/rpc.md:3063;DRIFT/users/admin/rpc.md:3169",
+    "title": "### 1.7 🔴 新增 DRIFT-ARPC-010 · `logout` 的 **Redis 写不绑 deadline** ⇒ 超时被记成「Redis 挂了」（**与 user 域 V-012 同型**）",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-ARPC-011",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/admin/rpc.md:3118",
+    "title": "### 1.8 🟢 新增 DRIFT-ARPC-011 · **防回退留档**：29 处 catch 放行分支**不得**改回 Go 的 `codes.Internal`",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-ARPC-012",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/admin/rpc.md:3195;DRIFT/users/admin/rpc.md:4100",
+    "title": "### 1.9 🔴 新增 DRIFT-ARPC-012 · **Nacos 注册失败**：catch 的异常类型与实际抛出**不匹配** ⇒ 且「fail-open 还是 fail-fast」**口径未定**",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-ARPC-014",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/admin/rpc.md:4435",
+    "title": "## 🔴 `DRIFT-ARPC-014` · **「OS 盲选口」族** · 本组件 **5 处**（2026-10-28 · G1 lane）",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-USERSCOMMON-006",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/common.md:788;DRIFT/users/common.md:869",
+    "title": "### 4. 本轮**新抓到**的一条：`DRIFT-USERSCOMMON-006` 🔴（潜伏 · wire 不可观察 · 共享层写权）",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "D-015",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/user/api.md:1973",
+    "title": "| **D-015** | 🔴 **未修** | — | — | 待拍板（**仅 api 侧**；rpc 侧经三形态直连实测无漂移 ⇒ 见 [`user/rpc.md` 第十一轮](./rpc.md)） |",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "DRIFT-USERAPI-017",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/user/api.md:3635",
+    "title": "## 🔴 `DRIFT-USERAPI-017` · **「OS 盲选口」族** · 本组件 **4 处**（2026-10-28 · G1 lane）",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "V-013",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/user/rpc.md:2353",
+    "title": "### V-013 的分类与统计影响",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "DRIFT-USERRPC-V-016",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/user/rpc.md:2714",
+    "title": "## 🔴 `DRIFT-USERRPC-V-016` · **「OS 盲选口」族** · 本组件 **5 处**（2026-10-28 · G1 lane）",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 混(0/1)"
+   },
+   {
+    "id": "DRIFT-USERRPC-V-001",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/user/rpc.md:473;DRIFT/users/user/rpc.md:1360",
+    "title": "### DRIFT-USERRPC-V-001 🔴 `Login` 对 `status == NULL` 的分支与 Go **相反**（fail-open） —— ✅ **已修（第二轮）**",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 混(0/1)"
+   },
+   {
+    "id": "V-002",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/user/rpc.md:995;DRIFT/users/vs-common.md:1578",
+    "title": "| **V-002** | 🟡 **2026-10-27 订正：定性为「DDL 层差异 · 行为层零差异」⇒ 建议保持 RAG NOT NULL ⇒ 本条无落码动作** | — | — | ⚠️ **本行原写「🔴 未修（被卡）· 改动必须与 admin 域同一次提交」—— 该口径已被 2026-10-27 的逐层证据链",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "Round-2",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/vs-common.md:5072",
+    "title": "## 2026-10-29 指针：`users-common` 组件的活体证据**已落仓**（Round-2 T-2.6 / G-4）",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 绿(0)"
+   },
+   {
+    "id": "SD-2026-10-25-CAND-17",
+    "dir": "Intentional_Deviations",
+    "domain": "users",
+    "source": "Intentional_Deviations/users/_shared.md:110",
+    "title": "## SD-2026-10-25-CAND-17@users · 🏷 **待签字候选** —— `users_user.status` 的**可空性**：Go **可空** / RAG `NOT NULL`",
+    "status": "⏳ 未签字",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "SD-2026-10-25-CAND-16",
+    "dir": "Intentional_Deviations",
+    "domain": "users",
+    "source": "Intentional_Deviations/users/_shared.md:18",
+    "title": "## SD-2026-10-25-CAND-16@users · 🏷 **待签字候选** —— users 域 **8 处**时间列 `DEFAULT CURRENT_TIMESTAMP`（Go 侧**无**默认）",
+    "status": "⏳ 未签字",
+    "evidence": "B 静态"
+   }
+  ]
+ },
+ "W6": {
+  "轮": "第 1 轮 · W1~W7",
+  "条目": [
+   {
+    "id": "MISMATCH-API-01",
+    "dir": "DRIFT",
+    "domain": "comment",
+    "source": "DRIFT/comment/api.md:52;DRIFT/comment/api.md:88;DRIFT/comment/api.md:293",
+    "title": "| **MISMATCH-API-01** | `CommentApiSupport.rpcError` 改用 `CommentGrpcError.bizCodeFromError(err)` 取业务码（msg 仍取 `status.getDescription()`） | **新增** `CommentApiGrpc",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E66",
+    "dir": "DRIFT",
+    "domain": "comment",
+    "source": "DRIFT/comment/rpc.md:290;DRIFT/global/_README.md:431;DRIFT/global/vs-common.md:31",
+    "title": "### 3.6 🔴 D9（= global **E66**）：Redis 调用**不感知 deadline** ⇒ 缓存读写**照写不误**",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "C-3",
+    "dir": "DRIFT",
+    "domain": "comment",
+    "source": "DRIFT/comment/vs-common.md:59;DRIFT/comment/vs-common.md:112;DRIFT/comment/vs-common.md:220",
+    "title": "| **C-3** | ✅ **comment 域 6 个业务 span 已补齐（2026-10-27 阶段 2 已落码）** | **新增** `comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentSpans.java` ＋ `Co",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 绿(0)"
+   },
+   {
+    "id": "C-6",
+    "dir": "DRIFT",
+    "domain": "comment",
+    "source": "DRIFT/comment/vs-common.md:62;DRIFT/comment/vs-common.md:223",
+    "title": "| **C-6** | 🔴 **comment-api 的 JWT 验签被计入 3s 预算**（Go 的计时器在 Authorize **之后**起算 ⇒ 验签在预算**之外**） | `service/comment/comment-api/src/main/java/com/rag/comment/comment/",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "G4-16",
+    "dir": "DRIFT",
+    "domain": "comment",
+    "source": "DRIFT/comment/vs-common.md:96",
+    "title": "| **G4-16** | 🔴 **comment-rpc 的 `D8` / `D9` 两条仍在共享层**（= global `E65` / `E66`）—— 本轮**状态复核：未修，且本域无法自修** | **现象**：**D8**＝出向 gRPC 调用**不继承请求 deadline** ⇒ `ArticleRpc",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-MSGAPI-011",
+    "dir": "DRIFT",
+    "domain": "message",
+    "source": "DRIFT/message/api.md:1499;DRIFT/message/vs-common.md:39",
+    "title": "#### 🆕 `DRIFT-MSGAPI-011` 🔴 **RAG 全域通病**：**状态行缺 reason phrase**",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-MSGAPI-009",
+    "dir": "DRIFT",
+    "domain": "message",
+    "source": "DRIFT/message/api.md:858",
+    "title": "### ⏸ DRIFT-MSGAPI-009 ⏸ **已签字（`SD-2026-10-23-03`）· 不是待修项** 出参 `affected`：Go **数字** / RAG **字符串**",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "FB-G2-03",
+    "dir": "DRIFT",
+    "domain": "message",
+    "source": "DRIFT/message/feedback-to-g4.md:52",
+    "title": "### FB-G2-03 · `DRIFT-MSGAPI-011` · 🔴 **不可修**（容器层框架限制 · **转达即可，不必动手**）",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "SD-04",
+    "dir": "DRIFT",
+    "domain": "message",
+    "source": "DRIFT/message/proto.md:34",
+    "title": "### 🔴 澄清一条容易误判的点：本域**没有** SD-04 / SD-05 那类 `package` 归一偏离",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 绿(0)"
+   },
+   {
+    "id": "DRIFT-MSG-V-020",
+    "dir": "DRIFT",
+    "domain": "message",
+    "source": "DRIFT/message/rpc.md:1671",
+    "title": "## 2026-10-23 第五轮：`DRIFT-MSG-V-020` 已修（照 users 域规格单开）",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-MSG-V-027",
+    "dir": "DRIFT",
+    "domain": "message",
+    "source": "DRIFT/message/rpc.md:2110",
+    "title": "### 1. 🔴 `DRIFT-MSG-V-027`（新挖出 · 已修）：**Flyway 的 baseline 把 V1 整条跳过 ⇒ `message_notification` 永远建不出来**",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "DRIFT-MSG-012",
+    "dir": "DRIFT",
+    "domain": "message",
+    "source": "DRIFT/message/rpc.md:262",
+    "title": "| **DRIFT-MSG-012** | 部署面 | 无 servlet 容器 | `pom.xml` 引 `spring-boot-web-server`，与 `NacosRegistration` javadoc 自述「本服务不带 web」矛盾 | `OBSERVABLE DIFFERENCE` | `UNKNO",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 绿(0)"
+   },
+   {
+    "id": "SD-2026-10-24-CAND-05",
+    "dir": "Intentional_Deviations",
+    "domain": "comment",
+    "source": "Intentional_Deviations/comment/api.md:73",
+    "title": "## SD-2026-10-24-CAND-05：Bearer 前缀剥离的长度边界 `> 7` vs Go 的 `> 6` ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**",
+    "status": "⏳ 未签字",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "SD-2026-10-24-CAND-09",
+    "dir": "Intentional_Deviations",
+    "domain": "comment",
+    "source": "Intentional_Deviations/comment/rpc.md:162",
+    "title": "## SD-2026-10-24-CAND-09：RAG 的 DDL **比 Go 生产 DDL 更严**（约束 / 索引 / 触发器层） ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**",
+    "status": "⏳ 未签字",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "SD-2026-10-24-CAND-03",
+    "dir": "Intentional_Deviations",
+    "domain": "comment",
+    "source": "Intentional_Deviations/comment/rpc.md:229",
+    "title": "## SD-2026-10-24-CAND-03：authority / dispatch 两个子命令**默认关闭** ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**",
+    "status": "⏳ 未签字",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "SD-2026-10-24-CAND-01",
+    "dir": "Intentional_Deviations",
+    "domain": "comment",
+    "source": "Intentional_Deviations/comment/rpc.md:34",
+    "title": "## SD-2026-10-24-CAND-01：9 处时间列的 `NOT NULL DEFAULT CURRENT_TIMESTAMP`（RAG 更严） ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**",
+    "status": "⏳ 未签字",
+    "evidence": "B 静态"
+   }
+  ]
+ },
+ "W7": {
+  "轮": "第 1 轮 · W1~W7",
+  "条目": [
+   {
+    "id": "DRIFT-COMMON-LOG-001",
+    "dir": "DRIFT",
+    "domain": "common",
+    "source": "DRIFT/common/alignment-2026-10-23.md:296",
+    "title": "## 三、🔴 DRIFT-COMMON-LOG-001：日志 KV 字段在**生产**被丢弃（`SEMANTIC MISMATCH`）",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "T-6",
+    "dir": "DRIFT",
+    "domain": "common",
+    "source": "DRIFT/common/alignment-2026-10-23.md:693;DRIFT/common/alignment-2026-10-23.md:714;DRIFT/global/_README.md:92",
+    "title": "| **T-6** | `message` | `-010` | `common/observability/HttpMiddleware.java:421`（`setContentType(\"text/plain; charset=utf-8\")`）+ `common/http/GoStyleRouterErrorR",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "T-10",
+    "dir": "DRIFT",
+    "domain": "common",
+    "source": "DRIFT/common/alignment-2026-10-23.md:697;DRIFT/common/alignment-2026-10-23.md:718;DRIFT/global/_README.md:97",
+    "title": "| **T-10** | `users` | 交接 **#2** | `service/users/user/user-rpc/.../UserDomainService.java:113`（javadoc 仍写「由 `RpcInterceptor` 调度」） | 声称 deadline 由 `DeadlineStat",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "CF-018",
+    "dir": "DRIFT",
+    "domain": "common",
+    "source": "DRIFT/common/alignment-2026-10-23.md:848;DRIFT/common/alignment-2026-10-23.md:958",
+    "title": "| **CF-018** | — （**非 Go 语义差异**，是 RAG 侧 API 缺陷） | Go：`process.go:20-62` `RunDispatcher(ctx, …, once bool)` 是**阻塞式**，靠 `ctx.Done()` 退出 | `Dispatcher.java:222` 建 ",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "PITFALL-FOLLOW-005",
+    "dir": "DRIFT",
+    "domain": "follow",
+    "source": "DRIFT/follow/vs-common.md:300;DRIFT/follow/vs-common.md:424;DRIFT/follow/vs-common.md:1215",
+    "title": "### 9.2 🆕 本轮新登记 ⇒ **派 G4**：`PITFALL-FOLLOW-005`",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "DRIFT-HOTAPI-027",
+    "dir": "DRIFT",
+    "domain": "hot",
+    "source": "DRIFT/hot/api.md:1720",
+    "title": "## DRIFT-HOTAPI-027 —— MaxConns 在 RAG 侧**默认阈值下结构性不可达**（且 Go 是 per-route、RAG 是 global）",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "G-HOT-001",
+    "dir": "DRIFT",
+    "domain": "hot",
+    "source": "DRIFT/hot/rpc.md:167",
+    "title": "#### 6.8.5 🔴 一处**有意偏离 Go**：撤销路径的锁升级（G-HOT-001）",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "U-06",
+    "dir": "DRIFT",
+    "domain": "like",
+    "source": "DRIFT/like/api.md:829;DRIFT/like/api.md:842",
+    "title": "| **U-06** | 🔴 **仍漂移**（**可观察差异 · 运维面**）—— ⚠️ **原前提「疑似死配置」已被推翻**：`DevServer` **确实被消费**（由 go-zero **框架**消费，**不在仓内代码里**）⇒ Go 在**独立端口**起 `/metrics` + `/healthz` + p",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "OP-09",
+    "dir": "DRIFT",
+    "domain": "like",
+    "source": "DRIFT/like/rpc.md:504;DRIFT/message/rpc.md:505",
+    "title": "### OP-09 事实生产侧（RAG `service/LikeDomainFactService.java:68-159`）",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "SD-2026-10-24-11",
+    "dir": "Intentional_Deviations",
+    "domain": "like",
+    "source": "Intentional_Deviations/like/api.md:133",
+    "title": "### ⏳ SD-2026-10-24-11（候选）：网关层拒绝计数 —— **Java 侧比 Go 侧多暴露一个指标** ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**",
+    "status": "⏳ 未签字",
+    "evidence": "B 静态"
+   }
+  ]
+ },
+ "W8": {
+  "轮": "第 2 轮 · W8~W14",
+  "条目": [
+   {
+    "id": "CD-7",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/cross-domain.md:47;DRIFT/global/cross-domain.md:141",
+    "title": "| **CD-7** | `X-7` | DDL 双侧活体逐列对照 | `like` 域 + 其余 5 域 | 🟡 **部分闭合**（2026-10-25 B3）—— 4 个域已能活体逐列对照；其余 5 域**缺双侧库环境** | ✅ **已跑**（产出真结论 + 1 条新差异 CD-10） |",
+    "status": "🟡 部分闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "E34",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:383",
+    "title": "| **E34** | 🟡 **T-15**：「全局 OTel 由测试预置」这个前提**侥幸成立** | 7 份 slow 轴守门 | ✅ **第三十轮闭合其 ③**（各加一行 `rag.test.gate.context-key=<域>-slow-threshold`）⇒ 🔴 **实测出真实脆弱点**：Spring ",
+    "status": "🟡 部分闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "E43",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:423;DRIFT/users/vs-common.md:1228",
+    "title": "| **E43** | 🔵 **别域台账 1 处真实路径错误** | `docs/DRIFT/like/rpc.md:163` | 🟡 **记账 + 报主会话**（global **不写别域台账**；⚠️ **当前无 like 域 owner 会话** ⇒ 只能经主会话转达）—— `check-ddl-static.p",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "E67",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/_README.md:432",
+    "title": "| **E67** | 🟡 **Kafka 生产不感知 deadline**（**待核** · 不定性） | `comment-rpc/service/CommentAuditPublisher.java:80`（`kafkaTemplate.send(topic, payload)`） | 🟡 **待核**（2026",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "FB-01",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/vs-common.md:352;DRIFT/global/vs-common.md:1527;DRIFT/like/vs-common.md:80",
+    "title": "#### FB-01 · A3「路径归一」进共享层",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "FB-02",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/vs-common.md:373;DRIFT/global/vs-common.md:862;DRIFT/global/vs-common.md:1580",
+    "title": "#### FB-02 · A3 form 闸门的开关判据改成「语义可达性」",
+    "status": "🟡 部分闭合",
+    "evidence": "A 活体 · 混(0/1/2)"
+   },
+   {
+    "id": "G4-A4-03",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/vs-common.md:3753;DRIFT/global/vs-common.md:3789",
+    "title": "| **G4-A4-03** | 1015 的归因写成「只对 users 域成立」⇒ **漏记 4 个域的第二个产出形态** | 🟡 **口径不完整** | 摘要表 A4 行已订正 |",
+    "status": "🟡 部分闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "G4-A4-04",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/vs-common.md:3754;DRIFT/global/vs-common.md:3801",
+    "title": "| **G4-A4-04** | 404/405 的结论**缺前置条件**（CORS 会替换 405 分支）＋ 405 的 `Content-Type` 有**两份互斥的 L3** | 🟡 **尚未判别** | 摘要表 A4 行已订正 |",
+    "status": "🟡 部分闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "L4-02",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/lanes/L4-flyway.md:173",
+    "title": "| **L4-02** | 🟡 `article-rpc` 用**默认账本表名** `flyway_schema_history` ⇒ 5 个场景里它是**唯一**使用者（没撞）⇒ 但「**将来新增模块忘配 `table` 就直接撞上它**」这条残留风险**仍在** | S1/S2/S3 三个场景里 `flyway_s",
+    "status": "🟡 部分闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "L4-03",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/lanes/L4-flyway.md:174",
+    "title": "| **L4-03** | 🟡 **Flyway 的 advisory lock 按「账本表名」算 key** ⇒ 独立账本表名**顺带把迁移锁也隔离了**（不是只有账本表隔离） | `flyway-database-postgresql-10.22.0` 源码 `PostgreSQLConnection.java:1",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   }
+  ]
+ },
+ "W9": {
+  "轮": "第 2 轮 · W8~W14",
+  "条目": [
+   {
+    "id": "A-5",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:364",
+    "title": "| **A-5** | **rpc 域的其余明文默认值**（`${POSTGRES_PASSWORD:password}` / `${MINIO_SECRET_KEY:minioadmin}` / `${*_AUTHORITY_TOKEN:}`） | 🟡 **已登记，本轮未动** | 🔴 **G4**（共享层 `ser",
+    "status": "🟡 部分闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "A-6",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:365",
+    "title": "| **A-6** | **跨域待办**：其它域 rpc 的 `*SchemaGate` 走**同一套** `@EventListener(ApplicationReadyEvent.class)` 写法 ⇒ 校验发生在「server 已起来之后」 | 🟡 **已登记，不修** | ⬜ **各域自行判断**（本工作树只",
+    "status": "🟡 部分闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "DRIFT-ARTICLE-API-006",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/api.md:703;DRIFT/global/vs-common.md:225;Intentional_Deviations/article/api.md:26",
+    "title": "#### DRIFT-ARTICLE-API-006 —— 8–10 MiB JSON body 的错误文案（OBSERVABLE DIFFERENCE，LOW）",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-ARTICLE-RPC-007",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/rpc.md:518",
+    "title": "### DRIFT-ARTICLE-RPC-007 —— 每通道独立的 Kafka brokers 是\"声明但从不消费\"的配置",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "G4-11",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:296",
+    "title": "| **G4-11** | 🟡 **article 域「双侧活体 0 条」的**受阻前提**已过期**（基线 §九 **G-3**）⇒ 从「环境受阻」降为「**可做但本轮未做**」 | **现象**：基线 §九 G-3 写「Go 侧需 `etcd:2379`（容器在跑但**宿主端口未映射**）⇒ 0 条」⇒ **202",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "G4-12",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:297",
+    "title": "| **G4-12** | 🟡 **基线 `docs/PhaseGoal-judge.md` 有三处归类/口径需订正**（**共享面**：它是 4 条 lane 矩阵的**唯一数据源** ⇒ G3 不写 ⇒ 交合并收口执行者） | **现象**：① **§十一 D-07** 把 `comment` 域的 `report",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "G4-3",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:276;DRIFT/comment/vs-common.md:79;DRIFT/favorite/vs-common.md:110",
+    "title": "| **G4-3** | 🟡 **正式派单（单 3）** `S-6` 的 `SqlTimeoutStatusTranslator` javadoc **「Go 出处」段归因错误** ⇒ 该段以「Go 出处」措辞断言 Go 行为却**零 `文件:行号`**（命中 AGENTS.md §3.3.2） | `service/",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "G4-5",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:278;DRIFT/favorite/vs-common.md:113",
+    "title": "| **G4-5** | 🟡 **AGENTS.md §6.3 问题 4 的记载不完整** | `AGENTS.md` §6.3（问题 4）＋ §3.5 | 该处只点名「**`favorite-rpc` 例外**（缺 `baseline-version: 0`）」⇒ **实测漏了 `article-rpc`**（同样 ",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "G4-7",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:281",
+    "title": "| **G4-7** | 🟡 **`flyway-concurrent-verify.py` 的 `KNOWN_BLOCKED` 只登记了 `favorite`，同形的 `article-rpc` 没登记** | `tools/difftest/flyway-concurrent-verify.py:48-51`（`K",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "U-9",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/rpc.md:2510",
+    "title": "## 12.4 🟡 `U-9` **拆成两半**：`U-9a` ✅ 闭合（offset 提交/跳过语义 · 两侧同构）· `U-9b` 🟡 **取证缺口**",
+    "status": "🟡 部分闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "U-9b",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/rpc.md:2523",
+    "title": "### 12.4.2 🟡 `U-9b`（处理器并发模型）—— **取证缺口**，**不许写「已对齐」**",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   }
+  ]
+ },
+ "W10": {
+  "轮": "第 2 轮 · W8~W14",
+  "条目": [
+   {
+    "id": "UNRESOLVED-MSG-V-001",
+    "dir": "DRIFT",
+    "domain": "_cross",
+    "source": "DRIFT/_cross/message-domain-wide.md:215;DRIFT/_cross/message-domain-wide.md:494",
+    "title": "| **UNRESOLVED-MSG-V-001** | Nacos namespace/group 不一致 | `message-rpc` 用 `public`/`DEFAULT_GROUP`，user/admin 用 `sea-rtw`/`USER_GROUP`（`message-api/application.y",
+    "status": "🟡 部分闭合",
+    "evidence": "A 活体 · 红(1)"
+   },
+   {
+    "id": "C-4",
+    "dir": "DRIFT",
+    "domain": "comment",
+    "source": "DRIFT/comment/vs-common.md:60;DRIFT/comment/vs-common.md:126;DRIFT/comment/vs-common.md:221",
+    "title": "| **C-4** | 🟡 **`:9091` metrics 暴露面** | `comment-rpc` 的部署形态 | Go `comment.go:38-41` 的独立 goroutine ⇒ RAG `web-application-type: none` ⇒ 无对应面 ⇒ 属**部署形态类**，与本域已登记的",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "C-5",
+    "dir": "DRIFT",
+    "domain": "comment",
+    "source": "DRIFT/comment/vs-common.md:61;DRIFT/comment/vs-common.md:222",
+    "title": "| **C-5** | 🟡 **A6/A7 升 L4 的探针** | `tools/errmsg-probe/{go,java}` → 复制出 `comment/` | 探针骨架已有（顶层 article ＋ `favorite/` ＋ **`hot/`**（2026-10-29 G3 落码））⇒ 复制一份到 `com",
+    "status": "🟡 部分闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "G4-17",
+    "dir": "DRIFT",
+    "domain": "comment",
+    "source": "DRIFT/comment/vs-common.md:97",
+    "title": "| **G4-17** | 🟡 **comment 域的 DDL 差异已被机器重测** ⇒ **基线 §十一 D-07 的归类与计数都要订正**（详见 `docs/DRIFT/comment/rpc.md` 的 2026-10-29 补记 ＋ article 域派单 **G4-12**） | **现象**：`pytho",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "PIT-GLOBAL-051",
+    "dir": "DRIFT",
+    "domain": "comment",
+    "source": "DRIFT/comment/vs-common.md:29;Pitfalls/global/cross-domain.md:2014",
+    "title": "| `PIT-GLOBAL-051` | 与「SQL 被 deadline 取消」同族的踩坑记录 | `service/common`<br>📍 **可复算指针（本次补）**：`docs/Pitfalls/global/cross-domain.md:2010`（`## PIT-GLOBAL-051 …`）· 同文件 ",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-MSG-V-032",
+    "dir": "DRIFT",
+    "domain": "message",
+    "source": "DRIFT/message/rpc.md:2801",
+    "title": "### 🟡 `DRIFT-MSG-V-032` 🟡 **登记（不改）**：`MessageRpcSlowThresholdGateTest` 在**全量并发回归**里偶发 `UNAVAILABLE: Network closed for unknown reason`",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-MSGAPI-012",
+    "dir": "DRIFT",
+    "domain": "message",
+    "source": "DRIFT/message/api.md:1532",
+    "title": "#### 🆕 `DRIFT-MSGAPI-012` 🟡 **框架限制**：`Content-Type` 分号后的**空格**在 Tomcat 上不可达",
+    "status": "🟡 部分闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "FB-G2-04",
+    "dir": "DRIFT",
+    "domain": "message",
+    "source": "DRIFT/message/feedback-to-g4.md:66",
+    "title": "### FB-G2-04 · `DRIFT-MSGAPI-012` · 🟡 **不可修**（Tomcat 序列化行为 · **不转派**）",
+    "status": "🟡 部分闭合",
+    "evidence": "C 无指针"
+   }
+  ]
+ },
+ "W11": {
+  "轮": "第 2 轮 · W8~W14",
+  "条目": [
+   {
+    "id": "DRIFT-USERAPI-013",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/user/api.md:624;DRIFT/users/user/api.md:3283;DRIFT/users/user/api.md:3590",
+    "title": "| `DRIFT-USERAPI-013` | 过载保护（MaxConns 闸门粒度 + breaker 键空间 + 注释与实现矛盾）| 🟡 **2026-10-29 拆半**（与 `vs-common.md` §6.1/§6.4 收敛为同一状态）：**① MaxConns 闸门粒度 = ✅ 已签字 ⇒ 不修**（`S",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-USERRPC-V-002",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/user/rpc.md:531;DRIFT/users/user/rpc.md:1706",
+    "title": "### DRIFT-USERRPC-V-002 DDL：`users_user.status` 的 **NOT NULL** 两侧不同 —— 🟡 **2026-10-27 订正：定性为「DDL 层差异 · 行为层零差异」⇒ 建议保持 NOT NULL**（原标题「🔴 仍成立，但被卡（改动必须与 admin 域同改）」已",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "U-2",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/admin/_shared.md:212;DRIFT/users/admin/rpc.md:1476",
+    "title": "| **U-2** | 🟡 **2026-10-27 订正：定性为「DDL 层差异 · 行为层零差异」⇒ 建议保持 RAG NOT NULL ⇒ 落点无动作**（Go 读 NULL ⇒ **0** 且不报错；RAG NOT NULL ⇒ 读不到 NULL ⇒ 也是 0 ⇒ **可观察结果相同**）⇒ ⚠️ **原写「🔴",
+    "status": "🟡 部分闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "UNRESOLVED-ADMINAPI-005",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/admin/api.md:1005;DRIFT/users/admin/api.md:1588",
+    "title": "### UNRESOLVED-ADMINAPI-005 · 两项启动期事实未实测",
+    "status": "🟡 部分闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "UNRESOLVED-USERSCOMMON-004",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/common.md:545;DRIFT/users/common.md:871",
+    "title": "| **UNRESOLVED-USERSCOMMON-004** | `ddl/SchemaInitializer` 的四份脚本与 Go `AutoMigrate` 的**逐列等价性** | 本轮按用户口径**不动 DDL**，只审了 Java 侧脚本内容；`ADVISORY_LOCK_KEY` 的并发正确性未做双侧对",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   }
+  ]
+ },
+ "W12": {
+  "轮": "第 2 轮 · W8~W14",
+  "条目": [
+   {
+    "id": "F-6",
+    "dir": "DRIFT",
+    "domain": "favorite",
+    "source": "DRIFT/favorite/vs-common.md:228",
+    "title": "| **F-6** | **rpc 域的其余明文默认值**（`${POSTGRES_PASSWORD:password}` / `${MINIO_SECRET_KEY:minioadmin}` / `${*_AUTHORITY_TOKEN:}`） | 🟡 **已登记，本轮未动** | 🔴 **G4**（需**单独单据*",
+    "status": "🟡 部分闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "G4-14",
+    "dir": "DRIFT",
+    "domain": "favorite",
+    "source": "DRIFT/favorite/vs-common.md:121",
+    "title": "| **G4-14** | 🟡 **favorite 域两条「待拍板」项的**前提已变**（U9 · 部署形态）+ **U7 的环境受阻前提部分解除** | **现象**：① **U9**（Go 生产形态有 **16062** 那个 HTTP 面：`/metrics` `/healthz` pprof ⇒ RAG 侧 ",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "G4-15",
+    "dir": "DRIFT",
+    "domain": "favorite",
+    "source": "DRIFT/favorite/vs-common.md:122",
+    "title": "| **G4-15** | 🟡 **favorite-api 的 405 多一个 `Content-Type`**（既有项，落点 `service/common`）—— 本轮**状态复核**：**仍在，未修** | **现象**：`405`（方法不匹配）响应**多带一个 `Content-Type`** ⇒ 与 Go ",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-HOTAPI-025",
+    "dir": "DRIFT",
+    "domain": "hot",
+    "source": "DRIFT/hot/api.md:1590",
+    "title": "## DRIFT-HOTAPI-025 🟡 部分闭合（499 已可见 · 断连取消已生效）· 残留时序差（补全批次独立池）",
+    "status": "🟡 部分闭合",
+    "evidence": "A 活体 · 绿(0)"
+   },
+   {
+    "id": "DRIFT-HOTAPI-026",
+    "dir": "DRIFT",
+    "domain": "hot",
+    "source": "DRIFT/hot/api.md:1672",
+    "title": "## DRIFT-HOTAPI-026 —— MaxBytes 拒绝后 Go **重置连接（RST）**，RAG 干净关闭",
+    "status": "🟡 部分闭合",
+    "evidence": "A 活体 · 红(1)"
+   },
+   {
+    "id": "DRIFT-HOTAPI-031",
+    "dir": "DRIFT",
+    "domain": "hot",
+    "source": "DRIFT/hot/api.md:2398",
+    "title": "## DRIFT-HOTAPI-031 —— 🟡 框架限制：超长请求行的**状态码与错误体形状**不可配（Go 431 + `text/plain` vs RAG 400 + `text/html`）",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-HOTRPC-005",
+    "dir": "DRIFT",
+    "domain": "hot",
+    "source": "DRIFT/hot/rpc.md:723;DRIFT/hot/rpc.md:990",
+    "title": "### DRIFT-HOTRPC-005 🟡 OBSERVABLE DIFFERENCE · LOW · 已取证",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "G4-19",
+    "dir": "DRIFT",
+    "domain": "hot",
+    "source": "DRIFT/hot/vs-common.md:92",
+    "title": "| **G4-19** | 🟡 **共享脚本 `check-surface-parity.py` 在工作树里指错 Go 真源**（**跨 G1~G4 全域**）—— hot 域是**最先撞上**的那个（它会**直接 EXIT=1**） | **现象**：`python3 tools/difftest/check-sur",
+    "status": "🟡 部分闭合",
+    "evidence": "A 活体 · 绿(0)"
+   },
+   {
+    "id": "H-4",
+    "dir": "DRIFT",
+    "domain": "hot",
+    "source": "DRIFT/hot/vs-common.md:70",
+    "title": "| **H-4** | 🟡 **部署侧**：`hot-rpc` 的 gRPC 端口未在 `Infrastructure.md §3` 预占 | 部署配置（**非本仓写权面**） | `hot-rpc/.../application.yml:83-85` 的注释自记「Infrastructure.md §3 目前只给 h",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-LIKE-018",
+    "dir": "DRIFT",
+    "domain": "like",
+    "source": "DRIFT/like/rpc.md:898;DRIFT/like/rpc.md:1289",
+    "title": "### DRIFT-LIKE-018 — Kafka 消费并发度 8 → 1",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "U-03",
+    "dir": "DRIFT",
+    "domain": "like",
+    "source": "DRIFT/like/api.md:826;DRIFT/like/api.md:839",
+    "title": "| **U-03** | 🟡 **取证缺口** —— 仍缺「**真 Tomcat + 慢下游**」的超时用例 ⇒ **3s → 503 这条出口至今只在配置层/装配层核对过** | ① 配置层：`service/like/like-api/src/main/resources/application.yml:28-29",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "U-05",
+    "dir": "DRIFT",
+    "domain": "like",
+    "source": "DRIFT/like/api.md:828;DRIFT/like/api.md:841",
+    "title": "| **U-05** | 🟡 **取证缺口** —— **判据两侧一致**（chunked ⇒ `ContentLength == -1` ⇒ **不读 body**），但**缺端到端真容器证据** | ① Go **消费点**：go-zero `rest/httpx/requests.go:66` → `:117 P",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "U-08",
+    "dir": "DRIFT",
+    "domain": "like",
+    "source": "DRIFT/like/api.md:831;DRIFT/like/api.md:844",
+    "title": "| **U-08** | 🟡 **取证缺口（前提已被推翻）** —— ⚠️ 「**本轮所有探针都绕开了 gRPC**」**已不成立**：新探针**真的发 gRPC 网络请求**；RAG 侧「寻址失败」的错误形态**已实测 = `1015`**（**不是 `5001`**）⇒ **U-08 原文的猜测被推翻**。**剩余",
+    "status": "🟡 部分闭合",
+    "evidence": "A 活体 · 绿(0)"
+   }
+  ]
+ },
+ "W13": {
+  "轮": "第 2 轮 · W8~W14",
+  "条目": [
+   {
+    "id": "DRIFT-003",
+    "dir": "DRIFT",
+    "domain": "common",
+    "source": "DRIFT/common/protection.md:89;DRIFT/message/api.md:79;DRIFT/users/user/api.md:35",
+    "title": "#### ✅ 连带关闭 `like-api` 的 DRIFT-003 / 004 / 005",
+    "status": "🟡 部分闭合",
+    "evidence": "A 活体 · 绿(0)"
+   },
+   {
+    "id": "DRIFT-CF-018",
+    "dir": "DRIFT",
+    "domain": "common",
+    "source": "DRIFT/common/alignment-2026-10-23.md:661;DRIFT/common/alignment-2026-10-23.md:1050;DRIFT/global/vs-common.md:4646",
+    "title": "### 十二·一、层一：common 域自身的漂移真实条数 = **23 条编号 + 5 项未编号**（2026-10-29 三次订正 · 漏减 `DRIFT-CF-018`）",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "T-7",
+    "dir": "DRIFT",
+    "domain": "common",
+    "source": "DRIFT/common/alignment-2026-10-23.md:694;DRIFT/common/alignment-2026-10-23.md:715;DRIFT/global/_README.md:93",
+    "title": "| **T-7** | `message` | `-011` | 同上路径 | 状态行 reason phrase 差异 | 🟡 仍 OPEN（同上拍板） |",
+    "status": "🟡 部分闭合",
+    "evidence": "C 无指针"
+   },
+   {
+    "id": "DRIFT-TASK-API-004",
+    "dir": "DRIFT",
+    "domain": "task",
+    "source": "DRIFT/task/_README.md:315;DRIFT/task/_README.md:355;DRIFT/task/api.md:510",
+    "title": "| `DRIFT-TASK-API-004` | 🟡 未修（全域共性） | 🟡 未修（不变） | 判据是 **HTTP 头渲染层**（`application/json` 无 charset ＋ `text/plain;charset=utf-8` 无空格）⇒ **必须真容器活体**才能量到 ⇒ 本轮**未重跑**该对",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   }
+  ]
+ },
+ "W14": {
+  "轮": "第 2 轮 · W8~W14",
+  "条目": [
+   {
+    "id": "DRIFT-FOLLOW-007",
+    "dir": "DRIFT",
+    "domain": "follow",
+    "source": "DRIFT/follow/api.md:34;DRIFT/follow/api.md:589;DRIFT/follow/api.md:1182",
+    "title": "| DRIFT-FOLLOW-007 | 指标文本层：多一个 `application` tag / 直方图**零桶** | 可观察（抓取侧） | 🟡 **已修**（tag + 桶）· ⚠️ 残留 = **框架限制** · ✅ **已定性（用户 2026-10-27 拍板：不修，登记为框架限制）** · 🆕 **202",
+    "status": "🟡 部分闭合",
+    "evidence": "A 活体 · 绿(0)"
+   },
+   {
+    "id": "T-16",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/common-tails.md:598",
+    "title": "### T-16 🟡→🟢 **第 ① 层已修（第三十一轮 · 2026-10-26）** —— 超时的**有效期限**未继承客户端 deadline",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "U-01",
+    "dir": "DRIFT",
+    "domain": "like",
+    "source": "DRIFT/like/api.md:824;DRIFT/like/api.md:837",
+    "title": "| **U-01** | 🟡 **取证缺口（部分闭合）** —— **like → DC 那一跳已 L4 闭合**（`003-A`）；**DC → 第三仓消费端那一跳仍未取证**，且**对端仓不在本项目范围** ⇒ **不是缺陷** | ① 已闭合部分：探针阶段 B（`run.sh` 第 10 步）—— 两侧投给 DC",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   },
+   {
+    "id": "DRIFT-ADMINAPI-012",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/admin/api.md:2236",
+    "title": "## 13. 🆕 `DRIFT-ADMINAPI-012` · Redis 断连 ⇒ 命令挂满 3s ⇒ **503**（Go 是 fail-open 200）—— **已修**（2026-10-27 · G1 lane）",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态"
+   }
+  ]
+ }
+}
