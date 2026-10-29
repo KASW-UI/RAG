@@ -54,6 +54,11 @@
 #   bash tools/difftest/exp-admin-worker-pool-load.sh [并发数，默认 300]
 # 退出码：0 = 结论成立（第 2 轮裸 503 = 0）；1 = 不成立（需重新分析）。
 set -uo pipefail
+# 🔴 RAG 侧 **fail-closed 密钥**（P0 #8）：占位符解析不出来 ⇒ 进程起不来
+#    ⇒ 探针「起 RAG 侧」这一步必挂 ⇒ 看起来像产品缺陷，其实是探针自己没给密钥。
+#    （2026-10-30 活体对拍轮实测 · 12 个探针全中招 ⇒ 收敛到这一个共享件）
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/rag-secrets.sh"
+
 
 N="${1:-300}"
 RUN_DIR="${RUN_DIR:-/tmp/difftest}"

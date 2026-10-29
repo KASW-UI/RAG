@@ -206,12 +206,17 @@ wait_ready() {   # $1 = 端口  $2 = 标签
   return 1
 }
 
-cleanup() {
+stop_stacks() {   # 真正把两侧服务停掉（**幂等** ⇒ 可被 cleanup 与收尾复核各调一次）
   local p
   [ -n "${KEEPALIVE_PID:-}" ] && kill "${KEEPALIVE_PID}" 2>/dev/null
   for p in ${GO_PIDS[@]+"${GO_PIDS[@]}"} ${RAG_PIDS[@]+"${RAG_PIDS[@]}"}; do kill "$p" 2>/dev/null; done
   sleep 1
   for p in ${GO_PIDS[@]+"${GO_PIDS[@]}"} ${RAG_PIDS[@]+"${RAG_PIDS[@]}"}; do kill -9 "$p" 2>/dev/null; done
+  sleep 1
+}
+
+cleanup() {
+  stop_stacks
   # 只注销**本探针自己注册**的实例（ip+port 精确匹配）
   nacos_deregister user-rpc "${GO_USER_RPC_PORT}"
   nacos_deregister follow-rpc "${RAG_RPC_PORT}"
@@ -379,7 +384,14 @@ say "   ✓ token 已签发（${#JWT_TOKEN} 字节）"
 # ══════════════════════════ 5. 起 Go 侧 user-rpc（下游，两侧共用同一个）══════════════
 step "5/9 起 Go 侧 user-rpc（etcd 注册 user.rpc；并注册进 Nacos 供 RAG 侧解析）"
 docker exec Sea-etcd etcdctl --endpoints="${ETCD_CTL_ENDPOINT}" del "user.rpc" --prefix >/dev/null 2>&1
-( cd "${WORK}" && "${WORK}/bin/user-rpc" -f "${WORK}/etc/user.yaml" >"${WORK}/go-user-rpc.log" 2>&1 ) &
+# ⚠️ **必须 `exec`**（2026-10-30 活体对拍轮实测踩到）：`( cd X && cmd ) &` 起的是
+#    **子 shell** ⇒ `$!` 是**子 shell 的 PID**，不是 Go 二进制的 PID
+#    ⇒ `kill $!` 杀的是子 shell ⇒ **Go 二进制变孤儿继续跑**（实测泄漏 13 分钟）
+#    ⇒ 它的 **etcd 租约还在**（`user.rpc` / `follow.rpc` 注册键不失效）
+#    ⇒ **下一轮探针的 Go client 会随机选中这些陈旧实例** ⇒ 连到已死的那个
+#    ⇒ 业务码塌成 `Internal` ⇒ **看起来像产品漂移，其实是探针互相污染**。
+#    ⇒ `exec` 让 Go 二进制**替换**子 shell ⇒ `$!` 就是它 ⇒ kill 干净。
+( cd "${WORK}" && exec "${WORK}/bin/user-rpc" -f "${WORK}/etc/user.yaml" >"${WORK}/go-user-rpc.log" 2>&1 ) &
 GO_PIDS+=($!)
 for _ in $(seq 1 40); do etcd_has_key user.rpc && break; sleep 1; done
 etcd_has_key user.rpc || die "Go user-rpc 40s 内没注册进 etcd（见 ${WORK}/go-user-rpc.log）"
@@ -399,7 +411,7 @@ say "   ✓ 已注册 user.rpc → $(etcd_get_value user.rpc)（:${GO_USER_RPC_P
 # ══════════════════════════ 6. 起 Go 侧 follow-rpc + follow-api ═════════════════════
 step "6/9 起 Go 侧 follow-rpc（etcd 注册 follow.rpc）与 follow-api（:${GO_API_PORT}）"
 docker exec Sea-etcd etcdctl --endpoints="${ETCD_CTL_ENDPOINT}" del "follow.rpc" --prefix >/dev/null 2>&1
-( cd "${WORK}" && "${WORK}/bin/follow-rpc" -f "${WORK}/etc/follow.yaml" >"${WORK}/go-rpc.log" 2>&1 ) &
+( cd "${WORK}" && exec "${WORK}/bin/follow-rpc" -f "${WORK}/etc/follow.yaml" >"${WORK}/go-rpc.log" 2>&1 ) &
 GO_PIDS+=($!)
 for _ in $(seq 1 40); do etcd_has_key follow.rpc && break; sleep 1; done
 etcd_has_key follow.rpc || die "Go follow-rpc 40s 内没注册进 etcd（见 ${WORK}/go-rpc.log）"
@@ -409,7 +421,7 @@ say "   ✓ 已注册 follow.rpc → $(etcd_get_value follow.rpc)（:${GO_RPC_PO
 # ⚠️ 同上：Go 侧 `zrpc.MustNewClient` 启动时**阻塞拨号 3s** ⇒ 下游还没完全就绪就起 api
 #    ⇒ api 进程直接 panic（`logx.Must`）⇒ 探针假挂。⇒ 等一下再起。
 sleep 3
-( cd "${WORK}" && "${WORK}/bin/follow-api" -f "${WORK}/etc/followcenter.yaml" >"${WORK}/go-api.log" 2>&1 ) &
+( cd "${WORK}" && exec "${WORK}/bin/follow-api" -f "${WORK}/etc/followcenter.yaml" >"${WORK}/go-api.log" 2>&1 ) &
 GO_PIDS+=($!)
 for _ in $(seq 1 40); do nc -z -G 1 127.0.0.1 "${GO_API_PORT}" && break; sleep 1; done
 nc -z -G 2 127.0.0.1 "${GO_API_PORT}" || die "Go follow-api 没起来（见 ${WORK}/go-api.log）"
@@ -654,10 +666,45 @@ if [ "${RECORD_FILE}" != "" ]; then
 fi
 
 echo
+# ══════════════════════════ 收尾：服务**真正**停掉 + 端口零残留 ═══════════════
+# ⚠️ **2026-10-30 活体对拍轮实测踩到**：本探针原先**只 kill `$!`**，而 `$!` 是
+#    `( cd … && cmd ) &` 的**子 shell** PID ⇒ **Go 二进制变孤儿继续跑**
+#    （实测泄漏 **13 分钟**）⇒ 它的 **etcd 租约还在**（`user.rpc` / `follow.rpc`
+#    注册键不失效）⇒ **下一轮探针的 Go client 会随机选中这些陈旧实例**
+#    ⇒ 连到已死的那个 ⇒ 业务码塌成 `Internal`
+#    ⇒ **看起来像产品漂移，其实是探针互相污染**。
+# ⇒ 修法（上文三处 `exec`）已让 `$!` 就是 Go 二进制本身 ⇒ 这里再加一道
+#    **端口零残留断言**：收尾不干净 ⇒ 探针**污染了宿主环境** ⇒ 本轮判 **EXIT=2**
+#    （**不判绿**）⇒ 宁可报「环境问题」，也不把污染留给下一轮。
+#
+# 🔴 **2026-10-30 活体对拍轮实测：这条断言原先装在了「错误的时机」**
+#    `cleanup` 是 `trap EXIT` ⇒ 它在**脚本退出时**才跑；
+#    而本断言在**退出之前**跑 ⇒ 进程**还活着** ⇒ **必然**报残留 ⇒ **必然 EXIT=2**
+#    ⇒ 探针自己的对拍矩阵（17/17 全 ✅）被**自己的收尾断言**打成红的
+#    ⇒ **我自己上一轮加的这道断言，制造了一个恒红的假信号**。
+# ⇒ 修法：**先真正收尾（kill + 等），再查残留**（`stop_stacks` 幂等 ⇒ trap 再调一次无害）。
+step "10/10 收尾复核（服务真停 · 端口零残留）"
+stop_stacks
+LEFTOVER=0
+for p in "${GO_API_PORT}" "${RAG_API_PORT}" "${GO_RPC_PORT}" "${GO_USER_RPC_PORT}" \
+         "${RAG_RPC_PORT}" "${GO_API_DEV_PORT}" "${GO_RPC_DEV_PORT}" "${GO_USER_DEV_PORT}"; do
+  for pid in $(lsof -ti tcp:"${p}" 2>/dev/null); do
+    say "   ❌ 端口 :${p} 仍有残留（pid ${pid}）"
+    LEFTOVER=1
+  done
+done
+if [ "${LEFTOVER}" = "1" ]; then
+  say ""
+  say "❌ 收尾后本探针的端口仍有残留 ⇒ 探针污染了宿主环境（下一轮会撞车）"
+  exit 2
+fi
+say "   ✓ 收尾复核：本探针的 8 个端口**零残留**"
+
+echo
 if [ "${FAILED}" = "0" ]; then
   say "✅ 双侧逐字节一致（Go 真源 == RAG == 冻结期望值）"
   exit 0
 fi
-say "❌ 双侧存在字节差异"
+say "❌ 两侧存在字节差异"
 dump_logs
 exit 1

@@ -36,6 +36,106 @@ die() { bad "$*"; exit 2; }
 
 cd "${RAG_ROOT}"
 
+# ── 炸法分类（**按失败签名**判，不按「日志里出现过什么词」）──────────────────
+# ⚠️ **2026-10-30 活体对拍轮实测修正**：本项目已升 **Spring Boot 4.0.8**
+#    ⇒ 「判定成 SERVLET 但没有 servlet 容器」这个失败在 Boot 4 下的**签名与 Boot 3 不同**：
+#      Boot 3 ⇒ "ServletWebServerFactory bean defined ..."（缺容器）
+#      Boot 4 ⇒ classpath 读 `ResponseBodyAdvice` 失败（共享层 `common` 里的
+#                `GoStyleJsonContentTypeAdvice implements ResponseBodyAdvice`，
+#                而 rpc 模块**故意不带 spring-webmvc** ⇒ 该接口的字节不存在）：
+#                "class path resource [org/springframework/web/servlet/mvc/method/annotation/ResponseBodyAdvice.class]
+#                 cannot be opened because it does not exist"
+#    ⇒ 旧分类器只认 Boot 3 的那一句 ⇒ 在 Boot 4 下**恒判 other** ⇒ 探针**假红**
+#      （2026-10-30 实测 EXIT=1；而同轮 B-case 真启动成功 + 21300 LISTEN
+#        ⇒ **产品无缺陷，是探针误报**）。
+# ⇒ 修法：两种签名都认；**且只认失败签名** ⇒ 成功启动的日志不会被误判成 servlet。
+# ⇒ 本函数自带 `--self-test`（拿已知正例 + **负例**反测）⇒ 判据本身可复算。
+classify_log() {  # $1 = 日志路径 ⇒ 打印 uri / servlet / started / other
+  local log="$1"
+  if grep -q "Incorrectly formatted target uri" "${log}" 2>/dev/null; then
+    printf 'uri'; return
+  fi
+  # ⚠️ **成功优先**：成功启动的日志里也可能出现 `ServletWebServerApplicationContext`
+  #    （那是**正常的**上下文类名，不是失败签名）⇒ 必须先判 started。
+  if grep -q "Started FavoriteRpcApplication" "${log}" 2>/dev/null; then
+    printf 'started'; return
+  fi
+  if grep -q "ServletWebServerFactory bean defined" "${log}" 2>/dev/null \
+     || grep -q "class path resource \[org/springframework/web/servlet/mvc/method/annotation/ResponseBodyAdvice.class\] cannot be opened" "${log}" 2>/dev/null; then
+    printf 'servlet'; return
+  fi
+  printf 'other'
+}
+
+# ── 判据 → 退出码的映射（**纯函数** ⇒ 可自检）───────────────────────────────
+# 🔴🔴 **2026-10-30 教训（本轮真踩到了）**：分类器 `classify_log` **自检 6/6 全绿**，
+#   但探针实际出口**仍然是错的** —— 重构时**忘了把分类结果写回 `LAST_KIND`**
+#   ⇒ 三个 case 的 kind 全成 `other` ⇒ 探针报「A/B/C 不成立」。
+#   ⇒ **自检只测了「判据函数」，没测「判据 → 退出码」的接线** ⇒ 探针可以
+#     **自检全绿而出口是错的**（这正是「跑绿 ≠ 对」在**探针自己**身上的形态）。
+# ⇒ 修法：把「日志 → (kind, rc)」整条决策路径收进**一个纯函数** `verdict_of_log`，
+#   `run_case` **只调它**（不再自己拼 kind/rc）⇒ 自检对它**逐档**反测 ⇒ 接线错不了。
+kind_to_rc() {  # $1 = kind ⇒ 0=起来 · 1=炸了 · 2=无结论/超时
+  case "$1" in
+    started)          printf '0' ;;
+    uri|servlet)      printf '1' ;;
+    *)                printf '2' ;;
+  esac
+}
+
+verdict_of_log() {  # $1 = 日志路径 ⇒ 打印 "<kind> <rc>"
+  local kind
+  kind="$(classify_log "$1")"
+  printf '%s %s' "${kind}" "$(kind_to_rc "${kind}")"
+}
+
+# ── 分类器自检（**拿已知错例反测**：自制判据的漏报比误报更难发现）──────────
+self_test() {
+  local d fails=0 got
+  d="$(mktemp -d)"
+  printf 'Caused by: java.lang.IllegalArgumentException: Incorrectly formatted target uri; expected: %s\n' \
+    "'discovery:[//]/<service-name>'" > "${d}/uri.log"
+  printf 'APPLICATION FAILED TO START\nServletWebServerFactory bean defined but missing\n' > "${d}/servlet3.log"
+  printf 'Caused by: java.io.FileNotFoundException: class path resource [org/springframework/web/servlet/mvc/method/annotation/ResponseBodyAdvice.class] cannot be opened because it does not exist\n' > "${d}/servlet4.log"
+  printf 'Started FavoriteRpcApplication in 1.85 seconds\n' > "${d}/started.log"
+  printf 'APPLICATION FAILED TO START\nCaused by: java.lang.NullPointerException: unrelated failure\n' > "${d}/other.log"
+  printf 'Started FavoriteRpcApplication in 1.85 seconds\n\tat org.springframework.boot.web.server.servlet.context.ServletWebServerApplicationContext.refresh\n' > "${d}/started_servlet_ctx.log"
+
+  # ⚠️ 这里测的是**整条决策路径**（日志 → kind → rc），**不是**只测 classify_log
+  #   ⇒ 才抓得住「kind 算对了、rc 没接上」这一类接线错。
+  check() {  # $1 = 日志名  $2 = 期望 kind  $3 = 期望 rc
+    local v kind rc
+    v="$(verdict_of_log "${d}/$1")"
+    kind="${v%% *}"; rc="${v##* }"
+    if [ "${kind}" = "$2" ] && [ "${rc}" = "$3" ]; then
+      printf '  ✅ %-22s ⇒ kind=%-8s rc=%s\n' "$1" "${kind}" "${rc}"
+    else
+      printf '  ❌ %-22s ⇒ 期望 kind=%s rc=%s 实得 kind=%s rc=%s\n' "$1" "$2" "$3" "${kind}" "${rc}"; fails=1
+    fi
+  }
+  check uri.log                uri      1
+  check servlet3.log           servlet  1
+  check servlet4.log           servlet  1
+  check started.log            started  0
+  check other.log              other    2
+  check started_servlet_ctx.log started  0
+  if [ "${fails}" -eq 0 ]; then
+    printf '  ✅ 决策路径自检 6/6 通过（含 kind → rc 的接线）\n'
+  else
+    printf '  ❌ 决策路径自检有反例 ⇒ 判据/接线本身不可信\n'
+  fi
+  return "${fails}"
+}
+
+# ── 分类器自检入口（**不起服务、不碰 DB**，秒级）────────────────────────────
+# ⚠️ 为什么单独开一个入口：判据本身如果错了，整个探针的退出码就**没有意义**
+#   ⇒ 「跑绿 ≠ 对」在**探针自己**身上同样成立（AGENTS.md §3.3.3）。
+if [ "${1:-}" = "--self-test" ]; then
+  printf '== prod-startup-probe 分类器自检 ==\n'
+  self_test
+  exit $?
+fi
+
 JAR="service/favorite/favorite-rpc/target/favorite-rpc-0.0.1-SNAPSHOT.jar"
 [ -f "${JAR}" ] || die "找不到 ${JAR} ⇒ 先跑：mvn -o -pl service/favorite/favorite-rpc -am package -DskipTests"
 
@@ -111,7 +211,10 @@ COMMON=(
 
 # 起一次，等它给出结论（起来了 / 炸了 / 超时）。
 # 返回：0 = 起来了；1 = 炸了；2 = 超时（没结论）。
-# 副作用：把判定出的「炸法」写进全局变量 LAST_KIND（uri / servlet / other）。
+# ⚠️ **2026-10-30 结构调整**：本函数**只负责「起进程 + 打印 + 落日志」**，
+#   **不参与最终判定** ⇒ 最终判定直接读 `${TMP}/<tag>.log` 重算（见 §7）。
+#   ⇒ 这样「判定」只有**一条**分类路径（`verdict_of_log`）⇒ 不存在「这里算对了、
+#     那边没接上」的第二条路径。
 run_case() {
   local tag="$1"; shift
   local log="${TMP}/${tag}.log"
@@ -128,38 +231,39 @@ run_case() {
   done
   sleep 2
 
-  LAST_KIND="other"
-  if grep -q "Incorrectly formatted target uri" "${log}" 2>/dev/null; then
-    LAST_KIND="uri"
-    bad "${tag}：**启动即炸**（devh URI 校验 · 两斜杠）"
-    grep -m1 -A2 "Caused by: java.lang.IllegalArgumentException: Incorrectly formatted target uri" "${log}" | head -3 | sed 's/^/     /'
-    kill "${pid}" >/dev/null 2>&1; wait "${pid}" 2>/dev/null
-    wait_port_free
-    return 1
-  fi
-  if grep -q "ServletWebServerFactory bean defined" "${log}" 2>/dev/null; then
-    LAST_KIND="servlet"
-    bad "${tag}：**启动即炸**（Boot 判定成 SERVLET 但没有 servlet 容器）"
-    grep -m1 -B2 -A3 "ServletWebServerFactory bean defined" "${log}" | head -8 | sed 's/^/     /'
-    kill "${pid}" >/dev/null 2>&1; wait "${pid}" 2>/dev/null
-    wait_port_free
-    return 1
-  fi
-  if grep -q "Started FavoriteRpcApplication" "${log}" 2>/dev/null; then
-    LAST_KIND="started"
-    ok "${tag}：**启动成功**"
-    grep -E "gRPC Server started|Started FavoriteRpcApplication" "${log}" | head -2 | sed 's/^/     /'
-    lsof -nP -iTCP:"${GRPC_PORT}" -sTCP:LISTEN 2>/dev/null | head -3 | sed 's/^/     /'
-    kill "${pid}" >/dev/null 2>&1; wait "${pid}" 2>/dev/null
-    wait_port_free
-    return 0
-  fi
+  local v; v="$(verdict_of_log "${log}")"
+  local kind="${v%% *}" rc="${v##* }"
+  case "${kind}" in
+    uri)
+      bad "${tag}：**启动即炸**（devh URI 校验 · 两斜杠）"
+      grep -m1 -A2 "Caused by: java.lang.IllegalArgumentException: Incorrectly formatted target uri" "${log}" | head -3 | sed 's/^/     /'
+      kill "${pid}" >/dev/null 2>&1; wait "${pid}" 2>/dev/null
+      wait_port_free
+      return "${rc}"
+      ;;
+    servlet)
+      bad "${tag}：**启动即炸**（Boot 判定成 SERVLET 但没有 servlet 容器）"
+      grep -m1 -B2 -A3 -E "ServletWebServerFactory bean defined|ResponseBodyAdvice.class" "${log}" | head -8 | sed 's/^/     /'
+      kill "${pid}" >/dev/null 2>&1; wait "${pid}" 2>/dev/null
+      wait_port_free
+      return "${rc}"
+      ;;
+    started)
+      ok "${tag}：**启动成功**"
+      grep -E "gRPC Server started|Started FavoriteRpcApplication" "${log}" | head -2 | sed 's/^/     /'
+      lsof -nP -iTCP:"${GRPC_PORT}" -sTCP:LISTEN 2>/dev/null | head -3 | sed 's/^/     /'
+      kill "${pid}" >/dev/null 2>&1; wait "${pid}" 2>/dev/null
+      wait_port_free
+      return "${rc}"
+      ;;
+  esac
   bad "${tag}：120s 内既没起来也没报已知错误 ⇒ 看 ${TMP}/${tag}.log"
   tail -30 "${log}" | sed 's/^/     /'
   kill "${pid}" >/dev/null 2>&1; wait "${pid}" 2>/dev/null
   wait_port_free
-  return 2
+  return "${rc}"
 }
+
 
 # 等监听端口真正释放 ⇒ 下一个 case 不会撞「端口被上一个 case 占着」。
 wait_port_free() {
@@ -176,14 +280,10 @@ say "A · 修前（把 client 地址按字节改回两斜杠）"
 run_case "A-before" \
   --grpc.client.user-rpc.address=discovery://user-rpc \
   --grpc.client.article-rpc.address=discovery://article-rpc
-A_RC=$?
-A_KIND="${LAST_KIND}"
 
 # ── 5. B · 修后（生产 yaml 原样）───────────────────────────────────────────
 say "B · 修后（**不传任何 --grpc.client.* 覆盖**）"
 run_case "B-after"
-B_RC=$?
-B_KIND="${LAST_KIND}"
 
 # ── 6. C · 修前（web 类型）────────────────────────────────────────────────
 # ⚠️ 这一条是 **2026-10-26 A/B 途中撞出来的**（比两斜杠更靠前）：
@@ -194,12 +294,21 @@ B_KIND="${LAST_KIND}"
 #    （无该行时 Boot 由 deduceFromClasspath() 判定 ⇒ 同样是 SERVLET）。
 say "C · 修前（把 web-application-type 覆盖回 servlet）"
 run_case "C-before" --spring.main.web-application-type=servlet
-C_RC=$?
-C_KIND="${LAST_KIND}"
 
 # ── 7. 判定 ────────────────────────────────────────────────────────────────
+# 🔴🔴 **2026-10-30 教训的根治**：判定**直接由日志文件重新推导**，
+#   **不再经由 `run_case` 的返回值 / 全局 `LAST_KIND` 传递**。
+#   ⇒ 上一版就是栽在「分类算对了、但没写回全局」这一根接线上 ⇒
+#     **自检全绿而出口全错**。
+#   ⇒ 现在 `run_case` 只负责「起进程 + 打印 + 落日志」，**不参与判定**；
+#     判定只认 `verdict_of_log <日志文件>` 这一条**纯函数**路径 ⇒
+#     **没有中间状态可丢** ⇒ 同类 bug 结构上不可能再发生。
+#     （自检覆盖的正是这条路径 —— 见 `self_test`。）
 echo
 FAILED=""
+vA="$(verdict_of_log "${TMP}/A-before.log")"; A_KIND="${vA%% *}"; A_RC="${vA##* }"
+vB="$(verdict_of_log "${TMP}/B-after.log")";  B_KIND="${vB%% *}"; B_RC="${vB##* }"
+vC="$(verdict_of_log "${TMP}/C-before.log")"; C_KIND="${vC%% *}"; C_RC="${vC##* }"
 [ "${A_RC}" -eq 1 ] && [ "${A_KIND}" = "uri" ] || FAILED="A（期望「炸·uri」，实际 rc=${A_RC} kind=${A_KIND}）"
 [ "${C_RC}" -eq 1 ] && [ "${C_KIND}" = "servlet" ] || FAILED="${FAILED} C（期望「炸·servlet」，实际 rc=${C_RC} kind=${C_KIND}）"
 [ "${B_RC}" -eq 0 ] && [ "${B_KIND}" = "started" ] || FAILED="${FAILED} B（期望「起来」，实际 rc=${B_RC} kind=${B_KIND}）"

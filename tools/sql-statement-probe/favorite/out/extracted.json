@@ -512,11 +512,11 @@
         {
           "sql": "INSERT INTO \"favorite_folder\" (\"folder_id\",\"user_id\",\"name\",\"create_time\",\"update_time\") VALUES ($1,$2,$3,$4,$5) RETURNING \"id\"",
           "params": {
-            "1": "2114664366449553408",
+            "1": "2115886541579214848",
             "2": "2001",
             "3": "SqlProbeFolder",
-            "4": "2026-10-26 18:24:08.183291+08",
-            "5": "2026-10-26 18:24:08.183291+08"
+            "4": "2026-10-30 03:20:37.440449+08",
+            "5": "2026-10-30 03:20:37.440449+08"
           }
         },
         {
@@ -535,11 +535,11 @@
         {
           "sql": "INSERT INTO favorite_folder (folder_id, user_id, name, create_time, update_time)\n\tVALUES ($1, $2, $3, $4, $5)",
           "params": {
-            "1": "2114664366570917888",
+            "1": "2115886541669208064",
             "2": "2001",
             "3": "SqlProbeFolder",
-            "4": "2026-10-26 18:24:08.21149+08",
-            "5": "2026-10-26 18:24:08.21149+08"
+            "4": "2026-10-30 03:20:37.461258+08",
+            "5": "2026-10-30 03:20:37.461258+08"
           }
         }
       ]
@@ -570,14 +570,14 @@
         {
           "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
           "params": {
-            "1": "2114664366449553408",
+            "1": "2115886541579214848",
             "2": "1"
           }
         },
         {
           "sql": "SELECT * FROM \"favorite_item\" WHERE folder_id = $1 AND target_id = $2 AND target_type = $3 ORDER BY \"favorite_item\".\"id\" LIMIT $4",
           "params": {
-            "1": "2114664366449553408",
+            "1": "2115886541579214848",
             "2": "t-77",
             "3": "post",
             "4": "1"
@@ -590,31 +590,31 @@
         {
           "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2 FOR UPDATE",
           "params": {
-            "1": "2114664366449553408",
+            "1": "2115886541579214848",
             "2": "1"
           }
         },
         {
           "sql": "INSERT INTO \"favorite_item\" (\"favorite_id\",\"folder_id\",\"user_id\",\"target_id\",\"target_type\",\"target_revision\",\"title\",\"cover\",\"create_time\") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING \"id\"",
           "params": {
-            "1": "2114664366722183168",
-            "2": "2114664366449553408",
+            "1": "2115886541801512960",
+            "2": "2115886541579214848",
             "3": "2001",
             "4": "t-77",
             "5": "post",
             "6": null,
             "7": "req-title",
             "8": "req-cover",
-            "9": "2026-10-26 18:24:08.249209+08"
+            "9": "2026-10-30 03:20:37.494056+08"
           }
         },
         {
           "sql": "INSERT INTO \"favorite_fact_outbox\" (\"event_id\",\"favorite_id\",\"aggregate_version\",\"payload\",\"status\",\"retry_count\",\"technical_receipt_id\",\"technical_input_hash\",\"technical_offset\",\"technical_received_at\",\"delivered_at\",\"created_at\",\"updated_at\") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
           "params": {
-            "1": "favorite.2114664366722183168.v1",
-            "2": "2114664366722183168",
+            "1": "favorite.2115886541801512960.v1",
+            "2": "2115886541801512960",
             "3": "1",
-            "4": "{\"payload\": {\"event_id\": \"favorite.2114664366722183168.v1\", \"folder_id\": \"2114664366449553408\", \"operation\": \"assert\", \"target_id\": \"t-77\", \"event_time\": \"2026-10-26T10:24:08.250264Z\", \"source_ref\": \"rtw.favorite/2114664366722183168\", \"favorite_id\": \"2114664366722183168\", \"subject_ref\": {\"tenant_id\": \"platform\", \"subject_id\": \"2001\", \"authority_id\": \"rtw.identity\"}, \"target_type\": \"post\", \"available_at\": \"2026-10-26T10:24:08.250264Z\", \"schema_version\": 1, \"target_revision\": null}, \"event_id\": \"favorite.2114664366722183168.v1\", \"producer\": \"rtw.community.favorite\", \"event_type\": \"rtw.favorite.assert\", \"occurred_at\": \"2026-10-26T10:24:08.250264Z\", \"aggregate_id\": \"2114664366722183168\", \"operation_id\": \"favorite.2114664366722183168.v1\", \"schema_version\": 1, \"aggregate_version\": 1}",
+            "4": "{\"payload\": {\"event_id\": \"favorite.2115886541801512960.v1\", \"folder_id\": \"2115886541579214848\", \"operation\": \"assert\", \"target_id\": \"t-77\", \"event_time\": \"2026-10-29T19:20:37.495097Z\", \"source_ref\": \"rtw.favorite/2115886541801512960\", \"favorite_id\": \"2115886541801512960\", \"subject_ref\": {\"tenant_id\": \"platform\", \"subject_id\": \"2001\", \"authority_id\": \"rtw.identity\"}, \"target_type\": \"post\", \"available_at\": \"2026-10-29T19:20:37.495097Z\", \"schema_version\": 1, \"target_revision\": null}, \"event_id\": \"favorite.2115886541801512960.v1\", \"producer\": \"rtw.community.favorite\", \"event_type\": \"rtw.favorite.assert\", \"occurred_at\": \"2026-10-29T19:20:37.495097Z\", \"aggregate_id\": \"2115886541801512960\", \"operation_id\": \"favorite.2115886541801512960.v1\", \"schema_version\": 1, \"aggregate_version\": 1}",
             "5": "0",
             "6": "0",
             "7": "",
@@ -622,8 +622,8 @@
             "9": "0",
             "10": null,
             "11": null,
-            "12": "2026-10-26 18:24:08.250312+08",
-            "13": "2026-10-26 18:24:08.250312+08"
+            "12": "2026-10-30 03:20:37.495138+08",
+            "13": "2026-10-30 03:20:37.495138+08"
           }
         },
         {
@@ -635,13 +635,13 @@
         {
           "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
           "params": {
-            "1": "2114664366570917888"
+            "1": "2115886541669208064"
           }
         },
         {
           "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE folder_id = $1 AND target_id = $2 AND target_type = $3\n\tLIMIT 1",
           "params": {
-            "1": "2114664366570917888",
+            "1": "2115886541669208064",
             "2": "t-77",
             "3": "post"
           }
@@ -657,32 +657,32 @@
         {
           "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1\n\tFOR UPDATE",
           "params": {
-            "1": "2114664366570917888"
+            "1": "2115886541669208064"
           }
         },
         {
           "sql": "INSERT INTO favorite_item\n\t    (favorite_id, folder_id, user_id, target_id, target_type, target_revision, title, cover,\n\t     create_time)\n\tVALUES ($1, $2, $3, $4, $5,\n\t        $6, $7, $8,\n\t        $9)",
           "params": {
-            "1": "2114664366805798912",
-            "2": "2114664366570917888",
+            "1": "2115886541857951744",
+            "2": "2115886541669208064",
             "3": "2001",
             "4": "t-77",
             "5": "post",
             "6": null,
             "7": "req-title",
             "8": "req-cover",
-            "9": "2026-10-26 18:24:08.274192+08"
+            "9": "2026-10-30 03:20:37.51092+08"
           }
         },
         {
           "sql": "INSERT INTO favorite_fact_outbox\n\t    (event_id, favorite_id, aggregate_version, payload, status, retry_count,\n\t     technical_receipt_id, technical_input_hash,\n\t     created_at, updated_at)\n\tVALUES ($1, $2, $3, $4::jsonb, 0, 0,\n\t        '', '',\n\t        $5, $6)",
           "params": {
-            "1": "favorite.2114664366805798912.v1",
-            "2": "2114664366805798912",
+            "1": "favorite.2115886541857951744.v1",
+            "2": "2115886541857951744",
             "3": "1",
-            "4": "{\"event_id\":\"favorite.2114664366805798912.v1\",\"event_type\":\"rtw.favorite.assert\",\"schema_version\":1,\"producer\":\"rtw.community.favorite\",\"aggregate_id\":\"2114664366805798912\",\"aggregate_version\":1,\"operation_id\":\"favorite.2114664366805798912.v1\",\"occurred_at\":\"2026-10-26T10:24:08.275361Z\",\"payload\":{\"schema_version\":1,\"event_id\":\"favorite.2114664366805798912.v1\",\"subject_ref\":{\"authority_id\":\"rtw.identity\",\"tenant_id\":\"platform\",\"subject_id\":\"2001\"},\"target_type\":\"post\",\"target_id\":\"t-77\",\"target_revision\":null,\"operation\":\"assert\",\"source_ref\":\"rtw.favorite/2114664366805798912\",\"event_time\":\"2026-10-26T10:24:08.275361Z\",\"available_at\":\"2026-10-26T10:24:08.275361Z\",\"favorite_id\":\"2114664366805798912\",\"folder_id\":\"2114664366570917888\"}}",
-            "5": "2026-10-26 18:24:08.277582+08",
-            "6": "2026-10-26 18:24:08.277582+08"
+            "4": "{\"event_id\":\"favorite.2115886541857951744.v1\",\"event_type\":\"rtw.favorite.assert\",\"schema_version\":1,\"producer\":\"rtw.community.favorite\",\"aggregate_id\":\"2115886541857951744\",\"aggregate_version\":1,\"operation_id\":\"favorite.2115886541857951744.v1\",\"occurred_at\":\"2026-10-29T19:20:37.511643Z\",\"payload\":{\"schema_version\":1,\"event_id\":\"favorite.2115886541857951744.v1\",\"subject_ref\":{\"authority_id\":\"rtw.identity\",\"tenant_id\":\"platform\",\"subject_id\":\"2001\"},\"target_type\":\"post\",\"target_id\":\"t-77\",\"target_revision\":null,\"operation\":\"assert\",\"source_ref\":\"rtw.favorite/2115886541857951744\",\"event_time\":\"2026-10-29T19:20:37.511643Z\",\"available_at\":\"2026-10-29T19:20:37.511643Z\",\"favorite_id\":\"2115886541857951744\",\"folder_id\":\"2115886541669208064\"}}",
+            "5": "2026-10-30 03:20:37.513205+08",
+            "6": "2026-10-30 03:20:37.513205+08"
           }
         },
         {
@@ -696,14 +696,14 @@
         {
           "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
           "params": {
-            "1": "2114664366449553408",
+            "1": "2115886541579214848",
             "2": "1"
           }
         },
         {
           "sql": "SELECT * FROM \"favorite_item\" WHERE folder_id = $1 AND target_id = $2 AND target_type = $3 ORDER BY \"favorite_item\".\"id\" LIMIT $4",
           "params": {
-            "1": "2114664366449553408",
+            "1": "2115886541579214848",
             "2": "t-78",
             "3": "post",
             "4": "1"
@@ -716,31 +716,31 @@
         {
           "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2 FOR UPDATE",
           "params": {
-            "1": "2114664366449553408",
+            "1": "2115886541579214848",
             "2": "1"
           }
         },
         {
           "sql": "INSERT INTO \"favorite_item\" (\"favorite_id\",\"folder_id\",\"user_id\",\"target_id\",\"target_type\",\"target_revision\",\"title\",\"cover\",\"create_time\") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING \"id\"",
           "params": {
-            "1": "2114664366902538240",
-            "2": "2114664366449553408",
+            "1": "2115886541935730688",
+            "2": "2115886541579214848",
             "3": "2001",
             "4": "t-78",
             "5": "post",
             "6": null,
             "7": "req-title-2",
             "8": "req-cover-2",
-            "9": "2026-10-26 18:24:08.29217+08"
+            "9": "2026-10-30 03:20:37.525994+08"
           }
         },
         {
           "sql": "INSERT INTO \"favorite_fact_outbox\" (\"event_id\",\"favorite_id\",\"aggregate_version\",\"payload\",\"status\",\"retry_count\",\"technical_receipt_id\",\"technical_input_hash\",\"technical_offset\",\"technical_received_at\",\"delivered_at\",\"created_at\",\"updated_at\") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
           "params": {
-            "1": "favorite.2114664366902538240.v1",
-            "2": "2114664366902538240",
+            "1": "favorite.2115886541935730688.v1",
+            "2": "2115886541935730688",
             "3": "1",
-            "4": "{\"payload\": {\"event_id\": \"favorite.2114664366902538240.v1\", \"folder_id\": \"2114664366449553408\", \"operation\": \"assert\", \"target_id\": \"t-78\", \"event_time\": \"2026-10-26T10:24:08.292597Z\", \"source_ref\": \"rtw.favorite/2114664366902538240\", \"favorite_id\": \"2114664366902538240\", \"subject_ref\": {\"tenant_id\": \"platform\", \"subject_id\": \"2001\", \"authority_id\": \"rtw.identity\"}, \"target_type\": \"post\", \"available_at\": \"2026-10-26T10:24:08.292597Z\", \"schema_version\": 1, \"target_revision\": null}, \"event_id\": \"favorite.2114664366902538240.v1\", \"producer\": \"rtw.community.favorite\", \"event_type\": \"rtw.favorite.assert\", \"occurred_at\": \"2026-10-26T10:24:08.292597Z\", \"aggregate_id\": \"2114664366902538240\", \"operation_id\": \"favorite.2114664366902538240.v1\", \"schema_version\": 1, \"aggregate_version\": 1}",
+            "4": "{\"payload\": {\"event_id\": \"favorite.2115886541935730688.v1\", \"folder_id\": \"2115886541579214848\", \"operation\": \"assert\", \"target_id\": \"t-78\", \"event_time\": \"2026-10-29T19:20:37.526207Z\", \"source_ref\": \"rtw.favorite/2115886541935730688\", \"favorite_id\": \"2115886541935730688\", \"subject_ref\": {\"tenant_id\": \"platform\", \"subject_id\": \"2001\", \"authority_id\": \"rtw.identity\"}, \"target_type\": \"post\", \"available_at\": \"2026-10-29T19:20:37.526207Z\", \"schema_version\": 1, \"target_revision\": null}, \"event_id\": \"favorite.2115886541935730688.v1\", \"producer\": \"rtw.community.favorite\", \"event_type\": \"rtw.favorite.assert\", \"occurred_at\": \"2026-10-29T19:20:37.526207Z\", \"aggregate_id\": \"2115886541935730688\", \"operation_id\": \"favorite.2115886541935730688.v1\", \"schema_version\": 1, \"aggregate_version\": 1}",
             "5": "0",
             "6": "0",
             "7": "",
@@ -748,8 +748,8 @@
             "9": "0",
             "10": null,
             "11": null,
-            "12": "2026-10-26 18:24:08.292621+08",
-            "13": "2026-10-26 18:24:08.292621+08"
+            "12": "2026-10-30 03:20:37.526219+08",
+            "13": "2026-10-30 03:20:37.526219+08"
           }
         },
         {
@@ -761,13 +761,13 @@
         {
           "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
           "params": {
-            "1": "2114664366570917888"
+            "1": "2115886541669208064"
           }
         },
         {
           "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE folder_id = $1 AND target_id = $2 AND target_type = $3\n\tLIMIT 1",
           "params": {
-            "1": "2114664366570917888",
+            "1": "2115886541669208064",
             "2": "t-78",
             "3": "post"
           }
@@ -783,32 +783,32 @@
         {
           "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1\n\tFOR UPDATE",
           "params": {
-            "1": "2114664366570917888"
+            "1": "2115886541669208064"
           }
         },
         {
           "sql": "INSERT INTO favorite_item\n\t    (favorite_id, folder_id, user_id, target_id, target_type, target_revision, title, cover,\n\t     create_time)\n\tVALUES ($1, $2, $3, $4, $5,\n\t        $6, $7, $8,\n\t        $9)",
           "params": {
-            "1": "2114664366969376768",
-            "2": "2114664366570917888",
+            "1": "2115886541975392256",
+            "2": "2115886541669208064",
             "3": "2001",
             "4": "t-78",
             "5": "post",
             "6": null,
             "7": "req-title-2",
             "8": "req-cover-2",
-            "9": "2026-10-26 18:24:08.308578+08"
+            "9": "2026-10-30 03:20:37.535596+08"
           }
         },
         {
           "sql": "INSERT INTO favorite_fact_outbox\n\t    (event_id, favorite_id, aggregate_version, payload, status, retry_count,\n\t     technical_receipt_id, technical_input_hash,\n\t     created_at, updated_at)\n\tVALUES ($1, $2, $3, $4::jsonb, 0, 0,\n\t        '', '',\n\t        $5, $6)",
           "params": {
-            "1": "favorite.2114664366969376768.v1",
-            "2": "2114664366969376768",
+            "1": "favorite.2115886541975392256.v1",
+            "2": "2115886541975392256",
             "3": "1",
-            "4": "{\"event_id\":\"favorite.2114664366969376768.v1\",\"event_type\":\"rtw.favorite.assert\",\"schema_version\":1,\"producer\":\"rtw.community.favorite\",\"aggregate_id\":\"2114664366969376768\",\"aggregate_version\":1,\"operation_id\":\"favorite.2114664366969376768.v1\",\"occurred_at\":\"2026-10-26T10:24:08.309435Z\",\"payload\":{\"schema_version\":1,\"event_id\":\"favorite.2114664366969376768.v1\",\"subject_ref\":{\"authority_id\":\"rtw.identity\",\"tenant_id\":\"platform\",\"subject_id\":\"2001\"},\"target_type\":\"post\",\"target_id\":\"t-78\",\"target_revision\":null,\"operation\":\"assert\",\"source_ref\":\"rtw.favorite/2114664366969376768\",\"event_time\":\"2026-10-26T10:24:08.309435Z\",\"available_at\":\"2026-10-26T10:24:08.309435Z\",\"favorite_id\":\"2114664366969376768\",\"folder_id\":\"2114664366570917888\"}}",
-            "5": "2026-10-26 18:24:08.309643+08",
-            "6": "2026-10-26 18:24:08.309643+08"
+            "4": "{\"event_id\":\"favorite.2115886541975392256.v1\",\"event_type\":\"rtw.favorite.assert\",\"schema_version\":1,\"producer\":\"rtw.community.favorite\",\"aggregate_id\":\"2115886541975392256\",\"aggregate_version\":1,\"operation_id\":\"favorite.2115886541975392256.v1\",\"occurred_at\":\"2026-10-29T19:20:37.536013Z\",\"payload\":{\"schema_version\":1,\"event_id\":\"favorite.2115886541975392256.v1\",\"subject_ref\":{\"authority_id\":\"rtw.identity\",\"tenant_id\":\"platform\",\"subject_id\":\"2001\"},\"target_type\":\"post\",\"target_id\":\"t-78\",\"target_revision\":null,\"operation\":\"assert\",\"source_ref\":\"rtw.favorite/2115886541975392256\",\"event_time\":\"2026-10-29T19:20:37.536013Z\",\"available_at\":\"2026-10-29T19:20:37.536013Z\",\"favorite_id\":\"2115886541975392256\",\"folder_id\":\"2115886541669208064\"}}",
+            "5": "2026-10-30 03:20:37.536173+08",
+            "6": "2026-10-30 03:20:37.536173+08"
           }
         },
         {
@@ -822,14 +822,14 @@
         {
           "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
           "params": {
-            "1": "2114664366449553408",
+            "1": "2115886541579214848",
             "2": "1"
           }
         },
         {
           "sql": "SELECT * FROM \"favorite_item\" WHERE folder_id = $1 AND target_id = $2 AND target_type = $3 ORDER BY \"favorite_item\".\"id\" LIMIT $4",
           "params": {
-            "1": "2114664366449553408",
+            "1": "2115886541579214848",
             "2": "t-77",
             "3": "post",
             "4": "1"
@@ -840,13 +840,13 @@
         {
           "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
           "params": {
-            "1": "2114664366570917888"
+            "1": "2115886541669208064"
           }
         },
         {
           "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE folder_id = $1 AND target_id = $2 AND target_type = $3\n\tLIMIT 1",
           "params": {
-            "1": "2114664366570917888",
+            "1": "2115886541669208064",
             "2": "t-77",
             "3": "post"
           }
@@ -878,7 +878,7 @@
           "sql": "UPDATE \"favorite_folder\" SET \"name\"=$1,\"update_time\"=$2 WHERE folder_id = $3",
           "params": {
             "1": "Alpha2",
-            "2": "2026-10-26 18:24:08.352408+08",
+            "2": "2026-10-30 03:20:37.563149+08",
             "3": "9001"
           }
         },
@@ -905,7 +905,7 @@
           "sql": "UPDATE favorite_folder\n\tSET name = $1, update_time = $2\n\tWHERE folder_id = $3",
           "params": {
             "1": "Alpha2",
-            "2": "2026-10-26 18:24:08.367237+08",
+            "2": "2026-10-30 03:20:37.571784+08",
             "3": "9001"
           }
         }
@@ -916,7 +916,7 @@
         {
           "sql": "SELECT * FROM \"favorite_item\" WHERE favorite_id = $1 ORDER BY \"favorite_item\".\"id\" LIMIT $2",
           "params": {
-            "1": "2114664366722183168",
+            "1": "2115886541801512960",
             "2": "1"
           }
         },
@@ -927,24 +927,24 @@
         {
           "sql": "SELECT * FROM \"favorite_item\" WHERE favorite_id = $1 ORDER BY \"favorite_item\".\"id\" LIMIT $2 FOR UPDATE",
           "params": {
-            "1": "2114664366722183168",
+            "1": "2115886541801512960",
             "2": "1"
           }
         },
         {
           "sql": "SELECT * FROM \"favorite_fact_outbox\" WHERE favorite_id = $1 AND aggregate_version = 1 LIMIT $2 FOR UPDATE",
           "params": {
-            "1": "2114664366722183168",
+            "1": "2115886541801512960",
             "2": "1"
           }
         },
         {
           "sql": "INSERT INTO \"favorite_fact_outbox\" (\"event_id\",\"favorite_id\",\"aggregate_version\",\"payload\",\"status\",\"retry_count\",\"technical_receipt_id\",\"technical_input_hash\",\"technical_offset\",\"technical_received_at\",\"delivered_at\",\"created_at\",\"updated_at\") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
           "params": {
-            "1": "favorite.2114664366722183168.v2",
-            "2": "2114664366722183168",
+            "1": "favorite.2115886541801512960.v2",
+            "2": "2115886541801512960",
             "3": "2",
-            "4": "{\"payload\": {\"event_id\": \"favorite.2114664366722183168.v2\", \"folder_id\": \"2114664366449553408\", \"operation\": \"retract\", \"target_id\": \"t-77\", \"event_time\": \"2026-10-26T10:24:08.383019Z\", \"source_ref\": \"rtw.favorite/2114664366722183168\", \"favorite_id\": \"2114664366722183168\", \"subject_ref\": {\"tenant_id\": \"platform\", \"subject_id\": \"2001\", \"authority_id\": \"rtw.identity\"}, \"target_type\": \"post\", \"available_at\": \"2026-10-26T10:24:08.383019Z\", \"schema_version\": 1, \"target_revision\": null}, \"event_id\": \"favorite.2114664366722183168.v2\", \"producer\": \"rtw.community.favorite\", \"event_type\": \"rtw.favorite.retract\", \"occurred_at\": \"2026-10-26T10:24:08.383019Z\", \"aggregate_id\": \"2114664366722183168\", \"operation_id\": \"favorite.2114664366722183168.v2\", \"schema_version\": 1, \"aggregate_version\": 2}",
+            "4": "{\"payload\": {\"event_id\": \"favorite.2115886541801512960.v2\", \"folder_id\": \"2115886541579214848\", \"operation\": \"retract\", \"target_id\": \"t-77\", \"event_time\": \"2026-10-29T19:20:37.584806Z\", \"source_ref\": \"rtw.favorite/2115886541801512960\", \"favorite_id\": \"2115886541801512960\", \"subject_ref\": {\"tenant_id\": \"platform\", \"subject_id\": \"2001\", \"authority_id\": \"rtw.identity\"}, \"target_type\": \"post\", \"available_at\": \"2026-10-29T19:20:37.584806Z\", \"schema_version\": 1, \"target_revision\": null}, \"event_id\": \"favorite.2115886541801512960.v2\", \"producer\": \"rtw.community.favorite\", \"event_type\": \"rtw.favorite.retract\", \"occurred_at\": \"2026-10-29T19:20:37.584806Z\", \"aggregate_id\": \"2115886541801512960\", \"operation_id\": \"favorite.2115886541801512960.v2\", \"schema_version\": 1, \"aggregate_version\": 2}",
             "5": "0",
             "6": "0",
             "7": "",
@@ -952,14 +952,14 @@
             "9": "0",
             "10": null,
             "11": null,
-            "12": "2026-10-26 18:24:08.383033+08",
-            "13": "2026-10-26 18:24:08.383033+08"
+            "12": "2026-10-30 03:20:37.58482+08",
+            "13": "2026-10-30 03:20:37.58482+08"
           }
         },
         {
           "sql": "DELETE FROM \"favorite_item\" WHERE favorite_id = $1",
           "params": {
-            "1": "2114664366722183168"
+            "1": "2115886541801512960"
           }
         },
         {
@@ -971,7 +971,7 @@
         {
           "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE favorite_id = $1\n\tLIMIT 1",
           "params": {
-            "1": "2114664366805798912"
+            "1": "2115886541857951744"
           }
         },
         {
@@ -985,30 +985,30 @@
         {
           "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE favorite_id = $1\n\tLIMIT 1\n\tFOR UPDATE",
           "params": {
-            "1": "2114664366805798912"
+            "1": "2115886541857951744"
           }
         },
         {
           "sql": "SELECT event_id, favorite_id, aggregate_version, payload, status, retry_count,\n\t       technical_receipt_id, technical_input_hash, technical_offset,\n\t       technical_received_at, delivered_at, created_at, updated_at\n\tFROM favorite_fact_outbox\n\tWHERE favorite_id = $1 AND aggregate_version = 1\n\tLIMIT 1\n\tFOR UPDATE",
           "params": {
-            "1": "2114664366805798912"
+            "1": "2115886541857951744"
           }
         },
         {
           "sql": "INSERT INTO favorite_fact_outbox\n\t    (event_id, favorite_id, aggregate_version, payload, status, retry_count,\n\t     technical_receipt_id, technical_input_hash,\n\t     created_at, updated_at)\n\tVALUES ($1, $2, $3, $4::jsonb, 0, 0,\n\t        '', '',\n\t        $5, $6)",
           "params": {
-            "1": "favorite.2114664366805798912.v2",
-            "2": "2114664366805798912",
+            "1": "favorite.2115886541857951744.v2",
+            "2": "2115886541857951744",
             "3": "2",
-            "4": "{\"event_id\":\"favorite.2114664366805798912.v2\",\"event_type\":\"rtw.favorite.retract\",\"schema_version\":1,\"producer\":\"rtw.community.favorite\",\"aggregate_id\":\"2114664366805798912\",\"aggregate_version\":2,\"operation_id\":\"favorite.2114664366805798912.v2\",\"occurred_at\":\"2026-10-26T10:24:08.41054Z\",\"payload\":{\"schema_version\":1,\"event_id\":\"favorite.2114664366805798912.v2\",\"subject_ref\":{\"authority_id\":\"rtw.identity\",\"tenant_id\":\"platform\",\"subject_id\":\"2001\"},\"target_type\":\"post\",\"target_id\":\"t-77\",\"target_revision\":null,\"operation\":\"retract\",\"source_ref\":\"rtw.favorite/2114664366805798912\",\"event_time\":\"2026-10-26T10:24:08.41054Z\",\"available_at\":\"2026-10-26T10:24:08.41054Z\",\"favorite_id\":\"2114664366805798912\",\"folder_id\":\"2114664366570917888\"}}",
-            "5": "2026-10-26 18:24:08.410705+08",
-            "6": "2026-10-26 18:24:08.410705+08"
+            "4": "{\"event_id\":\"favorite.2115886541857951744.v2\",\"event_type\":\"rtw.favorite.retract\",\"schema_version\":1,\"producer\":\"rtw.community.favorite\",\"aggregate_id\":\"2115886541857951744\",\"aggregate_version\":2,\"operation_id\":\"favorite.2115886541857951744.v2\",\"occurred_at\":\"2026-10-29T19:20:37.608029Z\",\"payload\":{\"schema_version\":1,\"event_id\":\"favorite.2115886541857951744.v2\",\"subject_ref\":{\"authority_id\":\"rtw.identity\",\"tenant_id\":\"platform\",\"subject_id\":\"2001\"},\"target_type\":\"post\",\"target_id\":\"t-77\",\"target_revision\":null,\"operation\":\"retract\",\"source_ref\":\"rtw.favorite/2115886541857951744\",\"event_time\":\"2026-10-29T19:20:37.608029Z\",\"available_at\":\"2026-10-29T19:20:37.608029Z\",\"favorite_id\":\"2115886541857951744\",\"folder_id\":\"2115886541669208064\"}}",
+            "5": "2026-10-30 03:20:37.608159+08",
+            "6": "2026-10-30 03:20:37.608159+08"
           }
         },
         {
           "sql": "DELETE FROM favorite_item WHERE favorite_id = $1",
           "params": {
-            "1": "2114664366805798912"
+            "1": "2115886541857951744"
           }
         },
         {
@@ -1296,14 +1296,14 @@
         {
           "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
           "params": {
-            "1": "2114664366449553408",
+            "1": "2115886541579214848",
             "2": "1"
           }
         },
         {
           "sql": "SELECT * FROM \"favorite_item\" WHERE folder_id = $1 ORDER BY create_time desc",
           "params": {
-            "1": "2114664366449553408"
+            "1": "2115886541579214848"
           }
         }
       ],
@@ -1311,13 +1311,13 @@
         {
           "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
           "params": {
-            "1": "2114664366570917888"
+            "1": "2115886541669208064"
           }
         },
         {
           "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE folder_id = $1\n\tORDER BY create_time DESC",
           "params": {
-            "1": "2114664366570917888"
+            "1": "2115886541669208064"
           }
         }
       ]
@@ -1345,7 +1345,7 @@
         {
           "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2",
           "params": {
-            "1": "2114664366449553408",
+            "1": "2115886541579214848",
             "2": "1"
           }
         },
@@ -1356,30 +1356,30 @@
         {
           "sql": "SELECT * FROM \"favorite_folder\" WHERE folder_id = $1 ORDER BY \"favorite_folder\".\"id\" LIMIT $2 FOR UPDATE",
           "params": {
-            "1": "2114664366449553408",
+            "1": "2115886541579214848",
             "2": "1"
           }
         },
         {
           "sql": "SELECT * FROM \"favorite_item\" WHERE folder_id = $1 ORDER BY favorite_id FOR UPDATE",
           "params": {
-            "1": "2114664366449553408"
+            "1": "2115886541579214848"
           }
         },
         {
           "sql": "SELECT * FROM \"favorite_fact_outbox\" WHERE favorite_id = $1 AND aggregate_version = 1 LIMIT $2 FOR UPDATE",
           "params": {
-            "1": "2114664366902538240",
+            "1": "2115886541935730688",
             "2": "1"
           }
         },
         {
           "sql": "INSERT INTO \"favorite_fact_outbox\" (\"event_id\",\"favorite_id\",\"aggregate_version\",\"payload\",\"status\",\"retry_count\",\"technical_receipt_id\",\"technical_input_hash\",\"technical_offset\",\"technical_received_at\",\"delivered_at\",\"created_at\",\"updated_at\") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)",
           "params": {
-            "1": "favorite.2114664366902538240.v2",
-            "2": "2114664366902538240",
+            "1": "favorite.2115886541935730688.v2",
+            "2": "2115886541935730688",
             "3": "2",
-            "4": "{\"payload\": {\"event_id\": \"favorite.2114664366902538240.v2\", \"folder_id\": \"2114664366449553408\", \"operation\": \"retract\", \"target_id\": \"t-78\", \"event_time\": \"2026-10-26T10:24:08.618138Z\", \"source_ref\": \"rtw.favorite/2114664366902538240\", \"favorite_id\": \"2114664366902538240\", \"subject_ref\": {\"tenant_id\": \"platform\", \"subject_id\": \"2001\", \"authority_id\": \"rtw.identity\"}, \"target_type\": \"post\", \"available_at\": \"2026-10-26T10:24:08.618138Z\", \"schema_version\": 1, \"target_revision\": null}, \"event_id\": \"favorite.2114664366902538240.v2\", \"producer\": \"rtw.community.favorite\", \"event_type\": \"rtw.favorite.retract\", \"occurred_at\": \"2026-10-26T10:24:08.618138Z\", \"aggregate_id\": \"2114664366902538240\", \"operation_id\": \"favorite.2114664366902538240.v2\", \"schema_version\": 1, \"aggregate_version\": 2}",
+            "4": "{\"payload\": {\"event_id\": \"favorite.2115886541935730688.v2\", \"folder_id\": \"2115886541579214848\", \"operation\": \"retract\", \"target_id\": \"t-78\", \"event_time\": \"2026-10-29T19:20:37.769569Z\", \"source_ref\": \"rtw.favorite/2115886541935730688\", \"favorite_id\": \"2115886541935730688\", \"subject_ref\": {\"tenant_id\": \"platform\", \"subject_id\": \"2001\", \"authority_id\": \"rtw.identity\"}, \"target_type\": \"post\", \"available_at\": \"2026-10-29T19:20:37.769569Z\", \"schema_version\": 1, \"target_revision\": null}, \"event_id\": \"favorite.2115886541935730688.v2\", \"producer\": \"rtw.community.favorite\", \"event_type\": \"rtw.favorite.retract\", \"occurred_at\": \"2026-10-29T19:20:37.769569Z\", \"aggregate_id\": \"2115886541935730688\", \"operation_id\": \"favorite.2115886541935730688.v2\", \"schema_version\": 1, \"aggregate_version\": 2}",
             "5": "0",
             "6": "0",
             "7": "",
@@ -1387,20 +1387,20 @@
             "9": "0",
             "10": null,
             "11": null,
-            "12": "2026-10-26 18:24:08.618161+08",
-            "13": "2026-10-26 18:24:08.618161+08"
+            "12": "2026-10-30 03:20:37.769581+08",
+            "13": "2026-10-30 03:20:37.769581+08"
           }
         },
         {
           "sql": "DELETE FROM \"favorite_item\" WHERE folder_id = $1",
           "params": {
-            "1": "2114664366449553408"
+            "1": "2115886541579214848"
           }
         },
         {
           "sql": "DELETE FROM \"favorite_folder\" WHERE folder_id = $1",
           "params": {
-            "1": "2114664366449553408"
+            "1": "2115886541579214848"
           }
         },
         {
@@ -1412,7 +1412,7 @@
         {
           "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1",
           "params": {
-            "1": "2114664366570917888"
+            "1": "2115886541669208064"
           }
         },
         {
@@ -1426,42 +1426,42 @@
         {
           "sql": "SELECT id, folder_id, user_id, name, create_time, update_time\n\tFROM favorite_folder\n\tWHERE folder_id = $1\n\tLIMIT 1\n\tFOR UPDATE",
           "params": {
-            "1": "2114664366570917888"
+            "1": "2115886541669208064"
           }
         },
         {
           "sql": "SELECT id, favorite_id, folder_id, user_id, target_id, target_type,\n\t       target_revision, title, cover, create_time\n\tFROM favorite_item\n\tWHERE folder_id = $1\n\tORDER BY favorite_id\n\tFOR UPDATE",
           "params": {
-            "1": "2114664366570917888"
+            "1": "2115886541669208064"
           }
         },
         {
           "sql": "SELECT event_id, favorite_id, aggregate_version, payload, status, retry_count,\n\t       technical_receipt_id, technical_input_hash, technical_offset,\n\t       technical_received_at, delivered_at, created_at, updated_at\n\tFROM favorite_fact_outbox\n\tWHERE favorite_id = $1 AND aggregate_version = 1\n\tLIMIT 1\n\tFOR UPDATE",
           "params": {
-            "1": "2114664366969376768"
+            "1": "2115886541975392256"
           }
         },
         {
           "sql": "INSERT INTO favorite_fact_outbox\n\t    (event_id, favorite_id, aggregate_version, payload, status, retry_count,\n\t     technical_receipt_id, technical_input_hash,\n\t     created_at, updated_at)\n\tVALUES ($1, $2, $3, $4::jsonb, 0, 0,\n\t        '', '',\n\t        $5, $6)",
           "params": {
-            "1": "favorite.2114664366969376768.v2",
-            "2": "2114664366969376768",
+            "1": "favorite.2115886541975392256.v2",
+            "2": "2115886541975392256",
             "3": "2",
-            "4": "{\"event_id\":\"favorite.2114664366969376768.v2\",\"event_type\":\"rtw.favorite.retract\",\"schema_version\":1,\"producer\":\"rtw.community.favorite\",\"aggregate_id\":\"2114664366969376768\",\"aggregate_version\":2,\"operation_id\":\"favorite.2114664366969376768.v2\",\"occurred_at\":\"2026-10-26T10:24:08.638391Z\",\"payload\":{\"schema_version\":1,\"event_id\":\"favorite.2114664366969376768.v2\",\"subject_ref\":{\"authority_id\":\"rtw.identity\",\"tenant_id\":\"platform\",\"subject_id\":\"2001\"},\"target_type\":\"post\",\"target_id\":\"t-78\",\"target_revision\":null,\"operation\":\"retract\",\"source_ref\":\"rtw.favorite/2114664366969376768\",\"event_time\":\"2026-10-26T10:24:08.638391Z\",\"available_at\":\"2026-10-26T10:24:08.638391Z\",\"favorite_id\":\"2114664366969376768\",\"folder_id\":\"2114664366570917888\"}}",
-            "5": "2026-10-26 18:24:08.638595+08",
-            "6": "2026-10-26 18:24:08.638595+08"
+            "4": "{\"event_id\":\"favorite.2115886541975392256.v2\",\"event_type\":\"rtw.favorite.retract\",\"schema_version\":1,\"producer\":\"rtw.community.favorite\",\"aggregate_id\":\"2115886541975392256\",\"aggregate_version\":2,\"operation_id\":\"favorite.2115886541975392256.v2\",\"occurred_at\":\"2026-10-29T19:20:37.790914Z\",\"payload\":{\"schema_version\":1,\"event_id\":\"favorite.2115886541975392256.v2\",\"subject_ref\":{\"authority_id\":\"rtw.identity\",\"tenant_id\":\"platform\",\"subject_id\":\"2001\"},\"target_type\":\"post\",\"target_id\":\"t-78\",\"target_revision\":null,\"operation\":\"retract\",\"source_ref\":\"rtw.favorite/2115886541975392256\",\"event_time\":\"2026-10-29T19:20:37.790914Z\",\"available_at\":\"2026-10-29T19:20:37.790914Z\",\"favorite_id\":\"2115886541975392256\",\"folder_id\":\"2115886541669208064\"}}",
+            "5": "2026-10-30 03:20:37.791072+08",
+            "6": "2026-10-30 03:20:37.791072+08"
           }
         },
         {
           "sql": "DELETE FROM favorite_item WHERE folder_id = $1",
           "params": {
-            "1": "2114664366570917888"
+            "1": "2115886541669208064"
           }
         },
         {
           "sql": "DELETE FROM favorite_folder WHERE folder_id = $1",
           "params": {
-            "1": "2114664366570917888"
+            "1": "2115886541669208064"
           }
         },
         {

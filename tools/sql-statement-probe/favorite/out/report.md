@@ -55,9 +55,9 @@
 
 | 用例 | Go | RAG | 一致 |
 |---|---|---|---|
-| `z01_list_folders_created` | n=1 [SqlProbeFolder|c=1793010248183|u=1793010248183] | n=1 [SqlProbeFolder|c=1793010248211|u=1793010248211] | ✅ |
-| `z02_list_items_created` | n=1 [t-78|post|req-title-2|c=1793010248292] | n=1 [t-78|post|req-title-2|c=1793010248308] | ✅ |
-| `z03_list_folders_user1001_after_rename` | n=1 [Alpha2|c=1767294245678|u=1793010248352] | n=1 [Alpha2|c=1767294245678|u=1793010248367] | ✅ |
+| `z01_list_folders_created` | n=1 [SqlProbeFolder|c=1793301637440|u=1793301637440] | n=1 [SqlProbeFolder|c=1793301637461|u=1793301637461] | ✅ |
+| `z02_list_items_created` | n=1 [t-78|post|req-title-2|c=1793301637525] | n=1 [t-78|post|req-title-2|c=1793301637535] | ✅ |
+| `z03_list_folders_user1001_after_rename` | n=1 [Alpha2|c=1767294245678|u=1793301637563] | n=1 [Alpha2|c=1767294245678|u=1793301637571] | ✅ |
 
 ⇒ **L1 响应不同：0 例**（这是「SQL 层差异」对外可观察的直接证据）
 
@@ -446,7 +446,7 @@ SELECT id, folder_id, user_id, name, create_time, update_time
 SELECT * FROM "favorite_folder" WHERE user_id = $1 AND name = $2 ORDER BY "favorite_folder"."id" LIMIT $3
 -- [1]
 begin
--- [2]  -- params: {'1': '2114664366449553408', '2': '2001', '3': 'SqlProbeFolder', '4': '2026-10-26 18:24:08.183291+08', '5': '2026-10-26 18:24:08.183291+08'}
+-- [2]  -- params: {'1': '2115886541579214848', '2': '2001', '3': 'SqlProbeFolder', '4': '2026-10-30 03:20:37.440449+08', '5': '2026-10-30 03:20:37.440449+08'}
 INSERT INTO "favorite_folder" ("folder_id","user_id","name","create_time","update_time") VALUES ($1,$2,$3,$4,$5) RETURNING "id"
 -- [3]
 commit
@@ -460,7 +460,7 @@ SELECT id, folder_id, user_id, name, create_time, update_time
 	FROM favorite_folder
 	WHERE user_id = $1 AND name = $2
 	LIMIT 1
--- [1]  -- params: {'1': '2114664366570917888', '2': '2001', '3': 'SqlProbeFolder', '4': '2026-10-26 18:24:08.21149+08', '5': '2026-10-26 18:24:08.21149+08'}
+-- [1]  -- params: {'1': '2115886541669208064', '2': '2001', '3': 'SqlProbeFolder', '4': '2026-10-30 03:20:37.461258+08', '5': '2026-10-30 03:20:37.461258+08'}
 INSERT INTO favorite_folder (folder_id, user_id, name, create_time, update_time)
 	VALUES ($1, $2, $3, $4, $5)
 ```
@@ -489,17 +489,17 @@ SELECT id, folder_id, user_id, name, create_time, update_time
 **GO 侧**
 
 ```sql
--- [0]  -- params: {'1': '2114664366449553408', '2': '1'}
+-- [0]  -- params: {'1': '2115886541579214848', '2': '1'}
 SELECT * FROM "favorite_folder" WHERE folder_id = $1 ORDER BY "favorite_folder"."id" LIMIT $2
--- [1]  -- params: {'1': '2114664366449553408', '2': 't-77', '3': 'post', '4': '1'}
+-- [1]  -- params: {'1': '2115886541579214848', '2': 't-77', '3': 'post', '4': '1'}
 SELECT * FROM "favorite_item" WHERE folder_id = $1 AND target_id = $2 AND target_type = $3 ORDER BY "favorite_item"."id" LIMIT $4
 -- [2]
 begin
--- [3]  -- params: {'1': '2114664366449553408', '2': '1'}
+-- [3]  -- params: {'1': '2115886541579214848', '2': '1'}
 SELECT * FROM "favorite_folder" WHERE folder_id = $1 ORDER BY "favorite_folder"."id" LIMIT $2 FOR UPDATE
--- [4]  -- params: {'1': '2114664366722183168', '2': '2114664366449553408', '3': '2001', '4': 't-77', '5': 'post', '6': None, '7': 'req-title', '8': 'req-cover', '9': '2026-10-26 18:24:08.249209+08'}
+-- [4]  -- params: {'1': '2115886541801512960', '2': '2115886541579214848', '3': '2001', '4': 't-77', '5': 'post', '6': None, '7': 'req-title', '8': 'req-cover', '9': '2026-10-30 03:20:37.494056+08'}
 INSERT INTO "favorite_item" ("favorite_id","folder_id","user_id","target_id","target_type","target_revision","title","cover","create_time") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING "id"
--- [5]  -- params: {'1': 'favorite.2114664366722183168.v1', '2': '2114664366722183168', '3': '1', '4': '{"payload": {"event_id": "favorite.2114664366722183168.v1", "folder_id": "2114664366449553408", "operation": "assert", "target_id": "t-77", "event_time": "2026-10-26T10:24:08.250264Z", "source_ref": "rtw.favorite/2114664366722183168", "favorite_id": "2114664366722183168", "subject_ref": {"tenant_id": "platform", "subject_id": "2001", "authority_id": "rtw.identity"}, "target_type": "post", "available_at": "2026-10-26T10:24:08.250264Z", "schema_version": 1, "target_revision": null}, "event_id": "favorite.2114664366722183168.v1", "producer": "rtw.community.favorite", "event_type": "rtw.favorite.assert", "occurred_at": "2026-10-26T10:24:08.250264Z", "aggregate_id": "2114664366722183168", "operation_id": "favorite.2114664366722183168.v1", "schema_version": 1, "aggregate_version": 1}', '5': '0', '6': '0', '7': '', '8': '', '9': '0', '10': None, '11': None, '12': '2026-10-26 18:24:08.250312+08', '13': '2026-10-26 18:24:08.250312+08'}
+-- [5]  -- params: {'1': 'favorite.2115886541801512960.v1', '2': '2115886541801512960', '3': '1', '4': '{"payload": {"event_id": "favorite.2115886541801512960.v1", "folder_id": "2115886541579214848", "operation": "assert", "target_id": "t-77", "event_time": "2026-10-29T19:20:37.495097Z", "source_ref": "rtw.favorite/2115886541801512960", "favorite_id": "2115886541801512960", "subject_ref": {"tenant_id": "platform", "subject_id": "2001", "authority_id": "rtw.identity"}, "target_type": "post", "available_at": "2026-10-29T19:20:37.495097Z", "schema_version": 1, "target_revision": null}, "event_id": "favorite.2115886541801512960.v1", "producer": "rtw.community.favorite", "event_type": "rtw.favorite.assert", "occurred_at": "2026-10-29T19:20:37.495097Z", "aggregate_id": "2115886541801512960", "operation_id": "favorite.2115886541801512960.v1", "schema_version": 1, "aggregate_version": 1}', '5': '0', '6': '0', '7': '', '8': '', '9': '0', '10': None, '11': None, '12': '2026-10-30 03:20:37.495138+08', '13': '2026-10-30 03:20:37.495138+08'}
 INSERT INTO "favorite_fact_outbox" ("event_id","favorite_id","aggregate_version","payload","status","retry_count","technical_receipt_id","technical_input_hash","technical_offset","technical_received_at","delivered_at","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 -- [6]
 commit
@@ -508,12 +508,12 @@ commit
 **RAG 侧**
 
 ```sql
--- [0]  -- params: {'1': '2114664366570917888'}
+-- [0]  -- params: {'1': '2115886541669208064'}
 SELECT id, folder_id, user_id, name, create_time, update_time
 	FROM favorite_folder
 	WHERE folder_id = $1
 	LIMIT 1
--- [1]  -- params: {'1': '2114664366570917888', '2': 't-77', '3': 'post'}
+-- [1]  -- params: {'1': '2115886541669208064', '2': 't-77', '3': 'post'}
 SELECT id, favorite_id, folder_id, user_id, target_id, target_type,
 	       target_revision, title, cover, create_time
 	FROM favorite_item
@@ -523,20 +523,20 @@ SELECT id, favorite_id, folder_id, user_id, target_id, target_type,
 SHOW TRANSACTION ISOLATION LEVEL
 -- [3]
 BEGIN
--- [4]  -- params: {'1': '2114664366570917888'}
+-- [4]  -- params: {'1': '2115886541669208064'}
 SELECT id, folder_id, user_id, name, create_time, update_time
 	FROM favorite_folder
 	WHERE folder_id = $1
 	LIMIT 1
 	FOR UPDATE
--- [5]  -- params: {'1': '2114664366805798912', '2': '2114664366570917888', '3': '2001', '4': 't-77', '5': 'post', '6': None, '7': 'req-title', '8': 'req-cover', '9': '2026-10-26 18:24:08.274192+08'}
+-- [5]  -- params: {'1': '2115886541857951744', '2': '2115886541669208064', '3': '2001', '4': 't-77', '5': 'post', '6': None, '7': 'req-title', '8': 'req-cover', '9': '2026-10-30 03:20:37.51092+08'}
 INSERT INTO favorite_item
 	    (favorite_id, folder_id, user_id, target_id, target_type, target_revision, title, cover,
 	     create_time)
 	VALUES ($1, $2, $3, $4, $5,
 	        $6, $7, $8,
 	        $9)
--- [6]  -- params: {'1': 'favorite.2114664366805798912.v1', '2': '2114664366805798912', '3': '1', '4': '{"event_id":"favorite.2114664366805798912.v1","event_type":"rtw.favorite.assert","schema_version":1,"producer":"rtw.community.favorite","aggregate_id":"2114664366805798912","aggregate_version":1,"operation_id":"favorite.2114664366805798912.v1","occurred_at":"2026-10-26T10:24:08.275361Z","payload":{"schema_version":1,"event_id":"favorite.2114664366805798912.v1","subject_ref":{"authority_id":"rtw.identity","tenant_id":"platform","subject_id":"2001"},"target_type":"post","target_id":"t-77","target_revision":null,"operation":"assert","source_ref":"rtw.favorite/2114664366805798912","event_time":"2026-10-26T10:24:08.275361Z","available_at":"2026-10-26T10:24:08.275361Z","favorite_id":"2114664366805798912","folder_id":"2114664366570917888"}}', '5': '2026-10-26 18:24:08.277582+08', '6': '2026-10-26 18:24:08.277582+08'}
+-- [6]  -- params: {'1': 'favorite.2115886541857951744.v1', '2': '2115886541857951744', '3': '1', '4': '{"event_id":"favorite.2115886541857951744.v1","event_type":"rtw.favorite.assert","schema_version":1,"producer":"rtw.community.favorite","aggregate_id":"2115886541857951744","aggregate_version":1,"operation_id":"favorite.2115886541857951744.v1","occurred_at":"2026-10-29T19:20:37.511643Z","payload":{"schema_version":1,"event_id":"favorite.2115886541857951744.v1","subject_ref":{"authority_id":"rtw.identity","tenant_id":"platform","subject_id":"2001"},"target_type":"post","target_id":"t-77","target_revision":null,"operation":"assert","source_ref":"rtw.favorite/2115886541857951744","event_time":"2026-10-29T19:20:37.511643Z","available_at":"2026-10-29T19:20:37.511643Z","favorite_id":"2115886541857951744","folder_id":"2115886541669208064"}}', '5': '2026-10-30 03:20:37.513205+08', '6': '2026-10-30 03:20:37.513205+08'}
 INSERT INTO favorite_fact_outbox
 	    (event_id, favorite_id, aggregate_version, payload, status, retry_count,
 	     technical_receipt_id, technical_input_hash,
@@ -553,17 +553,17 @@ COMMIT
 **GO 侧**
 
 ```sql
--- [0]  -- params: {'1': '2114664366449553408', '2': '1'}
+-- [0]  -- params: {'1': '2115886541579214848', '2': '1'}
 SELECT * FROM "favorite_folder" WHERE folder_id = $1 ORDER BY "favorite_folder"."id" LIMIT $2
--- [1]  -- params: {'1': '2114664366449553408', '2': 't-78', '3': 'post', '4': '1'}
+-- [1]  -- params: {'1': '2115886541579214848', '2': 't-78', '3': 'post', '4': '1'}
 SELECT * FROM "favorite_item" WHERE folder_id = $1 AND target_id = $2 AND target_type = $3 ORDER BY "favorite_item"."id" LIMIT $4
 -- [2]
 begin
--- [3]  -- params: {'1': '2114664366449553408', '2': '1'}
+-- [3]  -- params: {'1': '2115886541579214848', '2': '1'}
 SELECT * FROM "favorite_folder" WHERE folder_id = $1 ORDER BY "favorite_folder"."id" LIMIT $2 FOR UPDATE
--- [4]  -- params: {'1': '2114664366902538240', '2': '2114664366449553408', '3': '2001', '4': 't-78', '5': 'post', '6': None, '7': 'req-title-2', '8': 'req-cover-2', '9': '2026-10-26 18:24:08.29217+08'}
+-- [4]  -- params: {'1': '2115886541935730688', '2': '2115886541579214848', '3': '2001', '4': 't-78', '5': 'post', '6': None, '7': 'req-title-2', '8': 'req-cover-2', '9': '2026-10-30 03:20:37.525994+08'}
 INSERT INTO "favorite_item" ("favorite_id","folder_id","user_id","target_id","target_type","target_revision","title","cover","create_time") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING "id"
--- [5]  -- params: {'1': 'favorite.2114664366902538240.v1', '2': '2114664366902538240', '3': '1', '4': '{"payload": {"event_id": "favorite.2114664366902538240.v1", "folder_id": "2114664366449553408", "operation": "assert", "target_id": "t-78", "event_time": "2026-10-26T10:24:08.292597Z", "source_ref": "rtw.favorite/2114664366902538240", "favorite_id": "2114664366902538240", "subject_ref": {"tenant_id": "platform", "subject_id": "2001", "authority_id": "rtw.identity"}, "target_type": "post", "available_at": "2026-10-26T10:24:08.292597Z", "schema_version": 1, "target_revision": null}, "event_id": "favorite.2114664366902538240.v1", "producer": "rtw.community.favorite", "event_type": "rtw.favorite.assert", "occurred_at": "2026-10-26T10:24:08.292597Z", "aggregate_id": "2114664366902538240", "operation_id": "favorite.2114664366902538240.v1", "schema_version": 1, "aggregate_version": 1}', '5': '0', '6': '0', '7': '', '8': '', '9': '0', '10': None, '11': None, '12': '2026-10-26 18:24:08.292621+08', '13': '2026-10-26 18:24:08.292621+08'}
+-- [5]  -- params: {'1': 'favorite.2115886541935730688.v1', '2': '2115886541935730688', '3': '1', '4': '{"payload": {"event_id": "favorite.2115886541935730688.v1", "folder_id": "2115886541579214848", "operation": "assert", "target_id": "t-78", "event_time": "2026-10-29T19:20:37.526207Z", "source_ref": "rtw.favorite/2115886541935730688", "favorite_id": "2115886541935730688", "subject_ref": {"tenant_id": "platform", "subject_id": "2001", "authority_id": "rtw.identity"}, "target_type": "post", "available_at": "2026-10-29T19:20:37.526207Z", "schema_version": 1, "target_revision": null}, "event_id": "favorite.2115886541935730688.v1", "producer": "rtw.community.favorite", "event_type": "rtw.favorite.assert", "occurred_at": "2026-10-29T19:20:37.526207Z", "aggregate_id": "2115886541935730688", "operation_id": "favorite.2115886541935730688.v1", "schema_version": 1, "aggregate_version": 1}', '5': '0', '6': '0', '7': '', '8': '', '9': '0', '10': None, '11': None, '12': '2026-10-30 03:20:37.526219+08', '13': '2026-10-30 03:20:37.526219+08'}
 INSERT INTO "favorite_fact_outbox" ("event_id","favorite_id","aggregate_version","payload","status","retry_count","technical_receipt_id","technical_input_hash","technical_offset","technical_received_at","delivered_at","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 -- [6]
 commit
@@ -572,12 +572,12 @@ commit
 **RAG 侧**
 
 ```sql
--- [0]  -- params: {'1': '2114664366570917888'}
+-- [0]  -- params: {'1': '2115886541669208064'}
 SELECT id, folder_id, user_id, name, create_time, update_time
 	FROM favorite_folder
 	WHERE folder_id = $1
 	LIMIT 1
--- [1]  -- params: {'1': '2114664366570917888', '2': 't-78', '3': 'post'}
+-- [1]  -- params: {'1': '2115886541669208064', '2': 't-78', '3': 'post'}
 SELECT id, favorite_id, folder_id, user_id, target_id, target_type,
 	       target_revision, title, cover, create_time
 	FROM favorite_item
@@ -587,20 +587,20 @@ SELECT id, favorite_id, folder_id, user_id, target_id, target_type,
 SHOW TRANSACTION ISOLATION LEVEL
 -- [3]
 BEGIN
--- [4]  -- params: {'1': '2114664366570917888'}
+-- [4]  -- params: {'1': '2115886541669208064'}
 SELECT id, folder_id, user_id, name, create_time, update_time
 	FROM favorite_folder
 	WHERE folder_id = $1
 	LIMIT 1
 	FOR UPDATE
--- [5]  -- params: {'1': '2114664366969376768', '2': '2114664366570917888', '3': '2001', '4': 't-78', '5': 'post', '6': None, '7': 'req-title-2', '8': 'req-cover-2', '9': '2026-10-26 18:24:08.308578+08'}
+-- [5]  -- params: {'1': '2115886541975392256', '2': '2115886541669208064', '3': '2001', '4': 't-78', '5': 'post', '6': None, '7': 'req-title-2', '8': 'req-cover-2', '9': '2026-10-30 03:20:37.535596+08'}
 INSERT INTO favorite_item
 	    (favorite_id, folder_id, user_id, target_id, target_type, target_revision, title, cover,
 	     create_time)
 	VALUES ($1, $2, $3, $4, $5,
 	        $6, $7, $8,
 	        $9)
--- [6]  -- params: {'1': 'favorite.2114664366969376768.v1', '2': '2114664366969376768', '3': '1', '4': '{"event_id":"favorite.2114664366969376768.v1","event_type":"rtw.favorite.assert","schema_version":1,"producer":"rtw.community.favorite","aggregate_id":"2114664366969376768","aggregate_version":1,"operation_id":"favorite.2114664366969376768.v1","occurred_at":"2026-10-26T10:24:08.309435Z","payload":{"schema_version":1,"event_id":"favorite.2114664366969376768.v1","subject_ref":{"authority_id":"rtw.identity","tenant_id":"platform","subject_id":"2001"},"target_type":"post","target_id":"t-78","target_revision":null,"operation":"assert","source_ref":"rtw.favorite/2114664366969376768","event_time":"2026-10-26T10:24:08.309435Z","available_at":"2026-10-26T10:24:08.309435Z","favorite_id":"2114664366969376768","folder_id":"2114664366570917888"}}', '5': '2026-10-26 18:24:08.309643+08', '6': '2026-10-26 18:24:08.309643+08'}
+-- [6]  -- params: {'1': 'favorite.2115886541975392256.v1', '2': '2115886541975392256', '3': '1', '4': '{"event_id":"favorite.2115886541975392256.v1","event_type":"rtw.favorite.assert","schema_version":1,"producer":"rtw.community.favorite","aggregate_id":"2115886541975392256","aggregate_version":1,"operation_id":"favorite.2115886541975392256.v1","occurred_at":"2026-10-29T19:20:37.536013Z","payload":{"schema_version":1,"event_id":"favorite.2115886541975392256.v1","subject_ref":{"authority_id":"rtw.identity","tenant_id":"platform","subject_id":"2001"},"target_type":"post","target_id":"t-78","target_revision":null,"operation":"assert","source_ref":"rtw.favorite/2115886541975392256","event_time":"2026-10-29T19:20:37.536013Z","available_at":"2026-10-29T19:20:37.536013Z","favorite_id":"2115886541975392256","folder_id":"2115886541669208064"}}', '5': '2026-10-30 03:20:37.536173+08', '6': '2026-10-30 03:20:37.536173+08'}
 INSERT INTO favorite_fact_outbox
 	    (event_id, favorite_id, aggregate_version, payload, status, retry_count,
 	     technical_receipt_id, technical_input_hash,
@@ -617,21 +617,21 @@ COMMIT
 **GO 侧**
 
 ```sql
--- [0]  -- params: {'1': '2114664366449553408', '2': '1'}
+-- [0]  -- params: {'1': '2115886541579214848', '2': '1'}
 SELECT * FROM "favorite_folder" WHERE folder_id = $1 ORDER BY "favorite_folder"."id" LIMIT $2
--- [1]  -- params: {'1': '2114664366449553408', '2': 't-77', '3': 'post', '4': '1'}
+-- [1]  -- params: {'1': '2115886541579214848', '2': 't-77', '3': 'post', '4': '1'}
 SELECT * FROM "favorite_item" WHERE folder_id = $1 AND target_id = $2 AND target_type = $3 ORDER BY "favorite_item"."id" LIMIT $4
 ```
 
 **RAG 侧**
 
 ```sql
--- [0]  -- params: {'1': '2114664366570917888'}
+-- [0]  -- params: {'1': '2115886541669208064'}
 SELECT id, folder_id, user_id, name, create_time, update_time
 	FROM favorite_folder
 	WHERE folder_id = $1
 	LIMIT 1
--- [1]  -- params: {'1': '2114664366570917888', '2': 't-77', '3': 'post'}
+-- [1]  -- params: {'1': '2115886541669208064', '2': 't-77', '3': 'post'}
 SELECT id, favorite_id, folder_id, user_id, target_id, target_type,
 	       target_revision, title, cover, create_time
 	FROM favorite_item
@@ -650,7 +650,7 @@ SELECT * FROM "favorite_folder" WHERE folder_id = $1 ORDER BY "favorite_folder".
 SELECT * FROM "favorite_folder" WHERE user_id = $1 AND name = $2 ORDER BY "favorite_folder"."id" LIMIT $3
 -- [2]
 begin
--- [3]  -- params: {'1': 'Alpha2', '2': '2026-10-26 18:24:08.352408+08', '3': '9001'}
+-- [3]  -- params: {'1': 'Alpha2', '2': '2026-10-30 03:20:37.563149+08', '3': '9001'}
 UPDATE "favorite_folder" SET "name"=$1,"update_time"=$2 WHERE folder_id = $3
 -- [4]
 commit
@@ -669,7 +669,7 @@ SELECT id, folder_id, user_id, name, create_time, update_time
 	FROM favorite_folder
 	WHERE user_id = $1 AND name = $2
 	LIMIT 1
--- [2]  -- params: {'1': 'Alpha2', '2': '2026-10-26 18:24:08.367237+08', '3': '9001'}
+-- [2]  -- params: {'1': 'Alpha2', '2': '2026-10-30 03:20:37.571784+08', '3': '9001'}
 UPDATE favorite_folder
 	SET name = $1, update_time = $2
 	WHERE folder_id = $3
@@ -680,17 +680,17 @@ UPDATE favorite_folder
 **GO 侧**
 
 ```sql
--- [0]  -- params: {'1': '2114664366722183168', '2': '1'}
+-- [0]  -- params: {'1': '2115886541801512960', '2': '1'}
 SELECT * FROM "favorite_item" WHERE favorite_id = $1 ORDER BY "favorite_item"."id" LIMIT $2
 -- [1]
 begin
--- [2]  -- params: {'1': '2114664366722183168', '2': '1'}
+-- [2]  -- params: {'1': '2115886541801512960', '2': '1'}
 SELECT * FROM "favorite_item" WHERE favorite_id = $1 ORDER BY "favorite_item"."id" LIMIT $2 FOR UPDATE
--- [3]  -- params: {'1': '2114664366722183168', '2': '1'}
+-- [3]  -- params: {'1': '2115886541801512960', '2': '1'}
 SELECT * FROM "favorite_fact_outbox" WHERE favorite_id = $1 AND aggregate_version = 1 LIMIT $2 FOR UPDATE
--- [4]  -- params: {'1': 'favorite.2114664366722183168.v2', '2': '2114664366722183168', '3': '2', '4': '{"payload": {"event_id": "favorite.2114664366722183168.v2", "folder_id": "2114664366449553408", "operation": "retract", "target_id": "t-77", "event_time": "2026-10-26T10:24:08.383019Z", "source_ref": "rtw.favorite/2114664366722183168", "favorite_id": "2114664366722183168", "subject_ref": {"tenant_id": "platform", "subject_id": "2001", "authority_id": "rtw.identity"}, "target_type": "post", "available_at": "2026-10-26T10:24:08.383019Z", "schema_version": 1, "target_revision": null}, "event_id": "favorite.2114664366722183168.v2", "producer": "rtw.community.favorite", "event_type": "rtw.favorite.retract", "occurred_at": "2026-10-26T10:24:08.383019Z", "aggregate_id": "2114664366722183168", "operation_id": "favorite.2114664366722183168.v2", "schema_version": 1, "aggregate_version": 2}', '5': '0', '6': '0', '7': '', '8': '', '9': '0', '10': None, '11': None, '12': '2026-10-26 18:24:08.383033+08', '13': '2026-10-26 18:24:08.383033+08'}
+-- [4]  -- params: {'1': 'favorite.2115886541801512960.v2', '2': '2115886541801512960', '3': '2', '4': '{"payload": {"event_id": "favorite.2115886541801512960.v2", "folder_id": "2115886541579214848", "operation": "retract", "target_id": "t-77", "event_time": "2026-10-29T19:20:37.584806Z", "source_ref": "rtw.favorite/2115886541801512960", "favorite_id": "2115886541801512960", "subject_ref": {"tenant_id": "platform", "subject_id": "2001", "authority_id": "rtw.identity"}, "target_type": "post", "available_at": "2026-10-29T19:20:37.584806Z", "schema_version": 1, "target_revision": null}, "event_id": "favorite.2115886541801512960.v2", "producer": "rtw.community.favorite", "event_type": "rtw.favorite.retract", "occurred_at": "2026-10-29T19:20:37.584806Z", "aggregate_id": "2115886541801512960", "operation_id": "favorite.2115886541801512960.v2", "schema_version": 1, "aggregate_version": 2}', '5': '0', '6': '0', '7': '', '8': '', '9': '0', '10': None, '11': None, '12': '2026-10-30 03:20:37.58482+08', '13': '2026-10-30 03:20:37.58482+08'}
 INSERT INTO "favorite_fact_outbox" ("event_id","favorite_id","aggregate_version","payload","status","retry_count","technical_receipt_id","technical_input_hash","technical_offset","technical_received_at","delivered_at","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
--- [5]  -- params: {'1': '2114664366722183168'}
+-- [5]  -- params: {'1': '2115886541801512960'}
 DELETE FROM "favorite_item" WHERE favorite_id = $1
 -- [6]
 commit
@@ -699,7 +699,7 @@ commit
 **RAG 侧**
 
 ```sql
--- [0]  -- params: {'1': '2114664366805798912'}
+-- [0]  -- params: {'1': '2115886541857951744'}
 SELECT id, favorite_id, folder_id, user_id, target_id, target_type,
 	       target_revision, title, cover, create_time
 	FROM favorite_item
@@ -709,14 +709,14 @@ SELECT id, favorite_id, folder_id, user_id, target_id, target_type,
 SHOW TRANSACTION ISOLATION LEVEL
 -- [2]
 BEGIN
--- [3]  -- params: {'1': '2114664366805798912'}
+-- [3]  -- params: {'1': '2115886541857951744'}
 SELECT id, favorite_id, folder_id, user_id, target_id, target_type,
 	       target_revision, title, cover, create_time
 	FROM favorite_item
 	WHERE favorite_id = $1
 	LIMIT 1
 	FOR UPDATE
--- [4]  -- params: {'1': '2114664366805798912'}
+-- [4]  -- params: {'1': '2115886541857951744'}
 SELECT event_id, favorite_id, aggregate_version, payload, status, retry_count,
 	       technical_receipt_id, technical_input_hash, technical_offset,
 	       technical_received_at, delivered_at, created_at, updated_at
@@ -724,7 +724,7 @@ SELECT event_id, favorite_id, aggregate_version, payload, status, retry_count,
 	WHERE favorite_id = $1 AND aggregate_version = 1
 	LIMIT 1
 	FOR UPDATE
--- [5]  -- params: {'1': 'favorite.2114664366805798912.v2', '2': '2114664366805798912', '3': '2', '4': '{"event_id":"favorite.2114664366805798912.v2","event_type":"rtw.favorite.retract","schema_version":1,"producer":"rtw.community.favorite","aggregate_id":"2114664366805798912","aggregate_version":2,"operation_id":"favorite.2114664366805798912.v2","occurred_at":"2026-10-26T10:24:08.41054Z","payload":{"schema_version":1,"event_id":"favorite.2114664366805798912.v2","subject_ref":{"authority_id":"rtw.identity","tenant_id":"platform","subject_id":"2001"},"target_type":"post","target_id":"t-77","target_revision":null,"operation":"retract","source_ref":"rtw.favorite/2114664366805798912","event_time":"2026-10-26T10:24:08.41054Z","available_at":"2026-10-26T10:24:08.41054Z","favorite_id":"2114664366805798912","folder_id":"2114664366570917888"}}', '5': '2026-10-26 18:24:08.410705+08', '6': '2026-10-26 18:24:08.410705+08'}
+-- [5]  -- params: {'1': 'favorite.2115886541857951744.v2', '2': '2115886541857951744', '3': '2', '4': '{"event_id":"favorite.2115886541857951744.v2","event_type":"rtw.favorite.retract","schema_version":1,"producer":"rtw.community.favorite","aggregate_id":"2115886541857951744","aggregate_version":2,"operation_id":"favorite.2115886541857951744.v2","occurred_at":"2026-10-29T19:20:37.608029Z","payload":{"schema_version":1,"event_id":"favorite.2115886541857951744.v2","subject_ref":{"authority_id":"rtw.identity","tenant_id":"platform","subject_id":"2001"},"target_type":"post","target_id":"t-77","target_revision":null,"operation":"retract","source_ref":"rtw.favorite/2115886541857951744","event_time":"2026-10-29T19:20:37.608029Z","available_at":"2026-10-29T19:20:37.608029Z","favorite_id":"2115886541857951744","folder_id":"2115886541669208064"}}', '5': '2026-10-30 03:20:37.608159+08', '6': '2026-10-30 03:20:37.608159+08'}
 INSERT INTO favorite_fact_outbox
 	    (event_id, favorite_id, aggregate_version, payload, status, retry_count,
 	     technical_receipt_id, technical_input_hash,
@@ -732,7 +732,7 @@ INSERT INTO favorite_fact_outbox
 	VALUES ($1, $2, $3, $4::jsonb, 0, 0,
 	        '', '',
 	        $5, $6)
--- [6]  -- params: {'1': '2114664366805798912'}
+-- [6]  -- params: {'1': '2115886541857951744'}
 DELETE FROM favorite_item WHERE favorite_id = $1
 -- [7]
 COMMIT
@@ -920,21 +920,21 @@ ROLLBACK
 **GO 侧**
 
 ```sql
--- [0]  -- params: {'1': '2114664366449553408', '2': '1'}
+-- [0]  -- params: {'1': '2115886541579214848', '2': '1'}
 SELECT * FROM "favorite_folder" WHERE folder_id = $1 ORDER BY "favorite_folder"."id" LIMIT $2
 -- [1]
 begin
--- [2]  -- params: {'1': '2114664366449553408', '2': '1'}
+-- [2]  -- params: {'1': '2115886541579214848', '2': '1'}
 SELECT * FROM "favorite_folder" WHERE folder_id = $1 ORDER BY "favorite_folder"."id" LIMIT $2 FOR UPDATE
--- [3]  -- params: {'1': '2114664366449553408'}
+-- [3]  -- params: {'1': '2115886541579214848'}
 SELECT * FROM "favorite_item" WHERE folder_id = $1 ORDER BY favorite_id FOR UPDATE
--- [4]  -- params: {'1': '2114664366902538240', '2': '1'}
+-- [4]  -- params: {'1': '2115886541935730688', '2': '1'}
 SELECT * FROM "favorite_fact_outbox" WHERE favorite_id = $1 AND aggregate_version = 1 LIMIT $2 FOR UPDATE
--- [5]  -- params: {'1': 'favorite.2114664366902538240.v2', '2': '2114664366902538240', '3': '2', '4': '{"payload": {"event_id": "favorite.2114664366902538240.v2", "folder_id": "2114664366449553408", "operation": "retract", "target_id": "t-78", "event_time": "2026-10-26T10:24:08.618138Z", "source_ref": "rtw.favorite/2114664366902538240", "favorite_id": "2114664366902538240", "subject_ref": {"tenant_id": "platform", "subject_id": "2001", "authority_id": "rtw.identity"}, "target_type": "post", "available_at": "2026-10-26T10:24:08.618138Z", "schema_version": 1, "target_revision": null}, "event_id": "favorite.2114664366902538240.v2", "producer": "rtw.community.favorite", "event_type": "rtw.favorite.retract", "occurred_at": "2026-10-26T10:24:08.618138Z", "aggregate_id": "2114664366902538240", "operation_id": "favorite.2114664366902538240.v2", "schema_version": 1, "aggregate_version": 2}', '5': '0', '6': '0', '7': '', '8': '', '9': '0', '10': None, '11': None, '12': '2026-10-26 18:24:08.618161+08', '13': '2026-10-26 18:24:08.618161+08'}
+-- [5]  -- params: {'1': 'favorite.2115886541935730688.v2', '2': '2115886541935730688', '3': '2', '4': '{"payload": {"event_id": "favorite.2115886541935730688.v2", "folder_id": "2115886541579214848", "operation": "retract", "target_id": "t-78", "event_time": "2026-10-29T19:20:37.769569Z", "source_ref": "rtw.favorite/2115886541935730688", "favorite_id": "2115886541935730688", "subject_ref": {"tenant_id": "platform", "subject_id": "2001", "authority_id": "rtw.identity"}, "target_type": "post", "available_at": "2026-10-29T19:20:37.769569Z", "schema_version": 1, "target_revision": null}, "event_id": "favorite.2115886541935730688.v2", "producer": "rtw.community.favorite", "event_type": "rtw.favorite.retract", "occurred_at": "2026-10-29T19:20:37.769569Z", "aggregate_id": "2115886541935730688", "operation_id": "favorite.2115886541935730688.v2", "schema_version": 1, "aggregate_version": 2}', '5': '0', '6': '0', '7': '', '8': '', '9': '0', '10': None, '11': None, '12': '2026-10-30 03:20:37.769581+08', '13': '2026-10-30 03:20:37.769581+08'}
 INSERT INTO "favorite_fact_outbox" ("event_id","favorite_id","aggregate_version","payload","status","retry_count","technical_receipt_id","technical_input_hash","technical_offset","technical_received_at","delivered_at","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
--- [6]  -- params: {'1': '2114664366449553408'}
+-- [6]  -- params: {'1': '2115886541579214848'}
 DELETE FROM "favorite_item" WHERE folder_id = $1
--- [7]  -- params: {'1': '2114664366449553408'}
+-- [7]  -- params: {'1': '2115886541579214848'}
 DELETE FROM "favorite_folder" WHERE folder_id = $1
 -- [8]
 commit
@@ -943,7 +943,7 @@ commit
 **RAG 侧**
 
 ```sql
--- [0]  -- params: {'1': '2114664366570917888'}
+-- [0]  -- params: {'1': '2115886541669208064'}
 SELECT id, folder_id, user_id, name, create_time, update_time
 	FROM favorite_folder
 	WHERE folder_id = $1
@@ -952,20 +952,20 @@ SELECT id, folder_id, user_id, name, create_time, update_time
 SHOW TRANSACTION ISOLATION LEVEL
 -- [2]
 BEGIN
--- [3]  -- params: {'1': '2114664366570917888'}
+-- [3]  -- params: {'1': '2115886541669208064'}
 SELECT id, folder_id, user_id, name, create_time, update_time
 	FROM favorite_folder
 	WHERE folder_id = $1
 	LIMIT 1
 	FOR UPDATE
--- [4]  -- params: {'1': '2114664366570917888'}
+-- [4]  -- params: {'1': '2115886541669208064'}
 SELECT id, favorite_id, folder_id, user_id, target_id, target_type,
 	       target_revision, title, cover, create_time
 	FROM favorite_item
 	WHERE folder_id = $1
 	ORDER BY favorite_id
 	FOR UPDATE
--- [5]  -- params: {'1': '2114664366969376768'}
+-- [5]  -- params: {'1': '2115886541975392256'}
 SELECT event_id, favorite_id, aggregate_version, payload, status, retry_count,
 	       technical_receipt_id, technical_input_hash, technical_offset,
 	       technical_received_at, delivered_at, created_at, updated_at
@@ -973,7 +973,7 @@ SELECT event_id, favorite_id, aggregate_version, payload, status, retry_count,
 	WHERE favorite_id = $1 AND aggregate_version = 1
 	LIMIT 1
 	FOR UPDATE
--- [6]  -- params: {'1': 'favorite.2114664366969376768.v2', '2': '2114664366969376768', '3': '2', '4': '{"event_id":"favorite.2114664366969376768.v2","event_type":"rtw.favorite.retract","schema_version":1,"producer":"rtw.community.favorite","aggregate_id":"2114664366969376768","aggregate_version":2,"operation_id":"favorite.2114664366969376768.v2","occurred_at":"2026-10-26T10:24:08.638391Z","payload":{"schema_version":1,"event_id":"favorite.2114664366969376768.v2","subject_ref":{"authority_id":"rtw.identity","tenant_id":"platform","subject_id":"2001"},"target_type":"post","target_id":"t-78","target_revision":null,"operation":"retract","source_ref":"rtw.favorite/2114664366969376768","event_time":"2026-10-26T10:24:08.638391Z","available_at":"2026-10-26T10:24:08.638391Z","favorite_id":"2114664366969376768","folder_id":"2114664366570917888"}}', '5': '2026-10-26 18:24:08.638595+08', '6': '2026-10-26 18:24:08.638595+08'}
+-- [6]  -- params: {'1': 'favorite.2115886541975392256.v2', '2': '2115886541975392256', '3': '2', '4': '{"event_id":"favorite.2115886541975392256.v2","event_type":"rtw.favorite.retract","schema_version":1,"producer":"rtw.community.favorite","aggregate_id":"2115886541975392256","aggregate_version":2,"operation_id":"favorite.2115886541975392256.v2","occurred_at":"2026-10-29T19:20:37.790914Z","payload":{"schema_version":1,"event_id":"favorite.2115886541975392256.v2","subject_ref":{"authority_id":"rtw.identity","tenant_id":"platform","subject_id":"2001"},"target_type":"post","target_id":"t-78","target_revision":null,"operation":"retract","source_ref":"rtw.favorite/2115886541975392256","event_time":"2026-10-29T19:20:37.790914Z","available_at":"2026-10-29T19:20:37.790914Z","favorite_id":"2115886541975392256","folder_id":"2115886541669208064"}}', '5': '2026-10-30 03:20:37.791072+08', '6': '2026-10-30 03:20:37.791072+08'}
 INSERT INTO favorite_fact_outbox
 	    (event_id, favorite_id, aggregate_version, payload, status, retry_count,
 	     technical_receipt_id, technical_input_hash,
@@ -981,9 +981,9 @@ INSERT INTO favorite_fact_outbox
 	VALUES ($1, $2, $3, $4::jsonb, 0, 0,
 	        '', '',
 	        $5, $6)
--- [7]  -- params: {'1': '2114664366570917888'}
+-- [7]  -- params: {'1': '2115886541669208064'}
 DELETE FROM favorite_item WHERE folder_id = $1
--- [8]  -- params: {'1': '2114664366570917888'}
+-- [8]  -- params: {'1': '2115886541669208064'}
 DELETE FROM favorite_folder WHERE folder_id = $1
 -- [9]
 COMMIT
@@ -1013,21 +1013,21 @@ SELECT id, folder_id, user_id, name, create_time, update_time
 **GO 侧**
 
 ```sql
--- [0]  -- params: {'1': '2114664366449553408', '2': '1'}
+-- [0]  -- params: {'1': '2115886541579214848', '2': '1'}
 SELECT * FROM "favorite_folder" WHERE folder_id = $1 ORDER BY "favorite_folder"."id" LIMIT $2
--- [1]  -- params: {'1': '2114664366449553408'}
+-- [1]  -- params: {'1': '2115886541579214848'}
 SELECT * FROM "favorite_item" WHERE folder_id = $1 ORDER BY create_time desc
 ```
 
 **RAG 侧**
 
 ```sql
--- [0]  -- params: {'1': '2114664366570917888'}
+-- [0]  -- params: {'1': '2115886541669208064'}
 SELECT id, folder_id, user_id, name, create_time, update_time
 	FROM favorite_folder
 	WHERE folder_id = $1
 	LIMIT 1
--- [1]  -- params: {'1': '2114664366570917888'}
+-- [1]  -- params: {'1': '2115886541669208064'}
 SELECT id, favorite_id, folder_id, user_id, target_id, target_type,
 	       target_revision, title, cover, create_time
 	FROM favorite_item

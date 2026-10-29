@@ -40,6 +40,13 @@
 #   ./exp-difftest-grpc-user9.sh --no-build   # 复用已有 jar
 #   ./exp-difftest-grpc-user9.sh --keep       # 跑完保留两套栈，便于手工再打
 set -euo pipefail
+# 🔴 RAG 侧 **fail-closed 密钥**（P0 #8）：占位符解析不出来 ⇒ 进程起不来
+#    ⇒ 探针「起 RAG 侧」这一步必挂 ⇒ 看起来像产品缺陷，其实是探针自己没给密钥。
+#    （2026-10-30 活体对拍轮实测 · 12 个探针全中招 ⇒ 收敛到这一个共享件）
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/rag-secrets.sh"
+# 共享件：PG 容器 + 建库（**建库失败必须响** ⇒ setup 阶段不许 fail-open）
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/rag-pg.sh"
+
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -122,28 +129,14 @@ ensure_container() {  # name image host_port container_port [docker run 额外�
   fi
 }
 
-wait_pg() {  # 等 PG 真正能连上（容器 healthy ≠ psql 可用）
-  for _ in $(seq 1 60); do
-    if docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d postgres -c 'select 1' >/dev/null 2>&1; then
-      echo "  OK   ${PG_CONTAINER} 已可连"; return 0
-    fi
-    sleep 1
-  done
-  echo "  FAIL ${PG_CONTAINER} 超时不可连" >&2; return 1
-}
-
-ensure_container "$PG_CONTAINER" postgres:16-alpine "$PG_PORT" 5432 \
-  -e POSTGRES_USER="$PG_USER" -e POSTGRES_PASSWORD="$PG_PASSWORD" -e POSTGRES_DB=postgres
+ensure_pg_container "$PG_CONTAINER" "$PG_PORT" "$PG_USER" "$PG_PASSWORD"
 ensure_container "$REDIS_CONTAINER" redis:7-alpine "$REDIS_PORT" 6379
-wait_pg
+wait_pg_ready "$PG_CONTAINER" "$PG_USER" || exit 2
 
-for db in "$GO_DB" "$RAG_DB"; do
-  docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d postgres \
-    -c "DROP DATABASE IF EXISTS $db" >/dev/null 2>&1 || true
-  docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d postgres \
-    -c "CREATE DATABASE $db" >/dev/null
-done
-echo "  ✓ $GO_DB / $RAG_DB 已重建"
+# ⚠️ **建库失败必须响**（2026-10-30 活体对拍轮）：原来 CREATE 失败仍打印「✓ 已重建」
+#    ⇒ setup 阶段 fail-open ⇒ 后面以「连不上库」的形式炸在别处 ⇒ 误导性结论。
+reset_pg_dbs "$PG_CONTAINER" "$PG_USER" "$GO_DB" "$RAG_DB" || exit 2
+echo "  ✓ $GO_DB / $RAG_DB 已重建（**空库**）"
 
 echo "==> [2/5] 生成 Go 运行配置副本（端口与库名都指向本脚本自己的资源）"
 # ⚠️ 除了监听端口/库名，**PG 端口与 Redis 端口也要改** ——

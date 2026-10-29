@@ -57,6 +57,13 @@
 #   REDIS_HOST=redis ./exp-difftest-redis-neverup-rpc.sh # 形态：主机名解析失败
 # ════════════════════════════════════════════════════════════════════════════
 set -uo pipefail
+# 🔴 RAG 侧 **fail-closed 密钥**（P0 #8）：占位符解析不出来 ⇒ 进程起不来
+#    ⇒ 探针「起 RAG 侧」这一步必挂 ⇒ 看起来像产品缺陷，其实是探针自己没给密钥。
+#    （2026-10-30 活体对拍轮实测 · 12 个探针全中招 ⇒ 收敛到这一个共享件）
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/rag-secrets.sh"
+# 共享件：PG 容器 + 建库（**建库失败必须响** ⇒ setup 阶段不许 fail-open）
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/rag-pg.sh"
+
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -147,9 +154,10 @@ EOF
   fi
   echo "  ✓ 探针已构建 → $PROBE"
 fi
-if ! docker ps --format '{{.Names}}' | grep -qx "$PG_CONTAINER"; then
-  echo "  FAIL PG 容器 ${PG_CONTAINER} 不在运行" >&2; exit 2
-fi
+# 🔴 **PG 容器自给自足**（2026-10-30 活体对拍轮）：原先只「检查在不在」
+#    ⇒ 隐式依赖别的探针的残留容器 ⇒ 被清理后**直接 exit 2**（假红）。
+ensure_pg_container "$PG_CONTAINER" "$PG_PORT" "$PG_USER" "$PG_PASSWORD"
+wait_pg_ready "$PG_CONTAINER" "$PG_USER" || exit 2
 if [[ "$REDIS_MODE" == "never" ]] && lsof -nP -iTCP:"$DEAD_REDIS_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
   echo "  FAIL 端口 ${DEAD_REDIS_PORT} 已被监听 ⇒「从未连上」不成立" >&2; exit 2
 fi
@@ -180,11 +188,9 @@ PY
 fi
 
 echo "==> [1/6] 重建两侧数据库"
-for db in "$GO_DB" "$RAG_DB"; do
-  docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d postgres -c "DROP DATABASE IF EXISTS $db WITH (FORCE)" >/dev/null 2>&1 || true
-  docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d postgres -c "CREATE DATABASE $db" >/dev/null
-done
-echo "  ✓ ${GO_DB} / ${RAG_DB} 已重建"
+# ⚠️ **建库失败必须响**（2026-10-30 活体对拍轮）：原来 CREATE 失败仍打印「✓ 已重建」
+#    ⇒ setup 阶段 fail-open ⇒ 后面以「连不上库」的形式炸在别处 ⇒ 误导性结论。
+reset_pg_dbs "$PG_CONTAINER" "$PG_USER" "$GO_DB" "$RAG_DB" || exit 2
 
 echo "==> [2/6] 生成配置副本（两侧 Redis 都指向 ${REDIS_HOST}:${DEAD_REDIS_PORT} —— 形态：${REDIS_HOST}）"
 sed -e "s/0.0.0.0:19004/0.0.0.0:${GO_RPC_PORT}/" \
