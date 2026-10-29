@@ -1,6 +1,9 @@
 package com.rag.common.logger;
 
 /**
+ * <p><b>Go 出处</b>：{@code service/common/logger/logger.go:42-46}
+ * （{@code func WithArticleID(articleID string) LogOption} ＋ 闭包体 {@code func(opts *LogOptions) { opts.ArticleID = articleID }}`）
+ * ⇒ <b>语义等价</b>（同 {@link WithUserID}）。
  * 对应 Go 版 service/common/logger/logger.go 的 WithArticleID 函数：
  *
  * <pre>

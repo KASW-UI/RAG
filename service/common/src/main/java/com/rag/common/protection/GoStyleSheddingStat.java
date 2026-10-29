@@ -48,7 +48,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li><b>降载的三个计数</b>：只在 <b>每分钟一行的日志</b>里出现
  *       （{@code logx.Statf("(%s) shedding_stat [1m], …")}），
  *       <b>没有</b>对应的 prometheus 指标；</li>
- *   <li><b>熔断的计数</b>（{@code googlebreaker.go:121-130} 的 {@code markDrop}/{@code markFailure}）
+ *   <li><b>熔断的计数</b>（{@code core/breaker/googlebreaker.go:121-130} 的 {@code markDrop}/{@code markFailure}）
  *       写进 {@code b.stat}（{@code collection.RollingWindow}）——
  *       那是<b>熔断算法自己的状态</b>（算 dropRatio 用），<b>根本没有对外暴露</b>。</li>
  * </ul>
@@ -67,12 +67,12 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class GoStyleSheddingStat {
 
-    /** Go {@code zrpc/internal/serverinterceptors/sheddinginterceptor.go:18} {@code serviceType = "rpc"}。 */
+    /** Go {@code zrpc/internal/serverinterceptors/sheddinginterceptor.go:15} {@code const serviceType = "rpc"}。 */
     public static final String SERVICE_TYPE = "rpc";
 
     private static final Logger LOG = LoggerFactory.getLogger(GoStyleSheddingStat.class);
 
-    /** 统计周期：Go {@code core/stat/metrics.go:20} {@code logInterval = time.Minute}。 */
+    /** 统计周期：Go {@code core/stat/metrics.go:14} {@code logInterval = time.Minute}。 */
     private static final long REPORT_INTERVAL_MINUTES = 1L;
 
     private final String name;
@@ -136,7 +136,7 @@ public final class GoStyleSheddingStat {
     public record Snapshot(long total, long pass, long drop) {
     }
 
-    // ── 进程级单例 + 每分钟上报（Go: sheddinginterceptor.go:19-21 + sheddingstat.go:30-35）────────
+    // ── 进程级单例 + 每分钟上报（Go: sheddinginterceptor.go:17-20 + sheddingstat.go:30-35）────────
 
     private static volatile GoStyleSheddingStat instance;
 

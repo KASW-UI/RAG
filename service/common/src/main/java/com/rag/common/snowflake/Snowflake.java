@@ -37,7 +37,7 @@ public final class Snowflake {
     public static final Logger LOG = LoggerFactory.getLogger(Snowflake.class);
 
     /**
-     * 对应 Go 版 {@code snowflake.Epoch}（bwmarrin v0.3.0 snowflake.go:17）：
+     * 对应 Go 版 {@code snowflake.Epoch}（{@code github.com/bwmarrin/snowflake@v0.3.0/snowflake.go:17}）：
      * <pre>
      *     // Epoch is set to the twitter snowflake epoch of Nov 04 2010 01:42:54 UTC in milliseconds
      *     Epoch int64 = 1288834974657
@@ -130,7 +130,7 @@ public final class Snowflake {
         /**
          * <b>锚点 A</b>：Node 创建时刻「距 epoch 的纳秒数」——
          * 对应 Go 侧 {@code curTime.Add(time.Unix(...).Sub(curTime))} 里的<b>墙钟偏移量</b>
-         * （{@code snowflake.go:126}）。
+         * （{@code github.com/bwmarrin/snowflake@v0.3.0/snowflake.go:126}）。
          *
          * <p>🔴 <b>为什么必须含 epoch 偏移</b>（AGENTS.md §3.3.1 的「读消费点」纪律）：
          * Go 的 {@code n.epoch} 的<b>墙钟分量</b>就是 epoch 时刻本身 ⇒ {@code time.Since(n.epoch)}
@@ -142,7 +142,7 @@ public final class Snowflake {
 
         /**
          * <b>锚点 B</b>：Node 创建时刻的单调钟读数（纳秒）——
-         * 对应 Go 侧 {@code curTime} 自带的<b>单调读数</b>（{@code snowflake.go:124}）。
+         * 对应 Go 侧 {@code curTime} 自带的<b>单调读数</b>（{@code github.com/bwmarrin/snowflake@v0.3.0/snowflake.go:124}）。
          *
          * <p>Go 侧 {@code time.Since(n.epoch)} 之所以<b>免疫墙钟回拨</b>，靠的就是它：
          * 两个时间点都带单调读数 ⇒ {@code Time.Sub}（{@code $GOROOT/src/time/time.go:1194}）
@@ -151,7 +151,7 @@ public final class Snowflake {
         final long anchorMonotonicNanos;
 
         /**
-         * 构造即取锚点 —— 对应 Go 侧 {@code snowflake.NewNode(...)}（{@code snowflake.go:112}）
+         * 构造即取锚点 —— 对应 Go 侧 {@code snowflake.NewNode(...)}（{@code github.com/bwmarrin/snowflake@v0.3.0/snowflake.go:112}）
          * 里的 {@code var curTime = time.Now()}（{@code :124}）：<b>每个 Node 一份锚点</b>。
          */
         public State() {
@@ -163,7 +163,7 @@ public final class Snowflake {
 
         /**
          * 当前「距 epoch 时刻的毫秒数」—— 与 Go 侧
-         * {@code time.Since(n.epoch).Nanoseconds() / 1000000}（{@code snowflake.go:139}）同构。
+         * {@code time.Since(n.epoch).Nanoseconds() / 1000000}（{@code github.com/bwmarrin/snowflake@v0.3.0/snowflake.go:139}）同构。
          *
          * <p><b>语义等价论证</b>：Go 侧 {@code time.Since(n.epoch)} 在两个时间点都带单调读数时
          * 走 {@code subMono} ⇒ 结果 = 「创建时刻的墙钟偏移」+「创建至今的单调流逝量」
@@ -277,7 +277,7 @@ public final class Snowflake {
     }
 
     /**
-     * 对应 bwmarrin v0.3.0 {@code func (n *Node) Generate() ID}（snowflake.go:135-160）。
+     * 对应 bwmarrin v0.3.0 {@code func (n *Node) Generate() ID}（{@code github.com/bwmarrin/snowflake@v0.3.0/snowflake.go:135-160}）。
      *
      * <pre>
      * n.mu.Lock()
@@ -306,7 +306,7 @@ public final class Snowflake {
      *
      * <p><b>🔴 DRIFT-SF-001 修复（2026-10-29 · G4 lane）：时钟源从墙钟改为「锚点 + 单调流逝」。</b>
      * <ul>
-     *   <li><b>Go 出处（逐条可核）</b>：{@code bwmarrin/snowflake@v0.3.0/snowflake.go}
+     *   <li><b>Go 出处（逐条可核）</b>：{@code github.com/bwmarrin/snowflake@v0.3.0/snowflake.go}
      *       <ul>
      *         <li>{@code :124} {@code var curTime = time.Now()} —— <b>带单调读数</b>的当前时刻；</li>
      *         <li>{@code :126} {@code n.epoch = curTime.Add(time.Unix(Epoch/1000, (Epoch%1000)*1000000).Sub(curTime))}
@@ -327,7 +327,7 @@ public final class Snowflake {
      *       <b>「不免疫」是 RAG 侧纯墙钟实现独有的</b> ⇒ 故本条不是「为 Go 加保护」，
      *       而是<b>把 RAG 改成 Go 已有行为</b>。</li>
      *   <li><b>位布局与回绕逻辑一字未动</b>（41 位时间戳 + 10 位 workerId + 12 位 sequence），
-     *       仍逐条对齐 {@code snowflake.go:135-160}。</li>
+     *       仍逐条对齐 {@code github.com/bwmarrin/snowflake@v0.3.0/snowflake.go:135-160}。</li>
      * </ul>
      *
      * <p>{@code synchronized (state)} 对应 bwmarrin 的 {@code n.mu.Lock()}。

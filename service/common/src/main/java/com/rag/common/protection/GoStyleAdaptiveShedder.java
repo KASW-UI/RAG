@@ -8,7 +8,7 @@ import java.util.function.IntSupplier;
  *
  * <p><b>⚠️ 先说清一件事：Go 侧这不是「CPU 超阈值就 503」</b>。
  * 很多「简化移植」会写成 {@code if cpu > 90 then reject}，那是<b>另一个行为</b>：
- * Go 的 {@code shouldDrop()}（{@code adaptiveshedder.go:216-234}）需要
+ * Go 的 {@code shouldDrop()}（{@code adaptiveshedder.go:208-225}）需要
  * <b>同时</b>满足三个条件才丢请求：
  * <ol>
  *   <li>{@code systemOverloaded() || stillHot()}：CPU ≥ 阈值，<b>或</b>刚降过载仍在冷却期；</li>
@@ -130,7 +130,7 @@ final class GoStyleAdaptiveShedder {
         }
     }
 
-    /** {@code promise.Fail()}（{@code adaptiveshedder.go:247-249}）：只减在途。 */
+    /** {@code promise.Fail()}（{@code adaptiveshedder.go:280-282}）：只减在途。 */
     void fail() {
         addFlying(-1);
     }
@@ -152,7 +152,7 @@ final class GoStyleAdaptiveShedder {
         }
     }
 
-    /** {@code shouldDrop()}（{@code adaptiveshedder.go:216-234}）。 */
+    /** {@code shouldDrop()}（{@code adaptiveshedder.go:208-225}）。 */
     boolean shouldDrop() {
         if (!(systemOverloaded() || stillHot())) {
             return false;

@@ -75,7 +75,7 @@ final class GoStyleStatusCapturingResponse extends HttpServletResponseWrapper {
     }
 
     /**
-     * 与 Go {@code breakerhandler.go:39} 的判据逐字对齐：
+     * 与 Go {@code rest/handler/breakerhandler.go:32-38} 的判据逐字对齐：
      * {@code if cw.Code < http.StatusInternalServerError { promise.Accept() } else { promise.Reject(...) }}。
      *
      * <p>⚠️ <b>这条判据只看 HTTP 状态码，不看业务码</b>。本模块的业务错误

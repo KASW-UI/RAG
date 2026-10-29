@@ -1,6 +1,8 @@
 package com.rag.common.logger;
 
 /**
+ * <p><b>Go 出处</b>：{@code service/common/logger/logger.go:32}（{@code type LogOption func(*LogOptions)}）
+ * ⇒ 本类是它的 Java 表达（{@code @FunctionalInterface}）⇒ <b>语义等价</b>：Go 的函数选项 = Java 的函数式接口。
  * 对应 Go 版 service/common/logger/logger.go 的 LogOption 函数选项类型：
  *
  * <pre>

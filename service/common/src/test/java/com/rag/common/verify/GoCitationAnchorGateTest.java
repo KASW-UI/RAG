@@ -58,6 +58,12 @@ class GoCitationAnchorGateTest {
      * 内容锚定表：(Go 相对路径, 起行, 止行, 必须在该区间内出现的锚点串)。
      *
      * <p>⚠️ 这张表就是<b>断言的期望值</b> ⇒ ⇒ 改它等于改断言 ⇒ ⇒ 必须先回真源核实再改。
+     *
+     * <p><b>2026-10-29（R3 轮）扩表</b>：本表从 **21 条**扩到 **45 条**
+     * ⇒ 覆盖 {@code protection/} + {@code http/} 两个机制密集区里
+     * <b>每一条</b> {@code .go:行} 引用（唯一 (文件,行) 对）⇒ ⇒ 该区间的引用<b>内容锚定覆盖率 = 100%</b>。
+     * <p>扩表过程<b>又抓出 7 处真缺陷</b>（区间指到相邻函数 / 空行 / 错的 const 块）⇒ ⇒ 逐条见
+     * {@code docs/DRIFT/global/vs-common.md} §4.18.2。
      */
     private static final String[][] CITATIONS = {
             // —— GoStyleCpuReader.java ——
@@ -72,19 +78,79 @@ class GoCitationAnchorGateTest {
             {"zrpc/internal/serverinterceptors/sheddinginterceptor.go", "28", "28", "IncrementTotal()"},
             {"zrpc/internal/serverinterceptors/sheddinginterceptor.go", "33", "33", "IncrementDrop()"},
             {"zrpc/internal/serverinterceptors/sheddinginterceptor.go", "42", "42", "IncrementPass()"},
+            // 🆕 2026-10-29 扩表（原先未锚定）：熔断计数写进 breaker 自己的滚动窗口
+            {"core/breaker/googlebreaker.go", "121", "130", "func (b *googleBreaker) markDrop()"},
+            // 🆕 serviceType 常量在 :15（原引用 :18 指到了 struct 字段）
+            {"zrpc/internal/serverinterceptors/sheddinginterceptor.go", "15", "15", "const serviceType = \"rpc\""},
+            // 🆕 logInterval 在 :14（原引用 :20 指到了 type 块）
+            {"core/stat/metrics.go", "14", "14", "logInterval"},
+            // 🆕 每分钟上报的 goroutine 起点
+            {"core/load/sheddingstat.go", "30", "35", "go st.run()"},
             // —— GoStyleRpcFailurePolicy.java ——
             {"zrpc/internal/serverinterceptors/breakerinterceptor.go", "53", "58", "func serverSideAcceptable"},
             {"zrpc/internal/codes/accept.go", "9", "17", "func Acceptable"},
             // —— GoStyleAdaptiveShedder.java ——
             {"core/load/adaptiveshedder.go", "245", "252", "func (as *adaptiveShedder) systemOverloaded()"},
             {"core/load/adaptiveshedder.go", "237", "242", "coolOffDuration"},
+            // 🆕 shouldDrop() 的三个条件在 :208-225（原引用 :216-234 只指到函数尾 + stillHot）
+            {"core/load/adaptiveshedder.go", "208", "225", "func (as *adaptiveShedder) shouldDrop() bool"},
+            // 🆕 常量块
+            {"core/load/adaptiveshedder.go", "18", "30", "defaultCpuThreshold"},
+            // 🆕 windowScale
+            {"core/load/adaptiveshedder.go", "115", "115", "windowScale"},
+            // 🆕 Allow() 的判据
+            {"core/load/adaptiveshedder.go", "126", "136", "ErrServiceOverloaded"},
+            // 🆕 promise.Pass()
+            {"core/load/adaptiveshedder.go", "284", "289", "func (p *promise) Pass()"},
+            // 🆕 RT 向上取整
+            {"core/load/adaptiveshedder.go", "285", "287", "math.Ceil(rt)"},
+            // 🆕 promise.Fail()（原引用 :247-249 指到了 systemOverloaded 的尾部）
+            {"core/load/adaptiveshedder.go", "280", "282", "func (p *promise) Fail()"},
+            // 🆕 addFlying()
+            {"core/load/adaptiveshedder.go", "139", "152", "func (as *adaptiveShedder) addFlying"},
+            // 🆕 highThru()
+            {"core/load/adaptiveshedder.go", "154", "160", "maxFlight := as.maxFlight() * as.overloadFactor()"},
+            // 🆕 maxFlight()
+            {"core/load/adaptiveshedder.go", "162", "170", "mathx.AtLeast(maxFlight, 1)"},
+            // 🆕 maxPass()
+            {"core/load/adaptiveshedder.go", "172", "180", "passCounter.Reduce"},
+            // 🆕 minRt()
+            {"core/load/adaptiveshedder.go", "182", "196", "func (as *adaptiveShedder) minRt()"},
+            // 🆕 overloadFactor()
+            {"core/load/adaptiveshedder.go", "202", "206", "mathx.Between"},
+            // 🆕 IgnoreCurrentBucket
+            {"core/collection/rollingwindow.go", "70", "72", "ignore the current bucket"},
+            // 🆕 rtCounter.Add（测试接缝）
+            {"core/load/adaptiveshedder.go", "287", "287", "rtCounter.Add"},
             // —— GoStyleJsonBodyConverter.java ——
             {"rest/httpx/requests.go", "117", "124", "func ParseJsonBody"},
             {"rest/httpx/requests.go", "153", "155", "func withJsonBody"},
             {"rest/httpx/requests.go", "17", "22", "maxBodyLen"},
+            // 🆕 maxBodyLen 的具体取值（8 MiB）
+            {"rest/httpx/requests.go", "21", "21", "8 << 20"},
+            // 🆕 LimitReader：Go 只读前 8 MiB
+            {"rest/httpx/requests.go", "119", "119", "io.LimitReader(r.Body, maxBodyLen)"},
+            // 🆕 MaxBytes 默认 1 MiB
+            {"rest/config.go", "53", "53", "default=1048576"},
+            // 🆕 MaxBytes 挂在引擎上全局生效
+            {"rest/engine.go", "163", "164", "MaxBytesHandler"},
+            // —— GoStyleRouterErrorResponses.java（2026-10-29 R3 轮补入 · A6 轴的第三个落点）——
+            // 🆕 bindRoute 的链构造（native middlewares + auth + 用户中间件）
+            {"rest/engine.go", "104", "118", "appendAuthHandler"},
+            // 🆕 ServeHTTP 的「无匹配」与「方法不匹配」两条分支
+            {"rest/router/patrouter.go", "59", "83", "func (pr *patRouter) ServeHTTP"},
+            // 🆕 404 分支
+            {"rest/router/patrouter.go", "73", "73", "pr.handleNotFound(w, r)"},
+            {"rest/router/patrouter.go", "93", "97", "http.NotFound(w, r)"},
+            // 🆕 405 分支（只 Set(Allow) + WriteHeader(405)，无 body）
+            {"rest/router/patrouter.go", "79", "82", "http.StatusMethodNotAllowed"},
+            // 🆕 methodsAllowed
+            {"rest/router/patrouter.go", "101", "117", "func (pr *patRouter) methodsAllowed"},
             // —— GoStyleStatusCapturingResponse.java ——
             {"rest/internal/response/withcoderesponsewriter.go", "23", "26", "Code:   http.StatusOK"},
             {"rest/handler/breakerhandler.go", "33", "33", "cw.Code < http.StatusInternalServerError"},
+            // 🆕 整个 defer 块（Accept / Reject 两支；原引用 :39 指到了 next.ServeHTTP）
+            {"rest/handler/breakerhandler.go", "32", "38", "promise.Reject"},
             // —— GoStyleCpuReader.java 的「哨兵值论证」段 ——
             {"core/stat/usage.go", "22", "22", "var cpuUsage int64"},
             {"core/stat/usage.go", "35", "39", "cpuUsage"},
@@ -105,6 +171,8 @@ class GoCitationAnchorGateTest {
             "src/main/java/com/rag/common/protection/GoStyleStatusCapturingResponse.java",
             "src/main/java/com/rag/common/http/GoStyleJsonBodyConverter.java",
             "src/main/java/com/rag/common/http/GoStyleJsonBodyConverterConfig.java",
+            // 🆕 2026-10-29 R3 轮补入（A6 轴的第三个共享层落点）
+            "src/main/java/com/rag/common/http/GoStyleRouterErrorResponses.java",
     };
 
     /** 已订正的引用形态：文件路径 → 必须出现的字面量。 */
@@ -124,6 +192,48 @@ class GoCitationAnchorGateTest {
                     "rest/internal/response/withcoderesponsewriter.go:23-26"},
             {"src/main/java/com/rag/common/protection/GoStyleStatusCapturingResponse.java",
                     "rest/handler/breakerhandler.go:33"},
+            // 🆕 2026-10-29 扩表锁（本轮内容锚定新抓出的 7 处）
+            {"src/main/java/com/rag/common/protection/GoStyleSheddingStat.java",
+                    "core/breaker/googlebreaker.go:121-130"},
+            {"src/main/java/com/rag/common/protection/GoStyleSheddingStat.java",
+                    "zrpc/internal/serverinterceptors/sheddinginterceptor.go:15"},
+            {"src/main/java/com/rag/common/protection/GoStyleSheddingStat.java", "core/stat/metrics.go:14"},
+            {"src/main/java/com/rag/common/protection/GoStyleSheddingStat.java", "sheddingstat.go:30-35"},
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java",
+                    "adaptiveshedder.go:208-225"},
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java",
+                    "adaptiveshedder.go:18-30"},
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java",
+                    "adaptiveshedder.go:280-282"},
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java",
+                    "adaptiveshedder.go:139-152"},
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java",
+                    "adaptiveshedder.go:154-160"},
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java",
+                    "adaptiveshedder.go:162-170"},
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java",
+                    "adaptiveshedder.go:172-180"},
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java",
+                    "adaptiveshedder.go:182-196"},
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java",
+                    "adaptiveshedder.go:202-206"},
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java",
+                    "adaptiveshedder.go:126-136"},
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java",
+                    "adaptiveshedder.go:284-289"},
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java",
+                    "adaptiveshedder.go:285-287"},
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java", "adaptiveshedder.go:287"},
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java",
+                    "adaptiveshedder.go:115"},
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java",
+                    "collection/rollingwindow.go:70-72"},
+            {"src/main/java/com/rag/common/protection/GoStyleStatusCapturingResponse.java",
+                    "rest/handler/breakerhandler.go:32-38"},
+            {"src/main/java/com/rag/common/http/GoStyleJsonBodyConverter.java", "requests.go:21"},
+            {"src/main/java/com/rag/common/http/GoStyleJsonBodyConverter.java", "requests.go:119"},
+            {"src/main/java/com/rag/common/http/GoStyleJsonBodyConverter.java", "rest/config.go:53"},
+            {"src/main/java/com/rag/common/http/GoStyleJsonBodyConverter.java", "rest/engine.go:163-164"},
     };
 
     /** 已知写错的引用形态：文件路径 → 必须<b>不</b>再出现的字面量。 */
@@ -136,6 +246,21 @@ class GoCitationAnchorGateTest {
             {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java", "adaptiveshedder.go:245-256"},
             {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java", "adaptiveshedder.go:237-244"},
             {"src/main/java/com/rag/common/http/GoStyleJsonBodyConverter.java", "requests.go:117-125"},
+            // 🆕 2026-10-29 扩表禁用名单（本轮内容锚定新抓出的 7 处写错形态）
+            //    ① googlebreaker 的完整路径必须带 core/breaker/ 前缀（裸名在真源里找不到）
+            {"src/main/java/com/rag/common/protection/GoStyleSheddingStat.java", "{@code googlebreaker.go:121-130}"},
+            //    ② serviceType 常量在 :15，不在 :18
+            {"src/main/java/com/rag/common/protection/GoStyleSheddingStat.java", "sheddinginterceptor.go:18"},
+            //    ③ logInterval 在 :14，不在 :20
+            {"src/main/java/com/rag/common/protection/GoStyleSheddingStat.java", "core/stat/metrics.go:20"},
+            //    ④ 包级单例 var 块是 :17-20，不在 :19-21
+            {"src/main/java/com/rag/common/protection/GoStyleSheddingStat.java", "sheddinginterceptor.go:19-21"},
+            //    ⑤ breaker 判据在 :32-38/:33，不在 :39
+            {"src/main/java/com/rag/common/protection/GoStyleStatusCapturingResponse.java", "breakerhandler.go:39"},
+            //    ⑥ shouldDrop() 是 :208-225，不在 :216-234
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java", "adaptiveshedder.go:216-234"},
+            //    ⑦ promise.Fail() 是 :280-282，不在 :247-249
+            {"src/main/java/com/rag/common/protection/GoStyleAdaptiveShedder.java", "adaptiveshedder.go:247-249"},
     };
 
     @Test
@@ -162,13 +287,20 @@ class GoCitationAnchorGateTest {
     }
 
     /**
-     * 第三道门：**javadoc 里的每条 `.go:行` 引用，都必须落在「已验表」覆盖的那条引用上**
-     * （或落在本仓已知的少数「非区间型」引用上）。
+     * 第三道门：<b>javadoc 里的每一条 {@code .go:行} 引用，都必须落在「已验表」覆盖的那条引用上</b>。
      *
      * <p><b>它补的是哪条缝</b>：前两道门之间有一条缝 ——
      * 「内容锚定」验的是<b>表 vs Go</b>，「引用锁」验的是<b>javadoc vs 名单里的若干形态</b>
      * ⇒ ⇒ 若有人把 javadoc 改成<b>名单以外的第三个错值</b>（既不是已订正形态、也不在禁用名单里），
      * 前两道门都抓不到 ⇒ ⇒ 本道门把它抓住（因为它不在已验表里）。
+     *
+     * <p><b>🔴 2026-10-29（R3 轮）：本道门从「留痕不判红」升级为「判红」</b>。
+     * <p><b>升级理由</b>：上一轮它是「留痕不判红」，理由是「这 7 个文件里 47 条引用只锚定了 21 条
+     * ⇒ 若一律判红则本仓当前就是红的 ⇒ ⇒ 守门会变成常红的摆设」。
+     * ⇒ ⇒ 本轮把那 **26 条全部锚定**（并因此又抓出 **7 处真缺陷**）⇒ ⇒ **覆盖 = 45/45 = 100%**
+     * ⇒ ⇒ 「判红」现在<b>不会</b>让本仓变红 ⇒ ⇒ 判红才有意义 ⇒ ⇒ **本轮起它是真门**。
+     * <p>⚠️ <b>回归风险</b>：若将来有人在这些文件里新增一条 {@code .go:行} 引用而<b>忘了</b>加进已验表
+     * ⇒ ⇒ 本门会红 ⇒ ⇒ 这是<b>期望行为</b>（新增引用必须先内容锚定）。
      */
     @Test
     @DisplayName("引用白名单：javadoc 里的每条 .go:行 引用都必须落在已验表内（自包含 · 不依赖外部输入）")
@@ -195,7 +327,7 @@ class GoCitationAnchorGateTest {
                 String file = raw.substring(raw.lastIndexOf('/') + 1);
                 String from = m.group(2);
                 if (!files.contains(file)) {
-                    // 文件本身不在已验表里 ⇒ **不判红**（判红会误伤历史引用），只**留痕**
+                    // 文件本身不在已验表里 ⇒ 🔴 本轮起**判红**（新增引用必须先内容锚定）
                     unknownFiles.add(relative + " 引用了未纳入表的文件：" + raw + ":" + from);
                     continue;
                 }
@@ -204,17 +336,11 @@ class GoCitationAnchorGateTest {
                 }
             }
         }
-        if (!unknownFiles.isEmpty()) {
-            System.out.println("[G4] ℹ️ 以下引用未纳入已验表（**不判红**，只留痕）：" + unknownFiles);
-        }
-        // ⚠️ **本道门刻意「留痕不判红」** ⇒ 理由：
-        //   这 7 个文件里共 40+ 条 `.go:行` 引用，其中只有 21 条进了已验表（内容锚定过）
-        //   ⇒ ⇒ 若对「未纳入表」一律判红 ⇒ **本仓当前就是红的** ⇒ ⇒ 守门会变成「常红的摆设」⇒ ⇒ 无意义。
-        //   ⇒ ⇒ 所以：**判红的责任交给「引用锁」（本轮修过的 11 处）**，
-        //      本道门只负责把「还没核过的引用」**如实报出来**（数量进台账 ⇒ 变成可量化的剩余项）。
-        //   ⇒ ⚠️ 因此**不能**把本道门读成「这 7 个文件的引用全有网」。
         System.out.println("[G4] ℹ️ 已验表覆盖 " + verified.size() + " 条引用；本组文件的其余引用（未锚定）共 "
                 + uncovered.size() + " 条 + 未纳入表的文件引用 " + unknownFiles.size() + " 条 ⇒ 剩余项。");
+        // 🔴 2026-10-29：覆盖已达 45/45 ⇒ 「判红」不再让本仓变红 ⇒ ⇒ 升级为真门（防新增引用漏锚定）。
+        assertThat(uncovered).as("这些 .go:行 引用不在已验表内 ⇒ 必须先内容锚定再写进 javadoc").isEmpty();
+        assertThat(unknownFiles).as("这些 .go:行 引用指向的文件不在已验表内 ⇒ 必须先内容锚定").isEmpty();
     }
 
     @Test

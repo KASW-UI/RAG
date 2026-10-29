@@ -3,6 +3,9 @@ package com.rag.common.persistence;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 
 /**
+ * <p><b>Go 出处</b>：<b>无</b> —— Go 侧用 GORM，<b>没有</b>「MyBatis-Plus 自动配置排序」这个概念
+ * ⇒ ⇒ 本类是 <b>Spring Boot 4 专用的装配 workaround</b>（{@code @AutoConfigureAfter} 指向的类名在 Boot 4 里被挪走）
+ * ⇒ ⇒ <b>纯表达层</b>：它只保证 MP 的自动配置被求值 ⇒ <b>不改变任何业务语义</b> ⇒ <b>无行为面</b>。
  * 🔴 <b>共享层</b>的 MyBatis-Plus 自动配置<b>排序桥</b>（Spring Boot 4 专用的 workaround）。
  *
  * <h2>为什么需要它</h2>

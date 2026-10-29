@@ -5,6 +5,9 @@ import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Component;
 
 /**
+ * <p><b>Go 出处</b>：{@code service/common/observability/observability.go:19-30}
+ * （观测层的常量与阈值口径）＋ {@code service/common/observability/http.go:36}（观测层的工作线程池来源）
+ * ⇒ ⇒ Go 侧由<b>进程生命周期</b>托管、无显式关闭钩子 ⇒ ⇒ 本类是 <b>表达层补齐</b> ⇒ <b>无 Go 对应物</b>。
  * M9 修复：给观测层的静态线程池补上真正的关闭钩子。
  *
  * <p><b>背景</b>：相关类的 javadoc 都写着

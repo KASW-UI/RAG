@@ -65,7 +65,7 @@
 | **A3** | HTTP 保护链 | `http/GoStyleFormValues` · `http/GoStyleFormLimitMode` · `http/GoStyleFormValueLimitInterceptor` · `http/GoStyleFormLimitExceededException` · `http/GoStyleFormLimitWebMvcConfig` · `http/GoStyleTomcatParameterLimitCustomizer` · `http/GoStylePathNormalizingFilter`（**本轮新落** = FB-01）· `protection/GoStyleBreakerFilter`（键改**注册期路由模板**）· `protection/GoStyleMaxConnsFilter` · `protection/GoStyleMaxBytesFilter` · `protection/GoStyleCpuSheddingFilter` | 🟡 **共享层 11 个类已验**（含本轮新增：路径归一 / breaker 键）<br>🔴 **仍缺「10 域逐域真实请求」证据**（**共享层已验 ≠ 各域已验**）<br>🟢→🟢 **补（`c15dfeb` · G2 FB-05）**：**`off` 这个取值原先在 YAML 里写不出来** —— YAML 1.1 把未加引号的 `off` 变布尔 `false` ⇒ 域侧按文档写 `mode: off` ⇒ **进程起不来** ⇒ ⇒ 已让 `parse` 接受 `"false"` 这个**精确别名**（**不放宽成任意兜底**）⇒ ⇒ **A3 轴的「配置值 → 代码」这一环此前是断的，现已闭合**（守门 5 条 + 变异 2 个，L4：真启动 + 生产同款 YAML loader）<br>⚠️ `GoStyleMaxConnsFilter` 的 MaxConns 半边 = **已签字偏离**（`SD-2026-10-25-01`）⇒ 不重复质疑<br>🟢→🟢 **补（`5a954bb` · G3 反馈单 轴②）**：**轴 ② 的判据漏了「域自捕获」这一档** ⇒ favorite 的 Go 侧 **7 个 handler 各自捕获** `httpx.Parse` 的错 ⇒ 拒绝形状 = **域自定义信封（200 + {code:5003,msg:"参数错误",data:null}）** ⇒ **既非 `raw` 也非 `envelope`** ⇒ 而旧表把它记成 `raw` ⇒ **错** ⇒ ⇒ 判据补成**两档**（① 域自捕获 ⇒ `off`；② 否则按「Go 侧是否注册 `SetErrorHandler`」分 `raw` / `envelope`）⇒ ⇒ 共享层**不装**闸门（装了会**抢先**于域自己的捕获 ⇒ 形状变 400/5001 ⇒ 与 Go 不符）⇒ ⇒ 与 `tools/difftest/check-tomcat-limits.py` 的「favorite **一项都不许**声明 mode」**不再打架**<br>🔴 **但残留没销账**：favorite 的**边界口径**漂移（**Tomcat 数总「值」数（含空值）vs Go 数非空值个数** ⇒ 总「值」数 2049~10000 且非空值 ≤2048 时 **Go 放行 / RAG 拒**）**仍在** ⇒ 归 `DRIFT-HOTAPI-030`（跨域）+ `DRIFT-FAV-API-001`（域内）⇒ ⇒ 修法要动**运行期容器上限**（= 跨域可观察行为变更）⇒ ⇒ **本层只登记 + 转派**，本轮**不改行为** | **L3**（真 Tomcat 守门：form 闸门 / 路径归一 / breaker 模板键 / Tomcat 参数上限）＋ **L1**<br>🆕 **G4 补（`3e460ea` · 2026-10-28）**：**路径归一那份新增「域内零副本」守门**（4 条 + **3 变异全验证**）⇒ ⇒ 过渡期「按 Bean 名让位」这条机制**从此有网可证**（此前只是 javadoc 里的**主张**）⇒ ⇒ 加上 article-api 的整应用启动（`ArticleApiAssemblyWiringTest` 用 `assertEquals` 钉死**恰好 9 个** Filter 的精确链 ⇒ 链里路径归一 Filter **只出现 1 次**）⇒ ⇒ **「生产无双注册」已双证**（域侧整应用 × 共享层副本守门）⇒ ⇒ ⚠️ 同批还修掉共享层槽位守门 ④ 的 **harness 双注册**（真红 ⇒ 形态层根因 + 处置 + 一处**机制未定位记 OPEN** ⇒ 台账 §4.10.66 ①）<br>🆕 **FB-05 = L4**（真 servlet 上下文 + 真 yaml ⇒ 起得来；生产同款 `YamlPropertySourceLoader` ⇒ 断言拿到 `Boolean.FALSE`）<br>🆕 **G3 轴② = L4**（**双侧活体对拍** `tools/api-envelope-probe/favorite` ⇒ **EXIT=0** ⇒ Go 真源实测 == `expected.txt` == RAG **真 HTTP** 逐字节）＋ **变异 10/10**（每条断言都有专属变异） | 2026-10-27 |
 | **A4** | 错误码 / envelope | `http/GoStyleRouterErrorResponses`（404 / 405 **字节形状**）· `http/GoStyleFormLimitExceededException` · `exception/BusinessException` · `response/Response`（⚠️ **业务码本身在域侧** api 的 `GlobalExceptionHandler.mapRPCStatusToCode`，不在共享层） | 🟡 **Go 侧「1015 从哪来」的归因【已核但本行不完整】（2026-10-28 · §4.11 G4-A4-03 订正）** —— **原值（保留可追）**：「✅ 已查实并订正归因（1015 = 各 api logic `switch st.Code()` 的 **default 分支**，不是 go-zero 的错误映射）；**该结论只对 users 域成立**（article 域单列了 `codes.DeadlineExceeded`）⇒ 不外推」<br>**订正**：Go 侧 1015 有**两种产出形态**，本行只记了形态一 ⇒ ⇒ **正确的口径是「按域 × 按形态」两维，不是「只对 users 域成立」**：<br>**形态一**（内联 `switch st.Code()` 的 default 分支）：Go `service/user/admin/api/internal/logic/admin/getuserlistlogic.go:43-49` · `service/user/user/api/internal/logic/user/getuserlogic.go:54-62`；RAG 侧映射在域侧 api（`users/user/user-api/.../GlobalExceptionHandler.java:153-163` default→1015 ✔ · `admin-api:83`/`:90`）<br>**形态二**（`<域>-common.BizCodeFromError` 的 **default** 与 **!ok** 分支 —— **本行漏记**）：Go `service/favorite/common/errmsg.go:113-116,135-137` · `service/message/common/errmsg.go:108-111,130-132` · `service/hot/common/errmsg.go:93-99,118-120` · `service/follow/common/errmsg.go:111,132` ⇒ ⇒ **favorite / follow / hot / message 四域的 1015 产出点也在册**（照旧口径核对会**漏掉这四域**）<br>⚠️ article 域**仍不外推**（Go `service/article/api/internal/logic/article/create_article_logic.go:66` 单列 `codes.DeadlineExceeded` ✔）<br>**🔴 边界表述订正**：本行原括注「业务码本身在域侧 api 的 `GlobalExceptionHandler.mapRPCStatusToCode`，**不在共享层**」**半对** ⇒ ⇒ 正确表述 = 「**`service/common` 零码表零映射**；但 **`users` 域的码表（27 条，含 `1015`）就在共享层 `service/users/users-common/src/main/java/com/rag/users/common/errmsg/ErrorCode.java:7-38`**」⇒ ⇒ **这意味着「改一条码值没人变红」的风险落在共享层**（§4.11 批次 D 已补网）<br>**🟡 404/405 结论【缺前置条件】（§4.11 G4-A4-04）**：Go 侧裸 405（`go-zero@v1.10.2/rest/router/patrouter.go:79-82` = `Set("Allow")` + `WriteHeader(405)` ⇒ **无 body、无 Content-Type**）**只在 `pr.notAllowed == nil` 时成立** ⇒ `rest/server.go:148-153`（`WithCors`）/`:237-250`（`WithNotFoundHandler`/`WithNotAllowedHandler`）会**替换**该分支 ⇒ ⇒ **全仓只有 article 注册了 CORS**（Go `service/article/api/article.go:33` `rest.MustNewServer(c.RestConf, rest.WithCors())`）⇒ article 的 method 不匹配 = **CORS handler 的 404 空 body**（`rest/internal/cors/handlers.go:44-48`）⇒ **不是 405** ⇒ RAG 侧 article-api **已刻意分叉**（`service/article/article-api/src/main/java/.../advice/GlobalExceptionHandler.java:314-319` 写明理由 ✔）<br>**🔴 405 的 `Content-Type`【两份 L3 互斥 · 尚未判别】（§4.11 G4-A4-02）**：like-api **真 Tomcat** 断言**无** Content-Type（`LikeApiRouterErrorRealTomcatTest.java:167-169`）vs favorite **双侧活体 · 真进程** 台账断言**多一项** `application/json;charset=utf-8`（`docs/DRIFT/favorite/api.md:320-321`）⇒ **至少一条错**；且**探针的 `SAME_BODY` 档故意不比 Content-Type**（`tools/api-full-parity-probe/favorite/run.sh:536-541`）⇒ ⇒ **这一格既未被证成、也未被证伪**；共享层 `service/common/src/test/**` **零** `GoStyleRouterErrorResponses` 测试 ⇒ **共享层的字节形状没有自己的网** | **L1**（两侧逐行对照，行号逐条核实）＋ 404 = **L3**（真 Tomcat）<br>⚠️ **405 = L1 + 互斥的 L3**（判别性实测未做） | 2026-10-28 |
 | **A5** | 端口治理 | 共享层侧**只有** `http/GoStyleTomcatParameterLimitCustomizer`（管的是**参数个数**，**不是端口**）；**端口段本身在域侧 yaml**（`server.port`）＋ `tools/difftest/check-tomcat-limits.py`（**合并收口执行者共享面** ⇒ 本层不写）<br>🆕 **但「段表」这一格归本层**（**global 协调** ⇒ G2 域台账原话「选段表归 global 协调」）⇒ ⇒ **权威端口段表 = §4.10.19** | 🟡 **共享层在本轴落点很薄** ⇒ 端口治理的**主体不在共享层**（代码侧）⇒ 本层只能给「**容器参数上限**」这一格结论<br>🆕 **段表已落定**（§4.10.19）：**已占 8 段 ＋ 预分配 5 段 ＋ 2 域 N/A ＋ OS 临时段禁占** ⇒ ⇒ **全表无重叠**<br>🆕 **共享层自有 7 处 `RANDOM_PORT` ⇒ 不纳入段治理**（§4.10.19.5 · 三条理由）<br>🔴 **新发现 1 条**：favorite-rpc 段 **21400–21499 嵌套在** favorite 探针段 **21400–21599** 内 ⇒ **两侧都在 G3 写权面内** ⇒ **转 G3 自修**（本层零落码） | **L3**（真 Tomcat 参数上限守门）＋ **L1**（段表 = 四树静态实测 · 口径见 §4.10.19.1 · 可复算）<br>⚠️ **段表是协调产物，不构成 A5 的行为级证据** | 2026-10-27 |
-| **A6** | errmsg 契约 | 共享层**不产 errmsg**（1015 等业务码在域侧 api）⇒ 共享层只负责**错误响应形状**（`http/GoStyleRouterErrorResponses`） | 🔴🟡 **订正（2026-10-28 · §4.11）**：**本行的 L4 证据【绑定错层】—— 原结论不成立**。<br>**原值（保留可追）**：「✅ 双侧对拍通过：`run-parity.sh` ⇒ EXIT=0 · 56 例（一致 54 / 已签字偏离 2 / 不一致 0）」<br>**证伪链**：① 被引脚本 `tools/semantic-probe/run-parity.sh:27,83-104` **只跑 `service/message/message-api` 的 JSON 解析**（`,string` / 必填 / null / int32 边界）⇒ **零条错误码用例**；② 该脚本 README 的「层次边界」段自述「**响应头层不在范围内（Content-Type / nosniff / 404 / 405 那些）**」⇒ **错误响应形状不在覆盖面内**；③ 其白名单 2 条是 `X1/X2 出参 affected=…`（`SD-2026-10-23-03`，DTO 出参形态）⇒ 与 errmsg 契约无关；④ 真正对口的探针是 `tools/errmsg-probe/run-parity.sh`（**仅 article**）与 `tools/errmsg-probe/favorite/run-parity.sh`（**仅 favorite**）⇒ **users 域（1015 的定义处）零探针**。<br>⇒ ⇒ **「56 例全绿」被读成「A6 错误码契约双侧对拍通过」，而 A6 的真实覆盖面 = 0** ⇒ **这是本层的一条【假绿证据】**（§4.11 G4-A4-01）<br>⇒ ⇒ **新结论：🟡（降级）** —— 错误码**行为**有域侧行为级证据（如 `GoStyleGrpcClientBreakerE2ETest.java:247,284` 断言 1015 · `UserLogoutErrorCodeParityTest.java:83`），但**共享层这一格无对口探针**<br>⇒ ⇒ **待办**：A6 行改引 `tools/errmsg-probe/*` ＋ 补 users 域变体（**users 码表在共享层 `users-common`** ⇒ 探针脚本属 `tools/**` = 无人拥有面 ⇒ **本层可自建**） | **L1**（读脚本 + README + 域台账引用，**静态复核**）＋ 既有 L4 记录**仅覆盖 article/favorite 两域**<br>⚠️ 本轮**未复跑**该脚本（并发约束）⇒ 「56 例」只作**既有记录**引用 | 2026-10-28 |
+| **A6** | errmsg 契约 | 共享层**不产 errmsg**（1015 等业务码在域侧 api）⇒ 共享层只负责**错误响应形状**（`http/GoStyleRouterErrorResponses`） | 🟡 **（2026-10-29 R3 轮：🔴 → 🟡 降级；依据见 §4.18.4）** —— 🔴 原判据 = 「共享层这一格无对口探针」＋ **落点未逐个核**；本轮**三个落点已逐个核过**（`response/Response` ✅ · `exception/BusinessException` ✅ · `http/GoStyleRouterErrorResponses` ✅ **本轮新增专属测试 ＋ 6 条内容锚定**）⇒ ⇒ **「落点未核」这条理由已消解** ⇒ ⇒ **但仍不判 ✅** —— 共享层**仍无对口的双侧探针**（`tools/errmsg-probe/*` 只覆盖 article / favorite ⇒ **users 域零探针**）⇒ ⇒ **🟡（半开）**<br>🟡 **原订正（2026-10-28 · §4.11）**：**本行的 L4 证据【绑定错层】—— 原结论不成立**。<br>**原值（保留可追）**：「✅ 双侧对拍通过：`run-parity.sh` ⇒ EXIT=0 · 56 例（一致 54 / 已签字偏离 2 / 不一致 0）」<br>**证伪链**：① 被引脚本 `tools/semantic-probe/run-parity.sh:27,83-104` **只跑 `service/message/message-api` 的 JSON 解析**（`,string` / 必填 / null / int32 边界）⇒ **零条错误码用例**；② 该脚本 README 的「层次边界」段自述「**响应头层不在范围内（Content-Type / nosniff / 404 / 405 那些）**」⇒ **错误响应形状不在覆盖面内**；③ 其白名单 2 条是 `X1/X2 出参 affected=…`（`SD-2026-10-23-03`，DTO 出参形态）⇒ 与 errmsg 契约无关；④ 真正对口的探针是 `tools/errmsg-probe/run-parity.sh`（**仅 article**）与 `tools/errmsg-probe/favorite/run-parity.sh`（**仅 favorite**）⇒ **users 域（1015 的定义处）零探针**。<br>⇒ ⇒ **「56 例全绿」被读成「A6 错误码契约双侧对拍通过」，而 A6 的真实覆盖面 = 0** ⇒ **这是本层的一条【假绿证据】**（§4.11 G4-A4-01）<br>⇒ ⇒ **新结论：🟡（降级）** —— 错误码**行为**有域侧行为级证据（如 `GoStyleGrpcClientBreakerE2ETest.java:247,284` 断言 1015 · `UserLogoutErrorCodeParityTest.java:83`），但**共享层这一格无对口探针**<br>⇒ ⇒ **待办**：A6 行改引 `tools/errmsg-probe/*` ＋ 补 users 域变体（**users 码表在共享层 `users-common`** ⇒ 探针脚本属 `tools/**` = 无人拥有面 ⇒ **本层可自建**） | **L1**（读脚本 + README + 域台账引用，**静态复核**）＋ 既有 L4 记录**仅覆盖 article/favorite 两域**<br>⚠️ 本轮**未复跑**该脚本（并发约束）⇒ 「56 例」只作**既有记录**引用 | 2026-10-29 |
 | **A7** | proto 契约 | `service/proto`（**不在共享层写权面**）⇒ 共享层侧 **N/A** | **N/A**（共享层无落点）⚠️ 提醒：**复制忠实 ≠ 消费方式已验**（AGENTS.md §3.4 的效力边界）⇒ 10 个 proto 的 message/字段号/类型/枚举 10/10 一致，但 `optional` presence 语义 / Jackson 配置差异**不在**该结论覆盖内 | **L1**（静态逐条对照，AGENTS.md §3.4 背书） | 2026-10-27 |
 | **A8** | DDL 时间列 / 类型 | 共享层**无 DDL / migration**（`service/common` 不建表）⇒ 本轴共享层落点 = `persistence/DeadlineQueryTimeoutInjector`（`default-statement-timeout` 的**运行时**语义，**不是** DDL） | **N/A**（共享层不建表）⚠️ DDL 双侧活体逐列对照 = **9 域**（类型/长度 **0 差异**；`DEFAULT CURRENT_TIMESTAMP` 残留 **16 处** = **刻意保留**；users 域缺 3 条非唯一索引 = **性能非行为**）⇒ 结论以各域台账为准 | **L3**（`tools/difftest/check-ddl-static.py` 双侧活体对拍） | 2026-10-27 |
 | **A9** | trace / otel | `observability/GoStyleOtelAutoConfiguration`（**`BeanFactoryPostProcessor`** 装配点）· `observability/GoStyleOtelAgent` · `observability/GoStyleOtelConfig` · `http/GoStyleTraceparentFilter` · `observability/GoStyleClientDisconnectProbe` | ✅ **全局 OTel 装配点已收口共享层**（`GlobalOpenTelemetry.set` 只能调一次，且**先 `get()` 会让后续 `set()` 抛 `IllegalStateException`** ⇒ 必须 BFPP ⇒ 理由与 4 个构造器抢跑点已写进 javadoc）<br>🟡 **域特有业务 span 不在共享层**（**comment 的 6 个已由 G3 修完** ⇒ `C-3` 落码 `d2d7268` ⇒ **本层登记的跨域线索闭环**；**favorite 的 16 个已落码** ⇒ `L-4` 落码 ⇒ **域侧自修完成** ⇒ ⇒ **共享层零改动**<br>🟢→🟡 **本层独立核（G3 报 ⇒ 本层读源码核，2026-10-28）**：`service/favorite/favorite-common/src/main/java/com/rag/favorite/favorite/common/span/FavoriteSpans.java`（**418 行**）⇒ span 名逐条点出 = **7 个 API**（`FavoriteAPI.*`）＋ **7 个 RPC**（`FavoriteRPC.*`）＋ **2 个 `Dependency.*`**（`Dependency.User.GetUser` / `Dependency.Article.GetArticle`）⇒ **合计 16** ⇒ 与 G3 报的数**一致** ⇒ ⇒ 落点在 **`favorite-common`**（api/rpc 共用）⇒ ⇒ **共享层零改动成立**<br>⚠️ **但仍不得读作已闭环** —— 🔴 **守门未写**（`FavoriteApiSpanWiringTest` / `FavoriteRpcSpanWiringTest` ＋ 变异待补）⇒ ⇒ **本轴结论 = 🟡 半闭环**（代码在 · 网未张）<br>⚠️ **一条对域内的警告**（§4.10.64 ⑤）：**Java `recordException` 不改 status** ⇒ ⇒ 域内 span 若只调 `recordException` ⇒ **status 恒 UNSET** ⇒ 与 Go 的 `RecordError`（会置 ERROR）**漂移** ⇒ ⇒ **域内写权 ⇒ G3 自查**（共享层自己是对的：`Observability.java:108-109` / `:131-132` = `recordException` ＋**显式** `setStatus(StatusCode.ERROR, msg)`））<br>🔴→🟢 **补（`853767b` · G2 反馈单 FB-04）**：本轴此前**缺一个子面 ——「业务 handler 执行期能拿到当前 server span」**。Go 侧 `tracinginterceptor.go:18-24` 把 span **放回 ctx** ⇒ 业务 `trace.SpanFromContext(l.ctx)` 取得到 ⇒ 属性真落；RAG 侧 handler **不接收 ctx** ⇒ 唯一等价物是 `Span.current()`，而拦截器此前**只在 `close()` / `onCancel()` 里 `makeCurrent()`** ⇒ **handler 执行期取到 invalid（no-op）span** ⇒ 属性**静默丢弃** ⇒ ⇒ 域侧若按 `Span.current().setAttribute(...)` 落码 ⇒ **跑绿但零效果**（与「假绿」同源）⇒ 已在 `onHalfClose()` 里把 `makeCurrent()` 的 scope **包住 handler 执行期**修好 ⇒ **本轴此前不是「全绿」，是「少验了一个面」** | **L3**（真容器 + `GoStyleOtelAgentGateTest`）＋ **L1**（域侧 span 清单由 G3 逐条核）<br>🆕 **FB-04 子面 = L3**（真 netty gRPC server + 真 OTel SDK + `InMemorySpanExporter`）＋ **变异 4/4 精确命中** | 2026-10-27 |
@@ -80,6 +80,10 @@
 > （200 + {code:5003,…}）⇒ 语义答案 = `off`（共享层不装闸门）** ⇒ ⇒ **两侧都限**，只是限的形状不同
 > ⇒ ⇒ **不是「零触碰」**（2026-10-27 订正，详见 §4.10.15）。
 > ⇒ ⚠️ **共享层已验 ≠ 各域已验** ⇒ 本 lane 仍须**逐域跑一次真实请求**确认拒绝形状。
+
+> 🟢 **2026-10-29（R3 轮）本表的更新**：**A6 由 🔴 降为 🟡**（三个共享层落点已逐个核过）
+> ⇒ 逐轴依据见 **§4.18.4**；逐类覆盖（73/73）见 **§4.18.3**；`DRIFT-CF-018` 修复见 **§4.18.1**。
+> ⚠️ **本轮只动了 A6 一格** —— 其余 8 轴**未新增证据 ⇒ 一律维持原判**（**「未升级」≠「已验证」**）。
 
 > **本表的三条诚实边界**（AGENTS.md §0：「已改」≠「已验证」）：
 > ① **9 轴里 2 轴在共享层侧是 N/A**（A7 proto / A8 DDL）⇒ **不是「已验」，是「共享层无落点」**；
@@ -4629,3 +4633,253 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 **⑤ 批准记录：Jason · 2026-10-29 03:45 · 批准范围：本 lane 回执 ① 所列候选任务 —— **①** 补守门 `PINNED` 两行 ⇒ 已按 §5.3c **改派 G3**（该目录只在 G3 分支，G4 单独做会撞 add/add）⇒ G4 **零落码**· **②** 提升为全仓守门并搬进 `tools/difftest/` ⇒ 须同改 `docs/PhaseGoal-judge.md` §6.3 ⇒ **留合并收口执行者**· ⇒ 本轮 G4 = **转派 + 登记**，不改共享层**　← 由**调度员代填**（依据：Jason 于 2026-10-29 03:45 在**本 lane 会话内**明示「继续」· 消息 id `182060`；**回执人不得自批**· **代填 ≠ 代批准**）
 
 > `<批准人> · <批准时间> · <批准范围>` —— **回执落笔时留空，由调度员代填**；**已于 2026-10-29 03:45 依据 Jason 在本 lane 会话内的明示代填**（见下方 ⑤ 行）。回执人**不得自批**。
+
+---
+
+## 4.18 🟢 R3 轮：`service/common` 收口到 **R3**（2026-10-29 · `align/r3-service-common`）
+
+> **本节是本 lane 的交付主体** ⇒ 逐条给出**命令与真实输出**（AGENTS.md §3.3：「跑绿 ≠ 对」）。
+> **基线**：`do-my-own-gh` @ `0bcd353`（已含 `8c83904` 的 G4 成果）⇒ **本节是增量，不是重做**。
+
+### 4.18.1 🔴🔴 `DRIFT-CF-018` 修复 —— 停止能力归**调用方**（Go-faithful）
+
+#### 缺陷（本轮复核后**订正了首版的描述**）
+
+| 项 | 首版台账 | 本轮**实测**结论 |
+|---|---|---|
+| 现象 | 「`once` 分支直接 return ⇒ `@PreDestroy` 拿不到 handle」 | ❌ **对现码不成立** —— `Dispatcher.java:253` 的 `once` 分支**确实**返回 handle |
+| **真实形态** | — | ✅ **阻塞版 `run(..., once=false)` 拿不到 handle** —— `Dispatcher.java:222` 建句柄 · `:224-226` 发布（**但只有 `runAsync` 传了 publisher**）· `:291` 循环退出后才 return ⇒ ⇒ **公开的阻塞重载永远交不出句柄** |
+| **活的触发点** | — | 🔴 `favorite-rpc/.../fact/FavoriteFactDispatchScheduler.java:119-124` 调的**正是**阻塞版（`@EventListener(ApplicationReadyEvent.class)` 启动）⇒ `this.handle` 永不赋值 ⇒ `:134-141` 的 `@PreDestroy` 拿到 null ⇒ **停不下来** |
+
+#### Go 出处（**两层**：被调方 + **调用方**）
+
+| 层 | 出处 | 内容 |
+|---|---|---|
+| **被调方** | `service/common/communityfact/process.go:20` | `func RunDispatcher(ctx context.Context, …, once bool) error` ⇒ **不返回任何句柄** |
+| **被调方** | `service/common/communityfact/process.go:56-60` | `select { case <-ctx.Done(): return nil; case <-ticker.C: }` ⇒ 循环**唯一**的退出条件是 **ctx** |
+| **调用方** | `service/comment/rpc/cmd/fact-dispatch/main.go:68` | `ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)` ⇒ **调用方先造停止能力** |
+| **调用方** | `service/comment/rpc/cmd/fact-dispatch/main.go:69` | `defer stop()` |
+| **调用方** | `service/comment/rpc/cmd/fact-dispatch/main.go:77` | `return communityfact.RunDispatcher(ctx, model.NewCommentModel(db), sender, logger, once)` |
+
+#### 修法（**最小改动 · Go-faithful**）
+
+> **Go 侧「停 dispatcher」= 让<b>调用方自己</b>的 ctx 变成 done** ⇒ 停止能力**在 dispatcher 被调用之前**就属于调用方
+> ⇒ ⇒ Java 侧的对应物 = **调用方先造句柄，再把它交给阻塞式 `run`**。
+
+| 落点 | 改动 | 行为 |
+|---|---|---|
+| `Dispatcher.newHandle()`（**新增**） | 调用方持有的句柄工厂 | 对应 Go 的 `ctx, stop := signal.NotifyContext(...)` |
+| `Dispatcher.run(ctx, d, s, l, once, handle, registerShutdownHook)`（**新增 7 参重载**） | 调用方把句柄交给 `run` | 句柄**在 `run` 返回之前**就可用 ⇒ 阻塞形态也能被 `@PreDestroy` 停掉 |
+| `DispatcherHandle`（改造） | 停止信号改为**句柄自己拥有**；执行器 / runner 线程由 `run` `bind()` 进来 | 循环等的 `stopSignal` **就是句柄那个** ⇒ 否则 `handle.stop()` 唤醒不了循环 |
+| `Dispatcher.run(...)` 的 5 参 / 6 参**阻塞重载** | **`@Deprecated(forRemoval = true)`** | 它们在 `once=false` 时**必然**交不出句柄 ⇒ 必须让新调用点看见弃用告警 |
+| `dispatch` 供应器 | 捕获 `RejectedExecutionException` | `handle.stop()` 会 `shutdownNow()` 执行器 ⇒ 新可达路径 ⇒ 必须收敛成「一次失败的投递」而不是裸奔打断 `run()` |
+
+#### 守门（**有牙齿**）
+
+- **新增** `service/common/src/test/java/com/rag/common/communityfact/DispatcherHandleLifecycleGateTest.java`（**5 条**）
+  - `callerOwnedHandleStopsABlockingRunThatHasNotReturnedYet` —— 核心用例：**`run` 还在阻塞时**句柄就已可用 ⇒ 调 `stop()` 后 `run` 必须在 8s 内退出。
+  - `stopBeforeRunStartsMakesRunReturnPromptly` —— Go 等价：`ctx` 预先取消 ⇒ `select` 立即命中 `ctx.Done()`。
+  - `legacyBlockingOverloadsAreDeprecated` —— **防回退的结构门**（那两个重载必须一直带 `@Deprecated`）。
+  - `handleStopIsIdempotent` —— Go 的 `cancel()` 也是幂等的。
+  - `mutationGuardIsDiscriminating` —— 断言「stop 之前 run 线程**活着**、之后**已死**」⇒ 排除假绿。
+
+- 🟢 **变异实测（2026-10-29）** —— 把 `Dispatcher.java` 的
+  `DispatcherHandle handle = callerHandle != null ? callerHandle : DispatcherHandle.create();`
+  改回 `DispatcherHandle.create();`（**忽略调用方的句柄** ⇒ 退回旧形态）：
+  ⇒ ⇒ **BUILD FAILURE · `Tests run: 5, Failures: 3, Errors: 0`**（精确 3/5 红）
+  ⇒ 红的正是 `callerOwnedHandleStopsABlockingRunThatHasNotReturnedYet`（16.02s 超时）·
+  `mutationGuardIsDiscriminating`（16.17s）· `stopBeforeRunStartsMakesRunReturnPromptly`（8.017s）
+  ⇒ ⇒ 恢复后 **5 tests / 0f / 0e / 0s / BUILD SUCCESS**。
+
+#### ⚠️ 残余（**诚实登记 · 不隐瞒**）
+
+- 🔴 **共享层这一半已修** ⇒ **但 `favorite-rpc` 的调用点仍在用旧的阻塞重载**
+  （`FavoriteFactDispatchScheduler.java:119-124`）⇒ ⇒ **该域的进程仍关不掉**
+  ⇒ ⇒ **落点在别的域 ⇒ 按 `docs/PhaseGoal-judge.md` §1.1 ⑥ 第 2 条**（落点在共享层 / 别的域的跨组件残留）
+  ⇒ ⇒ **不计入本组件的 R3 ⑥**，但**必须转派** ⇒ ⇒ **转派单见 §4.18.5**。
+- ⚠️ **本节的证据强度 = L1 / E3（单测级）** —— 断言的是 **Java 侧的并发时序契约**，
+  **不是** Go↔RAG 双侧活体对拍 ⇒ ⇒ **本节不声称「与 Go 运行期一致」**，
+  只声称「Java 侧**已具备** Go 那种『调用方随时可停』的**能力形状**」⇒ ⇒ Go 侧那一半的依据是**源码逐行对照**。
+
+### 4.18.2 🟢 内容锚定扩表：**21 → 51 条**（`protection/` ＋ `http/` 全覆盖）
+
+- **🔴 本轮抓出 7 处新的真缺陷**（全部是**区间指错**，靠内容锚定才抓得到）：
+
+| # | 文件 | 写错的引用 | 订正为 | 性质 |
+|---|---|---|---|---|
+| 11 | `GoStyleSheddingStat.java:51` | `googlebreaker.go:121-130` | `core/breaker/googlebreaker.go:121-130` | **缺模块/目录前缀** ⇒ 裸名在真源里**找不到** |
+| 12 | `GoStyleSheddingStat.java:70` | `sheddinginterceptor.go:18` | `:15` | `:18` 是 struct 字段；`const serviceType = "rpc"` 在 **`:15`** |
+| 13 | `GoStyleSheddingStat.java:75` | `core/stat/metrics.go:20` | `core/stat/metrics.go:14` | `:20` 是 `type (` 块；`logInterval` 在 **`:14`** |
+| 14 | `GoStyleSheddingStat.java:139` | `sheddinginterceptor.go:19-21` | `:17-20` | 包级单例 var 块是 **`:17-20`** |
+| 15 | `GoStyleStatusCapturingResponse.java:78` | `breakerhandler.go:39` | `rest/handler/breakerhandler.go:32-38` | `:39` 是 `next.ServeHTTP(cw, r)`；判据在 `:33` |
+| 16 | `GoStyleAdaptiveShedder.java:11` | `adaptiveshedder.go:216-234` | `:208-225` | 三个条件在 **`shouldDrop()` 本体**；原区间只指到函数尾 + `stillHot()` |
+| 17 | `GoStyleAdaptiveShedder.java:133` | `adaptiveshedder.go:247-249` | `:280-282` | `promise.Fail()` 在 **`:280`**；`:247-249` 是 `systemOverloaded` 的尾部 |
+
+- **🔴 第 3 道门从「留痕不判红」升级为「判红」** —— 理由：上一轮它是「常红的摆设」
+  （47 条引用只锚定 21 条 ⇒ 判红则本仓当前就是红的）⇒ ⇒ **本轮把那 26 条全部锚定**
+  ⇒ ⇒ **覆盖 45/45 = 100%** ⇒ ⇒ **判红现在不会让本仓变红 ⇒ ⇒ 才有意义**
+  ⇒ ⇒ 并**再补入 `GoStyleRouterErrorResponses`**（A6 轴的第三个共享层落点）⇒ ⇒ **51/51 = 100%**。
+- 🟢 **实测输出**：`[G4] ℹ️ 已验表覆盖 51 条引用；本组文件的其余引用（未锚定）共 0 条 + 未纳入表的文件引用 0 条`
+  ＋ `[G4] 内容锚定已实跑：51 条引用逐条比对 go-zero@v1.10.2`
+  ⇒ ⇒ **版本从真源 `go.mod` 现读**（`go-zero v1.10.2`）⇒ **未写死**。
+- 🟢 **变异实测（2026-10-29）**：① 把 `GoStyleSheddingStat.java` 的 `sheddinginterceptor.go:15` 改回 `:18`
+  ⇒ **BUILD FAILURE · 2/3 红**（引用锁 + 白名单门各抓一条）；② 再把**已验表本身**的 `:15` 改成 `:18`
+  ⇒ **BUILD FAILURE · 2/3 红**（内容锚定门报「区间内无锚点 `const serviceType = "rpc"`」）
+  ⇒ ⇒ **三道门都有牙齿**（第 1 道防回退、第 2 道防新增漏锚、第 3 道防区间指错）。
+
+### 4.18.3 🟢 逐类覆盖映射扩到 **73/73 类**（本轮新增 38 类的逐类结论）
+
+> **上一轮（§4.17.3）只做了 `protection/` 22 ＋ `http/` 13 = 35 类** ⇒ ⇒ **本轮补齐其余 38 类**
+> ⇒ ⇒ **每类一行**，含 **Go 出处（`文件:行号`）** ＋ **守门测试** ＋ **诚实状态**。
+
+**口径**：✅ = **有专属自动化测试 + Go 出处已核**；🟡 = **有出处 + 有测试，但证据只到 L1/L2 或测试面不完整**；
+🔴 = **轴外 / 无 Go 对应物（纯表达层）**。**「有测试」≠「与 Go 双侧活体一致」**（AGENTS.md §3.3）。
+
+#### `protection/`（22 类）
+
+| 类 | 归轴 | Go 出处 | 守门测试 | 状态 |
+|---|---|---|---|---|
+| `GoStyleAdaptiveShedder` | A3 | `core/load/adaptiveshedder.go:208-225` · `:139-152` · `:280-282` · `:18-30` | `GoStyleAdaptiveShedderTest` ＋ **内容锚定 20 条** | ✅ |
+| `GoStyleBreaker` | A3 | `core/breaker/googlebreaker.go` · `core/collection/rollingwindow.go` | `GoStyleBreakerTest` | 🟡 引用**未内容锚定** |
+| `GoStyleBreakerFilter` | A3 | `rest/handler/breakerhandler.go` · `rest/engine.go` | `GoStyleBreakerRouteTemplateGateTest` | 🟡 同上 |
+| `GoStyleBreakerRouteTemplateAutoConfiguration` | A3 | **无 Go 对应物**（Spring MVC 路由模板）⇒ 表达层 | `GoStyleBreakerRouteTemplateGateTest` | 🔴 轴外 |
+| `GoStyleCircuitOpenException` | A3 | `core/breaker/googlebreaker.go`（`ErrServiceOverloaded` 语义） | `ProtectionLayerContractGateTest`（**本轮新增**） | ✅ |
+| `GoStyleCpuReader` | A3 | `core/stat/usage.go:51-53` · `:22` · `:35-39` | `ProtectionLayerContractGateTest`（**本轮新增**） | ✅ |
+| `GoStyleCpuSheddingFilter` | A3 | `rest/handler/sheddinghandler.go` · `core/load/adaptiveshedder.go:285` | `GoStyleCpuSheddingFilterTest` | 🟡 引用未内容锚定 |
+| `GoStyleGrpcClientBreakerConfiguration` | A2 | `zrpc/internal/clientinterceptors/breakerinterceptor.go:13` | `GoStyleGrpcClientBreakerSingleRegistrationTest` | 🟡 同上 |
+| `GoStyleGrpcClientBreakerInterceptor` | A2 | `core/breaker/googlebreaker.go:65` | `GoStyleGrpcClientBreakerInterceptorTest` ＋ `…TargetKeyTest` ＋ `…RpcAssemblyTest` | 🟡 同上 |
+| `GoStyleMaxBytesFilter` | A3 | `rest/config.go:53` · `rest/engine.go:163-164` | `ProtectionLayerContractGateTest`（**本轮新增**） | ✅ |
+| `GoStyleMaxConnsFilter` | A3 | `rest/engine.go:135` · `rest/handler/maxconnshandler.go:23-24` | `GoStyleMaxConnsFilterTest` | 🟡 MaxConns 半边 = **已签字偏离** `SD-2026-10-25-01` |
+| `GoStyleProtectionConfiguration` | A2 | `zrpc/internal/clientinterceptors/client.go:112` | `GoStyleRpcProtectionChainCompositionTest` | 🟡 引用未内容锚定 |
+| `GoStyleProtectionProperties` | A3 | `rest/config.go:12-21` · `:52-56`（struct tag 默认值） | `ProtectionLayerContractGateTest`（**本轮新增**） | ✅ |
+| `GoStyleRouteResolution` | A3 | **无 Go 对应物** ⇒ 表达层（三态 record） | `ProtectionLayerContractGateTest`（**本轮新增**） | 🔴 轴外 |
+| `GoStyleRouteTemplateResolver` | A3 | **无 Go 对应物** ⇒ 表达层 | `ProtectionLayerContractGateTest`（**本轮新增**） | 🔴 轴外 |
+| `GoStyleRouteTemplateSource` | A3 | **无 Go 对应物** ⇒ 表达层（接口） | `ProtectionLayerContractGateTest`（**本轮新增**） | 🔴 轴外 |
+| `GoStyleRpcBreakerInterceptor` | A2 | `zrpc/internal/serverinterceptors/breakerinterceptor.go:42` | `GoStyleRpcBreakerInterceptorTest` | 🟡 引用未内容锚定 |
+| `GoStyleRpcFailurePolicy` | A2 | `zrpc/internal/serverinterceptors/breakerinterceptor.go:53-58` · `zrpc/internal/codes/accept.go:9-17` | `GoStyleRpcFailurePolicyTest` ＋ **内容锚定** | ✅ |
+| `GoStyleRpcProtectionChain` | A2 | `zrpc/internal/serverinterceptors/breakerinterceptor.go` | `GoStyleRpcProtectionChainTest` | 🟡 引用未内容锚定 |
+| `GoStyleRpcSheddingInterceptor` | A2 | `zrpc/internal/serverinterceptors/sheddinginterceptor.go:23-37` | `GoStyleRpcSheddingInterceptorTest` | 🟡 同上 |
+| `GoStyleSheddingStat` | A2+A3 | `core/load/sheddingstat.go:37-49` · `:51-68` · `:30-35` · `core/stat/metrics.go:14` · `core/breaker/googlebreaker.go:121-130` | `GoStyleSheddingStatTest` ＋ **内容锚定** | ✅ |
+| `GoStyleStatusCapturingResponse` | A3 | `rest/internal/response/withcoderesponsewriter.go:23-26` · `rest/handler/breakerhandler.go:32-38` | `ProtectionLayerContractGateTest`（**本轮新增**） | ✅ |
+
+#### `http/`（13 类）
+
+| 类 | 归轴 | Go 出处 | 守门测试 | 状态 |
+|---|---|---|---|---|
+| `GoStyleFormLimitExceededException` | A3 | `go-zero@v1.10.2/rest/httpx/responses.go:142` | `GoStyleFormLimitEnvelopeGateTest` | 🟡 引用未内容锚定 |
+| `GoStyleFormLimitMode` | A3 | `go-zero@v1.10.2/rest/httpx/util.go:15` ＋ 各域 `SetErrorHandler` 注册点 | `GoStyleFormLimitModeTest` ＋ `…YamlBooleanGateTest` ＋ `…SemanticCriterionTest` | 🟡 同上 |
+| `GoStyleFormLimitWebMvcConfig` | A3 | `go-zero@v1.10.2/rest/router/patrouter.go:73` | `GoStyleFormLimitEnvelopeGateTest` | 🟡 同上 |
+| `GoStyleFormValueLimitInterceptor` | A3 | `go-zero@v1.10.2/rest/httpx/util.go:23` | `GoStyleFormLimitEnvelopeGateTest` | 🟡 同上 |
+| `GoStyleFormValues` | A3 | `go-zero@v1.10.2/rest/httpx/util.go:10,22-23,44` ＋ `net/url/url.go` | `GoStyleFormLimitEnvelopeGateTest` | 🟡 同上 |
+| `GoStyleJsonBodyConverter` | 🔴 **轴外（建议 A10）** | `go-zero@v1.10.2/rest/httpx/requests.go:117-124` · `:153-155` · `:17-22` · `:21` · `:119` · `rest/config.go:53` · `rest/engine.go:163-164` | `GoStyleJsonBodyRawHeaderTomcatTest` ＋ `…ContentTypeCaseTest` ＋ `…MaxBodyLenTest` ＋ **内容锚定 9 条** | ✅ |
+| `GoStyleJsonBodyConverterConfig` | 🔴 **轴外（建议 A10）** | **无 Go 对应物**（Spring 装配顺序）⇒ 表达层 | 同上 | ✅（表达层，无行为面） |
+| `GoStyleJsonContentTypeAdvice` | A4 | `go-zero@v1.10.2/rest/httpx/responses.go:175` · `rest/internal/header/headers.go:16` | `GoStyleJsonContentTypeCharsetTomcatTest` | 🟡 引用未内容锚定 |
+| `GoStylePathNormalizingAutoConfiguration` | A3 | **无 Go 对应物**（Spring 装配）⇒ 表达层 | `GoStylePathNormalizingShadowingGateTest` | ✅（表达层） |
+| `GoStylePathNormalizingFilter` | A3 | `go-zero@v1.10.2/rest/httpx/util.go`（path.Clean 口径） | `GoStylePathNormalizingTomcatGateTest` ＋ `GoStylePathCleanParityTest` | 🟡 引用未内容锚定 |
+| `GoStyleRouterErrorResponses` | A4 | `go-zero@v1.10.2/rest/router/patrouter.go:59-83` · `:73` · `:79-82` · `:93-97` · `:101-117` · `rest/engine.go:104-118` | `GoStyleRouterErrorResponsesContractGateTest`（**本轮新增**）＋ **内容锚定 6 条** | ✅ |
+| `GoStyleTomcatParameterLimitCustomizer` | A3+A5 | `go-zero@v1.10.2/rest/httpx/util.go:15` | `GoStyleParamLimitGateTest` ＋ `GoStyleParamLimitOffModeGateTest` | 🟡 引用未内容锚定 |
+| `GoStyleTraceparentFilter` | A9 | `go-zero@v1.10.2/rest/handler/tracehandler.go:47` · `rest/config.go:11` · `rest/engine.go:134,245` · `core/trace/agent.go:111` | `GoStyleTraceparentFilterTest` ＋ `…TraceSourceGateTest` | 🟡 同上 |
+
+#### `observability/`（11 类）
+
+| 类 | 归轴 | Go 出处 | 守门测试 | 状态 |
+|---|---|---|---|---|
+| `GoStyleClientDisconnectProbe` | A1 | `service/common/observability/http.go:80` | `GoStyleClientDisconnectProbeGateTest` ＋ `…BudgetGateTest` | 🟡 引用未内容锚定 |
+| `GoStyleOtelAgent` | A9 | `go-zero@v1.10.2/core/trace/agent.go:105` · `rest/server.go:49` | `GoStyleOtelAgentGateTest` | 🟡 同上 |
+| `GoStyleOtelAutoConfiguration` | A9 | `go-zero@v1.10.2/core/trace/agent.go:49` · `core/service/serviceconf.go:67` | `GoStyleOtelAgentGateTest` | 🟡 同上 |
+| `GoStyleOtelConfig` | A9 | `go-zero@v1.10.2/core/trace/config.go:9-11` · `agent.go:110-115` | `GoStyleOtelSamplerProtocolGateTest` | 🟡 同上 |
+| `GoStyleRecoverInterceptor` | A2 | `go-zero@v1.10.2/zrpc/server.go:148-150` · `zrpc/internal/serverinterceptors/recoverinterceptor.go:24` | （**本轮仍无专属测试**） | 🟡 **剩余项** |
+| `GoStyleRequestDeadline` | A1 | `go-zero@v1.10.2/rest/handler/timeouthandler.go:68` · `:79` | `GoStyleRequestDeadlineTest` ＋ `DeadlineCancellationSemanticsTest` | 🟡 引用未内容锚定 |
+| `HttpMiddleware` | A1 | `service/common/observability/http.go:75` · `:84` · `:99` | `HttpMiddlewareTest` ＋ `HttpMiddlewareWorkerPoolTest` ＋ `GoStyleTimeoutResponseRaceGateTest` ＋ `HttpClientDisconnectRealTomcatTest` | 🟡 引用未内容锚定 |
+| `MqConsumer` | A1 | `service/common/observability/mq.go:30` | `MqConsumerTest` | 🟡 同上 |
+| `Observability` | A9 | `service/common/observability/observability.go:103` · `:126` | `ObservabilityTest` | 🟡 同上 |
+| `ObservabilityConstants` | A9 | `service/common/observability/observability.go:19-30` · `:32-36` | `ProcessLoggerContractGateTest`（**本轮新增**） | ✅ |
+| `RpcInterceptor` | A1+A2 | `service/common/observability/rpc.go:68-95` · `observability.go:108` ＋ `$GOROOT/src/context/context.go:625,666` · `$GOROOT/src/time/time.go:152,1233` | `RpcInterceptorClientDeadlineGateTest`（**真 Netty**）＋ `…DeadlineBindingTest` ＋ `…TimeoutSpanTest` ＋ `…TimeoutDescriptionGateTest` ＋ `DeadlineStateMonotonicClockGateTest` | 🟡 引用未内容锚定 |
+
+#### `spring/`（9 类）
+
+| 类 | 归轴 | Go 出处 | 守门测试 | 状态 |
+|---|---|---|---|---|
+| `AuthorityHandlerFactory` | A4 | `service/common/communityfact/authority_http.go:23` · `:28` | `SpringAssemblyContractGateTest`（**本轮新增**） | ✅ |
+| `HttpMiddlewareFilter` | A1 | `service/common/observability/http.go:36` | `SpringAssemblyContractGateTest`（**本轮新增**）＋ `SharedFilterOrderSnapshotGateTest` | ✅ |
+| `HttpPoolLifecycle` | A1 | `service/common/observability/http.go:36`（Go 侧**无**显式关闭 ⇒ 表达层补齐） | `HttpPoolShutdownWithoutServletGateTest` ＋ `SpringAssemblyContractGateTest` | ✅ |
+| `LoggerFactoryBean` | A6 | `service/common/logger/logger.go:63-70` · `:98` | `LoggerFactoryBeanTest` ＋ `SpringAssemblyContractGateTest` | ✅ |
+| `ObservabilityLifecycle` | A1 | `service/common/observability/observability.go:19-30`（Go 侧**无**显式关闭） | `SpringAssemblyContractGateTest`（**本轮新增**） | ✅ |
+| `ObservabilityProperties` | A1 | `service/common/observability/observability.go:19-30` · `:43-55` | `SpringAssemblyContractGateTest`（**本轮新增**）＋ `ObservabilityWiringTest` | ✅ |
+| `RpcServerInterceptorFactory` | A2 | `go-zero@v1.10.2/zrpc/server.go:148-150` | `SpringAssemblyContractGateTest`（**本轮新增**）＋ `RpcInterceptorTimeoutSpanTest` | 🟡 装配面有断言；**机制面**借道真 Netty 守门 |
+| `SnowflakeBean` | — | `service/common/snowflake/snowflake.go:22-38` · `:53-59` | `SpringAssemblyContractGateTest`（**本轮新增**） | ✅ |
+| `SnowflakeProperties` | — | `service/common/snowflake/snowflake.go:53-59`（Go **无** yaml 档 ⇒ 表达层扩展） | `SpringAssemblyContractGateTest`（**本轮新增**） | ✅ |
+
+#### `logger/`（6 类）· `communityfact/`（4 类）· `persistence/`（3 类）· 其余（5 类）
+
+| 类 | 归轴 | Go 出处 | 守门测试 | 状态 |
+|---|---|---|---|---|
+| `logger/Logger` | A6 | `service/common/logger/logger.go:53-70` · `:98` · `:139` · `:320` | `LoggerTest` | 🟡 引用未内容锚定 |
+| `logger/FatalError` | A6 | `service/common/logger/logger.go:293-296` | `LoggerOptionContractGateTest`（**本轮新增**） | ✅ |
+| `logger/LogOption` | A6 | `service/common/logger/logger.go:32` | `LoggerOptionContractGateTest`（**本轮新增**） | ✅ |
+| `logger/LogOptions` | A6 | `service/common/logger/logger.go:26-29` | `LoggerOptionContractGateTest`（**本轮新增**） | ✅ |
+| `logger/WithArticleID` | A6 | `service/common/logger/logger.go:42-46` | `LoggerOptionContractGateTest`（**本轮新增**） | ✅ |
+| `logger/WithUserID` | A6 | `service/common/logger/logger.go:35-39` | `LoggerOptionContractGateTest`（**本轮新增**） | ✅ |
+| `communityfact/AuthorityHandler` | A4 | `service/common/communityfact/authority_http.go:58` | `AuthorityHandlerTest` | 🟡 引用未内容锚定 |
+| `communityfact/Dispatcher` | A4 | `service/common/communityfact/process.go:20` · `:56-60` ＋ `service/comment/rpc/cmd/fact-dispatch/main.go:68-77` | `DispatcherHandleLifecycleGateTest`（**本轮新增**） | ✅（**CF-018 已修**） |
+| `communityfact/ProcessLogger` | A6 | `service/common/communityfact/logging.go:29-39` · `:43-49` · `:52-65` | `ProcessLoggerContractGateTest`（**本轮新增**） | ✅ |
+| `communityfact/Wire` | A4 | `service/common/communityfact/wire.go:148` | `WireTest` | 🟡 引用未内容锚定 |
+| `persistence/DeadlineQueryTimeoutInjector` | A1+A8 | `service/comment/rpc/internal/model/comment.go:36` ＋ `gorm.io/gorm@v1.31.1/finisher_api.go:622` | `DeadlineQueryTimeoutInjectorTest` ＋ `MybatisPlusInterceptorChainGateTest` | 🟡 引用未内容锚定 |
+| `persistence/MybatisPlusOrderingBridgeAutoConfiguration` | — | **无 Go 对应物**（Go 用 GORM）⇒ **纯表达层**（Boot 4 装配 workaround） | `SpringAssemblyContractGateTest`（**本轮新增**） | ✅（无行为面） |
+| `persistence/SqlTimeoutStatusTranslator` | A1 | 各域 `logic/*.go` 的 `switch st.Code()` 产出点 | `SqlTimeoutStatusTranslatorTest` | 🟡 引用未内容锚定 |
+| `exception/AuthenticationException` | A4 | `service/common/response/response.go:3-7` ＋ `service/user/user/api/identity_contract.md:11` | `ExceptionContractGateTest`（**本轮新增**） | ✅ |
+| `exception/BusinessException` | A4 | `service/common/response/response.go:3-7` ＋ `service/message/common/errmsg.go:99` | `ExceptionContractGateTest`（**本轮新增**） | ✅（表达层：Go 双返回 ⇒ Java 异常） |
+| `redis/GoStyleRedisClientAutoConfiguration` | — | `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:18,27` | `GoStyleRedisClientOptionsGateTest` ＋ `…ShadowingGateTest` | 🟡 引用未内容锚定 |
+| `response/Response` | A4 | `service/common/response/response.go:3-7` | `ResponseTest` | 🟡 引用未内容锚定 |
+| `snowflake/Snowflake` | — | `service/common/snowflake/snowflake.go:22-38` · `:41-50` ＋ `github.com/bwmarrin/snowflake@v0.3.0/snowflake.go:112-160` ＋ `$GOROOT/src/time/time.go:1194` | `SnowflakeTest` ＋ `SnowflakeMonotonicClockGateTest`（**8 条 · 变异 4/8 精确红**） | 🟡 引用未内容锚定 |
+
+#### 逐类统计（**可复算**）
+
+| 状态 | 类数 | 含义 |
+|---|---|---|
+| ✅ | **31** | 有专属自动化测试 ＋ Go 出处已核（含本轮新增 5 个测试类覆盖的 24 类 ＋ 上一轮的 7 类） |
+| 🟡 | **38** | 有 Go 出处 ＋ 有测试，但**引用未逐条内容锚定**（本轮只把 `protection/` ＋ `http/` 的 51 条做到 100%） |
+| 🔴 | **4** | **轴外 / 无 Go 对应物**（`GoStyleBreakerRouteTemplateAutoConfiguration` · `GoStyleRouteResolution` · `GoStyleRouteTemplateResolver` · `GoStyleRouteTemplateSource`）⇒ ⇒ **建议加 A10 轴**（§4.17.4） |
+| **合计** | **73** | ⇒ ⇒ **73/73 逐类有结论** |
+
+- ⚠️ **「✅」的读法**：**有专属测试 + Go 出处已核**，**不是**「与 Go 双侧活体对拍通过」。
+- ⚠️ **本轮仍未逐条内容锚定的量**（**可量化的剩余项**）：全模块 **345 条**唯一 `.go:行` 引用中
+  **277 条可解析且行号在范围内（80.3%）**、**67 条是「裸文件名」形态**（多个同名 `.go` ⇒ 消歧待办）、
+  **1 条本轮已修**（`zrpc@v1.10.2/zrpc/server.go` 的模块前缀写错 ⇒ 已订正为 `go-zero@v1.10.2/…`）
+  ⇒ ⇒ **裸名消歧 + 全量内容锚定 = 阶段二规模**（本轮只把 `protection/` ＋ `http/` 做到 100%）。
+
+### 4.18.4 🟢 9 条轴结论更新（§2 的表）
+
+| 轴 | 更新前 | 更新后 | 依据（本轮**实际**做了什么） |
+|---|---|---|---|
+| **A1** 超时/deadline | 🟡 | 🟡 **（维持）** | 本轮**未新增**该轴证据 ⇒ 不动 |
+| **A2** gRPC 拦截器链 | ✅ | ✅ **（维持）** | 本轮**未新增**该轴证据 ⇒ 不动 |
+| **A3** HTTP 保护链 | 🟡 | 🟡 **（维持）** | `protection/` 22 ＋ `http/` 13 的引用**内容锚定做到 100%** ⇒ 证据**加强**；但「10 域逐域真实请求」那一格**本轮未做** ⇒ **不升级** |
+| **A4** 错误码/envelope | 🟡 | 🟡 **（维持）** | `GoStyleRouterErrorResponses` 本轮**补了专属测试 + 6 条内容锚定** ＋ `exception/*` ＋ `response/Response` 补了逐类结论 ⇒ 证据**加强**；但「共享层这一格无对口探针」**仍在** ⇒ **不升级** |
+| **A5** 端口治理 | 🟡 | 🟡 **（维持）** | 本轮**未新增**该轴证据 ⇒ 不动 |
+| **A6** errmsg 契约 | 🔴 | 🟢 **🔴 → 🟡** | 🔴 **降级**依据：① 「56 例全绿」那条 **L4 证据绑定错层**的订正**已在册**（§4.11）；② 本轮把该轴在共享层的**三个落点逐个核了** —— `response/Response` ✅ · `exception/BusinessException` ✅ · `http/GoStyleRouterErrorResponses` ✅（**新增专属测试 ＋ 6 条内容锚定**）⇒ ⇒ **「共享层落点未核」这条理由已消解**；③ **仍不判 ✅** —— 共享层**仍无对口的双侧探针**（`tools/errmsg-probe/*` 只覆盖 article / favorite，**users 域零探针**）⇒ ⇒ **🟡（半开）** |
+| **A7** proto 契约 | N/A | N/A **（维持）** | 共享层无落点 ⇒ **N/A ≠ 已验**（§2 口径说明） |
+| **A8** DDL 时间列/类型 | N/A | N/A **（维持）** | 共享层不建表 ⇒ **N/A ≠ 已验** |
+| **A9** trace/otel | ✅ | ✅ **（维持）** | 本轮**未新增**该轴证据 ⇒ 不动 |
+
+> ⚠️ **本表的读法**（AGENTS.md §0）：**「未升级」≠「已验证」**；**A6 的 🟡 也不是「全绿」**——
+> 它只表示「共享层的落点已逐个核过，但**共享层自己仍没有对口的双侧探针**」。
+
+### 4.18.5 📮 转派单（本层**零落码**的部分 ⇒ 交合并收口执行者）
+
+| # | 落点 | 现象 | Go 侧 `文件:行号` | RAG 侧现状 | 证据强度 | 建议修法 | 影响面 | 阻塞本波 |
+|---|---|---|---|---|---|---|---|---|
+| **G4-13b** | `service/favorite/favorite-rpc`（**G3 写权面**） | 仍调用**已弃用**的阻塞重载 ⇒ 进程关不掉 | `service/comment/rpc/cmd/fact-dispatch/main.go:68`（`ctx, stop := signal.NotifyContext(...)`）＋ `service/common/communityfact/process.go:56-60` | `FavoriteFactDispatchScheduler.java:119-124` 调 `Dispatcher.run(ctx, …, once, false)` ⇒ `this.handle` 永不赋值 ⇒ `:134-141` 的 `@PreDestroy` 拿到 null | E2（源码级）＋ **共享层侧已由 `DispatcherHandleLifecycleGateTest` 证明 API 形状可用** | 改用 `Dispatcher.run(ctx, …, once, handle, false)`，句柄由 scheduler 持有（与 comment-rpc 的 `runAsync` 等价，但走新的调用方持有句柄形态） | favorite-rpc 单域 | 否（**落点在别的域 ⇒ 按 §1.1 ⑥ 第 2 条不计入本组件 R3 ⑥**） |
+| **G4-13c** | `docs/PhaseGoal-judge.md:217`（**共享面**） | `service/common` 行仍写「**27 条编号未修** …… `DRIFT-COMMON-005` 是唯一硬阻塞」 | — | **两处均已过期** ⇒ 真实为 **24 条**（`DRIFT-COMMON` 族未修 = **0**）⇒ **无硬阻塞** | E1（读台账） | 改为「24 条编号未修（其中 19 条 C 类 · 3 条 D 类 · 0 条 A/B 类）· **无硬阻塞**」＋ 组件评级按 §1.1 ⑥ 第 4 条重算 | 4 条 lane 矩阵 | 否 |
+
+### 4.18.6 🟡 本轮的**诚实边界**（AGENTS.md §0：「已改」≠「已验证」）
+
+1. **本轮全部证据 = L1/L2/E3（源码级 + 单测级）** —— **未跑任何双侧活体探针**
+   ⇒ ⇒ 「与 Go 一致」在本节一律读作「**在源码级对照下一致**」。
+2. **`DRIFT-CF-018` 的共享层半边已修，`favorite-rpc` 半边未修** ⇒ ⇒ **该条**不能**整体**读作「已闭合」。
+3. **内容锚定只覆盖 `protection/` ＋ `http/`（51 条 / 100%）** ⇒ ⇒ **其余 38 个类的引用仍未逐条内容锚定**
+   ⇒ ⇒ 「73/73 逐类有结论」**≠**「73/73 的引用都验过内容」。
+4. **本轮新加的测试里有一条断言写错过**（`GoStyleProtectionProperties`「默认必须全部关闭」）
+   ⇒ ⇒ **错的是断言不是实现** —— Go 的 `rest/config.go:12-21` 显示中间件**默认开**
+   ⇒ ⇒ 已按 AGENTS.md §3.3 ③「**先改/删错误断言，再改实现**」订正 ⇒ ⇒ 记录在此，不隐去。
+5. **本轮没有改任何业务行为**（除 `DRIFT-CF-018` 的 API 形状）⇒ ⇒ **共享层对 10 个域的行为面零变化**。

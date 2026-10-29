@@ -6,6 +6,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
+ * <p><b>Go 出处</b>：{@code service/common/logger/logger.go:63-70}
+ * （{@code func Init(svcName string)} ⇒ 服务名的<b>唯一</b>来源，且<b>空名 panic</b>）
+ * ＋ {@code service/common/logger/logger.go:98}（{@code func (l *Logger) logBusinessErr(...)}`）。
  * Spring 入口：将服务名从 {@code spring.application.name} 注入，提供实例方法
  * {@link #logInfo} / {@link #logBusinessErr} / {@link #logFatal}。
  *

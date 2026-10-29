@@ -5,6 +5,10 @@ import io.opentelemetry.api.common.AttributeKey;
 import java.time.Duration;
 
 /**
+ * <p><b>Go 出处</b>：{@code service/common/observability/observability.go:19-30}
+ * （第一组常量块：{@code SuccessBizCode = 200} / {@code DefaultSlowThreshold = 500 * time.Millisecond} / 6 个 {@code Attr*} 键）
+ * ＋ {@code service/common/observability/observability.go:32-36}（第二组常量块：3 个 {@code ErrorKind*} 值）
+ * ⇒ <b>常量值与键名逐条一致</b>（{@code DefaultSlowThreshold} 用 {@link Duration} 替代 Go 的 {@code time.Duration}）。
  * 对应 Go 版 service/common/observability/observability.go 顶部的常量块。
  *
  * <p>Go 版两个常量块：
