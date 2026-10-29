@@ -330,3 +330,34 @@
 **④ 等批准** ⇒ **批准后才开工**（**回执落笔时**本轮除本回执小节外不写任何代码、不改任何台账；已读动作仅限只读：四档台账 + `_cross` + 阶段标准 + 回执模板）⇒ **Jason 于 2026-10-29 03:44 在本 lane 会话内明示「继续」**（消息 id `182054`）⇒ **已获批开工**（⑤ 由调度员代填，见本节末尾）。
 
 **⑤ 批准记录：Jason · 2026-10-29 03:44 · 批准范围：本 lane 回执 ① 所列候选任务 **H-A1**（hot proto 消息体 wire 探针落码）+ **A-1**（article 域双侧活体对拍）+ **F-1**（favorite-rpc 整域双侧活体对拍）· **G4 反馈单 1 张**（7 项，含补守门 `PINNED` 两行 `gorm.io/driver/postgres: v1.6.0` + `github.com/lovoo/goka: v1.1.16`）· **自有写权面 2 处台账过期描述**（`article/common.md:22` / `:74-77`、`comment/common.md:110` vs `:112`）**　← 由**调度员代填**（依据：Jason 于 2026-10-29 03:44 在**本 lane 会话内**明示「继续」· 消息 id `182054`；**回执人不得自批**· **代填 ≠ 代批准**）
+
+---
+
+## 📌 追加 · 🔵 **本域 rpc 层的「双侧活体」证据已补齐**（2026-10-29 · R2 lane · `align/r2-favorite`）
+
+### ① 一句话
+
+本 lane（`favorite` 域）此前**没有任何「两侧真栈同时跑」的 rpc 层证据**
+⇒ RoundPlan `docs/RoundPlan/Round-2.md` **T-2.3 · F-1** 把这条记成「🔴 环境受限（Go 侧 etcd / Kafka 拉不起来）」。
+⇒ **该判定已过期**（2026-10-29 实测推翻：宿主 `Sea-etcd` 49319 / `Sea-nacos` 49848 / `Sea-postgres` 49432 / `Sea-kafka` 49992 / `Sea-jaeger` 49317 **全部在跑**）
+⇒ ⇒ 新增产物 **`tools/api-full-parity-probe/favorite-rpc/`**（`run.sh` / `expected.txt` / `mutate-parity.sh` / `README.md` / `java/` / `seed.sql`）
+⇒ ⇒ **25 条 FROZEN 用例：Go 真源 == RAG == 冻结期望值（逐字节 · gRPC wire 层）**，`EXIT=0`。
+
+⇒ 逐条证据（含 26 条用例表、12 条实测坑、3 条变异）⇒ [`rpc.md`](rpc.md) 末尾的
+「📌 追加 · ✅ favorite-rpc 的 rpc 层双侧活体对拍已落地」一节。
+
+### ② ⚠️ **对 common 面（9 条机制面轴）的影响：只读，不改判**
+
+| 项 | 结论 |
+|---|---|
+| **A1（超时 / deadline）· 出向侧 `E65`** | 🔴 **仍 OPEN** —— 本探针**不测**出向 deadline 传播 ⇒ **既不构成反驳，也不构成销案** ⇒ 仍以 §1 的 `E65` 行（共享层 `service/common` · `RpcInterceptor` 只绑 `DeadlineState`）为准 |
+| **A2~A9 其余各轴** | **不变** —— 本探针验的是 **favorite 域自己的 wire 契约**，不涉及共享层机制的实现面 ⇒ §2 的九轴逐轴结论**一字不改** |
+| **共享层写权** | ✅ **零触碰** —— 本轮对 `service/common/**` 与 `service/users/users-common/**` 的改动 = **0 行**（AGENTS.md §5.3f：共享层只有 `align/g4-service-common` 能写） |
+| **域侧产品代码** | ✅ **零改动** —— 本轮对 `service/favorite/**` 的改动 = **0 行**（探针只读它 / 编译它 / 启动它） |
+
+### ③ 本 lane 对 common 面**新登记**的一条事实（**不修，只登记**）
+
+| 编号 | 摘要 | 落点 | 状态 | 证据 |
+|---|---|---|---|---|
+| （域侧 · 非编号） | **`favorite-rpc` 的两个出向 client 走的是**「服务端路径 ⇒ `GoStyleRequestDeadline.applyTo` 恒 no-op」** ⇒ 出向**零期限**（与 Go 的 `zrpc` 无条件 2s 客户端超时 + `depCtx` 传播父 deadline 相反）⇒ ⇒ 一旦下游 `user.rpc` **在场但慢**，RAG 侧会**一直等**而 Go 侧 **2s 就断** | **共享层** `service/common`（`RpcInterceptor` / `GoStyleRequestDeadline`）⇒ 落点同 `E65` | 🔴 **OPEN**（**与 §1 的 `E65` 同一条**，本轮只是给它补了一个**可观测后果**） | 本轮探针**未直接测**（下游缺席 ⇒ 走不到超时分支）⇒ **本条只登记，不改判** |
+
