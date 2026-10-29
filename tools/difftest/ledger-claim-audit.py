@@ -49,8 +49,13 @@ LEDGER_DIRS = ("docs/DRIFT", "docs/Intentional_Deviations", "docs/Pitfalls")
 # ── 结论条目的识别：标题行里带编号 token 的 ────────────────────────────────
 HEADING_RE = re.compile(r"^(#{2,4})\s+(.+?)\s*$")
 # 编号 token：DRIFT-XXX-nnn / SD-… / DEV-… / PIT-… / P-… / PF-… / N-n / E-nn / S1-… / UNRESOLVED-n …
+# ⚠️ **2026-10-29 修正（W-C lane 实测发现的工具缺口）**：原式把「域段」写死成
+#    `DRIFT-[A-Z0-9]+` **后面必须再有一段 + `-数字`** ⇒ **三段式编号整类失配**：
+#    `DRIFT-LIKE-003` / `DRIFT-LIKEAPI-021` / `DRIFT-MSGAPI-011` / **`DRIFT-HOTAPI-030`** /
+#    **`E-65`** —— 全部**对工具隐形**（⇒ 「落空 0」只覆盖了部分条目 ⇒ 是**假保证**）。
+#    ⇒ 改为：域段之后允许 **0..n 段**中段，再接 `-数字`。
 ID_RE = re.compile(
-    r"\b((?:DRIFT-[A-Z0-9]+|SD|DEV|PIT|PF|UNRESOLVED|S1|SHOT|CYCLE|E)[-_][A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)*-\d+[A-Za-z]?)\b"
+    r"\b((?:DRIFT-[A-Z0-9]+|SD|DEV|PIT|PF|UNRESOLVED|S1|SHOT|CYCLE|E)(?:[-_][A-Za-z0-9]+)*-\d+[A-Za-z]?)\b"
 )
 # 证据指针：<path>:<numbers>
 PTR_RE = re.compile(
