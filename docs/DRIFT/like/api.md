@@ -774,6 +774,68 @@ Servlet Filter 在路由匹配**之前** ⇒ 本 Filter 会对 `/like/v1/**` 下
 
 ---
 
+## 9.1 G-14 销号 · U-01 ~ U-08 逐条结论（2026-10-29）
+
+> **背景**：[`docs/PhaseGoal-judge.md`](../../PhaseGoal-judge.md) §九 **G-14**（`:447`）= 「`like` 域 8 条 Unresolved（U-01~U-08）台账未标关闭（U-04 已注明闭环）」⇒ 处置方向 = 「**逐条销号或明确列为「取证缺口」**」。
+> **本节** = 逐条给结论。⚠️ **上表原文保留未删改**（本节是**增补**，不是改写）。
+> **纪律**：**不得把「取证缺口」写成「已闭合」**，**不得为了清零而放宽口径**；每条结论的**证据强度必须与结论一致**（L1 源码级 / L2 静态 / L3 单侧自动化 / L4 双侧活体）。
+
+### ① 本轮新增的证据（**本轮实跑**）
+
+| # | 证据 | 结果 | 日期 |
+|---|---|---|---|
+| 1 | `bash tools/api-full-parity-probe/like/run.sh`（**双侧活体**：Go 真源栈 + RAG 栈 + 真 Nacos/etcd/PG/Redis/Kafka） | ✅ **EXIT=0** —— 阶段 A **8 个 case 逐字节** `Go == RAG == expected.txt`（`getlikecount` / `getlikestate` / `gettargetlikerlist` / `getuserlikelist` / `getusertotallike` / `likeaction` / `no_token`(401) / `missing_required`）· 阶段 B **DC 收到 970 bytes · sha256 `3685ca30…` 两侧相同 + outbox 终态逐字段相同** · 阶段 C **双失败业务错误两侧都记 5011** | 2026-10-29 |
+| 2 | 同上探针的**就绪闸门**（`tools/api-full-parity-probe/like/run.sh:386-404`） | ✅ 实跑日志「**首个非 1015 响应已到**」（Go 侧 / RAG 侧各一次）⇒ **api→like-rpc 的真 gRPC 网络请求确实发生**（**这条直接推翻 U-08 的原前提**） | 2026-10-29 |
+| 3 | 同上探针的 **RAG 侧 api 日志**（`rag-api.log`） | ⚠️ 实测命中**寻址失败**路径 **13 次**：`DiscoveryClientNameResolver : No servers found for like-rpc` ＋ `Status{code=UNAVAILABLE}` ⇒ **U-08 的错误形态本轮拿到了实测证据** | 2026-10-29 |
+| 4 | `tools/errmsg-probe/like/`（错误码双侧逐字节对拍） | ✅ 已落仓（`run-parity.sh` EXIT=0 ＋ `mutate-parity.sh` 精确转红）—— **本轮未复跑**（记录为**上一轮 lane 的实跑结果**） | 2026-10-29 |
+
+> 🔴 **复算前提（必须一起读，否则会误判「探针坏了」）**：
+> **探针脚本本身没设 `USER_JWT_SECRET`** ⇒ RAG like-api 会被 **P0 #8 补正**加的守卫 fail-closed 拒绝启动（`like-api.user-auth.access-secret 未配置（绑到了未解析的占位符字面量 ${USER_JWT_SECRET}）`，`service/like/like-api/src/main/java/com/rag/like/like/api/config/LikeApiProperties.java:132`）⇒ **探针 EXIT=2**。
+> ⇒ **复算命令必须先 `export USER_JWT_SECRET=<与签发方一致的值>`**（本轮用 `JWT_SECRET` 默认值 `ae0536f9-6450-4606-8e13-5a19ed505da0`）⇒ 本轮即**这样跑出 EXIT=0**。
+> ⚠️ **探针脚本的修法在 `tools/**`（本 lane 无写权）⇒ 只登记，不动手**（详见本节 ④）。
+
+### ② 逐条结论（**U-01 ~ U-08 各一行**）
+
+| ID | **结论** | 证据（`文件:行号` / 命令与结果） | 证据强度 | 核对日期 |
+|---|---|---|---|---|
+| **U-01** | 🟡 **取证缺口（部分闭合）** —— **like → DC 那一跳已 L4 闭合**（`003-A`）；**DC → 第三仓消费端那一跳仍未取证**，且**对端仓不在本项目范围** ⇒ **不是缺陷** | ① 已闭合部分：探针阶段 B（`run.sh` 第 10 步）—— 两侧投给 DC 的 **970 bytes** · sha256 `3685ca30…` **相同** ＋ outbox 终态逐字段相同 ⇒ 对应 [`like/rpc.md`](rpc.md) `DRIFT-LIKE-003-A` **L4**<br>② 缺口部分：第三仓 `Sea-BreakTheWaves/service/async/rpc/cmd/worker/community_fact_acceptance.sh:5-8` 需要 **`SEA_DC_PLATFORM_ROOT`（另一个仓的 pinned checkout）** ＋ `SEA_RTW_COMMUNITY_ROOT` ＋ `SEA_COMMUNITY_EXPECTED_DC_SHA`（40 位 hex）⇒ 真实 DC 验收**必然跨到仓外**<br>③ 探针的「假 DC」只替代**接收端**（记录字节 + sha256）⇒ **不覆盖**第三仓的消费者（`.../internal/warehouse/communitysource/consumer.go` / `.../internal/app/community_authority_binder.go`） | **L4（like→DC 一跳）** ＋ 🟡（DC→第三仓一跳） | 2026-10-29 |
+| **U-02** | ✅ **已闭合** —— `weight` 在 Go 侧**只走 api→rpc 的 wire**，`like-rpc` **收到即丢弃**（`like_record` 无 weight 列 · rpc 侧 logic/model 全文无 weight 引用）⇒ RAG 侧同样丢弃 ⇒ **`DRIFT-016` 产生的 `+Inf` 权重不会落库** ⇒ **业务影响面 = 0**；`author_id` 两侧**都落库**且都进 Redis key | ① Go **发送点**：`service/like/api/internal/logic/like/likeactionlogic.go:56` `Weight: float32(req.Weight)`；`proto/like.proto:33` `float weight = 6;`；`service/like/rpc/pb/like.pb.go:98`<br>② Go **消费点 = 不存在**：全 `service/like/**` 树 grep `weight` **只命中** `api/internal/types/types.go:61`（api DTO）、`api/.../likeactionlogic.go:56`、`pb/like.pb.go:98/172-174`、`proto/like.proto:33` ⇒ **rpc 的 logic 与 model 里零引用**<br>③ RAG 同形：`service/like/like-api/src/main/java/com/rag/like/like/api/service/LikeActionService.java:57` 窄化；`service/like/like-rpc/src/main/java/**` 全文**无 weight 引用**<br>④ `author_id` 落库：Go `service/like/rpc/internal/logic/likeactionlogic.go:189`（Redis key `user_total_like:%d`）＋ `:228`（`AuthorID: in.AuthorId`）· RAG `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/mapper/LikeRecordMapper.java:196-197`（INSERT 带 `author_id`）＋ `:252`（UPDATE `author_id = #{authorId}`）＋ `:45-46`（按 `author_id` 计数）＋ `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeActionScript.java:40`（`KEYS[6]=user_total_like:<authorId>`） | **L1（源码级 · 两侧读到消费点）**；`author_id` 的响应面另由探针阶段 A `likeaction` 逐字节覆盖（**L4**） | 2026-10-29 |
+| **U-03** | 🟡 **取证缺口** —— 仍缺「**真 Tomcat + 慢下游**」的超时用例 ⇒ **3s → 503 这条出口至今只在配置层/装配层核对过** | ① 配置层：`service/like/like-api/src/main/resources/application.yml:28-29`（`observability.http-timeout: 3s`，注释自陈对齐 Go `rest/config.go:55`）<br>② 装配层：`HttpMiddlewareFilter` 是 `@Component` ＋ `scanBasePackages` 含 `com.rag.common` ⇒ 扫到即生效<br>③ ⚠️ **现有超时/503 相关测试全是 MockMvc**（`webEnvironment = MOCK`）：`service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiProtectionMvcTest.java:51-53` ＋ `LikeApiGoAlignmentTest.java:46-48` ⇒ **不驱动真容器**<br>④ 真容器测试只有 3 个（`LikeApiRouterErrorRealTomcatTest` 404/405 · `LikeApiPathNormalizationRealTomcatTest` · `LikeApiGrpcClientBreakerE2ETest` 熔断 1015）⇒ **没有一条打超时路径**<br>⑤ `LikeApiGoAlignmentTest.java:315-322` **自陈**：「3s 超时真的会在运行期产出 503」这件事 §9 U-03 记为**未验证**，且**刻意不写恒真断言**<br>⑥ 探针阶段 A 的 8 个 case（`run.sh:452-459`）**无超时 case** | **L2（静态：配置 + 装配 + 测试面扫描）** | 2026-10-29 |
+| **U-04** | ✅ **已闭合** —— **可观测窗口 = 0**：Go 侧单次 RPC 上界 **2000ms 固定**，RAG 侧单次 RPC 也**封顶 2000ms** ⇒ 两侧同时到期，无窗口 | ① Go **消费点**（非声明点）：go-zero `zrpc/config.go:31` `Timeout int64 \`json:",default=2000"\``（`RpcClientConf`）⇒ `zrpc/client.go:70-71` `if c.Timeout > 0 { opts = append(opts, WithTimeout(time.Duration(c.Timeout)*time.Millisecond)) }`（**真正的消费点**）<br>② 真源未覆盖默认：Go api `service/like/api/etc/likecenter.yaml:31-35` 的 `LikeRpc:` 块**只写 Etcd** ⇒ `service/like/api/internal/config/config.go:17` `LikeRpc zrpc.RpcClientConf` ⇒ **取默认 2000ms**<br>③ RAG：`service/like/like-api/src/test/java/com/rag/like/like/api/LikeRpcTimeoutCapTest.java`（**6 条**）—— 真 in-process gRPC server **睡 2500ms**（`:82`）⇒ 断言 `DEADLINE_EXCEEDED`（`:193-194`）＋ **服务端观测到的 deadline = 2000ms**（`:222-223`）＋ 反向对照（去掉 2000 上界 ⇒ **成功**）<br>④ 台账 `docs/DRIFT/like/api.md:825` 已注明闭环 | **L3（单侧自动化 + Go 源码链）** —— ⚠️ **未做双侧慢下游活体对拍 ⇒ 不写 L4** | 2026-10-29 |
+| **U-05** | 🟡 **取证缺口** —— **判据两侧一致**（chunked ⇒ `ContentLength == -1` ⇒ **不读 body**），但**缺端到端真容器证据** | ① Go **消费点**：go-zero `rest/httpx/requests.go:66` → `:117 ParseJsonBody` → **`:153-154 withJsonBody`：`r.ContentLength > 0 && strings.Contains(r.Header.Get(header.ContentType), header.ApplicationJson)`** ⇒ chunked（`ContentLength == -1`）⇒ **不读 body**<br>② 真源调用点：`service/like/api/internal/handler/like/likeactionhandler.go:18` `httpx.Parse(r, &req)`<br>③ RAG **同一判据**：`service/common/src/main/java/com/rag/common/http/GoStyleJsonBodyConverter.java:300` `goReadsBody(request.getContentType(), request.getContentLengthLong())`（`:279-291` 说明为何必须用 `getContentLengthLong()`）<br>④ ⚠️ **缺口**：`MockMvc` 的 `.content(byte[])` 必带 Content-Length ⇒ 无法模拟 chunked（U-05 原文已述）；真容器测试 `LikeApiRouterErrorRealTomcatTest` 只覆盖 404/405 ⇒ **无一条发 chunked 请求** | **L1 / L2（源码级判据对照）** | 2026-10-29 |
+| **U-06** | 🔴 **仍漂移**（**可观察差异 · 运维面**）—— ⚠️ **原前提「疑似死配置」已被推翻**：`DevServer` **确实被消费**（由 go-zero **框架**消费，**不在仓内代码里**）⇒ Go 在**独立端口**起 `/metrics` + `/healthz` + pprof；RAG 把 actuator 挂在**业务端口 18887** ⇒ **端口 + 路径两层都不同**（且 **pprof 无对应物**） | ① Go **消费点**（框架内，**非声明点**）：go-zero `core/service/serviceconf.go:77` **`devserver.StartAgent(sc.DevServer)`**（在 `ServiceConf.SetUp()` 内，`:53`）⇒ `rest.RestConf` 内嵌 `service.ServiceConf`（`rest/config.go:46`）⇒ **api 侧同样起**；`zrpc.RpcServerConf` 内嵌（`zrpc/config.go:39`）⇒ **rpc 侧同样起**<br>② Go 配置：`service/like/api/etc/likecenter.yaml:20-27`（`Enabled: true` · `Port: 9099` · `MetricsPath: /metrics` · `HealthPath: /healthz` · `EnablePprof: true`）· `service/like/rpc/etc/like.yaml:19-26`（`Port: 9098`）<br>③ 仓内 grep：`DevServer` 在**全仓只出现在 14 个 yaml**里、**无一条 Go 代码**读它 ⇒ U-06 原述「未 grep 到 Go 侧任何读 `DevServer` 的代码」**属实，但不足以判死配置**（消费点在框架内）<br>④ RAG：`service/like/like-api/src/main/resources/application.yml:175-183` —— `management.endpoints.web.exposure.include: health,info,prometheus`，**没有 `management.server.port`** ⇒ actuator 与业务**共用 18887**；且**无 `pprof`**（Go `EnablePprof: true` 无对应物）<br>⑤ **运行期旁证**：探针 README「探针本身踩过的坑 #2」记载「**Go rpc 多绑一个 `9098` 导致撞端口** ⇒ go-zero `zrpc` 的 `ServiceConf.SetUp()` 会 `devserver.StartAgent`」⇒ **实测印证框架确实起了它**<br>⑥ ⚠️ **与已登记偏离的边界**：[`docs/Intentional_Deviations/like/api.md`](../../Intentional_Deviations/like/api.md) `SD-2026-10-24-11` 签的是**指标名可见面**（`like_api_reject_total` Go 未调 `InitMetrics()`）⇒ **与本条的「端点形态（端口/路径/pprof）」是不同轴** ⇒ **本条不重议该签字项** | **L2（静态：框架消费点 + 两侧配置）＋ L4 旁证（探针实测到 Go 多绑 `9098`）** | 2026-10-29 |
+| **U-07** | ✅ **已闭合** —— **nil map 在两侧都不可能发生** ⇒ 最小形态都是 `{"states":{}}` ⇒ 等价 | ① Go **构造点**：`service/like/rpc/internal/logic/getlikestatelogic.go:34-36` `resp := &pb.GetLikeStateResp{States: make(map[string]int32)}` ⇒ **恒为非 nil**（哪怕为空）<br>② Go **直传点**：`service/like/api/internal/logic/like/getlikestatelogic.go:65-67` `States: rpcResp.States`<br>③ RAG：`service/like/like-api/src/main/java/com/rag/like/like/api/service/LikeStateService.java:46-51` ⇒ 复制进 `new LinkedHashMap<>()`（`:46`）⇒ **恒非 nil**；且 **proto3 的 map 字段在 Java 侧恒非 null**（空 map 而非 null）⇒ `getStatesMap()` 不会返回 null<br>⇒ ⇒ 「rpc 返回 nil map」这个前提**在两侧都不成立** ⇒ **等价**（U-07 原文担心的「唯一没有 `make` 保护的可空容器」**已被 Go 的 `make` 消掉**） | **L1（源码级 · 两侧读到构造点）**；非空形态另由探针阶段 A `getlikestate` 逐字节覆盖（**L4**） | 2026-10-29 |
+| **U-08** | 🟡 **取证缺口（前提已被推翻）** —— ⚠️ 「**本轮所有探针都绕开了 gRPC**」**已不成立**：新探针**真的发 gRPC 网络请求**；RAG 侧「寻址失败」的错误形态**已实测 = `1015`**（**不是 `5001`**）⇒ **U-08 原文的猜测被推翻**。**剩余缺口 = Go 侧对照**（Go 走 **etcd** 不是 Nacos ⇒「无 Nacos」在 Go 侧**无同形事件**） | ① **真 gRPC 已被证实**：`tools/api-full-parity-probe/like/run.sh:386-404` 的就绪闸门把 `"code":1015` 当作「下游没就绪」⇒ 说明 api→rpc 的**真 gRPC 调用**确实发生；本轮实跑日志「**首个非 1015 响应已到**」（两侧各一次）⇒ **寻址成功路径已 L4**<br>② **失败路径本轮实测**：本轮 `rag-api.log` 命中 **13 次** `No servers found for like-rpc` ＋ `Status{code=UNAVAILABLE}` ⇒ HTTP 信封返回 `code:1015`<br>③ **码值来源（消费点）**：`service/like/like-common/src/main/java/com/rag/like/like/common/errmsg/LikeGrpcError.java:237-246` —— `UNAVAILABLE` 落 **`default`** 分支 ⇒ `CODE_SERVER_BUSY`（**1015**，见 `LikeErrorCode.java:26`）<br>④ `service/like/like-api/src/main/java/com/rag/like/like/api/service/LikeApiSupport.java:177-186` —— `rpcError` 保留 `status.getDescription()` 原文；**`5001` 只在「非 status 错误」分支**（`:179-182`）⇒ ⇒ **U-08 原文的「会被 `rpcError` 折叠成 5001」被推翻**<br>⑤ 真容器 + gRPC 失败路径旁证：`LikeApiGrpcClientBreakerE2ETest`（`webEnvironment = DEFINED_PORT`，真 Tomcat）覆盖 `INTERNAL` ⇒ **1015**（同类 `default` 分支）<br>⑥ 配置：`service/like/like-api/src/main/resources/application.yml:171-173`（`address: discovery:///like-rpc` · `negotiation-type: plaintext`）—— ⚠️ U-08 原述的 `:97-105` **已过期**（配置块随 P0 #8 补正移位） | **RAG 侧 = L4**（真进程 + 真 gRPC + 真 Tomcat）；**双侧 = 缺口 ⇒ 不写 L4** | 2026-10-29 |
+
+### ③ 剩余缺口汇总（**谁没合上 · 缺什么 · 谁能补**）
+
+| ID | 状态 | **还缺什么** | **谁能补** | 是否阻断阶段一 |
+|---|---|---|---|---|
+| **U-01** | 🟡 取证缺口 | **DC → 第三仓消费端**那一跳的真 DC 验收（需 `SEA_DC_PLATFORM_ROOT` 的 pinned checkout ＋ 40 位 `SEA_COMMUNITY_EXPECTED_DC_SHA`） | ⚠️ **对端仓不在本项目范围**（AGENTS.md §一：范围 = RAG + Go 真源）⇒ **本项目不可补**；需**用户 / 主线**决定是否开跨仓范围 | ❌ 否 |
+| **U-02** | ✅ 已闭合 | — | — | — |
+| **U-03** | 🟡 取证缺口 | 一条**真 Tomcat + 慢下游（>3s）**的用例 ⇒ 断言 `503` + body 逐字节 | **本域 `like-api` lane**（阶段二）—— ⚠️ 本轮**只写台账**，不改 `service/**` | ❌ 否 |
+| **U-04** | ✅ 已闭合 | （可选）双侧慢下游活体对拍 | 本域（阶段二）—— ⚠️ 结论**不依赖**它（已 L3） | ❌ 否 |
+| **U-05** | 🟡 取证缺口 | 一条**真 Tomcat 发 chunked 请求**的用例（判据两侧已一致） | **本域 `like-api` lane**（阶段二）—— ⚠️ 本轮**只写台账** | ❌ 否 |
+| **U-06** | 🔴 仍漂移 | 运维端点**形态**对齐（端口 / 路径 / pprof 三层） | ⚠️ **不在本域单改**（十组件共性）⇒ **归 G4 / 收口执行者**；⚠️ 属**部署形态决策** ⇒ 建议走**签字登记**或阶段二 | ❌ 否（**运维面**，非业务语义） |
+| **U-07** | ✅ 已闭合 | — | — | — |
+| **U-08** | 🟡 取证缺口 | **Go 侧「下游不可达」的错误形态**对拍（Go 走 etcd ⇒ 需造「etcd 无 `like.rpc` 实例」并真发一次请求） | **本域 `like-api` lane**（阶段二） | ❌ 否 |
+
+⇒ **本轮净结果**：**✅ 已闭合 3 条**（U-02 · U-04 · U-07）· **🟡 取证缺口 4 条**（U-01 · U-03 · U-05 · U-08）· **🔴 仍漂移 1 条**（U-06）。
+⇒ ⚠️ **「仍漂移」只有 1 条**（U-06），且是**运维端点形态**，**不属业务语义**、**不在阶段一必相对齐项** ⇒ **不改变本组件的阶段一判定**。
+
+### ④ 🔴 本轮**新发现**的两条**探针可复现性缺陷**（**只登记，不动手**）
+
+| 项 | 内容 |
+|---|---|
+| 现象 | **`tools/api-full-parity-probe/like/run.sh` 在当前代码基线上跑不起来** ⇒ **EXIT=2**（`RAG like-api` 启动失败） |
+| 根因 | 探针只用了 `JWT_SECRET`（**签发**侧，`run.sh:60`）⇒ **从未给 RAG api 进程传 `USER_JWT_SECRET`**（`run.sh:343` `java -jar "${RAG_API_JAR}"` 无该 env）⇒ 而 `service/like/like-api/src/main/resources/application.yml:85` 的 `access-secret: ${USER_JWT_SECRET}` **没有默认值** ⇒ Spring 绑到**未解析的占位符字面量** ⇒ **P0 #8 补正**加的守卫 **fail-closed** 抛错（`LikeApiProperties.java:132`）⇒ 进程起不来 |
+| 影响 | ⚠️ **「like 域双侧活体探针 ⇒ EXIT=0」这句话，按当前脚本**已经不可复算** ⇒ ⇒ 凡引用该结论的台账，**必须附带这条前提** |
+| **本轮的处置** | **绕行**：先 `export USER_JWT_SECRET=<与签发方一致的值>`（子 JVM 继承 env）⇒ **本轮即跑出 EXIT=0**（阶段 A 8/8 + 阶段 B + 阶段 C 全绿）⇒ **未改 `tools/**` 一行**（该目录写权属 R2 lane / 收口执行者） |
+| **建议修法（供收口执行者）** | 在 `run.sh` 起 RAG api 那一步补 `USER_JWT_SECRET="${JWT_SECRET}"`（探针自己签发、自己验签 ⇒ 同值即可）⇒ **一行改动**；建议同时加一条**启动即失败**的守门（防「密钥没传 ⇒ 静默起不来」再次发生） |
+| **同族第 2 条缺陷（本轮实测撞到）** | **探针跑完会留下孤儿 Go 进程占住 `18121`/`18122`** —— cleanup 只收了**容器**（本轮实测 `r2like-*` 容器已清空）⇒ Go 的 `${WORK}/api` / `${WORK}/rpc` **一半被 SIGTERM、另一半变孤儿（`PPID=1`）继续 LISTEN** ⇒ ⇒ **下一轮探针起 Go api 撞端口 ⇒ 看起来像「环境坏了」**。本轮**两次**撞到同一形态（接手时已有一对孤儿 ⇒ 本轮跑完又留一对）⇒ 判定为**探针侧缺陷，不是 like 域缺陷**。**手动清理**：`lsof -nP -iTCP:18121 -iTCP:18122 -sTCP:LISTEN` ⇒ `kill <pid>`（本轮已清）。**建议修法**：cleanup 里显式 `wait` + 兜底 `pkill -f "${WORK}/(api\|rpc)"` |
+
+---
+
 ## 10. 最终判定
 
 ### 10.1 §39 的 18 项 checklist（逐条）

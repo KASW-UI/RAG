@@ -1448,7 +1448,7 @@ G4 共享层 **5** · G3 **11**（article 3 · comment 4 · hot 4）· G1 **9**�
 **③ 待批准项**
 
 1. **候选清单的 6 条里，我域内核对后只有 2 条是真错**（另 4 条 `processor.go:82` 是**守门假阳性** ⇒ 一行都不用改）⇒ 详见下一节 ⇒ **若按原清单派 6 条工单，会有 4 条返工**。
-2. **`DRIFT-LIKE-003-C`**（权威读暴露形态：Go 是**独立进程** `cmd/fact-authority/main.go`（`LIKE_DATABASE_URL` ＋ `LIKE_FACT_AUTHORITY_LISTEN` ＋ `LIKE_FACT_AUTHORITY_TOKEN`，token ≥ 32），RAG 侧无 HTTP 端点）⇒ 落地需改 **2 处共享面**（新建模块要动 `check-wave-lane-ownership.py` 白名单 ＋ 根 `docker-compose.yml`）⇒ **G2 不可写** ⇒ 形态决策（**独立进程** vs 同进程独立 HTTP 端口）**须拍板**。
+2. **`DRIFT-LIKE-003-C`**（权威读暴露形态：Go 是**独立进程** `cmd/fact-authority/main.go`（`LIKE_DATABASE_URL` ＋ `LIKE_FACT_AUTHORITY_LISTEN` ＋ `LIKE_FACT_AUTHORITY_TOKEN`，token ≥ 32），RAG 侧无 HTTP 端点）⇒ 落地需改 **2 处共享面**（新建模块要动 `check-wave-lane-ownership.py` 白名单 ＋ 根 `docker-compose.yml`）⇒ **G2 不可写** ⇒ 形态决策（**独立进程** vs 同进程独立 HTTP 端口）**2026-10-29 已由用户裁定 = 登记为 C 类暂缓**（11 字段见 [`like/rpc.md`](rpc.md) §2 ②-2）⇒ ⇒ **不再是阶段一待拍板项**（⚠️ **C 类 ≠ 零差异** ⇒ 不得据此宣称 like-rpc「已对齐」）。
 3. **`docs/PhaseGoal-judge.md:200`/`:202`**（`like-rpc` / `like-proto` 仍 🟡）＋ `:395-396`/`:408`/`:416`（把 `E60`/`003` 列为「未通过」）⇒ **该文件是 4 lane 共用唯一数据源 ⇒ G2 不写** ⇒ 须收口按新状态重读 ＋ 销号。
 4. **`tools/g3-anchor-check/` 的 `PINNED` 缺 `gorm.io/driver/postgres v1.6.0` ＋ `github.com/lovoo/goka v1.1.16`** ⇒ 守门假阳性率 **52%** ⇒ 补 `PINNED` 的落点属 G3 私有目录（**可安全补**，不触发 §6.3 守门计数漂移）；但若要把该守门**搬进 `tools/difftest/` 提升为全仓守门** ⇒ **必须同时改 `docs/PhaseGoal-judge.md` §6.3**，否则立刻制造 **B14**。
 
@@ -1497,7 +1497,7 @@ G4 共享层 **5** · G3 **11**（article 3 · comment 4 · hot 4）· G1 **9**�
 | **`E59`** | ✅ **闭合**（本轮复验守门，不重开） | **E3（复跑）** | 2026-10-29 | `MessageDomainServiceDbFailureStatusTest` ⇒ **4/0F/0E/0S · BUILD SUCCESS**（EXIT=0）⇒ **修复仍在**；⚠️ **落点在 message 域 ⇒ 本 lane 未改其代码**；⚠️ **双侧活体仍缺 ⇒ 不写 L4** |
 | **`DRIFT-LIKE-003-A`** | ✅ **闭合**（E4 ⇒ **L4**） | **L4 ＋ 变异验证** | 2026-10-29 | 探针阶段 B：**970 bytes** · sha256 `3685ca30…` 两侧相同 ＋ outbox 终态逐字段相同 |
 | **`DRIFT-LIKE-003-B`** | 🟡 **仍开放**（取证缺口，**非行为漂移**） | E3（既有守门 11/11） | 2026-10-29 | **本轮不产生新证据** ⇒ 该格的解锁前提 = `003-C` 先拍板 |
-| **`DRIFT-LIKE-003-C`** | 🔴 **仍开放**（形态决策） | — | 2026-10-29 | **本轮未触碰**（落地要改 2 处共享面 ⇒ 本 lane 无写权） |
+| **`DRIFT-LIKE-003-C`** | 🟡 **C 类暂缓项已正式登记**（2026-10-29 用户裁定） | **—（C 类已登记 ⇒ 不计入必相对齐项）** | 2026-10-29 | **已按 `twoStage.md` §5.3 十一项登记**（域内副本 = `like/rpc.md` §2 ②-2；与全仓交付物 `docs/Stage1/05-差异与暂缓项清单.md` §3.7 `S1-LIKE-001` 一致）⇒ **不再作为阶段一待拍板项**；形态二选一落到阶段二执行 |
 
 ## ③ 🆕 本轮**新登记**的共享层可观测性缺口（**⇒ 转 G4 · 本 lane 只登记不改**）
 

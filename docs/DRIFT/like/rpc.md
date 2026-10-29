@@ -1797,6 +1797,27 @@ mvn -o -B -DargLine=-Xmx2g -pl service/like/like-rpc -am \
 | **⑩ 阶段 2 测试场景与通过标准** | — | 同一条 `event_id` ⇒ 两侧 `AuthorityFact` 的 `Event` / `SubjectRef` / `TechnicalReceipt` / `SourceEventHash` **逐字段相等**；12 道校验的**每一条否定用例**（缺字段 / hash 不符 / 状态机非法 / revision 不合法 …）两侧**同拒** | ① 端点**必须鉴权**（无 token ⇒ 401/403）；② token 长度 < 32 ⇒ **启动失败**（Go `main.go:54`）；③ 查询不存在的事件 ⇒ **404**；④ 依赖不可用 ⇒ **503** |
 | **⑪ 当前证据及剩余证据缺口** | **E4**（5 个专属守门 + 真容器） | **E3**（`LikeAuthorityLookupServiceGateTest` **11 条**实跑全绿；Go 侧 `fact_authority.go` 逐字对照）<br>**缺口**：**未做双侧活体对拍** ⇒ **不写 L4**；**未取证 3 项**（P-U-1/2/3，见 [`like/proto.md`](proto.md) 与本节 §7） | **证据缺口 = 全部**（本轮**零**端点实现 ⇒ 无可测物） |
 
+#### ②-2 🟡 `DRIFT-LIKE-003-C` · **C 类暂缓项正式登记**（`docs/twoStage.md` §5.3 十一项 · 2026-10-29 用户裁定落码）
+
+> 🔴 **本节取代上表「段 3」列在 ⑥/⑨ 上的「待拍板」措辞** —— 上表写于裁定之前。
+> **裁定（Jason 2026-10-29）**：`003-C` **改登记为 C 类暂缓项** ⇒ **不是「待拍板」，是「已按 C 类登记、待阶段二落码」**
+> ⇒ **本条不再回到用户拍板队列**；形态二选一（独立进程 vs 同进程独立 HTTP 端口）落到**阶段二**执行。
+> ⚠️ **与全仓级交付物一致**：[`docs/Stage1/05-差异与暂缓项清单.md` §3.7 `S1-LIKE-001`](../../Stage1/05-差异与暂缓项清单.md)（11 字段齐全）—— 本节是它的**域内副本**，内容与结论**不得冲突**。
+
+| # | 字段 | 内容 |
+|---|---|---|
+| 1 | **唯一编号** | **`DRIFT-LIKE-003-C`**（域内副本 = `S1-LIKE-001`）<br>母条目 `DRIFT-LIKE-003` 已拆三段：**A 投递链路** ✅ **L4 闭合** · **B 权威读语义** 🟡 **取证缺口** · **C 暴露形态** = **本条** |
+| 2 | **原始项目中的文件/方法/业务契约** | Go `service/like/rpc/cmd/fact-authority/main.go:23-96`（**独立进程** `fact-authority`）：<br>· `:51-53` 读 `LIKE_DATABASE_URL` / `LIKE_FACT_AUTHORITY_LISTEN` / `LIKE_FACT_AUTHORITY_TOKEN`<br>· `:54-56` 三者任一不满足（**token 长度 < 32**）⇒ **启动失败**<br>· `:71` `communityfact.NewAuthorityHandler("rtw.like-mq", token, model.NewLikeFactModel(db).AuthoritativeFact, logger)`<br>· `:75-80` `net.Listen` + `http.Server{Handler: handler, ReadHeaderTimeout: 3s, WriteTimeout: 5s}`<br>共享层 `service/common/communityfact/authority_http.go:23-79`：<br>· `:24` `len(token) < 32` ⇒ 拒绝构造 handler<br>· `:28` `mux.HandleFunc("GET /internal/v1/community/facts", …)`<br>· `:43-46` `Authorization: Bearer <token>` 恒定时间比较，不匹配 ⇒ **401**<br>· `:52` / `:59` 查不到该事件 ⇒ **404**；`:67` 依赖不可用 ⇒ **503**<br>**业务契约** = 「**谁能问权威事实**」的**暴露形态**：**独立 HTTP 进程** ＋ **固定路径** ＋ **Bearer 静态令牌** |
+| 3 | **原始行为** | Go 把权威读暴露成**一个独立进程**上的 **HTTP GET `GET /internal/v1/community/facts`**：启动前必须同时具备 DB DSN / 监听地址 / **长度 ≥ 32 的 Bearer 令牌**（否则进程起不来）⇒ 令牌不匹配 ⇒ **401**；事件不存在 ⇒ **404**；依赖不可用 ⇒ **503**。<br>⇒ **「谁能问权威」在 Go 侧只有这一个入口**，且该入口**自带鉴权** |
+| 4 | **阶段一当前行为**（**实测**） | **语义齐备 + 暴露形态缺失**：<br>· RAG `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/mq/LikeAuthorityEndpointConfig.java` = **29 行纯注释的骨架占位**（无一行可执行代码）<br>· 实测 `service/like/like-rpc/src/main/java/**` 里 `@RestController` / `@RequestMapping` / `@Controller` / `@GetMapping` = **0 命中** ⇒ **like-rpc 没有任何 HTTP 端点**<br>· 实测 `grep -rn "rtw.like-mq" service/**/src/main/java` 只命中**常量定义**（`LikeEventContracts.java:181` / `LikeDeliveryValidator.java:116` / `LikeAuthorityLookupService.java:75`）⇒ **没有任何 `AuthorityHandlerFactory.register(...)` 调用** ⇒ 未接线<br>· 共享层能力**已齐备**：`service/common/src/main/java/com/rag/common/communityfact/AuthorityHandler.java` ＋ `service/common/src/main/java/com/rag/common/spring/AuthorityHandlerFactory.java`（**依赖 servlet**）⇒ **差的是 like 域接线，不是能力**<br>· 语义层**已实现**：`service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeAuthorityLookupService.java`（**407 行**，Go `fact_authority.go:12-146` 的 12 道校验逐字翻译）· 守门 `LikeAuthorityLookupServiceGateTest` **11 条**全绿 |
+| 5 | **具体差异** | **暴露形态差异**（**不是**链路缺失、**不是**语义差异）：Go 有「**独立进程 + 固定路径 + Bearer 鉴权**」这一个入口；RAG 侧**没有任何 HTTP 端点** ⇒ **「谁能问权威事实」在 RAG 侧无对应物**<br>· ⚠️ 台账原述「**6 个 4 行骨架**」**已实测过时**（本节 §2 ① 已订正）⇒ **不得再按旧述当缺陷**<br>· ⚠️ **安全性方向 = RAG 更严**（少一个越权面）⇒ **不是安全洞**；受影响的是**调用方拿不到权威事实** ⇒ 该链路暂不可用 |
+| 6 | **暂缓或简化理由** | ① **暴露形态是部署/产品决策**（暴露给谁、看多细、放在哪个进程）⇒ **阶段一不存在「唯一正确形态」的判据** ⇒ 不该由技术 lane 单方面拍板；<br>② **用户 2026-10-29 裁定 = 改登记为 C 类（阶段二暂缓）** ⇒ 按 `docs/PhaseGoal-judge.md` §1.1 ⑥ 第 4 条（`:57`）**不计入**「归属本组件的必相对齐项」；<br>③ （工程约束，**记录用**）落地需改 **2 处共享面**：新建模块要动 `tools/difftest/check-wave-lane-ownership.py` 白名单 ＋ 根 `docker-compose.yml` ⇒ **域内 lane 无写权** ⇒ **落码归收口执行者 / 阶段二** |
+| 7 | **对业务正确性/安全性/数据一致性与可靠性的影响** | 业务正确性 🟡（**形态层**，非语义层）· 安全 ❌（**RAG 更严** ⇒ 不是安全洞）· 数据一致性 ❌（无）· 可靠性 🟡（调用方拿不到权威事实 ⇒ 受影响链路暂不可用） |
+| 8 | **是否阻断阶段 1** | ❌ **否**（**C 类暂缓 ⇒ 不计入「真漂移 = 0」的口径**）<br>**依据（逐条可复算）**：<br>· 按 `docs/twoStage.md` §10（`:954`）**「C 类：阶段 2 最终工程建设项」** ⇒ `003-C` 定级 **C 类**（§10 `:957` 明写「P0–P3 描述问题严重程度，A–D 描述阶段归属，两者不能互相替代」⇒ 本条**同时**是 **P2**）<br>· 本条已按 `docs/twoStage.md` §5.3（`:363-375`）**11 字段登记完整**（本表 ①~⑪）<br>· ⇒ 按 `docs/PhaseGoal-judge.md` §1.1 ⑥ 第 4 条（`:57`）**不计入**「归属本组件的必相对齐项」⇒ ⇒ **不计入**阶段一必相对齐项<br>· ⚠️ **C 类 ≠ 零差异** ⇒ **不得**据此宣称 like-rpc「已对齐」；⚠️「事实投递链路端到端真实运行」的**最后一环**仍是本段 ⇒ 收口方若要判 **P0 第 1 条**，**必须连本段一起读** |
+| 9 | **阶段 2 的恢复或替换方案** | ① 先由**用户拍板部署形态**（暴露给谁、什么粒度、哪个进程）<br>② 按拍板结果把 RAG 的暴露入口**对齐 Go 的形态**（**内部实现不改**）<br>③ 若拍板结论是「**不对齐**」⇒ 走**签字登记**（`docs/Intentional_Deviations/like/`）⇒ **决策即结论**<br>④ 落地动作**二选一**：**独立进程**（新增模块 + 改 2 处共享面）／**同进程独立 HTTP 端口**（给 like-rpc 加 servlet 依赖 ⇒ 会动既有 **4 个**未声明 `webEnvironment` 的 `@SpringBootTest`） |
+| 10 | **阶段 2 的测试场景和通过标准** | ① 端点**必须鉴权**：无 token / 错 token ⇒ **401**（Go `authority_http.go:46`）<br>② token 长度 < 32 ⇒ **启动失败**（Go `main.go:54`）<br>③ 查询不存在的 `event_id` ⇒ **404**（Go `authority_http.go:52`/`:59`）<br>④ 依赖不可用 ⇒ **503**（Go `authority_http.go:67`）<br>⑤ 选定的暴露入口 × 选定的粒度 ⇒ **双侧活体对拍** ⇒ 响应**逐字节一致**（状态码 + 归一化 body 逐字段）⇒ **通过标准 = 0 处差异**<br>⑥ **变异必红**：故意改一处端点形态 ⇒ 探针必须转红 |
+| 11 | **当前证据及剩余证据缺口** | **当前证据** = A 段 **L4**（探针阶段 B：两侧投给 DC 的 **970 bytes** · sha256 `3685ca30…` 相同 ＋ outbox 终态逐字段相同）· B 段 **E3**（`LikeAuthorityLookupServiceGateTest` **11/11**）· `E60` **已销案**（探针阶段 C：Go `"error_code":5011` · RAG `business_error` 行）<br>**剩余缺口** = **暴露形态层尚未取证** —— ⚠️ 但缺口**不是「证据不足」，而是「形态本身尚未定义」**（决策未下 ⇒ 无可测物）⇒ **不是取证缺口**、**不属 §11.2** 类<br>⚠️ **与 `003-B` 互锁**：`003-B` 的双侧活体格（「同一条 `event_id` 两侧 `AuthorityFact` 逐字段相等」）**解锁前提 = 本段先拍板** |
+
 #### ③ 本轮新增的「段 2」实现要点（**逐字对照 Go，不采信台账转述**）
 
 | Go 位置 | RAG 实现 | 备注 |
@@ -1939,7 +1960,7 @@ grep -n "new FixedBackOff(0, 0)\|new DefaultErrorHandler" \
 
 | # | 未闭合项 | 性质 | 优先级 | 阶段归属 | 是否**阻断**本域判 ✅ | 归谁 |
 |---|---|---|---|---|---|---|
-| 1 | **`DRIFT-LIKE-003-C`**（权威读的**暴露形态**：独立进程 / 同进程独立 HTTP 端口） | **形态决策**（不是行为漂移） | **P2** | **C 类** | ❌ 否 | **收口执行者 / 用户拍板**（落地需改 2 处共享面） |
+| 1 | **`DRIFT-LIKE-003-C`**（权威读的**暴露形态**：独立进程 / 同进程独立 HTTP 端口） | **形态决策**（不是行为漂移） | **P2** | **C 类** | ❌ 否 | **阶段二**（**2026-10-29 用户裁定 = 改登记为 C 类暂缓** ⇒ 已按 `twoStage.md` §5.3 **11 字段**登记于本文件 §2 ②-2 ⇒ **不再回到用户拍板队列**；落地需改 2 处共享面 ⇒ 归收口执行者） |
 | 2 | **`L-U9`**（真 Kafka 活体：失败消息之后后续消息真被继续处理） | **取证缺口** | P2 | C 类 | ❌ 否 | 本域（阶段 2） |
 | 3 | **`DRIFT-LIKE-003-B` 的双侧活体**（同一条 `event_id` 两侧 `AuthorityFact` 逐字段相等） | **取证缺口** | P2 | C 类 | ❌ 否 | 本域（阶段 2） |
 | 4 | **`P-U-1/2/3`**（like-proto 未取证项，见 [`like/proto.md`](proto.md)） | **取证缺口** | P3 | C 类 | ❌ 否 | 本域（阶段 2） |
@@ -2310,6 +2331,24 @@ cd "/Users/pr/Documents/java&golang/RAG.worktrees/r2-like-task"
 bash tools/api-full-parity-probe/like/run.sh          # ⇒ EXIT=0
 ```
 
+> 🔴🔴 **2026-10-29 复算前提（R4 lane 实测追加）—— 上面这条命令按当前代码基线**跑不出来**（⇒ EXIT=2）** ⇒ **必须先补一个环境变量**：
+>
+> ```bash
+> export USER_JWT_SECRET=ae0536f9-6450-4606-8e13-5a19ed505da0   # = 探针自己的 JWT_SECRET
+> bash tools/api-full-parity-probe/like/run.sh          # ⇒ EXIT=0
+> ```
+>
+> **根因**：探针只用了 `JWT_SECRET`（**签发**侧，`run.sh:60`）⇒ **从未给 RAG api 进程传 `USER_JWT_SECRET`**（`run.sh:343` `java -jar "${RAG_API_JAR}"` 无该 env）⇒ 而 `service/like/like-api/src/main/resources/application.yml:85` 的 `access-secret: ${USER_JWT_SECRET}` **没有默认值** ⇒ Spring 绑到**未解析的占位符字面量** ⇒ **P0 #8 补正**加的守卫 **fail-closed** 抛错（`service/like/like-api/src/main/java/com/rag/like/like/api/config/LikeApiProperties.java:132`）⇒ **RAG like-api 起不来** ⇒ 探针 `die`（EXIT=2）。
+> ⇒ **R4 lane 实测**：不补 env ⇒ 连撞 **3 次**（① 宿主端口起不来 ⇒ `EXIT=2`；② Go 进程被宿主 OOM killer `Killed: 9` ⇒ `EXIT=2`；③ 上面这条密钥守卫 ⇒ `EXIT=2`）⇒ **补上 env 后 ⇒ EXIT=0**（阶段 A **8/8** + 阶段 B + 阶段 C 全绿）。
+> ⚠️ **本 lane 只登记，未改 `tools/**` 一行**（该目录写权在 R2 lane / 收口执行者）⇒ **建议修法 = 一行**：在 `run.sh` 起 RAG api 那一步补 `USER_JWT_SECRET="${JWT_SECRET}"`。
+> ⇒ 📌 **凡引用本节 EXIT=0 的结论，必须连带引用这条前提**（否则「不可复算」）。
+>
+> 🔴 **同族第 2 条缺陷（本 lane 实测撞到）—— 探针跑完后会留下孤儿 Go 进程，占住 `18121`/`18122`**：
+> `run.sh` 的 cleanup 只收了**容器**（`r2like-*` 容器本轮实测已清空）⇒ **Go 的 `api` / `rpc` 二进制**（`${WORK}/api` / `${WORK}/rpc`）**被 SIGTERM 掉一半、另一半变孤儿（`PPID=1`）继续 LISTEN** ⇒ ⇒ **下一轮探针起 Go api 时撞端口 ⇒ 看起来像「环境坏了」**。
+> **本轮实测**：接手时工作树里**已经有**这样一对孤儿（占 `18121`/`18122`）；本轮跑完又留了一对 ⇒ **两次都是同一形态** ⇒ 判定为**探针侧缺陷，不是 like 域缺陷**。
+> **手动清理**：`lsof -nP -iTCP:18121 -iTCP:18122 -sTCP:LISTEN` ⇒ `kill <pid>`（本轮已清）。
+> **建议修法（供收口执行者）**：cleanup 里对 `GO_PIDS` / `RAG_PIDS` 显式 `wait` + 兜底 `pkill -f "${WORK}/(api|rpc)"` ⇒ 否则**每跑一轮就污染下一轮**。
+
 ### 阶段 A · HTTP 业务面（9 条冻结期望 ⇒ 逐字节）
 
 ```
@@ -2391,7 +2430,7 @@ bash tools/api-full-parity-probe/like/mutate-parity.sh   # ⇒ EXIT=0
 | 2 | **`E59`**（message-rpc：deadline 的原始错误被改写成 `INTERNAL` + `ERROR_DB_UPDATE`） | ✅ **闭合（销案，本轮复验）** —— **不重开**；⚠️ **落点不在本域**（`service/message/**` ⇒ 本 lane **只读** ⇒ **未改其代码**） | **E3（复跑）** · 2026-10-29 | 本轮只**复跑它的守门**：`mvn -o -B -pl service/message/message-rpc -am -DargLine=-Xmx2g -Dtest='MessageDomainServiceDbFailureStatusTest' -Dsurefire.failIfNoSpecifiedTests=false test` ⇒ **`Tests run: 4, Failures: 0, Errors: 0, Skipped: 0`** · **BUILD SUCCESS**（EXIT=0）⇒ ⇒ **修复仍在**。⚠️ **双侧活体仍缺**（Go 侧真 server 与 RAG 侧真 server 同一条 DB 故障的 status 逐字节比对）⇒ ⇒ **不写 L4**（沿用 `docs/DRIFT/message/rpc.md:2800` 的口径） |
 | 3 | **`DRIFT-LIKE-003-A`**（事实投递链路） | ✅ **闭合（销号）** —— 证据从 **E4 升到 L4** | **L4（双侧活体）＋ 变异验证** · 2026-10-29 | 阶段 B：两侧投给 DC 的**字节**相同（**970 bytes** · sha256 `3685ca30…`）＋ **outbox 终态逐字段相同**（`delivery_status` / receipt_id / receipt_sha256）⇒ ⇒ 「**事实一旦投递，两侧产生的字节与回写状态完全一致**」已双侧活体取证 |
 | 4 | **`DRIFT-LIKE-003-B`**（权威读语义 Java 化 · 12 道校验） | 🟡 **仍开放**（**取证缺口**，**非行为漂移**）—— **不重开** | **E3（既有守门 11/11）** · 2026-10-29 | 本轮探针**不产生新证据**：RAG 侧**没有**权威读 HTTP 端点（= `003-C` 未落地）⇒ ⇒ **「同一条 `event_id` 两侧 `AuthorityFact` 逐字段相等」这一格仍缺** ⇒ ⇒ **该格的解锁前提是 `003-C` 先拍板**（见 §5） |
-| 5 | **`DRIFT-LIKE-003-C`**（权威读的**暴露形态**：独立进程 / 同进程独立 HTTP 端口） | 🔴 **仍开放**（**形态决策**）—— **不因本轮探针而改变** | — · 2026-10-29 | 本轮**未触碰**：落地需改 **2 处共享面**（新建模块要动 `check-wave-lane-ownership.py` 白名单 ＋ 根 `docker-compose.yml`）⇒ **本 lane 无写权** ⇒ ⇒ **仍须收口执行者 / 用户拍板**（两种形态二选一） |
+| 5 | **`DRIFT-LIKE-003-C`**（权威读的**暴露形态**：独立进程 / 同进程独立 HTTP 端口） | 🟡 **C 类暂缓项已正式登记**（2026-10-29 用户裁定）—— **不再作为阶段一待拍板项** | **—（C 类已登记 ⇒ 不计入必相对齐项）** · 2026-10-29 | **本轮未触碰实现**（落地要改 2 处共享面 ⇒ 本 lane 无写权）⇒ **裁定结果 = 按 `twoStage.md` §5.3 十一项登记为 C 类暂缓**（本文件 §2 ②-2，字段与全仓交付物 `docs/Stage1/05-差异与暂缓项清单.md` §3.7 `S1-LIKE-001` 一致）⇒ ⇒ **形态二选一落到阶段二执行**，本条**不再回到用户拍板队列** |
 
 ## ④ 🔴 本轮**新登记**的一条**共享层可观测性缺口**（**本 lane 不修 ⇒ 转 G4**）
 
