@@ -20,6 +20,31 @@
 #   GO_REPO=/path/to/Sea-RideTheWind_golang bash tools/api-full-parity-probe/like/run.sh
 #
 # 退出码：0 = 三段全绿；1 = 有差异；2 = 环境问题 / 真源漂移 / 依赖缺失。
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# 🩹 2026-10-29 · R4 lane 修的两个**真缺陷**（上一轮收工时登记）
+#
+# 🔴 缺陷 1：**没给 RAG 的 like-api 传验签密钥 ⇒ 进程起不来 ⇒ 探针 EXIT=2**
+#   现象：`service/like/like-api/src/main/resources/application.yml:85` 写的是
+#         `access-secret: ${USER_JWT_SECRET}`（**故意没有默认值** ⇒ P0 #8），
+#         守卫 `LikeApiProperties#verifyAccessSecret()`（@PostConstruct）fail-closed
+#         ⇒ 缺变量 ⇒ `IllegalStateException` ⇒ **应用起不来**。
+#   事实：上一版脚本只导了 `JWT_SECRET`（**签发侧**）⇒ 从没给 **验签侧** 传过密钥。
+#   修法：起 like-api 时补 `USER_JWT_SECRET="${USER_JWT_SECRET}"`（与签发同值）。
+#         ⚠️ **只有 like-api 需要它** —— like-rpc 全模块零 JWT 引用，
+#            它的两个 token 占位符都有默认值（空串）且对应功能默认关闭。
+#
+# 🔴 缺陷 2：cleanup 只收容器 ⇒ **Go 的 api/rpc 变孤儿**、继续占端口
+#   事实：`( cd X && cmd ) &` ⇒ `$!` 是**子 shell** 的 PID（bash 对异步子 shell
+#         会再 fork 一次）⇒ `kill $!` 杀的是子 shell ⇒ 真服务进程活着 ⇒ 端口不释放
+#         ⇒ 实测残留占住 :18121 / :18122 ⇒ 污染下一轮。
+#   修法：① 启动侧改 `exec`（子 shell 被**替换**成服务进程 ⇒ `$!` 就是服务 PID）；
+#         ② 收尾侧**按端口复核**（kill 之后端口还在 ⇒ 再按签名清一遍）；
+#         ③ 收尾后**断言** `lsof -nP -iTCP:<端口> -sTCP:LISTEN` 为空 ⇒ 不绿就不算跑完。
+#
+# ⚠️ 端口**自动挑**：在窗口 18161-18170 内挑 9 个空闲口（5 服务口 + 4 容器宿主口）
+#    ⇒ 不硬编码撞车；窗口不够 ⇒ **exit 2**（环境问题），不越界抢别人的口。
+# ─────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,21 +60,29 @@ NACOS_PORT="${NACOS_PORT:-49848}"    # Sea-nacos   49848→8848
 REDIS_HOST_PORT="${REDIS_HOST_PORT:-49380}"
 JAEGER_PORT="${JAEGER_PORT:-49268}"  # Sea-jaeger  49268→4317
 
-# ── 两侧服务端口（本轮 like 段：18121-18125）────────────────────────────────
-GO_API_PORT="${GO_API_PORT:-18121}"   # Go  like-api  HTTP
-GO_RPC_PORT="${GO_RPC_PORT:-18122}"   # Go  like-rpc  gRPC
-RAG_API_PORT="${RAG_API_PORT:-18123}" # RAG like-api  HTTP
-RAG_RPC_PORT="${RAG_RPC_PORT:-18124}" # RAG like-rpc  gRPC
-DC_PORT="${DC_PORT:-18125}"           # 假 DataCenter 接收端（阶段 B）
+# ── 端口：**自动挑空闲的**（不许硬编码撞车）──────────────────────────────────
+# ⚠️ 本探针需要 **9 个**宿主端口：
+#    · 5 个服务口：Go like-api · Go like-rpc · RAG like-api · RAG like-rpc · 假 DC
+#    · 4 个容器宿主口：两侧各一个 Postgres + 一个 Redis
+#      （**两侧必须物理隔离**：阶段 C 要在**各自**的 Redis 上单独禁 ZCARD、
+#        在**各自**的 PG 上单独删 like_record；阶段 A 的 likeaction 是**写路径**，
+#        共用一个 Redis 会让 Go 的写和 RAG 的写打到同一批键上 ⇒ 响应必然不同 ⇒ 假漂移）
+# ⇒ 本 lane 的端口窗口 = 18161-18170（10 个 ⇒ 留 1 个当「容器起不来」时的替补）。
+# ⚠️ 不用 OS 临时段 49152-65535（宿主中间件 Sea-etcd/kafka/nacos/redis/jaeger 在那儿）。
+# ⚠️ 不用 like 域的 Testcontainers 段 22790-22819（已被域内测试类逐个占死，
+#    `LikeContainerFixedHostPortSegmentGateTest` 守门「全域不得重号」）。
+PORT_WINDOW_START="${PORT_WINDOW_START:-18161}"
+PORT_WINDOW_END="${PORT_WINDOW_END:-18170}"
+# ⚠️ **上一版脚本写死的端口段**（18121-18125 / 18131-18134）在这里**只作一件事**：
+#    把上一轮遗留的**孤儿进程**腾干净（缺陷 2：Go 的 api/rpc 变孤儿后仍占着 :18121/:18122
+#    ⇒ 污染下一轮）。⚠️ 只杀**签名匹配本探针**的进程 ⇒ 不越界动别人的东西。
+LEGACY_PORTS="18121 18122 18123 18124 18125 18131 18132 18133 18134"
 
-# ── 两侧各自的容器宿主口（**避开 OS 临时段 49152-65535**）─────────────────────
-# ⚠️ like 域的 Testcontainers 段 22790-22819 **已被域内测试类逐个占死**
-#    （`LikeContainerFixedHostPortSegmentGateTest` 守门「全域不得重号」）
-#    ⇒ 本探针**不占用**那一段 ⇒ 用 18131-18134（紧邻本轮分配段，且不在任何仓的段表里）。
-GO_PG_PORT="${GO_PG_PORT:-18131}"
-GO_REDIS_PORT="${GO_REDIS_PORT:-18132}"
-RAG_PG_PORT="${RAG_PG_PORT:-18133}"
-RAG_REDIS_PORT="${RAG_REDIS_PORT:-18134}"
+# 端口全部由 alloc_ports() 在**运行时**分配（下面这行只是占位，避免 set -u 报未定义）
+GO_API_PORT=""; GO_RPC_PORT=""; RAG_API_PORT=""; RAG_RPC_PORT=""; DC_PORT=""
+GO_PG_PORT=""; GO_REDIS_PORT=""; RAG_PG_PORT=""; RAG_REDIS_PORT=""
+# 容器宿主口的**候选池**（运行时分配；容器口不预分配 ⇒ 见 alloc_ports 的注释）
+CONTAINER_PORT_POOL=""
 # ⚠️ 容器名带 `$$`（每轮唯一）⇒ 别的轮/别的 lane 的 cleanup 绝不可能把本轮的库删掉。
 GO_PG_CONTAINER="${GO_PG_CONTAINER:-r2like-go-pg-$$}"
 GO_REDIS_CONTAINER="${GO_REDIS_CONTAINER:-r2like-go-redis-$$}"
@@ -57,7 +90,21 @@ RAG_PG_CONTAINER="${RAG_PG_CONTAINER:-r2like-rag-pg-$$}"
 RAG_REDIS_CONTAINER="${RAG_REDIS_CONTAINER:-r2like-rag-redis-$$}"
 
 # ── 验签密钥（必须与签发方一致；真源 likecenter.yaml:6 的原值）──────────────
+# Go 出处（**消费点**）：`service/like/api/internal/handler/routes.go:49`
+#   `rest.WithJwt(serverCtx.Config.UserAuth.AccessSecret)`
+#   ⇒ AccessSecret 的声明点 = `service/like/api/etc/likecenter.yaml:6`
 JWT_SECRET="${JWT_SECRET:-ae0536f9-6450-4606-8e13-5a19ed505da0}"
+# 🔴🔴 **同一个值必须同时喂给 RAG 的 like-api 进程**（缺陷 1 · 2026-10-29）：
+#   RAG 侧 `service/like/like-api/src/main/resources/application.yml:85` 写的是
+#   `access-secret: ${USER_JWT_SECRET}`（**没有默认值** ⇒ P0 #8 的 fail-closed 守卫），
+#   守卫 = `LikeApiProperties#verifyAccessSecret()`（@PostConstruct）
+#   ⇒ **不传 `USER_JWT_SECRET` ⇒ 进程起不来**（`IllegalStateException`）⇒ 探针 EXIT=2。
+#   ⇒ 本探针「签发用 JWT_SECRET / 验签用 USER_JWT_SECRET」，**两者同值**是既定设计。
+#   ⚠️ **只有 like-api 需要它**：like-rpc 全模块**零** JWT 引用（grep 实证），
+#      它的 `DC_PLATFORM_SERVICE_TOKEN` / `LIKE_FACT_AUTHORITY_TOKEN` 两处都是
+#      `${…:}`（**有默认值 = 空串**）且对应功能默认**关闭**
+#      （`like.fact.dispatch-enabled: false` / `like.authority.enabled: false`）⇒ 不会 fail-closed。
+USER_JWT_SECRET="${USER_JWT_SECRET:-${JWT_SECRET}}"
 # ── 假 DC 的 token（Go `cmd/fact-dispatch/main.go:55` 要求 **≥32 字节**）──────
 DC_TOKEN="${DC_TOKEN:-r2like-probe-data-center-service-token-0000000001}"
 
@@ -76,6 +123,44 @@ dump_logs() {
 die()  { printf '!! %s\n' "$*" >&2; dump_logs; exit 2; }
 
 host_port_open() { nc -z -G 2 127.0.0.1 "$1" >/dev/null 2>&1; }
+
+# ── 「这个口还有人在**监听**吗」（**lsof 判据**，不是 nc -z）────────────────────
+# ⚠️ **为什么「等端口释放」不能用 `nc -z`**（2026-10-29 实测踩出来的）：
+#    `nc -z` 只问「能不能连上」⇒ **docker-proxy 保留了宿主口、但没在 accept** 时
+#    它会说「没人监听」⇒ 端口**看着是空的**、实际 `docker run -p` 照样报
+#    "port is already allocated" ⇒ 探针在第 1 步就死 ⇒ 看起来像「环境坏了」。
+#    ⇒ `lsof -nP -iTCP:<port> -sTCP:LISTEN` 直接问「**谁在 LISTEN**」⇒
+#      docker-proxy 保留着的时候**看得见**（`com.docker.backend`）⇒ 才是可靠判据。
+#    ⚠️ 本机（2026-10-29 实测）docker 的口**通常是瞬时释放**的 ⇒ 轮询一般一轮就过；
+#       但**不能**因为「通常」就不等 ⇒ 判据换成 lsof 后等的就是**真的**释放。
+port_listening() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
+
+# ── 这个口是被 **docker 保留**着，还是被**别的进程**占着？────────────────────
+# ⇒ docker 保留 ⇒ 等它放出来就还能用；别人占着 ⇒ 等也没用 ⇒ 直接换口。
+# ⚠️ 判据 = 持有者的**命令行**里有没有 docker（macOS Docker Desktop 的
+#    `com.docker.backend` / `vpnkit`）⇒ 不用 PID（PID 每次都变）。
+port_holder_is_docker() {   # $1 = 端口 ⇒ 0 = 持有者是 docker
+  local p="$1" pid cmd
+  for pid in $(lsof -ti tcp:"${p}" -sTCP:LISTEN 2>/dev/null); do
+    cmd="$(ps -p "${pid}" -o command= 2>/dev/null)"
+    case "${cmd}" in
+      *com.docker*|*docker*|*vpnkit*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# ── 等一个口**真的**被放出来（lsof 判据；最多等 $2 秒）⇒ 0 = 已释放 ──────────
+wait_port_released() {   # $1 = 端口  $2 = 最多等多少秒
+  local p="$1" max="${2:-20}" i
+  for i in $(seq 1 "${max}"); do
+    port_listening "${p}" || return 0
+    # 持有者**不是 docker** ⇒ 等也没用（是别人的业务进程）⇒ 立刻判失败
+    port_holder_is_docker "${p}" || return 1
+    sleep 1
+  done
+  return 1
+}
 
 # ── 注销 Nacos 里的**残留实例**（上一轮的旧实例在心跳超时前仍是「健康」的）──
 nacos_deregister_all() {
@@ -104,30 +189,227 @@ etcd_get_value() {
 }
 etcd_has_key() { [ -n "$(etcd_get_value "$1")" ]; }
 
+# ── 「这个进程是不是本探针的？」─────────────────────────────────────────────
+# 🔴 **绝不按端口无差别 kill**：`lsof -ti tcp:<port>` 在端口被**容器发布**时
+#    返回的是 `com.docker.backend services` ⇒ 无差别 kill 会**当场杀掉 Docker daemon**
+#    （2026-10-29 实测：favorite-rpc 探针第一次跑就是这么报废的）。
+#    ⇒ 只杀签名匹配本探针的；**别人的进程 ⇒ 报错退出，不越界动手**。
+is_own_probe_process() {
+  case "$1" in
+    # 本探针自己的工作目录（Go 二进制、配置副本、假 DC 的输出目录都在里面）
+    *api-full-parity-probe*|*"${WORK}"*) return 0 ;;
+    # RAG 侧的两个 fat jar
+    *like-api-*SNAPSHOT.jar*|*like-rpc-*SNAPSHOT.jar*) return 0 ;;
+    # ⚠️ **上一轮遗留的孤儿**（缺陷 2）：Go 二进制落在 `mktemp -d` 出来的
+    #    `/var/folders/…/tmp.XXXX/{api,rpc,fact-dispatch}` 下 ⇒ 旧 WORK 也匹配得上。
+    */tmp.*/api|*/tmp.*/rpc|*/tmp.*/fact-dispatch) return 0 ;;
+  esac
+  return 1
+}
+
+# ── 回收**本 lane 自己的**残留容器（名字前缀 r2like-）────────────────────────
+# 🔴 为什么必须**先回收容器、再挑端口**：宿主上**发布端口**的容器会让
+#    `com.docker.backend services` 这个进程**持有该端口** ⇒ `lsof -ti tcp:<port>`
+#    看到的是 docker 后端，不是探针的进程 ⇒ 「按端口无差别 kill」会误杀 docker 后端。
+#    ⇒ 正确顺序：先删掉**自己前缀**的容器（端口随之释放），再查端口。
+reclaim_own_containers() {
+  local c ports="" p i
+  for c in $(docker ps -a --format '{{.Names}}' 2>/dev/null | grep '^r2like-' || true); do
+    ports="${ports} $(docker inspect -f '{{range $q, $conf := .NetworkSettings.Ports}}{{range $conf}}{{.HostPort}} {{end}}{{end}}' "${c}" 2>/dev/null)"
+    docker rm -f "${c}" >/dev/null 2>&1 && say "   · 回收本 lane 残留容器 ${c}"
+  done
+  # ⚠️ docker-proxy 释放宿主口**不是瞬时**的 ⇒ 轮询等它真的还回来
+  #    （判据用 **lsof** 而不是 `nc -z` ⇒ 后者在 docker 保留着口时会误报「已释放」）
+  for p in ${ports}; do
+    [ -n "${p}" ] || continue
+    for i in $(seq 1 20); do port_listening "${p}" || break; sleep 1; done
+  done
+}
+
+# ── 本探针**真正占用**的全部端口（5 个服务口 + 4 个容器宿主口）────────────────
+# ⚠️ **只算「真正用过的」**：`CONTAINER_PORT_POOL` 是**候选池**——本轮不一定每个都绑上
+#    ⇒ 把它算进来 ⇒ 若**别的 lane 的容器**恰好占着候选池里的某个口
+#    ⇒ 收尾断言会把**别人的**占用当成「本探针的残留」⇒ **假红**。
+#    ⇒ 候选池只进「开跑前清残留」（`free_probe_ports`），**不进**收尾断言。
+all_probe_ports() {
+  printf '%s\n' "${GO_API_PORT} ${GO_RPC_PORT} ${RAG_API_PORT} ${RAG_RPC_PORT} ${DC_PORT} ${GO_PG_PORT} ${GO_REDIS_PORT} ${RAG_PG_PORT} ${RAG_REDIS_PORT}"
+}
+
+# ── 容器宿主口的**候选池**（本轮没绑上的候选口也在内）────────────────────────
+candidate_ports() { printf '%s\n' "${CONTAINER_PORT_POOL}"; }
+
 # ── 端口预检：把**上一轮残留**的探针进程踢掉（否则 Go rpc 会 panic）──────────
 free_probe_ports() {
-  local p pid
-  for p in "${GO_API_PORT}" "${RAG_API_PORT}" "${GO_RPC_PORT}" "${RAG_RPC_PORT}" "${DC_PORT}" \
-           "${GO_PG_PORT}" "${GO_REDIS_PORT}" "${RAG_PG_PORT}" "${RAG_REDIS_PORT}"; do
-    for pid in $(lsof -ti tcp:"${p}" 2>/dev/null); do
-      kill -9 "${pid}" 2>/dev/null
-      say "   · 踢掉占用 :${p} 的残留进程 ${pid}"
+  local p pid cmd
+  # ① **服务口**：必须干净 ⇒ 别人的进程占着 ⇒ **报错退出**（不越界动手）
+  for p in "${GO_API_PORT}" "${GO_RPC_PORT}" "${RAG_API_PORT}" "${RAG_RPC_PORT}" "${DC_PORT}"; do
+    [ -n "${p}" ] || continue
+    for pid in $(lsof -ti tcp:"${p}" -sTCP:LISTEN 2>/dev/null); do
+      cmd="$(ps -p "${pid}" -o command= 2>/dev/null)"
+      if is_own_probe_process "${cmd}"; then
+        kill -9 "${pid}" 2>/dev/null
+        say "   · 踢掉占用 :${p} 的**本探针**残留进程 ${pid}"
+      else
+        die "端口 :${p} 被**无关**进程占用（pid ${pid}：${cmd}）⇒ 本探针不越界杀进程；请改端口窗口后重跑"
+      fi
+    done
+  done
+  # ② **容器候选口**：⚠️ 这里**绝不 die** ——
+  #    候选口可能是 **docker 保留着**的（`com.docker.backend` 持有它的 LISTEN socket）
+  #    ⇒ 那不是「别人的业务进程」⇒ 真正的判据交给 `pick_port`（真起一次容器才知道）
+  for p in $(candidate_ports); do
+    [ -n "${p}" ] || continue
+    for pid in $(lsof -ti tcp:"${p}" -sTCP:LISTEN 2>/dev/null); do
+      cmd="$(ps -p "${pid}" -o command= 2>/dev/null)"
+      if is_own_probe_process "${cmd}"; then
+        kill -9 "${pid}" 2>/dev/null
+        say "   · 踢掉占用 :${p} 的**本探针**残留进程 ${pid}"
+      else
+        say "   · 端口 :${p} 被非本探针进程持有（pid ${pid}：${cmd}）⇒ 留给 pick_port 真试时跳过" >&2
+      fi
+    done
+  done
+  # ⚠️ **上一版脚本写死的端口段**：把上一轮遗留的孤儿（Go api/rpc 变孤儿后仍占着
+  #    :18121/:18122）腾干净 ⇒ 否则它们会一直占着宿主端口、污染下一轮。
+  for p in ${LEGACY_PORTS}; do
+    for pid in $(lsof -ti tcp:"${p}" -sTCP:LISTEN 2>/dev/null); do
+      cmd="$(ps -p "${pid}" -o command= 2>/dev/null)"
+      if is_own_probe_process "${cmd}"; then
+        kill -9 "${pid}" 2>/dev/null
+        say "   · 清掉上一版脚本遗留的孤儿进程 ${pid}（:${p}）"
+      fi
     done
   done
   sleep 1
+}
+
+# ── 在端口窗口内自动挑空闲端口（**不许硬编码撞车**）────────────────────────
+# ⚠️ **两类端口的「空闲」判据不一样**（2026-10-29 实测踩出来的）：
+#   · **服务口**（普通 TCP bind）⇒ `nc -z` 判据**准确** ⇒ 窗口里扫一遍就行。
+#   · **容器宿主口** ⇒ `nc -z` **不准确**：macOS Docker Desktop 的 `com.docker.backend`
+#     在**容器被删之后**仍会**保留宿主口的占用** ⇒ `nc -z` 说「没人监听」、
+#     端口**看着是空的** ⇒ 但 `docker run -p` 报 "port is already allocated"
+#     ⇒ 探针在第 1 步就死 ⇒ 看起来像「环境坏了」。
+#     ⇒ 唯一可靠的判据 = **真起一次容器**（`pick_port` 就是干这个的）
+#     ⇒ ⇒ 容器口**不预分配**，改成「候选池 + 逐个真试」。
+alloc_ports() {
+  local p free="" n=0 pool="" used=""
+  # ① 5 个服务口
+  for p in $(seq "${PORT_WINDOW_START}" "${PORT_WINDOW_END}"); do
+    host_port_open "${p}" && continue
+    free="${free} ${p}"
+    n=$((n + 1))
+    [ "${n}" -ge 5 ] && break
+  done
+  [ "${n}" -ge 5 ] || die "端口窗口 ${PORT_WINDOW_START}-${PORT_WINDOW_END} 里只剩 ${n} 个空闲的**服务口**（要 5 个）⇒ 别的 lane 占了本段 ⇒ 换段重跑（PORT_WINDOW_START=… PORT_WINDOW_END=…）"
+  # shellcheck disable=SC2086
+  set -- ${free}
+  GO_API_PORT="$1"; GO_RPC_PORT="$2"; RAG_API_PORT="$3"; RAG_RPC_PORT="$4"; DC_PORT="$5"
+  # ② 容器口的候选池 = 窗口里**没被服务口占用**的其余端口
+  for p in $(seq "${PORT_WINDOW_START}" "${PORT_WINDOW_END}"); do
+    case " ${free} " in *" ${p} "*) continue ;; esac
+    pool="${pool} ${p}"
+  done
+  n=$(printf '%s' "${pool}" | wc -w | tr -d '[:space:]')
+  [ "${n}" -ge 4 ] || die "端口窗口里只剩 ${n} 个可作容器宿主口的候选（要 4 个）⇒ 换段重跑"
+  # ⚠️ **轮转起点**：按 `$$` 打散 ⇒ 连续两轮**不会**从同一个候选开始试
+  #    ⇒ 上一轮被 docker 保留的那个口 ⇒ 这一轮排在后面 ⇒ 撞车概率大降。
+  local off=$(( $$ % n )) i=0 head="" tail=""
+  # shellcheck disable=SC2086
+  for p in ${pool}; do
+    if [ "${i}" -lt "${off}" ]; then tail="${tail} ${p}"; else head="${head} ${p}"; fi
+    i=$((i + 1))
+  done
+  CONTAINER_PORT_POOL="${head}${tail}"
+  say "   · 端口自动选择：服务口 ${GO_API_PORT}/${GO_RPC_PORT}/${RAG_API_PORT}/${RAG_RPC_PORT}/${DC_PORT}"
+  say "   ·                 容器口候选池 ${CONTAINER_PORT_POOL}（真起容器才知能不能用）"
+}
+
+# ── 等一批端口**真的**被释放 ────────────────────────────────────────────────
+# ⚠️ 两种等法：
+#   · 服务口（strict）：还开着 ⇒ 看是谁占的；**不是本探针的** ⇒ 等也没用 ⇒ 不等
+#     （例如别的 lane 抢了这个口 ⇒ 我们无权动它）。
+#   · 容器口（plain）：宿主口由 **docker-proxy** 持有 ⇒ 删了容器才还回来 ⇒ 无条件等。
+wait_ports_closed() {   # $1 = strict|plain   $2.. = 端口列表
+  local mode="$1"; shift
+  local p pid cmd i foreign
+  for p in "$@"; do
+    [ -n "${p}" ] || continue
+    for i in $(seq 1 30); do
+      port_listening "${p}" || break
+      if [ "${mode}" = "strict" ]; then
+        foreign=0
+        for pid in $(lsof -ti tcp:"${p}" -sTCP:LISTEN 2>/dev/null); do
+          cmd="$(ps -p "${pid}" -o command= 2>/dev/null)"
+          is_own_probe_process "${cmd}" || foreign=1
+        done
+        [ "${foreign}" = "1" ] && break
+      fi
+      sleep 1
+    done
+  done
+}
+
+# ── 收尾：把服务**真正**停掉（不是「kill 了就算」）──────────────────────────
+# 🔴🔴 **缺陷 2 的本体**：上一版 cleanup 只 `kill` 掉 `${GO_PIDS[@]}` 里的 PID ⇒
+#    而那批 PID 是 `( cd X && cmd ) &` 的**子 shell**（实测：bash 对 `&` 的异步子 shell
+#    会**再 fork 一次**跑命令 ⇒ `$!` ≠ 服务 PID）⇒ **真正的 Go api/rpc 进程变孤儿**
+#    ⇒ 继续占着 :18121/:18122 ⇒ 污染下一轮。
+#    ⇒ 修法有两半：① 启动侧改用 `exec`（让 `$!` 就是服务 PID）；
+#                   ② 收尾侧**按端口复核**（kill 之后端口还在 ⇒ 再按签名清一遍）。
+teardown() {
+  local p pid cmd
+  # ① 先礼后兵：SIGTERM → SIGKILL
+  for p in ${GO_PIDS[@]+"${GO_PIDS[@]}"} ${RAG_PIDS[@]+"${RAG_PIDS[@]}"} ${DC_PIDS[@]+"${DC_PIDS[@]}"}; do kill "$p" 2>/dev/null; done
+  sleep 1
+  for p in ${GO_PIDS[@]+"${GO_PIDS[@]}"} ${RAG_PIDS[@]+"${RAG_PIDS[@]}"} ${DC_PIDS[@]+"${DC_PIDS[@]}"}; do kill -9 "$p" 2>/dev/null; done
+  # ② **按端口复核**：服务口必须真的关了（这一步才是「不留孤儿」的判据）
+  wait_ports_closed strict "${GO_API_PORT}" "${GO_RPC_PORT}" "${RAG_API_PORT}" "${RAG_RPC_PORT}" "${DC_PORT}"
+  # ③ 收容器（容器的宿主口由 docker-proxy 持有 ⇒ 删了容器才还回来）
+  docker rm -f "${GO_PG_CONTAINER}" >/dev/null 2>&1
+  docker rm -f "${GO_REDIS_CONTAINER}" >/dev/null 2>&1
+  docker rm -f "${RAG_PG_CONTAINER}" >/dev/null 2>&1
+  docker rm -f "${RAG_REDIS_CONTAINER}" >/dev/null 2>&1
+  wait_ports_closed plain "${GO_PG_PORT}" "${GO_REDIS_PORT}" "${RAG_PG_PORT}" "${RAG_REDIS_PORT}"
+  # ④ 兜底：端口上还有东西 ⇒ **只杀签名匹配本探针的**（不越界动别人的）
+  for p in $(all_probe_ports); do
+    [ -n "${p}" ] || continue
+    for pid in $(lsof -ti tcp:"${p}" -sTCP:LISTEN 2>/dev/null); do
+      cmd="$(ps -p "${pid}" -o command= 2>/dev/null)"
+      if is_own_probe_process "${cmd}"; then
+        kill -9 "${pid}" 2>/dev/null
+        say "   · 收尾：清掉残留的**本探针**进程 ${pid}（:${p}）"
+      else
+        say "   ⚠️ 端口 :${p} 仍有**非本探针**进程（pid ${pid}：${cmd}）⇒ 不越界杀" >&2
+      fi
+    done
+  done
+  GO_PIDS=(); RAG_PIDS=(); DC_PIDS=()
+}
+
+# ── 收尾后**断言**：本探针的端口上一个残留都不能有 ──────────────────────────
+# ⚠️ 判据 = `lsof -nP -iTCP:<端口> -sTCP:LISTEN` 为空（= 「没人还在监听」）。
+#    ⚠️ 刻意**只查 LISTEN**：一个进程可能只是**连出**到这个口（客户端 socket）⇒
+#    那不是「占了端口」⇒ 不该算残留。
+assert_no_leftover() {
+  local p pid cmd bad=0
+  for p in $(all_probe_ports); do
+    [ -n "${p}" ] || continue
+    for pid in $(lsof -ti tcp:"${p}" -sTCP:LISTEN 2>/dev/null); do
+      cmd="$(ps -p "${pid}" -o command= 2>/dev/null)"
+      say "   ❌ 端口 :${p} 仍有残留（pid ${pid}：${cmd}）"
+      bad=1
+    done
+  done
+  [ "${bad}" = "0" ] && say "   ✓ 收尾复核：本探针的 9 个端口**零残留**"
+  return "${bad}"
 }
 
 cleanup() {
   local p
   # ⚠️ macOS 自带 bash 3.2：`set -u` 下展开**空数组**会报 `unbound variable`
   #    ⇒ 用 `${A[@]+"${A[@]}"}` 形式。
-  for p in ${GO_PIDS[@]+"${GO_PIDS[@]}"} ${RAG_PIDS[@]+"${RAG_PIDS[@]}"} ${DC_PIDS[@]+"${DC_PIDS[@]}"}; do kill "$p" 2>/dev/null; done
-  sleep 1
-  for p in ${GO_PIDS[@]+"${GO_PIDS[@]}"} ${RAG_PIDS[@]+"${RAG_PIDS[@]}"} ${DC_PIDS[@]+"${DC_PIDS[@]}"}; do kill -9 "$p" 2>/dev/null; done
-  docker rm -f "${GO_PG_CONTAINER}" >/dev/null 2>&1
-  docker rm -f "${GO_REDIS_CONTAINER}" >/dev/null 2>&1
-  docker rm -f "${RAG_PG_CONTAINER}" >/dev/null 2>&1
-  docker rm -f "${RAG_REDIS_CONTAINER}" >/dev/null 2>&1
+  teardown
   # ⚠️ **不删临时目录**：`rm -rf` 在本机会被回收站守卫整体拒绝
   #    ⇒ 留着 `/var/folders/.../tmp.*` 由系统清理（比让脚本自杀强）。
   if [ "${KEEP_WORK:-0}" = "1" ]; then
@@ -139,8 +421,8 @@ cleanup() {
 trap cleanup EXIT
 
 # ══════════════════════════ 0. 前置检查（缺 ⇒ exit 2，绝不静默降级）══════════════
-step "0/10 前置检查"
-for cmd in docker go mvn curl xxd shasum lsof nc python3; do
+step "0/11 前置检查"
+for cmd in docker go mvn java curl xxd shasum lsof nc python3; do
   command -v "${cmd}" >/dev/null 2>&1 || die "缺命令：${cmd}"
 done
 GO_REPO="${GO_REPO:-/Users/pr/Documents/java&golang/Sea-RideTheWind_golang}"
@@ -152,39 +434,80 @@ for pair in "Sea-etcd:${ETCD_PORT}" "Sea-kafka:${KAFKA_PORT}" "Sea-nacos:${NACOS
 done
 docker exec Sea-etcd etcdctl --endpoints="${ETCD_CTL_ENDPOINT}" endpoint health >/dev/null 2>&1 \
   || die "容器内 etcd 端点 ${ETCD_CTL_ENDPOINT} 不可用（ETCD_CTL_ENDPOINT 可覆盖）"
+# ⚠️ **顺序不能颠倒**：先回收自己前缀的**残留容器**（容器发布端口时是 docker 后端
+#    持有该端口 ⇒ 不先删容器就去「按端口无差别 kill」⇒ **会误杀 Docker daemon**），
+#    再在窗口内**自动挑空闲端口**，最后才清端口上的残留进程。
+reclaim_own_containers
+alloc_ports
 free_probe_ports
 say "   ✓ 命令齐 / 中间件在跑"
 
 # ══════════════════════════ 1. 两侧各自的 Postgres + Redis ══════════════════════
-step "1/10 两侧 Postgres + Redis（各一个容器，互不污染）"
+step "1/11 两侧 Postgres + Redis（各一个容器，互不污染）"
 
 start_pg() {   # $1 = 容器名  $2 = 宿主端口
-  local c="$1" p="$2" out
+  local c="$1" p="$2" out state deadline
   docker rm -f "${c}" >/dev/null 2>&1
   # ⚠️ **不吞掉 docker 的报错**：上一轮探针的容器刚被删掉时，docker-proxy 还会占着宿主口
   #    ⇒ `docker run -p` 会报 "port is already allocated" ⇒ 这里把它打出来才能定位。
+  # ⚠️ 返回码分工（2026-10-29 加）：**1 = docker run 失败（口的问题）** · **2 = 起来了但没就绪（不是口的问题）**
+  #    ⇒ 区分开 ⇒ 「口被 docker 保留」才换口，「PG 慢」不该换口（换口也是慢 ⇒ 白等）。
   if ! out=$(docker run -d --name "${c}" -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=sea \
     -e POSTGRES_DB=first_db -p "${p}:5432" postgres:16-alpine 2>&1); then
     say "   · docker run 失败（:${p}）：${out}" >&2
     return 1
   fi
-  for _ in $(seq 1 40); do
-    docker exec "${c}" pg_isready -U admin -d first_db >/dev/null 2>&1 && break
-    sleep 1
+  # 🔴🔴 **按墙钟等就绪，不按「迭代次数」**（2026-10-29 实测踩过）：
+  #    机器负载高时（load average 一度打到 **36**）`docker exec` 本身就很慢（单次 1~3s）
+  #    ⇒ 「60 次 × sleep 1」**远小于** 60 秒 ⇒ PG 还没 init 完就被判「没就绪」
+  #    ⇒ 探针**误判成「环境坏了」**（EXIT=2）⇒ 变异套件那一轮白跑。
+  #    ⇒ 改成 `deadline`（墙钟秒）＋ 轮询里顺带看**容器状态**：
+  #    容器 exited/dead ⇒ 真的起不来 ⇒ 立刻失败（别白等）；created/running ⇒ 继续等。
+  deadline=$(( $(date +%s) + ${PG_READY_TIMEOUT:-240} ))
+  while [ "$(date +%s)" -lt "${deadline}" ]; do
+    if docker exec "${c}" pg_isready -U admin -d first_db >/dev/null 2>&1; then
+      for _ in $(seq 1 30); do host_port_open "${p}" && return 0; sleep 1; done
+      return 2
+    fi
+    state="$(docker inspect -f '{{.State.Status}}' "${c}" 2>/dev/null)"
+    case "${state}" in
+      exited|dead)
+        say "   · :${p} 的 PG 容器状态=${state} ⇒ 起不来（不是端口问题）" >&2
+        docker logs "${c}" 2>&1 | tail -5 | sed 's/^/      | /' >&2
+        return 2 ;;
+    esac
+    sleep 2
   done
-  docker exec "${c}" pg_isready -U admin -d first_db >/dev/null 2>&1 || return 1
-  for _ in $(seq 1 15); do host_port_open "${p}" && return 0; sleep 1; done
-  return 1
+  say "   · :${p} 的 PG 在 ${PG_READY_TIMEOUT:-240}s 内没就绪" >&2
+  return 2
 }
 start_redis() {  # $1 = 容器名  $2 = 宿主端口
   local c="$1" p="$2" out
   docker rm -f "${c}" >/dev/null 2>&1
+  # ⚠️ 返回码分工：1 = docker run 失败（口的问题） · 2 = 起来了但连不上（不是口的问题）
   if ! out=$(docker run -d --name "${c}" -p "${p}:6379" redis:7-alpine 2>&1); then
     say "   · docker run 失败（:${p}）：${out}" >&2
     return 1
   fi
-  for _ in $(seq 1 20); do host_port_open "${p}" && return 0; sleep 1; done
-  return 1
+  # ⚠️ 就绪等待**按墙钟**（见 start_redis_wait）
+  start_redis_wait "${c}" "${p}"
+}
+# ⚠️ Redis 的就绪也**按墙钟等**（负载高时 `nc -z` + `docker` 调用都会变慢 ⇒ 迭代次数不等于秒）
+#    ⇒ 并且轮询里看**容器状态**：exited/dead ⇒ 真的起不来 ⇒ 立刻失败（别白等）。
+start_redis_wait() {   # $1 = 容器名  $2 = 宿主端口
+  local c="$1" p="$2" state deadline
+  deadline=$(( $(date +%s) + ${REDIS_READY_TIMEOUT:-60} ))
+  while [ "$(date +%s)" -lt "${deadline}" ]; do
+    host_port_open "${p}" && return 0
+    state="$(docker inspect -f '{{.State.Status}}' "${c}" 2>/dev/null)"
+    case "${state}" in
+      exited|dead)
+        say "   · :${p} 的 Redis 容器状态=${state} ⇒ 起不来（不是端口问题）" >&2
+        return 2 ;;
+    esac
+    sleep 1
+  done
+  return 2
 }
 # 端口阶梯：宿主口被**上一轮的 docker-proxy** 占着时换下一个
 # （2026-10-29 实测踩过：容器刚删，端口还没释放 ⇒ `docker run -p` 报
@@ -195,41 +518,71 @@ start_redis() {  # $1 = 容器名  $2 = 宿主端口
 #    "   · :18133 起不来 ⇒ 换下一个\n18143" ⇒ 后续的 JDBC URL 变成
 #    `jdbc:postgresql://127.0.0.1:   · :18133 …` ⇒ 启动失败 ⇒
 #    症状是「RAG like-rpc 起不来」，而真正的原因藏在**端口变量**里（2026-10-29 实测）。
-pick_port() {   # $1 = 类型(pg|redis)  $2 = 容器名  $3.. = 候选端口 ⇒ 成功时把端口打到 stdout
-  local kind="$1" c="$2"; shift 2
-  local p
-  for p in "$@"; do
-    if [ "${kind}" = "pg" ]; then
-      start_pg "${c}" "${p}" && { printf '%s' "${p}"; return 0; }
-    else
-      start_redis "${c}" "${p}" && { printf '%s' "${p}"; return 0; }
+# 这个口是不是已经被**本轮别的容器**用掉了？⇒ 跳过（否则两个容器抢一个口）
+port_taken_by_sibling() {   # $1 = 端口 ⇒ 0 = 已被占用
+  local c
+  for c in "${GO_PG_CONTAINER}" "${GO_REDIS_CONTAINER}" "${RAG_PG_CONTAINER}" "${RAG_REDIS_CONTAINER}"; do
+    if docker inspect -f '{{range $q, $conf := .NetworkSettings.Ports}}{{range $conf}}{{.HostPort}} {{end}}{{end}}' "${c}" 2>/dev/null \
+        | tr ' ' '\n' | grep -qx "${1}"; then
+      return 0
     fi
-    say "   · :${p} 起不来 ⇒ 换下一个" >&2
-    docker rm -f "${c}" >/dev/null 2>&1
-    sleep 2
   done
   return 1
 }
-# ⚠️ **先清掉本 lane 的残留容器**：容器名带 `$$`（每轮唯一）⇒ 上一轮的容器名与本轮不同
-#    ⇒ `docker rm -f "${GO_PG_CONTAINER}"` **删不掉它** ⇒ 它的宿主口仍被占着
-#    ⇒ 本轮 `docker run -p` 会失败或静默换口 ⇒ 端口与预期不符 ⇒ 探针假挂。
-#    ⇒ 这里按**前缀**清（`r2like-` 是本 lane 独占的容器名前缀 ⇒ 不会碰到别人的容器）。
-for stale in $(docker ps -a --format '{{.Names}}' | grep '^r2like-' || true); do
-  say "   · 清掉残留容器 ${stale}"
-  docker rm -f "${stale}" >/dev/null 2>&1
-done
-GO_PG_PORT="$(pick_port pg "${GO_PG_CONTAINER}" ${GO_PG_PORT} $((GO_PG_PORT+10)) $((GO_PG_PORT+20)))" \
-  || die "Go 侧 PG 起不来"
-GO_REDIS_PORT="$(pick_port redis "${GO_REDIS_CONTAINER}" ${GO_REDIS_PORT} $((GO_REDIS_PORT+10)) $((GO_REDIS_PORT+20)))" \
-  || die "Go 侧 Redis 起不来"
-RAG_PG_PORT="$(pick_port pg "${RAG_PG_CONTAINER}" ${RAG_PG_PORT} $((RAG_PG_PORT+10)) $((RAG_PG_PORT+20)))" \
-  || die "RAG 侧 PG 起不来"
-RAG_REDIS_PORT="$(pick_port redis "${RAG_REDIS_CONTAINER}" ${RAG_REDIS_PORT} $((RAG_REDIS_PORT+10)) $((RAG_REDIS_PORT+20)))" \
-  || die "RAG 侧 Redis 起不来"
+pick_port() {   # $1 = 类型(pg|redis)  $2 = 容器名  $3.. = 候选端口 ⇒ 成功时把端口打到 stdout
+  local kind="$1" c="$2"; shift 2
+  local p attempt rc
+  for p in "$@"; do
+    if port_taken_by_sibling "${p}"; then
+      say "   · :${p} 已被本轮别的容器占用 ⇒ 跳过" >&2
+      continue
+    fi
+    for attempt in 1 2 3; do
+      if [ "${kind}" = "pg" ]; then
+        start_pg "${c}" "${p}"; rc=$?
+      else
+        start_redis "${c}" "${p}"; rc=$?
+      fi
+      [ "${rc}" = "0" ] && { printf '%s' "${p}"; return 0; }
+      # ⚠️ 起来了但没就绪 ⇒ **不是口的问题** ⇒ 换口也没用 ⇒ 直接放弃
+      [ "${rc}" = "2" ] && { say "   · :${p} 起来了但没就绪（不是端口问题）⇒ 放弃这个口" >&2; return 2; }
+      # docker run 失败 ⇒ 大概率是**这个口被 docker 保留着** ⇒
+      #   ① 删掉半拉子容器；② **等它真的被放出来**（判据 = lsof 看不见 LISTEN）
+      #   （⚠️ 用 `nc -z` 等是**等不到的**：docker 保留着口时 `nc -z` 误报「已释放」
+      #     ⇒ 上一轮「还原后转绿那一跑」就撞在这个坑上 ⇒ 看着像环境坏了）
+      say "   · :${p} docker run 失败（第 ${attempt}/3 次）⇒ 等 docker 真正放出口" >&2
+      docker rm -f "${c}" >/dev/null 2>&1
+      if wait_port_released "${p}" 20; then
+        say "   · :${p} 已释放 ⇒ 重试同一个口" >&2
+      else
+        say "   · :${p} 仍被占（持有者不是 docker ⇒ 等也没用）⇒ 换下一个候选口" >&2
+        break
+      fi
+    done
+    say "   · :${p} 起不来 ⇒ 换下一个" >&2
+  done
+  return 1
+}
+# ⚠️ **残留容器已在第 0 步按前缀清过**（`reclaim_own_containers`）—— 必须放在
+#    「自动挑端口」**之前**：容器发布端口时是 docker 后端持有该端口 ⇒ 不先删容器
+#    就去按端口无差别 kill ⇒ 会误杀 Docker daemon。
+# ⚠️ 容器口的**替补**来自窗口里剩下的空闲口（`CONTAINER_PORT_POOL`）⇒ 容器刚被删、
+#    docker-proxy 还没把宿主口还回来时，`docker run -p` 会报 "port is already allocated"
+#    ⇒ 这里换下一个候选口（而不是撞车或静默换口）。
+# ⚠️ 容器口**不预分配** ⇒ 直接从候选池里**真起一次**试出来（见 alloc_ports 的注释）
+#    ⇒ 返回码 2 = 起来了但没就绪（**不是**口的问题）⇒ 与「口不够」分开报。
+GO_PG_PORT="$(pick_port pg "${GO_PG_CONTAINER}" ${CONTAINER_PORT_POOL})"; rc=$?
+[ "${rc}" = "0" ] || { [ "${rc}" = "2" ] && die "Go 侧 PG 起来了但没就绪（不是端口问题）"; die "Go 侧 PG 起不来（候选口 ${CONTAINER_PORT_POOL} 全部不可用）"; }
+GO_REDIS_PORT="$(pick_port redis "${GO_REDIS_CONTAINER}" ${CONTAINER_PORT_POOL})"; rc=$?
+[ "${rc}" = "0" ] || { [ "${rc}" = "2" ] && die "Go 侧 Redis 起来了但没就绪（不是端口问题）"; die "Go 侧 Redis 起不来（候选口 ${CONTAINER_PORT_POOL} 全部不可用）"; }
+RAG_PG_PORT="$(pick_port pg "${RAG_PG_CONTAINER}" ${CONTAINER_PORT_POOL})"; rc=$?
+[ "${rc}" = "0" ] || { [ "${rc}" = "2" ] && die "RAG 侧 PG 起来了但没就绪（不是端口问题）"; die "RAG 侧 PG 起不来（候选口 ${CONTAINER_PORT_POOL} 全部不可用）"; }
+RAG_REDIS_PORT="$(pick_port redis "${RAG_REDIS_CONTAINER}" ${CONTAINER_PORT_POOL})"; rc=$?
+[ "${rc}" = "0" ] || { [ "${rc}" = "2" ] && die "RAG 侧 Redis 起来了但没就绪（不是端口问题）"; die "RAG 侧 Redis 起不来（候选口 ${CONTAINER_PORT_POOL} 全部不可用）"; }
 say "   ✓ 两侧 Postgres + Redis 就绪（宿主端口已验证可连）"
 
 # ══════════════════════════ 2. 构建 Go 侧二进制（真源**只读**）══════════════════
-step "2/10 构建 Go 侧二进制（api / rpc / fact-dispatch）"
+step "2/11 构建 Go 侧二进制（api / rpc / fact-dispatch）"
 ( cd "${GO_REPO}" && CGO_ENABLED=0 GOPROXY=off GOFLAGS=-mod=mod GOTOOLCHAIN=local \
     go build -o "${WORK}/" ./service/like/api ./service/like/rpc ./service/like/rpc/cmd/fact-dispatch ) \
   || die "Go 侧构建失败"
@@ -237,7 +590,7 @@ step "2/10 构建 Go 侧二进制（api / rpc / fact-dispatch）"
 say "   ✓ api / rpc / fact-dispatch 构建完成"
 
 # ══════════════════════════ 3. Go 侧配置副本（真源 yaml 写死主机名）══════════════
-step "3/10 生成 Go 侧配置副本"
+step "3/11 生成 Go 侧配置副本"
 mkdir -p "${WORK}/etc" "${WORK}/log"
 # ⚠️ **DevServer 必须关掉**：go-zero v1.10.2 `zrpc/config.go` 的 `RpcServerConf.SetUp()`
 #    会调 `ServiceConf.SetUp()` ⇒ `core/service/serviceconf.go:79` `devserver.StartAgent(sc.DevServer)`
@@ -287,14 +640,22 @@ grep -q "postgres://admin:sea@127.0.0.1:${GO_PG_PORT}/first_db" "${WORK}/etc/lik
 say "   ✓ 配置副本已生成（真源 service/like 仍然干净）"
 
 # ══════════════════════════ 4. 起 Go 侧 rpc + api ═══════════════════════════════
-step "4/10 起 Go 侧 like-rpc（注册 etcd ${ETCD_PORT}）"
+step "4/11 起 Go 侧 like-rpc（注册 etcd ${ETCD_PORT}）"
 docker exec Sea-etcd etcdctl --endpoints="${ETCD_CTL_ENDPOINT}" del "like.rpc" --prefix >/dev/null 2>&1
 # ⚠️ Go 的 Postgres DSN 用的是 **环境变量占位符**（真源 like.yaml 的
 #    `postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_ADDR}:${POSTGRES_PORT}/${POSTGRES_DB}`）
 #    ⇒ 只需导环境变量，**不用改 yaml**。
-( cd "${WORK}" && POSTGRES_USER=admin POSTGRES_PASSWORD=sea POSTGRES_ADDR=127.0.0.1 \
+# 🔴🔴 **必须用 `exec`**（缺陷 2 · 2026-10-29 实测）：`( cd X && cmd ) &` ⇒ `$!` 是
+#    **子 shell** 的 PID —— bash 对**异步**子 shell 会**再 fork 一次**去跑命令
+#    ⇒ 真正的服务进程是它的**儿子** ⇒ `kill $!` 只杀得掉子 shell
+#    ⇒ **Go 的 api/rpc 变孤儿**、继续占着端口 ⇒ 污染下一轮。
+#    （实测：`$!`=71845（bash），真服务=71846；`kill 71845` 之后 71846 仍活着。）
+#    ⇒ `exec` 把子 shell **替换**成服务进程 ⇒ `$!` 就是服务 PID ⇒ kill 才有效。
+#    ⇒ 环境变量用 `exec env VAR=… cmd` 传（`VAR=… exec cmd` 在 bash 里是
+#      「特殊内置 + 赋值」⇒ 赋值留在**被替换掉**的 shell 里 ⇒ 不可靠）。
+( cd "${WORK}" && exec env POSTGRES_USER=admin POSTGRES_PASSWORD=sea POSTGRES_ADDR=127.0.0.1 \
     POSTGRES_PORT="${GO_PG_PORT}" POSTGRES_DB=first_db \
-    "${WORK}/rpc" -f "${WORK}/etc/like.yaml" >"${WORK}/go-rpc.log" 2>&1 ) &
+    "${WORK}/rpc" -f "${WORK}/etc/like.yaml" ) >"${WORK}/go-rpc.log" 2>&1 &
 GO_PIDS+=($!)
 # ⚠️ go-zero 的 etcd 键是**前缀族** `<key>/<leaseID>` ⇒ 必须按前缀查。
 for _ in $(seq 1 40); do etcd_has_key like.rpc && break; sleep 1; done
@@ -304,15 +665,16 @@ for _ in $(seq 1 20); do nc -z -G 1 127.0.0.1 "${GO_RPC_PORT}" && break; sleep 1
 nc -z -G 2 127.0.0.1 "${GO_RPC_PORT}" || die "Go like-rpc 注册了但端口没监听（见 ${WORK}/go-rpc.log）"
 say "   ✓ 已注册 like.rpc → $(etcd_get_value like.rpc)（:${GO_RPC_PORT} 已监听）"
 
-step "5/10 起 Go 侧 like-api（:${GO_API_PORT}）"
-( cd "${WORK}" && "${WORK}/api" -f "${WORK}/etc/likecenter.yaml" >"${WORK}/go-api.log" 2>&1 ) &
+step "5/11 起 Go 侧 like-api（:${GO_API_PORT}）"
+# ⚠️ 同样**必须 `exec`**（理由同上：否则 `$!` 是子 shell ⇒ Go api 变孤儿）
+( cd "${WORK}" && exec "${WORK}/api" -f "${WORK}/etc/likecenter.yaml" ) >"${WORK}/go-api.log" 2>&1 &
 GO_PIDS+=($!)
 for _ in $(seq 1 40); do nc -z -G 1 127.0.0.1 "${GO_API_PORT}" && break; sleep 1; done
 nc -z -G 2 127.0.0.1 "${GO_API_PORT}" || die "Go like-api 没起来（见 ${WORK}/go-api.log）"
 say "   ✓ Go 侧已监听 :${GO_API_PORT}"
 
 # ══════════════════════════ 5. 起 RAG 侧 ═══════════════════════════════════════
-step "6/10 起 RAG 侧 like-rpc（注册 Nacos ${NACOS_PORT}）+ like-api（:${RAG_API_PORT}）"
+step "6/11 起 RAG 侧 like-rpc（注册 Nacos ${NACOS_PORT}）+ like-api（:${RAG_API_PORT}）"
 ( cd "${RAG_ROOT}" && mvn -o -q -pl service/like/like-rpc,service/like/like-api -am package -DskipTests ) \
   || die "RAG 侧构建失败"
 RAG_RPC_JAR="${RAG_ROOT}/service/like/like-rpc/target/like-rpc-0.0.1-SNAPSHOT.jar"
@@ -339,7 +701,19 @@ done
 curl -s "http://127.0.0.1:${NACOS_PORT}/nacos/v1/ns/service/list?pageNo=1&pageSize=50&namespaceId=public" 2>/dev/null | grep -q 'like-rpc' \
   || die "RAG like-rpc 90s 内没注册进 Nacos（见 ${WORK}/rag-rpc.log）"
 say "   ✓ RAG like-rpc 已注册进 Nacos"
+# 🔴🔴 **必须传 `USER_JWT_SECRET`**（缺陷 1 · 2026-10-29 · P0 #8）：
+#   RAG 侧 `service/like/like-api/src/main/resources/application.yml:85` 写的是
+#   `access-secret: ${USER_JWT_SECRET}`（**故意没有默认值**）⇒ 占位符解析不出来时，
+#   Spring 的 `@ConfigurationProperties` 绑定器**不报错**、而是把**占位符原文**当值绑上去
+#   ⇒ ⇒ 守卫 `LikeApiProperties#verifyAccessSecret()`（@PostConstruct）显式拒
+#   ⇒ ⇒ **进程起不来**（`IllegalStateException`）⇒ 探针 EXIT=2。
+#   ⇒ 本探针的 token 由 `lib/make_jwt.py --secret "${JWT_SECRET}"` 签发
+#      ⇒ **签发与验签必须同密钥** ⇒ `USER_JWT_SECRET` = `JWT_SECRET`。
+#   （Go 侧对应：声明点 `service/like/api/etc/likecenter.yaml:6`，
+#     消费点 `service/like/api/internal/handler/routes.go:49`
+#     `rest.WithJwt(serverCtx.Config.UserAuth.AccessSecret)`。）
 SERVER_PORT="${RAG_API_PORT}" NACOS_ADDR="127.0.0.1:${NACOS_PORT}" \
+USER_JWT_SECRET="${USER_JWT_SECRET}" \
   java -jar "${RAG_API_JAR}" >"${WORK}/rag-api.log" 2>&1 &
 RAG_PIDS+=($!)
 for _ in $(seq 1 90); do nc -z -G 1 127.0.0.1 "${RAG_API_PORT}" && break; sleep 1; done
@@ -347,7 +721,7 @@ nc -z -G 2 127.0.0.1 "${RAG_API_PORT}" || die "RAG like-api 没起来（见 ${WO
 say "   ✓ RAG 侧已监听 :${RAG_API_PORT}"
 
 # ══════════════════════════ 6. 两侧播种（**绝不用空库当证据**）══════════════════
-step "7/10 两侧播种同一批数据（Redis 键 + PG 行）"
+step "7/11 两侧播种同一批数据（Redis 键 + PG 行）"
 TARGET_ID="9007199254740994"
 TARGET_TYPE="article"
 SEED_USER="1001"
@@ -374,7 +748,7 @@ done
 say "   ✓ 两侧同一批数据（Redis 6 个键 + PG 1 行）"
 
 # ══════════════════════════ 7. 阶段 A：HTTP 业务面逐字节对拍 ═══════════════════
-step "8/10 阶段 A · HTTP 业务面（Go vs RAG vs expected.txt ⇒ 逐字节）"
+step "8/11 阶段 A · HTTP 业务面（Go vs RAG vs expected.txt ⇒ 逐字节）"
 EXPECTED="${HERE}/expected.txt"
 [ -f "${EXPECTED}" ] || die "缺少冻结的期望值：${EXPECTED}"
 
@@ -467,7 +841,7 @@ fi
 say "   ✓ 阶段 A 全绿"
 
 # ══════════════════════════ 7b. 阶段 C：E60 双失败错误传播 ═════════════════════
-step "9/10 阶段 C · E60 · Redis 与 DB **同时**失败 ⇒ 业务错误码必须两侧都是 5011"
+step "9/11 阶段 C · E60 · Redis 与 DB **同时**失败 ⇒ 业务错误码必须两侧都是 5011"
 
 # ⚠️ **为什么必须注入「Redis 与 DB 同时失败」**（Go
 #    `service/like/rpc/internal/logic/likeactionlogic.go:345-364` 的 `currentUserLikeTotal`）：
@@ -571,7 +945,7 @@ fi
 say "   ✓ 阶段 C 全绿"
 
 # ══════════════════════════ 8. 阶段 B：事实投递链路（DRIFT-LIKE-003-A）══════════
-step "10/10 阶段 B · 事实投递链路（003-A）· 两侧投给 DC 的字节"
+step "10/11 阶段 B · 事实投递链路（003-A）· 两侧投给 DC 的字节"
 
 # ⚠️ **两侧各用一个假 DC 输出目录**（而不是共用一个、再按文件名序号猜哪边是谁）：
 #    假 DC 会把**收到的每一份**事实都落一个文件 ⇒ 共用一个目录时，
@@ -707,6 +1081,18 @@ if [ "${FAILED}" != "0" ]; then
 fi
 say "   ✓ 阶段 B 全绿"
 
+# ══════════════════════════ 9. 收尾：服务**真正**停掉 + 端口零残留 ═══════════
+# ⚠️ 收尾**在断言之前**做：因为「跑绿」的前提之一就是「没给下一轮留垃圾」。
+#    ⇒ 先 teardown（kill → 等端口关 → 删容器 → 按签名兜底清），
+#      再 assert_no_leftover（`lsof -nP -iTCP:<端口> -sTCP:LISTEN` 必须为空）。
+step "11/11 收尾复核（服务真停 · 端口零残留）"
+teardown
+if ! assert_no_leftover; then
+  say ""
+  say "❌ 收尾后本探针的端口仍有残留 ⇒ 探针污染了宿主环境（下一轮会撞车）"
+  exit 2
+fi
+
 say ""
-say "✅ 阶段 A（HTTP 业务面）+ 阶段 B（事实投递链路）双侧逐字节一致"
+say "✅ 阶段 A（HTTP 业务面）+ 阶段 B（事实投递链路）+ 阶段 C（E60 双失败）双侧逐字节一致"
 exit 0

@@ -43,6 +43,30 @@ run_probe() {
   echo $?
 }
 
+# run_probe_expect <期望退出码> <标签> ⇒ 0 = 拿到期望退出码；1 = 没拿到
+# ⚠️🔴 **EXIT=2 = 环境问题**（容器起不来 / 端口不够 / 中间件不在 / 机器负载高到 PG 初始化超时）
+#    ⇒ **不是**「探针没抓到漂移」⇒ ⇒ **重跑该轮**（最多 3 次，每次隔 60s）。
+#    ⚠️ 2026-10-29 实测踩过：load average 打到 **36** 时 RAG 侧 PG「起来了但没就绪」
+#    ⇒ 那一轮跑出 EXIT=2 ⇒ 若不重跑 ⇒ 变异套件会**误报「探针是假绿」**
+#    （真相是「那轮环境没跑起来」，不是「探针看不见 RAG 侧的字节漂移」）。
+#    ⇒ 顺带说明：`run.sh` 的退出码分工是 **0=全绿 · 1=有差异 · 2=环境/真源漂移/依赖缺失**。
+run_probe_expect() {   # $1 = 期望 rc  $2 = 标签
+  local want="$1" label="$2" attempt=1 rc
+  while [ "${attempt}" -le 3 ]; do
+    rc="$(run_probe)"
+    if [ "${rc}" = "${want}" ]; then return 0; fi
+    if [ "${rc}" = "2" ] && [ "${attempt}" -lt 3 ]; then
+      say "   ⚠️ ${label}：第 ${attempt} 次跑出 EXIT=2（**环境问题**，不是「变异没被抓到」）⇒ 60s 后重跑该轮"
+      sleep 60
+      attempt=$((attempt + 1))
+      continue
+    fi
+    say "   · ${label}：实际 EXIT=${rc}（期望 ${want}）"
+    return 1
+  done
+  return 1
+}
+
 # backup <文件> <备份名>
 backup() { cp "$1" "${BAK_DIR}/$2"; }
 # restore <文件> <备份名>
@@ -64,11 +88,10 @@ backup "${MSG_FILE}"    messages.java
 backup "${PUBLISHER}"   publisher.java
 
 say "== 基线（未变异）必须转绿 =="
-BASE_RC="$(run_probe)"
-if [ "${BASE_RC}" = "0" ]; then
+if run_probe_expect 0 "基线"; then
   say "   ✅ 基线绿（exit 0）"
 else
-  say "❌ 基线就不绿（exit ${BASE_RC}）⇒ 后续变异判定无意义"
+  say "❌ 基线就不绿 ⇒ 后续变异判定无意义"
   tail -30 "${TMP_OUT}" | sed 's/^/   | /'
   exit 1
 fi
@@ -80,12 +103,11 @@ fi
 say ""
 say "== M1 冻结的 expected.txt 被改 ⇒ 必须转红 =="
 mutate "${EXPECTED}" 'CASE|getlikecount|200|7b22' 'CASE|getlikecount|200|7b23'
-RC="$(run_probe)"
-if [ "${RC}" = "1" ]; then
+if run_probe_expect 1 "M1"; then
   say "   ✅ 精确转红（exit 1 · Go 侧与冻结值不符）"
   grep -E "❌|!= expected" "${TMP_OUT}" | head -6 | sed 's/^/   | /'
 else
-  say "   ❌ 没按预期转红（exit ${RC}）⇒ 探针没在比冻结值"
+  say "   ❌ 没按预期转红 ⇒ 探针没在比冻结值"
   tail -25 "${TMP_OUT}" | sed 's/^/   | /'
   FAILED=1
 fi
@@ -99,12 +121,11 @@ say ""
 say "== M2 RAG 侧的 5001 文案被改 ⇒ 必须转红 =="
 mutate "${MSG_FILE}" 'map.put(LikeErrorCode.ERROR_SERVER_COMMON.getCode(), "系统内部错误");' \
                   'map.put(LikeErrorCode.ERROR_SERVER_COMMON.getCode(), "内部错误");'
-RC="$(run_probe)"
-if [ "${RC}" = "1" ]; then
+if run_probe_expect 1 "M2"; then
   say "   ✅ 精确转红（exit 1 · RAG 侧字节漂移被抓到）"
   grep -E "❌|!= expected" "${TMP_OUT}" | head -6 | sed 's/^/   | /'
 else
-  say "   ❌ 没按预期转红（exit ${RC}）⇒ 探针看不见 RAG 侧的字节漂移"
+  say "   ❌ 没按预期转红 ⇒ 探针看不见 RAG 侧的字节漂移"
   tail -25 "${TMP_OUT}" | sed 's/^/   | /'
   FAILED=1
 fi
@@ -123,12 +144,11 @@ say "== M3 E60 的业务错误日志被降级成普通 warn（≈ 还原 E60 修
 #    ⇒ 若替换串还留着它，变异后日志里仍能 grep 到 ⇒ 探针照样绿 ⇒ 变异「不精确」。
 #    这里改成 "e60 path degraded to plain warn" ⇒ 该标记彻底消失 ⇒ 必然转红。
 mutate "${PUBLISHER}" 'logger.logBusinessErr(Context.current(),' 'LOG.warn("e60 path degraded to plain warn", '
-RC="$(run_probe)"
-if [ "${RC}" = "1" ]; then
+if run_probe_expect 1 "M3"; then
   say "   ✅ 精确转红（exit 1 · E60 的业务错误分支没被观测到）"
   grep -E "❌|双失败业务错误" "${TMP_OUT}" | head -6 | sed 's/^/   | /'
 else
-  say "   ❌ 没按预期转红（exit ${RC}）⇒ 探针看不见 E60 分支被删掉"
+  say "   ❌ 没按预期转红 ⇒ 探针看不见 E60 分支被删掉"
   tail -25 "${TMP_OUT}" | sed 's/^/   | /'
   FAILED=1
 fi
@@ -136,11 +156,10 @@ restore "${PUBLISHER}" publisher.java
 
 say ""
 say "== 还原后必须重新转绿 =="
-RC="$(run_probe)"
-if [ "${RC}" = "0" ]; then
+if run_probe_expect 0 "还原后"; then
   say "   ✅ 还原后绿（exit 0）"
 else
-  say "   ❌ 还原后仍红（exit ${RC}）⇒ 还原没生效"
+  say "   ❌ 还原后仍红 ⇒ 还原没生效"
   tail -30 "${TMP_OUT}" | sed 's/^/   | /'
   FAILED=1
 fi

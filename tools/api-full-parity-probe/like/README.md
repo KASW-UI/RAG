@@ -24,11 +24,38 @@ bash tools/api-full-parity-probe/like/mutate-parity.sh # 变异验证（M1~M3 �
 
 可用 env 覆盖：`GO_REPO`（真源路径，默认 `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang`）·
 `ETCD_PORT` / `KAFKA_PORT` / `NACOS_PORT` / `REDIS_HOST_PORT` / `JAEGER_PORT` ·
-`GO_API_PORT` / `GO_RPC_PORT` / `RAG_API_PORT` / `RAG_RPC_PORT` / `DC_PORT` ·
-`GO_PG_PORT` / `GO_REDIS_PORT` / `RAG_PG_PORT` / `RAG_REDIS_PORT` · `JWT_SECRET` · `DC_TOKEN`。
+`JWT_SECRET` / `USER_JWT_SECRET` / `DC_TOKEN` ·
+`PORT_WINDOW_START` / `PORT_WINDOW_END`（端口窗口，默认 18161-18170）·
+`PG_READY_TIMEOUT` / `REDIS_READY_TIMEOUT`（**墙钟秒**，默认 240 / 60 —— 机器负载高时 PG 初始化会慢）。
 
-端口段：like 域 `18121-18125`（服务）+ `18131-18134`（两侧容器宿主口）。
-⚠️ **不占用** like 域 Testcontainers 段 `22790-22819`（已被域内测试类逐个占死 ⇒ `LikeContainerFixedHostPortSegmentGateTest` 守门）。
+### 端口：**自动挑空闲的**（不许硬编码撞车）
+
+端口窗口 = **18161-18170**（可用 `PORT_WINDOW_START` / `PORT_WINDOW_END` 改）⇒
+脚本在窗口内**自动挑 9 个空闲口**：5 个服务口（Go api · Go rpc · RAG api · RAG rpc · 假 DC）
++ 4 个容器宿主口（两侧各 PG + Redis）⇒ **窗口内不够 9 个 ⇒ 直接 exit 2**（环境问题，不越界抢别人的口）。
+
+> ⚠️ **不占用** like 域 Testcontainers 段 `22790-22819`（已被域内测试类逐个占死 ⇒ `LikeContainerFixedHostPortSegmentGateTest` 守门）。
+> ⚠️ **不占用** OS 临时段 `49152-65535`（宿主中间件 Sea-etcd/kafka/nacos/redis/jaeger 在那儿）。
+> ⚠️ **绝不按端口无差别 kill**：容器发布端口时是 `com.docker.backend` 持有该宿主口 ⇒
+> 无差别 kill 会**当场杀掉 Docker daemon** ⇒ 脚本只杀**签名匹配本探针**的进程，
+> 别人的进程占口 ⇒ **报错退出（exit 2）**，不越界动手。
+
+### 收尾复核：**端口零残留**（不绿就不算跑完）
+
+探针跑完 ⇒ 先 `teardown`（kill → 等端口关 → 删容器 → 按签名兜底清）⇒ 再
+**断言本探针**真正用过的 **9 个端口**（5 服务口 + 4 容器宿主口）
+在 `lsof -nP -iTCP:<port> -sTCP:LISTEN` 下**一个都不剩** ⇒ 有残留 ⇒ **EXIT=2**。
+
+> ⚠️ 断言**只算「真正用过的」端口**，**不含**候选池里没绑上的口 ⇒
+> 否则别的 lane 的容器恰好在候选池里 ⇒ 会把**别人的**占用算成「本探针的残留」⇒ 假红。
+
+### 验签密钥（**起进程时必须传**）
+
+`USER_JWT_SECRET` = 与签发同值（默认取 `JWT_SECRET`）。
+⚠️ RAG 侧 `service/like/like-api/src/main/resources/application.yml:85` 写的是
+`access-secret: ${USER_JWT_SECRET}`（**无默认值**）⇒ 守卫 `LikeApiProperties#verifyAccessSecret()`
+**fail-closed** ⇒ **不传 ⇒ like-api 起不来 ⇒ 探针 EXIT=2**。
+⚠️ **只有 like-api 需要它** —— like-rpc 全模块零 JWT 引用。
 
 ## 真源冻结 ⇒ 只改「副本」
 
@@ -50,8 +77,8 @@ go-zero 的 `core/conf/config.go:60-66` **只在 `conf.WithEnv()` 时**才 `os.E
 
 | 侧 | PG | Redis | 事实投递接收端 |
 |---|---|---|---|
-| Go | 容器 `r2like-go-pg-$$`（宿主口 `18131`） | 容器 `r2like-go-redis-$$`（`18132`） | 假 DC `dc-go/` 输出目录 |
-| RAG | 容器 `r2like-rag-pg-$$`（`18133`） | 容器 `r2like-rag-redis-$$`（`18134`） | 假 DC `dc-rag/` 输出目录 |
+| Go | 容器 `r2like-go-pg-$$`（宿主口**自动挑**） | 容器 `r2like-go-redis-$$`（**自动挑**） | 假 DC `dc-go/` 输出目录 |
+| RAG | 容器 `r2like-rag-pg-$$`（**自动挑**） | 容器 `r2like-rag-redis-$$`（**自动挑**） | 假 DC `dc-rag/` 输出目录 |
 
 两侧**播种同一批数据**（`lib/seed_fact.py` 生成同一份 payload + 信封 + INSERT SQL）⇒
 **绝不用空库**（空库 ⇒ 两侧都返回「没数据」⇒ 假绿）。
@@ -117,6 +144,10 @@ go-zero 的 `core/conf/config.go:60-66` **只在 `conf.WithEnv()` 时**才 `os.E
 | 11 | Redis 故障注入报错 `ERR syntax error` | Redis 7 里 `CONFIG SET rename-command` 不可用 | 改用 `ACL SETUSER default -zcard`（确定性失败，且不影响 Lua 的 ZADD/HGET/INCR） |
 | 12 | 测 gRPC `UNAUTHENTICATED` 时**读出空响应体** | `HttpURLConnection` 对 401 有隐式认证协商 ⇒ **吃掉响应体** | 用 JDK `HttpClient` |
 | 13 | `RAG_PIDS[@]: unbound variable` | macOS 自带 **bash 3.2**：`set -u` 下展开**空数组**报错 ⇒ cleanup 提前死 ⇒ 容器残留 | 用 `${A[@]+"${A[@]}"}` 形式 |
+| 14 | 探针 **EXIT=2**（`RAG like-api` 起不来） | 探针只导了 `JWT_SECRET`（**签发侧**）⇒ **没给验签侧**传 `USER_JWT_SECRET` ⇒ RAG 侧 `application.yml:85` 是 `access-secret: ${USER_JWT_SECRET}`（**无默认值**）⇒ 守卫 `LikeApiProperties#verifyAccessSecret()` **fail-closed** ⇒ 进程起不来 | 探针补 `USER_JWT_SECRET="${USER_JWT_SECRET}"`（与签发同值） |
+| 15 | 跑完一轮后 `:18121`/`:18122` **仍在 LISTEN** ⇒ 下一轮撞端口 | `( cd X && cmd ) &` ⇒ `$!` 是**子 shell** 的 PID（bash 对**异步**子 shell 会**再 fork 一次**）⇒ 真服务进程是它的**儿子** ⇒ `kill $!` 只杀得掉子 shell ⇒ **孤儿继续占口** | 启动侧改 `exec`（子 shell 被**替换**成服务进程）＋ 收尾按端口复核 ＋ 收尾后 `lsof` 断言零残留 |
+| 16 | 负载高时（load average 到 **36**）「PG 起来了但没就绪」⇒ 探针误判成环境坏了（EXIT=2） | 就绪等待按「**迭代次数**」（`60 次 × sleep 1`）⇒ 负载高时单次 `docker exec` 要 1~3s ⇒ **实际远小于 60 秒** ⇒ PG 还没 init 完就被判失败 | 改成**墙钟 deadline**（`PG_READY_TIMEOUT`，默认 240s）＋ 轮询里看**容器状态**（`exited`/`dead` ⇒ 立刻失败，别白等） |
+| 17 | `nc -z` 说口是空的，`docker run -p` 却报 `port is already allocated` | `nc -z` 只问「能不能连上」⇒ docker-proxy 保留着口时它**误报已释放** | 等端口释放一律用 **`lsof -nP -iTCP:<port> -sTCP:LISTEN`**（问「谁在 LISTEN」）判据 |
 
 ## 变异验证（`mutate-parity.sh`）
 
