@@ -55,7 +55,7 @@
 
 **为什么被卡**（`users/user/rpc.md:1413`）：`admin-rpc` 的 `UserEntity.status` 是 `private Long status = 0L;`，MyBatis `callSettersOnNulls=false` ⇒ 读出 `NULL` 会被当成 `0`（「活跃」）⇒ 单独放开 `users_user.status` 的 `NOT NULL` 会**立刻激活** admin 侧把 `NULL` 当活跃的缺陷 ⇒ 必须两侧一起裁决。
 
-### 2.2 🔴 DEFAULT 差异 **22 处**（真差）—— 仍未修，但是**刻意保留**⚠️ **2026-10-29 订正**：原写 **14 处** ⇒ 那是**旧 2 域口径**（users 8 + message 6，未含 comment）⇒ **权威数 = 22**（users **8** + message **6** + comment **8**）⇒ 逐域见 **§四** 的 `DEFAULT` 之和（= **22**；⚠️ 同表合计 **51** 是**全部维度**的合计，**不是** DEFAULT 数 —— 两个数不要混）
+### 2.2 🔴 DEFAULT 差异 **22 处**（真差）—— 仍未修，但是**刻意保留**⚠️ **2026-10-29 订正**：原写 **14 处** ⇒ 那是**旧 2 域口径**（users 8 + message 6，未含 comment）⇒ **权威数 = 22**（users **8** + message **6** + comment **8**）<br>⚠️ **2026-10-29 复核（可复算性）**：**22 = 工具可复算 14 + comment 人工闭合 8** ⇒ **comment 的 8 处当前无法用 `python3 tools/difftest/check-ddl-static.py --domain comment` 复算** —— 该域检查在**已签字**的 `report_record` 表列集合差异处**提前中止**（工具无「跳过已签字表」开关）⇒ **本档 `:175` 行 comment 的「人工闭合」标注就是这个原因** ⇒ ⇒ **报数时必须写清「22」里哪 14 处机器可复算、哪 8 处要人工**。⇒ 逐域见 **§四** 的 `DEFAULT` 之和（= **22**；⚠️ 同表合计 **51** 是**全部维度**的合计，**不是** DEFAULT 数 —— 两个数不要混）
 
 **全部是同一形态**：Go 侧 `create_time`/`update_time` 等时间列**无默认**，RAG 侧是 `DEFAULT CURRENT_TIMESTAMP`。
 
@@ -143,7 +143,7 @@
 | like-rpc 丢失 CHECK / 触发器 / 索引 | ✅ **已修**（2026-10-23 第三轮）—— `V6__align_like_domain_fact_outbox_with_go.sql` 补 6 项（2 个 CHECK + 2 个部分索引 + 1 个触发器 + 版本范围 CHECK），**不改 V4** ⇒ `DRIFT-LIKE-017` 已结案 | `service/like/like-rpc/src/main/resources/db/migration/V6__align_like_domain_fact_outbox_with_go.sql` |
 | message-rpc `V2` 迁移无 `IF NOT EXISTS` | ✅ **前提不成立** —— V2 的 `ADD CONSTRAINT uk_conversation_pair` 在 **GORM 建过表的库上本来就能跑**（GORM 建的是**索引**，不是同名**约束**）⇒ 原文担心的失败场景不存在。`V4` 已把该约束降回索引 | [`docs/DRIFT/message/rpc.md`](../message/rpc.md) §`UNRESOLVED-MSG-005` |
 
-**⇒ AGENTS.md §〇 item 2 的「仍未修」应改为**：**`users_user.status` 可空性 1 处 + DEFAULT 残留 **22 处**（users 8 + message 6 + comment 8）+ users 域缺 Go 的 3 条索引**。⚠️ **2026-10-29 订正**：原文写 **14** ⇒ **旧 2 域口径**；而 `AGENTS.md` §〇 item 2 现写「**16 处**」⇒ 那是 **users 域全部残留数**（可空性 1 + DEFAULT 8 + 索引 7）被误当成 DEFAULT 数 ⇒ ⇒ **同一个指标三处三个数（16 / 14 / 22）⇒ 权威 = 22**
+**⇒ AGENTS.md §〇 item 2 的「仍未修」应改为**：**`users_user.status` 可空性 1 处 + DEFAULT 残留 **22 处**（users 8 + message 6 + comment 8）⇒ ⚠️ **其中 14 处机器可复算（users 8 + message 6）、comment 的 8 处需人工闭合**（工具在已签字的 `report_record` 列集合差异处提前中止）+ users 域缺 Go 的 3 条索引**。⚠️ **2026-10-29 订正**：原文写 **14** ⇒ **旧 2 域口径**；而 `AGENTS.md` §〇 item 2 现写「**16 处**」⇒ 那是 **users 域全部残留数**（可空性 1 + DEFAULT 8 + 索引 7）被误当成 DEFAULT 数 ⇒ ⇒ **同一个指标三处三个数（16 / 14 / 22）⇒ 权威 = 22**
 
 ### 表名映射（§三 提到的「两侧表名本来就不同」）
 
