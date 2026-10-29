@@ -34,22 +34,30 @@ HEADER = """# 自动生成 —— 由派工清单（lane briefs）推出：每�
 """
 
 
-def build() -> dict[str, set[str]]:
+def build() -> set[tuple[str, str]]:
+    """派工清单 ⇒ **{(编号, 域)}**（**节点级**）。
+
+    ⚠️ **为什么必须是节点级而不是「编号 → 域集合」**（2026-10-30 派第 4 轮时暴露）：
+      同一个编号**可能在两个域各有一条**（实测第 4 轮的 `G4-4` = article 域一条 +
+      favorite 域一条 ⇒ 第 3 轮人工判定为「**不同的事**」⇒ 归一后**各判各的**）。
+      ⇒ 若按编号聚成域集合 ⇒ **一个域的定级会套到另一个域** ⇒ **串味**。
+      ⇒ ⇒ 每行 = **一个节点 (编号, 域)**；同一编号多域 ⇒ **多行**（不是一个逗号分隔的集合）。
+    """
     data = json.loads(LANES.read_text(encoding="utf-8"))
-    out: dict[str, set[str]] = {}
+    out: set[tuple[str, str]] = set()
     for lane in sorted(data):
         for it in data[lane]["条目"]:
             rel = it["source"].split(";")[0].rsplit(":", 1)[0]
             parts = rel.split("/")
             dom = parts[1] if len(parts) > 1 else "_root"
-            out.setdefault(it["id"], set()).add(dom)
+            out.add((it["id"], dom))
     return out
 
 
-def render(scope: dict[str, set[str]]) -> str:
+def render(scope: set[tuple[str, str]]) -> str:
     lines = [HEADER.rstrip("\n"), ""]
-    for i in sorted(scope):
-        lines.append(f"{i}\t{','.join(sorted(scope[i]))}")
+    for i, d in sorted(scope):
+        lines.append(f"{i}\t{d}")
     return "\n".join(lines) + "\n"
 
 
@@ -61,12 +69,13 @@ def main() -> int:
         if cur != text:
             print("🔴 overlay-scope.txt 与派工清单不一致 ⇒ 跑 gen-overlay-scope.py 重生成")
             return 1
-        print(f"✅ overlay-scope.txt 与派工清单一致（{len(scope)} 条）")
+        print(f"✅ overlay-scope.txt 与派工清单一致（{len(scope)} 个节点）")
         return 0
     OUT.write_text(text, encoding="utf-8")
-    multi = {i: s for i, s in scope.items() if len(s) > 1}
-    print(f"✅ 已生成 {OUT.relative_to(ROOT)}：{len(scope)} 条"
-          f"（跨多域的 {len(multi)} 条）")
+    ids = {i for i, _ in scope}
+    multi = {i for i in ids if sum(1 for j, _ in scope if j == i) > 1}
+    print(f"✅ 已生成 {OUT.relative_to(ROOT)}：{len(scope)} 个节点 / {len(ids)} 个编号"
+          f"（跨多域的 {len(multi)} 个）")
     return 0
 
 

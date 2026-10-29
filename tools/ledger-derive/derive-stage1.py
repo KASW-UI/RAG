@@ -89,6 +89,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import json
 import pathlib
 import re
 import sys
@@ -179,14 +180,17 @@ def domain_of_rel(rel: str) -> str:
     return parts[1] if len(parts) > 1 else "_root"
 
 
-def load_scope_overrides() -> dict[str, set[str] | None]:
-    """读 `overlay-scope.txt` ⇒ `{编号: 域集合 | None}`（`None` = 全部域）。
+def load_scope_overrides() -> set[tuple[str, str]]:
+    """读 `overlay-scope.txt` ⇒ **{(编号, 域)}**（**节点级**）。
 
     ⚠️ **为什么显式文件而不把规则藏进代码**：域适配的判据（「这个定级到底在说哪个域的条目」）
     本质上是**语义判断** ⇒ 机器只能给出初值 ⇒ 必须留一个人工可改、可复核的落点。
     ⇒ 规则在代码里（可复算），**例外在这份文件里**（可订正）。
+    ⚠️ **节点级**（2026-10-30）：同一个编号**可能在两个域各有一条**（实测 `G4-4`
+    = article + favorite ⇒ 第 3 轮判定为「不同的事」⇒ 归一后各判各的）
+    ⇒ 按编号聚成域集合会让**一个域的定级套到另一个域** ⇒ 串味。
     """
-    out: dict[str, set[str] | None] = {}
+    out: set[tuple[str, str]] = set()
     if not SCOPE_FILE.exists():
         return out
     for line in SCOPE_FILE.read_text(encoding="utf-8").split("\n"):
@@ -197,10 +201,12 @@ def load_scope_overrides() -> dict[str, set[str] | None]:
         ident = parts[0].strip().strip("*` ")
         if not ident:
             continue
-        if len(parts) < 2 or parts[1].strip() == "*":
-            out[ident] = None
-        else:
-            out[ident] = {x.strip() for x in parts[1].split(",") if x.strip()}
+        if len(parts) < 2 or not parts[1].strip():
+            continue
+        for d in parts[1].split(","):
+            d = d.strip()
+            if d:
+                out.add((ident, d))
     return out
 
 
@@ -944,8 +950,44 @@ def load_shared_grading() -> dict[str, dict]:
     return out
 
 
-def load_grading_overlay() -> dict[str, dict]:
-    """U5-O · **显式定级叠加层** ⇒ {编号: {stage, prio, blocking, basis, date, src}}
+def load_lane_domains() -> dict[tuple[str, str], str]:
+    """派工清单 `_lanes.json` ⇒ **{(lane, 编号): 域}**。
+
+    ⚠️ **派工清单是「哪条台账条目派给哪个 lane」的权威记录**
+      ⇒ **(lane, 编号) → 域** = 那条台账条目所属的域（第一层目录）⇒ **机械可定，零猜测**。
+    ⚠️ **为什么按 (lane, 编号) 而不是只按编号**：同一个编号**可能在两个域各有一条**
+      （实测 `G4-4` = article + favorite）⇒ 两条分属**不同的 lane 文件** ⇒
+      ⇒ 定级必须按 (lane, 编号) 区分，否则**一个域的定级会套到另一个域**（串味）。
+    """
+    out: dict[tuple[str, str], str] = {}
+    p = GRADING_DIR / "_lanes.json"
+    # ⚠️ **不许静默降级**（2026-10-30 实测踩坑）：原先这里写的是
+    #   `except Exception: return out` ⇒ 派生层**漏了 `import json`** ⇒
+    #   `json.loads` 抛 `NameError` ⇒ 被**静默吞掉** ⇒ 返回空 ⇒
+    #   **派工域全部丢失** ⇒ 节点级改造**根本没生效** ⇒ 数字却「看着正常」。
+    #   ⇒ 判据依赖外部输入时，失败必须**硬失败**，不许降级成「这条不可核验」。
+    if not p.exists():
+        raise SystemExit(f"🔴 派工清单缺失：{p} ⇒ 无法推出 U5-O 的适用域 ⇒ 退出")
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as exc:                      # ⚠️ 硬失败，不静默
+        raise SystemExit(f"🔴 派工清单解析失败：{p} ⇒ {exc!r} ⇒ 退出")
+    for lane in sorted(data):
+        for it in data[lane].get("条目", []):
+            rel = it.get("source", "").split(";")[0].rsplit(":", 1)[0]
+            parts = rel.split("/")
+            dom = parts[1] if len(parts) > 1 else "_root"
+            out.setdefault((lane, it["id"]), dom)
+    # ⚠️ **自检**：派工清单的 lane 数必须 == `W*.md` 定级文件数（否则某个 lane 的定级会丢）
+    _wfiles = {p.stem for p in GRADING_DIR.glob("W*.md")}
+    _missing = _wfiles - set(data)
+    if _missing:
+        raise SystemExit(f"🔴 派工清单缺少 lane：{sorted(_missing)} ⇒ 其定级会落空 ⇒ 退出")
+    return out
+
+
+def load_grading_overlay() -> dict[tuple[str, str], dict]:
+    """U5-O · **显式定级叠加层** ⇒ **{(lane, 编号): {stage, prio, blocking, basis, date, src, domain}}**
 
     ⚠️ **为什么需要这一层（而不是把定级写回各域台账）**：
       台账里绝大多数条目是**表格行型**（实测 129 条待定级里 **71 条是表格行**），
@@ -961,13 +1003,19 @@ def load_grading_overlay() -> dict[str, dict]:
     ⚠️ **格式**：Markdown 表格，列 = 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期。
       「依据」列必须写 **Go 侧 `文件:行号` + RAG 侧 `文件:行号` + 结论**
       ⇒ 没有双侧行号的行**视为无效**（否则「定级」又变成无出处的断言）。
+    ⚠️ **键 = (lane, 编号) 而不是只按编号**（2026-10-30 派第 4 轮时暴露）：
+      同一个编号**可能在两个域各有一条**（`G4-4` = article + favorite ⇒ 各判各的）
+      ⇒ 一个编号只能存一条定级就会**丢掉一半**，或**串味到别的域**。
+      ⇒ lane 从**文件名**取（`W25.md` ⇒ `W25`）⇒ 与派工清单对齐 ⇒ 域**机械可定**。
     """
-    out: dict[str, dict] = {}
+    out: dict[tuple[str, str], dict] = {}
     if not GRADING_DIR.exists():
         return out
+    lane_dom = load_lane_domains()
     for p in sorted(GRADING_DIR.glob("*.md")):
         if p.name.startswith("_"):
             continue          # ⚠️ `_` 前缀 = 说明文件（格式规范/示例）⇒ **不是数据**
+        lane = p.stem
         rel = p.relative_to(ROOT)
         for ln, line in enumerate(p.read_text(encoding="utf-8").split("\n"), 1):
             if not line.lstrip().startswith("|"):
@@ -1026,10 +1074,13 @@ def load_grading_overlay() -> dict[str, dict]:
                    # ⚠️ **依据里提到的服务目录** ⇒ 该定级「说的是哪个域的条目」的初值
                    #   （用户 2026-10-30 拍板：条目身份 = 编号 + 所属域目录）
                    "dep_domains": domains_from_paths(basis),
+                   # ⚠️ **派工域 = 该条定级针对的那条台账条目所属的域**（机械可定）
+                   "domain": lane_dom.get((lane, ident), ""),
                    "src": f"{rel}:{ln}"}
-            old = out.get(ident)
+            key = (lane, ident)
+            old = out.get(key)
             if old is None or (rec["date"], rec["src"]) > (old["date"], old["src"]):
-                out[ident] = rec
+                out[key] = rec
     return out
 
 
@@ -1584,17 +1635,30 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
             continue
         if detect_status(e):
             reg_domains[e["id"]].add(e["domain"])
-    # ⇒ U5-O 叠加层的适用域 = 依据里提到的域 ∩ 登记域（交集空 ⇒ 全登记域 ⇒ 共享层事项）
+    # ⇒ U5-O 叠加层的适用域 = **派工域**（该条定级针对的那条台账条目所属的域，机械可定）
+    #   ⇒ 同编号多域时**各判各的**（节点级）⇒ 不会串味
     scope_over = load_scope_overrides()
     ov_scope: dict[str, set[str] | None] = {}
-    for ident, rec in (overlay or {}).items():
-        if ident in scope_over:
-            ov_scope[ident] = scope_over[ident]
-            continue
-        reg = reg_domains.get(ident, set())
-        dep = set(rec.get("dep_domains") or ())
-        inter = dep & reg
-        ov_scope[ident] = inter if inter else (reg or None)
+    ov_by_node: dict[tuple[str, str], dict] = {}
+    for (_lane, ident), rec in (overlay or {}).items():
+        dom = rec.get("domain") or ""
+        if dom:
+            doms = {dom}
+        else:
+            # ⚠️ **兜底**：派工清单里没有该 (lane, 编号) ⇒ 用「依据里提到的域 ∩ 登记域」
+            reg = reg_domains.get(ident, set())
+            dep = set(rec.get("dep_domains") or ())
+            inter = dep & reg
+            doms = inter if inter else (reg or set())
+        ov_scope[ident] = doms
+        for d in doms:
+            ov_by_node.setdefault((ident, d), rec)
+    # ⚠️ **手工订正**（`overlay-scope.txt` 节点级）⇒ **强制**加入指定节点
+    for (i, d) in scope_over:
+        for (_lane, ident), rec in (overlay or {}).items():
+            if ident == i:
+                ov_by_node.setdefault((i, d), rec)
+                break
     # ⇒ U5-0（台账表格里的历史定级）的适用域 = **表格所在文件的域**
     #   （来源文件就是它「在说哪个域的条目」的最直接证据 ⇒ 机械可定，零猜测）
     def _grading_scope(rec) -> set[str] | None:
@@ -1618,9 +1682,8 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
         if e["excluded"]:
             continue
         # ⚠️ **U5-O 命中前置**（域校验要在「是否派生」之前做 —— 下面要用它补状态）
-        _ov = overlay.get(ident)
-        if _ov and not _in_scope(ov_scope.get(ident), e["domain"]):
-            _ov = None
+        #   ⚠️ **节点级查找**（2026-10-30）—— 同编号在两个域各有一条时**各判各的**
+        _ov = ov_by_node.get((ident, e["domain"]))
         if status is None:
             # ⚠️ **「文字形态状态」兜底**（2026-10-30）
             #   台账大量用**文字**写状态（`### F-3 —— DRIFT-ARTICLE-API-003 已修：…`）⇒
@@ -1808,7 +1871,7 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
             "title": e["title"].replace("\t", " ")[:160],
             "_closed": closed,
             "_ov": "U5-O" in rules,
-            "basis": (overlay.get(ident) or {}).get("basis", ""),
+            "basis": (_ov or {}).get("basis", ""),
             "_excluded": e["excluded"] or "",
             "_date": _date,
             "_auth": _auth,

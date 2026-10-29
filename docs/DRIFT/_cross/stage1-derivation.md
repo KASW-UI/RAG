@@ -849,17 +849,17 @@
 | `V-004` | DRIF | users | ✅ 已一致 | C 无指针 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/users/_shared.md:777;DRIFT/users/user/rpc.md:997` | Go `service/user/user/rpc/internal/logic/avatarhelpers.go:18`（`createTime = item.CreateTime.Format(time.RFC3339)` ⇒ 按进程本地时区渲染带偏移）vs RAG `service/users… |
 | `V-013` | DRIF | users | 🔴 未闭合 | C 无指针 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/users/user/rpc.md:2353` | Go `service/user/user/rpc/internal/logic/getuserlogic.go:44`（`status.Error(codes.Internal, "DB查询失败")` ⇒ logic 层根本不返回 1015）vs RAG `service/users/user/u… |
 | `G4-1` | DRIF | comment | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | GAP-12 | 静态取证 · 缺活体对拍 | `DRIFT/comment/vs-common.md:77` | — |
-| `G4-2` | DRIF | comment | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/comment/vs-common.md:78` | Go `service/common/observability/rpc.go:38`（`timeoutCtx, cancel := context.WithTimeout(ctx, timeout)` ⇒ Go 侧 ctx deadline ⇒ GORM 的 `QueryContext`/`Exe… |
-| `G4-3` | DRIF | comment | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/comment/vs-common.md:79` | Go `service/user/admin/api/internal/logic/admin/getuserlistlogic.go:44-48`（`switch st.Code()` 44 · `case codes.Internal:` 45 → `errmsg.ErrorServerComm… |
+| `G4-2` | DRIF | comment | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/comment/vs-common.md:78` | — |
+| `G4-3` | DRIF | comment | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/comment/vs-common.md:79` | — |
 | `F-1` | DRIF | favorite | 🔴 未闭合 | C 无指针 | P1 | — | 否 | 未判定 | GAP-12 | 无可复算指针 · 结论不可复算 | `DRIFT/favorite/vs-common.md:223` | — |
 | `F-2` | DRIF | favorite | 🔴 未闭合 | A 活体 · 绿(0) | P1 | — | 否 | 未判定 | GAP-12 | 未定级 ⇒ 未排期 | `DRIFT/favorite/vs-common.md:224` | — |
-| `F-3` | DRIF | favorite | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/favorite/vs-common.md:225` | Go `go-zero@v1.10.2/rest/httpx/util.go:44-53`（同名 key 多值收成 `[]string` 存 map，空值 `continue`）＋ `go-zero@v1.10.2/core/mapping/unmarshaler.go:835-846`（`u.op… |
+| `F-3` | DRIF | favorite | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/favorite/vs-common.md:225` | — |
 | `F-4` | DRIF | favorite | 🔴 未闭合 | C 无指针 | P1 | — | 否 | 未判定 | GAP-12 | 无可复算指针 · 结论不可复算 | `DRIFT/favorite/vs-common.md:226` | — |
-| `G4-5` | DRIF | favorite | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/favorite/vs-common.md:113` | Go `service/article/rpc/internal/model/db.go:55-60`（`db.AutoMigrate(&Article{}, &ArticleSyncOutboxEvent{})` ⇒ Go 侧**无版本化迁移账本 / 无 baseline 概念** ⇒ 「账本撞号… |
-| `G4-6` | DRIF | favorite | 🔴 未闭合 | C 无指针 | P1 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/favorite/vs-common.md:112` | Go `go-zero@v1.10.2/zrpc/internal/config.go:14`（`Breaker bool \`json:",default=true"\`` ⇒ client breaker **默认开**）＋ `go-zero@v1.10.2/zrpc/internal/clie… |
+| `G4-5` | DRIF | favorite | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/favorite/vs-common.md:113` | — |
+| `G4-6` | DRIF | favorite | 🔴 未闭合 | C 无指针 | P1 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/favorite/vs-common.md:112` | — |
 | `L-4` | DRIF | favorite | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | GAP-10,GAP-12 | 静态取证 · 缺活体对拍 | `DRIFT/favorite/vs-common.md:87` | — |
-| `L-7` | DRIF | favorite | 🔴 未闭合 | C 无指针 | P1 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/favorite/vs-common.md:91` | Go `go-zero@v1.10.2/rest/router/patrouter.go:60`（`reqPath := path.Clean(r.URL.Path)` ⇒ Go 侧路径归一由 **router 层**承担 ⇒ 无「filter 副本」概念）vs RAG `service/commo… |
-| `L-8` | DRIF | favorite | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/favorite/vs-common.md:94` | Go `go-zero@v1.10.2/rest/engine.go:74`（`chn.Append(handler.Authorize(...))` ⇒ **JWT 验签在 Authorize 内侧**）＋ `go-zero@v1.10.2/rest/engine.go:110-111`（`chn… |
+| `L-7` | DRIF | favorite | 🔴 未闭合 | C 无指针 | P1 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/favorite/vs-common.md:91` | — |
+| `L-8` | DRIF | favorite | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/favorite/vs-common.md:94` | — |
 | `E3` | DRIF | follow | 🔴 未闭合 | C 无指针 | P1 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/follow/stage1-admission.md:378` | — |
 | `FB-04` | DRIF | global | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | GAP-12 | 静态取证 · 缺活体对拍 | `DRIFT/global/vs-common.md:910;DRIFT/like/vs-common.md:179;DRIFT/like/vs-common.md:196` | — |
 | `N-1` | DRIF | global | 🔴 未闭合 | C 无指针 | P1 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/global/lanes/L10-ddldeep.md:332` | — |
@@ -867,7 +867,7 @@
 | `D-6` | DRIF | like | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | GAP-12 | 静态取证 · 缺活体对拍 | `DRIFT/like/vs-common.md:73` | — |
 | `D-7` | DRIF | like | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | GAP-12 | 静态取证 · 缺活体对拍 | `DRIFT/like/vs-common.md:72` | — |
 | `FB-05` | DRIF | like | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | P2-T02,P2-T06 ｜ GAP-12 | 静态取证 · 缺活体对拍 | `DRIFT/like/vs-common.md:109` | — |
-| `SD-2026-10-23-09` | Inte | like | ⏳ 未签字 | B 静态 | P1 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `Intentional_Deviations/like/api.md:54` | Go `go-zero@v1.10.2/rest/handler/maxconnshandler.go:12-36`（容量拒绝 ⇒ **裸 503**，触发条件是 `MaxConns`，`go-zero@v1.10.2/rest/config.go:52` 默认 10000；Go **无 worke… |
+| `SD-2026-10-23-09` | Inte | like | ⏳ 未签字 | B 静态 | P1 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `Intentional_Deviations/like/api.md:54` | — |
 | `D-4` | DRIF | message | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | GAP-12 | 静态取证 · 缺活体对拍 | `DRIFT/message/vs-common.md:72` | — |
 | `SD-2026-10-23-08` | DRIF | message | ✅ 仍成立 | A 活体 · 红(1) | P1 | — | 否 | 未判定 | DEC-02 | 未定级 ⇒ 未排期 | `DRIFT/message/rpc.md:2068;Intentional_Deviations/message/rpc.md:121` | — |
 | `A-1` | DRIF | users | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/users/admin/_shared.md:217;DRIFT/users/admin/api.md:1329` | — |
@@ -876,17 +876,17 @@
 | `A-1` | DRIF | article | 🟡 部分闭合 | C 无指针 | P2 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/article/vs-common.md:360` | — |
 | `G4-4` | DRIF | article | 🟡 部分闭合 | B 静态 | P2 | — | 否 | 未判定 | GAP-12 | 未定级 ⇒ 未排期 | `DRIFT/article/vs-common.md:277` | — |
 | `D-2` | Inte | common | 待核实 | C 无指针 | P2 | — | 否 | 未判定 | GAP-12 | 无可复算指针 · 结论不可复算 | `Intentional_Deviations/common/_signed-deviations.md:171` | — |
-| `G4-3` | DRIF | favorite | 🟡 部分闭合 | B 静态 | P2 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/favorite/vs-common.md:110` | Go `service/user/admin/api/internal/logic/admin/getuserlistlogic.go:44-48`（`switch st.Code()` 44 · `case codes.Internal:` 45 → `errmsg.ErrorServerComm… |
+| `G4-3` | DRIF | favorite | 🟡 部分闭合 | B 静态 | P2 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/favorite/vs-common.md:110` | — |
 | `G4-4` | DRIF | favorite | 🟡 部分闭合 | B 静态 | P2 | — | 否 | 未判定 | GAP-12 | 未定级 ⇒ 未排期 | `DRIFT/favorite/vs-common.md:111` | — |
 | `E2` | DRIF | follow | 🟡 部分闭合 | C 无指针 | P2 | — | 否 | 未判定 | GAP-09,GAP-12 | 无可复算指针 · 结论不可复算 | `DRIFT/follow/stage1-admission.md:377` | — |
 | `S1-FOLLOW-013` | DRIF | follow | 🟡 部分闭合 | A 活体 · 混(0/2) | P2 | — | 否 | 未判定 | GAP-12 | 未定级 ⇒ 未排期 | `DRIFT/follow/vs-common.md:823` | — |
 | `N-2` | DRIF | global | 🟡 部分闭合 | C 无指针 | P2 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/global/lanes/L10-ddldeep.md:333` | — |
 | `N-3` | DRIF | global | 🟡 部分闭合 | C 无指针 | P2 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/global/lanes/L10-ddldeep.md:334` | — |
 | `N-4` | DRIF | global | 🟡 部分闭合 | C 无指针 | P2 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/global/lanes/L10-ddldeep.md:335` | — |
-| `G4-2` | DRIF | hot | 🟡 部分闭合 | B 静态 | P2 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/hot/vs-common.md:89` | Go `service/common/observability/rpc.go:38`（`timeoutCtx, cancel := context.WithTimeout(ctx, timeout)` ⇒ Go 侧 ctx deadline ⇒ GORM 的 `QueryContext`/`Exe… |
+| `G4-2` | DRIF | hot | 🟡 部分闭合 | B 静态 | P2 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/hot/vs-common.md:89` | — |
 | `UNRESOLVED-005` | DRIF | message | 🟡 部分闭合 | B 静态 | P2 | — | 否 | 未判定 | GAP-12 | 未定级 ⇒ 未排期 | `DRIFT/message/api.md:1097` | — |
 | `A-2` | DRIF | users | 🟡 部分闭合 | C 无指针 | P2 | — | 否 | 未判定 | BLK-03 | 无可复算指针 · 结论不可复算 | `DRIFT/users/admin/rpc.md:1874` | — |
-| `DRIFT-003` | DRIF | users | 🟡 部分闭合 | B 静态 | P2 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/users/user/api.md:35` | Go `service/like/api/likecenter.go:37`（`server := rest.MustNewServer(c.RestConf)` ⇒ Go 的四层保护是 go-zero `rest.Server` 的**内建行为**，不是 like 域自己的代码）＋ `go-zer… |
+| `DRIFT-003` | DRIF | users | 🟡 部分闭合 | B 静态 | P2 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/users/user/api.md:35` | — |
 | `P-2` | DRIF | users | 🟡 部分闭合 | C 无指针 | P2 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/users/stage1-admission.md:767` | — |
 | `UNRESOLVED-USERSCOMMON-002` | DRIF | users | 待核实 | B 静态 | P2 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/users/common.md:543` | — |
 | `DRIFT-MSG-V-001` | DRIF | _cross | ✅ 已一致 | C 无指针 | P3 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/_cross/message-domain-wide.md:26;DRIFT/_cross/message-domain-wide.md:148;DRIFT/_cross/message-domain-wide.md:161` | — |
@@ -994,7 +994,7 @@
 | `MISMATCH-API-03` | DRIF | comment | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/comment/api.md:54;DRIFT/comment/api.md:120` | — |
 | `SD-2026-10-23-04` | DRIF | comment | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/comment/proto.md:61;Intentional_Deviations/comment/proto.md:11` | — |
 | `SD-2026-10-24-CAND-08` | DRIF | comment | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/comment/vs-common.md:30;Intentional_Deviations/comment/api.md:172` | — |
-| `DRIFT-001` | DRIF | common | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/common/deadline.md:2` | Go `go-zero@v1.10.2/rest/router/patrouter.go:72-82`（`if !ok { pr.handleNotFound(w, r); return }` ⇒ 路径未注册 ⇒ **404**；`if pr.notAllowed != nil { pr.notAl… |
+| `DRIFT-001` | DRIF | common | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/common/deadline.md:2` | — |
 | `DRIFT-006` | DRIF | common | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/common/http.md:2` | — |
 | `DRIFT-COMMON-001` | DRIF | common | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/common/alignment-2026-10-23.md:71;DRIFT/common/alignment-2026-10-23.md:1043` | — |
 | `DRIFT-COMMON-002` | DRIF | common | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/common/alignment-2026-10-23.md:104;DRIFT/common/alignment-2026-10-23.md:1044` | — |
@@ -1016,7 +1016,7 @@
 | `L-1` | DRIF | favorite | ✅ 已一致 | C 无指针 | P3 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/favorite/vs-common.md:84` | — |
 | `L-2` | DRIF | favorite | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/favorite/vs-common.md:85` | — |
 | `L-5` | DRIF | favorite | ✅ 已一致 | C 无指针 | P3 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/favorite/vs-common.md:88` | — |
-| `L-6` | DRIF | favorite | ✅ 已一致 | A 活体 · 绿(0) | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/favorite/vs-common.md:89` | Go `service/article/rpc/internal/model/db.go:55`（Go 侧 **AutoMigrate** ⇒ 排序图里**没有** MP 自动配置这一环 ⇒ **无「排序桥」对应物** ⇒ 不构成 Go 对照项）vs RAG `service/common/src/… |
+| `L-6` | DRIF | favorite | ✅ 已一致 | A 活体 · 绿(0) | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/favorite/vs-common.md:89` | — |
 | `L-9` | DRIF | favorite | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/favorite/vs-common.md:95` | — |
 | `DRIFT-FOLLOW-001` | DRIF | follow | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/api.md:32;DRIFT/follow/api.md:51;DRIFT/follow/api.md:1178` | — |
 | `DRIFT-FOLLOW-002` | DRIF | follow | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/rpc.md:17;DRIFT/follow/rpc.md:25;DRIFT/follow/rpc.md:693` | — |
@@ -1052,7 +1052,7 @@
 | `CD-6` | DRIF | global | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/global/_README.md:137;DRIFT/global/cross-domain.md:46;DRIFT/global/cross-domain.md:591` | — |
 | `CD-8` | DRIF | global | ✅ 已一致 | C 无指针 | P3 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/global/cross-domain.md:48` | — |
 | `CD-9` | DRIF | global | ✅ 已一致 | C 无指针 | P3 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/global/cross-domain.md:49` | — |
-| `DRIFT-ARTICLE-API-006` | DRIF | global | ✅ 已一致 | A 活体 · 绿(0) | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/global/vs-common.md:225` | Go `go-zero@v1.10.2/rest/httpx/requests.go:21`（`maxBodyLen = 8 << 20  // 8MB` ⇒ `io.LimitReader` **静默截断** ⇒ 解析器报 `unexpected EOF` ⇒ 400 + body `"unexp… |
+| `DRIFT-ARTICLE-API-006` | DRIF | global | ✅ 已一致 | A 活体 · 绿(0) | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/global/vs-common.md:225` | — |
 | `DRIFT-COMMON-005` | DRIF | global | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/global/vs-common.md:3937` | — |
 | `E1` | DRIF | global | ✅ 已一致 | C 无指针 | P3 | — | 否 | 未判定 | GAP-10 | 无可复算指针 · 结论不可复算 | `DRIFT/global/_README.md:332` | — |
 | `E11` | DRIF | global | ✅ 已一致 | C 无指针 | P3 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/global/_README.md:350` | — |
@@ -1085,7 +1085,7 @@
 | `S-6` | DRIF | global | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/global/vs-common.md:235` | — |
 | `SD-2026-10-24-04` | DRIF | global | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/global/lanes/L5-signoff.md:134` | — |
 | `T-1` | DRIF | global | ✅ 已一致 | C 无指针 | P3 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/global/_README.md:87;DRIFT/global/common-tails.md:47;DRIFT/global/common-tails.md:76` | — |
-| `T-10` | DRIF | global | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/global/_README.md:97;DRIFT/global/common-tails.md:490;DRIFT/global/common-tails.md:640` | Go `service/common/observability/rpc.go:38`（`timeoutCtx, cancel := context.WithTimeout(ctx, timeout)` ⇒ deadline **来自 ctx**，Go 侧**没有**「手动设过期时刻」的原语）；超时… |
+| `T-10` | DRIF | global | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/global/_README.md:97;DRIFT/global/common-tails.md:490;DRIFT/global/common-tails.md:640` | — |
 | `T-11` | DRIF | global | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/global/common-tails.md:498;DRIFT/global/common-tails.md:641;DRIFT/global/lanes/L5-signoff.md:29` | — |
 | `T-14` | DRIF | global | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/global/common-tails.md:565` | — |
 | `T-15` | DRIF | global | ✅ 已一致 | C 无指针 | P3 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/global/common-tails.md:576;DRIFT/global/common-tails.md:587` | — |
@@ -1239,7 +1239,7 @@
 | `OP-06` | DRIF | message | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/message/rpc.md:502` | — |
 | `OP-07` | DRIF | message | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/message/rpc.md:503` | — |
 | `OP-08` | DRIF | message | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/message/rpc.md:504` | — |
-| `OP-09` | DRIF | message | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/message/rpc.md:505` | Go `service/like/rpc/internal/model/domain_fact.go:76-138`（`appendLikeFact`：遗留未版本化事实 ⇒ 报错 `:101-110`；原子取号 `:111-116`；版本须 ∈ [1, 2^53-1] `:117-119`；payl… |
+| `OP-09` | DRIF | message | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/message/rpc.md:505` | — |
 | `SD-2026-10-24-01` | DRIF | message | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/message/rpc.md:2714;Intentional_Deviations/message/rpc.md:30` | — |
 | `SD-2026-10-24-02` | DRIF | message | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/message/rpc.md:2715;Intentional_Deviations/message/rpc.md:52` | — |
 | `SD-2026-10-24-03` | DRIF | message | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/message/rpc.md:2716;Intentional_Deviations/message/rpc.md:73` | — |
@@ -1269,7 +1269,7 @@
 | `DRIFT-TASK-RPC-006` | DRIF | task | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/task/_README.md:322;DRIFT/task/_README.md:362;DRIFT/task/rpc.md:349` | — |
 | `DRIFT-TASK-RPC-007` | DRIF | task | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/task/_README.md:323;DRIFT/task/_README.md:363;DRIFT/task/rpc.md:408` | — |
 | `DRIFT-TASK-RPC-008` | DRIF | task | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/task/_README.md:324;DRIFT/task/_README.md:364;DRIFT/task/rpc.md:1545` | — |
-| `FB-01` | DRIF | task | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/task/vs-common.md:72` | Go `go-zero@v1.10.2/rest/router/patrouter.go:48`（注册侧 `cleanPath := path.Clean(reqPath)`）＋ `go-zero@v1.10.2/rest/router/patrouter.go:60`（匹配侧 `reqPath :… |
+| `FB-01` | DRIF | task | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/task/vs-common.md:72` | — |
 | `FB-06` | DRIF | task | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | P2-T02,P2-T06 | 未定级 ⇒ 未排期 | `DRIFT/task/vs-common.md:148` | — |
 | `SD-2026-10-23-TASK-01` | DRIF | task | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/task/_README.md:325;DRIFT/task/_README.md:365;Intentional_Deviations/task/rpc.md:13` | — |
 | `SD-2026-10-24-TASK-01` | DRIF | task | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/task/_README.md:326;DRIFT/task/_README.md:366;Intentional_Deviations/task/rpc.md:115` | — |
@@ -1543,7 +1543,7 @@
 | `PIT-GLOBAL-048` | Pitf | global | 仍生效 | C 无指针 | P1 | N/A（不适用） | 否 | 未判定 | P2-T01,P2-T05 | 无可复算指针 · 结论不可复算 | `Pitfalls/global/cross-domain.md:1903` | — |
 | `PIT-GLOBAL-049` | Pitf | global | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 已定性 · 未排期 | `Pitfalls/global/cross-domain.md:1940` | — |
 | `PIT-GLOBAL-050` | Pitf | global | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 已定性 · 未排期 | `Pitfalls/global/cross-domain.md:1980` | — |
-| `PIT-GLOBAL-051` | Pitf | global | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 已定性 · 未排期 | `Pitfalls/global/cross-domain.md:2014` | Go `service/comment/rpc/internal/logic/report_comment_logic.go:88-92`（`result = "sys_fail"` → `span.RecordError(err)` → `err = errmsg.NewGrpcErr(errms… |
+| `PIT-GLOBAL-051` | Pitf | global | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 已定性 · 未排期 | `Pitfalls/global/cross-domain.md:2014` | — |
 | `PIT-GLOBAL-052` | Pitf | global | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 已定性 · 未排期 | `Pitfalls/global/cross-domain.md:2055` | — |
 | `PIT-GLOBAL-053` | Pitf | global | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 已定性 · 未排期 | `Pitfalls/global/cross-domain.md:2132` | — |
 | `PIT-GLOBAL-054` | Pitf | global | 仍生效 | C 无指针 | P1 | N/A（不适用） | 否 | 未判定 | P2-T01 | 无可复算指针 · 结论不可复算 | `Pitfalls/global/cross-domain.md:2174` | — |
