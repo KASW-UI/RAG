@@ -121,7 +121,7 @@
 |---|---|
 | **计划任务 ID** | `P2-T01` |
 | **原始编号** | `E65` · `E38②`（窄化后的第③层残余）· `X-6`（`PhaseGoal-judge.md` §五）· `P0 #4` · comment 域 `D8` · like 域 `U15` · favorite 域 `E65` |
-| **原始来源** | `docs/DRIFT/global/vs-common.md:30`（🔴 OPEN）· `:46`（完整重核 · 21 stub / 30 处零 deadline）· `:63`（A1 轴「共享层侧 = **半开**」）· `docs/DRIFT/global/_README.md:391-392`（双侧活体探针坐实 + Go 真源逐行取证）· `docs/DRIFT/_cross/domain-common-lanes.md:131` · `docs/DRIFT/comment/rpc.md:166`（`D8`）· `docs/DRIFT/like/vs-common.md:174` · `docs/PhaseGoal-judge.md:259`（X-6 行）· `docs/PhaseGoal-judge.md:189` / `:235`（E65 仅出现在「仍开放项」列） |
+| **原始来源** | `docs/DRIFT/global/vs-common.md:30`（🔴 OPEN）· `:46`（完整重核 · 21 stub / 30 处零 deadline）· `:63`（A1 轴「共享层侧 = **半开**」）· `docs/DRIFT/global/_README.md:391-392`（双侧活体探针坐实 + Go 真源逐行取证）· `docs/DRIFT/_cross/domain-common-lanes.md:131` · `docs/DRIFT/comment/rpc.md:179`（`D8`）· `docs/DRIFT/like/vs-common.md:174` · `docs/PhaseGoal-judge.md:259`（X-6 行）· `docs/PhaseGoal-judge.md:189` / `:235`（E65 仅出现在「仍开放项」列） |
 | **当前状态** | global 台账 **🔴 OPEN**；judge **无 A/B/C/D 定级**、**不在「共享层 28 项」桶里**（那 23 编号 = `DRIFT-COMMON` 0 + communityfact 14 + logger 7 + snowflake 2）；`E66` 在 judge 里**出现 0 次** ⇒ 按 Jason 2026-10-29 裁定 **定为 A 类（阶段一阻断）** |
 | **当前事实** | ① **今天实跑** `python3 tools/difftest/check-deadline-downstream.py` ⇒ **EXIT=0**，输出：`Go {failed_fast:true, code:4, outgoing_carrier:present_expired, sql_carrier:present_expired}` ⇔ `RAG {failed_fast:false, code:0, outgoing_carrier:absent, sql_carrier:present_expired}` ⇒ **Go 侧 deadline 到点 ⇒ 出向调用立刻失败（code=4 = DEADLINE_EXCEEDED）；RAG 侧出向调用完全没有 deadline ⇒ 挂住、永不返回** ② ⚠️ **该守门的 PASS 语义是「漂移还在」**（`check-deadline-downstream.py` docstring ③：「drift 键是**已登记的漂移形态** ⇒ 漂移还在 ⇒ 绿；形态变了（**被修好**）⇒ **红**」）⇒ **不能拿它的 PASS 证明 X-6 成立** ③ **X-6 的判据原文**：「下游 deadline = `min(客户端 deadline, 服务端 timeout)`；SQL 取消时刻 == deadline 时刻」⇒ RAG 侧「下游 deadline」不成立 ④ **改造面 = 21 个出向 stub 类 / 30 处零 deadline 调用点**，其中 **11 个类连上界都没有**（`message-rpc/UserRpcClient.java:42` · `message-rpc/AdminRpcClient.java:58`/`:92` · `like-rpc/MessageRpcClient.java:85` · `follow-rpc/UserRpcClient.java:50` · `user-api/UserRpcClient.java:144` · `admin-api/AdminRpcClient.java:174` 等）⇒ Go 侧全部有 **2000ms 硬上界**（`go-zero@v1.10.2` `zrpc/config.go:31` `Timeout int64 json:",default=2000"`）⑤ 根因一句话：**链上有两个互不相通的载体** —— `RpcInterceptor.DeadlineState`（服务端 / rpc 线程）vs `GoStyleRequestDeadline`（出向 stub / api 线程）；`GoStyleRequestDeadline.begin` 在全仓生产代码中**只出现 1 次**（`service/common/.../observability/HttpMiddleware.java:324`）⇒ **rpc 进程无 HTTP 入口 ⇒ 出向 stub 永远看不到入向 deadline** ⑥ 候选修法已探明（**不需要架构级改造、不需要 interrupt**）：共享层在 `onHalfClose` 里把有效期限也绑进 `GoStyleRequestDeadline` ＋ 各域裸 stub 调用点改用 `applyTo` ⑦ ⚠️ **改造面数字被订正过两次**（20/7 → 21/30）⇒ **执行时必须重数** |
 | **阶段一影响** | **① 阻断阶段一** —— 命中 `P0 #4`「核心失败路径具有明确行为，不会无声吞掉关键异常」⇒ RAG 侧出向调用**无限期挂起**；且 `P0 #4` 的现有证据（失败路径矩阵 227 条）测的是「端点 × 失败维度」，**不覆盖跨进程 deadline 传播** |
@@ -159,7 +159,7 @@
 |---|---|
 | **计划任务 ID** | `P2-T03` |
 | **原始编号** | `E65`（域侧半边）· comment 域 `D8` · like 域 `U15` |
-| **原始来源** | `docs/DRIFT/global/vs-common.md:46`（逐条 `文件:行号` 清单）· `docs/DRIFT/global/_README.md:391` · `docs/DRIFT/comment/rpc.md:166` |
+| **原始来源** | `docs/DRIFT/global/vs-common.md:46`（逐条 `文件:行号` 清单）· `docs/DRIFT/global/_README.md:391` · `docs/DRIFT/comment/rpc.md:179` |
 | **当前状态** | 🔴 **未做**。已知样例：`comment-rpc/client/ArticleRpcClient.java:65`（裸 stub）· `like-rpc/client/MessageRpcClient.java:85` · `message-rpc/client/UserRpcClient.java:42` · `follow-rpc/client/UserRpcClient.java:50`（注释明说「没有在此处设 deadline」）· `favorite-rpc/client/{UserRpcClient.java:45, ArticleRpcClient.java:50}`（走 `applyTo` ⇒ gRPC 路径 no-op ⇒ **`P2-T02` 修好后自动生效**） |
 | **当前事实** | `applyTo` 只在**载体里**有值时才有意义 ⇒ 调用点必须**统一走同一个载体**（不能一半 `applyTo` 一半手搓 `remainingMillis()`）⇒ 否则**两套语义并存**，修一半 = 混进表述差异 |
 | **阶段一影响** | ① **阻断阶段一**（A 类 · E65 的域侧半边） |
@@ -303,6 +303,6 @@
 | **judge §十一 D-01~D-08** | **8 条** | `D-08` ⇒ `P4-T09`；`D-01`/`D-04` ⇒ 已闭合；`D-02` 残留 ⇒ `P1-T04`；`D-03` ⇒ `DEC-01`（待裁定）；`D-05` ⇒ `DEC-03`（阶段二）；`D-06` ⇒ `P4-T06` + 共享层 28 项逐条定级；`D-07` ⇒ 已签字 `SD-2026-10-24-CAND-02` ⇒ **不得再修** |
 | 跨组件不变量 | **12 条**（`X-1`~`X-12`） | `X-5`/`X-6`/`X-12` ⇒ `P1-T01`/`P2-T01`/`P3-*`；其余 9 条 ⇒ 已成立（复判时逐条复核） |
 | 证据缺口 | **20 条**（`G-1`~`G-20`） | `G-19` ⇒ `P5-T01`（+ `P2-T05` 守门改造）· `G-17` ⇒ **记录缺口**（`like-common` 专属台账）⇒ 登记在 `_unresolved.md` 第 2 类 `GAP-02` ⇒ **阶段一之外**；其余 18 条 ⇒ 已闭合（历史） |
-| Intentional_Deviations | **48 条已签字 + 18 条未签字候选** | 已签字 ⇒ **保护项**（写进各轮「不得顺手修回 Go 行为」约束）；18 条候选 ⇒ **不升级拍板**，登记在 `_unresolved.md` 的第 4 类 |
+| Intentional_Deviations | **60 条已签字 + 12 条未签字候选** | ⚠️ **2026-10-29 机器复算订正**：原写 48 / 18 ⇒ 现值 60 / 12（[`docs/Intentional_Deviations/_INDEX.md`](../Intentional_Deviations/_INDEX.md) 权威表）<br>已签字 ⇒ **保护项**（写进各轮「不得顺手修回 Go 行为」约束）；12 条候选 ⇒ **不升级拍板**，登记在 `_unresolved.md` 的第 4 类 |
 | Pitfalls | **56+ 条 global + 各域** | 逐条转成**执行防错约束**，见 [`_dependencies.md`](_dependencies.md) **§4.0 附表**（各轮 PIT → 任务 ID 对账）与各轮「防错约束」小节 |
 | DDL 残留 | **51 处**（C 23 / D 28 / A 0） | 不计入阶段一（§1.1 ⑥ 第 4 条）⇒ 登记在 `_unresolved.md` 第 5 类 |

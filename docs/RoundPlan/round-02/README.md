@@ -57,7 +57,7 @@
 |---|---|
 | **任务 ID** | `P2-T01` |
 | **原始编号** | `E65` · `E38②` · `X-6` · `P0 #4` |
-| **来源** | `docs/DRIFT/global/vs-common.md:30`/`:46`/`:63` · `docs/DRIFT/global/_README.md:391` · `docs/DRIFT/_cross/domain-common-lanes.md:131` · `docs/DRIFT/comment/rpc.md:166`（`D8`）· `docs/DRIFT/like/rpc.md`（`U15`） |
+| **来源** | `docs/DRIFT/global/vs-common.md:30`/`:46`/`:63` · `docs/DRIFT/global/_README.md:391` · `docs/DRIFT/_cross/domain-common-lanes.md:131` · `docs/DRIFT/comment/rpc.md:179`（`D8`）· `docs/DRIFT/like/rpc.md`（`U15`） |
 | **当前状态** | 🔴 台账数字**被订正过两次**，不可信 ⇒ 需重数 |
 | **执行目的** | 改造面是**跨 5 个模块的 21 个类 / 30 个调用点** ⇒ 不先精确落表，就会漏改（漏一个 = 该条路径仍然挂住） |
 | **具体操作** | ① 全仓扫**出向 stub 提供者**（`@GrpcClient` 注入的 stub 字段 + `newStub`/`build` 出来的 stub）② 对每个 stub 判定三态：**① 走 `applyTo(stub)`**（有上限但 gRPC 路径 no-op）· **② 走 `remainingMillis()` 手搓** · **③ 裸 stub（零 deadline、无上界）** ③ 对每个调用点记录：`文件:行号` · 所属模块 · 当前形态 ④ 逐条给出 **Go 对照**（Go 侧对应调用点 + 上下文是否带 ctx）⑤ 标出 **Go 的 2000ms 硬上界出处**（`zrpc/config.go:31`）⑥ **必须自证计数**（脚本输出 + 人工抽查 ≥3 条） |
@@ -101,7 +101,7 @@
 |---|---|
 | **任务 ID** | `P2-T03` |
 | **原始编号** | `E65`（域侧半边）· comment 域 `D8` · like 域 `U15` |
-| **来源** | `docs/DRIFT/global/vs-common.md:46`（逐条 `文件:行号` 清单）· `docs/DRIFT/global/_README.md:391`（「各域裸 stub 调用点改用 `applyTo`」）· `docs/DRIFT/comment/rpc.md:166` |
+| **来源** | `docs/DRIFT/global/vs-common.md:46`（逐条 `文件:行号` 清单）· `docs/DRIFT/global/_README.md:391`（「各域裸 stub 调用点改用 `applyTo`」）· `docs/DRIFT/comment/rpc.md:179` |
 | **当前状态** | 🔴 **未做**。已知样例：`comment-rpc/client/ArticleRpcClient.java:65`（裸 stub）· `like-rpc/client/MessageRpcClient.java:85` · `message-rpc/client/UserRpcClient.java:42` · `follow-rpc/client/UserRpcClient.java:50`（注释明说「没有在此处设 deadline」）· `favorite-rpc/client/{UserRpcClient.java:45, ArticleRpcClient.java:50}`（走 `applyTo` ⇒ gRPC 路径 no-op ⇒ **`P2-T02` 修好后自动生效**） |
 | **执行目的** | `applyTo` 只在**载体里**有值时才有意义 ⇒ 调用点必须**统一走同一个载体**（不能一半 `applyTo` 一半手搓 `remainingMillis()`） |
 | **具体操作** | ① 按 `P2-T01` 的全表，把**所有**出向 stub 调用点**统一**改成 `stub.applyTo(deadlineState)` 形态（载体名以 `P2-T02` 的实现为准）② **清掉手搓 `remainingMillis()` 的那批**（`like-api/LikeRpcClient.java:138` · `comment-api/CommentRpcClient.java:97` · `task-api/TaskRpcClient.java:106` · `article-api/UserRpcClient.java:83`）⇒ 否则**两套语义并存**，修一半 = 混进表述差异 ③ ⚠️ **不要把 `hot-api/HotArticleQueryService.java:102` 算进来** —— 那是**本地查询**读剩余预算，**不是出向 stub** ④ 每处改完补一条断言（**断 deadline 值本身**，不是断「调用了某个方法」） |

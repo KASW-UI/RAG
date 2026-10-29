@@ -48,6 +48,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import re
 import sys
 from pathlib import Path
@@ -56,15 +57,18 @@ ROOT = Path(__file__).resolve().parents[2]
 BASE = ROOT / "docs/Intentional_Deviations"
 INDEX = BASE / "_INDEX.md"
 
-HEADING_RE = re.compile(r"^(#{2,4})\s+(.+?)\s*$")
+HEADING_RE = re.compile(r"^(#{2,5})\s+(.+?)\s*$")   # ⚠️ 5 级：`common/_signed-deviations.md` 用 `#####`
 # 编号 token
 ID_RE = re.compile(r"(?:SD|DEV)[-_][A-Za-z0-9_.\-]+|[NACD]-\d+")
 # 前导装饰（标题里编号前面可能夹这些）
 # ⚠️ **2026-10-29 修正**：`⏳` 是**候选条目的固定前缀**（`### ⏳ SD-2026-10-23-09（候选）：…`）
 #    ⇒ 原正则漏了它 ⇒ like 域 4 条候选**整族失配**（⇒ 候选数被少算）。
+# ⚠️ **2026-10-29 再修正**：`🔴 🟡 ✅ ❌ ⚫ ⚠️ ⛔ 🏷 📌` 同样是常见前缀
+#    （`##### 🔴 C-1 逐条重核（…）`）⇒ 原正则也漏了 ⇒ **`A/C/D-x` 族整族失配**
+#    ⇒ 索引的「A/C/D-x 族 5 条」一直**没有机器能验**。
 LEAD_RE = re.compile(
     r"^[\s>*_`~·—–\-（）()#]*"
-    r"(?:🆕|⏳|🏷|⚠️|📌|⛔|✅|❌|🟡)?"
+    r"(?:🆕|⏳|🏷|⚠️|📌|⛔|✅|❌|🔴|🟡|⚫|⬜)?"
     r"[\s>*_`~·—–\-（）()#]*"
     r"(?:~~)?`?"
 )
@@ -72,6 +76,10 @@ REVOKE_RE = re.compile(r"⛔|已撤销|已失效|已关闭|❌|撤销记录")
 CAND_RE = re.compile(r"⏳|候选|未签字|待签字|🏷")
 SIGNED_RE = re.compile(r"✅|已签字|仍成立|用户拍板|留痕")
 TRANSCRIPT_RE = re.compile(r"转录自|同族条目|同族\s*`")
+# 「索引行」= **总表 / 概览表里的目录行**（正本在同一条目的**全文落点**或 `_cross/`）
+#   ⇒ 索引口径 ②「同一编号跨文件转录同一件事 ⇒ 只算一条」⇒ **不独立计数**
+#   ⚠️ 与 `TRANSCRIPT_RE` 分开：前者只作用于**表行**（标题里的同义写法由 TRANSCRIPT_RE 兜底）
+INDEX_ROW_RE = re.compile(r"索引行|不独立计数")
 # 「附记」= 挂在**另一条**条目下的补充说明 ⇒ **不是独立条目**（不计数）
 APPENDIX_RE = re.compile(r"附记")
 
@@ -98,6 +106,11 @@ VALUE_MAP = [
     ("未签字", "未签字"), ("待签字", "未签字"), ("候选", "未签字"),
     ("仍成立", "已签字"), ("已签字", "已签字"), ("仍生效", "已签字"),
 ]
+# 「**不计入签字数**」标记（2026-10-29 新增）
+#   索引口径原文：「一条 = 一个有**独立编号**的**签字条目**」
+#   ⇒ `A/C/D-x` 族里的 **C-1（表述差异 · 语义已对齐 · 无需签字）** 与 **D-1/D-2（UNRESOLVED）**
+#      **不是签字条目** ⇒ 即使「仍成立」也**不得计入签字数**（⇒ 索引原表把它们算进「已签字合计」= 多算 3 条）。
+NON_COUNT_RE = re.compile(r"不计入签字数")   # ⚠️ **精确短语** —— 「不计入已签字计数」这类**澄清散文**不算
 
 
 def _value_kind(v: str) -> str | None:
@@ -135,6 +148,28 @@ def _classify(title: str, seg: str) -> tuple[str, str]:
             return k, m.group(0).strip()
     return "未定级", ""
 
+TABLE_ROW_RE = re.compile(r"^\s*\|\s*\*{0,2}`?([A-Za-z][A-Za-z0-9_.\-]*)`?\*{0,2}\s*\|")
+
+
+def _table_row_entries(path: pathlib.Path, lines: list[str]) -> list[tuple[int, str, str]]:
+    """表行条目：**首列正好是编号 token** ⇒ 也是一条结论（如 `| A-1 | … |`）。
+
+    ⚠️ 同一文件里同一编号只算**第一次**出现 ⇒ 概览表 + 复核块不会重复计数。
+    """
+    out, seen = [], set()
+    for i, l in enumerate(lines):
+        m = TABLE_ROW_RE.match(l)
+        if not m:
+            continue
+        ident = m.group(1)
+        if not (ID_RE.fullmatch(ident) or ident.startswith(("SD-", "DEV-"))):
+            continue
+        if ident in seen:
+            continue
+        seen.add(ident)
+        out.append((i, ident, l))
+    return out
+
 
 def _entries() -> list[dict]:
     out = []
@@ -156,6 +191,12 @@ def _entries() -> list[dict]:
             end = head_idx[k + 1] if k + 1 < len(head_idx) else len(lines)
             seg = "\n".join(lines[i:end])
             kind, field = _classify(title, seg)
+            # ⚠️ **只认规范状态字段里的「不计入」标记**（不扫正文 —— 正文里的「不计入」
+            #    多半是**对别条的回指**，扫正文会把活条目误判 ⇒ 同族：全文扫状态词的教训）
+            if NON_COUNT_RE.search(field):
+                # ⚠️ 精确短语命中 ⇒ 本条**性质上不是签字条目**（表述差异 / UNRESOLVED 等）
+                #    ⇒ 即便「仍成立」也**不计入签字数**（索引口径：「一条 = 一个签字条目」）
+                kind = "不计入签字数（性质：表述差异 / UNRESOLVED 等）"
             if TRANSCRIPT_RE.search(title):
                 kind = "转录（不独立计数）"
             elif APPENDIX_RE.search(title):
@@ -169,7 +210,43 @@ def _entries() -> list[dict]:
                 "field": field,
                 "seg": seg,
             })
+        # ── 表行条目（首列 = 编号）—— 同一文件里同一编号只算第一次 ──────────
+        seen_ids = {e["id"] for e in out if e["file"] == str(p.relative_to(ROOT))}
+        for i, ident, row in _table_row_entries(p, lines):
+            if ident in seen_ids:
+                continue
+            seen_ids.add(ident)
+            # 条目正文段 = 该行 → 下一个标题行
+            nxt = next((h for h in head_idx if h > i), len(lines))
+            seg = "\n".join(lines[i:nxt])
+            kind, field = _classify(row, seg)
+            if NON_COUNT_RE.search(field):
+                kind = "不计入签字数（性质：表述差异 / UNRESOLVED 等）"
+            if INDEX_ROW_RE.search(row):
+                # ⚠️ **总表目录行** ⇒ 正本在同一编号的**全文落点**（跨文件）⇒ 按索引口径 ②
+                #    「同一编号跨文件转录同一件事 ⇒ 只算一条」⇒ **不独立计数**
+                kind = "转录（不独立计数）"
+            out.append({
+                "file": str(p.relative_to(ROOT)),
+                "line": i + 1,
+                "id": ident,
+                "title": row.strip()[:160],
+                "kind": kind,
+                "field": field,
+                "seg": seg,
+            })
     return out
+
+
+def _family(ident: str) -> str:
+    """条目族别（对应索引计数表的行）"""
+    if re.fullmatch(r"N-\d+", ident):
+        return "N-x 族"
+    if re.fullmatch(r"[ACD]-\d+", ident):
+        return "A/C/D-x 族"
+    if "CAND" in ident:
+        return "CAND 族"
+    return "SD- 族"
 
 
 def main() -> int:
@@ -189,6 +266,7 @@ def main() -> int:
     revoked = counts.get("撤销/失效", 0)
     transcript = counts.get("转录（不独立计数）", 0)
     unknown = counts.get("未定级", 0)
+    noncount = counts.get("不计入签字数（性质：表述差异 / UNRESOLVED 等）", 0)
 
     print("Intentional_Deviations · 签字数 / 候选数复算")
     print("=" * 68)
@@ -197,6 +275,7 @@ def main() -> int:
     print(f"  ⏳ 未签字（候选）       = {cand}")
     print(f"  ⛔ 撤销 / 失效（不计）   = {revoked}")
     print(f"  🔁 转录（不独立计数）    = {transcript}")
+    print(f"  ⊘ 不计入签字数（性质类）  = {noncount}")
     print(f"  ⚠️ 未定级（**缺状态字段**）= {unknown}")
     if unknown:
         print(f"  📊 状态字段覆盖率      = {(len(entries)-unknown)/len(entries)*100:.1f}%"
@@ -210,6 +289,24 @@ def main() -> int:
             if e["kind"] == "未定级":
                 print(f"  {e['file']}:{e['line']}  {e['id']:26s} {e['title'][:82]}")
         print("-" * 68)
+
+    # ── 族别分解（对应索引计数表的行）─────────────────────────────
+    fam: dict = collections.defaultdict(lambda: collections.defaultdict(int))
+    for e in entries:
+        if e["kind"] in ("转录（不独立计数）", "附记（不独立计数）",
+                        "不计入签字数（性质：表述差异 / UNRESOLVED 等）"):
+            continue
+        fam[_family(e["id"])][e["kind"]] += 1
+    print("  族别分解（对应索引计数表）：")
+    for f in ("SD- 族", "N-x 族", "A/C/D-x 族", "CAND 族"):
+        d = fam.get(f, {})
+        tot = sum(d.values())
+        if not tot:
+            continue
+        print(f"    {f:12s} 共 {tot:3d} 条 · 已签字 {d.get('已签字', 0):3d}"
+              f" · 未签字 {d.get('未签字', 0):3d} · 撤销/失效 {d.get('撤销/失效', 0):3d}"
+              f" · 未定级 {d.get('未定级', 0):3d}")
+    print("-" * 68)
 
     if args.list:
         for k in ("未定级", "撤销/失效", "未签字", "已签字", "转录（不独立计数）"):

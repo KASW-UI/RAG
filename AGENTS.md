@@ -21,9 +21,9 @@
 > ⚠️ **「已改」≠「已验证」；「源码级对照」≠「双侧活体对拍」** ⇒ 台账里的 ✅ 一律读作「**在该证据强度下一致**」，
 > 不是已闭环。**每条的证据强度以该域台账的「证据强度」列为准**（分层口径见 `docs/DRIFT/_INDEX.md` 末节）。
 
-1. **已签字的有意偏离**（另 **18 条未签字候选**）—— 是决策不是缺陷，但两侧确实不一致 ⇒ [`docs/Intentional_Deviations/`](docs/Intentional_Deviations/_INDEX.md)
+1. **已签字的有意偏离**（另 **12 条未签字候选**）—— 是决策不是缺陷，但两侧确实不一致 ⇒ [`docs/Intentional_Deviations/`](docs/Intentional_Deviations/_INDEX.md)
    ⚠️ **共性**：多数是「**RAG 做了更严/更安全的那一侧**」或「proto `package` 归一（表达层）」⇒ 对拍看到它们变红，**先确认是不是签字项，不要当新回归去「修」**。
-2. **DDL 差异**（2026-10-25 双侧活体对拍 · **9 域**）：**类型/长度 0 差异**。**仍未修**：`users_user.status` 可空性 · `DEFAULT CURRENT_TIMESTAMP` 残留 **22 处**（**14 处可复算**）· users 域缺 3 条非唯一索引（**性能非行为**）。`hot` = **N/A** ⇒ 不许写成「已对齐」。⇒ [`ddl-type-divergences.md`](docs/DRIFT/_cross/ddl-type-divergences.md)
+2. **DDL 差异**（2026-10-25 双侧活体对拍 · **9 域**）：**类型/长度 0 差异**。**仍未修**：`users_user.status` 可空性 · `DEFAULT CURRENT_TIMESTAMP` 残留 **22 处**（**22 处可复算**）· users 域缺 3 条非唯一索引（**性能非行为**）。`hot` = **N/A** ⇒ 不许写成「已对齐」。⇒ [`ddl-type-divergences.md`](docs/DRIFT/_cross/ddl-type-divergences.md)
 3. **跨组件不变量仍无法单侧闭环**（§3.5 表）⇒ **收口域 = `global`**。
    ⇒ **每个模块接手的第一件事仍是「先让它真的启动一次」**（2026-10-23 修复轮**之前**实测 `hot-rpc`/`like-rpc` **根本起不来，而测试全绿**）⇒ **「跑绿」不是「对」**。
 > 历轮修复记录 ⇒ [`docs/DRIFT/_cross/fix-round-2026-10-23.md`](docs/DRIFT/_cross/fix-round-2026-10-23.md) · 教训 ⇒ [`fix-round-lessons.md`](docs/Pitfalls/_cross/fix-round-lessons.md)
