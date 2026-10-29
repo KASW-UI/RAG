@@ -624,6 +624,11 @@ def load_grading_overlay() -> dict[str, dict]:
             blk = cs[3].strip().strip("*` ")
             if blk.startswith("不") or "不阻断" in blk:
                 blocking = "否"
+            elif blk.startswith("否"):
+                # ⚠️ **裸「否」也要显式解析** —— 否则 `blocking` 落空 ⇒ 靠
+                #   「A 类 ⇒ 是 / 其余 ⇒ 否」的回落规则才得出同样的值
+                #   ⇒ **正确结果来自兜底而非判据**（脆弱：回落规则一改就变）。
+                blocking = "否"
             elif blk.startswith("是"):
                 blocking = "是"
             else:
@@ -631,8 +636,15 @@ def load_grading_overlay() -> dict[str, dict]:
             basis = cs[4].strip()
             date = cs[5].strip() if len(cs) > 5 else ""
             # ⚠️ **依据必须含双侧 `文件:行号`** —— 否则「定级」是无出处的断言
+            #   ⚠️ **Go 侧必须是 `.go`；RAG 侧不限扩展名** ——
+            #      实测（2026-10-30 W4 轮）：RAG 侧指针常指向
+            #      `application.yml:53` / `AutoConfiguration.imports:4` /
+            #      `docker-compose.yaml:15` / `README.md:89` ⇒ 若限定 `.java`
+            #      ⇒ **6 条定级被整行丢弃**（数字看着正常，内容全错）。
+            #      ⇒ RAG 侧用「任意扩展名」正则，但**必须排除 `.go`**
+            #      （否则 Go 侧行号会被误当成 RAG 侧 ⇒ 两侧实际只写了一边）。
             has_go = re.search(r"[\w./\-]+\.go:\d+", basis)
-            has_rag = re.search(r"[\w./\-]+\.java:\d+", basis)
+            has_rag = re.search(r"[\w./\-]+\.(?!go\b)[A-Za-z]{1,10}:\d+", basis)
             if not (has_go and has_rag):
                 continue
             # ⚠️ **结论三态单独抽字段** —— **不许靠全文搜**。
@@ -1785,6 +1797,16 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a("6. **「未排期」≠「不重要」** —— 它只说明**当前没有任何任务/未解决项指向它**。")
     a("7. **本层**不读**产品代码** ⇒ 它是**台账的投影**，不是代码的事实；")
     a("   「指针能解析」也不等于「结论为真」（同 AGENTS.md §3.3.3 第 ② 条）。")
+    a("8. 🆕 **U8 认不出「表行编号」** —— 实测（U5-O 轮）：`global/vs-common.md` 里的表行编号")
+    a("   （`B-10` / `B-11` / `G4-A4-05` / `G4-A4-07`）**与任务的「原始编号」不是一一对应**")
+    a("   （`_task-universe.md` 的 `P2-T01` 写的是 `E65` / `X-6` / `P0 #4`，不含 `B-10`）")
+    a("   ⇒ 派生层会判它们「**未排期**」⇒ **报进真缺口清单**。")
+    a("   ⚠️ **这不等于它们没排期** —— 它们可能是某个任务的**改造面内条目**")
+    a("   ⇒ **本层不猜**（不按语义关联去连任务）⇒ 处置 = **在 `_unresolved.md` 登记歧义 + 人工确认**。")
+    a("   ⇒ 与第 3 条同源：**「不可见」≠「不存在」**。")
+    a("9. 🆕 **「已闭合」档 ≠ 台账已销账** —— §4.4 的条目在台账里**仍写 🔴 未闭合**，")
+    a("   只是逐条回源后**差异早已不存在**。本层**不改状态**（投影不裁定）")
+    a("   ⇒ 状态订正由**回写台账**完成（追加「阶段归属定级附录」，保留区机制不产生自噬）。")
     a("")
     a("---")
     a("")
