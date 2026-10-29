@@ -56,6 +56,21 @@ LANE_DOMAINS = {
 }
 STATUS_RANK = {"✅": 4, "🟡": 3, "⚫": 2, "🔴": 1}
 
+
+def baseline_version() -> str:
+    """从 judge 头部解析基线版本号（**不硬编码** ⇒ judge 升版时生成物自动跟随）。
+
+    解析失败 ⇒ 直接抛错（门红）⇒ **不许静默回落成某个字面值** ——
+    那会让「基线已升版 / 生成物仍写旧号」这件事在门禁里彻底看不见。
+    """
+    m = re.search(r"\*\*版本\*\*：\*\*修订版\s+(v\d+)\*\*",
+                  BASE.read_text(encoding="utf-8"))
+    if not m:
+        raise SystemExit(
+            "❌ 解析不到 judge 的基线版本号（期望 docs/PhaseGoal-judge.md 头部有 "
+            "「**版本**：**修订版 vN**」）⇒ 不许回落成写死的版本号")
+    return m.group(1)
+
 # ── P0 九条归属（主责唯一；collab = 协作方）──
 # owner ∈ {G1..G4, 收口}
 P0_MAP = {
@@ -342,7 +357,8 @@ def render(lane: str, rows) -> str:
     A("> ⚠️ **本文件是机器生成的 —— 不要手改。**")
     A("> 生成器：`python3 tools/difftest/check-phasegoal-lanes.py --write`；"
       "校验器：`python3 tools/difftest/check-phasegoal-lanes.py`（CI 门禁）。")
-    A("> **唯一数据源**：[`docs/PhaseGoal-judge.md`](../PhaseGoal-judge.md)（阶段一终点指标基线 v3）。")
+    A(f"> **唯一数据源**：[`docs/PhaseGoal-judge.md`](../PhaseGoal-judge.md)"
+      f"（阶段一终点指标基线 {baseline_version()}）。")
     A("> ⇒ **改判定请改基线，然后重跑生成器** —— 手改本文件 ⇒ 与基线分叉 ⇒ 门禁红。")
     A("")
     A(f"- **lane 归属**（AGENTS.md §5.3d / §5.3f）：{scope}")
