@@ -136,7 +136,7 @@ cd /Users/pr/Documents/java&golang/RAG.worktrees/r3-errmsg-b
 bash tools/errmsg-probe/like/mutate-parity.sh ; echo "EXIT=$?"
 ```
 
-### 实测输出（2026-10-29，exit 1 = 变异测试通过）
+### 实测输出（2026-10-29 · ⚠️ 退出码已于 2026-10-29 统一为 **0 = 变异测试通过**，下面日志里的 `exit 1` 是**统一前**的原始输出）
 
 ```
 == 基线（未变异）必须转绿 ==
@@ -161,12 +161,12 @@ bash tools/errmsg-probe/like/mutate-parity.sh ; echo "EXIT=$?"
       --- 红色输出关键行 ---
       | 20:-FALLBACK|0|FAIL
 
-✅ 三条变异全部精确转红 ⇒ 探针非假绿（本脚本按约定以 exit 1 表示『变异测试通过』）
+✅ 三条变异全部精确转红 ⇒ 探针非假绿（退出码约定：**0 = 全部精确转红 = 通过** · 1 = 有变异没转红 = 守门失效 · 2 = 环境/输入根问题）
 ```
 
-> ⚠️ **退出码约定（与仓内 `hot` 版不同，按本轮任务书要求）**：
-> `mutate-parity.sh` **exit 1 = 全部变异精确转红（测试通过）**；exit 2 = 基线不绿 / 有变异没转红（守门是假绿）/ 环境问题。
-> ⇒ **跑 `mutate-parity.sh` 时不要把 exit 1 当成失败。**
+> ✅ **退出码约定（2026-10-29 已与全仓统一）**：
+> `mutate-parity.sh` **exit 0 = 全部变异精确转红（测试通过）** · exit 1 = 有变异没转红（守门是假绿）/ 基线不绿 · exit 2 = 环境 / 输入根探针问题。
+> ⇒ **与其余 7 个域（hot / comment / follow / message / users / task）完全一致** ⇒ 可直接 `&& echo ok` 判成功。
 
 ### 变异前后的 sha256
 

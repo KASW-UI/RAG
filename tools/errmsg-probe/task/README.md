@@ -28,20 +28,20 @@
 ```bash
 cd /Users/pr/Documents/java&golang/RAG.worktrees/r3-errmsg-task
 bash tools/errmsg-probe/task/run-parity.sh     # ⇒ exit 0（双侧一致）
-bash tools/errmsg-probe/task/mutate-parity.sh   # ⇒ exit 1（4 条变异全部精确转红 + 还原后转绿）
+bash tools/errmsg-probe/task/mutate-parity.sh   # ⇒ exit 0（4 条变异全部精确转红 + 还原后转绿）
 ```
 
-### 退出码约定（⚠️ 两个脚本**不一样**，别混）
+### 退出码约定（⚠️ 两个脚本**语义不同**，别混）
 
 | 脚本 | 0 | 1 | 2 |
 |---|---|---|---|
 | `run-parity.sh` | ✅ 双侧逐字节一致 | ❌ 有真漂移（diff 段会打印出来） | ⚠️ 环境问题（输入不可见 / 探针跑不起来） |
-| `mutate-parity.sh` | ——（**不用**） | ✅ **变异精确转红 = 测试通过** | ❌ 守门失效（某条变异没转红 / 环境问题） |
+| `mutate-parity.sh` | ✅ **变异精确转红 = 测试通过** | ❌ 守门失效（某条变异没转红 / 基线不绿） | ⚠️ 环境 / 输入根探针问题（硬失败） |
 
-> ⚠️ **`mutate-parity.sh` 成功时返回的是 `1`，不是 `0`** —— 这是本 lane 派单明确指定的约定。
-> 仓内另外 8 个域（`follow` / `message` / `like` / …）的 `mutate-parity.sh` 是「成功 = 0」。
-> ⇒ **不要**用 `bash mutate-parity.sh && echo ok` 判成功；请看脚本输出里的
-> 「✅ 全部变异精确转红 + 还原后转绿」那一行。
+> ✅ **2026-10-29 已与全仓统一** —— 本域原先用「成功 = exit 1」，现已改为 **0 = 通过**，
+> 与其余 **7 个域**（`hot` / `comment` / `follow` / `message` / `like` / `users` / 以及 `favorite` 的同款）
+> **完全一致** ⇒ ⇒ **现在可以直接 `bash mutate-parity.sh && echo ok` 判成功**。
+> ⚠️ 改前日志里出现的 `exit 1` 是**统一前**的原始输出（见上方「实测输出」段）。
 
 依赖：`mvn`（离线 `-o`）、JDK 21+、Go toolchain（≥1.25）、本地 Go module cache
 （需含 grpc / gorm / gorm-postgres-driver / go-redis —— **版本从真源 `go.mod` 动态读取**，真源升版本时本脚本自动跟随）。

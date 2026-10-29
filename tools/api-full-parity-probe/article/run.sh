@@ -293,7 +293,11 @@ say "   ✓ 配置副本已生成（真源 service/article 仍然干净）"
 step "4/8 起 Go 侧 article-rpc（注册 etcd ${ETCD_PORT}）"
 # 残留注册先清掉（上一轮的 lease 可能还在 ⇒ 客户端可能选中死实例）
 docker exec Sea-etcd etcdctl --endpoints="${ETCD_CTL_ENDPOINT}" del "article.rpc" --prefix >/dev/null 2>&1
-( cd "${WORK}" && "${WORK}/rpc" -f "${WORK}/etc/article.yaml" >"${WORK}/go-rpc.log" 2>&1 ) &
+# ⚠️ **必须用 `exec`** —— 否则 `$!` 是**子 shell 的 PID**，而真正的二进制是它的**子进程**
+#    ⇒ `cleanup()` 杀的是 wrapper ⇒ **二进制 survive ⇒ 占着 :8889 / :9002 / :19092**
+#    ⇒ 下一轮 `free_probe_ports` 才补刀 ⇒ 脚本化连跑时容易撞上「端口/GPRC 实例被上一轮占着」
+#    ⇒ **2026-10-29 实测踩过**（变异脚本 M1 报 exit 2 = 环境问题，根因即此）
+( cd "${WORK}" && exec "${WORK}/rpc" -f "${WORK}/etc/article.yaml" >"${WORK}/go-rpc.log" 2>&1 ) &
 GO_PIDS+=($!)
 # ⚠️ go-zero 的 etcd 键是**前缀族** `<key>/<leaseID>`（真源 yaml `Key: article.rpc`
 #    ⇒ `core/discov/publisher.go:191-196` + `core/discov/clients.go:39-41`
@@ -310,7 +314,8 @@ for _ in $(seq 1 20); do nc -z -G 1 127.0.0.1 "${GO_RPC_PORT}" && break; sleep 1
 nc -z -G 2 127.0.0.1 "${GO_RPC_PORT}" || die "Go article-rpc 注册了但端口没监听（见 ${WORK}/go-rpc.log）"
 say "   ✓ 已注册 article.rpc → $(etcd_get_value article.rpc)（:${GO_RPC_PORT} 已监听）"
 step "5/8 起 Go 侧 article-api（:${GO_API_PORT}）"
-( cd "${WORK}" && "${WORK}/api" -f "${WORK}/etc/article-api.yaml" >"${WORK}/go-api.log" 2>&1 ) &
+# ⚠️ 同上：**必须 `exec`**（否则 `$!` 不是二进制 PID ⇒ cleanup 杀不掉）
+( cd "${WORK}" && exec "${WORK}/api" -f "${WORK}/etc/article-api.yaml" >"${WORK}/go-api.log" 2>&1 ) &
 GO_PIDS+=($!)
 for _ in $(seq 1 40); do nc -z -G 1 127.0.0.1 "${GO_API_PORT}" && break; sleep 1; done
 nc -z -G 2 127.0.0.1 "${GO_API_PORT}" || die "Go article-api 没起来（见 ${WORK}/go-api.log）"

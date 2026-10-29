@@ -1349,6 +1349,8 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 
 | 段 | 用途 | 归属 | 状态 | 出处（`文件:行号`） |
 |---|---|---|---|---|
+| **18141–18145** | **article 域真容器测试段**（article-api `RealTomcatPort`） | G3 | ✅ **已落码**（2026-10-29 T-2.7 新增段）⇒ ⚠️ **不是 global 段表原预分配的 `22400–22499`** —— 那段已被 `article-rpc` 内部切满（`22400–22479` 生产 gRPC + `22480–22499` 守门脚手架）⇒ **段内没有留给 article-api 的切片** ⇒ 本轮另取 18141–18145 | `service/article/article-api/src/test/.../support/RealTomcatPort.java:55-58` |
+| **18146–18150** | **hot 域真容器测试段**（hot-api `RealTomcatPort`） | G3 | ✅ **已落码**（2026-10-29 T-2.7 新增段）⇒ 同上：原 `22500–22599` 已被 `hot-rpc` 内部切满（`22500–22579` 生产 gRPC + `22580–22599` 守门脚手架）⇒ **段内没有留给 hot-api 的切片** ⇒ 本轮另取 18146–18150 | `service/hot/hot-api/src/test/.../support/RealTomcatPort.java:26-29` |
 | 21300–21399 | favorite-api 真容器测试 | G3 | ✅ 已落码 | `service/favorite/favorite-api/src/test/.../support/RealTomcatPort.java:61` `:64` |
 | 21400–21599 | **favorite 探针**（3 个探针共用一段） | **G3**（见 §4.10.19.6 归因订正） | ✅ 已落码 | `tools/api-full-parity-probe/favorite/run.sh:96` · `tools/sql-statement-probe/favorite/run.sh:200` · `tools/grpc-contract-probe/favorite/run.sh:186` · 另有守门 `tools/probe-gate/favorite/check-port-ownership.sh:81-88` 在**同段内**做断言 |
 | 21400–21499 | favorite-rpc 真进程测试 | G3 | 🔴 **与上一行嵌套重叠** ⇒ 见 §4.10.19.4 | `service/favorite/favorite-rpc/src/test/.../support/RealGrpcPort.java:61` `:64` |
@@ -1361,8 +1363,8 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | **22100–22199** | **favorite-rpc 新段（迁出用）** | G3 | 🟡 **本层预分配 · 域侧未落码** | — |
 | **22200–22299** | **users 域**（user-api / admin-api） | G1 | 🟡 **本层预分配 · 域侧未落码** | — |
 | **22300–22399** | **follow 域** | G1 | 🟡 **本层预分配**（当前**零使用** ⇒ 预占防将来撞车） | — |
-| **22400–22499** | **article 域** | G3 | 🟡 **本层预分配 · 域侧未落码** | — |
-| **22500–22599** | **hot 域** | G3 | 🟡 **本层预分配 · 域侧未落码** | — |
+| **22400–22499** | **article 域** | G3 | ✅ **已落码**（2026-10-29 实测）—— 段内**已被 `article-rpc` 内部切满**：`22400–22479` = 真进程 gRPC server 端口（`article-rpc/.../support/RealGrpcPort.java:51`）· `22480–22499` = 守门脚手架段（`.../RealGrpcPortTest.java:47`）⇒ ⇒ **段内已无留给 article-api 的切片** ⇒ article-api 真容器测试另取 **`18141–18145`**（见本表首部） | `service/article/article-rpc/src/test/.../support/RealGrpcPort.java:51` · `.../RealGrpcPortTest.java:47` |
+| **22500–22599** | **hot 域** | G3 | ✅ **已落码**（2026-10-29 实测）—— 段内**已被 `hot-rpc` 内部切满**：`22500–22579` = 真进程 gRPC server 端口（`hot-rpc/.../support/RealGrpcPort.java:47`）· `22580–22599` = 守门脚手架段（`.../RealGrpcPortTest.java:48`）⇒ ⇒ **段内已无留给 hot-api 的切片** ⇒ hot-api 真容器测试另取 **`18146–18150`**（见本表首部） | `service/hot/hot-rpc/src/test/.../support/RealGrpcPort.java:47` · `.../RealGrpcPortTest.java:48` |
 | 22600–22699 | comment-rpc 真 gRPC 进程测试（**迁出用**） | G3 | 🟡 **本层预分配 · 域侧未落码**（⇒ §4.10.19.7） | — |
 | **22700–22999** | **Testcontainers 宿主口段**（**全域共用，按域分子段** ⇒ §4.10.39.2） | 全域 | 🟡 **本层预分配 · 域侧未落码** | — |
 | 49152–65535 | **OS 临时段** | — | 🔴 **禁占**（各域真容器测试必须自选专用段）<br>🔴 **2026-10-27 实测新增禁占理由**：Testcontainers 的**随机**宿主口就落在这一段（= Docker published 段，`sysctl net.inet.ip.portrange` 实测 `first=49152 last=65535`）⇒ ⇒ **真容器测试不得继续用 Testcontainers 默认随机口** | — |

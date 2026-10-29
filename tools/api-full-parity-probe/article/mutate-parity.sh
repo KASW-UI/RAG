@@ -12,7 +12,8 @@
 #    本 lane 的修复（@JsonPropertyOrder + javadoc）**还没提交** ⇒ `git checkout` 会
 #    把它们一起回滚掉 ⇒ 变异跑完代码就不是原来的代码了。
 #
-# 退出码：0 = 三条变异都精确转红 + 还原后转绿；1 = 有变异没转红。
+# 退出码：0 = 三条变异都精确转红 + 还原后转绿；1 = 有变异没转红（探针是假绿）；
+#         2 = 环境问题导致本轮判定无效（**不等于假绿** ⇒ 见 run_probe 处的说明）。
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,10 +33,23 @@ trap 'rm -f "${TMP_OUT}"' EXIT
 say() { printf '%s\n' "$*"; }
 
 FAILED=0
+ENV_BAD=0
 
+# ⚠️ **exit 2 = 环境问题（不是「有差异」）** —— 判据来自 run.sh：`die()` 一律 exit 2
+#    （前置检查不过 / Go 侧起不来 / 配置副本 sed 没命中 / 真源被改 …）。
+#    🔴 **exit 2 的已知常见成因**：上一轮探针被 kill 后，**Nacos 里的旧实例还会存活一段时间**
+#    （心跳超时前）⇒ 本轮 RAG 侧可能发现**陈旧实例** ⇒ 打到死实例 ⇒ INTERNAL ⇒ 熔断 ⇒ 5001
+#    ⇒ ⇒ **脚本化连跑 5 次时，第 1 次之后最容易撞上** ⇒ ⇒ **exit 2 必须重试，不能当「假绿」**。
 run_probe() {
   bash "${PROBE}" >"${TMP_OUT}" 2>&1
-  echo $?
+  local rc=$?
+  if [ "${rc}" = "2" ]; then
+    say "   · 探针报 exit 2（环境问题，不是差异）⇒ 等 6s 让 Nacos 心跳超时后再试一次"
+    sleep 6
+    bash "${PROBE}" >"${TMP_OUT}" 2>&1
+    rc=$?
+  fi
+  echo ${rc}
 }
 
 # backup <文件> <备份名>
@@ -83,8 +97,12 @@ RC="$(run_probe)"
 if [ "${RC}" = "1" ]; then
   say "   ✅ 精确转红（exit 1 · 字段序漂移被抓到）"
   grep -E "❌|!= expected" "${TMP_OUT}" | head -6 | sed 's/^/   | /'
+elif [ "${RC}" = "2" ]; then
+  say "   ⚠️ 环境问题（exit 2 · 重试后仍不可用）⇒ **本轮判定无效**，不等于「探针看不见漂移」"
+  tail -25 "${TMP_OUT}" | sed 's/^/   | /'
+  ENV_BAD=1
 else
-  say "   ❌ 没按预期转红（exit ${RC}）⇒ 探针看不见字段序漂移"
+  say "   ❌ 没按预期转红（exit 0 = 两侧仍一致）⇒ **探针是假绿**"
   tail -25 "${TMP_OUT}" | sed 's/^/   | /'
   FAILED=1
 fi
@@ -101,8 +119,12 @@ RC="$(run_probe)"
 if [ "${RC}" = "1" ]; then
   say "   ✅ 精确转红（exit 1 · 外层键序漂移被抓到）"
   grep -E "❌|!= expected" "${TMP_OUT}" | head -6 | sed 's/^/   | /'
+elif [ "${RC}" = "2" ]; then
+  say "   ⚠️ 环境问题（exit 2 · 重试后仍不可用）⇒ **本轮判定无效**，不等于「探针看不见漂移」"
+  tail -25 "${TMP_OUT}" | sed 's/^/   | /'
+  ENV_BAD=1
 else
-  say "   ❌ 没按预期转红（exit ${RC}）⇒ 探针看不见外层键序漂移"
+  say "   ❌ 没按预期转红（exit 0 = 两侧仍一致）⇒ **探针是假绿**"
   tail -25 "${TMP_OUT}" | sed 's/^/   | /'
   FAILED=1
 fi
@@ -119,8 +141,12 @@ RC="$(run_probe)"
 if [ "${RC}" = "1" ]; then
   say "   ✅ 精确转红（exit 1 · Go 侧与冻结值不符）"
   grep -E "❌|!= expected" "${TMP_OUT}" | head -6 | sed 's/^/   | /'
+elif [ "${RC}" = "2" ]; then
+  say "   ⚠️ 环境问题（exit 2 · 重试后仍不可用）⇒ **本轮判定无效**，不等于「探针没在比冻结值」"
+  tail -25 "${TMP_OUT}" | sed 's/^/   | /'
+  ENV_BAD=1
 else
-  say "   ❌ 没按预期转红（exit ${RC}）⇒ 探针没在比冻结值"
+  say "   ❌ 没按预期转红（exit 0 = Go 侧与冻结值仍一致）⇒ **探针没在比冻结值**"
   tail -25 "${TMP_OUT}" | sed 's/^/   | /'
   FAILED=1
 fi
@@ -131,16 +157,25 @@ say "== 还原后必须重新转绿 =="
 RC="$(run_probe)"
 if [ "${RC}" = "0" ]; then
   say "   ✅ 还原后绿（exit 0）"
+elif [ "${RC}" = "2" ]; then
+  say "   ⚠️ 还原后仍报 exit 2（环境问题）⇒ **本轮判定无效**，不等于「还原没生效」"
+  tail -30 "${TMP_OUT}" | sed 's/^/   | /'
+  ENV_BAD=1
 else
-  say "   ❌ 还原后仍红（exit ${RC}）⇒ 还原没生效"
+  say "   ❌ 还原后仍红（exit ${RC} = 两侧仍不一致）⇒ 还原没生效"
   tail -30 "${TMP_OUT}" | sed 's/^/   | /'
   FAILED=1
 fi
 
 say ""
-if [ "${FAILED}" = "0" ]; then
-  say "✅ 三条变异全部精确转红 + 还原后转绿 ⇒ 探针非假绿"
-  exit 0
+if [ "${FAILED}" != "0" ]; then
+  say "❌ 有变异没转红（两侧仍一致）⇒ 探针是假绿"
+  exit 1
 fi
-say "❌ 有变异没转红 ⇒ 探针是假绿"
-exit 1
+if [ "${ENV_BAD}" != "0" ]; then
+  say "⚠️ 有变异因**环境问题**（exit 2）未判定 ⇒ **本轮变异验证无效**（≠ 假绿）"
+  say "   ⇒ 请在**无其它探针并发**时重跑（本探针的 Go 侧端口固定 + Nacos 共享 ⇒ 并发时易撞）"
+  exit 2
+fi
+say "✅ 三条变异全部精确转红 + 还原后转绿 ⇒ 探针非假绿"
+exit 0
