@@ -905,3 +905,204 @@ G4 那张「逐组件实测表」是**在 G4 自己的树上解析 YAML** 得出
 ⚠️ **本节 ⑤ 留空 = 未获批准**（**留空不等于已批准**）；⇒ **本节 ⑤ 已由调度员于 2026-10-29 03:45 依据 Jason 的明示代填**（批准人 / 时间 / 范围见 ⑤ 行）⇒ **代填 ≠ 代批准**：批准来自 Jason 在本 lane 会话内的明示，调度员只负责落笔。
 
 **⑤ 批准记录：Jason · 2026-10-29 03:45 · 批准范围：本 lane 回执 ① 所列候选任务（修 §8.7 登记的 Go 出处真缺陷）—— §8.7 实测口径 = **23 条**（15 版本写错 + 5 越界 + 3 路径；回执 ① 的「21 条」已被本 lane ③ 第 1 条订正为 23）· ③ 第 4 项 `admin_invite.update_time` **已纳入**（Jason **2026-10-29 04:0x 追加拍板** ⇒ `admin-rpc` 的 `admin_invite.update_time` 不推进 ⇒ **域侧可自修**；与 `docs/Pitfalls/users/admin/rpc.md` **P-2** 同型：**user-rpc 修过、admin-rpc 漏修**）** · ⚠️ **2026-10-29 04:2x 实测结论：该项已闭合 ⇒ 本轮为它 0 行改动**（`AdminCreateAtomicService.java:201` 已有 `.setSql("update_time = CURRENT_TIMESTAMP")` ＋ `AdminRpcGoWireParityTest.createAdminAdvancesInviteUpdateTimeLikeGo()` 真 PG + 真 gRPC 前后对比断言 `after > before` ＋ **变异测精确红在目标用例** ⇒ 网有牙） ⇒ **「已批准但实测无需改动」是合法结果**，非漏做　← 由**调度员代填**（依据：Jason 于 2026-10-29 03:45 在**本 lane 会话内**明示「继续」· 消息 id `182057`；**回执人不得自批**· **代填 ≠ 代批准**）
+<!-- @new 2026-10-29 · `align/r3-ddl-users-follow` · RoundPlan `docs/RoundPlan/Round-3.md` **T-3.1 的 G1 侧（`follow` 域）** · 基线 = `do-my-own-gh` @ `4a4beaf8` -->
+
+## 16. 🟢 **DDL 逐域机器核**（`--indexes` + `--check-source`）· 2026-10-29 · R3·T-3.1（G1 lane · `follow` 域）
+
+> **本节为什么存在**：`tools/difftest/check-ddl-static.py` **默认不开 `--indexes`** ⇒ 索引 / 唯一约束 / 触发器**从未被机器核过**；**默认不开 `--check-source`** ⇒ 只比活库、不比仓里的 `.sql` ⇒ 「迁移改了但没人重跑」**不可见**。
+> 主线已把这两层补上并逐域实跑，结论只落在 `docs/PhaseGoal-judge.md` §七 **G-8 / G-9** ⇒ **域级证据链断了一节** ⇒ 本节把 `follow` 域的结论**落到本域台账**。
+> ⚠️ **本节只落结论与证据，不改任何差异**。
+> ⚠️ **`follow` 域不是 N/A** —— `hot` 域才是 N/A（两侧无数据库）；`follow` 域**两侧都有真库**（Go `follow_relation` / `block_relation` · RAG 同名两表）⇒ 本节是**实跑**结论，不是「本维度不适用」。
+
+### 16.1 执行口径（命令原文 · EXIT · 日期 · 环境）
+
+| 项 | 值 |
+|---|---|
+| 实跑日期 | **2026-10-29**（09:25–09:31 本机时间） |
+| 工作树 / 分支 | `/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-users-follow` · `align/r3-ddl-users-follow`<br>⚠️ **实跑时的基点 = `do-my-own-gh` @ `4a4beaf8`**；**提交时已 rebase 到 `do-my-own-gh` @ `49bd2dd1`** ⇒ 上游这两个提交**只动了 `.gitignore` 与 `docs/PhaseGoal-judge.md`**，**既没动本域这两个文件、也没动任何 `.sql`** ⇒ **实跑结论不受影响** |
+| 真源 | `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang` —— **冻结 · 只读**；脚本只**复制**副本，从不写入 |
+| 容器 / 库 | `ddl-follow-pg`（`postgres:16-alpine`）· Go 库 `go_follow_db` · RAG 库 `rag_follow_db` |
+| Go 侧 schema 来源 | **真源自己的 `AutoMigrate`**：`Sea-RideTheWind_golang/service/follow/rpc/internal/model/db.go:20`（`func InitDB(conf DBConf) *gorm.DB`）→ `:42`（`db.AutoMigrate(&FollowRelation{}, &BlockRelation{})`）⇒ 探针调的正是**真源自己的 `InitDB`**（`dbconf` 探针）⇒ 跑的是**真源同一份 struct tag + 同一个 gorm 版本** |
+| Go struct 出处 | `service/follow/rpc/internal/model/data_model.go:5-15`（`FollowRelation` · `TableName()` → `follow_relation`）· `:17-27`（`BlockRelation` · → `block_relation`） |
+| RAG 侧 schema 来源 | 仓内 `service/follow/follow-rpc/src/main/resources/db/migration/V1__create_follow_relation.sql` · `V2__create_block_relation.sql`（**Flyway**；生产 `locations: classpath:db/migration` ⇒ `application.yml:77`） |
+| 豁免名单 | **一个都没用**（`--allow-idx` / `--allow-default` **均未传**）⇒ 差异数是**原始值** |
+| 两侧表集合 | Go `go_follow_db` = {`follow_relation`, `block_relation`} · RAG `rag_follow_db` = {`follow_relation`, `block_relation`} ⇒ **各 2 张，逐条一致**（对拍环境**直接用 psql 放 `.sql`** ⇒ 两侧都**没有** Flyway 账本表 ⇒ `exclude_tables` 本轮**无对象可排除**） |
+
+**命令 ① —— 建库 + 双侧活体对拍（索引 / 约束 / 触发器 + 源码↔活库 一次跑全）**
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-users-follow"
+bash tools/difftest/ddl-parity.sh follow
+```
+
+⇒ **EXIT=0** —— 末行 `== 实质差异合计 0 处 ⇒ 退出码 0 ==`；runner 行 `=== 对拍退出码: 0 ===`
+⇒ Go 探针打印 `AUTOMIGRATE_OK`；RAG 侧按序执行 `V1__create_follow_relation.sql` → `V2__create_block_relation.sql`
+
+**命令 ② —— 只读静态对拍（显式带 `--indexes --check-source`）**
+
+```bash
+python3 tools/difftest/check-ddl-static.py --domain follow --indexes --check-source
+```
+
+⇒ **EXIT=0**（0 处）—— 与 ① 同数同因 ⇒ 两条路径互为复算
+
+**命令 ③ —— 打印 RAG 侧 SQL 清单**
+
+```bash
+python3 tools/difftest/check-ddl-static.py --domain follow --print-rag-sql
+```
+
+⇒ **EXIT=0**，输出 2 行，与 ① 实际执行的 2 份 `.sql` **逐条一致** ⇒ **清单没有落后于仓**
+
+### 16.2 八个被核维度的逐项结论
+
+| # | 维度 | 两侧规模 | 结论 | 计入失败数 |
+|---|---|---|---|---|
+| 1 | **源码 ↔ 活库**（G-9 `--check-source`） | 2 张表 | ✅ **0 差异** —— 仓里的两份 `.sql` 在**干净临时库** `rag_follow_db_srccheck` 上原样重放后，与活库**逐项一致**（表 / 列 / 列属性 / 可空性 / DEFAULT / 索引 / 约束 / 触发器） | 0 |
+| 2 | **列类型 / 长度** | 10 列 ↔ 10 列（键集合一致 ✓） | ✅ **0 差异** —— **10 列逐字相同** | 0 |
+| 3 | **可空性（NOT NULL）** | 10 列 | ✅ **0 差异** —— 两侧完全一致 | 0 |
+| 4 | **DEFAULT** | 10 列 | ✅ **0 差异** —— 两侧完全一致（**无** `CURRENT_TIMESTAMP` 残留） | 0 |
+| 5 | **索引**（`pg_indexes`） | Go 8 / RAG 8 | ✅ **0 差异** —— **两侧索引定义逐条一致**（⚠️ 本域连**索引名**都逐字相同 ⇒ 比 `users` 域还干净） | 0 |
+| 6 | **唯一约束 / 主键**（`pg_constraint`） | Go 2 / RAG 2 | ✅ **0 差异** —— **2 行逐条一致** | 0 |
+| 7 | **触发器**（`pg_trigger`） | 两侧各 0 | ⚪ **两侧都没有触发器 ⇒ 本维度「无对象可比」** —— ⚠️ **这不是「触发器已对齐」** | 0 |
+| 8 | **触发器形式 / 触发器函数体结构化属性** | 两侧各 0 | ⚪ **同上 ⇒ 无对象可比** —— 脚本原话：「两侧**没有可成对比对的触发器** ⇒ 本维度**什么都没比**（不是「已对齐」）」 | 0 |
+| | **合计** | | | **0** |
+
+⇒ **本域 DDL 在 8 个被核维度上 0 处残留。**
+
+### 16.3 「0 差异」项（逐条列全，不写「其余一致」）
+
+**① 列类型 / 长度 —— 10 列逐字相同**
+
+| 表 | 列 | Go 侧 | RAG 侧 | 判定 |
+|---|---|---|---|---|
+| `follow_relation` | `id` | `bigserial`（PK） | `bigserial`（PK） | ✅ 一致 |
+| `follow_relation` | `user_id` | `bigint` · `NOT NULL` | `bigint` · `NOT NULL` | ✅ 一致 |
+| `follow_relation` | `target_id` | `bigint` · `NOT NULL` | `bigint` · `NOT NULL` | ✅ 一致 |
+| `follow_relation` | `create_time` / `update_time` | `timestamp with time zone` · **可空** | `timestamp with time zone` · **可空** | ✅ 一致 |
+| `block_relation` | 同上 5 列 | 同上 | 同上 | ✅ 一致 |
+
+⇒ Go 出处（tag 逐条对应 `data_model.go:6-10` / `:18-22`）：`Id uint64 \`gorm:"primaryKey"\`` · `UserId int64 \`gorm:"column:user_id;not null;index;uniqueIndex:uk_follow_pair"\`` · `TargetId int64 \`gorm:"column:target_id;not null;index;uniqueIndex:uk_follow_pair"\`` · `CreateTime time.Time \`gorm:"column:create_time;autoCreateTime"\`` · `UpdateTime time.Time \`gorm:"column:update_time;autoUpdateTime"\``
+⇒ ⚠️ **`create_time` / `update_time` 两侧都是 `timestamptz` 且都可空** —— 与 `users` 域不同：**本域 RAG 侧**没有加 `DEFAULT CURRENT_TIMESTAMP`（Go 的 `autoCreateTime` / `autoUpdateTime` 由 GORM 在 Go 代码里赋值 ⇒ 不建 DB 默认；RAG 侧照抄了这一形态）⇒ **本域不存在 `users` 域那种「DEFAULT 残留」**。
+
+**② 索引 —— 8 / 8 逐条一致（**连名字都逐字相同**）**
+
+| 表 | 索引名 | 唯一性 | 列 |
+|---|---|---|---|
+| `follow_relation` | `follow_relation_pkey` | unique | `id` |
+| `follow_relation` | `idx_follow_relation_user_id` | non-unique | `user_id` |
+| `follow_relation` | `idx_follow_relation_target_id` | non-unique | `target_id` |
+| `follow_relation` | `uk_follow_pair` | unique | `user_id`, `target_id` |
+| `block_relation` | `block_relation_pkey` | unique | `id` |
+| `block_relation` | `idx_block_relation_user_id` | non-unique | `user_id` |
+| `block_relation` | `idx_block_relation_target_id` | non-unique | `target_id` |
+| `block_relation` | `uk_block_pair` | unique | `user_id`, `target_id` |
+
+⇒ **两侧 `pg_indexes.indexdef` 逐字相同**（脚本输出「两侧索引定义逐条一致 ✓」）。
+⇒ ⚠️ **这 4 条不是「名字不同但语义等价」，而是字面全同** —— 原因：RAG 侧迁移脚本**照抄了 GORM 的命名规则**（`uk_follow_pair` / `uk_block_pair` 是 struct tag 里**显式指定**的 `uniqueIndex` 名，不是按表名推导 ⇒ 两侧必然同名）。
+⇒ **其中 `uk_follow_pair` / `uk_block_pair` 是行为载体、不是优化** —— Go 侧 INSERT 走 `ON CONFLICT (user_id, target_id) DO NOTHING`（RAG 侧对应 `FollowRelationMapper#insertIgnoreConflict`）⇒ 删掉这两条 ⇒ 重复关注/重复拉黑会从「静默成功」变成 `5008 database update failed`（迁移脚本 `V1:44-49` 的注释原文）。
+
+**③ 唯一约束 / 主键 —— 2 / 2 逐条一致**
+
+| 表 | 约束 | contype | 定义 |
+|---|---|---|---|
+| `follow_relation` | `follow_relation_pkey` | p | `PRIMARY KEY (id)` |
+| `block_relation` | `block_relation_pkey` | p | `PRIMARY KEY (id)` |
+
+⇒ 两侧**同表同名同定义** ⇒ 连「命名形态差」都没有。
+
+**④ 源码 ↔ 活库 —— 0 差异（G-9 维度，本轮新增）**
+
+- 目录扫描得到 **2 份**迁移脚本（`V1__create_follow_relation.sql` / `V2__create_block_relation.sql`）⇒ **清单由目录扫描产生**，不会落后于仓。
+- 在**干净临时库** `rag_follow_db_srccheck` 上**原样重放**（交给 PG 自己解析）⇒ 与活库逐项对比：
+  **表集合 2 ↔ 2** · **列集合 0 差异** · **列属性 0 差异** · **可空性 0 差异** · **DEFAULT 0 差异** · **索引 0 差异** · **约束 0 差异** · **触发器 0 差异**
+- ⇒ 脚本原文：`✅ 仓里的迁移脚本**重放结果**与活库逐项一致`
+- ⇒ **含义**：本域仓里的 `.sql` 与**当前活库**之间**没有分叉** ⇒ 「迁移改了没人重跑」这一类漂移**在 `follow` 域为零**。
+
+**⑤ 可空性 / DEFAULT —— 两侧完全一致（脚本输出「（两侧完全一致 ✓）」）**
+
+⇒ `users_id`/`target_id` 两侧都 `NOT NULL`；`create_time`/`update_time` 两侧都**可空**；`id` 两侧都由 PG 的 `bigserial` 序列供值（`nextval`）⇒ **无序列名映射副作用**（两侧表名相同 ⇒ 序列名也相同 ⇒ 不存在 `users` 域那种「序列名映射的副产品」）。
+
+### 16.4 残留
+
+**本域残留 = 0 处。** ⇒ **无一条需要按 `docs/twoStage.md` §十 定级**。
+
+⚠️ **「0 残留」不等于「全维度已核」** —— 下列维度**无对象可比**，其结论是「**无对象可比**」，不是「已对齐」（§16.6）：
+
+| 维度 | 状态 | 说明 |
+|---|---|---|
+| 触发器集合 | ⚪ 两侧各 0 | 真源 `service/follow/**` 全域无 `CREATE TRIGGER`；RAG 侧两份迁移脚本也未建触发器（`grep` 命中 0）⇒ **本域不存在触发器语义漂移的可能** |
+| 触发器形式 / 函数体结构化属性 | ⚪ 两侧各 0 | 同上 ⇒ **脚本自己输出「本维度什么都没比」** |
+| CHECK / 外键 / 分区 / 存储过程 | ⚪ 人工补查 ⇒ 两侧各 0 | 见 §16.6 的效力边界表 |
+
+**签字状态**：`docs/Intentional_Deviations/follow/` 下 `api.md` / `common.md` / `proto.md` / `rpc.md` **四份全是 0 行空占位** ⇒ **本域零签字偏离** ⇒ 本节**没有**「已签字 ⇒ 不要重复质疑」的条目需要回避，也**没有**「已登记待签字候选」条目。
+⚠️ **空占位 ≠「已签字」**（`docs/Pitfalls/users/admin/rpc.md` **P-9**）—— 这里只是说「**本域没有需要按签字档回避的差异**」。
+
+### 16.5 变异验证（证明守门有牙齿，不是假绿）
+
+> ⚠️ **为什么不直接改仓内的 `.sql`**：`service/follow/follow-rpc/**` 的**代码**由本波次的另一条 lane 在改（AGENTS.md §5.3d 并发纪律）⇒ 本轮**零改动仓内迁移脚本** ⇒ 变异走**临时副本**（任务书允许的「**临时副本**」路线）：把 `check-ddl-static.py` 与该域的 `db/migration/` 目录**原样拷到一棵临时树**（保持相对路径 ⇒ `REPO_ROOT` 与仓内布局一致），**逐字节校验 sha256 相同**，再在**副本**上做变异。
+> ⇒ 守门读到的**仍是仓里那份 `.sql` 的内容**（同一份字节），只是不在仓里写。
+
+**变异 ①：`follow_relation.user_id` 的列类型（`BIGINT` → `INTEGER`）**
+
+| 步骤 | 命令 | 结果 |
+|---|---|---|
+| 基线 | `python3 tools/difftest/check-ddl-static.py --domain follow --indexes --check-source`（临时树） | **EXIT=0**（0 处）· 源码↔活库 = `✅ 一致` |
+| 变异 | `V1__create_follow_relation.sql`：`user_id     BIGINT      NOT NULL,` → `user_id     INTEGER     NOT NULL,`（改**一个列的类型**，命中目标行 **1** 处） | — |
+| 变异后重跑 | 同上命令 | **EXIT=1**（**1** 处）· 源码↔活库 **转红**：<br>`🔴 列属性不同：follow_relation.user_id  源码=('integer', '')  活库=('bigint', '')`<br>`❌ 源码 ↔ 活库**分叉 1 处** ⇒ 活库已过期于仓里的迁移脚本` |
+| 还原 | 改回 `BIGINT` | — |
+| 还原后重跑 | 同上命令 | **EXIT=0**（**0** 处 · 回到基线）· 源码↔活库 回到 `✅ 一致` |
+| **还原校验** | `shasum -a 256` 临时副本 vs 仓内文件 | **两侧同为 `21a437cf306632f7df845b588c9e2504b9c9d6f692f284d54b13cb75c4abee30`** ⇒ 逐字节回到变异前 |
+
+⇒ **结论**：变异**精确报出 1 处**、**指向被改的那一列**（`follow_relation.user_id`），**没有多红也没有漏红** ⇒ 守门**不是假绿**；还原后**精确回到 EXIT=0** ⇒ 无残留。
+⚠️ 与 `users` 域不同，本域基线就是 **EXIT=0** ⇒ 「变异必红 ⇒ 还原必绿」的**两端都是干净的 0/1 往返**。
+
+**变异 ②（`users` 域）：`users_user.status` 的列类型（`BIGINT` → `INTEGER`）** ⇒ 见 [`docs/DRIFT/users/vs-common.md` §72.5](../users/vs-common.md)。
+
+**仓内零改动核验**
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-users-follow"
+git status --short          # ⇒ 空
+git diff --stat -- service/ # ⇒ 0 行
+```
+
+### 16.6 证据强度 · 效力边界 · 未能核到的部分
+
+**证据强度 = L4（运行面 · 双侧活体）** —— 两侧各建一个**真 PG 16** 库（Go 侧跑真源自己的 `AutoMigrate`、RAG 侧跑仓里的真迁移脚本）⇒ 逐列 / 逐索引 / 逐约束 / 逐触发器 dump 后机器比对。
+⚠️ 本节所有 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环（AGENTS.md §0 证据强度分层）。
+
+**效力边界（越界即失效）**
+
+| # | 边界 | 对本域是否成立 |
+|---|---|---|
+| 1 | **`--check-source` 的重放引擎 ≠ 生产引擎** —— 重放用 **psql**；本域生产用 **Flyway 引擎**（`application.yml:77` `locations: classpath:db/migration`）⇒ 两个切句器不同 | ✅ **对本域不成立** —— 已核：两份 `.sql` 的 `$$` 命中 **0** ⇒ 无美元引号块 ⇒ 两个引擎看到的语句序列相同；且两份脚本只含 `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` |
+| 2 | **迁移清单 = 生产清单** —— `discover_rag_sql` 目录扫描的 2 份，与生产 Flyway `locations` 指向的目录内容**逐条一致**（命令 ③ 与 ① 的执行日志互证） | ✅ **成立** |
+| 3 | **Flyway 账本表** —— 生产库会有 `flyway_schema_history_follow`（`application.yml:79`），但**对拍环境直接用 psql 放 `.sql`** ⇒ 两个库里**都没有**账本表 ⇒ 本轮表集合就是 {2 张业务表} | ✅ **本轮无干扰**；⚠️ 换用真 Flyway 起环境时，账本表会出现在 RAG 侧 ⇒ 工具靠 `exclude_tables=("flyway_schema_history",)` 前缀匹配排除（**已配置**） |
+| 4 | **`baseline-version: 0`**（`application.yml:76`）—— 生产拓扑（共享非空 schema）下 V1 **必须**执行，否则 `follow_relation` 建不出来 | ⚠️ **本轮未核** —— 对拍用的是**全新空库** ⇒ baseline 不触发 ⇒ V1 正常执行。⚠️ **这正是该配置注释里点名的陷阱**（「全新空库的测试测不出来」）⇒ **该维度的守门是 `FollowFlywaySharedSchemaGateTest`（真 PG 16 + 真 Flyway 引擎）**，不在本节范围 ⇒ **登记为「未核」** |
+| 5 | **触发器函数体的语义**机器判不了 ⇒ 走人工逐条 | ✅ **不适用**（两侧各 0 个触发器） |
+| 6 | **`pg_constraint` 只比 `contype` + 定义文本，不解析外键的引用目标**（脚本文件头第 44–45 行） | ✅ **不适用**（本域两侧 `contype='f'` 各 **0 行**） |
+| 7 | **分区 / 存储过程 / 触发器函数** —— 脚本不查 | ✅ **不适用**（两份 `.sql` 的**可执行部分**无 `PARTITION` / `PROCEDURE` / `FUNCTION` / `CREATE RULE` / `CREATE SEQUENCE` 关键字 ⇒ 已人工核） |
+
+**未能核到的部分（明确写「未核」+ 原因，不含糊）**
+
+| # | 未核项 | 原因 | 影响 |
+|---|---|---|---|
+| 1 | **触发器形式 / 触发器函数体结构化属性** | 本域两侧**各 0 个触发器** ⇒ 无可比对对象 ⇒ 脚本自己输出「本维度**什么都没比**」 | 本域**不存在**触发器语义漂移的可能；但这**不等于**「触发器已对齐」 |
+| 2 | **CHECK / 外键 / 分区 / 存储过程** | 脚本不查（外键只比 `contype` + 定义文本）⇒ **人工补查**后两侧均为 0 行 ⇒ 该维度**人工闭合** | 无残留；但结论强度 = **L4 + 人工补查**，不是脚本原生结论 |
+| 3 | **共享库拓扑下的 Flyway `baseline-version: 0` 行为** | 对拍用**全新空库** ⇒ baseline 不触发 ⇒ 该配置**未被本节验证** | ⚠️ **该维度的守门是 `FollowFlywaySharedSchemaGateTest`（真 PG 16 + 真 Flyway 引擎）**（`application.yml:75` 明写）⇒ 本节**不重复核**，只登记边界 |
+| 4 | **索引是否被真实查询计划选中** | 需要 `EXPLAIN` + 真实数据量 ⇒ 本轮**未核** | 本域两侧索引**定义全同** ⇒ 查询计划**无索引层面的差异来源**；实际代价未量化 |
+| 5 | **Go 侧 schema 与生产的完全等价性** | 探针调的是真源 `model.InitDB`（`db.go:20` → `:42`）⇒ 与生产**同一份 struct tag + 同一个 gorm 版本**；且真源 `service/follow/**` **没有手写 `.sql`**（`ddl-parity.sh` 的 `GO_SQL` 清单对本域为空）⇒ **无遗漏** | 无缺口 |
+
+### 16.7 与其它台账的关系（指针，不改别的文件）
+
+| 台账 | 本节与它的关系 |
+|---|---|
+| [`docs/DRIFT/_cross/ddl-type-divergences.md` §四](../../DRIFT/_cross/ddl-type-divergences.md) | 🔴 **该文件对本域的一行已过期** —— §四「仍未覆盖」表把 `follow` 列在「**其余 5 域 … 均**无 DDL 探针** ⇒ 这 5 域的表结构**从未做过双侧逐列对照**」⇒ **已被 2026-10-25 L3 那轮实测推翻**（`open-items.md` P2 行记着 `follow` **0 差异** / 10 列 / 8 索引 / 2 约束），**本轮独立复跑并新增了 `--check-source` 与触发器两个维度** ⇒ 结论一致。⚠️ **该文件在 `_cross` ⇒ 本 lane 无写权 ⇒ 只在此登记，报给收口执行者** |
+| [`docs/DRIFT/_cross/open-items.md` P2 行](../../DRIFT/_cross/open-items.md) | 该行记「`follow` **0 差异**（10 列 / 8 索引 / 2 约束）」⇒ 与本节**逐条一致**（本轮为**独立复跑 + 新增源码↔活库维度 + 变异验证**） |
+| [`docs/DRIFT/follow/rpc.md`](rpc.md) · [`common.md`](common.md) | 本域**组件级**台账；本节是 **DDL 这一维度**的域级落账（域内 DDL 差异**本节为 0**）⇒ 与那两份台账的其它维度结论**互不冲突** |
+| [`docs/Intentional_Deviations/follow/`](../../Intentional_Deviations/follow/) | 四份**0 行空占位** ⇒ **本域零签字偏离** ⇒ 本节没有需要回避的已签字条目 |
+| [`docs/PhaseGoal-judge.md` §七 **G-8 / G-9**](../../PhaseGoal-judge.md) | 主线结论（G-8 / G-9 已闭合 · 9 域逐域跑）—— 本节是 `follow` 域的**域级落账** |
+
+---
+

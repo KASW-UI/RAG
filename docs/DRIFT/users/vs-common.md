@@ -3,7 +3,7 @@
 # `users-common` lane 台账 —— 「users ↔ `service/common`」跨层对账
 
 > 🟥 **当前态指针（2026-10-29 · R4·T-4.2（G-12）回填）** —— 本文件按「轮次」追加，**历史各轮一条未删**（快照价值）。
-> ⚠️ **头部一度严重过期**（头部「0. lane 身份」表停在 2026-10-27，正文已到 **2026-10-29 的开工轮**）⇒ **当前状态一律以这两节为准**：「70.5 域内收敛结论（**最终**）」＋「71. 🟢 **开工轮（2026-10-29 03:45 · Jason 开工批准）**：§8.7 的 **23 条**已修 ＋ **§69 结论的限定订正**（2026-10-29 · G1 lane）」；末节「2026-10-29 指针：`users-common` 组件的活体证据**已落仓**（Round-2 T-2.6 / G-4）」只是**指针** ⇒ 逐条证据在 [`common.md`](common.md)。
+> ⚠️ **头部一度严重过期**（头部「0. lane 身份」表停在 2026-10-27，正文已到 **2026-10-29 的开工轮**）⇒ **当前状态一律以这两节为准**：「70.5 域内收敛结论（**最终**）」＋「71. 🟢 **开工轮（2026-10-29 03:45 · Jason 开工批准）**：§8.7 的 **23 条**已修 ＋ **§69 结论的限定订正**（2026-10-29 · G1 lane）」＋「**72. 🟢 DDL 逐域机器核（`--indexes` + `--check-source`）· 2026-10-29 · R3·T-3.1**（`users` 域：**EXIT=1 · 16 处残留**（可空性 1 · DEFAULT 8 · 索引 7）· **源码↔活库 0 差异** · 变异精确转红）」；末节「2026-10-29 指针：`users-common` 组件的活体证据**已落仓**（Round-2 T-2.6 / G-4）」只是**指针** ⇒ 逐条证据在 [`common.md`](common.md)。
 > ⇒ 本文件里的 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环（AGENTS.md §0 证据强度分层）。
 > **本轮只回填头部口径；正文各轮的原始记录一条未删。**
 
@@ -5049,3 +5049,268 @@ wc -l /tmp/g1-gocite.txt        # ⇒ 819 行命中 / 177 个文件 / 展开后 
 | 证据强度 | **L4 双侧活体** ＋ 🆕 **可复算**（原 176 条的载体已消失 ⇒ 只能读作「声明」） |
 | 新抓到的一条 | 🔴 **`DRIFT-USERSCOMMON-006`**：`BearerTokenExtractor.tokenForSignatureVerification("Bearer ")` 差一（Go 剥成空串 / RAG 不剥）⇒ **潜伏 · wire 不可观察** ⇒ **共享层写权归 G4** ⇒ 只登记不落码 |
 | 逐条证据 | ⇒ [`common.md` 的「2026-10-29 第六轮」](common.md) |
+<!-- @new 2026-10-29 · `align/r3-ddl-users-follow` · RoundPlan `docs/RoundPlan/Round-3.md` **T-3.1 的 G1 侧（`users` 域）** · 基线 = `do-my-own-gh` @ `4a4beaf8` -->
+
+## 72. 🟢 **DDL 逐域机器核**（`--indexes` + `--check-source`）· 2026-10-29 · R3·T-3.1（G1 lane · `users` 域）
+
+> **本节为什么存在**：`tools/difftest/check-ddl-static.py` **默认不开 `--indexes`** ⇒ 索引 / 唯一约束 / 触发器**从未被机器核过**（AGENTS.md §3.1 对照清单的最后两项）；**默认不开 `--check-source`** ⇒ 只比活库、不比仓里的 `.sql` ⇒ 「迁移改了但没人重跑」**不可见**。
+> 主线已把这两层补上并**逐域实跑**，但结论只落在 `docs/PhaseGoal-judge.md` §七 **G-8 / G-9** ⇒ **域级证据链断了一节** ⇒ 本节把 `users` 域的结论**落到本域台账**。
+> ⚠️ **本节只落结论与证据，不修任何差异**（RoundPlan T-3.1：「冒出的新差异**按域登记**，**不在本轮当场修**」）。
+> ⚠️ **本节零改动 `service/**`** —— `service/users/users-common/**` 是 **G4 独占写权**（AGENTS.md §5.3f）⇒ 变异测试走**逐字节相同的临时副本**（§72.5）⇒ 提交后 `git diff --stat -- service/` = **0 行**。
+
+### 72.1 执行口径（命令原文 · EXIT · 日期 · 环境）
+
+| 项 | 值 |
+|---|---|
+| 实跑日期 | **2026-10-29**（09:24–09:31 本机时间） |
+| 工作树 / 分支 | `/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-users-follow` · `align/r3-ddl-users-follow`<br>⚠️ **实跑时的基点 = `do-my-own-gh` @ `4a4beaf8`**；**提交时已 rebase 到 `do-my-own-gh` @ `49bd2dd1`** ⇒ 上游这两个提交**只动了 `.gitignore` 与 `docs/PhaseGoal-judge.md`**，**既没动本域这两个文件、也没动任何 `.sql`** ⇒ **实跑结论不受影响** |
+| 真源 | `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang` —— **冻结 · 只读**；脚本只**复制**副本，从不写入（`git status` 真源仓零改动） |
+| 容器 / 库 | `ddl-users-pg`（`postgres:16-alpine`）· Go 库 `go_users_db` · RAG 库 `rag_users_db` |
+| Go 侧 schema 来源 | **真源自己的 `AutoMigrate`**：`service/user/user/rpc/internal/model/db.go:33`（`AutoMigrate(&User{}, &UserAvatarHistory{})`）+ `service/user/admin/rpc/internal/model/db.go:15`（`AutoMigrate(&Admin{}, &AdminInvite{}, &User{})`）⇒ 探针**两个包都跑** ⇒ Go 侧 4 张表齐全（admin 两张表由 admin/rpc 自己的 `InitDB` 产出） |
+| RAG 侧 schema 来源 | 仓内 `service/users/users-common/src/main/resources/db/01~04_*.sql`（**`SchemaInitializer` 幂等重放**，本域**不用 Flyway**）⇒ 清单与生产**同一个产生点**（§72.6） |
+| 豁免名单 | **一个都没用**（`--allow-idx` / `--allow-default` **均未传**）⇒ 下面所有差异数是**原始值**，没有被白名单压过 |
+| 逐列实测样本 | `users_user.username/password/email/extra_info` 两侧均 `text`（E-3 根因那批，**已清零**）· `status` 两侧均 `bigint` · `create_time/update_time/expires_at/used_at` 两侧均 `timestamp with time zone` · `is_current` 两侧均 `boolean` |
+
+**命令 ① —— 建库 + 双侧活体对拍（索引 / 约束 / 触发器 + 源码↔活库 一次跑全）**
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-users-follow"
+bash tools/difftest/ddl-parity.sh users
+```
+
+⇒ **EXIT=1** —— 末行 `== 实质差异合计 16 处 ⇒ 退出码 1 ==`；runner 行 `=== 对拍退出码: 1 ===`
+⇒ 中途两个 Go 探针各打印 `AUTOMIGRATE_OK`；RAG 侧按序执行 4 份 `.sql`（`01_create_user.sql` → `02_create_user_avatar_history.sql` → `03_create_admin.sql` → `04_create_admin_invite.sql`）
+
+**命令 ② —— 只读静态对拍（显式带 `--indexes --check-source`）**
+
+```bash
+python3 tools/difftest/check-ddl-static.py --domain users --indexes --check-source
+```
+
+⇒ **EXIT=1**（16 处）—— **与 ① 同数同因** ⇒ 两条路径互为复算（① 是「建库 + 对拍」，② 是「只对拍已建好的库」）
+
+**命令 ③ —— 打印 RAG 侧 SQL 清单**
+
+```bash
+python3 tools/difftest/check-ddl-static.py --domain users --print-rag-sql
+```
+
+⇒ **EXIT=0**，输出 4 行，与 ① 实际执行的 4 份 `.sql` **逐条一致** ⇒ **清单没有落后于仓**（G-9 的「单一产生点」在 `users` 域成立）
+
+### 72.2 八个被核维度的逐项结论
+
+| # | 维度 | 两侧规模 | 结论 | 计入失败数 |
+|---|---|---|---|---|
+| 1 | **源码 ↔ 活库**（G-9 `--check-source`） | 4 张表 | ✅ **0 差异** —— 仓里的 `.sql` 在**干净临时库** `rag_users_db_srccheck` 上原样重放后，与活库**逐项一致**（表 / 列 / 列属性 / 可空性 / DEFAULT / 索引 / 约束 / 触发器） | 0 |
+| 2 | **列类型 / 长度** | 35 列 ↔ 35 列（键集合一致 ✓） | ✅ **0 差异** —— **35 列逐字相同** | 0 |
+| 3 | **可空性（NOT NULL）** | 35 列 | 🔴 **1 处残留** | 1 |
+| 4 | **DEFAULT** | 35 列 | 🔴 **8 处残留**（另 4 处 = 序列名映射副产品 ⇒ **非真差**，不计失败） | 8 |
+| 5 | **索引**（`pg_indexes`） | Go 16 / RAG 17 | 🔴 **7 处残留**（另 13 处 = 命名形态差 ⇒ 语义等价，不计失败） | 7 |
+| 6 | **唯一约束 / 主键**（`pg_constraint`） | Go 8 / RAG 12 | ✅ **0 处实质差异**（12 处 = 命名形态差 / 唯一索引↔唯一约束**载体不同** ⇒ 语义等价） | 0 |
+| 7 | **触发器**（`pg_trigger`） | 两侧各 0 | ⚪ **两侧都没有触发器 ⇒ 本维度「无对象可比」** —— ⚠️ **这不是「触发器已对齐」** | 0 |
+| 8 | **触发器形式 / 触发器函数体结构化属性** | 两侧各 0 | ⚪ **同上 ⇒ 无对象可比** —— 脚本原话：「两侧**没有可成对比对的触发器** ⇒ 本维度**什么都没比**（不是「已对齐」）」 | 0 |
+| | **合计** | | | **16** |
+
+> ⚠️ **读法**：本域 DDL 的**行为层**（类型 / 长度 / 可空性 / DEFAULT / 索引 / 唯一约束）在 **8 个维度里 5 个为 0**；剩下的 16 处**全部是「登记在案的已知差异」**，不是新回归（逐条见 §72.4）。
+> ⚠️ **维度 7/8 不是「通过」而是「无对象」** —— Go 侧 `users` 域**根本没有触发器**（真源 `service/user/**` 全域无 `CREATE TRIGGER`）⇒ 本域的触发器语义**没有可核对象**。
+
+### 72.3 「0 差异」项（逐条列全，不写「其余一致」）
+
+**① 列类型 / 长度 —— 35 列逐字相同（0 处差异）**
+
+| 抽样列 | Go 侧类型 | RAG 侧类型 | 判定 |
+|---|---|---|---|
+| `users_user.username` / `.password` / `.email` | `text` | `text` | ✅ 一致（**E-3 根因已清零**：Go tag 无 `size` ⇒ GORM 建 `text`；RAG 侧已从 `varchar(255)` 改 `text`） |
+| `users_user.extra_info` | `text` | `text` | ✅ 一致（Go tag 是 `serializer:json` ⇒ **存字节**，不是 `jsonb` ⇒ 见 `01_create_user.sql:92-103` 的论证） |
+| `users_user.status` / `.uid` / `.score` | `bigint` / `bigint` / `integer` | `bigint` / `bigint` / `integer` | ✅ **类型一致**（⚠️ `status` 的**可空性**不一致 ⇒ 见 §72.4 残留 ①） |
+| `users_user.create_time` / `.update_time` | `timestamp with time zone` | `timestamp with time zone` | ✅ 类型一致（⚠️ **DEFAULT** 不一致 ⇒ 见 §72.4 残留 ②） |
+| `admin_admin.*` / `admin_invite.*` / `users_user_avatar_history.*` | — | — | ✅ 全部逐字相同（工具输出 `类型/长度差异 0 处` + `逐字相同 35 列`） |
+
+**② 源码 ↔ 活库 —— 0 差异（G-9 维度，本轮新增）**
+
+- 目录扫描得到 **4 份**迁移脚本（`01_create_user.sql` / `02_create_user_avatar_history.sql` / `03_create_admin.sql` / `04_create_admin_invite.sql`）⇒ **清单由目录扫描产生**，不会落后于仓。
+- 在**干净临时库** `rag_users_db_srccheck` 上**原样重放**（交给 PG 自己解析 ⇒ 与生产同一条路径）⇒ 与活库逐项对比：
+  **表集合 4 ↔ 4** · **列集合 0 差异** · **列属性 0 差异** · **可空性 / DEFAULT 0 差异** · **索引 0 差异** · **约束 0 差异** · **触发器 0 差异**
+- ⇒ 脚本原文：`✅ 仓里的迁移脚本**重放结果**与活库逐项一致`
+- ⇒ **含义**：本域仓里的 `.sql` 与**当前活库**之间**没有分叉** ⇒ 「迁移改了没人重跑」这一类漂移**在 `users` 域为零**。
+
+**③ 唯一约束 / 主键 —— 0 处实质差异（12 处语义等价，脚本判为不计失败）**
+
+| 语义等价配对（Go ≡ RAG） | contype | 定义 |
+|---|---|---|
+| `admins_pkey` ≡ `admin_admin.admin_admin_pkey` | p | `PRIMARY KEY (id)` |
+| `admin_invites_pkey` ≡ `admin_invite.admin_invite_pkey` | p | `PRIMARY KEY (id)` |
+| `users_pkey` ≡ `users_user.users_user_pkey` | p | `PRIMARY KEY (id)` |
+| `user_avatar_history_pkey` ≡ `users_user_avatar_history.users_user_avatar_history_pkey` | p | `PRIMARY KEY (id)` |
+| `uni_users_email` ≡ `users_user.users_user_email_key` | u | `UNIQUE (email)` |
+| `uni_users_username` ≡ `users_user.users_user_username_key` | u | `UNIQUE (username)` |
+| `uni_admins_email` ≡ `admin_admin.admin_admin_email_key` | u | `UNIQUE (email)` |
+| `uni_admins_username` ≡ `admin_admin.admin_admin_username_key` | u | `UNIQUE (username)` |
+| `idx_users_uid` ≡ `users_user.users_user_uid_key`（**唯一索引 ↔ 唯一约束，载体不同**） | u | `UNIQUE (uid)` |
+| `idx_admins_uid` ≡ `admin_admin.admin_admin_uid_key`（**载体不同**） | u | `UNIQUE (uid)` |
+| `idx_admin_invites_code` ≡ `admin_invite.admin_invite_code_key`（**载体不同**） | u | `UNIQUE (code)` |
+| `idx_user_avatar_history_history_id` ≡ `users_user_avatar_history.…_history_id_key`（**载体不同**） | u | `UNIQUE (history_id)` |
+
+⇒ **语义影响为零**：PG 层面的唯一性判定、`23505` 报错、`ON CONFLICT` 仲裁完全相同；差别只是 `pg_constraint.conname` 的字符串。
+
+**④ 索引命名形态差 —— 13 处语义等价（不计失败）**
+
+| 语义等价配对 | 唯一性 | 列 |
+|---|---|---|
+| `users_pkey` ≡ `users_user_pkey` | unique | `id` |
+| `admins_pkey` ≡ `admin_admin_pkey` | unique | `id` |
+| `admin_invites_pkey` ≡ `admin_invite_pkey` | unique | `id` |
+| `user_avatar_history_pkey` ≡ `users_user_avatar_history_pkey` | unique | `id` |
+| `uni_users_email` ≡ `users_user_email_key` | unique | `email` |
+| `uni_users_username` ≡ `users_user_username_key` | unique | `username` |
+| `uni_admins_email` ≡ `admin_admin_email_key` | unique | `email` |
+| `uni_admins_username` ≡ `admin_admin_username_key` | unique | `username` |
+| `idx_users_uid` ≡ `users_user_uid_key` | unique | `uid` |
+| `idx_admins_uid` ≡ `admin_admin_uid_key` | unique | `uid` |
+| `idx_admin_invites_code` ≡ `admin_invite_code_key` | unique | `code` |
+| `idx_user_avatar_history_history_id` ≡ `users_user_avatar_history_history_id_key` | unique | `history_id` |
+| `idx_user_avatar_history_uid` ≡ `idx_users_user_avatar_history_uid` | non-unique | `uid` |
+
+**⑤ 序列名映射的副产品 —— 4 处（非真差，脚本不计失败）**
+
+| 列 | Go 侧 DEFAULT | RAG 侧 DEFAULT | 判定 |
+|---|---|---|---|
+| `users_user.id` | `nextval('users_id_seq'::regclass)` | `nextval('users_user_id_seq'::regclass)` | ✅ **非真差** —— 两侧表名不同 ⇒ PG 建的序列名不同；两者都指向「本表主键的下一值」⇒ 语义等价 |
+| `admin_admin.id` | `nextval('admins_id_seq'::regclass)` | `nextval('admin_admin_id_seq'::regclass)` | ✅ 同上 |
+| `admin_invite.id` | `nextval('admin_invites_id_seq'::regclass)` | `nextval('admin_invite_id_seq'::regclass)` | ✅ 同上 |
+| `users_user_avatar_history.id` | `nextval('user_avatar_history_id_seq'::regclass)` | `nextval('users_user_avatar_history_id_seq'::regclass)` | ✅ 同上 |
+
+### 72.4 残留 16 处（逐条列出 + 定级 + 签字状态）
+
+> **定级口径** = `docs/twoStage.md` **§十**（`twoStage.md:941-973`）：**A** = 阶段 1 准入阻断 · **B** = 阶段 1 竞争力补强 · **C** = 阶段 2 最终工程建设 · **D** = 经分析确认可不实现或不适用（**须有明确理由**）。
+> ⚠️ **一条差异 ≠ 一个缺陷**：本节 16 处 ⇒ 归成 **4 条**（可空性 1 · DEFAULT 8 · 索引 7）。
+
+#### 残留 ① 🔴 可空性 1 处 —— `users_user.status`（Go 可空 / RAG `NOT NULL`）
+
+| 项 | 内容 |
+|---|---|
+| 差异 | `users_user.status`：`is_nullable` Go = `YES` / RAG = `NO`（**类型两侧都是 `bigint` · DEFAULT 两侧都是 `0` ⇒ 只有可空性一项不同**） |
+| Go 出处 | `Sea-RideTheWind_golang/service/user/user/rpc/internal/model/data_model.go:11` —— `Status int64 \`gorm:"column:status;default:0"\`` ⇒ **有 `default:0`、无 `not null`** ⇒ GORM 建出**可空**列（`admin/rpc` 侧的同名字段在 `service/user/admin/rpc/internal/model/data_model.go:41`，同一形态） |
+| RAG 出处 | `service/users/users-common/src/main/resources/db/01_create_user.sql:39` —— `status      BIGINT NOT NULL DEFAULT 0,` |
+| 签字状态 | ✅ **已登记 `SD-2026-10-25-CAND-17`** —— **🏷 待签字候选 · 未签字**（[`docs/Intentional_Deviations/users/_shared.md:101`](../../Intentional_Deviations/users/_shared.md)）· DRIFT 侧 `DRIFT-USERRPC-V-002`（[`docs/DRIFT/users/_shared.md`](_shared.md) §2） |
+| **定级** | **C 类**（阶段 2 最终工程建设项） |
+| 定级理由 | ① 方向是「**RAG 更严**」⇒ 正常写入路径（两侧都显式绑 `status`）结果完全相同 ⇒ **不构成阶段 1 准入阻断** ⇒ **不是 A 类**；② 但它与 `admin-rpc` 的 `UserEntity.status = 0L`（`DRIFT-USERRPC-V-001`）**耦合** —— 单独放开 `NOT NULL` 会让 `WHERE status = 0` **匹配到 `NULL` 行**（签字档 §「必须一起读的那条耦合」原文）⇒ 属「**业务语义恢复**」⇒ 阶段 2 ⇒ **C 类**；③ **不是 D 类** —— 签字档明写「本条签字只认账『RAG 更严』这个事实，**不关闭** `admin-rpc` 的 `status = 0L` 缺陷」⇒ 没有「可不实现」的分析结论 |
+| 处置 | **本轮不修**（RoundPlan T-3.1「不修」+ 已登记为待签字候选）⇒ 也**不重复质疑**（AGENTS.md §0：「对拍看到它们变红，先确认是不是签字项，不要当新回归去『修』」） |
+
+#### 残留 ② 🔴 DEFAULT 8 处 —— 4 张表 × 2 个时间列 `DEFAULT CURRENT_TIMESTAMP`（Go 侧无默认）
+
+| 表（RAG） | 列 | Go 侧 DEFAULT | RAG 侧 DEFAULT | Go 出处（tag 里**没有** `default`） | RAG 出处 |
+|---|---|---|---|---|---|
+| `users_user` | `create_time` | `<NULL>` | `CURRENT_TIMESTAMP` | `service/user/user/rpc/internal/model/data_model.go:14`（`autoCreateTime`） | `01_create_user.sql:42` |
+| `users_user` | `update_time` | `<NULL>` | `CURRENT_TIMESTAMP` | `service/user/user/rpc/internal/model/data_model.go:15`（`autoUpdateTime`） | `01_create_user.sql:43` |
+| `users_user_avatar_history` | `create_time` | `<NULL>` | `CURRENT_TIMESTAMP` | `service/user/user/rpc/internal/model/data_model.go:30` | `02_create_user_avatar_history.sql:30` |
+| `users_user_avatar_history` | `update_time` | `<NULL>` | `CURRENT_TIMESTAMP` | `service/user/user/rpc/internal/model/data_model.go:31` | `02_create_user_avatar_history.sql:31` |
+| `admin_admin` | `create_time` | `<NULL>` | `CURRENT_TIMESTAMP` | `service/user/admin/rpc/internal/model/data_model.go:12` | `03_create_admin.sql:59` |
+| `admin_admin` | `update_time` | `<NULL>` | `CURRENT_TIMESTAMP` | `service/user/admin/rpc/internal/model/data_model.go:13` | `03_create_admin.sql:60` |
+| `admin_invite` | `create_time` | `<NULL>` | `CURRENT_TIMESTAMP` | `service/user/admin/rpc/internal/model/data_model.go:27` | `04_create_admin_invite.sql:44` |
+| `admin_invite` | `update_time` | `<NULL>` | `CURRENT_TIMESTAMP` | `service/user/admin/rpc/internal/model/data_model.go:28` | `04_create_admin_invite.sql:45` |
+
+| 项 | 内容 |
+|---|---|
+| 成因 | Go 的 `autoCreateTime` / `autoUpdateTime` 由 **GORM 在 Go 代码里赋值** ⇒ **不建 DB 默认**；RAG 侧多一条 DB 级默认 |
+| 签字状态 | ✅ **已登记 `SD-2026-10-25-CAND-16`** —— **🏷 待签字候选 · 未签字**（[`docs/Intentional_Deviations/users/_shared.md:17`](../../Intentional_Deviations/users/_shared.md)）· DRIFT 侧 `DRIFT-USERRPC-V-011` |
+| **定级** | **D 类**（分析结论指向 D）—— ⚠️ **但现状仍是「待签字候选 · 未签字」** ⇒ 严格说现在只到「**待裁决**」这一步 |
+| 定级理由 | ① DEFAULT 只在「**INSERT 省略该列**」时发作 ⇒ 两侧**所有** INSERT 都显式绑定该列 ⇒ **当前不可观察**；② 删掉它是为「**不可观测的维度**」冒险（可能有人在裸 SQL 路径上依赖了这个默认）⇒ **收益低于风险**；③ 同形态的 `message` 域 6 处**已签** `SD-2026-10-24-04`（「**按 message 域口径签字，而不是改 DDL**」）⇒ **先例一致** ⇒ 有明确理由的「不实现」⇒ D 类 |
+| 处置 | **本轮不修** ⇒ **要关闭它，动作是「签字」而不是「改 DDL」**（⚠️ 登记类事项**不升级为拍板**，AGENTS.md 用户偏好） |
+
+#### 残留 ③ 🟡 索引 7 处 —— Go 独有 3（真缺） + RAG 独有 4（冗余）
+
+**③-a Go 独有 3 条（**真缺**）**
+
+| 索引名 | 表（RAG 侧名） | 列 | 唯一性 | Go 出处 |
+|---|---|---|---|---|
+| `idx_admin_invites_expires_at` | `admin_invite` | `expires_at` | 非唯一 | `service/user/admin/rpc/internal/model/data_model.go:24`（`ExpiresAt time.Time \`gorm:"column:expires_at;index;not null"\``） |
+| `idx_admin_invites_inviter_uid` | `admin_invite` | `inviter_uid` | 非唯一 | `service/user/admin/rpc/internal/model/data_model.go:23`（`InviterUid int64 \`gorm:"column:inviter_uid;index;not null"\``） |
+| `idx_user_avatar_history_is_current` | `users_user_avatar_history` | `is_current` | 非唯一 | `service/user/user/rpc/internal/model/data_model.go:29`（`IsCurrent bool \`gorm:"column:is_current;index;not null;default:false"\``） |
+
+- **定级：C 类**（阶段 2 最终工程建设项）
+- **定级理由**：① 三条都是**非唯一**普通索引 ⇒ PG **只用唯一索引 / 约束判唯一** ⇒ 缺失**不改变任何写入语义、冲突行为、唯一性判定** ⇒ **不是 A 类**（不阻断阶段一准入）；② 严格说它**不是行为差异，而是查询计划差异**（性能）⇒ 补齐属「生产工程机制」的最终形态 ⇒ 阶段 2 ⇒ **C 类**；③ **不是 D 类** —— `is_current` 那条**有业务语义**（「当前头像」标记，查询形态是 `WHERE uid=? AND is_current=true`）⇒ 说「不适用 / 可不做」不成立，只是 RAG 侧现由复合索引 `idx_users_user_avatar_history_uid_is_current` 覆盖 ⇒ **实际不慢**，只是索引构成与 Go 不同。
+- 跨域台账同款判定（**只读引用，我无权改**）：[`docs/DRIFT/_cross/ddl-type-divergences.md` §2.3.1](../../DRIFT/_cross/ddl-type-divergences.md) —— 「**性能差异，非行为差异**」。
+
+**③-b RAG 独有 4 条（**冗余，非漂移**）**
+
+| 索引名 | 表 | 列 | 唯一性 | Go 侧对应 |
+|---|---|---|---|---|
+| `idx_users_user_uid` | `users_user` | `uid` | 非唯一 | `idx_users_uid` ≡ `users_user_uid_key`（**唯一**） |
+| `idx_admin_admin_uid` | `admin_admin` | `uid` | 非唯一 | `idx_admins_uid` ≡ `admin_admin_uid_key`（**唯一**） |
+| `idx_admin_invite_code` | `admin_invite` | `code` | 非唯一 | `idx_admin_invites_code` ≡ `admin_invite_code_key`（**唯一**） |
+| `idx_users_user_avatar_history_uid_is_current` | `users_user_avatar_history` | `uid`, `is_current` | 非唯一 | `idx_user_avatar_history_uid`（单列 `uid`）＋ Go 独有的 `idx_user_avatar_history_is_current`（单列 `is_current`） |
+
+- **定级：D 类**（经分析确认不实现 —— **有明确理由**）
+- **定级理由**：① 每条对应列在 Go 侧**都已有等价 UNIQUE 约束 / 索引** ⇒ 唯一性判定、`23505`、`ON CONFLICT` 仲裁完全相同 ⇒ **语义等价**，只多占一点写入成本；② 处置建议（`ddl-type-divergences.md` §2.3.2 原文）：「**可删，但收益小于风险**（删索引在生产大表上是 DDL 风险，收益只是省一点写入开销）⇒ **不建议动**，登记为**已知冗余**」⇒ 明确理由的「不实现」⇒ **D 类**。
+- ⚠️ 与残留 ③-a 是**同一族**（索引构成不同），但**定性相反**：③-a 是「少」⇒ 补（可延后）；③-b 是「多」且**语义等价** ⇒ 不动。
+
+### 72.5 变异验证（证明守门有牙齿，不是假绿）
+
+> ⚠️ **为什么不直接改仓内的 `.sql`**：`service/users/users-common/**` 是 **G4 独占写权**（AGENTS.md §5.3f）⇒ 本轮**零改动仓内迁移脚本** ⇒ 变异走**临时副本**（任务书允许的「**临时副本**」路线）：把 `check-ddl-static.py` 与该域的 `db/` 目录**原样拷到一棵临时树**（保持相对路径 ⇒ `REPO_ROOT` 与仓内布局一致），**逐字节校验 sha256 相同**，再在**副本**上做变异。
+> ⇒ 守门读到的**仍是仓里那份 `.sql` 的内容**（同一份字节），只是不在仓里写。
+
+**变异 ①：`users_user.status` 的列类型（`BIGINT` → `INTEGER`）**
+
+| 步骤 | 命令 | 结果 |
+|---|---|---|
+| 基线 | `python3 tools/difftest/check-ddl-static.py --domain users --indexes --check-source`（临时树） | **EXIT=1**（16 处）· 源码↔活库 = `✅ 一致` |
+| 变异 | `01_create_user.sql`：`status      BIGINT NOT NULL DEFAULT 0,` → `status      INTEGER NOT NULL DEFAULT 0,`（改**一个列的类型**，命中目标行 **1** 处） | — |
+| 变异后重跑 | 同上命令 | **EXIT=1**（**17** 处 = 16 + **1**）· 源码↔活库 **转红**：<br>`🔴 列属性不同：users_user.status  源码=('integer', '')  活库=('bigint', '')`<br>`❌ 源码 ↔ 活库**分叉 1 处** ⇒ 活库已过期于仓里的迁移脚本` |
+| 还原 | 改回 `BIGINT` | — |
+| 还原后重跑 | 同上命令 | **EXIT=1**（**16** 处 · 回到基线）· 源码↔活库 回到 `✅ 一致` |
+| **还原校验** | `shasum -a 256` 临时副本 vs 仓内文件 | **两侧同为 `dc8378d6b4faf7d29c151615a49cb2558b0c548ca45eba373010313c9b064723`** ⇒ 逐字节回到变异前 |
+
+⇒ **结论**：变异**精确报出 1 处**、**指向被改的那一列**（`users_user.status`），其余 16 处**不变** ⇒ 守门**不是假绿**；还原后**精确回到基线** ⇒ 无残留。
+
+⚠️ **users 域的「EXIT=0 期望」口径**：本域 Go↔活库**本就有 16 处已登记差异** ⇒ 还原后的正确期望值是 **EXIT=1（16 处）**，而**不是** EXIT=0 ⇒ 变异判据用的是「**源码↔活库这一维度的差异数 0 → 1 → 0**」，不是总退出码。
+
+**变异 ②（`follow` 域）：`follow_relation.user_id` 的列类型（`BIGINT` → `INTEGER`）** ⇒ 见 [`docs/DRIFT/follow/vs-common.md` §16.5](../follow/vs-common.md)。
+
+**仓内零改动核验**
+
+```bash
+cd "/Users/pr/Documents/java&golang/RAG.worktrees/r3-ddl-users-follow"
+git status --short          # ⇒ 空
+git diff --stat -- service/ # ⇒ 0 行
+```
+
+### 72.6 证据强度 · 效力边界 · 未能核到的部分
+
+**证据强度 = L4（运行面 · 双侧活体）** —— 两侧各建一个**真 PG 16** 库（Go 侧跑真源自己的 `AutoMigrate`、RAG 侧跑仓里的真迁移脚本）⇒ 逐列 / 逐索引 / 逐约束 / 逐触发器 dump 后机器比对。
+⚠️ 本节所有 ✅ 一律读作「**在该证据强度下一致**」，不是已闭环（AGENTS.md §0 证据强度分层）。
+
+**效力边界（越界即失效）**
+
+| # | 边界 | 对本域是否成立 |
+|---|---|---|
+| 1 | **`--check-source` 的重放引擎 ≠ 生产引擎** —— 重放用 **psql**；本域生产用 **spring-jdbc `ScriptUtils`**（`service/users/users-common/src/main/java/com/rag/users/common/ddl/SchemaInitializer.java:63-68`，按文件名顺序执行 `01/02/03/04` 四份）⇒ **两个切句器不同** | ✅ **对本域不成立** —— 已核：四份 `.sql` 里 `$$` 的 **7 处命中全部在 `--` 注释里**（`01:140,143` · `02:83` · `03:119,122` · `04:91,92`，全是「为什么**不用** `DO $$ … $$`」的说明）⇒ **可执行部分无美元引号块** ⇒ 两个切句器看到的语句序列相同 |
+| 2 | **迁移清单 = 生产清单** —— `discover_rag_sql` 目录扫描产出 4 份，与 `SchemaInitializer.SCRIPTS` 的 4 份**逐条一致**（命令 ③ 与 ① 的执行日志互证） | ✅ **成立**（本域**不用 Flyway**，用 `SchemaInitializer` 幂等重放 ⇒ 无「账本版本号」问题） |
+| 3 | **触发器函数体的语义**（它到底在拒绝什么）机器判不了 ⇒ 走人工逐条 | ✅ **不适用**（本域两侧各 0 个触发器） |
+| 4 | **`pg_constraint` 只比 `contype` + 定义文本，不解析外键的引用目标**（脚本文件头第 44–45 行） | ✅ **不适用**（本域两侧 `contype='f'` 各 **0 行** ⇒ 无外键可解析） |
+| 5 | **分区 / 存储过程 / 触发器函数**：脚本不查 | ✅ **不适用**（四份 `.sql` 的**可执行部分**无 `PARTITION` / `PROCEDURE` / `FUNCTION` / `CREATE SEQUENCE` 关键字 ⇒ 已人工核；`BIGSERIAL` 的序列由 PG 隐式创建，已计入 §72.3⑤ 的「序列名映射副产品」） |
+| 6 | **CHECK 约束** —— 脚本实际是经 `pg_constraint` 一并比对的 | ⚪ **两侧各 0 行**（人工补查 `contype='c'`：`go_users_db` / `rag_users_db` 均 **0**）⇒ **无对象可比** |
+
+**未能核到的部分（明确写「未核」+ 原因，不含糊）**
+
+| # | 未核项 | 原因 | 影响 |
+|---|---|---|---|
+| 1 | **触发器形式 / 触发器函数体结构化属性** | 本域两侧**各 0 个触发器** ⇒ 无可比对对象 ⇒ 脚本自己输出「本维度**什么都没比**」 | 本域**不存在**触发器语义漂移的可能（真源 `service/user/**` 全域无 `CREATE TRIGGER`）；但这**不等于**「触发器已对齐」 |
+| 2 | **CHECK / 外键 / 分区 / 存储过程** | 脚本不查（外键只比 `contype` + 定义文本）⇒ **人工补查**后两侧均为 0 行 ⇒ 该维度**人工闭合** | 无残留；但结论强度 = **L4 + 人工补查**，不是脚本原生结论 |
+| 3 | **那 8 处 DEFAULT 是否真的「不可观察」** | 「两侧所有 INSERT 都显式绑定该列」是**写入路径**的行为层结论 ⇒ **不在 DDL 维度内** ⇒ 本节**未核**，沿用签字档 `SD-2026-10-25-CAND-16` 的既有结论 | 若将来新增一条**裸 SQL 写路径**，这 8 处会从「不可观察」变成「可观察」⇒ **复核触发点** |
+| 4 | **缺失的 3 条索引对真实查询计划的影响** | 需要 `EXPLAIN` + 真实数据量 ⇒ 本轮**未核** | 只能断言「**非唯一**索引缺失不改变行为语义」；**性能影响未量化** |
+| 5 | **Go 侧 schema 与生产的完全等价性** | 探针调的是真源 `model.InitDB`（同一份 struct tag + 同一个 `gorm.io/driver/postgres` 版本）⇒ 等价；但**真源手写 `.sql` 那一半**（`ddl-parity.sh` 的 `GO_SQL` 清单）**本域为空** ⇒ 无遗漏 | 无缺口；本域 Go 侧 schema **全部**由 `AutoMigrate` 产出 |
+| 6 | **`admin` 侧两张表由另一个包产出** | 探针**已同时跑** user/rpc 与 admin/rpc 两个包（否则 `expected_tables` 闸门会报「Go 侧缺 `admin_admin`」）⇒ Go 侧 4 张表齐全 | 已闭合（闸门 `expected_tables` 命中 4/4） |
+
+### 72.7 与其它台账的关系（指针，不改别的文件）
+
+| 台账 | 本节与它的关系 |
+|---|---|
+| [`docs/DRIFT/_cross/ddl-type-divergences.md`](../../DRIFT/_cross/ddl-type-divergences.md) | **同源结论、但口径已过期** —— 该文件 §〇 的容器/库名还写着 `difftest-postgres` / `go_db` / `rag_db`（2026-10-25 实测期），现役是 `ddl-users-pg` / `go_users_db` / `rag_users_db`；其 §二.1 / §二.2 / §二.3 的**条数与分类与本节逐条一致**（1 + 8 + 3 + 4）⇒ **本节是它的 2026-10-29 复核**（含 `--check-source` 与触发器维度）。⚠️ **该文件在 `_cross` ⇒ 本 lane 无写权 ⇒ 只在此登记，报给收口执行者** |
+| [`docs/Intentional_Deviations/users/_shared.md`](../../Intentional_Deviations/users/_shared.md) | 残留 ① ＝ `SD-2026-10-25-CAND-17` · 残留 ② ＝ `SD-2026-10-25-CAND-16` ⇒ **已登记 · 未签字** ⇒ 本节**不重复质疑、不改回** |
+| [`docs/DRIFT/_cross/open-items.md`](../../DRIFT/_cross/open-items.md) | 其 **P3 行**（users 域 8 处 DEFAULT 残留）＝ 本节残留 ② ⇒ 一致；⚠️ 该行写「已登记 `SD-2026-10-25-CAND-16`（未签字）」⇒ 与本节口径一致 |
+| [`docs/PhaseGoal-judge.md` §七 **G-8 / G-9`](../../PhaseGoal-judge.md) | 主线结论（G-8 / G-9 已闭合 · 9 域逐域跑）—— 本节是 `users` 域的**域级落账**，不重复改主线结论 |
+| [`docs/DRIFT/users/_shared.md`](_shared.md) §2（真库对照表 · **V-002 / V-011**） | 域内 DRIFT 侧的同两条目 ⇒ 本节给出**2026-10-29 的机器复核**（`--indexes` + `--check-source`），并把它们与签字档的编号对上 |
+
+---
+
