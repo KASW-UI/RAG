@@ -2464,6 +2464,45 @@ Sea-RideTheWind_golang/service/common/observability/http.go:88  → http.Error(w
 - **守门**：域级 `BlindPortGateTest`（落在 **user-rpc**，`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/BlindPortGateTest.java`）**5 条** ⇒ 一并覆盖本组件 ⇒ **本组件不单独建守门**（避免两份规则漂移）。
 - **边界**：**本组件生产代码零改动**（全部落在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项**（Go 侧无对应物 ⇒ 无对照义务）。
 
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W11
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| UNRESOLVED-ADMINAPI-005 | D（该开放项已关闭 ⇒ 无待实现内容） | P3 | 否 | Go `service/user/admin/api/internal/svc/servicecontext.go:27`（`AdminRpc: adminservice.NewAdminService(zrpc.MustNewClient(c.AdminRpc)),` ⇒ 下游不可达即 `logx.Must` **panic** ⇒ 进程起不来）＋ `service/user/admin/api/internal/metrics/metrics.go:9`（`prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "", Subsystem: "admin_api", Name: "intercept_total", …})` ⇒ Prometheus 全名 = `admin_api_intercept_total`）vs RAG `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/client/AdminRpcClient.java:142`（`@GrpcClient("admin-rpc")` ⇒ 启动期装配链在位）＋ `service/users/admin/admin-api/src/main/resources/application.yml:94`（`address: discovery:///admin-rpc`）＋ `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/metrics/AdminApiMetrics.java:122`（`return Counter.builder("admin_api_intercept_total")` ⇒ 与 Go 同名）＋ `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiStartupFailFastTest.java:121`（`assertThat(context).hasFailed();` ⇒ **① 已实测并被守门锁住**）＋ `:125`（`hasMessageContaining("Can't connect to channel");`）＋ `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiPrometheusMetricNameTest.java:116`（`assertTrue(names.contains(GO_METRIC_NAME),` ⇒ **② 已实测**）＋ `:123`（负向断言：不得出现 `admin_api_intercept_total_total`）＋ `tools/difftest/exp-admin-startup-failfast.sh:9`（双侧实证脚本，案例 A = 下游死端口 / 案例 B = Nacos 不可达）⇒ ⇒ 台账记的「**两项启动期事实未实测**」这个开放项**已不存在** ⇒ **差异已消失** ⇒ 归 **D**（无待实现内容）；⚠️ 本轮**未复跑**该脚本与两个 JUnit（证据强度 = 静态源码对照 ＋ 守门在位）⇒ 按 AGENTS.md §0 读作「在该证据强度下一致」；**P3**（本条是证据缺口项，缺口已补 ⇒ 不构成当前验收阻断条件） | 2026-10-30 |
+
+### lane W14
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-ADMINAPI-012 | D（已闭合 ⇒ 无待实现内容） | P1 | 否（不阻断阶段一） | Go `service/user/admin/api/internal/middleware/checkblacklistmiddleware.go:35` = `exists, err := m.Redis.ExistsCtx(r.Context(), blacklistKey)` ＋ `:36` = `if err == nil && exists {` ⇒ **Redis 出错 ⇒ 放行**（fail-open）＋ `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:14` = `maxRetries = 3` ＋ `:32-37` = `red.NewClient(&red.Options{… MaxRetries: maxRetries …})`（**不传任何 timeout** ⇒ 连接被拒 / 被关时**立即失败**、不排队）vs RAG `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/interceptor/AdminJwtAuthInterceptor.java:200` = `redisTemplate.hasKey(blacklistKey)` 包在 `catch (Throwable t)` 里 ＋ `:206` = `return exists != null && exists;` ⇒ **fail-open**（与 Go 同形）＋ `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java:132` = `ClientOptions.DisconnectedBehavior.REJECT_COMMANDS`（⇒ 断连即拒单 ⇒ 命令**毫秒级失败**，不再挂到 `commandTimeout` 3s）＋ 注册清单 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:5` ＋ 守门 `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiRedisDisconnectedFastFailTest.java:264` = `assertEquals(ClientOptions.DisconnectedBehavior.REJECT_COMMANDS, …)` ⇒ **差异已消失**：台账正文所述的修法（把 Lettuce 断连行为设成 `REJECT_COMMANDS`）**确已在位**，且域内副本 `RedisDisconnectedBehaviorConfig.java` 已删（该目录现存 `AdminApiProperties.java` / `WebMvcConfig.java`）⇒ 共享层未被遮蔽 ⇒ 断连（FIN）形态下 `hasKey` 快速失败 ⇒ 进 catch ⇒ **fail-open 200**（与 Go 同形）⇒ 原「挂满 3s ⇒ 503」不再发生；⚠️ RST 形态两侧都快速失败（不构成漂移）⇒ 本条无剩余待实现项 | 2026-10-30 |
+
+### lane W5
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-ADMINAPI-013 | D | P3 | 否 | Go `service/user/admin/api/internal/handler/routes.go:15`（生产侧等价面；Go 全仓 `forPort(0)` ／ `new ServerSocket(0)` ／ `RANDOM_PORT` 三个模式串 **0 命中** ⇒ Go 侧无对应物 ⇒ 不构成 Go 对照项）vs RAG `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiStartupFailFastTest.java:101`（`return RealGrpcPort.pick();`）＋ `AdminApiStartupFailFastTest.java:263`（`NettyServerBuilder.forPort(RealGrpcPort.pick())`）＋ `AdminApiRealTomcatResponseBytesTest.java:143`（`r.add("server.port", RealTomcatPort::pick);`）⇒ **差异已消失**（本组件 3 处「OS 盲选口」已全部改走域内私有固定段端口）⇒ 且**生产代码零改动**（全在 `src/test/java`）⇒ 无落码动作 | 2026-10-30 |
+---
+
+> ⚠️ **以下内容原位于本文件中部 —— 2026-10-30（G1 lane）移到末尾**
+> 理由 = **零行位移**：`docs/RoundPlan/_unresolved.md` 与 `docs/DRIFT/_cross/grading/*` 里有指向本文件的
+> **硬编码 `文件:行号` 指针** ⇒ ⇒ 派生层按**纯行号算术**解析 ⇒ ⇒ 中部插一行 ⇒ 指针解析到别的条目
+> ⇒ ⇒ 「排期指针 / 证据缺口组」的成员被静默改写 ⇒ ⇒ **派工面被改掉**。
+> ⇒ ⇒ 纪律：**新增内容一律放文件末尾**；要改中部 ⇒ 用「**就地替换**」（行数不变）而不是「插入新行」。
+> ⇒ ⇒ 判据：`python3 tools/ledger-derive/check-pointer-consistency.py`（派生层输入完整性棘轮）。
+
 ## ✅ `DRIFT-ADMINAPI-014` · 出向 admin-rpc **缺 2s 客户端超时** ⇒ 失败只能由**服务端**兜底（2026-10-30 · G1 lane · 域侧自修 · 已落码）
 
 > **证据强度 = L3**（Go ↔ RAG 源码逐条对照 ＋ 本域**真跑**守门 ＋ **变异实测**）
@@ -2527,33 +2566,3 @@ RAG 侧下游 `admin-rpc` **自己**带服务端 2s 超时
 - ⚠️ 守门**不**起真实 admin-rpc、**不**发真实请求 ⇒ 证的是「**出向调用的 deadline 口径**」；**不**证「下游挂死时端到端真的回 1015」。
 - ⚠️ **共享层那半边不在本条**：要让 rpc 进程也拿到「入站预算」，`GoStyleRequestDeadline` 需要**作用域化 API** ⇒ 落点 `service/common` ⇒ **G4 写权** ⇒ 已随 `E65` 反馈单转派。
 
-## 阶段归属定级附录（2026-10-30 · Go 对照）
-
-> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
-> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
-> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
-> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
-> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
->
-> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
-> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
-> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
-
-
-### lane W11
-
-| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
-|---|---|---|---|---|---|
-| UNRESOLVED-ADMINAPI-005 | D（该开放项已关闭 ⇒ 无待实现内容） | P3 | 否 | Go `service/user/admin/api/internal/svc/servicecontext.go:27`（`AdminRpc: adminservice.NewAdminService(zrpc.MustNewClient(c.AdminRpc)),` ⇒ 下游不可达即 `logx.Must` **panic** ⇒ 进程起不来）＋ `service/user/admin/api/internal/metrics/metrics.go:9`（`prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "", Subsystem: "admin_api", Name: "intercept_total", …})` ⇒ Prometheus 全名 = `admin_api_intercept_total`）vs RAG `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/client/AdminRpcClient.java:142`（`@GrpcClient("admin-rpc")` ⇒ 启动期装配链在位）＋ `service/users/admin/admin-api/src/main/resources/application.yml:94`（`address: discovery:///admin-rpc`）＋ `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/metrics/AdminApiMetrics.java:122`（`return Counter.builder("admin_api_intercept_total")` ⇒ 与 Go 同名）＋ `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiStartupFailFastTest.java:121`（`assertThat(context).hasFailed();` ⇒ **① 已实测并被守门锁住**）＋ `:125`（`hasMessageContaining("Can't connect to channel");`）＋ `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiPrometheusMetricNameTest.java:116`（`assertTrue(names.contains(GO_METRIC_NAME),` ⇒ **② 已实测**）＋ `:123`（负向断言：不得出现 `admin_api_intercept_total_total`）＋ `tools/difftest/exp-admin-startup-failfast.sh:9`（双侧实证脚本，案例 A = 下游死端口 / 案例 B = Nacos 不可达）⇒ ⇒ 台账记的「**两项启动期事实未实测**」这个开放项**已不存在** ⇒ **差异已消失** ⇒ 归 **D**（无待实现内容）；⚠️ 本轮**未复跑**该脚本与两个 JUnit（证据强度 = 静态源码对照 ＋ 守门在位）⇒ 按 AGENTS.md §0 读作「在该证据强度下一致」；**P3**（本条是证据缺口项，缺口已补 ⇒ 不构成当前验收阻断条件） | 2026-10-30 |
-
-### lane W14
-
-| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
-|---|---|---|---|---|---|
-| DRIFT-ADMINAPI-012 | D（已闭合 ⇒ 无待实现内容） | P1 | 否（不阻断阶段一） | Go `service/user/admin/api/internal/middleware/checkblacklistmiddleware.go:35` = `exists, err := m.Redis.ExistsCtx(r.Context(), blacklistKey)` ＋ `:36` = `if err == nil && exists {` ⇒ **Redis 出错 ⇒ 放行**（fail-open）＋ `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:14` = `maxRetries = 3` ＋ `:32-37` = `red.NewClient(&red.Options{… MaxRetries: maxRetries …})`（**不传任何 timeout** ⇒ 连接被拒 / 被关时**立即失败**、不排队）vs RAG `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/interceptor/AdminJwtAuthInterceptor.java:200` = `redisTemplate.hasKey(blacklistKey)` 包在 `catch (Throwable t)` 里 ＋ `:206` = `return exists != null && exists;` ⇒ **fail-open**（与 Go 同形）＋ `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java:132` = `ClientOptions.DisconnectedBehavior.REJECT_COMMANDS`（⇒ 断连即拒单 ⇒ 命令**毫秒级失败**，不再挂到 `commandTimeout` 3s）＋ 注册清单 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:5` ＋ 守门 `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiRedisDisconnectedFastFailTest.java:264` = `assertEquals(ClientOptions.DisconnectedBehavior.REJECT_COMMANDS, …)` ⇒ **差异已消失**：台账正文所述的修法（把 Lettuce 断连行为设成 `REJECT_COMMANDS`）**确已在位**，且域内副本 `RedisDisconnectedBehaviorConfig.java` 已删（该目录现存 `AdminApiProperties.java` / `WebMvcConfig.java`）⇒ 共享层未被遮蔽 ⇒ 断连（FIN）形态下 `hasKey` 快速失败 ⇒ 进 catch ⇒ **fail-open 200**（与 Go 同形）⇒ 原「挂满 3s ⇒ 503」不再发生；⚠️ RST 形态两侧都快速失败（不构成漂移）⇒ 本条无剩余待实现项 | 2026-10-30 |
-
-### lane W5
-
-| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
-|---|---|---|---|---|---|
-| DRIFT-ADMINAPI-013 | D | P3 | 否 | Go `service/user/admin/api/internal/handler/routes.go:15`（生产侧等价面；Go 全仓 `forPort(0)` ／ `new ServerSocket(0)` ／ `RANDOM_PORT` 三个模式串 **0 命中** ⇒ Go 侧无对应物 ⇒ 不构成 Go 对照项）vs RAG `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiStartupFailFastTest.java:101`（`return RealGrpcPort.pick();`）＋ `AdminApiStartupFailFastTest.java:263`（`NettyServerBuilder.forPort(RealGrpcPort.pick())`）＋ `AdminApiRealTomcatResponseBytesTest.java:143`（`r.add("server.port", RealTomcatPort::pick);`）⇒ **差异已消失**（本组件 3 处「OS 盲选口」已全部改走域内私有固定段端口）⇒ 且**生产代码零改动**（全在 `src/test/java`）⇒ 无落码动作 | 2026-10-30 |

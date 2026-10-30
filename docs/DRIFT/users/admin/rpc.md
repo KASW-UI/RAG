@@ -2946,16 +2946,6 @@ Redis 不可达的实际表现由 **3s 的命令超时**主导，5s 的连接超
 
 ## 1. 🟡 新增 DRIFT-ARPC-009 · admin-rpc 的 **gRPC 服务端拦截器链**缺 6 层（Go zrpc 框架级自带 vs RAG 只有 1 个）
 
-> 🟡 **2026-10-30 14:4x · 状态由 🔴 未闭合 改判 🟡 部分闭合**（G4 回执触发；核对日期 2026-10-30）
-> - **G4 已落共享层半边**：Jason 裁定「**只落 Stat 的慢调用日志**」⇒ 已落（`RpcInterceptor` 的 close 路径一行 ＋ 两个私有辅助方法，**零新依赖、不动 `GoStyleRpcProtectionChain.Composition`**）＋ 新增守门 `GoStyleSlowCallLogGateTest`（**真 in-process gRPC ＋ 真 logback appender 捕获** ⇒ 慢调用**真**打出 `[RPC] slowcall - <addr> - <method> - duration Nms`，快调用**不**打）⇒ **变异（去掉那行）精确转红**。
-> - ⇒ ⇒ **Stat 这层已闭**；**Prometheus 那层按 Jason 裁定不做** ⇒ ⇒ 故为**部分闭合**而非已闭合。
-> - 🔴 **本条「Go 侧」的两处前提偏差，本轮订正**（G4 独立核验）：
->   ① **Stat 层不走 Prometheus** —— `go-zero@v1.10.2/core/stat/metrics.go:3-18` **没有**任何 prometheus 依赖，它是**进程内聚合器**（每分钟 `logx.Statf` 打一行 qps/avg/median/t99）⇒ ⇒ **Stat 与 Prometheus 是两套互不相干的产出面** ⇒ ⇒ 本条原文「缺 Stat + Prometheus **两层**」把两个独立产出面说成了同一族 ⇒ **口径订正**（数值结论不变）。
->   ② **有效慢阈值 500ms 的来源不是 `StatConf.SlowThreshold`** —— 真源**所有 yaml 都没有 `Middlewares:` 块** ⇒ `StatConf` **恒零值** ⇒ 走**全局兜底 `slowThreshold`** ⇒ ⇒ **数值等价、机制不同**。
-> - ⚠️ **两条有意的不完整对齐（已登记，转派单 `G4-15b`/`G4-15c`）**：① Go 的 **Info 分支**（每个请求把全量 body 打 Info）**刻意不落**；② Go 的 Stat 装在 **breaker/shedding 之外**、RAG 装在**最内层** ⇒ ⇒ **慢调用的判定口径会有差异**。
-> - ⚠️ **为什么「只落慢调用日志」**（落点约束，G4 已核）：改 `Composition` record ⇒ **破坏 3 个域级守门测试 ＋ 1 个共享层测试的编译**（跨域）⇒ Prometheus 还要给 `service/common/pom.xml` 加 micrometer ⇒ 且「出口口径」是**运维决策**（Go 侧 8/10 个 rpc 的 `Prometheus.Host` 为空 ⇒ `StartAgent` 早退 ⇒ **配了也不产观测值**）。
-> - 📌 **派生层同步提示**：本条在 `docs/DRIFT/_cross/stage1-derivation.tsv` 里的行（`status` 列）会随本次订正由 🔴 变 🟡 ⇒ **派生层重生成由合并收口执行者做**（`_cross/**` = 共享面 ⇒ **G1 不写**）。
-
 - **Component**：admin-rpc / 全部 13 个 RPC 的**服务端**入口
 - **Category**：Reliability / Resilience / Error Mapping
 - **Classification**：OBSERVABLE DIFFERENCE　**Risk**：**MEDIUM-HIGH**（最严重的一条是 panic 的 status/业务码不同）
@@ -3108,7 +3098,6 @@ grpc-java 侧读了 `grpc-core-1.63.0` 的 `io/grpc/internal/ServerImpl.java` �
 #### 1.7.4 处置
 
 - **本轮不改代码**（修法口径未定 ⇒ 跨域统一决定）⇒ **只登记**。
-- 🔴 **2026-10-30 16:3x 订正 ⇒ 「本轮不改代码」已过期**：**域侧已落码**（共享层代理那半边由 G4 落）⇒ ⇒ 处置 = **两处 · 同一个提交**（清单编号 **M-6**）⇒ ① **共享层（G4）**：Redis 期限代理（`GoStyleRedisDeadlineConnection` ⇒ 派发前查预算）⇒ ② **域侧（G1 · 本轮已落）**：**撤掉 logout 入口的 `checkDeadline()`** ⇒ 让写尝试发生 ⇒ 由代理抛 `QueryTimeoutException` ⇒ 落进现有 `catch (Exception e)` ⇒ **自动得到 `INTERNAL`「注销失败,Redis写入异常」= Go 的 5001**（handler 级逐字同形）⇒ ⇒ **客户端可见面不变（1015）** ⇒ **同批合约束恢复**（理由与落点见文末订正小节（6）段）。
 - ⇒ 归 **`global` 的 E38② 同型**（在途工作不随客户端 deadline 取消）；
   `service/common` 单写权在 global ⇒ **本域无权改**。
 - ⚠️ **与 E38② 的差别**：E38② 说的是 **PG 查询**；本条是 **Redis 写**
@@ -4542,3 +4531,28 @@ if (connectTimeout != null) {                                     // :16
 - **测试结果（2026-10-30 16:31 实跑）**：定向 4 类 = **7 条 / 0F / 0E / 0S** ⇒ `AdminLogoutDeadlineHandoffTest` **3/3** · `AdminDomainServiceDeadlineTest` **2/2** · `AdminRpcLogoutClientVisibleGrpcStatusTest` **1/1**（真 PG + 真 Redis · 13.4s）· `AdminRpcLogoutClientVisibleGrpcStatusDefaultBehaviorTest` **1/1**（18.2s）⇒ ⇒ **既有两条 logout 客户端可见码测试未被打破**（它们本就不依赖域内闸门：一条「Redis 断连 ⇒ INTERNAL」、一条「命令排队 ⇒ 2s 预算先到 ⇒ 1015」）。
 - 🔴 **合并约束（本条唯一未闭合项 · 清单编号 M-6）**：**本域改动与共享层代理必须同一个提交进主干** ⇒ 理由 = 域内闸门撤掉后若代理**未**在位 ⇒ 该方法**没有任何**期限感知 ⇒ 期限已耗尽时**仍会把黑名单写进 Redis** ⇒ ⇒ **RAG 写、Go 不写** ⇒ ⇒ **E66 暴露面** ⇒ ⇒ **单独合入 = 倒退** ⇒ ⇒ 落点 `docs/Worktree.md` §3-1 的 M 表 + §3-2 的合并约束段（**不在 G1 写权面** · 由主线收口执行者写）。
 - ⚠️ **诚实边界（本轮无「双侧活体」新证据）**：① 新测试用 **Mockito 替换数据层** ⇒ 只证「域服务的控制流与异常映射」，**不证**「共享层代理真的在 Redis 调用路径上」（那由 G4 的 `GoStyleRedisDeadlineGateTest` 守 · **跨 lane**）⇒ ⇒ **本轮证据强度 = L3，不是 L4**；② **真链路复跑**（真 Redis ＋ 真 gRPC ＋ 真实期限耗尽）属**主干合入后**的复跑项；③ 残余「取连接/拨号窗口内过期 ⇒ RAG 写、Go 不写」**依旧成立**且代理盖不住 ⇒ **不可完全闭合 = 框架限制** ⇒ **不追**。
+---
+
+> ⚠️ **以下内容原位于本文件中部 —— 2026-10-30（G1 lane）移到末尾**
+> 理由 = **零行位移**：`docs/RoundPlan/_unresolved.md` 与 `docs/DRIFT/_cross/grading/*` 里有指向本文件的
+> **硬编码 `文件:行号` 指针** ⇒ ⇒ 派生层按**纯行号算术**解析 ⇒ ⇒ 中部插一行 ⇒ 指针解析到别的条目
+> ⇒ ⇒ 「排期指针 / 证据缺口组」的成员被静默改写 ⇒ ⇒ **派工面被改掉**。
+> ⇒ ⇒ 纪律：**新增内容一律放文件末尾**；要改中部 ⇒ 用「**就地替换**」（行数不变）而不是「插入新行」。
+> ⇒ ⇒ 判据：`python3 tools/ledger-derive/check-pointer-consistency.py`（派生层输入完整性棘轮）。
+
+- 🔴 **2026-10-30 16:3x 订正 ⇒ 「本轮不改代码」已过期**：**域侧已落码**（共享层代理那半边由 G4 落）⇒ ⇒ 处置 = **两处 · 同一个提交**（清单编号 **M-6**）⇒ ① **共享层（G4）**：Redis 期限代理（`GoStyleRedisDeadlineConnection` ⇒ 派发前查预算）⇒ ② **域侧（G1 · 本轮已落）**：**撤掉 logout 入口的 `checkDeadline()`** ⇒ 让写尝试发生 ⇒ 由代理抛 `QueryTimeoutException` ⇒ 落进现有 `catch (Exception e)` ⇒ **自动得到 `INTERNAL`「注销失败,Redis写入异常」= Go 的 5001**（handler 级逐字同形）⇒ ⇒ **客户端可见面不变（1015）** ⇒ **同批合约束恢复**（理由与落点见文末订正小节（6）段）。
+
+---
+
+> ⚠️ **以下内容原位于本文件中部「§1 admin-rpc 的 gRPC 服务端拦截器链缺 6 层」条目标题的正下方 —— 2026-10-30（G1 lane）移到末尾**
+> ⇒ ⇒ **原位 = 该条目标题之下 9 行**（「🔴 未闭合 ⇒ 🟡 部分闭合」的改判说明）⇒ ⇒ 搬迁只为让**中部行号**归零 ⇒ ⇒ **正文一字未改**。
+
+> 🟡 **2026-10-30 14:4x · 状态由 🔴 未闭合 改判 🟡 部分闭合**（G4 回执触发；核对日期 2026-10-30）
+> - **G4 已落共享层半边**：Jason 裁定「**只落 Stat 的慢调用日志**」⇒ 已落（`RpcInterceptor` 的 close 路径一行 ＋ 两个私有辅助方法，**零新依赖、不动 `GoStyleRpcProtectionChain.Composition`**）＋ 新增守门 `GoStyleSlowCallLogGateTest`（**真 in-process gRPC ＋ 真 logback appender 捕获** ⇒ 慢调用**真**打出 `[RPC] slowcall - <addr> - <method> - duration Nms`，快调用**不**打）⇒ **变异（去掉那行）精确转红**。
+> - ⇒ ⇒ **Stat 这层已闭**；**Prometheus 那层按 Jason 裁定不做** ⇒ ⇒ 故为**部分闭合**而非已闭合。
+> - 🔴 **本条「Go 侧」的两处前提偏差，本轮订正**（G4 独立核验）：
+>   ① **Stat 层不走 Prometheus** —— `go-zero@v1.10.2/core/stat/metrics.go:3-18` **没有**任何 prometheus 依赖，它是**进程内聚合器**（每分钟 `logx.Statf` 打一行 qps/avg/median/t99）⇒ ⇒ **Stat 与 Prometheus 是两套互不相干的产出面** ⇒ ⇒ 本条原文「缺 Stat + Prometheus **两层**」把两个独立产出面说成了同一族 ⇒ **口径订正**（数值结论不变）。
+>   ② **有效慢阈值 500ms 的来源不是 `StatConf.SlowThreshold`** —— 真源**所有 yaml 都没有 `Middlewares:` 块** ⇒ `StatConf` **恒零值** ⇒ 走**全局兜底 `slowThreshold`** ⇒ ⇒ **数值等价、机制不同**。
+> - ⚠️ **两条有意的不完整对齐（已登记，转派单 `G4-15b`/`G4-15c`）**：① Go 的 **Info 分支**（每个请求把全量 body 打 Info）**刻意不落**；② Go 的 Stat 装在 **breaker/shedding 之外**、RAG 装在**最内层** ⇒ ⇒ **慢调用的判定口径会有差异**。
+> - ⚠️ **为什么「只落慢调用日志」**（落点约束，G4 已核）：改 `Composition` record ⇒ **破坏 3 个域级守门测试 ＋ 1 个共享层测试的编译**（跨域）⇒ Prometheus 还要给 `service/common/pom.xml` 加 micrometer ⇒ 且「出口口径」是**运维决策**（Go 侧 8/10 个 rpc 的 `Prometheus.Host` 为空 ⇒ `StartAgent` 早退 ⇒ **配了也不产观测值**）。
+> - 📌 **派生层同步提示**：本条在 `docs/DRIFT/_cross/stage1-derivation.tsv` 里的行（`status` 列）会随本次订正由 🔴 变 🟡 ⇒ **派生层重生成由合并收口执行者做**（`_cross/**` = 共享面 ⇒ **G1 不写**）。
