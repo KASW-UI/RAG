@@ -3836,3 +3836,16 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
   - 还原 ⇒ 3 条全绿
 - **Go 侧对应物（表达层，非行为偏离）**：`go-zero@v1.10.2/zrpc/internal/client.go:126` = `grpc.DialContext(timeCtx, server, options...)`；`go-zero@v1.10.2/zrpc/client.go:84` = `target, err := c.BuildTarget()` ⇒ ⇒ Go 侧把 target **直连**给 grpc ⇒ ⇒ **不存在**「无 scheme ⇒ 走默认 scheme ⇒ 默认 scheme 被进程级全局 resolver 抢」这一层 ⇒ ⇒ RAG 侧显式写 `dns:///` 属**表达层**对齐 ⇒ ⇒ **不构成有意偏离，无需登记签字**
 - **验收读数**：user-api **138 条**（0F/0E/0S）· 与改动前同数 ⇒ ⇒ `BUILD SUCCESS`
+
+### 补充：devh discovery provider「是否注册」的直接探针（2026-10-31 · G1 lane · 同轮追加）
+
+- **为什么补**：上一节的「本条确实会被接管」原先靠**回落 target 即红**这条间接证据 ⇒ ⇒ 这一段用**直接探针**把「provider 有没有注册进进程级全局 registry」读出来 ⇒ ⇒ 并与 user-rpc / admin-rpc 两侧形成同形对照
+- **探针读数（实测）**：
+  - `io.grpc.NameResolverRegistry.getDefaultRegistry().getDefaultScheme()` ⇒ **`discovery`**（不是 `dns`）
+  - `…getProviderForScheme("discovery")` ⇒ **`DiscoveryClientResolverFactory [scheme=discovery, discoveryClient=org.springframework.cloud.client.discovery.composite.CompositeDiscoveryClient@…]`** ⇒ ⇒ **provider 已注册**
+  - `…getProviderForScheme("dns")` ⇒ `io.grpc.internal.DnsNameResolverProvider@…` ⇒ ⇒ grpc 自带 DNS resolver 也在，但**默认 scheme 已被 priority=6 的 discovery provider 夺走**
+- **⇒ 两侧对照（同一把尺）**：
+  - **user-api（本条）**：`defaultScheme=discovery` ⇒ **provider 在位** ⇒ ⇒ 无 scheme 的 target 必被接管 ⇒ ⇒ **实测可复现的活雷**（回落 target ⇒ `UNAVAILABLE: No servers found for 127.0.0.1:22200`）
+  - **user-rpc / admin-rpc**：`defaultScheme=dns` + `discoveryProvider=null` ⇒ **provider 从未注册** ⇒ ⇒ 不被接管 ⇒ ⇒ 那 4 处属**预防性**（探针 + 装置正确的配对实验读数见对应域台账）
+  - ⇒ ⇒ 决定性变量 = **该上下文有没有 `DiscoveryClient` bean**（devh `@ConditionalOnBean(DiscoveryClient.class)` 命中与否）⇒ ⇒ 「真发 RPC」是必要条件、**不是充分条件**
+- **探针纪律**：临时补丁 + 事后还原（**不用 `git stash`** —— 并发 lane 会互偷工作区状态）⇒ ⇒ 还原后 `grep -c 'forTarget("dns:///127.0.0.1:" + PORT)'` = 1 ⇒ ⇒ 无残留
