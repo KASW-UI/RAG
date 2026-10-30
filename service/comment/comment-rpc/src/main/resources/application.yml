@@ -50,7 +50,21 @@ spring:
   datasource:
     url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}?TimeZone=Asia/Shanghai
     username: ${POSTGRES_USER:admin}
-    password: ${POSTGRES_PASSWORD:password}
+    # 🔴 **口令占位符必须是「裸」写法**（2026-10-30 · 合并收口执行者派工 · 与 Go **逐字同形**）
+    #   【Go 出处】service/comment/rpc/etc/comment.yaml:9
+    #   【Go 的展开语义】go-zero 的加载 = `core/conf/config.go:63`
+    #       `loader([]byte(os.ExpandEnv(string(content))), v)` ⇒ ⇒ **`os.ExpandEnv` 不认
+    #       `${VAR:default}` 语法** ⇒ 缺变量时它把**整串当变量名**去查 ⇒ ⇒ **空串**
+    #       ⇒ ⇒ Go 侧缺 `POSTGRES_PASSWORD` = **空口令** ⇒ 连库失败 = fail-fast
+    #   【为什么取消原先的兜底】原先这里是 `${POSTGRES_PASSWORD:password}` ⇒ 走 **Spring 的
+    #       `:default` 语义** ⇒ **缺变量时会用那个默认值连上去** ⇒ ⇒ **RAG 比 Go 松**
+    #       （Go 必然失败、RAG 照样起）⇒ ⇒ 属**真漂移**，**不是**「更严的有意偏离」
+    #       ⇒ ⇒ 不需要为「保留兜底」签字 ⇒ ⇒ 本轮取消。
+    #   ⚠️ **残余差异（失败时刻不同）**：Go = **启动成功、连库时**失败；
+    #      RAG = **启动即失败**（Spring 解析不到占位符 ⇒ DataSource bean 创建失败）
+    #      ⇒ ⇒ 属「**RAG 更严**的一侧」⇒ ⇒ 由**合并收口执行者**在合并窗口统一登记
+    #      ⇒ ⇒ **不是**「保留兜底」的理由。
+    password: ${POSTGRES_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       # ⚠️ Go 侧 comment-rpc **没有**设 MaxIdleConns / MaxOpenConns（service_context.go 无相关调用），
@@ -284,6 +298,28 @@ comment:
     enabled: false
     token: ${COMMENT_FACT_AUTHORITY_TOKEN:}
 
+# =============================================================================
+# 角色标记：rpc 侧（**不是** api 侧）
+# =============================================================================
+# 🔴 **这一行是「共享层 api 侧 web 能力的边界声明」**（2026-10-30 · 合并收口执行者要求）
+#
+# 【为什么必须写】—— 共享层那批 **api 侧**的 web 能力（`GoStyleCpuSheddingFilter` ·
+#   `GoStyleMaxConnsFilter` · `GoStyleMaxBytesFilter` · `GoStyleBreakerFilter` +
+#   `GoStyleTomcatParameterLimitCustomizer` 等）是**按 `rag.side` 分边**的
+#   ⇒ G4 侧把门扩成 `@ConditionalOnProperty(prefix="rag", name="side", havingValue="api",
+#   matchIfMissing=true)` ⇒ ⇒ **不写这一行 = 默认落在 api 侧** ⇒ ⇒ 那些 Bean 会照常活。
+#
+# 【Go 出处】Go 侧 comment-rpc 全程 `zrpc.MustNewServer` ⇒ **不起 servlet 容器**
+#   ⇒ ⇒ **没有** go-zero rest 那套中间件链 ⇒ ⇒ 「rpc 侧 = 没有 api 侧中间件」两侧一致。
+#
+# ⚠️ **本模块当前（2026-10-30）还没有 servlet 容器**（载体尚未落地）⇒ ⇒ 这一行**当前还没有消费点**
+#   ⇒ ⇒ 它是**为 G4 正在扩的那道门预留的对侧**，也是**下一轮补载体时的必需项**
+#   ⇒ ⇒ 门落地后、载体落地后，它必须已在位。
+rag:
+  # 🔴 **必须显式写 `rpc`**（2026-10-30 · 合并收口执行者要求）—— 见上方注释：
+  #   `matchIfMissing=true` ⇒ **不写 = 默认 api 侧** ⇒ 共享层的 api 侧 web Bean 会挂上来。
+  side: rpc
+
 management:
   endpoints:
     web:
@@ -295,8 +331,8 @@ management:
     prometheus:
       enabled: true
   metrics:
-    # ⚠️ Go metrics.go:42-43 **主动注销**了 collectors.NewGoCollector() 与
-    #    NewProcessCollector()，即 Go 的 :9091 只暴露 5 个 comment_* 向量。
+    # ⚠️ Go service/comment/rpc/internal/metrics/metrics.go:42-43 **主动注销**了 Go/process 两个 collector
+    #    ⇒ Go 侧 comment 域**自建**的 :9091（service/comment/rpc/comment.go:38-41，非 go-zero agent）只暴露 5 个 comment_* 向量。
     #    Micrometer 默认会额外暴露 jvm_* / process_* / system_* ⇒ 照搬就是新增可观测面。
     #    这里显式关掉，对齐 Go 现状（不是「顺手增强」）。
     enable:
