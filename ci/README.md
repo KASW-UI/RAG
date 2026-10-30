@@ -234,7 +234,7 @@ python3 ci/generate-pipelines.py --check  # 校验（CI 也跑这一条）
 | **worker 从本地 registry 拉镜像** | ✅ | 探针流水线 **21s 成功**，层下载进度可见 ⇒ **containerd 走 HTTP 拉本地 registry 可行**（Concourse 8 的 containerd 2.4.2 不接受根级 `[registry]` 段，但 Concourse 自身的拉取路径能处理 HTTP registry） |
 | **task 容器出网** | ✅ | 探针：DNS(8.8.8.8 / 223.5.5.5) OK、`github.com:443` OK、`172.17.0.1:5010`（本地 registry）OK；`10.80.0.1:5010` FAIL（预期，网关无此服务） |
 | **DinD 外壳（真实 privileged）** | ✅ | 内层 `dockerd` 起来 → 从本地 registry 拉到 `maven:3.9.11-eclipse-temurin-21` → 进入 Maven 构建 |
-| 完整 4 step build 跑绿 | 🟡 **本机未跑完** | 本机 Docker Desktop 的 daemon 在演练期间再次无响应（与此前同形）⇒ 未擅自重启 ⇒ 详见 `ci/DELIVERY.md` §四.1（含 4 次演练逐次的卡点与根因） |
+| 完整 4 step build 跑绿 | 🟡 **本机未跑完** | **宿主磁盘 100% 满** ⇒ Docker Desktop 的 containerd 内容库出现块级 **I/O error** ⇒ ATC 500、worker 拉不到镜像、`docker logs` 都读不出来（**这也是此前反复出现的"daemon 卡死"的真根因**）⇒ 详见 `ci/DELIVERY.md` §四.1（含 4 次演练逐次的卡点与根因） |
 
 > 「配置校验通过」**不等于**「CI 跑通了」。前者已实测；后者在本机因宿主 daemon 卡死未取得绿灯，
 > 但取源→DinD→拉镜像→进 Maven 构建这段链路已逐段实测打通。
@@ -265,6 +265,7 @@ python3 ci/generate-pipelines.py --check  # 校验（CI 也跑这一条）
 | **DinD 内层网段** | 内层 dockerd 默认 `172.17.0.0/16` 与外层 docker0 **同段** ⇒ 抢走路由 | ⇒ 显式 `--bip 10.250.0.1/16 --default-address-pool base=10.250.0.0/16,size=24`（`DIND_BIP` / `DIND_POOL` 可覆盖） |
 | macOS socket 路径 | 实际在 `~/.docker/run/docker.sock`（`/var/run/docker.sock` 不存在） | ⇒ DinD 形态不依赖它（内层 daemon 自己起） |
 | 端口 5000 | 被 macOS ControlCenter 占用 | ⇒ 本地 registry 用 **5010** |
+| **宿主磁盘** | `/System/Volumes/Data` 一度 **100% 满（剩 617 MiB）** ⇒ Docker containerd 内容库块级 I/O error（`blob … expected at …: input/output error`） | ⇒ **所有"daemon 卡死"的真根因**；跑 CI 前先确认磁盘有余量（腾空间 → 重启 Docker Desktop → 内容库若仍 EIO 需进一步修复） |
 
 **需要的镜像**
 

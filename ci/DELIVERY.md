@@ -4,6 +4,8 @@
 > 范围严格限定在 CI：构建、测试、静态守门、结果汇总。
 > **不含** CD / 生产发布 / Kubernetes 部署。
 >
+> **PR**：<https://github.com/KASW-UI/RAG/pull/2>（分支 `align/ci-concourse` → 基准 `do-my-own-gh`）
+>
 > 事实基线：2026-10-30，本地 Concourse **8.3.2**（`/Users/pr/concourse-local`），
 > worker 运行时 = **containerd 3.0**（Concourse 8 已无 docker runtime）。
 
@@ -145,12 +147,19 @@ worker 的可用环境变量里也没有任何"挂宿主路径"的开关
 
 ### 4.1 未跑完的那一项：原因与边界
 
-**卡点**：本机 Docker Desktop 的 daemon 在演练 build 期间再次无响应
-（`_ping` 超时、API 返 500）⇒ 与用户此前遇到过的卡死同形。
-按既定约束**未擅自重启 Docker Desktop**（其它 lane 的容器还在跑），
+**卡点（两层，都不是 CI 逻辑问题）**：
+
+1. **宿主磁盘 100% 满** ⇒ `/System/Volumes/Data` 只剩约 1 GiB
+   ⇒ Docker Desktop 的 containerd 内容库出现**块级 I/O error**
+   （`blob sha256:… expected at /var/lib/desktop-containerd/…: input/output error`）
+   ⇒ ATC 返 500、worker 拉不到镜像、`docker logs` 本身都读不出来。
+   **这就是此前反复出现的"daemon 卡死"的真正根因**（包括本次 CI 开工前的那一次）。
+2. 磁盘腾出 3.1 GiB 并重启 Docker Desktop 后，**内容库仍有 EIO**（`docker run` 读镜像 blob 失败）
+   ⇒ 需要 Docker 侧的进一步修复（重建 VM 磁盘 / 清理损坏内容），属**宿主环境**操作，未擅自执行。
+
 ⇒ 完整 4 step 的端到端绿灯**在本机未取得**。
 
-**已取得的等价证据**：演练 build #3 的日志逐段证明了
+**已取得的等价证据**：演练 build 的日志逐段证明了
 「git 取源 → DinD 起内层 daemon → 内层从本地 registry 拉到 maven 镜像 → 进入 Maven 构建」
 这段链路是通的（见下表）。
 
@@ -159,7 +168,7 @@ worker 的可用环境变量里也没有任何"挂宿主路径"的开关
 | #1 | ❌ | `repo/ci/scripts/dind-run.sh: No such file` | **`ci/**` 不在触发面** ⇒ 取到的 commit 里还没有 `ci/` 目录 |
 | #2 | ❌ | `dial tcp 172.17.0.1:5010: connection refused` | **内层 dockerd 默认 bridge `172.17.0.0/16` 与外层 docker0 同段** ⇒ 抢走路由 |
 | #3 | ❌ | `Non-resolvable parent POM … com.rag:service:pom` | **仓内真实缺陷**（见 §六），非 CI 自身问题 |
-| #4 | ⏸ | daemon 无响应 | 本机 Docker Desktop 侧环境问题（非 CI 逻辑） |
+| #4 | ⏸ | 宿主磁盘满 ⇒ Docker 内容库块级 EIO | 宿主环境问题（非 CI 逻辑） |
 
 ### 4.2 演练与 canonical 的差异（必须说清）
 
@@ -185,11 +194,12 @@ canonical 流水线指向 `https://github.com/KASW-UI/RAG.git` 的 `do-my-own-gh
 | 资源类型镜像 | Concourse 8 的资源类型是 **rootfs.tgz 打包**（wolfi-base + git 二进制），**不从 Docker Hub 拉** | ⇒ 消除了 `alpine/git` 这条 Docker Hub 依赖 |
 | macOS socket 路径 | 实际在 `~/.docker/run/docker.sock` | ⇒ DinD 形态不依赖它 |
 | **DinD 内层网段** | 内层 dockerd 默认 `172.17.0.0/16` 与外层 docker0 同段 ⇒ 抢路由 | ⇒ 显式 `--bip 10.250.0.1/16 --default-address-pool base=10.250.0.0/16,size=24`（`DIND_BIP`/`DIND_POOL` 可覆盖） |
-| Docker Desktop 稳定性 | daemon 在演练期间再次无响应（与此前同形） | ⇒ 属宿主环境问题；CI 侧已把可调项全部变量化 |
+| **宿主磁盘** | `/System/Volumes/Data` 一度 **100% 满（剩 617 MiB）** ⇒ Docker containerd 内容库块级 **I/O error** ⇒ daemon 卡死 / ATC 500 | ⇒ **这是所有"daemon 卡死"的真根因**；CI 侧已把可调项全部变量化，但**磁盘是宿主环境前提**，需先腾空间 |
+| Docker Desktop 稳定性 | 磁盘满期间 daemon 无响应、内容库块级 EIO；腾出 3.1 GiB + 重启后仍需进一步修复 | ⇒ 属宿主环境问题；CI 侧已把可调项全部变量化 |
 
 ---
 
-## 六、CI 抓出的**仓内真实缺陷**（不在 `ci/` 范围内，未擅自修改）
+## 六、CI 抓出的**仓内真实缺陷**（已随本 PR 修复）
 
 ### 6.1 `service/users/admin/admin-api/pom.xml` 父 POM 无法在干净环境解析
 
@@ -228,8 +238,8 @@ canonical 流水线指向 `https://github.com/KASW-UI/RAG.git` 的 `do-my-own-gh
 **全仓扫描结论**：52 个 pom 里**只有这 1 处**真缺陷（根 pom 那条命中是外部
 `spring-boot-starter-parent` 父 POM，属扫描误报）。
 
-⚠️ 该文件属 `service/users/admin/**` 域（其它 lane 的地盘），
-按 AGENTS.md 的写权纪律**未擅自修改**；演练副本里临时应用过（仅用于验证 CI 机制）。
+✅ **已随本 PR 修复**（单独一笔 commit：`fix(admin-api): 补父 POM 的 relativePath`）——
+坐标与继承内容都不变 ⇒ 语义等价；不改它 ⇒ **所有域的 CI 都会红**。
 
 ---
 
