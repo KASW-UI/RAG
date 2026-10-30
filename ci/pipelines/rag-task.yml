@@ -82,6 +82,15 @@ jobs:
       #   caches: .m2 —— 任务容器内路径是 <工作目录>/.m2（默认 /tmp/build/.m2）；
       #   脚本按**同一路径**把它 bind 进嵌套容器的 /root/.m2 ⇒ Maven 依赖跨构建复用。
       #   （Concourse 的 cache 卷挂在任务容器上，嵌套容器看到的也是同一路径。）
+      #
+      # 【outputs：为什么构建阶段必须把 repo 往下传】
+      #   产物级守门 tools/difftest/check-jar-executable.sh 要读 **jar**，
+      #   而 jar 只在 **`package` 阶段**产出 —— `mvn test` **不产 jar**。
+      #   ⇒ 若本步骤不声明 outputs ⇒ 静态守门步骤拿到的 repo 里没有 target/*.jar
+      #   ⇒ 该门会以「没有产物（未构建？）⇒ 未检查 ⇒ 不算通过」判红
+      #   ⇒ **实测 2026-10-31 命中**：共享层演练的静态守门 8 过 1 挂，挂在这一门。
+      #   ⇒ 声明 outputs 后：jar 随产物链传到 static-gates 步骤
+      #     （Concourse 的步骤产物是**线性链**：上一步的 outputs 就是下一步的 inputs）。
       platform: linux
 
       image_resource:
@@ -92,6 +101,10 @@ jobs:
 
       inputs:
       - name: repo
+
+      outputs:
+      - name: repo
+        path: repo
 
       caches:
       - path: .m2

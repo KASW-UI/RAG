@@ -258,7 +258,15 @@ def read_task_config(rel_path: str) -> list[str]:
 
 def render_pipeline(name: str, domain_root, modules, paths, explain, title: str) -> str:
     module_list = ",".join(modules)
-    jar_list = " ".join(modules)
+    # 【JAR_MODULES 只给 api/rpc 模块】——
+    #   产物级守门 tools/difftest/check-jar-executable.sh 查的是
+    #   「**可执行**的 Spring Boot fat jar」⇒ 只对 *-api / *-rpc 成立。
+    #   service/common、service/users/users-common 是 **library 模块** ⇒
+    #   按该脚本自己的规矩（脚本头注释：*"service/common 刻意不在枚举里"*）
+    #   **不得**给它们加 repackage ⇒ 也不能拿它们去查产物可执行性。
+    #   ⇒ 共享层流水线没有可执行 jar ⇒ JAR_MODULES 留空
+    #     ⇒ run-static-gates.sh 会跳过该门（不是"通过"，是"不适用"）。
+    jar_list = " ".join(m for m in modules if m.rsplit("/", 1)[-1].endswith(("-api", "-rpc")))
     lines: list[str] = []
     a = lines.append
 
