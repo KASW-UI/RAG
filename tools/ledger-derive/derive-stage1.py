@@ -154,6 +154,13 @@ SCOPE_FILE = TOOL_DIR / "overlay-scope.txt"
 #   ⚠️ **组是显式数据，不是猜的** —— 每组都要能说出「凭什么它们是同一件事」。
 IDENTITY_GROUP_FILE = TOOL_DIR / "identity-groups.txt"
 
+# ⚠️ **波次映射（wave）** —— 2026-10-30 加：派生层要能直接回答「这条归哪棵工作树（G1~G4）做」。
+#   权威出处 = `docs/Worktree.md` §二「波次版：G1~G4」表（AGENTS.md §5.3d 只留结论 + 指针）。
+#   ⚠️ **显式数据文件，不藏在代码里**（与 `excluded-id-prefixes.txt` / `overlay-scope.txt` 同口径）⇒ 可复核、可改。
+#   ⚠️ **给的是「派工面」，不是「类级写权」** —— `users-common` 是混合体（AGENTS.md §5.3f 按类判定），
+#   本层只把**整份 users-common 专属台账**归 G4；`users/vs-common.md` 归 G1（该文件头部自记「归属 G1 波次工作树」）。
+WAVE_MAP_FILE = TOOL_DIR / "wave-map.txt"
+
 # ⚠️ **U5-O 保护字段** —— 这些字段一旦有「显式定级」，就**不许**被无定级的登记覆盖。
 #   依据见 `derive()` 合并段的注释：同一编号在**汇总文件**与**主文件**两处登记时，
 #   汇总文件那条日期更新就会把主文件的 U5-O 定级**静默覆盖**掉。
@@ -488,6 +495,55 @@ def load_exclusions() -> dict[str, str]:
             continue
         out[parts[0].strip()] = parts[1].strip()
     return out
+
+
+def load_wave_map() -> tuple[dict[str, str], dict[str, str]]:
+    """U11 波次映射 ⇒ **({文件路径: 波次}, {域名: 波次})**。
+
+    ⚠️ **为什么要有这一列**（2026-10-30）：派生层能回答「这条属哪个域、该谁修」，
+    但**回答不了「这条归哪棵工作树（G1~G4）」** ⇒ lane 要自己按域反推 ⇒ 容易派错树。
+    ⇒ `wave` 列 = **派工面**（该条归哪棵树做），**机械派生**（域级 + 文件级例外）。
+
+    ⚠️ **匹配顺序**：**先 file 后 domain**；同组内**行序优先** ⇒ 先命中先生效。
+    ⚠️ **未命中 ⇒ `—`**（派生层**不猜** ⇒ 待人工）。
+    ⚠️ **判据依赖外部输入时失败必须硬失败**（§5.3 纪律）—— 映射文件缺失 ⇒ `EXIT=2`，
+    **不许**静默降级成「全部 `—`」（那会让整列变成零信号）。
+    """
+    if not WAVE_MAP_FILE.exists():
+        print(f"🔴 波次映射文件缺失：{WAVE_MAP_FILE} ⇒ 无法给派生层 wave 列", file=sys.stderr)
+        sys.exit(2)
+    by_file: dict[str, str] = {}
+    by_dom: dict[str, str] = {}
+    for line in WAVE_MAP_FILE.read_text(encoding="utf-8").split("\n"):
+        line = line.rstrip()
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 2:
+            print(f"🔴 波次映射行格式错（需 `<键>\\t<波次>[\\t<理由>]`）：{line}", file=sys.stderr)
+            sys.exit(2)
+        key, wave = parts[0].strip(), parts[1].strip()
+        if wave not in ("G1", "G2", "G3", "G4"):
+            print(f"🔴 波次取值非法（只允许 G1/G2/G3/G4）：{line}", file=sys.stderr)
+            sys.exit(2)
+        if key.startswith("file:"):
+            by_file[key[5:].strip()] = wave
+        elif key.startswith("domain:"):
+            by_dom[key[7:].strip()] = wave
+        else:
+            print(f"🔴 波次映射键非法（须 `file:` 或 `domain:` 前缀）：{line}", file=sys.stderr)
+            sys.exit(2)
+    if not by_dom:
+        print("🔴 波次映射文件里没有任何 domain 规则 ⇒ 整列零信号", file=sys.stderr)
+        sys.exit(2)
+    return by_file, by_dom
+
+
+def wave_of(rel_path: str, domain: str, by_file: dict[str, str], by_dom: dict[str, str]) -> str:
+    """**文件级优先** → 域级 → `—`（未命中 ⇒ 待人工，不猜）。"""
+    if rel_path in by_file:
+        return by_file[rel_path]
+    return by_dom.get(domain, "—")
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -1649,6 +1705,8 @@ def detect_evidence(entry, live_probes: dict[str, str], all_tools: set[str]) -> 
 
 def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, all_tools, grading,
            judge_closed=frozenset(), overlay=None):
+    # ⚠️ **U11 波次映射** —— 派工面（该条归哪棵工作树 G1~G4 做）
+    wave_by_file, wave_by_dom = load_wave_map()
     # 任务 → 条目 反查表
     task_of: dict[str, list[str]] = collections.defaultdict(list)
     for tid, t in tasks.items():
@@ -1922,6 +1980,8 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
         rules.append("U9")
         rows.append({
             "id": ident, "dir": e["dir"], "domain": e["domain"],
+            # ⚠️ **U11 波次（派工面）** —— 该条归哪棵工作树（G1~G4）做
+            "wave": wave_of(e["file"], e["domain"], wave_by_file, wave_by_dom),
             "source": f"{e['file']}:{e['line']}", "unit": e["unit"],
             "status": status or "（无状态标记）",
             "evidence": evid, "prio": prio, "stage": stage,
@@ -1967,10 +2027,12 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
             merged[k]["_date"] = r["_date"]
             merged[k]["_statuses"] = [r["status"]]
             merged[k]["_reg"] = 1
+            merged[k]["_waves"] = [r["wave"]]
         else:
             merged[k]["_sources"].append(r["source"])
             merged[k]["_statuses"].append(r["status"])
             merged[k]["_reg"] += 1
+            merged[k]["_waves"].append(r["wave"])
             # ⚠️ **取「最新核对日期」的那一条，不是取「最严重」的那一条**。
             #   依据：`docs/PhaseGoal-judge.md` §1.5 L0「状态判据 = 以**条目级最新状态**为准
             #   （旧快照不覆盖后续证据）」。
@@ -2048,6 +2110,14 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
         r["_reg"] = reg
         r["_conflict"] = len(uniq)
         r["_uniq_status"] = uniq
+        # ⚠️ **波次并集（2026-10-30）** —— 同一件事在**同域不同台账文件**登记时，
+        #   两个文件可能落在**不同的派工面**（实测：`DRIFT/users/common.md` ⇒ G4 · `DRIFT/users/user/**` ⇒ G1；
+        #   `DRIFT/_cross/message-domain-wide.md` ⇒ G2 · `DRIFT/_cross/open-items.md` ⇒ G4）
+        #   ⇒ 取**并集**（`G1+G4` / `G2+G4`）⇒ **不隐藏任何一面** ⇒ lane 看到并集 ⇒ 按 §5.3e 转派 G4。
+        #   ⚠️ **不能只取第一条** —— 那取决于扫描顺序 ⇒ **同一份输入会给出两个不同的答案**（不可复算）。
+        ws = [w for w in dict.fromkeys(r.pop("_waves", [])) if w and w != "—"]
+        r["wave"] = "+".join(sorted(ws, key=lambda w: ("G1", "G2", "G3", "G4").index(w)
+                                     if w in ("G1", "G2", "G3", "G4") else 9)) or "—"
         # ⚠️ **合并方式**（2026-10-30）—— 用来区分两类「状态不一致」：
         #   ① `同域多版本`（同一件事的历史快照 + 后续订正）⇒ 取最新核对日期 ⇒ **不是缺陷**
         #   ② `同源组`（同一件事跨域登记）⇒ 合并后状态仍不一致 ⇒ **是真缺陷**（台账没同步）
@@ -2059,7 +2129,7 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
 # 输出
 # ════════════════════════════════════════════════════════════════════════
 
-TSV_COLS = ["id", "dir", "domain", "source", "unit", "status", "evidence",
+TSV_COLS = ["id", "dir", "domain", "wave", "source", "unit", "status", "evidence",
             "prio", "stage", "blocking", "final_goal", "schedule", "gap",
             "rules", "title", "basis"]
 
@@ -2096,7 +2166,7 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a("")
     a("> **本文件是「派生层」** —— 每个值都**从** `docs/DRIFT` / `docs/Intentional_Deviations` /")
     a("> `docs/Pitfalls` **投影**而来，**不重新裁定任何结论**（每个派生值都带 `rules` 规则号）。")
-    a("> **机器层** = [`stage1-derivation.tsv`](stage1-derivation.tsv)（全量问题项 × 16 列）")
+    a("> **机器层** = [`stage1-derivation.tsv`](stage1-derivation.tsv)（全量问题项 × 17 列）")
     a("> **生成器 + 守门** = [`tools/ledger-derive/derive-stage1.py`](../../../tools/ledger-derive/derive-stage1.py)")
     a("> （`--check` 模式：源台账改了而本层没重生成 ⇒ **EXIT=1**）")
     a("> **规范来源** = [`docs/twoStage.md`](../../twoStage.md) §10（11 字段 · P0-P3 × A-D）＋ §5.3（暂缓项 11 字段）")
@@ -2165,6 +2235,7 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a("| **U8 排期指针** | 任务 ID ｜ BLK/GAP/ENV/DEC-xx | 任务块里**直接写了本条目编号**，或任务块的**台账指针落在本条目段内** | `_task-universe.md` + `_unresolved.md` |")
     a("| **U9 证据缺口** | 缺口描述 | C⇒无可复算指针 · B+🔴⇒静态取证·缺活体 · 未定级⇒未定级⇒未排期 · 未排期⇒未排期 | — |")
     a("| **U10 条目身份** | **（编号, 所属域目录）** | ①**域** = 台账文件在 `docs/<台账目录>/` 下的**第一层目录** ②**默认按域拆开**（同编号跨域 ⇒ 各判各的）③**例外** = 同源组（`identity-groups.txt`）⇒ 组内仍合并 ④**覆盖层按域限定**：U5-O 用 `overlay-scope.txt`、U5-0 用**表格所在文件的域** | 用户 2026-10-30 拍板（「只改派生层口径：条目身份 = 编号 + 所属域目录」）· `docs/DRIFT/_cross/grading/_lanes.json` |")
+    a("| **U11 波次（派工面）** | `G1`/`G2`/`G3`/`G4`（**并集**形如 `G1+G4`） | **文件级规则优先** → **域级规则** → 未命中 ⇒ `—`（**不猜**）；映射 = [`wave-map.txt`](../../../tools/ledger-derive/wave-map.txt)（**显式数据文件**）⇒ 权威出处 = `docs/Worktree.md` §二「波次版：G1~G4」表。⚠️ **给的是「派工面」不是「类级写权」**（`users-common` 是混合体 ⇒ AGENTS.md §5.3f 按类判定）⇒ 整份 users-common 专属台账 ⇒ G4；`users/vs-common.md` ⇒ G1（该文件头部自记「归属 G1 波次工作树」） |")
     a("")
     a("### 1.5 排除清单（`excluded-id-prefixes.txt`）")
     a("")
@@ -2263,6 +2334,36 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     _staged_ids = {r["id"] for r in rows if r["stage"] != "—"}
     g_unstaged = _id_level(g_open_nc,
                            lambda r: r["stage"] == "—" and r["id"] not in _staged_ids)
+    # ⚠️ **波次分布（U11 · 派工面）** —— 放在「合计」之前 ⇒ lane 一进来就知道自己那棵有多少活
+    a("### 4.0 🆕 波次分布（**派工面 = 该条归哪棵工作树 G1~G4 做**）")
+    a("")
+    a("> 权威出处 = [`docs/Worktree.md`](../../Worktree.md) §二「波次版：G1~G4」表；"
+      "映射数据 = [`wave-map.txt`](../../../tools/ledger-derive/wave-map.txt)（**显式数据文件**）。")
+    a("> ⚠️ **G4 不在域波顺序里**（域波顺序 = G1→G2→G3）—— G4 = **共享层常设执行者**，"
+      "**先于 G1 就位 standby**、**落码窗口常开**。")
+    a("> ⚠️ **并集**（`G1+G4`）= 该条目**同源组跨域登记** ⇒ 跨两个派工面 ⇒ "
+      "**域波先做，涉及共享层的部分转 G4 反馈单**（AGENTS.md §5.3e）。")
+    a("")
+    _wc: dict[str, list] = {}
+    for r in rows:
+        _wc.setdefault(r["wave"], []).append(r)
+    a("| 波次 | 条目（行） | **状态开放**（仍要干的） | 其中 A/B 类（阶段一范围） | 覆盖范围 |")
+    a("|---|---|---|---|---|")
+    _wdesc = {
+        "G1": "`users`（**不含 users-common**）+ `follow`",
+        "G2": "`message` + `like` + `task`",
+        "G3": "`article` + `comment` + `favorite` + `hot`",
+        "G4": "**共享层** `service/common` + `service/users/users-common` + 收口域 `global`（**常设执行者 · 不在域波顺序里**）",
+    }
+    for w in sorted(_wc, key=lambda x: (len(x), x)):
+        _rs = _wc[w]
+        _op = len(_id_level(_rs, lambda r: r["status"] in open_states))
+        _ab = len(_id_level(_rs, lambda r: r["status"] in open_states and r["schedule"] == "未排期"
+                            and r["stage"] in ("A", "B") and not r.get("_closed")))
+        a(f"| **{w}** | {len(_rs)} | **{_op}** | {_ab} | {_wdesc.get(w, '**跨派工面并集**（同源组跨域登记）')} |")
+    a("")
+    a("> ⇒ **「状态开放」= 该条仍有待实现项**（🔴 未闭合 / 🟡 部分闭合 / 仍生效 / ⏳ 未签字）；"
+      "**A/B 类（阶段一范围）**那一列全是 0 ⇒ **每棵树的活都已有排期指针** ⇒ 没有「漏排」需要补派。")
     a(f"**合计 {len(g_open)} 行 / {len({r['id'] for r in g_open})} 个编号** —— "
       f"① **A/B 类**（阶段 1 范围内）**{len(g_ab)}** 个编号")
     a(f"· ② C/D 类（**阶段 2 承接**，§5.3 暂缓项清单已登记）**{len(g_cd)}** 条")
@@ -2280,10 +2381,10 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a("> **B 类 = 阶段 1 竞争力补强项**。")
     a("> 两条都**不在** `_task-universe.md` 的 37 条任务里 ⇒ **施工单漏了它们**。")
     a("")
-    a("| 归属 | 优先级 | ID | 域 | 状态 | 证据 | 证据缺口 | 源位置 |")
-    a("|---|---|---|---|---|---|---|---|")
+    a("| 归属 | 优先级 | ID | 域 | **波次** | 状态 | 证据 | 证据缺口 | 源位置 |")
+    a("|---|---|---|---|---|---|---|---|---|")
     for r in sort_rows(g_ab):
-        a(f"| {r['stage']} | {r['prio']} | `{r['id']}` | {r['domain']} | {r['status']} | "
+        a(f"| {r['stage']} | {r['prio']} | `{r['id']}` | {r['domain']} | **{r['wave']}** | {r['status']} | "
           f"{r['evidence']} | {r['gap']} | `{r['source']}` |")
     a("")
     a(f"> C/D 类 **{len(g_cd)}** 条另有去向（阶段 2 恢复方案已在各条台账的 §5.3 十一项表里）")
@@ -2430,14 +2531,14 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a("")
     a(f"## 六、全量派生表（{len(rows)} 条问题项）")
     a("")
-    a("> 机读请用 [`stage1-derivation.tsv`](stage1-derivation.tsv)（同一次生成，16 列）。")
+    a("> 机读请用 [`stage1-derivation.tsv`](stage1-derivation.tsv)（同一次生成，17 列）。")
     a("")
-    a("| ID | 目录 | 域 | 状态 | 证据 | 优先级 | 归属 | 阻断 | 最终目标 | 排期 | 缺口 | 源位置 | 依据（Go ↔ RAG） |")
-    a("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    a("| ID | 目录 | 域 | **波次** | 状态 | 证据 | 优先级 | 归属 | 阻断 | 最终目标 | 排期 | 缺口 | 源位置 | 依据（Go ↔ RAG） |")
+    a("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for r in sort_rows(rows):
         _b = (r.get("basis") or "").replace("|", "／").replace("\n", " ")
         _b = (_b[:150] + "…") if len(_b) > 151 else _b
-        a(f"| `{r['id']}` | {r['dir'][:4]} | {r['domain']} | {r['status']} | {r['evidence']} | "
+        a(f"| `{r['id']}` | {r['dir'][:4]} | {r['domain']} | **{r['wave']}** | {r['status']} | {r['evidence']} | "
           f"{r['prio']} | {r['stage']} | {r['blocking']} | {r['final_goal']} | {r['schedule']} | "
           f"{r['gap']} | `{r['source']}` | {_b or '—'} |")
     a("")

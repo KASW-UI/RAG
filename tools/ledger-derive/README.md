@@ -10,6 +10,7 @@
 | [`excluded-id-prefixes.txt`](excluded-id-prefixes.txt) | **显式排除清单**（制表符分隔：`<前缀>\t<理由>`）—— 口径变更留痕，不藏在代码里 |
 | [`overlay-scope.txt`](overlay-scope.txt) | **U5-O 定级的适用域**（制表符分隔：`<编号>\t<域1>,<域2>`）—— **由 [`gen-overlay-scope.py`](gen-overlay-scope.py) 从派工清单生成**，不猜 |
 | [`identity-groups.txt`](identity-groups.txt) | **同源关系表**（制表符分隔：`<编号A>\t<域A>\t<编号B>\t<域B>\t<关系>\t<来源>`）—— **例外清单**：这两**节点**是**同一件事** ⇒ 仍合并成一条。**节点 = (编号, 所属域)** ⇒ 支持「同编号跨域」与「不同编号别名（长/短编号）」两类 |
+| [`wave-map.txt`](wave-map.txt) | **波次映射（派工面）**（制表符分隔：`<匹配键>\t<波次>\t<理由>`）—— 键 = `file:<台账路径>`（**优先**）或 `domain:<域名>` ⇒ 该条归哪棵工作树 **G1~G4** 做。权威出处 = [`docs/Worktree.md`](../../docs/Worktree.md) §二「波次版：G1~G4」表 |
 | [`gen-overlay-scope.py`](gen-overlay-scope.py) | 由派工清单（`docs/DRIFT/_cross/grading/_lanes.json`）**重生成** `overlay-scope.txt`（`--check` 只校验不写盘） |
 | [`gen-identity-groups.py`](gen-identity-groups.py) | 由**人工同源判定**（`docs/DRIFT/_cross/grading/_samesrc-*.md`）**重生成** `identity-groups.txt`（`--check` 只校验不写盘）—— 本体位置**机械反查**（`resolve_pointer`），不手填编号与域 |
 
@@ -26,7 +27,7 @@ python3 tools/ledger-derive/gen-identity-groups.py --check  # 守门：同源关
 
 **产物**（在 `docs/DRIFT/_cross/`）：
 - [`stage1-derivation.md`](../docs/DRIFT/_cross/stage1-derivation.md) —— 人读层：口径 + 规则表 + 施工单视图 + 真缺口清单 + 全量表
-- [`stage1-derivation.tsv`](../docs/DRIFT/_cross/stage1-derivation.tsv) —— 机器层：全量问题项 × 16 列
+- [`stage1-derivation.tsv`](../docs/DRIFT/_cross/stage1-derivation.tsv) —— 机器层：全量问题项 × **17 列**（含 `wave` = 派工面 G1~G4）
 
 ## ⚠️ 条目身份 = **（编号, 所属域目录）**（2026-10-30 用户拍板）
 
@@ -94,6 +95,22 @@ python3 tools/ledger-derive/gen-identity-groups.py --check  # 守门：同源关
    ⇒ **排除后不丢条目**（那些编号在真域本来就有登记）⇒ 只去掉重复面。
    ⚠️ **域目录的 `_README.md`（如 `docs/DRIFT/global/_README.md`）是真台账 ⇒ 不排除**。
 ⇒ ⇒ **教训**：**凡在共享索引里写「编号 + 状态」的表 ⇒ 一定污染施工单** ⇒ 索引里只能放**指向**条目的引用。
+
+## ⚠️ `wave` 列 = **派工面**（该条归哪棵工作树 G1~G4 做）
+
+派生层原本能答「这条属哪个域、该谁修」，但**答不了「这条归哪棵工作树做」** ⇒ lane 要自己按域反推 ⇒ 容易派错树。
+⇒ **U11**：`wave` 列（TSV 第 4 列 / 人读层全量表同列）= **机械派生**（域级规则 + 文件级例外）。
+
+- **权威出处** = [`docs/Worktree.md`](../../docs/Worktree.md) §二「波次版：G1~G4」表（AGENTS.md §5.3d 只留结论 + 指针）。
+- **匹配顺序** = **先 file 后 domain**；同组内**行序优先**；**未命中 ⇒ `—`**（**不猜**）。
+- **并集**（`G1+G4`）= 该条目**同源组跨域登记** ⇒ 跨两个派工面 ⇒ **域波先做，涉及共享层的部分转 G4 反馈单**（AGENTS.md §5.3e）。
+  ⚠️ **不能只取第一条** —— 那取决于扫描顺序 ⇒ **同一份输入会给出两个不同的答案**（不可复算）。
+- ⚠️ **给的是「派工面」，不是「类级写权」** —— `users-common` 是**混合体**（AGENTS.md §5.3f：8 个跨域类归 G4 / 3 个 users 专用类留 users 域，**按类判定**）
+  ⇒ 本层只把**整份 users-common 专属台账**（`DRIFT/users/common.md` 等 3 份）归 **G4**；
+  `DRIFT/users/vs-common.md` 归 **G1**（users 域 ↔ `service/common` 的对账 —— **该文件头部自记「归属 G1 波次工作树（`align/g1-users-follow`）」**）。
+- ⚠️ **判据依赖外部输入 ⇒ 硬失败**：映射文件缺失 / 波次取值非法 / 键前缀非法 / 无 domain 规则 ⇒ **`EXIT=2`**，
+  **绝不**静默降级成「整列 `—`」（那会让这一列变成零信号）。
+- **变异测试**（`/tmp/rag-verify/mutate-wave-map.py`）⇒ **24 个已知错例全绿**（正向 7 · 域级 11 · 不命中 1 · 硬失败 5）。
 
 ## ⚠️ 「0」不可信：凡报 0，必须能指出「那 0 是靠什么撑住的」（2026-10-30 第 4 轮晚修）
 

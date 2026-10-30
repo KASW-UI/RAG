@@ -1,0 +1,43 @@
+# 波次映射（台账条目 → G1~G4 派工面）—— 派生层 `wave` 列的数据源
+#
+# ⚠️ **权威出处** = [`docs/Worktree.md`](../../../docs/Worktree.md) §二「波次版：G1~G4」表
+#    （AGENTS.md §5.3d 同样只留结论 + 指针）
+#
+# **格式**：`<匹配键>\t<波次>\t<理由>`
+#   匹配键两种：
+#     `file:<台账相对路径>`   ← **文件级**规则（**优先**）
+#     `domain:<域目录名>`     ← **域级**规则（file 未命中时）
+#   匹配顺序：**先 file 后 domain**；同组内**行序优先**（先命中先生效）。
+#   **未命中 ⇒ `—`（待人工 ⇒ 派生层不猜）**
+#
+# ⚠️ **G4 不在域波顺序里**（Worktree.md §二）—— G4 = **共享层常设执行者**，
+#    **先于 G1 就位 standby**，随时接收 G1/G2/G3 的反馈单 ⇒ **落码窗口常开**。
+#
+# ⚠️ **本表给的是「派工面」（该条归哪棵树做），不是「类级写权」** ——
+#    `users-common` 是**混合体**（AGENTS.md §5.3f：8 个跨域类归 G4 / 3 个 users 专用类留 users 域），
+#    **按类判定**、不按目录一刀切 ⇒ 本表只把**整份 users-common 专属台账**归 G4；
+#    `docs/DRIFT/users/vs-common.md`（users 域 ↔ service/common 的对账）**归 G1**
+#    —— 依据该文件头部自记「**归属 G1 波次工作树（`align/g1-users-follow`）**」。
+
+# ── 文件级（优先）──────────────────────────────────────────────────────────────
+file:DRIFT/users/common.md	G4	users-common（service/users/users-common）专属组件台账 ⇒ 共享层写权（§5.3f）
+file:Intentional_Deviations/users/common.md	G4	同上
+file:Pitfalls/users/common.md	G4	同上
+file:DRIFT/_cross/message-domain-wide.md	G2	内容是 **message 域**的全域台账（只是放在 `_cross/` 下）
+file:DRIFT/_cross/open-items.md	G4	跨模块共享层未决项 ⇒ 收口执行者
+file:Intentional_Deviations/_cross/signed-deviations.md	G4	跨域签字偏离 ⇒ 收口
+file:Pitfalls/_cross/domain-common-lanes.md	G4	并发纪律方法论（共享层）⇒ 收口
+
+# ── 域级（file 未命中时）──────────────────────────────────────────────────────
+domain:users	G1	Worktree.md §二 G1 行（users **不含 users-common**）
+domain:follow	G1	同上
+domain:message	G2	Worktree.md §二 G2 行
+domain:like	G2	同上
+domain:task	G2	同上
+domain:article	G3	Worktree.md §二 G3 行
+domain:comment	G3	同上
+domain:favorite	G3	同上
+domain:hot	G3	同上
+domain:common	G4	共享层 `service/common`（§5.3c 写权唯一）
+domain:global	G4	收口域（§3.5）+ G4 写权 `docs/DRIFT/global/vs-common.md`
+domain:_cross	G4	跨域档案 ⇒ 收口执行者

@@ -176,7 +176,7 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 3e. 🆕 **G4 = 共享层常设执行者（2026-10-27 用户定）** —— `service/common` + `users-common` ⇒ **写权唯一**：**随时接收** G1/G2/G3 反馈单（7 项：现象 / Go 侧 `文件:行号` / RAG 侧现状 / 证据强度 / 建议修法 / 影响面 / 是否阻塞本波）⇒ **执行落码** ⇒ **全量回归** ⇒ **回执**；**先于 G1 就位 standby**、**落码窗口常开**（G1~G3 只读、只登记）⇒ G4 **并行、不阻塞** ⇒ ✅ **撤销「基线不可变 / 结论作废」**；**例外升级**：某波「不改共享层就过不了」⇒ **就地升级为全量回归波**，等 **G4 落码后**再重跑；**G4 可开子会话并行加速，上限 10 个** ⇒ 细则 ⇒ [`docs/Worktree.md`](docs/Worktree.md) §三·1d · 规则表 **C1~C7** ⇒ [`cross-domain-coupling.md`](docs/DRIFT/_cross/cross-domain-coupling.md)
 3f. ⚠️ **共享判据 = 依赖度数，不是目录位置**（2026-10-27 实测）：`service/common` 与 `service/users/users-common` **都是共享层**（⇒ 写权归 G4）；其余 7 个 `<域>-common` 只被**本域**引用（pom / import / 扫描面 **三层实测**）⇒ **真私有**（⇒ 归各自域）⇒ `users-common` 是**混合体** ⇒ **按类判定**（8 个跨域类归 G4 / 3 个 users 专用类留 users 域），**不按模块一刀切**、**不搬目录**。
 3g. 🆕 **四棵工作树的当前目标（2026-10-28 用户定）** —— **两份标准文件 = 唯一目标**：**阶段 1 准入线** ⇒ [`docs/PhasedGoal.md`](docs/PhasedGoal.md)（P0 九条 / P1 机制 / P2 不阻塞）；**两阶段全流程 + 阶段归属 A/B/C/D + §9 故障矩阵** ⇒ [`docs/twoStage.md`](docs/twoStage.md)（**权威全文**）⇒ **lane 只做阶段 1、只做本域**：必读 = PhasedGoal.md 全文 + twoStage.md 的 §5.3 / §5.4 / §10；**不碰** §1.3 / §2.2 / §6 / §7（阶段 2 ⇒ 收口执行者）；**§4（阶段 0 事实基线）必读**。
-   ⇒ **派工清单 = 派生层施工单**（§0 第 4 条）：[`stage1-derivation.md`](docs/DRIFT/_cross/stage1-derivation.md) **§四 = 可开工清单**（§4.1 = 阶段一范围内）⇒ lane 只取**自己域**的条目。
+   ⇒ **派工清单 = 派生层施工单**（§0 第 4 条）：[`stage1-derivation.md`](docs/DRIFT/_cross/stage1-derivation.md) **§四 = 可开工清单**（§4.0 = 波次分布 · §4.1 = 阶段一范围内）⇒ lane 按 **`wave`** 列（`G1`~`G4` · 派工面，权威表 = `docs/Worktree.md` §二）取**自己那棵** + **自己域**的条目。
 4. **作用范围**：仅限 RAG 仓库（Go 真源已冻结只读，见 §一）。
 5. **Go 是真理之源**（2026-10-20 第三次切换，全子模块适用）：proto 字段号、错误码、JWT claims、表结构、HTTP path、
    Kafka topic 等语义细节一律以 Go 对应子模块为准；差异**只允许出现在表达层**，出现行为差异时默认判 **RAG 错**。
@@ -231,7 +231,7 @@ RAG 不是从 Go「推测」行为，而是**逐字对照 Go 源码**（§3.1）
 | [`docs/Intentional_Deviations/`](docs/Intentional_Deviations/_INDEX.md) | **有意偏离档**：「明知与 Go 不同、**经签字批准**」。⚠️ **是决策不是缺陷：不重复质疑** | 判断某条差异「要不要修」时 |
 | [`docs/PhasedGoal.md`](docs/PhasedGoal.md) · [`docs/twoStage.md`](docs/twoStage.md) | **阶段 1 准入线**（P0/P1/P2）· **两阶段全流程**（阶段 0/1/2 + §5.1~§5.7 流程义务 + §9 故障矩阵 + §10 阶段归属 A/B/C/D）⇒ **四棵工作树的目标**（§5.3g） | 开工前 / 判准入时 |
 | [`docs/PhaseGoal-judge.md`](docs/PhaseGoal-judge.md) · [`docs/RoundPlan/`](docs/RoundPlan/_INDEX.md) | **阶段 1 终点指标**（38 组件矩阵 + 12 条跨组件不变量）· **推进轮次 R0~R5** | 判「复刻到什么程度」时 |
-| [`docs/DRIFT/_cross/stage1-derivation.md`](docs/DRIFT/_cross/stage1-derivation.md) ＋ `.tsv` | **阶段一施工单派生层**：台账 → 施工单的**唯一索引**（§四 = **可开工清单** · §4.1 = 阶段一范围内 · `.tsv` = 机器层 16 列）⇒ 生成器/守门 = `tools/ledger-derive/derive-stage1.py`（`--check` 漂移检测） | 派工前 / 查「这条去哪做」 |
+| [`docs/DRIFT/_cross/stage1-derivation.md`](docs/DRIFT/_cross/stage1-derivation.md) ＋ `.tsv` | **阶段一施工单派生层**：台账 → 施工单的**唯一索引**（§四 = **可开工清单** · §4.0 = 波次分布 · §4.1 = 阶段一范围内 · `.tsv` = 机器层 17 列，含 **`wave`** 派工面 G1~G4）⇒ 生成器/守门 = `tools/ledger-derive/derive-stage1.py`（`--check` 漂移检测） | 派工前 / 查「这条去哪做」 |
 | [`docs/FileTree/`](docs/FileTree/README.MD) · [`docs/HUMAN_ONLY/`](docs/HUMAN_ONLY/simple.md) · [`docs/MappingTable/`](docs/MappingTable/README.MD) · [`docs/Worktree.md`](docs/Worktree.md) | 理论文件树（15 份，⚠️ **迁移期脚手架**）· 阅读指南 · 名字映射 · **并发工作流**（§5.3） | 规划结构 / 开并发对齐前 |
 | [`_cross/domain-common-lanes.md`](docs/DRIFT/_cross/domain-common-lanes.md) · [`_cross/cross-domain-coupling.md`](docs/DRIFT/_cross/cross-domain-coupling.md) | **`<域>-common` 对账总纲**（9 条机制面轴 A1~A9 · 写权边界 · 执行协议）· **跨域耦合矩阵与分波方案**（依赖 DAG · G1~G4 波次表 · 共享层写权规则） | 开工作树前 / 排波次前 |
 

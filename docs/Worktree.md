@@ -153,14 +153,21 @@ python3 tools/difftest/check-wave-lane-ownership.py     # ⇒ EXIT=0
 
 | 位置 | 是什么 | lane 怎么用 |
 |---|---|---|
-| [`DRIFT/_cross/stage1-derivation.md`](DRIFT/_cross/stage1-derivation.md) | **人读层** —— **§四 = 可开工清单**（**§4.1** = A/B 类 · 阶段一范围内 · §4.2 = C/D 类 · 阶段二承接） | **先看 §4.1** ⇒ 只取**自己域** + **阶段归属 A/B** 的条目 |
-| [`DRIFT/_cross/stage1-derivation.tsv`](DRIFT/_cross/stage1-derivation.tsv) | **机器层** —— 全量问题项 × **16 列**（`id / 域 / 状态 / 证据强度 / 优先级 / 阶段归属 / 是否阻断阶段一 / 排期指针 / 证据缺口 / rules / basis`） | 按 `domain` + `stage` + `blocking` 过滤 ⇒ 直接生成自己的待办 |
+| [`DRIFT/_cross/stage1-derivation.md`](DRIFT/_cross/stage1-derivation.md) | **人读层** —— **§四 = 可开工清单**（**§4.0 = 波次分布** · **§4.1** = A/B 类 · 阶段一范围内 · §4.2 = C/D 类 · 阶段二承接） | **先看 §4.0**（自己那棵有多少活）⇒ 再看 §4.1 ⇒ 只取**自己域** + **阶段归属 A/B** 的条目 |
+| [`DRIFT/_cross/stage1-derivation.tsv`](DRIFT/_cross/stage1-derivation.tsv) | **机器层** —— 全量问题项 × **17 列**（`id / 域 / **`wave`** / 状态 / 证据强度 / 优先级 / 阶段归属 / 是否阻断阶段一 / 排期指针 / 证据缺口 / rules / basis`） | 按 **`wave`** + `domain` + `stage` + `blocking` 过滤 ⇒ 直接生成自己的待办 |
+| `tools/ledger-derive/wave-map.txt` | **`wave` 列的映射数据**（域/台账文件 → G1~G4）—— 权威出处 = 本文件 §二「波次版：G1~G4」表 | 改派工面**只改这个文件**，不改代码 |
 | `tools/ledger-derive/derive-stage1.py` | **生成器 + 守门**（`--check`：源台账改了而派生层没重生成 ⇒ `EXIT=1`） | 改完台账**必须**重跑，否则守门红 |
 
 ⚠️ **三条效力边界（越界即失效）**：
 ① **只读台账、不读产品代码** ⇒ 它是台账的**投影**、不是代码的事实 ⇒ 派工时台账写「✅ 已闭合」的**仍须**按 AGENTS.md §3.3 确认（**注解存在 ≠ 机制生效 · 跑绿 ≠ 对**）；
 ② **每行都带 `rules` 规则号 + `basis` 双侧 `文件:行号`** ⇒ **可回源**；`basis` 缺 Go 侧或 RAG 侧一侧 ⇒ 派生层**整行丢弃**（**不猜**）；
 ③ **台账结论会过期**（实测：`D-7` 的「熔断打开 ⇒ 1015」半句已死 · `G-3` 的 🔴 标题是历史快照 · `SF-001` 的 MISMATCH 早已修好）⇒ 派工前**按 `basis` 抽查**，别照抄标题。
+
+⚠️ **`wave` 列 = 派工面（该条归哪棵工作树做）** —— **本文件的 §二 波次表就是它的权威出处**：
+`G1` = users（**不含 users-common**）+ follow · `G2` = message+like+task · `G3` = article+comment+favorite+hot · `G4` = 共享层（`service/common` + `users-common` + 收口域 `global`）。
+⇒ **lane 取自己那棵**（`wave` 含自己的波次号即可，**并集** `G1+G4` = 跨派工面 ⇒ 域波先做、共享层部分转 G4 反馈单）。
+⇒ ⚠️ **G4 不在域波顺序里**（域波顺序 = G1→G2→G3）—— G4 是**常设执行者**，**先于 G1 就位 standby**、**落码窗口常开**。
+⇒ ⚠️ **`wave` 给的是「派工面」不是「类级写权」** —— `users-common` 是**混合体**（AGENTS.md §5.3f **按类判定**）⇒ 动手前按 §5.3f 与 G4 对齐。
 
 ⚠️ **派生层指标自己被修过 3 次（§七 ⑦⑧⑨）** ⇒ **「真缺口 A/B 未排期 = 0」只有在修完后才成立**；
 派工前若发现「某条该有指针却没有」，先查 [`DRIFT/_cross/grading/_README.md`](DRIFT/_cross/grading/_README.md) §七，别直接当成漏排。
