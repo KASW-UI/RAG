@@ -4214,6 +4214,9 @@ EXIT=0
 > **一句话**：共享层 `53bc05ec` 之后，**favorite-rpc 的两条出向出口首次真正继承入向 deadline** ⇒
 > ⇒ 本域出向 deadline 语义与 Go **逐字同形**（`min(入向剩余, 2s 封顶)`）⇒
 > ⇒ **没有产生新的客户端可见失败形态**（出向超时两侧都折叠成 5001 / INTERNAL）。
+> 📌 **归因（2026-10-31 订正）**：「继承」这一半是 **devh 全局客户端拦截器链**给的
+> （`GoStyleOutboundDeadlineInterceptor`，`@GrpcGlobalClientInterceptor`，`enabled` **默认 true**），
+> **不是**域侧 `applyTo` 给的 ⇒ ⇒ 详见本段末「归因订正」小节。
 > ⚠️ **销账权不在本域**（该条的落点是 `service/common`）⇒ 本节只给**域侧事实 + 证据**，判定归 global。
 
 ### ① 变更本体（共享层）
@@ -4275,11 +4278,67 @@ EXIT=0
 - ⚠️ **但「域内 client 有没有消费载体」探针测不到**（脚本期望表自述：其 RAG 半边**手搓 Netty channel** ⇒ 不走 devh 全局拦截器
   ⇒ 测不到已落地的 `GoStyleOutboundDeadlineInterceptor`）⇒ ⇒ **本节关于「域内出口确实继承」的那一段 = L2（源码级逐行对照）**，
   **不是 L4 活体** ⇒ ⇒ 两者不要混引。
+  📌 **2026-10-31 订正**：探针测不到的那一段**不是缺陷，是探针的构造**（它自建裸 netty channel ⇒ 绕开 devh 装配）
+  ⇒ ⇒ 该缺口归 **global（探针口径）**，**不**是本域的缺陷 ⇒ ⇒ 本域的「域内出口确实继承」**结论不变**。
+  📌 **跨域参考**：同波次 **comment 域**已补一条**域内 L4 活体**守门
+  （`service/comment/comment-rpc/src/test/java/com/rag/comment/comment/rpc/client/CommentOutboundDeadlineCarrierGateTest`
+  ⇒ 真 wire ＋ 真共享层 `RpcInterceptor` ⇒ 证「载体在 gRPC handler 线程真的可见」＋「域内 2s 上界计算点取 min 正确」），
+  ⇒ ⇒ **favorite 域尚无同款域内守门** ⇒ 本域这一条仍是 L2（**不外推**）。
 
 ### ⑥ 对本域台账的影响
 
 - `docs/DRIFT/favorite/vs-common.md:29`（`E65` 行）与本文件 §37 的机制结论**已就地订正**（域侧事实消解）。
 - ⚠️ **销账权在 global**：落点是 `service/common` ⇒ 本域**不自行改判 OPEN/CLOSED** ⇒ 只报事实与证据。
+
+## 📌 追加 · 🔴 **「继承」这一半的归因订正（2026-10-31 · G3 · 合并收口执行者纠正面之后）**
+
+> **订的是什么**：合并收口执行者 2026-10-31 派单指出「域侧改 `applyTo(stub)` 即可继承请求 deadline」这个**根因表述不成立**，
+> 并对本节「favorite-rpc 两条出向出口**首次真正继承**入向 deadline」的**理由**提出改写建议。
+> ⇒ ⇒ 本节**独立复核**（不采信转述）后的结论如下。
+
+### 结论一 · 机制主张**成立**（已独立 javap 复核，不是采信转述）
+
+- devh 3.1.0.RELEASE `net/devh/boot/grpc/client/channelfactory/AbstractChannelFactory`
+  ⇒ `:61 GlobalClientInterceptorRegistry.getClientInterceptors()` ⇒ `:88 sortInterceptors(...)`
+  ⇒ `:95 ClientInterceptors.interceptForward(channel, interceptors)`
+  ⇒ ⇒ **全局客户端拦截器接在 channel 上**。
+- `net/devh/boot/grpc/client/interceptor/AnnotationGlobalClientInterceptorConfigurer`
+  ⇒ `getBeansWithAnnotation(GrpcGlobalClientInterceptor.class)` ⇒ ⇒ 本仓的
+  `GoStyleOutboundDeadlineInterceptor`（带 `@GrpcGlobalClientInterceptor`）**会被收集**。
+- 本域 main 代码 `ManagedChannelBuilder` / `NettyChannelBuilder` **零命中** ⇒ 出向 stub **全部**是 `@GrpcClient` 注入
+  ⇒ ⇒ **无一例外**走那条被拦截的 channel。
+
+⇒ ⇒ **域侧出向调用本来就继承请求 deadline** ⇒ ⇒ 「域侧显式 `applyTo` 是闭合 E65 的必要条件」这个根因**不成立**。
+
+### 结论二 · 但「继承是 devh 拦截器链给的」**不能倒推成「以前也给」**
+
+- `GoStyleOutboundDeadlineInterceptor.effectiveCallOptions` 的第 ① 项读的是
+  `GoStyleRequestDeadline.remainingNanos()` ⇒ **与域侧读的是同一个载体** ⇒ 载体缺席时返回 **-1**
+  ⇒ `if (requestRemaining >= 0L)` **跳过** ⇒ ⇒ **拦截器链在没有载体时也给不了请求 deadline**。
+- `git show 53bc05ec^:service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` 的 `onHalfClose`
+  ⇒ `try (DeadlineState.Scope ignored = DeadlineState.bindRemainingNanos(effectiveTimeoutNanos)) { super.onHalfClose(); }`
+  ⇒ ⇒ **只绑 SQL 载体，不绑出向载体** ⇒ **53bc05ec 之前载体确实缺席**。
+
+⇒ ⇒ **本节「首次真正继承」的措辞成立**（53bc05ec 之前确实没继承，之后才继承）
+⇒ ⇒ **不建议**把它改写成「出向 deadline 本来就由 devh 拦截器链给到了」—— 那会把正确的事实改错
+⇒ ⇒ **正确的理由**：「继承由 devh 拦截器链给；53bc05ec 之前载体缺席 ⇒ 拦截器链第 ① 项也拿不到 ⇒ 那时确实没继承」。
+
+### 结论三 · 「冗余」要分两半说（决定域侧那份 `applyTo` 能不能去）
+
+| 面 | 谁提供 | 域侧显式 `applyTo` 是否冗余 |
+|---|---|---|
+| **继承请求 deadline** | devh 全局客户端拦截器链（`enabled` **默认 true**） | **冗余**（拦截器也会给） |
+| **2s 客户端上界**（Go 的 `TimeoutInterceptor(2000ms)`） | **只在域侧**（`GoStyleClientCallTimeout`）—— 拦截器层 `capMillis` **默认 0 = 不启用**，全仓 `service/*/*/src/main/resources/*.yml` 的 `outbound-deadline` **零配置** | **不冗余** |
+
+⇒ ⇒ 且域侧那份 `applyTo` **不可去**：域侧要算「`min(请求剩余, 2s)`」就得先有「请求剩余」
+⇒ ⇒ `applyTo` 正是把载体剩余挂到 stub 上的那一步 ⇒ **它是域侧 2s 上界计算的输入**。
+
+### 结论四 · 对本域台账的影响
+
+- 本节「首次真正继承」与「与 Go 逐字同形」的**结论不变**，**只补归因**（本小节 + ⑤ 的诚实边界两处订正）。
+- ⚠️ **销账权仍在 global**（落点 `service/common`）⇒ 本域**不自行改判 OPEN/CLOSED** ⇒ C-3 / E65 仍 🔴。
+- ⚠️ **X-6 定级复判挂起**（合并收口执行者统一复判）⇒ 本域**不动** X-6 / C-3 的状态标记。
+- ⚠️ **favorite 域尚无域内 L4 活体守门**（comment 域已有）⇒ 本域「域内出口确实继承」仍记 **L2（源码级）**。
 
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 

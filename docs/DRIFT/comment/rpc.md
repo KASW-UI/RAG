@@ -1275,7 +1275,10 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 ## 📌 追加 · ✅ **comment 域两个出向出口的 deadline 继承形态：逐出口核对（两侧同形）**（2026-10-30 · G3 第五轮）
 
 > **一句话**：本域 `comment-rpc` 有 **2 条**出向出口，它们对「入向 deadline 载体」的**可见性不同** ——
-> ⇒ 一条在 **gRPC handler 线程**（载体可见 ⇒ **继承**入向剩余预算），
+> ⇒ 一条在 **gRPC handler 线程**（载体可见 ⇒ **继承**入向剩余预算
+> ⇒ 📌 **归因（2026-10-31 订正）**：「继承」这一半是 **devh 全局客户端拦截器链**给的
+> （`GoStyleOutboundDeadlineInterceptor`，`enabled` **默认 true**）⇒ **不是**域侧 `applyTo` 给的
+> ⇒ 详见第六轮段末「归因订正」小节），
 > ⇒ 一条在 **Kafka consumer 线程**（载体不可见 ⇒ **只有 2s 客户端封顶**）；
 > ⇒ 而 **Go 侧那一条 consumer 出口的 ctx 同样没有 deadline** ⇒ ⇒ **两侧逐出口同形**。
 > ⇒ ⇒ **「继承」那一半只对 handler 线程那条出口成立**；consumer 那条**不是漂移**。
@@ -1297,7 +1300,7 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 | RAG 调用点 | `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/client/ArticleRpcClient.java:71`（`GoStyleClientCallTimeout.withDeadline(stub)`）· 发起点 `:83` |
 | RAG 调用链 | `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/impl/CommentServiceGrpcImpl.java:73`（`domainService.getComment(request)`）⇒ `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentDomainService.java:427`（`loadSubject`）⇒ `:431` ⇒ `:274`（`resolveSubjectFallback`）⇒ `:254`（`resolveOwnerId`）⇒ `fetchAuthorId` ⇒ ⇒ **全程在 gRPC handler 线程上** |
 | Go 对照 | `service/comment/rpc/internal/logic/subject_fallback.go:12`（`resolveSubjectFallback(ctx context.Context, …)` ⇒ ctx 由 handler 传入）· `:17`（`articleRPC.GetArticle(ctx, …)` ⇒ 父 deadline 经 ctx 传播 ⇒ 到点即止） |
-| 载体可见性 | ⇒ handler 线程 ⇒ 共享层 `RpcInterceptor.onHalfClose` 绑的载体**可见** ⇒ ⇒ **继承入向剩余预算**（= `min(2s, 剩余)`） |
+| 载体可见性 | ⇒ handler 线程 ⇒ 共享层 `RpcInterceptor.onHalfClose` 绑的载体**可见** ⇒ ⇒ **继承入向剩余预算**（= `min(2s, 剩余)`）｜ 📌 **2026-10-31 订正 · 归因**：继承由 **devh 全局客户端拦截器链**提供（`GoStyleOutboundDeadlineInterceptor` 第 ① 项读**同一个载体**）；域侧显式 `applyTo` 对「继承」这一半**冗余**，但它是**域侧 2s 上界计算**的输入（拦截器层 `capMillis` 默认 0 ⇒ 不提供上界）⇒ ⇒ 「2s 上界」那一半**只在域侧** |
 | 当前实现的精度 | `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/client/GoStyleClientCallTimeout.java:90-96` 读 `GoStyleRequestDeadline.remainingMillis()` ⇒ **毫秒截断**（`service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java:90-96`）⇒ 与 Go 的纳秒预算（`go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25`）**差 ≤1ms** |
 
 ### 出口二 · `MessageRpcClient`（**在 Kafka consumer 线程 ⇒ 不继承** —— 且 Go 侧同样不继承）
@@ -1331,7 +1334,11 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 
 > **一句话**：Jason 拍板「本轮做」⇒ 本域两个出向出口已从**毫秒版**改为**纳秒两段式**
 > ⇒ ⇒ **精度差 ≤1ms 消除** ⇒ ⇒ 并补了一条**能真正触发载体**的守门
-> ⇒ ⇒ 「域内出口确实继承入向 deadline」这条**从 L2 源码级升到 L4 活体**。
+> ⇒ ⇒ **「载体在域内出口线程上可见」**这条**从 L2 源码级升到 L4 活体**。
+> ⚠️ **2026-10-31 订正 · 这条守门证的是什么、不是什么**：
+> ⇒ ⇒ **证**：① 载体在 gRPC handler 线程**真的可见**（真 wire ＋ 真共享层 `RpcInterceptor`）② **域内 2s 客户端上界的计算点**取 min 正确（纳秒精度 + 三组变异矩阵）。
+> ⇒ ⇒ **不证**：「生产装配面（真 `@GrpcClient` ⇒ devh 拦截器链把 deadline 送到了出向调用）」—— 那一环仍缺活体证据
+> ⇒ ⇒ ⇒ 故 **C-3 仍破的理由 = 双侧活体证据缺口**（不是「域侧真漂移」）⇒ **X-6 定级复判挂起**（归合并收口执行者统一复判）⇒ 本域**不动** X-6 / C-3 的状态标记。
 > ⚠️ **销账权不在本域**（C-3 / U15 的落点是 `service/common` ＋ global E65）⇒ 本节只给**域侧事实 + 证据**。
 
 ### 落码清单（4 个文件）
@@ -1407,14 +1414,20 @@ grpc-java 的 `ServerBuilder` **默认 executor = directExecutor**
 
 | 结论 | 强度 | 依据 |
 |---|---|---|
-| 载体在 gRPC handler 线程真的绑上 | **L4 活体** | 真 wire ＋ 真共享层拦截器 ＋ 客户端 deadline 真的到了服务端（`carrierIsReallyBoundOnHandlerThreadOverRealWire`） |
+| 载体在 gRPC handler 线程真的绑上 | **L4 活体** | 真 wire ＋ 真共享层拦截器 ＋ 客户端 deadline 真的到了服务端（`carrierIsReallyBoundOnHandlerThreadOverRealWire`）|
+| ⚠️ **生产装配面**（真 `@GrpcClient` ⇒ devh 拦截器链把 deadline 送到出向调用） | **未验** | 机制侧已独立 javap 复核（devh `AbstractChannelFactory:61/:88/:95` `interceptForward`）⇒ 但**没有活体运行证据** ⇒ 仍缺 ⇒ C-3 的活体证据缺口即在此处 |
 | 域内出向上界是**纳秒**且无毫秒截断 | **L4 活体 ＋ 变异精确转红** | `outboundBudgetKeepsNanosecondPrecision` |
 | 无载体时 2s 封顶 | **L4 活体** | `noCarrierStillGetsTwoSecondClientCap` |
 | 出口二（Kafka consumer 线程）**不继承** | **L2 源码级** | 上一轮新增段的逐出口核对（线程归属靠读注解与调用链）⇒ ⚠️ **未**做活体计时 |
 
 ### 收益边界（别把这次的收益说大）
 
-- **出口一**（`ArticleRpcClient`，gRPC handler 线程）：**收益真实存在** ⇒ 出向上界由「毫秒截断」改为「纳秒」⇒ 与 Go 一致（差 ≤1ms 的漂移消除）。
+- **出口一**（`ArticleRpcClient`，gRPC handler 线程）：**收益真实存在，且是链路级的** ⇒
+  旧实现 `withDeadline(stub)` 在 stub 上挂的是**毫秒** deadline ⇒ 拦截器 `effectiveCallOptions` 第 ③ 项
+  「调用点自己声明的 deadline」取 min 时会看到它 ⇒ ⇒ **最终出向上界被域侧的毫秒值截短**
+  ⇒ ⇒ 即使拦截器层是纳秒的，**整条链路仍是毫秒精度** ⇒ 改纳秒后链路整体纳秒 ⇒ ≤1ms 精度差消除
+  ⇒ ⇒ **这条改动不是「冗余」**：拦截器层 `capMillis` 默认 0（不启用）、全仓 yml 零配置
+  ⇒ ⇒ **Go 的 2000ms 客户端上界本来就只在域侧提供** ⇒ 域侧那半不可去。
 - **出口二**（`MessageRpcClient`，Kafka consumer 线程）：**收益为零** ⇒ 载体在该线程**不可见** ⇒ 走的是「无载体 ⇒ 2s 封顶」分支 ⇒ 改动前后**同一条路径** ⇒ 且 Go 侧该出口的 ctx 同样无 deadline ⇒ **两侧同形，不是漂移**。
 
 ### 🔴 验证方法学发现（影响「本域此前所有不带 `-am` 的回归结论」· 2026-10-30）
@@ -1430,6 +1443,60 @@ grpc-java 的 `ServerBuilder` **默认 executor = directExecutor**
   ⇒ ⇒ 只能读作「旧共享层 ＋ 域内代码全绿」，**不**证明「合并后（含 53bc05ec）全绿」**
   ⇒ ⇒ 本轮已用 `-am` 重跑（结论见本轮提交说明）。
 - ⚠️ **这是跨 lane 的方法学问题**（别的 lane 若也用不带 `-am` 的命令，同样中招）⇒ **已报合并收口执行者**。
+
+## 📌 追加 · 🔴 **「继承」这一半的归因订正（2026-10-31 · G3 · 合并收口执行者纠正面之后）**
+
+> **订的是什么**：合并收口执行者 2026-10-31 派单指出「域侧改 `applyTo(stub)` 即可继承请求 deadline」这个**根因表述不成立**，
+> 并对「域侧出口首次真正继承」的**理由**提出改写建议。
+> ⇒ ⇒ 本域**独立复核**（不采信转述）后的结论如下（favorite 域同款订正见 `docs/DRIFT/favorite/rpc.md` 同名小节）。
+
+### 结论一 · 机制主张**成立**（已独立 javap 复核，不是采信转述）
+
+- devh 3.1.0.RELEASE `net/devh/boot/grpc/client/channelfactory/AbstractChannelFactory`
+  ⇒ `:61 GlobalClientInterceptorRegistry.getClientInterceptors()` ⇒ `:88 sortInterceptors(...)`
+  ⇒ `:95 ClientInterceptors.interceptForward(channel, interceptors)`
+  ⇒ ⇒ **全局客户端拦截器接在 channel 上**。
+- `net/devh/boot/grpc/client/interceptor/AnnotationGlobalClientInterceptorConfigurer`
+  ⇒ `getBeansWithAnnotation(GrpcGlobalClientInterceptor.class)`
+  ⇒ ⇒ 本仓 `GoStyleOutboundDeadlineInterceptor`（`@GrpcGlobalClientInterceptor`）**会被收集**。
+- 本四域 main 代码 `ManagedChannelBuilder` / `NettyChannelBuilder` **零命中**
+  ⇒ 出向 stub **全部**是 `@GrpcClient` 注入 ⇒ ⇒ **无一例外**走那条被拦截的 channel。
+
+⇒ ⇒ **域侧出向调用本来就继承请求 deadline** ⇒ ⇒ 「域侧显式 `applyTo` 是闭合 E65 的必要条件」这个根因**不成立**。
+
+### 结论二 · 「继承由拦截器链给」**不能倒推成「以前也给」**
+
+- `GoStyleOutboundDeadlineInterceptor.effectiveCallOptions` 第 ① 项读
+  `GoStyleRequestDeadline.remainingNanos()` ⇒ **与域侧读的是同一个载体**
+  ⇒ 载体缺席时返回 **-1** ⇒ `if (requestRemaining >= 0L)` **跳过**
+  ⇒ ⇒ **拦截器链在没有载体时也给不了请求 deadline**。
+- `git show 53bc05ec^:service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` 的 `onHalfClose`
+  ⇒ `try (DeadlineState.Scope ignored = DeadlineState.bindRemainingNanos(effectiveTimeoutNanos)) { super.onHalfClose(); }`
+  ⇒ ⇒ **只绑 SQL 载体，不绑出向载体** ⇒ **53bc05ec 之前载体确实缺席**。
+
+⇒ ⇒ 「53bc05ec 之前没继承、之后才继承」**成立** ⇒ ⇒ **不建议**把它改写成「出向 deadline 本来就由 devh 拦截器链给到了」
+—— 那会把正确的事实改错。**正确的理由**：「继承由 devh 拦截器链给；53bc05ec 之前载体缺席 ⇒ 拦截器链第 ① 项也拿不到 ⇒ 那时确实没继承」。
+
+### 结论三 · 「冗余」分两半（决定域侧那份 `applyTo` 能不能去）
+
+| 面 | 谁提供 | 域侧显式 `applyTo` 是否冗余 |
+|---|---|---|
+| **继承请求 deadline** | devh 全局客户端拦截器链（`enabled` **默认 true**） | **冗余**（拦截器也会给） |
+| **2s 客户端上界**（Go 的 `TimeoutInterceptor(2000ms)`） | **只在域侧**（`GoStyleClientCallTimeout`）—— 拦截器层 `capMillis` **默认 0 = 不启用**；全仓 `service/*/*/src/main/resources/*.yml` 的 `outbound-deadline` **零配置** | **不冗余** |
+
+⇒ ⇒ 且域侧那份 `applyTo` **不可去**：要算「`min(请求剩余, 2s)`」就得先有「请求剩余」
+⇒ ⇒ `applyTo` 正是把载体剩余挂到 stub 上的那一步 ⇒ **它是域侧 2s 上界计算的输入**。
+
+### 结论四 · 对本域台账与守门的影响
+
+- 本域「两侧同形」「继承那一半已闭合」的**结论不变**，**只补归因**。
+- 🔴 **守门证什么、不证什么**（避免与探针/共享面混引）：
+  - **证**：载体在 gRPC handler 线程真的可见（L4 活体）＋ 域内 2s 上界计算点取 min 正确（L4 活体 + 三组变异矩阵）。
+  - **不证**：「生产装配面（真 `@GrpcClient` ⇒ devh 拦截器链把 deadline 送到出向调用）」—— **仍缺活体证据**。
+- ⇒ ⇒ **C-3 仍破的理由 = 双侧活体证据缺口**（不是「域侧真漂移」）⇒ **X-6 定级复判挂起**（归合并收口执行者）
+  ⇒ ⇒ 本域**不动** X-6 / C-3 的状态标记（派生层 delta 实测 **0 行**）。
+- ⚠️ 探针的 `failed_fast` / `code` 两格**是探针自己的构造**（自建裸 netty channel ⇒ 绕开 devh 装配）
+  ⇒ ⇒ 那不是域侧缺陷 ⇒ 探针口径**归 global**，本域**不改探针**。
 
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
