@@ -4804,3 +4804,12 @@ if (connectTimeout != null) {                                     // :16
 - 本轮**真容器启动 35 次**（`postgres:16-alpine` / `redis:7-alpine`）⇒ ⇒ 三域含容器的用例**本轮真跑且全绿**（此前是「Docker 停 ⇒ 类级 error ⇒ 折叠」）
 - ⚠️ **仍未覆盖（不得写成已闭环）**：① 域侧「logout 走的是共享层那个 Redis 期限代理」的**装配接线**（域侧 `AdminLogoutDeadlineHandoffTest` 用 **Mockito 替换数据层** ⇒ ⇒ **只证控制流，不证代理接线**）② 真 Redis 上「**预算耗尽 ⇒ 写不发生**」的**活体**行为（共享层的 `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` 本轮 **3 条全 skipped** ⇒ ⇒ 需要外部 Redis 地址）③ **RAG↔Go 双侧活体对拍**
 - ⇒ ⇒ 故 **E66 那格（admin 域）仍是「机制已落 · 活体验证未做」** ⇒ ⇒ **不改**
+
+---
+
+## 跨域同步：user 侧 logout 已与 admin 侧同款（2026-10-31 · G1 lane）
+
+- admin 侧的 logout 期限感知（入口不设闸门 + `AdminLogoutDeadlineHandoffTest` 3 条）**已于 2026-10-30 落地**（本域台账「logout 的期限感知归属与闭合登记」一节）
+- **user 侧本轮补齐同款**：Go 侧 `service/user/user/rpc/internal/logic/logoutlogic.go`（**全文 44 行** · 逐行读过 · **无 ctx 预检** ⇒ `:37 SetexCtx(l.ctx,…)` ⇒ `:38-40 codes.Internal`）与 admin 侧 `logoutlogic.go`（全文 46 行）**同构** ⇒ ⇒ 故 user 侧也**不设域内抢先闸门** ⇒ ⇒ handler 级码 = `INTERNAL`(5001) = Go
+- 新增 `UserLogoutDeadlineHandoffTest`（3 条，对齐 `AdminLogoutDeadlineHandoffTest`）；变异实测（把闸门加回）⇒ **精确 1 条转红** ⇒ ⇒ 有牙
+- ⚠️ **本域那一格的证据边界不变**：域侧测试用 Mockito 替换数据层 ⇒ **只证控制流与异常映射，不证共享层代理的装配接线** ⇒ ⇒ E66 那格**维持「机制已落 · 活体验证未做」**

@@ -2062,7 +2062,7 @@ api 侧有 3s HTTP 预算：RAG 的**黑名单查询**自己就要 ~3s ⇒ 请�
      - 连接失败 ⇒ `org.springframework.data.redis.RedisConnectionFailureException` → `DataAccessResourceFailureException`（`spring-data-redis-4.0.7`）
      ⇒ **两者都不是 `io.grpc.StatusRuntimeException`** ⇒ **守卫永远不命中** ⇒ Redis 路径**一直**落在 `catch (Exception)` 里被改写成 INTERNAL。
      （SQL 路径之所以能命中：PG `57014` 经 `SqlTimeoutStatusTranslator` 翻成 gRPC 的 `StatusRuntimeException` ⇒ 守卫拦得住。）
-  3. **RAG 的 Redis 写不绑 gRPC deadline** —— `checkDeadline()` **只在入口**调（`UserDomainService.java:764`），
+  3. **RAG 的 Redis 写不绑 gRPC deadline** —— 域侧闸门**只在入口**（⚠️ **2026-10-31**：logout 那处**已撤** ⇒ `UserDomainService.java:899` 现记「入口不设闸门」⇒ ⇒ 在途写只受**共享层期限代理 ＋ 3s command timeout** 约束），
      在途写一路跑到自己的 **3s command timeout** 才失败 ⇒ 而客户端早在 **2s** 就收到了拦截器发的 `DEADLINE_EXCEEDED`
      （`RpcInterceptor` 的超时调度器 `call.close(DEADLINE_EXCEEDED, …)`，业务线程**不中断**）
      ⇒ ⇒ 这解释了「**服务端日志比客户端晚 1s**」（实测日志里 RAG 那两行 `INTERNAL` 的时间戳在 3s 处）。
@@ -2951,3 +2951,60 @@ span 状态恒为 **`Unset`** ⇒ ⇒ **RAG 侧多置一个 `ERROR`** 就是**�
 - 本轮**真容器启动 35 次**（`postgres:16-alpine` / `redis:7-alpine`）⇒ ⇒ 三域含容器的用例**本轮真跑且全绿**（此前是「Docker 停 ⇒ 类级 error ⇒ 折叠」）
 - ⚠️ **仍未覆盖（不得写成已闭环）**：① 域侧「logout 走的是共享层那个 Redis 期限代理」的**装配接线**（域侧 `AdminLogoutDeadlineHandoffTest` 用 **Mockito 替换数据层** ⇒ ⇒ **只证控制流，不证代理接线**）② 真 Redis 上「**预算耗尽 ⇒ 写不发生**」的**活体**行为（共享层的 `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` 本轮 **3 条全 skipped** ⇒ ⇒ 需要外部 Redis 地址）③ **RAG↔Go 双侧活体对拍**
 - ⇒ ⇒ 故 **E66 那格（admin 域）仍是「机制已落 · 活体验证未做」** ⇒ ⇒ **不改**
+
+---
+
+## user 域 logout 的期限感知归属（与 admin 侧同款 · 2026-10-31）
+
+**一、Go 出处（逐行读过，不是转述）**
+
+- `service/user/user/rpc/internal/logic/logoutlogic.go`（**全文 44 行** · 本轮 cat 全文）：
+  - `:31-34` token 空 ⇒ `codes.InvalidArgument`「Token不能为空」
+  - `:35-36` key = `fmt.Sprintf("user:jwt_blacklist:%s", in.Token)` ＋ `UserAuth.AccessExpire`
+  - `:37` `err := l.svcCtx.BizRedis.SetexCtx(l.ctx, blackListKey, "banned", int(expireTime))` ⇒ **写绑 ctx**
+  - `:38-40` 写失败 ⇒ `status.Error(codes.Internal, "注销失败,Redis写入异常")`
+  - `:42-43` 成功返回
+  - ⇒ ⇒ **全文无 `ctx.Done()` 预检** ⇒ ⇒ Go **不是入口拒**，而是**让写去失败**
+- ⇒ ⇒ **与 admin 侧同构**：`service/user/admin/rpc/internal/logic/logoutlogic.go`（**全文 46 行**）同样 `:38 SetexCtx(l.ctx, …)` ＋ `:39-42 codes.Internal`、同样无 ctx 预检
+- ⇒ ⇒ **两侧 Go 的 handler 级码 = `INTERNAL`(5001)** ⇒ ⇒ **RAG 侧两个域都该不设域内抢先闸门**
+
+**二、改前 RAG 侧现状（本轮修掉的那一处）**
+
+- `service/users/user/user-rpc/.../UserDomainService.java:899` = `checkDeadline();` ⇒ 期限已耗尽时**在 Redis 写之前**就抛 `DEADLINE_EXCEEDED`
+- ⇒ ⇒ handler 级码 = **1015**（≠ Go 的 5001）⇒ ⇒ **这一面与 Go 不同构**
+- ⚠️ 共享层已**点名要 G1 去掉那处抢先检查**：`service/common/.../redis/GoStyleRedisDeadline.java:153-158`（原文：「⚠️ **但带域侧抢先 `checkDeadline()` 的路径根本走不到这里**（域侧检查先触发 ⇒ handler 级是 1015）⇒ ⇒ **完全同形需域侧去掉那处抢先检查 ⇒ 归 G1（users 域写权）**」）
+- ⚠️ **合并约束（共享层写明）**：必须与共享层代理**同一个提交**进主干（无代理而先删 ⇒ 两道闸门都没了 ⇒ RAG 写、Go 不写 ⇒ 数据面回归）⇒ ⇒ **该代理已在本树**（主干 `53bc05ec`）⇒ ⇒ **约束已满足**
+
+**三、改法与行数中性**
+
+- `UserDomainService.java` **三处就地替换、行数 936 → 936 不变**（该文件有跨文件行号指针）：
+  - `:888-897` 方法 javadoc（10 行 → 10 行）⇒ 补 Go 出处（全文 44 行 · 无 ctx 预检 · `:37`/`:38-40`）＋ handler 级码 = 5001
+  - `:899` `checkDeadline();` → 1 行说明注释（**不再调**）
+  - `:911-917` B-1 注释块（7 行 → 7 行）⇒ 改成 admin 侧**同款措辞**（集合口径 ＋ 共享层代理抛 `QueryTimeoutException` ⇒ 不被本分支拦 ⇒ 落 `catch (Exception)` ⇒ INTERNAL）
+- ⇒ ⇒ **三个硬指针全部保住**：`:899`（含**共享面** `docs/DRIFT/global/vs-common.md:4989` 引的那个）· `:906` · `:931`（`users/user/rpc.md:2048` / `users/vs-common.md:792` / `:3196` 引的）
+- ⚠️ 附带订正一处**本身就错的指针**：`docs/DRIFT/users/user/rpc.md` 原引 `UserDomainService.java:764` ＝ `uploadAvatar` 体内（**不是** logout 的闸门）⇒ 已改指 `:899`
+
+**四、新守门（对齐 admin 侧 `AdminLogoutDeadlineHandoffTest`）**
+
+- 新增 `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/service/UserLogoutDeadlineHandoffTest.java` —— **3 条**：
+  - ① 域侧不再抢先拦：期限已耗尽时 logout **仍调用到** Redis 写（`verify(ops).set(...)`）
+  - ② handler 级码 = `INTERNAL`「注销失败,Redis写入异常」（与 Go `codes.Internal` 逐字同形）
+  - ③ 反向：token 为空仍 `INVALID_ARGUMENT`（防「撤闸门」顺手撤掉参数校验）
+
+**五、变异实测（有牙 ⇒ 不是恒绿）**
+
+| 变异 | 实测结果 | 读法 |
+|---|---|---|
+| 把 `checkDeadline();` **加回** `:899` | **3 条里精确 1 条转红**（`logoutReachesRedisWriteEvenWhenDeadlineAlreadyExpired` ⇒ `DEADLINE_EXCEEDED: rpc deadline reached`）· ②③ **仍绿**（二者不依赖 interrupt） | ⇒ ⇒ 新网**有牙**、且**红在目标断言**（①）⇒ ⇒ 闸门若被加回 ⇒ 必红 ⇒ ⇒ 防回退成立 |
+| 还原 | **3 条全绿**（user-rpc 59 条 + admin-rpc 5 条；⚠️ 该轮是 **Mockito 层** ⇒ 真 Redis+gRPC 的活体用例跑在变异**前**那轮：1/1 绿 · 26.3s） | ⇒ ⇒ 还原后无残留 |
+
+**六、⚠️ 证据边界（如实，不夸大）**
+
+- 本轮证据强度 = **L3**（静态 ＋ 域内单测）⇒ ⇒ **不是 L4**
+- 三处仍未覆盖：① 共享层 Redis 期限代理**是否真在**本域 Redis 连接链上（**装配接线**，跨 lane ⇒ G4 侧守）② 真 Redis 上「**预算耗尽 ⇒ 写不发生**」的**活体**行为 ③ **RAG↔Go 双侧活体对拍**
+- ⇒ ⇒ **E66 那格（admin 域）维持「机制已落 · 活体验证未做」** ⇒ ⇒ **不改**
+
+**七、G4 转派单前提的一处订正（我自己核的）**
+
+- 转派单写「调整 `UserDomainServiceDeadlineTest` 的 `GUARDED` 清单（logout 出列）」⇒ ⇒ **该类全仓不存在**（`find` + 全仓 grep 只在 `docs/DRIFT/global/vs-common.md` 里出现过这个名字）⇒ ⇒ **user 域没有 GUARDED 清单** ⇒ ⇒ **无清单可调**
+- ⇒ ⇒ 真正受影响的是 **admin 域** `AdminDomainServiceDeadlineTest:26` 那句「`UserDomainService` 实有 **11 处** `checkDeadline()`」⇒ ⇒ 撤掉 logout 那处后是 **10 处** ⇒ ⇒ 已就地订正（**行数 148 → 148 不变** —— 该文件有共享面指针 `global/vs-common.md:5460` 引的 `:41-42` 与 `docs/Worktree.md:587` 引的 `:41-43`）
