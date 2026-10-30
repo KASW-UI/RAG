@@ -1511,9 +1511,9 @@ SCENARIO=map_empty         JSON={}          ← 对照：map 形态才会被省�
 （原写「RAG : text/plain ← 少了 charset 参数」，并称「守门脚本抓不到 charset 差异 ⇒ 需要独立守门」）。
 两处都已按实测改正（**只改注释，零行为改动**）。
 
-**跨域提示**：`scope=user` 时脚本仍是红的 —— RAG 的 user-api **仍缺 `charset=utf-8`**
-（`Content-Type='text/plain'` vs Go 的 `text/plain; charset=utf-8`）
-⇒ 那是 **users/user 域**的账（对应本文件 §5 A-1），**不是 admin 域的**。
+**跨域提示**（2026-10-30 订正 · 前提已不成立）：原记「`scope=user` 时脚本仍是红的 —— RAG 的 user-api **仍缺 `charset=utf-8`**
+（`Content-Type='text/plain'` vs Go 的 `text/plain; charset=utf-8`）」⇒ ⇒ 现行 `user-api/.../advice/GlobalExceptionHandler.java:287` 已显式钉 charset ⇒ **断言侧已销账**（栈起时脚本不再红）
+⇒ 那本属 **users/user 域**的账（对应本文件 §5 A-1，**已闭合**），**不是 admin 域**的；残留 = 守门脚本头部注释的**陈旧陈述** + **无栈时恒 SKIP ⇒ EXIT=0 假绿**（落点 `tools/difftest/**` = 共享面 ⇒ 已上报）。
 
 ## 3. ✅ UNRESOLVED-ADMINAPI-004 关闭：worker-pool 饱和分支在默认配置下**不可达**
 

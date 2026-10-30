@@ -4212,7 +4212,7 @@ Go 侧 `service/user/admin/rpc/admin.go` 的注册是 go-zero 的 `reflection.Re
 | §9 · ARPC-008 | `UserEntity.java:109` | `UserEntity.java:136` | `private Long status = 0L;` |
 | §9 · ARPC-008（另一处） | `UserEntity.java:85` | `UserEntity.java:136` | 同上 |
 | §9 · ADMINAPI-011 | `GlobalExceptionHandler.java:192` | `:196` | `headers.set(CONTENT_TYPE, "text/plain; charset=utf-8")` |
-| §9 · A-1（user-api） | `GlobalExceptionHandler.java:216` | `:287` | `headers.setContentType(new MediaType(TEXT_PLAIN, …))` |
+| §9 · A-1（user-api） | `GlobalExceptionHandler.java:216` | `:287` | `headers.setContentType(new MediaType(MediaType.TEXT_PLAIN, StandardCharsets.UTF_8));` ⇒ **已显式钉 charset**（2026-10-30 订正 · 原记「`new MediaType(TEXT_PLAIN, …)`」的前提已不成立） |
 | §9 · 用户表名 | `UserEntity.java:17-18` | `UserEntity.java:75` | `@TableName("users_user")` |
 | §10.5 表 · 右列 | `:483` / `:1011` / `:1042` | `:485` / `:1013` / `:1051-1054` | 现行值列（**左列历史值不动**） |
 | `api.md` × 3 | `AdminRpcClient.java:25` | `AdminRpcClient.java:142` | `@GrpcClient("admin-rpc")` 注解行 |
