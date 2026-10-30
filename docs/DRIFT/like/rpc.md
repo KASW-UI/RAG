@@ -2657,8 +2657,8 @@ like_rpc_action_total{action="unknown",result="invalid_param",target_type="artic
 - `apiSideAutoConfigurationsMustNotRegisterWhenSideIsRpc()` ⇒ 共享层的 `rag.side` 门落码后 ⇒
   **3 个** api 侧**自动配置**（`GoStylePathNormalizingAutoConfiguration` /
   `GoStyleJsonContentTypeAdvice` / `GoStyleBreakerRouteTemplateAutoConfiguration`）不许注册。
-  ⚠️ **【订正 · 见文末「rebase 后守门转强制判据」小节】**：本分支**已 rebase 到主干 `89ec4245`** ⇒ ⇒ 共享层的门**已在树上**
-  ⇒ ⇒ 这条**不再 skip**、**执行**且**通过**（两域各 `Tests run 4 / Skipped 0`）⇒ ⇒ 已是**强制判据**；⚠️ 但「机制到位 ⇒ 自动转强制」
+  ⚠️ **【订正 · 见文末「rebase 后守门转强制判据」小节】**：共享层的 `rag.side` 门**已在树上**（**内容口径** —— 不再写「本分支基线 hash」，理由见该小节末段）
+  ⇒ ⇒ 这条**不再 skip**、**执行**且**通过**（本域 `like-rpc`：`tests=4 / failures=0 / errors=0 / skipped=0` ⇒ **真执行**；⚠️ 原写「两域各 `Tests run 4 / Skipped 0`」⇒ ⇒ **该口径已作废** —— `message-rpc` 侧 = **未评估**，见该小节）⇒ ⇒ 已是**强制判据**；⚠️ 但「机制到位 ⇒ 自动转强制」
   ⇒ 当时是**假的**（探针用 JDK `getAnnotation` **不穿透元注解** ⇒ rebase 后仍 skip）⇒ ⇒ 已改用 `AnnotatedElementUtils.findMergedAnnotation`。
 
 **🔴 跨 lane 依赖（登记给 G4 / 合并收口执行者）**：共享层把 `rag.side` 门从 **2 个类**
@@ -2761,8 +2761,8 @@ RAG 侧**实测**（2026-10-30 20:07 · 真 fat jar ＋ 不设 `POSTGRES_PASSWOR
   **8 个**扫描面 api 侧 HTTP 中间件（CPU 降载 / 最大连接 / 最大字节 / 熔断 / traceparent / 表单限值 ×2 /
   Tomcat 参数上限）**一个都不在容器里**；
 - 同一测试的 `apiSideAutoConfigurationsMustNotRegisterWhenSideIsRpc()` ⇒ **3 个**自动配置面类不在容器里
-  ⚠️ **【订正 · 见文末「rebase 后守门转强制判据」小节】**：本分支**已 rebase 到主干 `89ec4245`** ⇒ ⇒ 这条**执行**且**通过**
-  （两域各 `Tests run 4 / Skipped 0`）⇒ ⇒ 已是**强制判据**（「skip ≠ 通过」的纪律依然成立 —— 只是本条现在**不是** skip）。
+  ⚠️ **【订正 · 见文末「rebase 后守门转强制判据」小节】**：共享层的门**已在树上** ⇒ ⇒ 这条**执行**且**通过**（本域 `like-rpc`：`tests=4 / failures=0 / errors=0 / skipped=0`）
+  ⇒ ⇒ 已是**强制判据**（原写「两域各 `Tests run 4 / Skipped 0`」⇒ ⇒ **该口径已作废** —— `message-rpc` 侧 = **未评估**，见该小节；「skip ≠ 通过」的纪律依然成立 —— **「未评估」也不是「通过」**）。
 - ⇒ ⇒ 合计：**rpc 进程里 api 侧 web 中间件 = 0**。
 
 **依据三 · `HttpPoolLifecycle` 不属于「剩余项」（否掉一版错误口径）**
@@ -2779,7 +2779,7 @@ RAG 侧**实测**（2026-10-30 20:07 · 真 fat jar ＋ 不设 `POSTGRES_PASSWOR
 ⇒ ⇒ 由主干新守门 `tools/difftest/check-rpc-common-scan-exclusion.py` 断言①（结构面）机械守住；
 断言②（形态面：servlet 形态必须显式 `rag.side: rpc`）与本域本轮落码一致。
 
-**本轮只读实测（2026-10-30 · 当时未把 `tools/` 文件合入本分支 —— `tools/**` 是 G4 写权面）**【订正 · 见文末「rebase 后守门转强制判据」小节】：**本分支已 rebase 到主干 `89ec4245`** ⇒ ⇒ `tools/` 已在树上 ⇒ ⇒ 现可直接实跑。
+**本轮只读实测（2026-10-30 · 当时未把 `tools/` 文件合入本分支 —— `tools/**` 是 G4 写权面）**【订正 · 见文末「rebase 后守门转强制判据」小节】：`tools/` **已在树上**（**内容口径**）⇒ ⇒ 现可直接实跑 ⇒ ⇒ **2026-10-31 已实跑，全部非容器守门 `EXIT=0`**（读数见该小节）。
 
 - 守门在本分支上 **EXIT=0**：结构面 ✅（10 个 rpc 域都没有扫 `com.rag.common`）；
   形态面 ✅（`like-rpc` / `message-rpc` 已显式 `rag.side: rpc`）。【订正 · 见文末「主干实况复判」小节】：「白名单那两条已 stale ⇒ 可剪枝」这个措辞**不准** ⇒ ⇒ 那两条本就是**假命中**（守门漏剥 pom 注释）⇒ ⇒ 已由主干 `a0d6ef13` 修判据并把白名单 **5→1**。
@@ -2840,3 +2840,66 @@ RAG 侧**实测**（2026-10-30 20:07 · 真 fat jar ＋ 不设 `POSTGRES_PASSWOR
 ①「白名单那两条已 stale ⇒ 可剪枝」⇒ 那两条本就是**假命中**，已由 `a0d6ef13` 剪掉；
 ②「task-rpc 不需要 `rag.side: rpc`」⇒ **立场不变**，现由依据一、二**双重印证**；
 ③「修法在共享面：`_module_has_web_starter()` 应先剥 XML 注释」⇒ **该修法已落**（`a0d6ef13`）。
+
+### 【订正 · 2026-10-31 · G2 lane】rebase 后守门转强制判据（**探针读法已修 · 本轮真实读数与「未评估」项**）
+
+**本节的由来（两件事，缺一不可）**
+
+- **① 探针读法错 ⇒ 「机制到位 ⇒ 自动转强制」当时是假的**：上一轮（2026-10-30）载体守门用 JDK `Class#getAnnotation` 读 `@ConditionalOnProperty`
+  ⇒ ⇒ **不穿透元注解** ⇒ ⇒ 机制**在树上**时仍判「不在」⇒ ⇒ 守门**恒 skip**（修前 `Skipped: 1`）
+  ⇒ ⇒ 已改用 `AnnotatedElementUtils.findMergedAnnotation`（与 Spring 条件求值路径一致）
+  ＋ **反射按名字找单一真源** `com.rag.common.web.ConditionalOnApiSide`（机制缺席时仍能编译，不引入编译期依赖）
+  ＋ 新增**机制面断言**：对 `com.rag.common.http.GoStylePathNormalizingAutoConfiguration` /
+  `com.rag.common.http.GoStyleJsonContentTypeAdvice` /
+  `com.rag.common.protection.GoStyleBreakerRouteTemplateAutoConfiguration` 逐类 `findMergedAnnotation`
+  ⇒ ⇒ 必须带 `name` 含 `rag.side`。
+- **② 上文 3 处【订正】括注指向的「文末小节」当时并不存在**（**悬空指针**）⇒ ⇒ 本节补齐 ⇒ ⇒ 上文引用现在**可达**。
+
+**本轮真实读数（2026-10-31 · 一律以 surefire XML 的 `tests=` / `skipped=` 为准，不看 stdout 的「BUILD SUCCESS」）**
+
+- `like-rpc` —— **已评估（真执行 · 绿）**【**本域**】：`service/like/like-rpc/target/surefire-reports/TEST-com.rag.like.like.rpc.LikeRpcMetricsCarrierGateTest.xml`
+  ⇒ `tests=4 / failures=0 / errors=0 / skipped=0` ⇒ ⇒ **不是 skip**（`skipped=0`）
+  ⇒ ⇒ 4 条 = `rpcSideMustNotCarryApiSideHttpMiddleware` · `defaultObservationPortMatchesGoDevServerPort` ·
+  `realFatJarExposesPrometheusAndKeepsGrpcAlive` · `apiSideAutoConfigurationsMustNotRegisterWhenSideIsRpc`。
+- `message-rpc` —— **未评估**（**跨域提示** · 不在本域，但同批读数口径必须一致）：`service/message/message-rpc/target/surefire-reports/TEST-com.rag.message.message.rpc.MessageRpcMetricsCarrierGateTest.xml`
+  ⇒ ⇒ ⚠️ 当前磁盘上这份 XML = **「变异跑」的产物**，**不是**干净读数 ⇒ `tests=4 / failures=2 / errors=1 / skipped=0`：
+  - `rpcSideMustNotCarryApiSideHttpMiddleware` **FAIL** ＋ `realFatJarExposesPrometheusAndKeepsGrpcAlive` **FAIL**
+    ⇒ 断言消息是「日志里没有『Tomcat started on』⇒ **web 容器没起来**」⇒ 日志尾部 `could not open file "global/pg_filenode.map": I/O error`
+    ⇒ ⇒ **红在 infra**（PG 容器起不来 ⇒ Spring 上下文没起来）⇒ ⇒ **不是**「门没生效」
+  - `apiSideAutoConfigurationsMustNotRegisterWhenSideIsRpc` **ERROR**
+    ⇒ `NullPointerException: Cannot invoke "java.net.http.HttpResponse.statusCode()" because "beans" is null`
+    ⇒ ⇒ 同因（上下文没起来 ⇒ 探针拿到 `null`）
+  - `defaultObservationPortMatchesGoDevServerPort` **PASS**（唯一一条与容器无关 ⇒ 它绿**不能**代表载体到位）
+  ⇒ ⇒ **这次变异跑不构成判据证据**（变异必须红在**目标断言**，而不是「容器没起来」）
+  ⇒ ⇒ 且**干净跑（2026-10-30 22:51-22:52）的 XML 被这次变异跑在同一 `target/` 目录覆写**
+  ⇒ ⇒ ⇒ **干净读数现已不可取证** ⇒ ⇒ ⇒ **`message-rpc` = 未评估**（**不是**「已通过」）。
+
+**环境（与合并收口执行者登记的环境受阻项 `ENV-06` 同源）**
+
+- 2026-10-31 `curl --unix-socket ~/.docker/run/docker.sock http://localhost/_ping` ⇒ **HTTP `000`**（socket 不可达）
+  ⇒ ⇒ **容器类用例全部不可用** ⇒ ⇒ 恢复前一律写「**未评估**」，**不得**写「已通过」。
+- ⇒ ⇒ 恢复后需**重跑两次**才算闭环：① **干净树** ⇒ 必须 `skipped=0` 且全绿；
+  ② **变异树**（摘掉 `message-rpc` 的 `rag.side: rpc`）⇒ ⇒ 必须**红在目标断言**
+  ⇒ ⇒ **不是**红在「`Tomcat started on` 缺失」或 `pg_filenode.map` ⇒ ⇒ 跑完还原。
+
+**🔴 三域回归本轮无效（读数 = 0 条，不是「789 条 / 0F / 0E / 2S」）**
+
+- 2026-10-30 23:10 的三域八模块回归 ⇒ `service/common` 的 `MybatisPlusInterceptorChainGateTest` **1 条 ERROR**
+  （`Previous attempts to find a Docker environment failed. Will not retry.`）⇒ ⇒ `common` **FAILURE**
+  ⇒ ⇒ `message-rpc` / `message-api` / `like-api` / `like-rpc` / `task-api` / `task-rpc` **全部 `banned`（Skipped）**
+  ⇒ ⇒ **本波三域一条测试都没跑** ⇒ ⇒ **本轮三域读数 = 0 条**。
+- ⚠️ 那组「789 条 / 0 failures / 0 errors / 2 skipped」是 **rebase 之前**的读数 ⇒ ⇒ **不可**当作本轮读数引用。
+- ⇒ ⇒ 该失败点在**共享层 `service/common`（G4 写权面）** ⇒ ⇒ **本域不写** ⇒ ⇒ 已报合并收口执行者。
+
+**2026-10-31 非容器守门新鲜读数（rebase 后实跑 · 全部 `EXIT=0`）**
+
+- `tools/difftest/check-rpc-common-scan-exclusion.py`（结构面 ＋ 形态面）· `tools/difftest/check-wave-lane-ownership.py`
+  · `tools/difftest/check-grpc-interceptor-wiring.py` · `tools/difftest/check-tomcat-limits.py`
+  · `tools/difftest/check-flyway-ledger.py` · `tools/check-ledger-tables.py` · `tools/check-ledger-selfcheck.py`（层 0~4）
+  · `tools/difftest/check-surface-parity.py --domain {message|like|task}` · `tools/difftest/check-proto-static.sh`（10/10 域 proto wire 契约逐字节一致）。
+
+**自我订正 · 「分支基线相对」陈述的复发（写法纪律）**
+
+- 上文原写「本分支**已 rebase 到主干 `89ec4245`**」⇒ ⇒ ⚠️ **凡把「分支基线 hash」写进台账断言，主干每前进一步就过期一次**
+  （本轮主干已再前移 ⇒ ⇒ 那句当天就再次过期）⇒ ⇒ 本次统一改为**内容口径**
+  （「共享层的门**已在树上**」/「`tools/` **已在树上**」）⇒ ⇒ 以后**不再**把分支基线 hash 写进台账断言。
