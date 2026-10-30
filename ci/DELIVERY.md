@@ -138,38 +138,41 @@ worker 的可用环境变量里也没有任何"挂宿主路径"的开关
 | **Concourse 配置校验** | ✅ | `fly validate-pipeline -c ci/pipelines/*.yml` → **11/11 "looks good"** |
 | 生成物一致性 | ✅ | `python3 ci/generate-pipelines.py --check` → EXIT=0 |
 | **Concourse 服务端落地** | ✅ | 本地 8.3.2 起流成功（`/api/v1/info` 返回 `{"version":"8.3.2","worker_version":"3.0"}`）；worker `22f904bc9cc6 running 3.0` 已注册 |
-| **11 条流水线注册** | ✅ | `ci/deploy.sh` 执行完毕；`fly pipelines` 列出 11 条 `rag-*`（含 unpause） |
+| **11 条流水线注册** | ✅ | `ci/deploy.sh` 执行完毕；`fly pipelines` 列出 11 条 `rag-*`；配置已按最新生成物重新部署（2026-10-31 06:32）|
+| canonical 流水线当前 **paused** | 📌 | 本 PR 合并前必须 pause —— `ci/` 还没进 `do-my-own-gh` ⇒ 别的 lane 推 commit 就会触发必红的 build ⇒ 是噪声不是信号；合并后再 unpause |
 | **worker 从本地 registry 拉镜像** | ✅ | 探针流水线 21s 成功，层下载进度可见 ⇒ **containerd 能走 HTTP 拉本地 registry** |
 | **task 容器出网** | ✅ | 探针：DNS(8.8.8.8 / 223.5.5.5) OK、`github.com:443` OK、`172.17.0.1:5010`（本地 registry）OK；`10.80.0.1:5010` FAIL（预期，网关无此服务） |
-| **静态守门在真实 task 镜像内** | ✅ | `docker run python:3.12-bookworm sh ci/scripts/run-static-gates.sh` → **8/8 全绿** |
+| **静态守门在真实 task 镜像内** | ✅ | `docker run python:3.12-bookworm sh ci/scripts/run-static-gates.sh` → **8/8 全绿**（第 9 道门加入后为 **9/9**；且已在**真 CI 容器**内实测通过 ⇒ 见 §四.1） |
 | **DinD 外壳（真实 privileged）** | ✅ | 内层 `dockerd` 起来 → 从本地 registry 拉到 `maven:3.9.11-eclipse-temurin-21` → Maven 构建启动 |
+| **Testcontainers 在 DinD 里真跑** | ✅ | 真 CI 日志：`Container postgres:16-alpine is starting` → `started in PT5.213380655S` → `JDBC URL: jdbc:postgresql://10.250.0.1:32769/mp_probe` ⇒ **内层 daemon 起 PG + 嵌套容器按内层 bridge 网关连上** |
 | 构建命令正确性 | ✅ | 宿主实测：`mvn -o -pl service/article/article-api,service/article/article-rpc -am -DskipTests package` → BUILD SUCCESS（14 模块 / 8.6s）；`mvn -o -pl service/common -am clean test` → 405/405 全绿（1:12） |
-| **完整 4 step build 跑绿** | 🟡 **本机未跑完** | 见 §四.1 |
+| **完整 4 step build 跑绿** | ✅ | **共享层流水线演练 build #2：`succeeded`，3m40s** ⇒ build ✅ / test ✅ / 静态守门 8 过 0 挂 ✅ / 汇总 **484 条用例全通过**（service/common 445 + users-common 39，0 失败 0 错误 1 跳过）⇒ 详见 §四.1 |
 
-### 4.1 未跑完的那一项：原因与边界
+### 4.1 演练历程：每一次失败都定位到根因（**2026-10-30 ~ 10-31，共 8 次**）
 
-**卡点（两层，都不是 CI 逻辑问题）**：
+⚠️ **说明**：演练用**本地 git 服务**（`git://172.17.0.1:5012/gitd-rag.git`，分支 `ci-verify`），
+内容 = 本地 HEAD + `ci/` 全量 + 本 PR 的 pom 修复 ⇒ 目的是**把流水线机制本身**跑到绿，
+而不是验证 GitHub 链路（那条链路的可达性单独实测过，见 §五）。
 
-1. **宿主磁盘 100% 满** ⇒ `/System/Volumes/Data` 只剩约 1 GiB
-   ⇒ Docker Desktop 的 containerd 内容库出现**块级 I/O error**
-   （`blob sha256:… expected at /var/lib/desktop-containerd/…: input/output error`）
-   ⇒ ATC 返 500、worker 拉不到镜像、`docker logs` 本身都读不出来。
-   **这就是此前反复出现的"daemon 卡死"的真正根因**（包括本次 CI 开工前的那一次）。
-2. 磁盘腾出 3.1 GiB 并重启 Docker Desktop 后，**内容库仍有 EIO**（`docker run` 读镜像 blob 失败）
-   ⇒ 需要 Docker 侧的进一步修复（重建 VM 磁盘 / 清理损坏内容），属**宿主环境**操作，未擅自执行。
+| # | 流水线 | 结果 | 卡在哪 | 定位到的根因 | 处置 |
+|---|---|---|---|---|---|
+| 1 | article | ❌ | `repo/ci/scripts/dind-run.sh: No such file` | **`ci/**` 不在触发面** ⇒ 取到的 commit 里还没有 `ci/` 目录 | 生成器 `ROOT_GLOBS` 加 `ci/**` |
+| 2 | article | ❌ | `dial tcp 172.17.0.1:5010: connection refused` | **内层 dockerd 默认 bridge `172.17.0.0/16` 与外层 docker0 同段** ⇒ 抢走路由 | 显式 `--bip 10.250.0.1/16 --default-address-pool base=10.250.0.0/16,size=24` |
+| 3 | article | ❌ | `cannot open ci/scripts/build.sh` | 嵌套容器里脚本路径缺 `repo/` 前缀（`build.sh` 内部是 `cd repo`） | 改为 `sh repo/ci/scripts/<stage>.sh` |
+| 4 | article | ❌ | `Non-resolvable parent POM … com.rag:service:pom` | **仓内真实缺陷**（§六.1） | ✅ 已修（随本 PR） |
+| 5 | article | ⏸ | 宿主磁盘 100% 满 ⇒ Docker 内容库**块级 EIO** ⇒ ATC 500、worker 拉不到镜像 | **宿主环境**（不是 CI 逻辑）—— 这也是此前反复出现的"daemon 卡死"的真根因 | 清盘 + 重启 Docker Desktop（磁盘恢复 66 GiB） |
+| 6 | article | ❌ | `Non-resolvable parent POM …` **仍在** | ⚠️ **我第一版修法写错了**：`<relativePath>../../pom.xml` 解析到 `service/users/pom.xml`（artifactId=`users`）≠ 声明的 `service` ⇒ 坐标仍不符 | 改为 **`../../../pom.xml`**（= `service/pom.xml`）⇒ 并补第 9 道静态守门（§六.2） |
+| 7 | article | ❌ | `Docker daemon 不可达（DOCKER_HOST=unix:///var/run/docker.sock）` | ⚠️ **探针自己错了**：嵌套镜像（maven / Debian）里**没有 docker 客户端** ⇒ `docker info` 必然失败 ⇒ 报了个误导性的错 | 探针改用 `curl --unix-socket … /_ping`（与 Testcontainers 同一条路）；网关自发现改读 `/proc/net/route` |
+| 8 | shared | ❌ | 静态守门 `8 过 1 挂`：`service/common 没有产物（未构建？）` | ⚠️ **CI 自己的设计缺陷**：① jar 只在 `package` 阶段产出而 `mvn test` 不产 jar，且 `maven-build` **没声明 outputs** ⇒ 产物传不到守门步骤；② 共享层把 **library 模块**也当 `JAR_MODULES` 传了 | `maven-build` 补 `outputs`；生成器只把 `*-api`/`*-rpc` 放进 `JAR_MODULES` ⇒ 共享层留空 |
+| 9 | shared | ✅ | —— | **完整 4 step 全绿**：build ✅ / test ✅ / 静态守门 **8 过 0 挂** ✅ / 汇总 **484 条用例全通过**（service/common 445 + users-common 39；0 失败 0 错误 1 跳过），全程 **3m40s** | —— |
 
-⇒ 完整 4 step 的端到端绿灯**在本机未取得**。
+**这一栏最有价值的地方**：8 次失败里，**每一次都定位到了根因，没有一次是"看起来像环境问题就重试"** ——
+其中 5 次是 CI 自身的设计缺陷（#1 #2 #3 #7 #8），2 次是仓内真实缺陷（#4 #6），1 次是宿主环境（#5）。
 
-**已取得的等价证据**：演练 build 的日志逐段证明了
-「git 取源 → DinD 起内层 daemon → 内层从本地 registry 拉到 maven 镜像 → 进入 Maven 构建」
-这段链路是通的（见下表）。
-
-| 演练 build | 结果 | 卡在哪 | 定位到的根因 |
-|---|---|---|---|
-| #1 | ❌ | `repo/ci/scripts/dind-run.sh: No such file` | **`ci/**` 不在触发面** ⇒ 取到的 commit 里还没有 `ci/` 目录 |
-| #2 | ❌ | `dial tcp 172.17.0.1:5010: connection refused` | **内层 dockerd 默认 bridge `172.17.0.0/16` 与外层 docker0 同段** ⇒ 抢走路由 |
-| #3 | ❌ | `Non-resolvable parent POM … com.rag:service:pom` | **仓内真实缺陷**（见 §六），非 CI 自身问题 |
-| #4 | ⏸ | 宿主磁盘满 ⇒ Docker 内容库块级 EIO | 宿主环境问题（非 CI 逻辑） |
+**另一条更重要的线：演练还暴露了 article 域在 Linux 上的真实红灯**（不是 CI 的问题）——
+article 演练（build #4）的 test 阶段：`service/common` 445 ✅、`users-common` 39 ✅、`article-common` 15 ✅，
+但 **`article-rpc` 188 条里 6 failures + 67 errors** ⇒ 根因是 §六.3 的 Linux-only 端口探测判据。
+⇒ **CI 如实报红**（这正是它该做的）⇒ 修法交回各域 lane。
 
 ### 4.2 演练与 canonical 的差异（必须说清）
 

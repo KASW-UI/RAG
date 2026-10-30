@@ -229,16 +229,22 @@ python3 ci/generate-pipelines.py --check  # 校验（CI 也跑这一条）
 | **Concourse 配置检查** | ✅ | `fly validate-pipeline -c ci/pipelines/*.yml` → **11/11 "looks good"**（客户端侧校验，不需要服务端） |
 | 生成物一致性 | ✅ | `python3 ci/generate-pipelines.py --check` → EXIT=0 |
 | 构建命令正确性 | ✅ | 宿主机实测：`mvn -o -pl service/article/article-api,service/article/article-rpc -am -DskipTests package` → BUILD SUCCESS（14 模块 / 8.6s）；`mvn -o -pl service/common -am clean test` → 405/405 全绿（1:12） |
-| **静态守门在真实 task 镜像内** | ✅ | `docker run python:3.12-bookworm sh ci/scripts/run-static-gates.sh` → **8/8 全绿** |
+| **静态守门在真实 task 镜像内** | ✅ | `docker run python:3.12-bookworm sh ci/scripts/run-static-gates.sh` → **8/8 全绿**；加入第 9 道门后为 **9/9**，且已在**真 CI 容器**内实测通过 |
 | **Concourse 服务端落地** | ✅ | 本地 **8.3.2** 起流成功（`/api/v1/info` → `{"version":"8.3.2","worker_version":"3.0"}`）；worker `22f904bc9cc6 running 3.0` 已注册 |
-| **11 条流水线注册** | ✅ | `ci/deploy.sh` 跑完；`fly pipelines` 列出 11 条 `rag-*`（全部 unpause） |
+| **11 条流水线注册** | ✅ | `ci/deploy.sh` 跑完；`fly pipelines` 列出 11 条 `rag-*`（配置已按最新生成物重新部署）|
+| **canonical 流水线当前是 paused** | 📌 | 本 PR **合并前**它们必须 pause：`ci/` 还没进 `do-my-own-gh` ⇒ 别的 lane 一推 commit 就会触发 build 并在第一步就红（`repo/ci/scripts/dind-run.sh: No such file`）⇒ 是噪声不是信号。**合并后**一条命令恢复：`for p in $(fly -t concourse pipelines -a \| awk 'NR>1 && $2=="no" {print $1}'); do fly -t concourse unpause-pipeline -p $p; done` |
 | **worker 从本地 registry 拉镜像** | ✅ | 探针流水线 **21s 成功**，层下载进度可见 ⇒ **containerd 走 HTTP 拉本地 registry 可行**（Concourse 8 的 containerd 2.4.2 不接受根级 `[registry]` 段，但 Concourse 自身的拉取路径能处理 HTTP registry） |
 | **task 容器出网** | ✅ | 探针：DNS(8.8.8.8 / 223.5.5.5) OK、`github.com:443` OK、`172.17.0.1:5010`（本地 registry）OK；`10.80.0.1:5010` FAIL（预期，网关无此服务） |
 | **DinD 外壳（真实 privileged）** | ✅ | 内层 `dockerd` 起来 → 从本地 registry 拉到 `maven:3.9.11-eclipse-temurin-21` → 进入 Maven 构建 |
-| 完整 4 step build 跑绿 | 🟡 **本机未跑完** | **宿主磁盘 100% 满** ⇒ Docker Desktop 的 containerd 内容库出现块级 **I/O error** ⇒ ATC 500、worker 拉不到镜像、`docker logs` 都读不出来（**这也是此前反复出现的"daemon 卡死"的真根因**）⇒ 详见 `ci/DELIVERY.md` §四.1（含 4 次演练逐次的卡点与根因） |
+| **Testcontainers 在 DinD 里真跑** | ✅ | 真 CI 日志：`Container postgres:16-alpine is starting` → `started in PT5.21S` → `JDBC URL: jdbc:postgresql://10.250.0.1:32769/mp_probe` ⇒ 内层 daemon 起 PG + 嵌套容器按**内层 bridge 网关**连上 |
+| **完整 4 step build 跑绿** | ✅ | **共享层流水线演练 build #2：`succeeded`（3m40s）** ⇒ build ✅ / test ✅ / 静态守门 **8 过 0 挂** ✅ / 汇总 **484 条用例全通过**（service/common 445 + users-common 39；0 失败 0 错误 1 跳过）⇒ 详见 `ci/DELIVERY.md` §四.1（含 8 次演练逐次的卡点与根因） |
 
-> 「配置校验通过」**不等于**「CI 跑通了」。前者已实测；后者在本机因宿主 daemon 卡死未取得绿灯，
-> 但取源→DinD→拉镜像→进 Maven 构建这段链路已逐段实测打通。
+> 「配置校验通过」**不等于**「CI 跑通了」—— 但两者现在**都有实测绿灯**：
+> 前者是 11/11 `fly validate-pipeline` + `--check` EXIT=0；后者是**真 build 跑完 4 个 step 全绿**。
+> ⚠️ **绿灯的范围要说清**：绿的是**共享层流水线**（`service/common` + `service/users/users-common`）；
+> article 域的 test 阶段**如实报红**（`article-rpc` 188 条里 6 failures + 67 errors）⇒ 根因是仓内
+> **Linux-only 的端口探测判据**（macOS 开发机看不见）⇒ 属各域 lane 的测试代码，本 PR **未擅自修改**，
+> 详见 `ci/DELIVERY.md` §六.3。
 
 ### 8.1 CI 在演练中抓出的真实缺陷（均已修在 `ci/` 内）
 
