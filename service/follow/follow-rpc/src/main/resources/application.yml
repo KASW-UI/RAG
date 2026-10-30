@@ -24,7 +24,18 @@ spring:
     #    ⚠️ 不要改用 spring.jackson.time-zone：那只管 JSON 序列化，不改 PG 会话。
     url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}?sslmode=${POSTGRES_SSLMODE:disable}&TimeZone=Asia/Shanghai
     username: ${POSTGRES_USER:admin}
-    password: ${POSTGRES_PASSWORD:password}
+    # ⚠️ **本行无默认值（2026-10-30 按 Go 同形取消 fallback · `S1-USERS-002`）**
+    #    Go 侧（`service/follow/rpc/etc/follow.yaml:33`）= `Password: "${POSTGRES_PASSWORD}"` ⇒ **无默认值**：
+    #    go-zero `core/conf/config.go:63` 用 `os.ExpandEnv` 展开 ⇒ 它**不认** `${VAR:default}` 语法
+    #    ⇒ 未设 env 即展开成**空串** ⇒ 用空口令连库 ⇒ 认证失败 ⇒ **fail-fast**。
+    #    RAG 侧此前给这个占位符挂了**明文默认口令** ⇒ 缺变量时**用那个公开口令连上**
+    #    ⇒ 与 Go **不同形**（Go 连不上 / RAG 连得上）⇒ ⇒ 那是一条**真漂移** ⇒ 本轮取消。
+    #    ⚠️ **残余差异（RAG 更严的一侧）**：Go = 启动成功、**连库时**失败；RAG = **启动即失败**
+    #    （Spring 解析不到占位符 ⇒ DataSource bean 创建失败）⇒ ⇒ 失败时刻不同 ⇒ 属有意偏离候选。
+    #    ⚠️ 注入侧一字不变：根级 `docker-compose.yaml` 用 `${POSTGRES_PASSWORD:?…}` 强制要求并透传、
+    #    `manage.sh` 硬校验 `.env`、`tools/difftest/*` 对拍装置显式 export ⇒ **不打断任何现有流程**。
+    #    ⚠️ 其余 7 处（article×2 / comment / favorite / like / message / task）属 G2/G3 面 ⇒ 口径尚未全仓统一。
+    password: ${POSTGRES_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       # 对应 Go db.go:38-39 sqlDB.SetMaxIdleConns(10) / SetMaxOpenConns(100)

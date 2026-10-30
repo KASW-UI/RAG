@@ -983,7 +983,7 @@ RAG 曾用 `if (!any) return 0;` 把它挡掉了。修复后双侧实测：空 b
 > ⇒ **本轮独立复核的逐层证据链**（不是转述）：
 > | 层 | 证据（本轮在 `GOMODCACHE` / `GOROOT` 里逐行读过） | 结论 |
 > |---|---|---|
-> | ① GORM 的 int64 setter | `gorm.io/gorm@v1.31.2/schema/field.go:616-622`：`case **int64: if data != nil && *data != nil { …SetInt(**data) }` | DB 值 NULL ⇒ `*data == nil` ⇒ **什么都不做** ⇒ 字段保持 **0**，**不报错** |
+> | ① GORM 的 int64 setter | `gorm.io/gorm@v1.31.1/schema/field.go:616-622`：`case **int64: if data != nil && *data != nil { …SetInt(**data) }` | DB 值 NULL ⇒ `*data == nil` ⇒ **什么都不做** ⇒ 字段保持 **0**，**不报错** |
 > | ② stdlib 转换层 | `database/sql/convert.go:431-435`：`case reflect.Pointer: if src == nil { dv.SetZero(); return nil }` | dest 的 kind 是 **Pointer** ⇒ 走这一支 ⇒ **不报错** |
 > | ③ 双侧活体对拍 | `user/rpc.md`「2026-10-23 第三轮」：`status IS NULL` 打 Login ⇒ **Go 200 + token** | ⇒ **删掉 `= 0L` 才是不等价的那一侧** |
 >

@@ -277,7 +277,7 @@ Result 只用 5 个枚举值。证据列的记号：
 | Logout | **`success` 字段** | 恒 `false` | 恒 `false` | **EQUIVALENT**（跟随后 Go 的可疑形态） | `[GO] :43` `[RAG] :756` |
 | Logout | token 有效性检查 | **无** | **无** | **EQUIVALENT** | `[GO] 全文 35 行` `[RAG] :737-757` |
 | 全组件 | 指标名 / label | `user_rpc_register_total{result=success\|fail_exists\|db_error\|internal_error}`、`user_rpc_login_total{result=success\|user_not_found\|db_error\|internal_error}` | 逐条 1:1 | **EQUIVALENT** | `[GO] metrics/metrics.go:9-22` `[RAG] UserRpcMetrics.java:47-79` |
-| 全组件 | 指标**可抓取性** | DevServer 仅 dev/test 起，生产无端点 | `management.server.port:-1` + 全端点关 | **EQUIVALENT**（两侧生产都不可抓） | `[GO] user.yaml:23-30` + `ServiceConf.Mode` 默认 `pro`；`[RAG] application.yaml:102-111` |
+| 全组件 | 指标**可抓取性** | 🔴 **生产也起 DevServer**（`go-zero@v1.10.2/core/service/serviceconf.go:77` `devserver.StartAgent(sc.DevServer)` 在 `SetUp()` 里**无条件**调用 ⇒ `:83-89` `initMode()` 只做 `load.Disable()` + `stat.SetReporter(nil)`、**不门控 DevServer** ⇒ `internal/devserver/server.go:79-82` 只判 `c.Enabled` ⇒ `internal/devserver/config.go:5` `Enabled` **default=true**（⚠️ **该默认值只在「DevServer 段存在但没给值」时生效** —— 真源 `go-zero@v1.10.2/core/service/serviceconf.go:40` 的 `DevServer DevServerConfig` 带 **`optional`** 标签 ⇒ **整段缺失 ⇒ 保持零值 ⇒ `Enabled=false` ⇒ 不启动** ⇒ ⇒ **本域成立是因为 `user.yaml:23-27` 显式写了 `DevServer: Enabled: true`**（`admin.yaml:31-35` 同款，端口 9097）⇒ ⇒ **不是「DevServer 默认全开」**）⇒ `zrpc/server.go:63` `c.SetUp()` 走同一条路）⇒ **生产就有** `/metrics` + `/healthz`（`user.yaml:23-30` ⇒ 端口 **9094**） | `management.server.port:-1` + 全端点关（`application.yaml:155-167`）⇒ **零出口** | 🔴 **OBSERVABLE DIFFERENCE**（⚠️ 原判「**EQUIVALENT**（两侧生产都不可抓）」的 **Go 侧前提已被推翻** ⇒ 订正依据见本行 Evidence 末） | `[GO] user.yaml:23-30` + `go-zero@v1.10.2/core/service/serviceconf.go:77` / `:83-89` + `internal/devserver/server.go:79-82` + `internal/devserver/config.go:5` + `zrpc/server.go:63`；`[RAG] application.yaml:155-167`<br>⚠️ **2026-10-30 订正（G1 lane · `align/g1-users-follow`）**：原判「**DevServer 仅 dev/test 起，生产无端点 ⇒ 两侧生产都不可抓 ⇒ EQUIVALENT**」**不成立** —— Go 侧 `SetUp()` **无条件**起 DevServer、**`initMode()` 也不门控它** ⇒ ⇒ **Go 生产可抓、RAG 零出口** ⇒ 改判 **OBSERVABLE DIFFERENCE**。落点 = **users 域 rpc 层的指标出口方案**（与 follow 域 `DRIFT-FOLLOW-006` / `S1-FOLLOW-001` 同族；`docs/DRIFT/follow/rpc.md:330-336` 已把 **9094 / 9097** 明确划归 **users 域**）⇒ ⚠️ **修法 = 引入 `spring-boot-starter-web`（纯 gRPC 进程 → 带 Tomcat ⇒ 部署形态变更）+ 关 Nacos 自动注册（否则注册的是 web 容器端口）** ⇒ **属「全仓 rpc 层指标出口统一方案」** ⇒ **用户 2026-10-24 已定交主会话拍板** ⇒ ⇒ **本轮只订正判定、只登记，不落码**（且**不在 `docs/DRIFT/_cross/stage1-derivation.tsv` 的 `wave=G1` 开放行内** ⇒ 不在本波派工面）。核对日期 2026-10-30。 ⚠️ **2026-10-30 16:7x 补载体层证据（依赖树实测，非 grep pom）**：`service/users/user/user-rpc` 的实际 classpath 只有 `spring-boot-starter-actuator`（**无** `spring-boot-starter-web` / **无** `tomcat-embed-core`）⇒ ⇒ **无 servlet 载体 ⇒ `/actuator/prometheus` 没有载体 ⇒ 「`management:` 段三重关闭」不是本域独有问题** ⇒ ⇒ **10 个 rpc 里 9 个无载体**（仅 `follow-rpc` 有）⇒ ⇒ 本行「RAG 侧零出口」的改判**成立且比原判更强**（不是本域孤例，是 9/10 的通例）⇒ 完整两层口径见 `docs/DRIFT/follow/vs-common.md` 末尾对应小节 |
 | 全组件 | 指标注册形态 | `prometheus.Unregister(GoCollector/ProcessCollector)`（`:25-26`） | Micrometer 保留默认 collector | **IMPLEMENTATION DIFFERENCE** | 无行为影响 |
 | 全组件 | 死代码 | 无 | 3 个异常类 + 2 个 mapper 方法零调用点，其中 3 个异常类的 javadoc 引用**不存在的 Go 出处** | **OBSERVABLE DIFFERENCE**（无行为影响） | **V-008** |
 
@@ -547,7 +547,7 @@ RAG 多一层 properties。**该条不重开。**
 > ⇒ **逐层证据链（本轮独立复核，不是转述台账）**：
 > | 层 | 证据 | 结论 |
 > |---|---|---|
-> | ① GORM 装给 int64 字段的 setter | `gorm.io/gorm@v1.31.2/schema/field.go:616-622`（**本轮在 `GOMODCACHE` 里逐行读过**）<br>`case reflect.Int, …, reflect.Int64:` → `switch data := v.(type) { case **int64: if data != nil && *data != nil { field.ReflectValueOf(ctx, value).SetInt(**data) } }` | ⇒ DB 值是 NULL ⇒ `*data == nil` ⇒ **什么都不做** ⇒ 字段保持 Go 零值 **0** ⇒ **不报错** |
+> | ① GORM 装给 int64 字段的 setter | `gorm.io/gorm@v1.31.1/schema/field.go:616-622`（**本轮在 `GOMODCACHE` 里逐行读过**）<br>`case reflect.Int, …, reflect.Int64:` → `switch data := v.(type) { case **int64: if data != nil && *data != nil { field.ReflectValueOf(ctx, value).SetInt(**data) } }` | ⇒ DB 值是 NULL ⇒ `*data == nil` ⇒ **什么都不做** ⇒ 字段保持 Go 零值 **0** ⇒ **不报错** |
 > | ② stdlib 转换层 | `database/sql/convert.go:431-435`（**本轮在 `GOROOT` 里逐行读过**）<br>`case reflect.Pointer: if src == nil { dv.SetZero(); return nil }` | ⇒ dest 的 kind 是 **Pointer**（GORM 传的是 `**int64`）⇒ 走这一支 ⇒ **不报错**<br>（⚠️ 网上常见的 `converting NULL to int64 is unsupported` 那条属 `case reflect.Int64` ⇒ **走不到**） |
 > | ③ 双侧活体对拍 | 本文件「2026-10-23 第三轮」：`status IS NULL` 打 Login ⇒ **Go 200 + token**；RAG 当时「删掉 `= 0L` + 加 null ⇒ INTERNAL」的版本 ⇒ **5001** | ⇒ **删掉 `= 0L` 才是不等价的那一侧**（已恢复，见 `UserEntity.status` 的 javadoc） |
 >
@@ -577,7 +577,7 @@ RAG 多一层 properties。**该条不重开。**
 - **Category**: Schema / Serialization
 - **Go 侧成因（本轮独立复核，不是猜的）**：
   `data_model.go:13` `ExtraInfo map[string]string gorm:"column:extra_info;serializer:json"`
-  → `gorm@v1.31.2/schema/field.go:195-199`：`serializer` 命中时 **强制 `field.DataType = String`**
+  → `gorm@v1.31.1/schema/field.go:195-199`：`serializer` 命中时 **强制 `field.DataType = String`**
   → `gorm.io/driver/postgres@v1.6.0/postgres.go:245-250`：`schema.String` 且 `Size == 0` ⇒ 返回 **`text`**。
   **⇒ Go 侧 `users.extra_info` 就是 `text`，不是 jsonb。**
   ⚠️ 上面这条推导链**每一环都对，但已不再是唯一依据**：本轮另取**建表语句级实证**
@@ -1381,7 +1381,7 @@ SEMANTICALLY EQUIVALENT（全部可达路径） + 7 项 OBSERVABLE DIFFERENCE
 
 - 声明点：`service/user/user/rpc/internal/model/data_model.go:11`
   `Status int64 `gorm:"column:status;default:0"`` —— <b>值类型 + 无 not null</b>
-- 消费点：`gorm@v1.31.2/scan.go:153` `db.AddError(rows.Scan(values...))`
+- 消费点：`gorm@v1.31.1/scan.go:153` `db.AddError(rows.Scan(values...))`
   → `database/sql` 对「NULL → int64」返回 unsupported 错误
   → `internal/model/user.go:28` `return nil, err`（<b>非</b> `ErrRecordNotFound`）
   → `internal/logic/loginlogic.go:53-57` db_error 支 ⇒ `codes.Internal "DB查询失败"`
@@ -1430,7 +1430,7 @@ SEMANTICALLY EQUIVALENT（全部可达路径） + 7 项 OBSERVABLE DIFFERENCE
 >
 > ⚠️ **本节写于 2026-10-23 上午，是那次「误修」期间的判断** ⇒ **已被同日第三轮的双侧活体对拍证伪**：
 > - **Go 侧读 `status IS NULL` 得到的是 `0`，不报错**（逐层证据见本文件 `DRIFT-USERRPC-V-002` 的 2026-10-27 订正块
->   ① `gorm@v1.31.2/schema/field.go:616-622` ② `database/sql/convert.go:431-435` ③ 双侧活体 `Go 200 + token`）；
+>   ① `gorm@v1.31.1/schema/field.go:616-622` ② `database/sql/convert.go:431-435` ③ 双侧活体 `Go 200 + token`）；
 > - ⇒ **admin-rpc 保留 `= 0L` 是「当时正确」的一侧**（与 user-rpc 同形），**不是缺陷** ——
 >   这一点 **admin-rpc 自己的台账已明确撤销该指认**
 >   （`docs/DRIFT/users/admin/rpc.md` 的 `UserEntity.status` javadoc：「admin-rpc 的同名实体一直保留 `= 0L`（与本类同形）—— 是当时正确的一侧 …该指认已撤销」）；
@@ -2007,7 +2007,7 @@ api 侧有 3s HTTP 预算：RAG 的**黑名单查询**自己就要 ~3s ⇒ 请�
 ### 上一节「待审」三问的答案
 
 1. **「Redis 命令超时 3s」与「gRPC deadline」是否同刻？** ⇒ **不同刻，且 RAG 侧是 deadline 必然先到**：
-   - Go：`SetexCtx(l.ctx, ...)` **绑了** handler ctx 的 2000ms deadline（`rpc.go:38,55`）⇒ 命令在 **2s** 被 ctx 掐断 ⇒ **< 3s** ⇒ handler 返回 `INTERNAL`（拒连/解析失败形态）或与拦截器同刻（挂起形态）。
+   - Go：`SetexCtx(l.ctx, ...)` **绑了** handler ctx 的 2000ms deadline ⇒ **但 ctx 的感知范围只到「取连接 + 拨号」这一段**：`internal/pool/pool.go:1099-1104`（`waitTurn` fast path **无条件先查 `ctx.Done()`**）＋ `:837`（`getConn` **必调** `waitTurn`）＋ `:1113`（slow path 的 `semaphore.Acquire(ctx, …)` 同样绑 ctx）＋ `:589-591`（`newConn` → `dialConn(ctx)` 拨号也绑 ctx）；⇒ **一旦连接已取到、进入 socket 读写，`redis.go:1027-1032` 的 `c.context(ctx)` 就把 ctx 换成 `context.Background()` ⇒ 该段只剩固定 3s `ReadTimeout`**（`options.go:174` 零值；go-zero `core/stores/redis/redisclientmanager.go:32-40` **未设** `ContextTimeoutEnabled`）⇒ ⇒ **本条实测形态（Redis 拒连/解析失败）里，Go 侧是 ~1.7~1.8s 拨号失败（见本节上一段的 5 次尝试换算）⇒ 早于 2s ⇒ 不是「2s 被 ctx 掐断」** ⇒ handler 返回 `INTERNAL` ⇒ **< 3s** ⇒ 与拦截器不同刻（挂起形态另算）。
    - RAG：Redis 写**只受 `spring.data.redis.timeout: 3s` 约束、不受 gRPC deadline 约束** ⇒ **拦截器的 2s 必然先到** ⇒ 客户端拿到 `DEADLINE_EXCEEDED`。
    ⇒ **形状不摇摆**（上一节的担心不成立）—— 因为两侧的「谁先到」是**各自确定**的。
 2. **「写失败 ⇒ 黑名单没写进去 ⇒ token 仍有效；api 侧读取也 fail-open ⇒ 两侧一起失效」是不是 Go 同款？**

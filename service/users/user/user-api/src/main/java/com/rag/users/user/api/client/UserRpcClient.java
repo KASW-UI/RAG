@@ -140,7 +140,83 @@ public class UserRpcClient implements InitializingBean {
                 + "（对齐 go-zero zrpc/internal/client.go:18 dialTimeout=3s）", timeout.toMillis());
     }
 
+    /**
+     * <b>zrpc 客户端超时 = 2s</b>。
+     *
+     * <p><b>Go 出处</b>：{@code go-zero@v1.10.2/zrpc/config.go:31}
+     * —— {@code RpcClientConf.Timeout int64 `json:",default=2000"`}
+     * ⇒ <b>默认 2000ms</b>；且 Go 侧 {@code service/user/user/api/etc/usercenter.yaml}
+     * 的 {@code UserRpc:} 段<b>没有显式 Timeout</b>（只有 {@code Etcd}）⇒ ⇒
+     * <b>Go 侧出向 user-rpc 的调用恒带 2s 客户端超时</b>。
+     *
+     * <p><b>消费点</b>：{@code go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25}
+     * —— {@code ctx, cancel := context.WithTimeout(ctx, t)}
+     * ⇒ <b>Go 的 {@code context.WithTimeout} 取更早者</b>（父 deadline 更早则保留父的）
+     * ⇒ ⇒ <b>Go 的出向 deadline = min(入站 ctx 剩余, 2s 客户端超时)</b>。
+     *
+     * <p><b>语义等价论证</b>：本实现把同一个 min 语义显式做出来 ——
+     * {@link com.rag.common.observability.GoStyleRequestDeadline#applyTo} 负责「入站剩余」
+     * （无入站预算时原样返回 ⇒ 剩 {@link Long#MAX_VALUE}），
+     * {@link #capByClientTimeout} 负责「2s 上界」⇒ 二者取更早者
+     * ⇒ <b>与 Go 的 {@code context.WithTimeout(ctx, 2s)} 逐字同形</b>。
+     *
+     * <p><b>为什么 RAG 侧必须自己补这一层</b>：Go 的 2s 客户端超时是
+     * <b>go-zero client interceptor 级</b>的（框架自带）；RAG 侧
+     * {@code devh} 的 {@code @GrpcClient} 注入的 <b>裸 stub 没有 call deadline</b>
+     * ⇒ 下游挂死时请求会<b>一路顶到 HTTP 超时分支</b>（{@code http-timeout: 3s}）
+     * ⇒ 对外是 <b>503 {@code Request Timeout}</b>；而 Go 侧是
+     * <b>HTTP 200 + {@code {"code":1015,"msg":"服务繁忙"}}</b>
+     * ⇒ ⇒ <b>可观察差异</b>（状态码 + 响应体 + 时刻三者都不同）。
+     *
+     * <p><b>⚠️ 差异的准确边界（不要读宽）</b>：RAG 侧下游 {@code user-rpc} <b>自己</b>带服务端 2s 超时
+     * （{@code service/users/user/user-rpc/src/main/resources/application.yaml:209} = {@code rpc-timeout: 2s}；
+     * 接线在位由 {@code check-grpc-interceptor-wiring.py} = EXIT=0 实测确认）
+     * ⇒ ⇒ <b>形态①「请求到达下游、业务挂死」</b>：RAG 由<b>服务端</b> 2s 收口 ⇒ {@code DEADLINE_EXCEEDED}
+     * ⇒ 本域映射 ⇒ <b>1015</b> ＋ HTTP 200 ⇒ <b>与 Go 同形</b>；
+     * ⇒ ⇒ <b>形态②「请求没到达下游」</b>（进程不可达 / 网络黑洞 / 连接建好但无响应）：
+     * Go 由<b>客户端</b> 2s 收口（= min(剩余 3s ctx, 2s)，3s 预算见
+     * {@code service/common/observability/http.go:30-34} ＋ {@code :53-56}）⇒ 200 + 1015；
+     * RAG 修前<b>无客户端收口</b> ⇒ 只能等 3s HTTP 预算 ⇒ 503
+     * ⇒ ⇒ <b>形态②才是本条要修的可观察差异</b>。
+     * ⇒ 同款修法在 follow 域已落地（{@code service/follow/follow-api/.../FollowRpcClient.java:231}
+     * 的 {@code capByClientTimeout(applyTo(stub))}，对应 Go 的
+     * {@code zrpc/config.go:31} 默认 2000ms）⇒ 本处照该形状落地。
+     */
+    public static final long CLIENT_TIMEOUT_MILLIS = 2000L;
+
+    /**
+     * 取出出向 user-rpc 的 stub —— <b>每次调用都重新套一次 deadline</b>。
+     *
+     * <p>⚠️ <b>不要缓存返回的 stub</b>：deadline 是<b>按调用时刻</b>算的
+     * （入站预算在请求推进中不断变短）⇒ 缓存会把「第一次调用时的预算」固化下来
+     * （同 {@code GoStyleRequestDeadline.applyTo} javadoc 的警告）。
+     */
     public UserServiceGrpc.UserServiceBlockingStub userRpc() {
-        return userServiceBlockingStub;
+        return capByClientTimeout(
+                com.rag.common.observability.GoStyleRequestDeadline.applyTo(userServiceBlockingStub));
+    }
+
+    /**
+     * 把 deadline 压到「入站 ctx 预算」与「Go 侧 2s 客户端超时」里的<b>较小者</b>。
+     *
+     * <p>包可见 ⇒ 供本包的守门测试直接验证 min 语义（AGENTS.md §3.3.3：
+     * 「凡引入新的框架机制，必须配一条能真正触发该机制的测试」）。
+     *
+     * @param stub 已套好入站预算（或原样）的 stub
+     * @return 带 {@code min(剩余, 2s)} deadline 的新 stub
+     */
+    static UserServiceGrpc.UserServiceBlockingStub capByClientTimeout(
+            UserServiceGrpc.UserServiceBlockingStub stub) {
+        io.grpc.Deadline deadline = stub.getCallOptions().getDeadline();
+        long remainingNanos = deadline == null
+                ? Long.MAX_VALUE
+                : deadline.timeRemaining(java.util.concurrent.TimeUnit.NANOSECONDS);
+        long capNanos = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(CLIENT_TIMEOUT_MILLIS);
+        if (remainingNanos <= 0L) {
+            // 预算已耗尽 ⇒ 立刻失败（Go 侧 ctx 到期同理）
+            return stub.withDeadlineAfter(1L, java.util.concurrent.TimeUnit.NANOSECONDS);
+        }
+        return stub.withDeadlineAfter(Math.min(remainingNanos, capNanos),
+                java.util.concurrent.TimeUnit.NANOSECONDS);
     }
 }
