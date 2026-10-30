@@ -5787,10 +5787,15 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
 **三、为什么没落运行期守门（诚实说明，不是遗漏）**
 
 - 收口执行者要求配一条**运行期**断言（起 rpc 形态的 context ＋ `rag.side=rpc` ⇒ ⇒ 断言那 13 个**带门的类**不在容器里）⇒ ⇒ **该门现已在主干 ⇒ ⇒ 这条断言此刻可写（不再是恒红）** ⇒ ⇒ **仍待域侧补**（该守门要断的 13 个类名已写在本节第一段里）⇒ ⇒ 在它落之前 ⇒ ⇒ **不写「已封住」**（原写「本分支基线上必然红 · 门没进来」是**分支相对**的说法 ⇒ 叠到主干后已不成立 ⇒ 原值保留备查）。
+- 🟢 **【2026-10-31 · 合并收口执行者就地订正】该运行期守门已落 ＋ 已真跑通过**：载体门 `UserRpcPrometheusCarrierGateTest` / `AdminRpcPrometheusCarrierGateTest` 已在主干（`8d276b89` ＋ `9754344d`）⇒ ⇒ **读 surefire XML（不是 stdout）**：`tests=4 · failures=0 · errors=0 · skipped=0`（**两域各 4/4，0 skip** ⇒ **真跑过，不是 SKIP**）⇒ ⇒ **全 7 条载体守门合计 22 tests / 0 failures / 0 errors / 0 skipped**（article 2/2 · favorite 2/2 · hot 2/2 · message 4/4 · like 4/4 · user 4/4 · admin 4/4）⇒ ⇒ 原写「仍待域侧补 ⇒ 在它落之前不写已封住」**已过期** ⇒ ⇒ **原值保留备查**。
+  ⚠️ **这批守门在 2026-10-30 曾经全部 SKIP**（本机 Docker daemon 返 500 ⇒ `ENV-06`）⇒ ⇒ **「BUILD SUCCESS」当时是 SKIP 不是通过** ⇒ ⇒ 本条的绿是 **2026-10-31 Docker 恢复后重跑**才拿到的 ⇒ ⇒ 判据一律以 surefire XML 的 `skipped=` 为准。
+  ⚠️ 期间踩到并已修的两个真问题：① `UserRpcPrometheusCarrierGateTest` **缺两个 import** ⇒ 叠进主干后 `mvn test-compile` 直接红（`18cfb1b2`）；② **排除 devh 的 `GrpcServerAutoConfiguration` = 一次性拆掉它提供的三个 bean**（`GrpcServerProperties` / `GrpcServiceDiscoverer` / `GlobalServerInterceptorRegistry`）⇒ ⇒ 连锁三层 `NoSuchBeanDefinitionException` ⇒ ⇒ 正解 = **不排除它** ＋ `grpc.server.port=0` 让 gRPC 绑随机口（`9754344d`）⇒ ⇒ **「编译通过」≠「守门转绿」在本条再次成立**。
 
 **四、给 users 两个 rpc 加观测载体这件事本身不在本轮授权面**
 
 - Go 侧 `user-rpc` / `admin-rpc` 的 DevServer 是**dev 模式工具**（Go 侧注释原文：「dev 模式工具，不是主进程一部分」「Docker 里也不抓」）⇒ ⇒ RAG 侧是否也开观测口 = **部署形态决策** ⇒ ⇒ 属 `S1-FOLLOW-001`（全仓 rpc 层指标出口统一方案）⇒ ⇒ **交主会话拍板** ⇒ ⇒ 本轮只把「载体一旦落地就必须带 `rag.side: rpc`」这件事钉在配置里。
+- 🟢 **【2026-10-31 · Jason 已拍板 · 合并收口执行者就地订正】载体已落地 ＋ 已追认**：Jason 于 2026-10-31 就 `S1-FOLLOW-001`（users 域实例）拍板「**追认保留**」⇒ ⇒ 落码载体 = `service/users/user/user-rpc/src/main/resources/application.yaml:235`（`server.port: ${USER_RPC_MANAGEMENT_PORT:9094}` ＋ `spring-boot-starter-web` ＋ Nacos `register-enabled: false`）＋ `service/users/admin/admin-rpc/src/main/resources/application.yml`（`${ADMIN_RPC_MANAGEMENT_PORT:9097}`）⇒ ⇒ 端口取自 Go 真源 `service/user/user/rpc/etc/user.yaml:23-30` / `service/user/admin/rpc/etc/admin.yaml:31-34` 的 `DevServer.Port`（**一字不差**）⇒ ⇒ 与已落地的 follow(16065) / article(9092) / favorite(16062) / hot(19091) **同款** ⇒ ⇒ **原写「本轮只钉配置」已过期** ⇒ ⇒ 原值保留备查。
+  ⚠️ **口径注**：Go 侧 `SetUp()` **无条件**起 DevServer（`core/service/serviceconf.go:77` `devserver.StartAgent(sc.DevServer)`，`initMode()` **不门控**它）⇒ ⇒ **Go 生产可抓** ⇒ ⇒ RAG 侧开这个面 = **对齐 Go 的观测面，不是新增面**（业务路由两侧都零）。
 ---
 
 > ⚠️ **以下内容原位于本文件中部 —— 2026-10-30（G1 lane）移到末尾**
@@ -5822,7 +5827,7 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
 **不做（明确边界）**
 ① 阶段二（`docs/twoStage.md` §1.3 / §2.2 / §6 / §7）；
 ② 共享面：`service/common/**` + `service/users/users-common/**` + `tools/**` + `docs/DRIFT/_cross/**` + `AGENTS.md` + 三个 `_INDEX.md` + `docs/PhaseGoal-judge.md` + `docs/PhaseGoal/**` + `docs/Worktree.md`（⇒ 归 G4 / 合并收口执行者）；
-③ **`S1-FOLLOW-001`（全仓 rpc 层指标出口统一方案）** —— 用户 **2026-10-24** 已定「交主会话拍板」⇒ **不当新缺陷重提**（follow 域已自行落地 `DRIFT-FOLLOW-006` 的同款，9094/9097 已由 `docs/DRIFT/follow/rpc.md:330-336` 明确划归 users 域 ⇒ **本轮只订正本域台账里被推翻的前提，不落码**）；
+③ **`S1-FOLLOW-001`（全仓 rpc 层指标出口统一方案）** —— 用户 **2026-10-24** 已定「交主会话拍板」⇒ **不当新缺陷重提**（follow 域已自行落地 `DRIFT-FOLLOW-006` 的同款，9094/9097 已由 `docs/DRIFT/follow/rpc.md:330-336` 明确划归 users 域 ⇒ **本轮只订正本域台账里被推翻的前提，不落码**）；🟢 **【2026-10-31 · Jason 追认】** 原写「**不落码**」**已过期** ⇒ ⇒ **Jason 已拍板「追认保留」**（users 域的载体**已落地**：`9094` / `9097`，端口与 Go 的 `DevServer.Port` 一字不差）⇒ ⇒ 落码与运行期证据见本文件「四、给 users 两个 rpc 加观测载体」小节的【2026-10-31 订正】段 ⇒ ⇒ **原值保留备查**。
 ④ **不重开任何已签字偏离**（`DRIFT-FOLLOW-008` / MaxConns 半边 `SD-2026-10-25-01` / `DRIFT-USERS-002` / `DRIFT-ADMINAPI-001~004` / N-2 乱码）；
 ⑤ 🔴 **订正（2026-10-30 16:5x）** —— 原写「**不改** `S1-USERS-002` 的 datasource 口令 fallback —— 台账 `docs/DRIFT/users/stage1-admission.md:477` 已裁定『取消 fallback ⇒ **RAG 比 Go 更严** ⇒ 属**有意偏离**（需签字），**不是纯域侧自修**』⇒ 本轮只登记」⇒ ⇒ **那个前提是错的**（`:477` 原句「Go 真源 yaml 是**字面量默认值**，恒能起栈」与 Go 源码不符）⇒ ⇒ **Go 侧全部 rpc yaml 都是 `"${POSTGRES_PASSWORD}"`（无默认值）** ⇒ `os.ExpandEnv` 不认 `${VAR:default}` ⇒ **缺变量即空串 ⇒ 连库失败 = fail-fast** ⇒ ⇒ **RAG 保留 `:password` 兜底 = 比 Go 松 = 真漂移** ⇒ ⇒ **不是有意偏离、不需要为「保留」签字** ⇒ ⇒ **本轮已落码**：G1 面 **3 处**取消 fallback（`user-rpc` `application.yaml:26` · `admin-rpc` `application.yml:24` · `follow-rpc` `application.yml:38` · ⚠️ **行号因本轮加注释位移 +2**）⇒ ⇒ 残余 **7 处**归 G2/G3。⚠️ **取消后的残余差异（RAG 更严的一侧）**：Go = 启动成功、连库时失败；RAG = **启动即失败** ⇒ **失败时刻**不同 ⇒ 这一条残余才属有意偏离候选（同 JWT fail-closed 族）。
 
@@ -5843,6 +5848,7 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
 
 **本轮 = 0 条新增待拍板项** —— 10 条开放项已全部按「域侧自修 / 转派 G4 / 域外登记」分流完毕，无一条卡在「必须 Jason 决策才能往下走」。
 ⚠️ **1 条既有待拍板项仍在（不属本轮、也不重复提）**：**`S1-FOLLOW-001`** —— 全仓 rpc 层指标出口统一方案（用户 2026-10-24 已定「交主会话拍板」）⇒ ⇒ 本轮**只订正本域台账里被推翻的前提**（`user/rpc.md:280`），**不落码**、**不重提**为新缺陷。
+🟢 **【2026-10-31 · Jason 已拍板 · 合并收口执行者就地订正】** —— **Jason 于 2026-10-31 就 users 域这一实例拍板「追认保留」** ⇒ ⇒ 原写「**1 条既有待拍板项仍在**」**已过期**（users 域不再是待拍板项）⇒ ⇒ 载体**已落地**（`9094` / `9097`）＋ **运行期守门已真跑通过**（`4/4` ＋ `4/4`，`skipped=0`）⇒ ⇒ **原值保留备查**。
 
 **④ 等批准 ⇒ 批准后才开工**
 **回执落笔时**本轮只读 + 写本回执（未获批准前不写任何代码、不改任何台账，本小节除外）；⇒ **Jason 于 2026-10-30 10:31 在本 lane 会话内明示「开始工作」**⇒ **已获批开工**（⑤ 由调度员代填，见本节末尾）⇒ 本轮按 ① 所列范围执行。
