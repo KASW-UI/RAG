@@ -15,20 +15,31 @@
 # 为什么这是**真偏离**（不是无害的冗余）：
 #   Go 侧的 rpc 服务**全部**是 `zrpc.MustNewServer` ⇒ ⇒ **一个 rest 中间件都没挂**
 #   （`rest.With*` 全在 api 侧的 `routes.go`）⇒ ⇒ 在 rpc 域注册 api 侧中间件 = RAG 做了 Go 不会做的事。
-#   ⚠️ **有杀伤力的两个**：
+#   ⚠️ **会「拒请求」的两个**（2026-10-30 二次订正 · G1 逐类核过 ⇒ 订正我原先把
+#     `GoStyleTomcatParameterLimitCustomizer` 列进去的错误 —— 它是**容器级**、**不是请求路径组件**）：
 #     · `GoStyleCpuSheddingFilter` ⇒ CPU 超阈时**拒掉抓取请求** ⇒ 直接威胁「载体」这件事本身的目的；
-#     · `GoStyleTomcatParameterLimitCustomizer` ⇒ **容器级** ⇒ 它管的正是 `DRIFT-HOTAPI-030` 那条轴。
+#     · `GoStyleMaxConnsFilter` ⇒ 连接数超限 ⇒ **同样拒请求**。
+#   ⇒ 另：`GoStyleTomcatParameterLimitCustomizer` 虽不拒请求，但它管的正是 `DRIFT-HOTAPI-030` 那条轴
+#     ⇒ ⇒ **两类风险要分开说**（拒请求 ≠ 容器参数口径）。
 #
 # ⚠️ **共享层门已在 G4 第九次订正 `6a7b1a2b` 落码**（`com.rag.common.web.ConditionalOnApiSide`
 #   元注解 + 13 个类全挂 + 5 形态真起进程守门 + 双向变异）⇒ ⇒ **自动配置面那 3 个已被护栏兜住**；
-#   ⇒ ⇒ **扫描面那 10 个仍只靠「域侧不扫 com.rag.common」活着** ⇒ ⇒ **本白名单只覆盖形态面**。
+#   ⇒ ⇒ **13 个类已逐个核实全部挂了 `@ConditionalOnApiSide`**（2026-10-30 二次订正）⇒ ⇒
+#   ⇒ ⇒ **「扫描面那 10 个只靠域侧约定活着、`rag.side=rpc` 救不了它们」这句已过期** ⇒ ⇒
+#   ⇒ ⇒ **扫描面现在是双保险**（域侧不扫 `com.rag.common` ＋ 门）⇒ ⇒ **形态面加一行 `rag.side: rpc`
+#   ⇒ ⇒   一次封掉全部 13 个** ⇒ ⇒ **本白名单覆盖的正是形态面 = 缺 `rag.side`**。
 #
 # 白名单用法：每行 `<模块标识>\t<归属 / 归期>`；模块标识 = 模块目录名（如 `follow-rpc`）。
 # 条目已无命中 ⇒ 守门会报「🟡 可删除」⇒ ⇒ **合入后请剪枝**。
 # ⚠️ **白名单只写「已定位、有人负责、归期明确」的项** ⇒ ⇒ 任何**新出现**的违例一律报红。
+#
+# ⚠️ **2026-10-30 二次订正 · 这 5 条的性质变了** ⇒ ⇒ 原写「等载体波次合入后即可删」**前提是错的**
+#   （载体 2026-10-29 就已在主干 ⇒ 这些域**今天就是 servlet 形态**）⇒ ⇒ **这 5 条是「活偏离」不是「将来才有」**
+#   ⇒ ⇒ 故每条理由都改成「🔴 活偏离 · 主干上今天就成立」＋ owner ＋ 已派单 ＋ 落地路径
+#   ⇒ ⇒ **白名单 = 如实登记的已知未修项**（不是「一切正常」的凭据）⇒ ⇒ 合入后**必须剪**。
 
-follow-rpc	G1 面 · 载体波次内补 `rag.side: rpc`（其载体样板已在 G1 分支落码）⇒ 合入主干后即可删
-like-rpc	G2 面 · 已派单（载体波次内一并加）⇒ 改动后即可删
-message-rpc	G2 面 · 已派单（载体波次内一并加）⇒ 改动后即可删
-task-rpc	G2 面 · 已派单（载体波次内一并加）⇒ 改动后即可删
-user-rpc	G1 面 · 载体波次内补 `rag.side: rpc` ⇒ 合入主干后即可删
+follow-rpc	🔴 **活偏离 · 主干上今天就成立**（载体 2026-10-29 已落主干 ⇒ 它是 servlet 形态 ⇒ api 侧 13 个类会挂到 16065 观测口）⇒ G1 面 · G1 已写好 `rag: side: rpc`（工作树已落）⇒ 等它单独提交 → 收口执行者 cherry-pick ⇒ 落地后即可删
+like-rpc	🔴 **活偏离 · 主干上今天就成立**（web starter ✅ + 无 `web-application-type: none` ⇒ servlet 形态）⇒ G2 面 · G2 分支 `48e48b93` 已有 `rag: side: rpc` ⇒ 已派单「单独提交一笔只含 3 个 yml 的 `rag.side`」⇒ 落地后即可删
+message-rpc	🔴 **活偏离 · 主干上今天就成立**（同上）⇒ G2 面 · G2 分支 `48e48b93` 已有 `rag: side: rpc` ⇒ 已派单同一笔 ⇒ 落地后即可删
+task-rpc	🔴 **活偏离 · 主干上今天就成立**（同上）⇒ G2 面 · ⚠️ **G2 分支里 task-rpc 漏了 `rag.side`**（like/message 有、task 没有）⇒ 已派单补上 ⇒ 落地后即可删
+user-rpc	🔴 **活偏离 · 主干上今天就成立**（web starter ✅ + 无 none ⇒ servlet 形态；当前 `management.server.port: -1` ⇒ 无观测口 ⇒ 影响较小但门缺失即偏离）⇒ G1 面 · G1 已写好 `rag: side: rpc` ⇒ 等它单独提交 → 收口执行者 cherry-pick ⇒ 落地后即可删
