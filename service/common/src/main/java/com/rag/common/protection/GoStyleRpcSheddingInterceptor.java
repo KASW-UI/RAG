@@ -1,5 +1,6 @@
 package com.rag.common.protection;
 
+import com.rag.common.observability.GoStyleStatMetrics;
 import io.grpc.ForwardingServerCall;
 import io.grpc.Metadata;
 import io.grpc.ServerCall;
@@ -232,6 +233,11 @@ public final class GoStyleRpcSheddingInterceptor implements ServerInterceptor {
             rejected.set(true);
             // Go: sheddinginterceptor.go:28-29 —— metrics.AddDrop() + sheddingStat.IncrementDrop()
             stat.incrementDrop();
+            // 🔴 Go 侧同一处还有 `metrics.AddDrop()`（stat.Metrics 的 **drop 计数**）
+            //    ⇒ ⇒ 本仓必须一并喂给 Stat 聚合器，否则每分钟那行报告里的
+            //    **drops 恒为 0**（Go: core/stat/metrics.go:178 report.Drops = drops）。
+            //    ⚠️ drops 与 qps/avg **互斥**：drop 样本不进 tasks、不进 duration（Go: metrics.go:107-118）。
+            GoStyleStatMetrics.getInstance().addDrop();
             // 🔴🔴 必须关 **watched**（本层包装过的那个），**不能关原始 call** ——
             //    关原始 call ⇒ 外层 breaker 的 close 观察点**不会被触发**
             //    ⇒ breaker 看不到这次降载 ⇒ 永远不会因降载而打开 ⇒ **与 Go 行为不同**。

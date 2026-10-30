@@ -614,6 +614,26 @@ req := r.WithContext(ctx)
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 `SD-2026-10-25-CAND-11`（T-2 / T-5 同一条），把「代码自称有意、但无签字」的第三态**归位到待签字候选** ⇒ 等用户拍板 |
 | 2026-10-25 | **用户签字** ⇒ 候选号 `CAND-11` 转正为 **`SD-2026-10-25-01`**，状态由「待签字」改为「已签字」。签字决定 = **保留 RAG 的全局闸门，不改成 per-route**。并完成两处落地：代码 javadoc 改为指向本档的指针 + 从 DRIFT 侧移除该条 |
 
+---
+
+## ⏳ SD-2026-10-30-CAND-22（候选）：RAG 的 Redis **严格模式**（命令等待 / socket 超时随剩余预算收紧）—— 若落码则比 Go 严 ｜ **状态（核对日期 2026-10-30）：⏳ 未签字**
+
+> 🏷 **候选，建议签** —— 登记完就躺着，不升级为拍板（用户既定偏好）。
+> ⚠️ **本条登记的是「一条尚未落码的能力」** ⇒ ⇒ 与「已生效的偏离」性质不同 ⇒ ⇒ **登记它 = 提前锁住「若将来落码则需签字」这个决策点**，**不是**在给一个已存在的偏离补账。
+
+| 项 | 值 |
+|---|---|
+| 状态 | ⏳ **未签字（候选）** —— 🏷 候选，建议签 |
+| 性质 | **「落码即产生一条有意偏离」的前置登记**（能力本身**本轮未落码** ⇒ 当前**无**行为差异 ⇒ 故不计入「已签字偏离」） |
+| ⚠️ **为什么现在登记** | 共享层已把「派发前检查」落码并证明其**不是**偏离（见下「与已落码部分的区别」）⇒ ⇒ **唯一剩下的「会造偏离」的两条能力**（socket 超时收紧 / 命令等待不超预算）**本轮明确不落** ⇒ ⇒ 若不登记，将来谁落码就会**无人认账地多出一条比 Go 严的行为** ⇒ ⇒ 本条 = 那一步的**决策前置** |
+| **Go 出处（对照面）** | `go-redis/v9@v9.20.0/redis.go:1024-1032`（`baseClient.context(ctx)` ⇒ `ContextTimeoutEnabled=false`（`go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-40` 构造客户端时**未设**该开关 ⇒ 默认 `false`）⇒ ⇒ **把 ctx 换成 `context.Background()`**）⇒ ⇒ `redis.go:968` / `:985`（`cn.WithWriter/WithReader(c.context(ctx), …)` ⇒ 拿到的 ctx **已无 deadline**）⇒ ⇒ `internal/pool/conn.go:961-991`（`cn.deadline(ctx, timeout)` ⇒ 只能用**固定 `ReadTimeout` = 3s** · `options.go:364-379`）⇒ ⇒ **Go 的 socket 层不随请求预算收紧** ⇒ ⇒ RAG 若收紧 = **比 Go 严** |
+| **RAG 出处（若落码，落在）** | ① socket 超时收紧 ⇒ `io.lettuce.core.TimeoutOptions$TimeoutSource`（public abstract · `getTimeout(RedisCommand)` + `getTimeUnit()`）+ `TimeoutOptions$Builder.timeoutSource(…)` + `ClientOptions$Builder.timeoutOptions(…)` + Boot 4 的 `LettuceClientOptionsBuilderCustomizer`（**实测 Boot 4.0.8 `LettuceConnectionConfiguration.createClientOptions` 字节码：offset 146 写的是**硬编码 `TimeoutOptions.enabled()`**（**不是** `spring.data.redis.timeout`）⇒ offset 151+ 才 apply customizer ⇒ ⇒ **customizer 在硬编码之后 ⇒ 可覆盖**）② 命令等待不超剩余预算 ⇒ 需把命令丢到另一线程再 `Future.get(remaining)` ⇒ ⚠️ 与**事务绑定**（`RedisConnectionUtils` 的 ThreadLocal 事务连接在调用线程上）+ **线程亲和**冲突 |
+| **与「已落码部分」的区别（关键）** | 共享层**已经落码**的是「**派发前检查**」（`GoStyleRedisDeadline.assertNotExhausted` · `GoStyleRedisDeadlineConnectionFactory.getConnection()` 在 `delegate.getConnection()` **之前**查预算）⇒ ⇒ **那一条不是偏离、是补齐漂移** —— Go 侧 `go-redis/v9@v9.20.0/internal/pool/pool.go:1098-1104` 的 `waitTurn` fast path **本来就无条件先查 `ctx.Done()`**（`pool.go:837` `getConn` 必调）⇒ ⇒ RAG 补上它 = **与 Go 同形** ⇒ ⇒ **不产生任何有意偏离** ⇒ ⇒ **本条候选**只覆盖上面那**两条尚未落码**的「严格模式」能力 |
+| 关闭条件 | ① 两条严格模式能力**本轮均不落** ⇒ **本条当前无行为差异** ⇒ 若它们**始终不落**，本条可在下一轮**撤销**（按本档口径「行为已不存在 ⇒ 不计」）；② 若将来落码 ⇒ **必须先走完签字** ⇒ 签字前 = 代码不得合入 |
+| 证据强度 | **A 活体**（Go 侧 socket 超时不收紧 = `redis.go:1024-1032` + `conn.go:961-991` 逐行读过 + `options.go:364-379` 的 `ReadTimeout=3s`）· ⚠️ **RAG 侧严格模式尚未落码 ⇒ 无 RAG 侧证据**（这正是本条只能是「候选」的原因） |
+| 落点 | 共享层 `service/common`（G4 写权）⇒ ⇒ **本档在 `docs/Intentional_Deviations/`（合并收口执行者写权面）** |
+| 相关台账 | `docs/DRIFT/global/vs-common.md` §4.19.5（订正全过程：E66 是真漂移 ⇒ 原「Redis 比 Go 更严」的登记前提作废）· §4.19.11（派发前检查 = 补齐漂移）· `G4-15d` 行（严格模式登记位）· `docs/DRIFT/_cross/user-qa-verbatim.md` |
+
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
 > 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。

@@ -13,7 +13,26 @@ spring:
   datasource:
     url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}
     username: ${POSTGRES_USER:admin}
-    password: ${POSTGRES_PASSWORD:password}
+    # 🔴 口令**不加默认值**（2026-10-30 · 与 Go 逐字同形）
+    #
+    # Go 出处：service/task/rpc/etc/task.yaml:50
+    #     Dsn: "host=… user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} …"
+    #   ⇒ 口令是**裸**占位符 `${POSTGRES_PASSWORD}`，**无默认值**。
+    # Go 侧加载语义：go-zero@v1.10.2/core/conf/config.go:63
+    #     return loader([]byte(os.ExpandEnv(string(content))), v)
+    #   ⇒ os.ExpandEnv **不认** `${VAR:default}` ⇒ 缺变量 ⇒ 落成**空串** ⇒ Go = 空口令 = 连库失败。
+    #
+    # 为什么取消兜底：Spring 的 `${VAR:default}` 会让**缺变量时用默认口令连上去**
+    #   ⇒ RAG 比 Go **松** ⇒ 真漂移（不是「更严的有意偏离」）⇒ 不需要为「保留兜底」签字。
+    #
+    # ⚠️ 残余差异（**失败时刻**不同，由合并收口执行者统一登记为有意偏离候选）：
+    #   Go = 启动成功、**连库时**失败；RAG = **启动即失败**（占位符解析不到 ⇒ DataSource bean 创建失败）
+    #   ⇒ 属「RAG 更严的一侧」⇒ 按 P0 #8 同款口径登记。
+    #
+    # ⚠️ 装置侧**不需要**改：tools/difftest/run.sh:196 显式 export POSTGRES_PASSWORD
+    #   ＋ 根级 docker-compose.yaml:15 强制要求该变量 ＋ manage.sh 硬校验 .env
+    #   ⇒ ⇒ 取消兜底不影响任何对拍装置。
+    password: ${POSTGRES_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       # 对应 Go service_context.go:43-44

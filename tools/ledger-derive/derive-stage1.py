@@ -182,6 +182,31 @@ OV_FIELDS = ("stage", "blocking", "prio", "gap", "_stage_src", "_closed", "basis
 SERVICE_PATH_RE = re.compile(r"(?:^|[\s`/])service/([A-Za-z0-9_\-]+)/")
 
 
+# ────────────────────────────────────────────────────────────────────────────
+# 表格行切分（**转义感知**）
+# ────────────────────────────────────────────────────────────────────────────
+# ⚠️ **为什么不能用 `line.split("|")`**（2026-10-30 · 第三次实测）——
+#   GFM 表格里，单元格内的竖线要写成 `\|` ⇒ ⇒ **裸 `split("|")` 会把一个单元格
+#   切成多个** ⇒ ⇒ 列数算错 ⇒ ⇒ 「表格结构异常」误报 ⇒ ⇒ 更糟的是
+#   **关闭判定会取错列**（`load_unresolved` 用 `cells[3]` 当「当前状态列」）
+#   ⇒ ⇒ 那个未解决项的「已关闭 / 已处置」判定**静默失效** ⇒ ⇒ 指向它的指针
+#   **被算成排期** ⇒ ⇒ 派工面上多出一条「真缺口」。
+#   ⇒ 实测样本：`docs/RoundPlan/_unresolved.md` 的 `BLK-02` 行内含探针读数
+#   `failed_fast=true\|code=4\|...` ⇒ 裸 split 得 11 段（表头是 8）⇒ 误判 malformed。
+#
+#   ⇒ 与 `tools/difftest/check-phasegoal-consistency.py` 的 `split_row`
+#     **同一口径**（`re.split(r"(?<!\\)\|")`）⇒ ⇒ 两张表的两个解析器不再打架。
+#
+#   ⚠️ `keep_ends=True` 保留**首尾两个空串**（`l.split("|")` 的原语义）⇒
+#     ⇒ 用于 `load_unresolved` 那处（它按固定下标取「当前状态列」）。
+def split_cells(line: str, keep_ends: bool = False) -> list[str]:
+    s = line.strip()
+    if not s.startswith("|"):
+        return []
+    body = s if keep_ends else s.strip("|")
+    return [c.strip() for c in re.split(r"(?<!\\)\|", body)]
+
+
 def domains_from_paths(text: str) -> set[str]:
     """从一段文本里提取它提到的**服务目录**所属的域。
 
@@ -317,7 +342,7 @@ def load_samesrc_judgements() -> dict[tuple[str, str], str]:
             s = line.strip()
             if not s.startswith("|"):
                 continue
-            cells = [c.strip() for c in s.strip("|").split("|")]
+            cells = split_cells(s)
             if len(cells) < 3:
                 continue
             ident = cells[0].strip().strip("*` ")
@@ -986,7 +1011,7 @@ def load_unresolved(line_index) -> dict[str, dict]:
             #   本行就被判 closed ⇒ **刚补上的排期指针立刻失效** ⇒ **自我抵消**（补了等于没补）。
             #   ⇒ 关闭是**状态字段**的语义，不是叙述里随便哪个词 ⇒ 只认**当前状态列（第 3 列）**。
             #   ⇒ 配套：`GAP-10` 行原来把「已处置」写在第 6 列 ⇒ 已把标记**前移到第 3 列**（原值逐字保留为子串）。
-            cells = l.split("|")
+            cells = split_cells(l, keep_ends=True)
             # 表头固定 6 列 ⇒ `| a | b | c | d | e | f |` ⇒ split 出 8 段（首尾各一空串）
             #   ⇒ cells[3] = 当前状态列。
             malformed = len(cells) != 8
@@ -1022,7 +1047,7 @@ def load_shared_grading() -> dict[str, dict]:
             continue
         if not l.startswith("|"):
             continue
-        cells = [c.strip() for c in l.strip().strip("|").split("|")]
+        cells = split_cells(l)
         if len(cells) < 11:
             continue
         ident = cells[0].strip("*` ")
@@ -1301,10 +1326,7 @@ def class_from_cell(cell: str) -> str:
 
 
 def _cells(line: str) -> list[str]:
-    s = line.strip()
-    if not s.startswith("|"):
-        return []
-    return [c.strip() for c in s.strip("|").split("|")]
+    return split_cells(line)
 
 
 def scan_grading_tables():

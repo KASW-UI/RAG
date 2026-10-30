@@ -202,6 +202,33 @@
             <artifactId>mybatis</artifactId>
         </dependency>
 
+        <!-- ============ 3c. Micrometer（Prometheus 写入面 · 2026-10-30 G4） ============ -->
+        <!--
+            对应 Go 侧的 zrpc/internal/serverinterceptors/prometheusinterceptor.go（Prometheus 层）
+            ＋ core/metric（写入闸门）。
+
+            ⚠️ 为什么是 **optional**（与 spring-webmvc / lettuce 同款纪律）：
+              本模块只在 MicrometerPrometheusSink 这**一个类**里引用 Micrometer 类型；
+              而 20 个组件里 **19 个今天没有指标 registry**
+              （9 个 api 有 actuator、10 个 rpc 里只有 follow-rpc 有）
+              ⇒ 若用普通 compile，micrometer-core 会沿 Maven 传递进所有下游
+              ⇒ 与本 pom 已写明的「共享层不得把下游不需要的框架塞给下游」冲突。
+            ⚠️ **optional 依赖不传递** ⇒ 下游组件要用 Prometheus 能力，
+              必须**自己**声明 micrometer（实践中是加 actuator + micrometer-registry-prometheus）
+              ⇒ ⇒ 这一条属于**域侧写权面**（各域 lane），本层只提供能力。
+            ⚠️ 运行期安全性：MicrometerPrometheusSink 只在
+              GoStylePrometheusMeterRegistryBridge 的 @ConditionalOnClass 判定通过后才会被加载
+              ⇒ 没有 micrometer 的进程里，那个类**根本不会被加载** ⇒ 不会 NoClassDefFoundError。
+
+            ⚠️ 版本**不写**：由 spring-boot-dependencies（BOM）管 ⇒ 与各 api 模块运行时
+            用的 Micrometer 是**同一个版本**（写死版本号 = 同一条 classpath 上塞第二个 Micrometer）。
+        -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <optional>true</optional>
+        </dependency>
+
         <!-- ============ 4. Jakarta Servlet API（替代 go-zero rest middleware） ============ -->
         <!--
             对应 Go 版 observability/http.go 的 rest.Middleware / http.HandlerFunc；
@@ -499,6 +526,17 @@
             <groupId>tools.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
             <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <!--
+                ⚠️ **仅测试**：守门要断言「暴露出去的指标名 / label / 桶边界」与 Go 侧逐项一致，
+                而断言必须落在**真正的 Prometheus 文本**上（不是「MeterRegistry 里有个 meter」）
+                ⇒ ⇒ 需要真 registry + 真 scrape。
+                ⚠️ 这条**不传递给任何下游模块**（test 作用域）⇒ 下游要用请自己声明。
+            -->
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>

@@ -1,5 +1,6 @@
 package com.rag.common.protection;
 
+import com.rag.common.web.ConditionalOnApiSide;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -77,10 +78,14 @@ import java.io.IOException;
  * 本文件保留 {@code HIGHEST_PRECEDENCE + 8} 是为了<b>与 Go 的 native middleware 同序</b>
  * （Go 侧 MaxBytes 也排在 trace/logging 等 native middleware 之内），
  * <b>不是</b>为了压过拦截器。
+ * <p>⚠️ <b>2026-10-30 · G4 lane：本类属 api 侧 rest 中间件 ⇒ 已挂 {@link com.rag.common.web.ConditionalOnApiSide}</b>
+ * ⇒ ⇒ 此前「rpc 域不注册本类」的依据是<b>域侧不扫 {@code com.rag.common} 这道约定</b>（不是本类的条件）
+ * ⇒ ⇒ 现由共享层自己兜住 ⇒ ⇒ Go 出处与语义等价论证见该注解。
  */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 8)
+@ConditionalOnApiSide
 public class GoStyleMaxBytesFilter implements Filter {
 
     private final long maxBytes;

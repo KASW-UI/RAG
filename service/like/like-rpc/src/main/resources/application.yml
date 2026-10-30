@@ -17,7 +17,26 @@ spring:
   datasource:
     url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}
     username: ${POSTGRES_USER:admin}
-    password: ${POSTGRES_PASSWORD:password}
+    # 🔴 口令**不加默认值**（2026-10-30 · 与 Go 逐字同形）
+    #
+    # Go 出处：service/like/rpc/etc/like.yaml:56
+    #     DataSource: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@…"
+    #   ⇒ 口令是**裸**占位符 `${POSTGRES_PASSWORD}`，**无默认值**。
+    # Go 侧加载语义：go-zero@v1.10.2/core/conf/config.go:63
+    #     return loader([]byte(os.ExpandEnv(string(content))), v)
+    #   ⇒ os.ExpandEnv **不认** `${VAR:default}` ⇒ 缺变量 ⇒ 落成**空串** ⇒ Go = 空口令 = 连库失败。
+    #
+    # 为什么取消兜底：Spring 的 `${VAR:default}` 会让**缺变量时用默认口令连上去**
+    #   ⇒ RAG 比 Go **松** ⇒ 真漂移（不是「更严的有意偏离」）⇒ 不需要为「保留兜底」签字。
+    #
+    # ⚠️ 残余差异（**失败时刻**不同，由合并收口执行者统一登记为有意偏离候选）：
+    #   Go = 启动成功、**连库时**失败；RAG = **启动即失败**（占位符解析不到 ⇒ DataSource bean 创建失败）
+    #   ⇒ 属「RAG 更严的一侧」⇒ 按 P0 #8 同款口径登记。
+    #
+    # ⚠️ 装置侧**不需要**改：tools/difftest/run.sh:196 显式 export POSTGRES_PASSWORD
+    #   ＋ 根级 docker-compose.yaml:15 强制要求该变量 ＋ manage.sh 硬校验 .env
+    #   ⇒ ⇒ 取消兜底不影响任何对拍装置。
+    password: ${POSTGRES_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       # 对应 Go servicecontext.go:34-35
@@ -200,6 +219,74 @@ spring:
         server-addr: ${NACOS_ADDR:nacos:8848}
         namespace: ${NACOS_NAMESPACE:public}
         group: ${NACOS_GROUP:DEFAULT_GROUP}
+        # 🔴 **必须显式关掉自动注册**（2026-10-30 · 补指标抓取载体时落地）。
+        #
+        # 【为什么】`spring-cloud-starter-alibaba-nacos-discovery` 的**自动注册**
+        # （`NacosAutoServiceRegistration`）继承自
+        # `org.springframework.cloud.client.serviceregistry.AbstractAutoServiceRegistration`
+        # —— 它 `implements ApplicationListener<WebServerInitializedEvent>`
+        # ⇒ **注册的是 web 容器端口**（实测 class 字节码：`onApplicationEvent(WebServerInitializedEvent)`）。
+        # ⇒ 而本模块的 web 容器（2026-10-30 起为了给 Actuator 载体才引入）
+        # 监听的是 **观测端口 9098**，**不是 gRPC 业务端口 8082**。
+        # ⇒ 自动注册一旦生效 ⇒ Nacos 里会出现「like-rpc → 9098」这条**错端口**实例
+        # ⇒ 调用方按 Nacos 给出的地址连过来 ⇒ 连到一个**只提供 /actuator/** 的 HTTP 端口
+        # ⇒ **gRPC 链路直接断**（业务码塌成 1015）。
+        #
+        # 【本模块的注册是手写的】`bootstrap/NacosRegistration.java` 用
+        # `GrpcServerProperties.getPort()`（= gRPC 端口）注册 ⇒ 与 Go 侧
+        # `zrpc.MustNewServer` 注册 `ListenOn` 的语义一致。
+        # ⇒ 自动注册必须关掉，否则**同一个服务名下会有两个端口的实例**。
+        #
+        # 同款见 service/follow/follow-rpc/src/main/resources/application.yml:112。
+        register-enabled: false
+
+# =============================================================================
+# HTTP 观测端口（Actuator 载体）
+# =============================================================================
+# 🔴 **这是本模块唯一的 HTTP 监听**（2026-10-30 · 指标抓取载体落地）。
+#
+# 【Go 出处（真源 · 消费点）】
+#   service/like/rpc/etc/like.yaml:19-26  DevServer.Port: 9098
+#   ⇒ go-zero@v1.10.2/zrpc/config.go:39  `RpcServerConf struct { service.ServiceConf ... }`
+#   ⇒ ⇒ go-zero@v1.10.2/zrpc/server.go:63  `if err = c.SetUp(); err != nil {`
+#   ⇒ ⇒ go-zero@v1.10.2/core/service/serviceconf.go:77  `devserver.StartAgent(sc.DevServer)`
+#   ⇒ ⇒ go-zero@v1.10.2/internal/devserver/server.go:73  **独立端口** `http.ListenAndServe`
+# ⇒ ⇒ **Go 的观测端口就是 9098** ⇒ RAG 侧取同一个端口（默认 9098），
+#      抓取配置只需改**路径**（Go `/metrics` → RAG `/actuator/prometheus`），
+#      **端口一字不差**。
+#
+# ⚠️ **与 gRPC 业务端口严格分离**：本端口只承载 Actuator（**无任何业务路由**），
+#    gRPC 仍是 `grpc.server.port`（8082）。
+#    ⇒ 探针/部署可用 LIKE_RPC_MANAGEMENT_PORT 覆盖（并行起时换口）。
+#
+# ⚠️ **端口冲突登记**：Go 侧 `like-rpc` 的 9098 与 `favorite-rpc` 的 9098 段位相邻、
+#    且本仓多个 rpc 的 `grpc.server.port` 都写着 8082 ⇒ 同机部署靠 env 覆盖
+#    ⇒ 与 follow-rpc 同款做法。
+server:
+  port: ${LIKE_RPC_MANAGEMENT_PORT:9098}
+
+# ============== 进程形态标记：rpc 侧（2026-10-30 · 合并收口执行者派工）==============
+# 🔴 **本模块是 rpc 形态** ⇒ 观测口上**不许挂 api 侧那套 rest 中间件**
+#
+# Go 出处（逐字对照）：Go 的 rpc 侧**一个 rest 中间件都没挂** ——
+#   service/like/rpc/like.go:41 走 zrpc.MustNewServer(...) ⇒ 全程 **zrpc** 栈
+#   ⇒ zrpc 的服务端拦截器链（trace / recover / stat / prometheus / breaker / shedding）
+#   是 **gRPC interceptor**，**不是** net/http 的 rest middleware
+#   ⇒ Go 的 rpc 进程上**不存在** maxConns / maxBytes / cpuShedding / breaker 这四层 HTTP 保护。
+#
+# 为什么需要这一行（本模块补 servlet 容器 ⇒ 共享层的 web 侧自动配置会在 rpc 进程**首次激活**）：
+#   共享层 service/common/src/main/java/com/rag/common/http/GoStylePathNormalizingAutoConfiguration.java:52
+#     与 GoStyleJsonContentTypeAdvice.java:95 都带
+#     @ConditionalOnWebApplication(type = SERVLET) ⇒ **只要有 servlet 容器就会注册**。
+#   共享层用 `rag.side` 区分形态（见 G4 的共享层落码）：
+#     @ConditionalOnProperty(name = "rag.side", havingValue = "api", matchIfMissing = true)
+#   ⇒ 默认（matchIfMissing=true）= **api 形态** ⇒ ⇒ **rpc 模块必须显式写 `rag.side: rpc`**，
+#     否则观测口上会挂着 Go 侧根本不存在的 rest 中间件。
+#
+# ⚠️ 本行**不是**「配置里写了就算」：运行期绑定 + 「请求路径上的 api 侧中间件不在容器里」
+#   由本模块的 LikeRpcMetricsCarrierGateTest 断言（真 fat jar + 真 /actuator/beans 清单）。
+rag:
+  side: rpc
 
 # ============== gRPC server（devh）==============
 # 对应 Go ListenOn: 0.0.0.0:8082
@@ -303,17 +390,48 @@ management:
   endpoints:
     web:
       exposure:
+        # ⚠️ **这一族配置在 2026-10-30 之前是死配置**：
+        #    `spring-boot-starter-actuator` 只给 endpoint + 自动配置、**不给 servlet 容器**
+        #    ⇒ `WebApplicationType=NONE` ⇒ 下面这一族**根本不加载**（**静默无效**）
+        #    ⇒ **指标注册了、抓不到**。
+        #    ⇒ 2026-10-30 补 `spring-boot-starter-web`（pom 第 7 段）后才真正有载体。
+        #
+        # ⚠️ **与 Go 的暴露面差异**（twoStage.md §10 定级 · 已登记为残余差异，不修）：
+        #    Go  : DevServer 的 `MetricsPath: /metrics` + `HealthPath: /healthz`
+        #          （service/like/rpc/etc/like.yaml:23-24）
+        #    RAG : `/actuator/prometheus` + `/actuator/health`（Actuator 的固定前缀）
+        #    ⇒ **路径不同、端口相同（都是 9098）** ⇒ 抓取配置**改路径不改端口**。
+        #    ⇒ 照 follow-rpc 已登记的口径（docs/DRIFT/follow/rpc.md 的「残余差异登记」第 2 条）
+        #       ⇒ **不新造一条偏离登记**。
         include: health,info,prometheus,metrics
   endpoint:
     health:
       show-details: when_authorized
     prometheus:
       enabled: true
-  metrics:
-    tags:
-      # 与 Go prometheus 子系统名对齐（Go 侧 LikeActionCount 的 Subsystem 是 "like-rpc"，
-      # LikeQueryCacheCount 的是 "like_rpc" —— 两处拼写不一致，是 Go 源码的事实，此处保留）
-      application: like-rpc
+  # ⚠️ **刻意不加 `tags.application`**（2026-10-30 · 与 Go 对照后移除）。
+  #
+  # 【为什么原来的 `application: like-rpc` 是错的】
+  #   原注释写「与 Go prometheus 子系统名对齐」—— **这句推理不成立**：
+  #   指标名的前缀来自 **meter 名**，不是来自这个 tag。
+  #   Go 侧 `service/like/rpc/internal/metrics/metrics.go:9-22`
+  #     `LikeActionCount` 的 Subsystem 是 **"like-rpc"**（带连字符）、
+  #     `LikeQueryCacheCount` 的 Subsystem 是 **"like_rpc"**（下划线）—— **两处拼写不一致**，
+  #     是 Go 源码的事实。
+  #   ⇒ 且 Go 侧 `service/like/rpc/internal/metrics/metrics.go:24` 的 `InitMetrics()`
+  #     **在本仓 Go 侧没有任何调用点**（实测 grep：`service/like/**` 内零命中）
+  #     ⇒ Go 的 like-rpc **从不注册**这两个指标 ⇒ Go 的观测口 `/metrics` 上**看不到**它们。
+  #   RAG 侧 meter 名已带前缀
+  #   （`service/like/like-rpc/src/main/java/com/rag/like/like/rpc/metrics/LikeRpcMetrics.java:53`
+  #     = `"like_rpc_action_total"`）
+  #   ⇒ 再挂 `application="like-rpc"` ⇒ **多一个 Go 没有的标签**
+  #     ⇒ 同一份 PromQL 在两侧**聚合结果不同**。
+  #
+  # 【先例】follow 域同款已修（`DRIFT-FOLLOW-007`，用户 2026-10-27 拍板）
+  #   ⇒ service/follow/follow-rpc/src/main/resources/application.yml:213-224 同款说明。
+  #
+  # 【本仓无任何消费方】`prometheus/settings.yml` 现有 job 只有 `user-api` / `prometheus`
+  #   ⇒ 全仓零处引用 `application="like-rpc"` ⇒ 移除**不影响任何现有抓取配置**。
   prometheus:
     metrics:
       export:

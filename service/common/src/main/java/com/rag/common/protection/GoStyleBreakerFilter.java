@@ -1,5 +1,6 @@
 package com.rag.common.protection;
 
+import com.rag.common.web.ConditionalOnApiSide;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -81,10 +82,14 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p><b>为什么 breaker 实例不做无界缓存</b>：key 由 method+path 构成，基数等于路由数
  * （本模块 13 条，含未匹配路径不会建 key），无界增长的现实风险为零。
+ * <p>⚠️ <b>2026-10-30 · G4 lane：本类属 api 侧 rest 中间件 ⇒ 已挂 {@link com.rag.common.web.ConditionalOnApiSide}</b>
+ * ⇒ ⇒ 此前「rpc 域不注册本类」的依据是<b>域侧不扫 {@code com.rag.common} 这道约定</b>（不是本类的条件）
+ * ⇒ ⇒ 现由共享层自己兜住 ⇒ ⇒ Go 出处与语义等价论证见该注解。
  */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 5)
+@ConditionalOnApiSide
 public class GoStyleBreakerFilter implements Filter {
 
     private final boolean enabled;

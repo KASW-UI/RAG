@@ -1668,6 +1668,27 @@ DDL 对拍：Go AutoMigrate 55 行 vs RAG **V1~V5**，**归一化后剩余 19 �
 
 <!-- @fix 2026-10-23 23:2x 第五轮 · V-020 已修（照 users 域规格） · V-016 按用户指示推迟 -->
 
+#### ✅ 2026-10-30 · G2 复核销号：`DRIFT-MSG-V-020` 的**状态标记未销**（本轮正文已写「已修」，派生层仍判 🔴 未闭合）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `bdac3607` · **核对日期** 2026-10-30
+> **证据强度**：**E3**（两侧源码逐字对照 + 真源回核 + 仓内守门在仓）· **阶段归属**：**P1 · D 类**（**差异已消失 ⇒ 无待实现内容** ⇒ **不阻断**阶段 1）
+> ⚠️ **本条原章节标题（`:1671`）写的就是「已修」** ⇒ **不是标题标记过期，是「条目标记」那一层没销** ⇒ 本小节即为销号记录。
+
+**逐条回源复核（2026-10-30 · 本 lane 实测，非转述）**：
+
+| 侧 | 出处 | 实测内容 |
+|---|---|---|
+| Go | `service/message/rpc/internal/model/db.go:22` | DSN 钉 `TimeZone=Asia/Shanghai` ⇒ GORM 迁出的 `timestamptz` **存绝对时刻**，`time.Time.Unix()` 读出**真实 epoch** |
+| Go | `service/message/rpc/internal/model/db.go:42` | `db.AutoMigrate(&Notification{}, &Conversation{}, &ConversationMessage{})` ⇒ 三张表随实体声明迁出 ⇒ **无版本化迁移账本** |
+| RAG | `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/service/MessageRpcSupport.java:107` / `:110` | `private static long toEpochSecond(OffsetDateTime instant)` ⇒ `return instant.toEpochSecond();` ⇒ **与时区无关**、持有**真实瞬时** ⇒ 等价于 Go 的 `time.Time.Unix()` |
+| RAG | `service/message/message-rpc/src/main/resources/db/migration/V5__message_time_columns_timestamptz.sql:2` | 8 个时间列 `TIMESTAMP ⇒ TIMESTAMPTZ` |
+| RAG 守门 | `MessageRpcTimeColumnParityTest`（真 PG 查 `information_schema`）· `MessageRpcSupportTimeZoneTest`（7 例，含**时区无关性**断言） | 两侧在仓 |
+
+⇒ **结论**：2026-10-23 第五轮按 users 域规格落码（改已应用迁移会撞 Flyway 校验和 ⇒ **新写 V5** 而非改 V1~V3）⇒ **类型与可空性两侧 0 差异** ⇒ **差异已消失** ⇒ **本条无待实现内容** ⇒ 归 **D 类** · **不阻断阶段一** ⇒ **销号**。
+⇒ ⚠️ **残留（不在本条范围）**：`DEFAULT CURRENT_TIMESTAMP` 残留（Go 侧无 DB 层 default）⇒ 已登记不修（两侧 INSERT 均显式绑定该列 ⇒ 不可观测）—— 见 `docs/DRIFT/_cross/ddl-type-divergences.md`。
+
+---
+
 ## 2026-10-23 第五轮：`DRIFT-MSG-V-020` 已修（照 users 域规格单开）
 
 > **用户指示**：「v020 照 users 域的规格单开，配真 PG 双侧对拍，别混在语义修复里」
@@ -2107,7 +2128,26 @@ breaker-probe  ：A 组 17 条逐条一致 / B 组 prefix=AAAAA / C 组 go=0.25 
 
 ---
 
-### 1. 🔴 `DRIFT-MSG-V-027`（新挖出 · 已修）：**Flyway 的 baseline 把 V1 整条跳过 ⇒ `message_notification` 永远建不出来**
+### 1. ✅ ~~🔴~~ **已销号（2026-10-30 · G2 复核）**：`DRIFT-MSG-V-027`（新挖出 · 已修）：**Flyway 的 baseline 把 V1 整条跳过 ⇒ `message_notification` 永远建不出来**
+
+#### ✅ 2026-10-30 · G2 复核销号：标题的 🔴 标记**已过期**（正文已写「已修」但状态标记未销）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `bdac3607` · **核对日期** 2026-10-30
+> **证据强度**：**E3**（两侧源码逐字对照 + 真源回核 + 仓内守门在仓）· **阶段归属**：**P0 · D 类**（**差异已消失 ⇒ 无待实现内容** ⇒ **不阻断**阶段 1）
+> ⚠️ **原「🔴」标记保留不改**（§5.3b「原值一律保留」+ 改标题状态会断掉入链锚点）⇒ **以本小节为准**。
+
+**逐条回源复核（2026-10-30 · 本 lane 实测，非转述）**：
+
+| 侧 | 出处 | 实测内容 |
+|---|---|---|
+| Go | `service/message/rpc/internal/model/db.go:42` | `db.AutoMigrate(&Notification{}, &Conversation{}, &ConversationMessage{})` ⇒ Go 侧**无版本化迁移账本** ⇒ **不存在**「非空 schema 上 baseline 把 V1 整条跳过」这个失效面 |
+| RAG | `service/message/message-rpc/src/main/resources/application.yml:66` | `baseline-on-migrate: true` ⇒ 仍开 |
+| RAG | `service/message/message-rpc/src/main/resources/application.yml:94`（+ `:73` 注释） | `baseline-version: 0` ⇒ **baseline 标记打在 version 0** ⇒ **V1 之后全部迁移照常执行** ⇒ V1 **不会**被跳过 |
+| RAG | `service/message/message-rpc/src/main/resources/application.yml:105` | `table: flyway_schema_history_message` ⇒ **独立账本表名**（§6.3 问题 4 的定案）⇒ 同库共存不撞号 |
+| RAG 守门 | `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageFlywaySharedSchemaWiringTest.java:164` / `:179` / `:187` | `:164` 断言账本里 baseline 行是 **version 0**；`:179` 断言 **V1 真的以 SQL 执行过**（不是被 baseline 顶掉）；`:187` 断言 `message_notification` **表存在** ⇒ ⇒ 三条断言合起来 = **「V1 没被跳过」这件事本身被钉住了** |
+
+⇒ **结论**：2026-10-24 起真栈暴露的「Flyway baseline 跳过 V1 ⇒ `message_notification` 永远建不出来 ⇒ 服务起不来」**已由 `baseline-version: 0` ＋ 独立账本表名闭合** ⇒ **差异已消失** ⇒ **本条无待实现内容** ⇒ 归 **D 类** · **不阻断阶段一** ⇒ **销号**。
+⇒ ⚠️ **残留（不在本条范围）**：Go 侧**无 DB 层 default** vs RAG 侧 `DEFAULT CURRENT_TIMESTAMP` 残留 ⇒ 已登记不修（两侧 INSERT 均显式绑定该列 ⇒ 不可观测）—— 见 `docs/DRIFT/_cross/ddl-type-divergences.md`。
 
 **Component**: `message-rpc`　**Operation**: 启动（全部 RPC）
 **Category**: DDL / Lifecycle　**Classification**: **`SEMANTIC MISMATCH`（服务起不来）**
@@ -2798,7 +2838,44 @@ RAG: message_notification.created_at | timestamptz | 可空 | DEFAULT CURRENT_TI
 
 ---
 
-### 🟡 `DRIFT-MSG-V-032` 🟡 **登记（不改）**：`MessageRpcSlowThresholdGateTest` 在**全量并发回归**里偶发 `UNAVAILABLE: Network closed for unknown reason`
+### ✅ `DRIFT-MSG-V-032` ✅ **已修（2026-10-30 · G2 落码）**：拆除时序已加固 ⇒ 偶发 `UNAVAILABLE: Network closed for unknown reason` 的根因已消除
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `bdac3607` · **核对日期** 2026-10-30
+> **证据强度**：**E3**（源码行号 + 仓内守门实跑 + **变异验证红在目标断言**）· ⚠️ **未做双侧活体对拍**（Go 侧无对应测试 ⇒ 本条**不是** Go↔RAG 行为差异）⇒ **不写 L4**
+> **阶段归属**：**P2 · B 类**（**不阻断**阶段 1 准入）· **排期指针** `GAP-11` · **处置 = 落码**（判定层 `docs/DRIFT/_cross/grading/W10.md` 判「剩余那部分 = 给 warm-up／建连加拆除时序加固 ⇒ 落点 `service/message/message-rpc/src/test/**` ⇒ G2 域内可自修」）
+> ⚠️ **原「🟡 登记（不改）」的定性已过期** —— 原判「域侧无法单独消除」的前提是「涉及其它模块的 gRPC 建连时序」；**2026-10-30 复核证明根因在本域自己的拆除写法**（见下 ③）⇒ **原值保留备查**，但结论已销号。
+
+#### ① §5.4「执行实际改造」九项
+
+| # | 项 | 内容 |
+|---|---|---|
+| 1 | **修改前的实现和行为** | `MessageRpcSlowThresholdGateTest` 的**两处**拆除都是「**发完就硬拆**」：① `warmUp()`（旧 `:340-346`）= 发一次调用 ⇒ `finally` 里 `ch.shutdownNow()` + `server.shutdownNow()`；② `callAndGetSpan()` 的 `finally`（旧 `:423-424`）= `channel.shutdownNow()` + `server.shutdownNow()` ⇒ **在途帧还没收尾就把连接拔了** ⇒ 客户端 netty 侧读到「连接已关」⇒ 抛 `UNAVAILABLE: Network closed for unknown reason` |
+| 2 | **具体问题** | ① **拆除顺序无等待**：`shutdownNow()` 是**立即**取消 ⇒ 客户端在途调用立刻被断链 ⇒ 症状 = V-032 登记的 `UNAVAILABLE`（**与被测的 slow 标记、阈值比较无关**）；② **建连无重试**：`GrpcTestPort.freePort()` 的「探测 + 二次确认」治的是**撞口**（`BindException`），治不了「探测与 bind 之间被抢」的 **TOCTOU 窗口** ⇒ 仍可能瞬时失败；③ **旧定性错**：原判「域侧无法单独消除（涉及其它模块的 gRPC 建连时序）」⇒ **2026-10-30 复核证明根因在本域自己的拆除写法** ⇒ 该前提**不成立** ⇒ 原「登记不改」改为**落码修** |
+| 3 | **修改后的实现** | ① 新增 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/support/GrpcTestLifecycle.java`（**优雅拆除器**）：`shutdown()` ⇒ `awaitTermination(5s)` ⇒ **仅超时**才降级 `shutdownNow()`；**顺序固定 = 先 channel 后 server**（先关 server ⇒ 在途调用立刻断链 ⇒ 复现症状）② `MessageRpcSlowThresholdGateTest` 的**两处**拆除都改调它 ③ `warmUp()` 拆成 `warmUp()`（重试壳）+ `warmUpOnce()`（单次），**只重试传输层失败**（`UNAVAILABLE` / `UNKNOWN`），**上限 3 次**、退避 200 ms×n ⇒ **业务码错误不重试**（重试无意义）⇒ **重试只包住预热、不包住被测断言** ⇒ 不掩盖被测行为缺陷 |
+| 4 | **修改理由** | AGENTS.md §3.3.3 第 ① 条「凡引入新的框架机制，必须配一条**能真正触发该机制**的测试」+ §3.3.3「跑绿 ≠ 对」⇒ 本条症状是**偶发**的 ⇒ 单次跑绿**证明不了**加固生效 ⇒ 必须补**能机械检出**的守门（见 ⑥）⇒ ⇒ 落码 = 优雅拆除 + 预热重试 + **新守门**，三者一体 |
+| 5 | **实际变更文件** | ① 🆕 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/support/GrpcTestLifecycle.java`（**新建** · 68 行）② 🆕 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcSlowThresholdTeardownGateTest.java`（**新建** · 守门）③ `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcSlowThresholdGateTest.java`（**仅测试侧** · 拆除写法 + 预热重试 + javadoc）⇒ ⚠️ **零 `src/main` 改动 ⇒ 不影响任何生产行为**（本条是**测试稳定性**问题，不是语义漂移） |
+| 6 | **测试场景和断言** | 🆕 `MessageRpcSlowThresholdTeardownGateTest.inFlightCallMustCompleteAcrossGracefulShutdown`（**1 条**）：起**真** gRPC server + **真** netty channel（`dns:///127.0.0.1:<port>`）⇒ handler 占用 300 ms ⇒ **异步** stub 发起**在途**调用 ⇒ 等 `entered` latch 确认 handler **真被调用过**（前提断言 ⇒ 否则「在途」不成立 ⇒ 判据空转）⇒ 调 `GrpcTestLifecycle.shutdownGracefully(channel, server)` ⇒ 断言 **① 在途调用成功返回**（`pending.get(20s)` 不抛）**② handler 已跑完**（`completed.get()` 为 true）。**判别依据** = gRPC-java 两种关闭语义的**可观察差异**：优雅 `shutdown()` 让**已有调用继续跑完**；`shutdownNow()` **立刻取消** ⇒ ⇒ 变异版必然红 |
+| 7 | **实际执行结果** | 🟢 **本轮域级回归（G2 三域八模块 · `-am` · `--fail-at-end`）** ⇒ **781 条 / 0 failures / 0 errors / 0 skipped**（8:26 min · BUILD SUCCESS）⇒ 逐模块（surefire `TEST-*.xml` 逐 `testsuite` 求和）：message-api 114 · message-rpc **101**（含本轮新增守门 1 条）· message-common 21 · like-api 104 · like-rpc 151 · like-common 18 · task-api 135 · task-rpc 137 ⇒ ⇒ **零红**⚠️ **口径**：本轮**未带 `clean`** ⇒ 增量编译 ⇒ 计数可能被 stale 产物影响 ⇒ **结论以「本轮实际执行过的模块全绿」为准**，不作为「全量条数基线」引用（§6.3 纪律）<br>① 正身：`mvn -o -B -pl service/message/message-rpc -am -Dtest='MessageRpcSlowThresholdTeardownGateTest,MessageRpcSlowThresholdGateTest' -Dsurefire.failIfNoSpecifiedTests=false test` ⇒ **`Tests run: 3, Failures: 0, Errors: 0, Skipped: 0`** · **BUILD SUCCESS**（拆解 = teardown 守门 1/1 + slow threshold 守门 2/2）② **变异验证**：把 `GrpcTestLifecycle` 的 channel 侧降级成 `shutdownNow()` ⇒ 守门 **红在目标断言** ⇒ `java.util.concurrent.ExecutionException: io.grpc.StatusRuntimeException: UNAVAILABLE: Channel shutdownNow invoked`（`MessageRpcSlowThresholdTeardownGateTest.java:109`）⇒ **BUILD FAILURE** ⇒ ⇒ **判据有判别力、不是恒真** ③ 恢复正身后复跑 ⇒ **3/3 绿** |
+| 8 | **尚未解决的问题** | ① **未做双侧活体对拍** —— 但 **Go 侧无任何对应测试**（判定层 `W10.md` 已核：Go `service/common/observability/observability.go:41` 是阈值真源、`service/message/rpc/message.go:44` 是打标唯一装配点，**Go 侧无对应测试**）⇒ ⇒ 本条**不是** Go↔RAG 行为差异 ⇒ 无双侧对拍可做 ⇒ **证据止于 E3** ② **偶发本身无法在单次跑里复现** ⇒ 本条的证据形态是「**机制论证 + 可机械检出的守门 + 变异验证**」，**不是**「跑了很多次都没红」 ③ **只改了 message-rpc 一个模块的测试** ⇒ 其它模块同款「发完就 `shutdownNow()`」写法（如 `favorite-common` / `follow-common` / `like-common` 的 errmsg 探针）**本轮未动** ⇒ 列为**阶段二**同族项（不阻断阶段一） |
+| 9 | **对阶段 2 的影响** | **无回退需求**（本条把「测试自身时序脆弱」修成「优雅拆除」）⇒ 阶段二只需 ① 补同族模块（其它 6 个 rpc 模块的同类写法）② 若将来要「双侧活体」口径，需 Go 侧先有对应测试（**不在本仓范围**） |
+
+#### ② §10「问题归属」十一项
+
+| # | 项 | 内容 |
+|---|---|---|
+| 1 | **唯一编号** | `DRIFT-MSG-V-032` |
+| 2 | **问题类型和优先级** | **测试稳定性**（非生产缺陷）· **P2** |
+| 3 | **阶段归属** | **B 类**（阶段 1 竞争力补强项 · **不阻断**阶段 1 准入） |
+| 4 | **涉及文件与实际证据** | RAG `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcSlowThresholdGateTest.java`（改造前 `:340-346` 拆除段 + `:423-424` finally 段）· 🆕 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/support/GrpcTestLifecycle.java`（**新建**）· 🆕 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcSlowThresholdTeardownGateTest.java`（**新建**）· Go 侧：`service/common/observability/observability.go:41`（阈值真源）+ `service/message/rpc/message.go:44`（打标唯一装配点）⇒ **Go 侧无对应测试 ⇒ 非行为差异** |
+| 5 | **触发场景** | **全量并发回归**（机器负载高 + 多模块并行）下，客户端 channel 在服务端连接被硬拆的瞬间仍有在途帧 ⇒ netty 读到「连接已关」⇒ `UNAVAILABLE: Network closed for unknown reason` ⇒ 2026-10-27 实测：`message-rpc` 模块 `Tests run: 84, Failures: 0, Errors: 1` ⇒ **BUILD FAILURE**（后续模块未跑到 ⇒ 收口拿不到绿证据） |
+| 6 | **当前行为与预期行为** | 当前（旧）= 拆除时**不等待**、**不重试** ⇒ 偶发 `UNAVAILABLE` ⇒ 预期 = 拆除**优雅**（在途调用自然收尾）+ 建连**可重试** ⇒ 症状消除 |
+| 7 | **对简历展示准入的影响** | **无**（P2 · B 类 · **不阻断**阶段 1 准入）；但它**威胁的是验收证据本身**（全量回归当场红 ⇒ 收口拿不到绿）⇒ 故仍在本轮修 |
+| 8 | **对最终工程目标的影响** | **阶段二**：同族写法（其它 rpc 模块的「发完就 `shutdownNow()`」）统一收敛；⚠️ **Go 侧补对应测试**不在本仓范围 |
+| 9 | **修复方向** | 优雅拆除（`shutdown()` → `awaitTermination` → 超时才 `shutdownNow()`；**先 channel 后 server**）＋ 预热**只重试传输层失败**（上限 3 次）＋ **一条能机械检出该机制的守门**（否则「跑绿」无判别力） |
+| 10 | **验收条件和测试方案** | `mvn -o -B -pl service/message/message-rpc -am -Dtest='MessageRpcSlowThresholdTeardownGateTest,MessageRpcSlowThresholdGateTest' -Dsurefire.failIfNoSpecifiedTests=false test` ⇒ **3/3 绿**；**变异验证**（`GrpcTestLifecycle` 降级 `shutdownNow()`）⇒ **守门红在目标断言** ⇒ ⇒ 判据非恒真 |
+| 11 | **当前处理状态** | ✅ **已修（2026-10-30 · G2 落码）· 销号** —— 证据强度 **E3**（源码行号 + 守门实跑 + 变异验证红在目标断言）；⚠️ **未做双侧活体对拍**（Go 侧无对应测试 ⇒ 非行为差异 ⇒ 无从对拍）⇒ **不写 L4** |
+
+> ⚠️ **原登记（保留备查 · 原值不改）**：
 
 | 字段 | 内容 |
 |---|---|
@@ -2809,7 +2886,7 @@ RAG: message_notification.created_at | timestamptz | 可空 | DEFAULT CURRENT_TI
 | **定性** | **flaky，不是回归**：① **单独复跑该类 2/2 全绿**（8.158 s）；② 该模块**不在**本轮改动范围（本轮只改 like-api / message-api 两个 **api** 组件 + 台账；**message-rpc 不依赖 message-api**）；③ 症状是 gRPC 客户端在服务端拆除/连接关闭时读到 `Network closed`，属**建连/拆除时序**，不是行为语义 |
 | **Evidence** | 全量日志 `/tmp/g2-full-reg2.log:15549-15552`；单独复跑 `Tests run: 2, Failures: 0, Errors: 0` |
 | **Difference** | 与 Go 无对应关系（Go 侧无此测试）⇒ **不是语义漂移**，是**测试自身的时序脆弱性** |
-| **Disposition** | **登记不改**（域侧无法单独消除：涉及其它模块的 gRPC 建连时序）；⚠️ **不因此判 message-rpc 回归**；⇒ 后续遇到同一症状，按「先单独复跑定性」处理，不直接当回归修 |
+| **Disposition** | ~~**登记不改**（域侧无法单独消除：涉及其它模块的 gRPC 建连时序）~~ ⇒ **2026-10-30 已改判并落码修**（见上）；⚠️ **不因此判 message-rpc 回归** 这半句**仍成立** |
 
 ---
 
@@ -2939,6 +3016,196 @@ sed -n '22p'      "/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/servic
 ```
 
 
+### ✅ `DRIFT-MSG-V-033` ✅ **已修（2026-10-30 · G2 落码）**：rpc 侧指标**无任何抓取出口** ⇒ 已落地独立观测口 **16067**（= Go `DevServer.Port`，**一字不差**）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `d22d7208` · **核对日期** 2026-10-30
+> **证据强度**：**E4**（**真 fat jar 进程** ＋ **真 HTTP 抓取** ＋ **真 gRPC 调用** ＋ **变异验证红在目标断言**）
+> · ⚠️ **未做「双侧活体 series 逐条比对」**（Go 侧真源进程本轮未起）⇒ 本条只证「**RAG 侧真抓得到**」＋「**端口与桶边界与 Go 一字不差**」⇒ **不写「series 集合逐条一致」**
+> **分类**：**P3**（本体已修 ⇒ 本域无待办）· 残余 **4 条 P3 / D 类**见「④ 残余差异登记」
+> ⚠️ **本条不是「新增能力」** —— 它是「**Go 有、RAG 无**」这条**早已登记的跨域缺口**在 message 域的落码（跨域派单表：`docs/DRIFT/follow/rpc.md:289` 与 `:333`）⇒ **派工面 = 「这波就补载体」**（Jason 2026-10-30 明示批准）
+
+#### ① §5.4「执行实际改造」九项
+
+| 项 | 内容 |
+|---|---|
+| **修改前的实现和行为** | `pom.xml` 第 5 段**有** actuator ＋ micrometer-prometheus ⇒ 指标**注册了**；但**没有 servlet 容器** ⇒ `management.endpoints.web.*` 这一族配置**根本不加载**（**不报错，是静默无效**）⇒ `/actuator/prometheus` **无出口** ⇒ **指标注册了但抓不到** |
+| **具体问题** | Go 侧 `service/message/rpc/etc/message.yaml:19-26` 配了 `DevServer` ⇒ 真的起了一套独立端口的观测口；RAG 侧**零出口** ⇒ **可观察差异**（抓取侧） |
+| **修改后的实现** | ① pom 加 `spring-boot-starter-web`（给 Actuator 一个 servlet 载体）② yml 加 `server.port: ${MESSAGE_RPC_MANAGEMENT_PORT:16067}` ③ yml 加 `spring.cloud.nacos.discovery.register-enabled: false` ④ yml 去掉 `management.metrics.tags.application` ⑤ `MessageMetrics` 的直方图桶边界**逐个钉** Go 的 `prometheus.DefBuckets` |
+| **修改理由** | 见「② 落码清单」的逐条 Go 出处 |
+| **实际变更文件** | `service/message/message-rpc/pom.xml` · `service/message/message-rpc/src/main/resources/application.yml` · `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/metrics/MessageMetrics.java` · `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcMetricsCarrierGateTest.java`（新）· `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcArtifactClasspathGateTest.java`（`fatJar()` 由 `private` 改包级可见 ⇒ 两个守门**共用同一份产物构建实现**） |
+| **测试场景和断言** | `MessageRpcMetricsCarrierGateTest` **2 条**：① **配置层** —— 生产 yaml 的 `server.port` 在 env 未设时解析出的默认值 **必须 = 16067**（＝ Go `DevServer.Port`）② **运行层** —— 真 fat jar 起来 ⇒ 日志含 `Tomcat started on` ⇒ gRPC 端口在监听 ⇒ 真 `GET /actuator/prometheus` **200** ＋ 响应体含 `jvm_memory_used_bytes` ⇒ 打一次**真实 gRPC 调用**后响应体含 **`message_rpc_request_total`** ⇒ **直方图桶边界逐个 = Go 的 11 个 `DefBuckets`** ⇒ 抓取后**两个端口都还活着** |
+| **实际执行结果** | **2/2 绿**（2026-10-30 18:0x · 47 s）· 变异验证 **3 处全红在目标断言**（见「⑤」） |
+| **尚未解决的问题** | 残余 **4 条 P3 / D 类**（见「④」）⇒ **无 A/B/C 类待办** ⇒ 本域**阶段一无阻断项** |
+| **对阶段 2 的影响** | 观测面形态（Tomcat vs `http.ListenAndServe`）与 Go 不同 ⇒ 阶段 2 若要「形态等价」，需另立一条**部署形态决策**（共享层 ⇒ G4 / 收口执行者） |
+
+#### ② 落码清单（改了哪几行 ＋ 为什么）
+
+| # | 文件 | 改动 | 为什么（Go 出处 / 机制） |
+|---|---|---|---|
+| 1 | `service/message/message-rpc/pom.xml` 第 5 段 | 加 `spring-boot-starter-web`（**版本由 `spring-boot-dependencies` BOM 管 ⇒ 不写 `<version>`**） | actuator 只给 endpoint ＋ 自动配置、**不给 servlet 容器** ⇒ classpath 上没有 `jakarta.servlet.Servlet` ⇒ `WebApplicationType=NONE` ⇒ 那一族配置**静默无效**。Go 侧：`service/message/rpc/etc/message.yaml:19-26`（`DevServer`）⇒ `go-zero@v1.10.2/zrpc/config.go:39`（`RpcServerConf struct { service.ServiceConf ... }` ⇒ rpc 侧内嵌）⇒ `go-zero@v1.10.2/zrpc/server.go:63`（`c.SetUp()`，**消费点**）⇒ `core/service/serviceconf.go:77`（`devserver.StartAgent(sc.DevServer)`）⇒ `internal/devserver/server.go:73`（**独立端口** `http.ListenAndServe`）⇒ **Go 侧真的能被抓** |
+| 2 | 同上（第 2 段的注释） | 改掉「message-rpc 不引 spring-boot-starter-web」这句**已过期**的断言 | AGENTS.md §3.3 ③：**先改/删错误断言，再改实现** |
+| 3 | `service/message/message-rpc/src/main/resources/application.yml` | 加 `server.port: ${MESSAGE_RPC_MANAGEMENT_PORT:16067}` | Go `service/message/rpc/etc/message.yaml:22` = `DevServer.Port: 16067` ⇒ **端口一字不差**；与 `grpc.server.port`（8082）**严格分离**（两个端口）。⚠️ **端口冲突登记**：Go 侧 `message-rpc` 的 16067 与 `hot-api` 的 16067 **撞**（Go 自己就这样）⇒ 同机部署靠 env 覆盖 ⇒ 与 follow-rpc 同款做法 |
+| 4 | 同上 | 加 `spring.cloud.nacos.discovery.register-enabled: false` | 自动注册（`NacosAutoServiceRegistration`）继承自 `AbstractAutoServiceRegistration`，后者 `implements ApplicationListener<WebServerInitializedEvent>`（**实测 class 字节码**：`onApplicationEvent(WebServerInitializedEvent)`）⇒ **注册的是 web 容器端口** ⇒ 有 web 容器后会把**观测口**注册成 `message-rpc` ⇒ 调用方连到只提供 `/actuator/` 的 HTTP 口 ⇒ **gRPC 链路直接断**（业务码塌成 1015）。本模块注册是**手写**的（`bootstrap/NacosRegistration.java` 用 `GrpcServerProperties.getPort()`）⇒ 与 Go `zrpc.MustNewServer` 注册 `ListenOn` 同语义 |
+| 5 | 同上（`management` 段） | 去掉 `metrics.tags.application: message-rpc` | 原注释「与 Go prometheus 子系统名对齐」**推理不成立**：前缀来自 **meter 名**（`MessageMetrics.java:45` = `"message_rpc_request_total"`），**不来自这个 tag**。Go 侧 `service/message/rpc/internal/metrics/metrics.go:13-14` 的 `Subsystem: "message_rpc"` ⇒ 指标名本身就是 `message_rpc_request_total` ⇒ **Go 侧没有任何 `application` 标签** ⇒ 再挂一个 ⇒ 同一份 PromQL 两侧**聚合结果不同**。先例：follow 域 `DRIFT-FOLLOW-007`（用户 2026-10-27 拍板）已按同款修 |
+| 6 | `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/metrics/MessageMetrics.java` | 直方图改用 `serviceLevelObjectives(...)` **逐个钉** Go 的 `prometheus.DefBuckets` | Go `service/message/rpc/internal/metrics/metrics.go:23` = `Buckets: prometheus.DefBuckets` ⇒ `client_golang@v1.23.2/prometheus/histogram.go:271` = `{.005,.01,.025,.05,.1,.25,.5,1,2.5,5,10}`（**11 个**）＋ `+Inf`。修前 Micrometer 的 **68 个** HdrHistogram 桶（`0.001` / `0.001048576` / …）⇒ 与 Go **零重合** ⇒ 同一段 `histogram_quantile()` 两侧**给出不同分位数** ⇒ **语义差异**（不是表达层差异）。⚠️ **不能同时开 `publishPercentileHistogram()`**（实测会叠加成 79 个桶 ⇒ 更不接近 Go）。先例：follow 域随载体同批落地 |
+
+#### ③ 运行证据（**L4 · 真进程 ＋ 真 HTTP 抓取** · 2026-10-30 18:08）
+
+**真 fat jar 启动（默认口 · 未设 env）**：
+
+```
+Tomcat started on port 16067 (http) with context path '/'
+gRPC Server started, listening on address: 0.0.0.0, port: 18082
+Started MessageRpcApplication in 4.023 seconds (process running for 4.344)
+```
+
+⇒ **两个端口都活**（实测 `lsof`：`*:16067 (LISTEN)` ＋ `*:18082 (LISTEN)`）⇒ **观测口 = 16067 = Go `DevServer.Port`，一字不差**。
+
+**真 `GET /actuator/prometheus`**：
+
+```
+status=200  bytes=18229
+Content-Type: text/plain;version=0.0.4;charset=utf-8
+总行数: 283
+```
+
+**打一次真实 gRPC 调用后（本域 meter 懒注册 ⇒ 必须有请求才出现）**：
+
+```
+message_rpc_request_total{method="ListConversations",result="fail"} 1.0
+```
+
+⇒ 🔴 **这就是「RAG 侧指标名」在抓取响应体里的实证**（不是 404、不是空 body）。
+
+**直方图桶边界（去重升序 · 实测抓取值）**：
+
+```
+0.005 0.01 0.025 0.05 0.1 0.25 0.5 1.0 2.5 5.0 10.0
+```
+
+⇒ 与 Go 的 `prometheus.DefBuckets` **逐个相同**（`1`/`1.0`、`5`/`5.0`、`10`/`10.0` 只是 Java `double.toString` 的**文本**差异 ⇒ Prometheus 按浮点解析 `le` ⇒ 语义等价）。
+
+**`application=` 标签残留 = 0 处** ⇒ 与 Go 侧**无该标签**一致。
+
+**`/actuator/health` = 200**（settle 后）⇒ ⚠️ **启动窗口内**会短暂返回 **503**（`readinessState=OUT_OF_SERVICE`），settle 后转 `UP` ⇒ **与 Go 同款语义**（go-zero `internal/health/health.go:47-56`：`CreateHttpHandler` ⇒ ready ⇒ 200 ＋ `HealthResponse`；未 ready ⇒ 503）。
+
+#### ④ 残余差异登记（按 `docs/twoStage.md` §10 定级）—— **本条阶段归属 = D 类**（差异已消失 ⇒ 无待实现内容；下表 5 条残余差异**全部 D 类**）
+
+> **派生层敏感措辞说明**：上句里的「阶段归属 = D 类」是**写给派生层的显式声明**（`derive-stage1.py` 的 `entry_stage_decl` **只在含「阶段归属 / 定级」的行里**取类）⇒ ⇒ 本条目与同构的 `DRIFT-LIKE-019` 的派生取值**恒等**（都是 D）⇒ ⇒ **不依赖任何「残余差异理由里偶然出现『定级』二字 ⇒ 父条目归属被意外改判」的措辞**（⚠️ 实测 like 域第 5 行理由里的「同一定级」曾把 `DRIFT-LIKE-019` **误**拾取成 D，而本条目因无此措辞被读成「未定级」⇒ ⇒ **同构两条目取值不一致** ⇒ 本轮已归一，并把该措辞改为「同档位」）。
+
+| # | 差异 | 严重度 | 阶段归属 | 理由 |
+|---|---|---|---|---|
+| 1 | **暴露路径不同**（Go `/metrics` ＋ `/healthz` ↔ RAG `/actuator/prometheus` ＋ `/actuator/health`） | **P3** | **D 类** | **端口一字不差（都是 16067）**；路径是 Actuator 的固定前缀 ⇒ 抓取配置**改路径不改端口** ⇒ 表达层差异。⇒ **照 follow-rpc 已登记的口径**（`docs/DRIFT/follow/rpc.md` 的「残余差异登记」第 2 条）⇒ **不新造一条偏离登记** |
+| 2 | **载体不同**（Go = `http.ListenAndServe` 的小 server，无 servlet；RAG = Tomcat，有 servlet 但**无任何业务 HTTP 路由**） | **P3** | **D 类** | 对外可观测面（独立端口 ＋ Prometheus 文本）一致；载体不同属框架表达差异 ⇒ **不修** |
+| 3 | **健康语义不同**（Go `/healthz` = **自身**就绪：`zrpc/internal/rpcserver.go:65 s.healthManager.MarkReady()`；RAG `/actuator/health` = **依赖聚合**：`db` / `redis` / `discoveryComposite` / `diskSpace` / `ssl` / `ping` ⇒ 任一依赖 DOWN 即 503） | **P3** | **D 类** | 形状不同但**都是「未就绪 ⇒ 503」** ⇒ 抓取/探针语义**同向**；差异在「依赖挂了就报不健康」这一层 ⇒ 运维面取舍 ⇒ **不修** |
+| 4 | **Go DevServer 另有 `/debug/pprof/*`**（`service/message/rpc/etc/message.yaml:26` `EnablePprof: true`；go-zero `internal/devserver/server.go:53-59` 五条路由） | **P3** | **D 类** | RAG 侧 Actuator **无 pprof endpoint** ⇒ 新增可观测面缺失；不影响指标可比性 ⇒ **不修** |
+| 5 | **`le` 文本 `1` vs `1.0` / `5` vs `5.0` / `10` vs `10.0`** | **P3** | **D 类** | Prometheus 按**浮点**解析 `le` ⇒ 同一个桶 ⇒ **语义等价** ⇒ 不修 |
+
+⚠️ **「一条差异 ≠ 一个缺陷」**：上表 5 条**全部是 D 类**（已分析确认可不实现）⇒ **本条本体（零抓取出口）已闭环**。
+
+#### ⑤ 守门与变异验证（**证明判据不是恒真**）
+
+| 变异 | 现象 | 结果 |
+|---|---|---|
+| ① **改实现**：摘掉 `service/message/message-rpc/pom.xml` 的 `spring-boot-starter-web` | 真 fat jar 起不来 web 容器 ⇒ 日志里**没有** `Tomcat started on` ⇒ 抓取端点**根本不存在** | ✅ **转红**（`Failures: 1`），报「**web 容器没起来 ⇒ 载体仍然不存在**」 |
+| ② **改实现**：把 `MessageMetrics` 的 `serviceLevelObjectives(...)` 改回 `publishPercentileHistogram()` | 桶边界回到 Micrometer 的 **69 个** HdrHistogram 桶（`0.001` / `0.001048576` / … / `30.0`）⇒ 与 Go 的 11 个**零重合** | ✅ **转红**（`Failures: 1`），报「**桶边界与 Go 的 `prometheus.DefBuckets` 不一致**」，并列出实测的 69 个边界 |
+| ③ **改实现**：摘掉 `service/like/like-rpc/pom.xml` 的 `spring-boot-starter-web`（like 域同款） | 同 ① | ✅ **转红**（`Failures: 1`），报同款断言 |
+
+⇒ 三处变异**全部红在目标断言**（不是红在别处）⇒ ⇒ **判据有牙齿，不是假绿**。
+⇒ 三处变异**均已还原干净**，还原后 `MessageRpcMetricsCarrierGateTest` 与 `LikeRpcMetricsCarrierGateTest` **各 2/2 绿**。
+
+#### ⑥ 与其它域的关系（**边界**）
+
+- 本条**只覆盖 `message-rpc`**。同款缺口的另外几处（`favorite-rpc` 16062 / `user-user-rpc` 9094 / `user-admin-rpc` 9097）属**别的域** ⇒ **各域各判**（`docs/DRIFT/_cross/grading/W28.md` 的结论口径）。
+- 🔴 **共享层未动**：`service/common/**` 是 **G4 写权面**。本轮补 servlet 容器 ⇒ 共享层 `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` 里 **3 个 `@ConditionalOnWebApplication(SERVLET)`** 自动配置（`GoStyleJsonContentTypeAdvice` / `GoStylePathNormalizingAutoConfiguration` / `GoStyleBreakerRouteTemplateAutoConfiguration`）**在 rpc 进程首次激活** ⇒ 而 Go 的 rpc 侧 `zrpc.MustNewServer` **一个 rest 中间件都没挂** ⇒ **「rpc 域观测口要不要挂 Go 的 rest 中间件」是共享层决策** ⇒ ⇒ **本轮只登记、不加任何 opt-out 属性**（合并窗口由合并收口执行者统一加）。【订正 · 见 §⑦】⇒ 2026-10-30 晚些时候**合并收口执行者改派** ⇒ **域侧要加 `rag.side: rpc`**（共享层的门已由 G4 落在 `align/g4-service-common:e8cb769a`）⇒ ⇒ 本行的「不加任何 opt-out 属性」**只是本轮当时的口径**，现已按 §⑦ 执行。
+  - **本轮实测其影响**：`GoStylePathNormalizingFilter.doFilter` 对**已 Clean** 的路径**原样下传** ⇒ `/actuator/prometheus` 本身已 Clean ⇒ **不受影响**；`GoStyleJsonContentTypeAdvice` 只在「响应体是 JSON」时改 Content-Type ⇒ Prometheus 文本（`text/plain;version=0.0.4`）**不受影响** ⇒ ⇒ **实测证据 = 上面「③」的抓取响应体（`Content-Type: text/plain;version=0.0.4;charset=utf-8` ＋ 内容完整）**。
+
+#### ⑦ 进程形态（2026-10-30 追加派工）：`rag.side: rpc` ⇒ rpc 观测口不许挂 api 侧那套 rest 中间件
+
+**Go 出处（逐字对照）**：Go 的 rpc 侧走 `zrpc.MustNewServer(...)`
+⇒ 服务端那条链（trace / recover / stat / prometheus / breaker / shedding）是 **gRPC interceptor**，
+**不是** net/http 的 rest middleware
+⇒ ⇒ **Go 的 rpc 进程上不存在** maxConns / maxBytes / cpuShedding / breaker 这四层 HTTP 保护。
+
+**为什么本轮才成为问题**：本条给本模块补了 servlet 容器
+⇒ ⇒ 共享层的 web 侧组件在 rpc 进程里**首次激活**
+（此前 4 个 rpc 组件**刻意不扫** `com.rag.common` ⇒ 那批 `@Component` 的 web 类一个都没进来）。
+
+**共享层的形态开关**（**G4 的共享层写权面**，落码在 `align/g4-service-common:e8cb769a`）：
+`@ConditionalOnProperty(name = "rag.side", havingValue = "api", matchIfMissing = true)`
+⇒ **默认 = api 形态** ⇒ ⇒ **rpc 模块必须显式写 `rag.side: rpc`**（不写 = 默认 api）。
+
+⚠️ **对「威胁」的订正**（派单时写的是「CPU 降载会拒请求 ⇒ 直接威胁载体存在的目的」）：
+- **当前基线上这个威胁并不成立**：那 4 个保护 Filter（`GoStyleCpuSheddingFilter` /
+  `GoStyleMaxConnsFilter` / `GoStyleMaxBytesFilter` / `GoStyleBreakerFilter`）是 **`@Component`**
+  （`service/common/src/main/java/com/rag/common/protection/GoStyleCpuSheddingFilter.java:61` 等）
+  ⇒ 本模块**刻意不扫** `com.rag.common` ⇒ ⇒ 它们**根本不在** rpc 容器里
+  （**实测**：真 fat jar 的 `/actuator/beans` 清单里查无这 4 个 Bean）。
+- ⇒ ⇒ `rag.side: rpc` 这一行的价值是**把「约定」变成「条件」**：
+  ① 共享层若把某个 web 类从 `@Component` 改成 `@AutoConfiguration`（或将来把 `com.rag.common`
+  加进 rpc 的扫描面）⇒ ⇒ 这一行自动挡住 ⇒ **约定不会随人流失**；
+  ② `GoStyleCpuSheddingFilter` 本身**默认 enabled=true**（同包 `GoStyleProtectionProperties`
+  的默认值 = go-zero 的 tag 默认值）且会 `setStatus(503)` ⇒ ⇒ 一旦挂上，**抓取真的会被拒**。
+
+**落码**：`service/message/message-rpc/src/main/resources/application.yml` 新增 `rag.side: rpc`
+＋ 同段注释（Go 出处 / 为什么 / 残余）⇒ 与 `spring.cloud.nacos.discovery.register-enabled: false`
+（本轮同批落的另一条，见上）**在同一文件、同一次提交**。
+
+**守门**（`MessageRpcMetricsCarrierGateTest` · 真 fat jar ＋ 真 `/actuator/beans` 清单）：
+- `rpcSideMustNotCarryApiSideHttpMiddleware()` ⇒ **8 个** api 侧 HTTP 中间件
+  （CPU 降载 / 最大连接 / 最大字节 / 熔断 / traceparent / 表单限值 ×2 / Tomcat 参数上限）
+  **一个都不许在容器里**；且 `/actuator/env?show-values=always` ⇒ 运行期 `rag.side` = `rpc`
+  且来源 = **生产 application.yml** ⇒ ⇒ **不是「yml 里写了就算」**。
+- `apiSideAutoConfigurationsMustNotRegisterWhenSideIsRpc()` ⇒ 共享层的 `rag.side` 门落码后 ⇒
+  **3 个** api 侧**自动配置**（`GoStylePathNormalizingAutoConfiguration` /
+  `GoStyleJsonContentTypeAdvice` / `GoStyleBreakerRouteTemplateAutoConfiguration`）不许注册。
+  ⚠️ **【订正 · 见文末「rebase 后守门转强制判据」小节】**：本分支**已 rebase 到主干 `89ec4245`** ⇒ ⇒ 共享层的门**已在树上**
+  ⇒ ⇒ 这条**不再 skip**、**执行**且**通过**（两域各 `Tests run 4 / Skipped 0`）⇒ ⇒ 已是**强制判据**；⚠️ 但「机制到位 ⇒ 自动转强制」
+  ⇒ 当时是**假的**（探针用 JDK `getAnnotation` **不穿透元注解** ⇒ rebase 后仍 skip）⇒ ⇒ 已改用 `AnnotatedElementUtils.findMergedAnnotation`。
+
+**🔴 跨 lane 依赖（登记给 G4 / 合并收口执行者）**：共享层把 `rag.side` 门从 **2 个类**
+扩到**全部** api 侧 web 组件，尚余 **9 个**（`GoStyleBreakerRouteTemplateAutoConfiguration` ·  ←【订正 · 见文末「跨 lane 依赖的数量订正」小节】：该数**已过期** ⇒ G4 已把门扩到**全部 13 个**（自动配置面 3 ＋ 扫描面 10）⇒ ⇒ 实际剩余 **0 个**（不是 9 / 10）
+`GoStyleCpuSheddingFilter` · `GoStyleMaxConnsFilter` · `GoStyleMaxBytesFilter` ·
+`GoStyleBreakerFilter` · `GoStyleTraceparentFilter` · `GoStyleFormValueLimitInterceptor` ·
+`GoStyleFormLimitWebMvcConfig` · `GoStyleTomcatParameterLimitCustomizer`）
+⇒ ⇒ **共享层写权面 ⇒ 本域不写** ⇒ ⇒ 已派单。【订正 · 见文末「跨 lane 依赖的数量订正」小节】：该派单**已落地**（G4 共享层门已挂 13 个类 ＋ 本域 `rag.side: rpc` 已落码）⇒ ⇒ 剩余项**不是**「门没挂够」，而是**结构面**（rpc 域不扫 `com.rag.common` 仍是域侧约定 ⇒ 由主干 `check-rpc-common-scan-exclusion.py` 断言①机械守住）。
+
+### ✅ `DRIFT-MSG-V-034` ✅ **已修（2026-10-30 · G2 落码）**：datasource 口令带默认值 ⇒ 缺变量时用默认口令连上去 ⇒ **RAG 比 Go 松** ⇒ 已取消兜底（与 Go 逐字同形）
+
+**阶段归属**（`docs/twoStage.md` §10）：**D 类**（差异已消失 ⇒ 无待实现内容）。
+
+**Go 出处**：`service/message/rpc/etc/message.yaml:32`
+⇒ `Password: "${POSTGRES_PASSWORD}"` ⇒ **裸占位符，无默认值**。
+
+**Go 侧加载语义**：`go-zero@v1.10.2/core/conf/config.go:63`
+⇒ `return loader([]byte(os.ExpandEnv(string(content))), v)`
+⇒ ⇒ `os.ExpandEnv` **不认** `${VAR:default}` 语法（它把 `POSTGRES_PASSWORD:password`
+**整串**当成变量名去查）⇒ ⇒ 缺变量 ⇒ **空串** ⇒ Go = **空口令** = 连库失败。
+
+**RAG 改前**：`service/message/message-rpc/src/main/resources/application.yml:29`
+= `${POSTGRES_PASSWORD:password}` ⇒ Spring 的 `:default` 语义
+⇒ 缺变量时**用默认口令连上去** ⇒ ⇒ **RAG 比 Go 松** ⇒ **真漂移**（不是「更严的有意偏离」）
+⇒ ⇒ **不需要为「保留兜底」签字**。
+
+**落码**：改成裸 `${POSTGRES_PASSWORD}` ＋ 注释（Go 出处 / 为什么取消 / 残余差异 / 装置侧不受影响）。
+
+**✅ 残余差异 = 无（**两侧同形**）⇒ ⇒ 那条「有意偏离候选」**不成立，本域不登记****：
+
+| 场景（缺 `POSTGRES_PASSWORD`） | Go | RAG |
+|---|---|---|
+| 口令值 | `os.ExpandEnv` ⇒ **空串** | 占位符解析 ⇒ **空串**（实测：应用**没有**报「Could not resolve placeholder」，而是带着空口令去连库） |
+| 失败点 | `service/message/rpc/internal/model/db.go:31` `gorm.Open(postgres.Open(dsn))` ⇒ **eager Ping**（`gorm.io/gorm@v1.31.1/gorm.go:236-239`，`DisableAutomaticPing` 默认 false）⇒ err ⇒ `:33 log.Fatalf("failed to connect postgres: %v", err)` | `flywayInitializer` 建连 ⇒ `FATAL: password authentication failed for user "admin"`（SQLState **28P01**）⇒ `Application run failed` |
+| 进程结局 | **启动阶段退出** | **启动阶段退出** |
+
+⇒ ⇒ **派单时写的「Go = 启动成功、连库时失败；RAG = 启动即失败」这个前提不成立**
+（两侧都是**启动阶段**连库失败 ⇒ 进程退出）⇒ ⇒ **本条无残余差异** ⇒ ⇒
+**不需要**按 P0 #8 同款口径登记「有意偏离候选」（登记了就是**假差异**）⇒ ⇒ **已回执合并收口执行者撤销该登记项**。
+
+**⚠️ 装置侧不需要改**：`tools/difftest/run.sh:196` 显式 `export POSTGRES_PASSWORD`
+＋ 根级 `docker-compose.yaml:15` 是 `${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}`（强制）
+＋ `manage.sh` 硬校验 `.env` ⇒ ⇒ 取消兜底**不影响任何对拍装置**
+（⚠️ 台账里「要连带改装置」那个前提是**错的**，G1 已订正）。
+
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
 > 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
@@ -2965,3 +3232,117 @@ sed -n '22p'      "/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/servic
 | DRIFT-MSG-012 | C（阶段 2 最终工程建设项 · 部署面收敛） | P2 | 否（不阻断阶段一） | Go `service/message/rpc/message.go:25`（`func main()` ⇒ 纯 gRPC 进程）＋ `:37`（`s := zrpc.MustNewServer(c.RpcServerConf, …)` ⇒ **无 servlet 容器**、无 HTTP 监听面）vs RAG `service/message/message-rpc/pom.xml:86`（`<artifactId>spring-boot-web-server</artifactId>` ⇒ 引了 web-server 构件）＋ `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/bootstrap/NacosRegistration.java:33`（javadoc 明写「**本服务不带 web**，要走纯手动注册路径」）⇒ ⇒ **差异仍成立**：pom 引入的 web-server 构件与本模块自述「不带 web」互相矛盾（属部署面差异，不影响 gRPC 行为面）⇒ 阶段二收敛（移除该依赖或改口径，二选一）⇒ 归 C、不阻断阶段一；⚠️ 本条在 2026-10-30 活体对拍轮里 `tools/difftest/run.sh` ⇒ EXIT=0，但退出码只证该探针自身断言成立、不等于本条全量成立 | 2026-10-30 |
 | DRIFT-MSG-V-020 | D（差异已消失 ⇒ 无待实现内容） | P1 | 否（不阻断阶段一） | Go `service/message/rpc/internal/model/db.go:22`（DSN 钉 `TimeZone=Asia/Shanghai` ⇒ GORM 迁出的 `timestamptz` 存绝对时刻，`time.Time.Unix()` 读出真实 epoch）＋ `:42`（`db.AutoMigrate(&Notification{}, &Conversation{}, &ConversationMessage{})` ⇒ 三张表随实体声明迁出）vs RAG `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/service/MessageRpcSupport.java:107`（`private static long toEpochSecond(OffsetDateTime instant)` ⇒ 实体字段已由 `LocalDateTime` 改为 `OffsetDateTime`）＋ `:110`（`return instant.toEpochSecond();` ⇒ **与时区无关**、持有真实瞬时 ⇒ 等价于 Go 的 `time.Time.Unix()`）＋ `service/message/message-rpc/src/main/resources/db/migration/V5__message_time_columns_timestamptz.sql:2`（8 个时间列 `TIMESTAMP ⇒ TIMESTAMPTZ`）⇒ ⇒ **差异已消失**：2026-10-23 第五轮按 users 域规格落码（改已应用迁移会撞 Flyway 校验和 ⇒ 新写 V5 而非改 V1~V3）⇒ 类型与可空性两侧 0 差异；⚠️ 残留（不在本条范围）= `DEFAULT CURRENT_TIMESTAMP` 残留（Go 侧无 DB 层默认 ⇒ 已登记不修，两侧 INSERT 均显式绑定该列 ⇒ 不可观测） | 2026-10-30 |
 | DRIFT-MSG-V-027 | D（差异已消失 ⇒ 无待实现内容） | P0 | 否（不阻断阶段一） | Go `service/message/rpc/internal/model/db.go:42`（`db.AutoMigrate(&Notification{}, &Conversation{}, &ConversationMessage{})` ⇒ Go 侧**无版本化迁移账本** ⇒ 不存在「非空 schema 上 baseline 把 V1 整条跳过」这个失效面）vs RAG `service/message/message-rpc/src/main/resources/application.yml:102`（`baseline-version: 0` ⇒ baseline 标记打在 version 0 ⇒ V1 之后全部迁移照常执行）＋ `:105`（`table: flyway_schema_history_message` ⇒ 独立账本表名）＋ `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageFlywaySharedSchemaWiringTest.java:164`（`assertEquals("0", versions.get(i), …)` ⇒ 断言账本里 baseline 行是 version 0）＋ `:179`（`assertEquals("SQL", types.get(versions.indexOf("1")), …)` ⇒ 断言 V1 真的以 SQL 执行过、不是被 baseline 顶掉）＋ `:187`（`assertTrue(tableExists("message_notification"), …)`）⇒ ⇒ **差异已消失**：2026-10-24 起真栈时暴露的「Flyway baseline 跳过 V1 ⇒ `message_notification` 永远建不出来 ⇒ 服务起不来」已由 `baseline-version: 0` ＋ 独立账本表名闭合 ⇒ 本域不再阻断阶段一 | 2026-10-30 |
+
+### 【订正 · 2026-10-30 · G2 lane】跨 lane 依赖的数量订正：「尚余 9 个」⇒ 实际剩余 0 个
+
+**订正对象**：本文件上文「🔴 跨 lane 依赖（登记给 G4 / 合并收口执行者）」小节里那句
+「共享层把 `rag.side` 门从 **2 个类**扩到**全部** api 侧 web 组件，尚余 **9 个**」。
+
+**旧行按台账纪律保留**（推翻旧结论必须**就地改旧处**、零行位移；上文那两行已加【订正】括注），
+本节只承载**订正的依据**与**订正后的剩余项**。
+
+**⚠️ 订正结论**：「尚余 **9 个**」是**过期快照** ⇒ ⇒ **实际剩余 0 个**（不是 9，也不是 10）。
+
+**依据一 · 共享层门已扩到全部 13 个类（主干实测）**
+
+- 门 = `service/common/src/main/java/com/rag/common/web/ConditionalOnApiSide.java:58`
+  ⇒ `@ConditionalOnProperty(name = "rag.side", havingValue = "api", matchIfMissing = true)`。
+- 其 javadoc 自述：「此前 `rag.side=api` **只罩住了 2 个类**（`GoStylePathNormalizingAutoConfiguration` ＋
+  `GoStyleJsonContentTypeAdvice`）⇒ ⇒ **其余 11 个** api 侧中间件没有这层限定」
+  ⇒ ⇒ 门的目标集合 = **13 个**。
+- 主干实测（逐类点名 `ConditionalOnApiSide`）⇒ **13 个类全部已挂**：
+  - **自动配置面 3 个**（`AutoConfiguration.imports` ⇒ 不靠组件扫描 ⇒ servlet 形态 rpc 域必注册）：
+    `GoStyleJsonContentTypeAdvice` · `GoStylePathNormalizingAutoConfiguration` · `GoStyleBreakerRouteTemplateAutoConfiguration`；
+  - **扫描面 10 个**（`@Component` / `@Configuration` ⇒ 靠组件扫描）：
+    `GoStyleCpuSheddingFilter` · `GoStyleMaxConnsFilter` · `GoStyleMaxBytesFilter` · `GoStyleBreakerFilter` ·
+    `GoStyleTraceparentFilter` · `GoStyleTomcatParameterLimitCustomizer` · `HttpMiddlewareFilter` ·
+    `GoStyleFormValueLimitInterceptor` · `GoStyleFormLimitWebMvcConfig` · `GoStyleJsonBodyConverterConfig`。
+- **传递门控已验**（不是「类上挂了注解」而是「内层 Bean 也随之不注册」）：
+  `GoStylePathNormalizingAutoConfiguration.java:57`（类级 `@ConditionalOnApiSide` ⇒ 其 `@Bean` 随类不注册）·
+  `GoStyleBreakerRouteTemplateAutoConfiguration.java:37`（同上 ⇒ 其 `@Bean` 随类不注册）。
+
+**依据二 · 本域活体实证：rpc 进程里 api 侧 web 中间件 = 0（读数，不是推断）**
+
+- `MessageRpcMetricsCarrierGateTest`（**真 fat jar ＋ 真 `/actuator/beans` 清单**）⇒
+  **8 个**扫描面 api 侧 HTTP 中间件（CPU 降载 / 最大连接 / 最大字节 / 熔断 / traceparent / 表单限值 ×2 /
+  Tomcat 参数上限）**一个都不在容器里**；
+- 同一测试的 `apiSideAutoConfigurationsMustNotRegisterWhenSideIsRpc()` ⇒ **3 个**自动配置面类不在容器里
+  ⚠️ **【订正 · 见文末「rebase 后守门转强制判据」小节】**：本分支**已 rebase 到主干 `89ec4245`** ⇒ ⇒ 这条**执行**且**通过**
+  （两域各 `Tests run 4 / Skipped 0`）⇒ ⇒ 已是**强制判据**（「skip ≠ 通过」的纪律依然成立 —— 只是本条现在**不是** skip）。
+- ⇒ ⇒ 合计：**rpc 进程里 api 侧 web 中间件 = 0**。
+
+**依据三 · `HttpPoolLifecycle` 不属于「剩余项」（否掉一版错误口径）**
+
+- `service/common/src/main/java/com/rag/common/spring/HttpPoolLifecycle.java:52` = `@Component` ·
+  `:53` = `@ConditionalOnWebApplication(SERVLET)` ⇒ ⇒ **要靠组件扫描才注册**；
+- 而 rpc 域**刻意不扫 `com.rag.common`** ⇒ ⇒ 它在 rpc 进程**根本不注册**
+  （其 javadoc `:32`-`:33` 自述：「rpc 模块一律不扫 `com.rag.common` ⇒ 本类在 rpc 进程里**根本不会被注册**」）。
+- ⇒ ⇒ 它**不是**「api 侧中间件在 rpc 域激活」⇒ ⇒ **不属于本项的剩余项**
+  ⇒ ⇒ 「12 激活 / 10 剩余（补 `HttpPoolLifecycle`）」这版口径**不成立**。
+
+**订正后本项的真正剩余**：**不是「门没挂够」**，而是**结构面** ——
+「rpc 域不扫 `com.rag.common`」目前仍是**域侧约定**（共享层无法从内部保证）
+⇒ ⇒ 由主干新守门 `tools/difftest/check-rpc-common-scan-exclusion.py` 断言①（结构面）机械守住；
+断言②（形态面：servlet 形态必须显式 `rag.side: rpc`）与本域本轮落码一致。
+
+**本轮只读实测（2026-10-30 · 当时未把 `tools/` 文件合入本分支 —— `tools/**` 是 G4 写权面）**【订正 · 见文末「rebase 后守门转强制判据」小节】：**本分支已 rebase 到主干 `89ec4245`** ⇒ ⇒ `tools/` 已在树上 ⇒ ⇒ 现可直接实跑。
+
+- 守门在本分支上 **EXIT=0**：结构面 ✅（10 个 rpc 域都没有扫 `com.rag.common`）；
+  形态面 ✅（`like-rpc` / `message-rpc` 已显式 `rag.side: rpc`）。【订正 · 见文末「主干实况复判」小节】：「白名单那两条已 stale ⇒ 可剪枝」这个措辞**不准** ⇒ ⇒ 那两条本就是**假命中**（守门漏剥 pom 注释）⇒ ⇒ 已由主干 `a0d6ef13` 修判据并把白名单 **5→1**。
+- 🔴 **新发现（共享面缺口 · 登记给 G4）**：守门的 `_module_has_web_starter()` 是**纯文本正则**、**不剥 XML 注释**
+  ⇒ ⇒ 它把 pom **注释里**那句「本模块不引 `spring-boot-starter-web`」当成了**真依赖**
+  ⇒ ⇒ `task-rpc`（`service/task/task-rpc/pom.xml:57` 注释）被**误判**成 servlet 形态
+  ⇒ ⇒ 白名单里「task-rpc · G2 面 · 已派单（载体波次内一并加）」那条**前提不成立**
+  ⇒ ⇒ **task-rpc 不需要 `rag.side: rpc`**（它**无 servlet 容器** ⇒ 那一行是**死配置**）
+  ⇒ ⇒ **本域不给 task-rpc 加这一行**（不写死配置、不制造「配置存在但无载体」的假象）。【订正 · 见文末「主干实况复判」小节】：**立场不变**，且已由主干修好的守门 ＋ 依赖树实测**双重印证**。
+- ⇒ ⇒ 修法在**共享面**：`_module_has_web_starter()` 应先剥 XML 注释
+  （与该脚本对 Java 侧 `strip_comments()` 的做法**对称**）⇒ 修后 `task-rpc` 形态面自动不命中 ⇒ 白名单那条即可剪枝。【订正 · 见文末「主干实况复判」小节】：**该修法已落** —— 主干 `a0d6ef13`「跨域静态门 pom 判定漏剥 XML 注释 ⇒ 假违例 + 假豁免 + 派错工单 ⇒ 修判据 + 剪白名单 5→1」。
+
+### 【复判 · 2026-10-30 晚些时候 · G2 lane】主干实况复判：三域零活偏离 ⇒ **不需要加急 cherry-pick**
+
+**触发**：合并收口执行者 2026-10-30 晚些时候发来**加急**派单：「主干上 like/message/task-rpc 三个域
+**今天就挂着 api 侧中间件** ⇒ 请单独提交一笔只含 `rag.side: rpc` 的 commit」。
+
+**复判结论**：该前提**已被主干自己落地的修复推翻** ⇒ ⇒ **主干上这三个域零活偏离**
+⇒ ⇒ **不需要加急 cherry-pick**（三条依据，逐条带证据）。
+
+**依据一 · 主干的守门已修好（`a0d6ef13`）**
+
+- 主干 HEAD = `a0d6ef13`「fix(守门): 跨域静态门 pom 判定漏剥 XML 注释 ⇒ 假违例 + 假豁免 + 派错工单
+  ⇒ 修判据 + 剪白名单 5→1」⇒ ⇒ **本节上文那条「新发现（共享面缺口）」已经落地修掉** ⇒ ⇒ 白名单 **5→1**。
+- 在该主干树上实跑 `tools/difftest/check-rpc-common-scan-exclusion.py` ⇒ **EXIT=0**；
+  形态面只剩 **1 条** = **follow-rpc**（**真活偏离** · 载体 2026-10-29 已落主干 ⇒ 它**真**有 web starter
+  ⇒ 13 个 api 侧类会挂到 16065 观测口 ⇒ **G1 面**）。【订正 · 见文末小节】：该条**已被主干 `e86ec93b` 消掉** ⇒ ⇒ 现形态面违例 = **0 条**、白名单 = **0 条**（零豁免）。
+  ⇒ ⇒ **like-rpc / message-rpc / task-rpc 在修好的守门下既不是「形态面违例」，也不是「白名单命中」**。
+
+**依据二 · 依赖树实测（主干真实树，不是 pom 文本）**
+
+- 主干 `service/task/task-rpc`：`mvn -o -pl service/task/task-rpc dependency:tree` ⇒ web 相关**只有**
+  `org.springframework.boot:spring-boot-web-server:4.0.8` ⇒ **无** `spring-boot-starter-web` ·
+  **无** `spring-boot-starter-tomcat` · **无** `tomcat-embed-core` · **无** `jakarta.servlet-api`。
+- 主干 `service/like/like-rpc` · `service/message/message-rpc`：同样**只有** `spring-boot-web-server`
+  （另有 `tomcat-embed-el` = **EL 表达式库**，**不含 servlet API** ⇒ 不构成容器）。
+- ⇒ ⇒ **运行时类路径上没有 servlet-api** ⇒ ⇒ Boot 的 `WebApplicationType.deduceFromClasspath()` 判 **NONE**
+  ⇒ ⇒ 那 13 个 api 侧 web 类**全部带 `@ConditionalOnWebApplication(SERVLET)`** ⇒ ⇒ **一个都不可能注册**
+  ⇒ ⇒ **「api 侧中间件挂在这些 rpc 进程上」这件事在主干上不成立**。
+- 对照：`favorite-rpc` / `comment-rpc` 之所以需要 `web-application-type: none`，正是因为它们**有**
+  `jakarta.servlet`（provided 作用域）⇒ Boot 会误判 SERVLET ⇒ **那才是真需要挡的形态**。
+
+**依据三 · 本域的载体与声明是**同一笔** ⇒ ⇒ 没有「中间窗口」**
+
+- 本分支 `48e48b93` 里，`like-rpc` / `message-rpc` 的 **`spring-boot-starter-web`（载体）
+  与 `rag: side: rpc`（形态声明）在同一笔提交** ⇒ ⇒ 它们成为 servlet 形态的那一刻，声明**同时**到位
+  ⇒ ⇒ **不需要提前 cherry-pick 一笔声明**。
+- 反过来：单独 cherry-pick 一笔声明到主干 ⇒ ① 当前**不生效**（那三域在主干上没有 servlet 容器）；
+  ② 本分支那笔合并时会造成 **add/add** ⇒ ⇒ **零功能收益 ＋ 合并摩擦** ⇒ ⇒ **不做**。
+- `task-rpc`：**不需要** `rag.side: rpc` —— 它**永不是** servlet 形态（Go 侧 `task-rpc` 无观测端口）
+  ⇒ ⇒ 那一行是**死配置** ⇒ ⇒ **本域不给它加**（立场不变，已由依据一、二**双重印证**）。
+
+**⇒ ⇒ 对合并收口执行者的正式答复**：加急派单的前提（主干三域今天就挂着 api 侧中间件）
+**已被主干自己的 `a0d6ef13` 修复推翻** ⇒ ⇒ **不产出**那笔 cherry-pick commit；**本域不需要任何新代码**。
+⇒ ⇒ 唯一剩下的**真活偏离**是 **follow-rpc**（G1 面）⇒ ⇒ 白名单那 1 条是**如实登记的已知未修项**，不是 G2 的活。
+
+**本节与上文的关系**：上文三处措辞已**就地**加【订正】括注（零行位移）——
+①「白名单那两条已 stale ⇒ 可剪枝」⇒ 那两条本就是**假命中**，已由 `a0d6ef13` 剪掉；
+②「task-rpc 不需要 `rag.side: rpc`」⇒ **立场不变**，现由依据一、二**双重印证**；
+③「修法在共享面：`_module_has_web_starter()` 应先剥 XML 注释」⇒ **该修法已落**（`a0d6ef13`）。

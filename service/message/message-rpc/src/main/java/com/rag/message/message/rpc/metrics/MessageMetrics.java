@@ -87,7 +87,50 @@ public class MessageMetrics {
                 Timer.builder(RPC_REQUEST_DURATION)
                         .description("Message rpc request duration in seconds")
                         .tag("method", m)
-                        .publishPercentileHistogram()
+                        // 🔴 **桶边界必须逐个钉 Go 的 `prometheus.DefBuckets`**（2026-10-30 落码）
+                        //
+                        // 【Go 出处（真源）】
+                        //   service/message/rpc/internal/metrics/metrics.go:19-24
+                        //     prometheus.NewHistogramVec(prometheus.HistogramOpts{
+                        //       Subsystem: "message_rpc", Name: "request_duration_seconds",
+                        //       Buckets: prometheus.DefBuckets, ...}, []string{"method"})
+                        //   ⇒ prometheus.DefBuckets
+                        //     = `client_golang@v1.23.2/prometheus/histogram.go:271`
+                        //       = {.005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10}（11 个）＋ +Inf
+                        //
+                        // 【为什么不能只写 `publishPercentileHistogram()`】
+                        //   Micrometer 的 percentile 直方图用它自己的 **HdrHistogram 派生的 68 个桶**
+                        //   （0.001 / 0.001048576 / … / 30.0）⇒ 与 Go 的 11 个边界**零重合**
+                        //   ⇒ 后果：同一段 PromQL（`histogram_quantile(0.95, …_bucket)`）
+                        //     在两侧**给出不同的分位数** ⇒ **监控语义不等价**
+                        //     ⇒ **不是「表达层差异」，是语义差异**。
+                        //   （2026-10-30 实测本模块修前的 `/actuator/prometheus`：
+                        //     `le="0.001"` / `"0.001048576"` / … ⇒ 68 个桶，一个都不等于 Go 的边界。）
+                        //
+                        // 【修法 = 只用 `serviceLevelObjectives(...)`】
+                        //   Micrometer 的 SLO 直方图**以 SLO 边界为桶边界** ⇒ 逐个等于 DefBuckets。
+                        //   ⚠️ **不要再加 `publishPercentileHistogram()`**：实测 Micrometer 会把
+                        //     SLO 边界**叠加**到它自己的 68 个桶上（⇒ 79 个桶）⇒ 反而更不接近 Go。
+                        //   ⚠️ **不能用 `publishPercentiles()`**：那是**分位数**开关，
+                        //     Prometheus 文本格式**不支持 quantile** ⇒ 对抓取端是无效配置。
+                        //   ⚠️ **Boot 4 已删掉 `management.metrics.distribution.buckets.<meter>`**
+                        //     ⇒ 桶边界**只能**在代码侧钉。
+                        //
+                        // 【先例】follow 域同款已修（2026-10-29 · 随载体一起落地）
+                        //   ⇒ service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/metrics/FollowRpcMetrics.java:126-145
+                        //   ⇒ 台账 docs/DRIFT/follow/rpc.md 的「🔴 桶边界」小节（含双侧活体实测）。
+                        .serviceLevelObjectives(
+                                Duration.ofMillis(5),    // .005
+                                Duration.ofMillis(10),   // .01
+                                Duration.ofMillis(25),   // .025
+                                Duration.ofMillis(50),   // .05
+                                Duration.ofMillis(100),  // .1
+                                Duration.ofMillis(250),  // .25
+                                Duration.ofMillis(500),  // .5
+                                Duration.ofSeconds(1),   // 1
+                                Duration.ofMillis(2500), // 2.5
+                                Duration.ofSeconds(5),   // 5
+                                Duration.ofSeconds(10))  // 10
                         .register(registry));
         timer.record(Duration.ofNanos(System.nanoTime() - startedAtNanos));
     }

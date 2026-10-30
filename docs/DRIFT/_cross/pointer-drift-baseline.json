@@ -1,0 +1,2934 @@
+{
+  "_comment": "指针漂移**例外集**基线（棘轮）—— 只登记**已知**的例外；守门只对**新增**的例外报红。生成器：tools/ledger-derive/check-pointer-consistency.py --baseline",
+  "_口径": "键 = (源文件, 目标文件, 解析出的编号) ⇒ **不含行号** ⇒ 源文件移位不造成假新增",
+  "entries": [
+    {
+      "src": "docs/CLOSEOUT-2026-10-29.md",
+      "src_line": 464,
+      "target": "DRIFT/_cross/open-items.md",
+      "target_line": 65,
+      "resolved_id": "DRIFT-INFRA-001",
+      "src_ids": [
+        "L-1"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/CLOSEOUT-2026-10-29.md",
+      "src_line": 374,
+      "target": "DRIFT/global/common-tails.md",
+      "target_line": 551,
+      "resolved_id": "SD-2026-10-24-10",
+      "src_ids": [
+        "SD-2026-10-23-09"
+      ],
+      "target_ids": [
+        "SD-2026-10-23-09",
+        "SD-2026-10-24-10"
+      ]
+    },
+    {
+      "src": "docs/CLOSEOUT-2026-10-29.md",
+      "src_line": 374,
+      "target": "DRIFT/users/admin/rpc.md",
+      "target_line": 2772,
+      "resolved_id": "UNRESOLVED-ARPC-002",
+      "src_ids": [
+        "SD-2026-10-23-09"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W1.md",
+      "src_line": 26,
+      "target": "DRIFT/global/vs-common.md",
+      "target_line": 29,
+      "resolved_id": "E21",
+      "src_ids": [
+        "E46",
+        "E62"
+      ],
+      "target_ids": [
+        "E46"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W11.md",
+      "src_line": 18,
+      "target": "DRIFT/users/admin/_shared.md",
+      "target_line": 212,
+      "resolved_id": "U-2",
+      "src_ids": [
+        "DRIFT-USERRPC-V-002",
+        "V-002"
+      ],
+      "target_ids": [
+        "U-2",
+        "V-002"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W11.md",
+      "src_line": 18,
+      "target": "DRIFT/users/admin/rpc.md",
+      "target_line": 1476,
+      "resolved_id": "U-2",
+      "src_ids": [
+        "DRIFT-USERRPC-V-002",
+        "V-002"
+      ],
+      "target_ids": [
+        "U-1",
+        "U-2"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W11.md",
+      "src_line": 20,
+      "target": "DRIFT/users/common.md",
+      "target_line": 871,
+      "resolved_id": "UNRESOLVED-USERSCOMMON-004",
+      "src_ids": [
+        "DRIFT-USERRPC-V-002",
+        "DRIFT-USERRPC-V-011",
+        "U-2"
+      ],
+      "target_ids": [
+        "UNRESOLVED-USERSCOMMON-004"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W11.md",
+      "src_line": 20,
+      "target": "DRIFT/users/user/rpc.md",
+      "target_line": 1715,
+      "resolved_id": "UNRESOLVED-USERRPC-005",
+      "src_ids": [
+        "DRIFT-USERRPC-V-002",
+        "DRIFT-USERRPC-V-011",
+        "U-2"
+      ],
+      "target_ids": [
+        "UNRESOLVED-USERRPC-005"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W13.md",
+      "src_line": 9,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 661,
+      "resolved_id": "DRIFT-CF-018",
+      "src_ids": [
+        "CF-018",
+        "SF-002",
+        "SF-003"
+      ],
+      "target_ids": [
+        "DRIFT-CF-018"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W13.md",
+      "src_line": 8,
+      "target": "DRIFT/like/api.md",
+      "target_line": 384,
+      "resolved_id": "DRIFT-LIKEAPI-002",
+      "src_ids": [
+        "DRIFT-003",
+        "DRIFT-LIKEAPI-003"
+      ],
+      "target_ids": [
+        "DRIFT-LIKEAPI-003"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W2.md",
+      "src_line": 14,
+      "target": "DRIFT/like/rpc.md",
+      "target_line": 1742,
+      "resolved_id": "E60",
+      "src_ids": [
+        "E58",
+        "E59"
+      ],
+      "target_ids": [
+        "E60"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W2.md",
+      "src_line": 25,
+      "target": "DRIFT/users/user/rpc.md",
+      "target_line": 2257,
+      "resolved_id": "E58",
+      "src_ids": [
+        "DRIFT-ARPC-011",
+        "DRIFT-USERRPC-V-013",
+        "E-4"
+      ],
+      "target_ids": [
+        "E58"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W30.md",
+      "src_line": 5,
+      "target": "Intentional_Deviations/like/rpc.md",
+      "target_line": 13,
+      "resolved_id": "SD-2026-10-23-06",
+      "src_ids": [
+        "D-7"
+      ],
+      "target_ids": [
+        "SD-2026-10-23-06"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W32.md",
+      "src_line": 3,
+      "target": "DRIFT/users/user/rpc.md",
+      "target_line": 517,
+      "resolved_id": "DRIFT-USERRPC-V-001",
+      "src_ids": [
+        "U-1",
+        "V-001"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W4.md",
+      "src_line": 7,
+      "target": "DRIFT/article/api.md",
+      "target_line": 1291,
+      "resolved_id": "F-3",
+      "src_ids": [
+        "CASE-16"
+      ],
+      "target_ids": [
+        "DRIFT-ARTICLE-API-003",
+        "F-3"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W4.md",
+      "src_line": 11,
+      "target": "DRIFT/article/api.md",
+      "target_line": 2338,
+      "resolved_id": "FIX-18",
+      "src_ids": [
+        "Latin-1"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W4.md",
+      "src_line": 13,
+      "target": "DRIFT/article/rpc.md",
+      "target_line": 1161,
+      "resolved_id": "FIX-06",
+      "src_ids": [
+        "DRIFT-ARTICLE-RPC-009"
+      ],
+      "target_ids": [
+        "DRIFT-ARTICLE-RPC-009",
+        "FIX-06",
+        "U-5"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W4.md",
+      "src_line": 16,
+      "target": "DRIFT/article/rpc.md",
+      "target_line": 1875,
+      "resolved_id": "FIX-17",
+      "src_ids": [
+        "P-U-2"
+      ],
+      "target_ids": [
+        "FIX-17",
+        "P-U-2"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W4.md",
+      "src_line": 14,
+      "target": "DRIFT/article/rpc.md",
+      "target_line": 119,
+      "resolved_id": "O-6",
+      "src_ids": [
+        "O-5"
+      ],
+      "target_ids": [
+        "O-5"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W4.md",
+      "src_line": 18,
+      "target": "DRIFT/article/rpc.md",
+      "target_line": 332,
+      "resolved_id": "S-3",
+      "src_ids": [
+        "U-3",
+        "U-4"
+      ],
+      "target_ids": [
+        "S-3",
+        "U-3"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/W9.md",
+      "src_line": 9,
+      "target": "DRIFT/article/vs-common.md",
+      "target_line": 27,
+      "resolved_id": "DRIFT-HOTAPI-030",
+      "src_ids": [
+        "DRIFT-ARTICLE-API-006"
+      ],
+      "target_ids": [
+        "CASE-02"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/_samesrc-W19.md",
+      "src_line": 7,
+      "target": "DRIFT/users/admin/rpc.md",
+      "target_line": 3699,
+      "resolved_id": "E65",
+      "src_ids": [
+        "E38"
+      ],
+      "target_ids": [
+        "E65"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/_samesrc-W21.md",
+      "src_line": 5,
+      "target": "DRIFT/users/stage1-admission.md",
+      "target_line": 509,
+      "resolved_id": "E6",
+      "src_ids": [
+        "CD-1",
+        "E4",
+        "E7"
+      ],
+      "target_ids": [
+        "E7",
+        "G-13"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/grading/_samesrc-W24.md",
+      "src_line": 6,
+      "target": "Intentional_Deviations/like/api.md",
+      "target_line": 77,
+      "resolved_id": "SD-2026-10-23-09",
+      "src_ids": [
+        "SD-2026-10-24-10"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/_cross/message-domain-wide.md",
+      "src_line": 483,
+      "target": "Intentional_Deviations/message/rpc.md",
+      "target_line": 191,
+      "resolved_id": "SD-2026-10-23-06",
+      "src_ids": [
+        "DRIFT-MSG-V-003"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 350,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 834,
+      "resolved_id": "CF-001",
+      "src_ids": [
+        "DRIFT-CF-001"
+      ],
+      "target_ids": [
+        "CF-001"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 351,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 835,
+      "resolved_id": "CF-002",
+      "src_ids": [
+        "DRIFT-CF-002"
+      ],
+      "target_ids": [
+        "CF-002"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 352,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 837,
+      "resolved_id": "CF-004",
+      "src_ids": [
+        "DRIFT-CF-004"
+      ],
+      "target_ids": [
+        "CF-004"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 353,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 838,
+      "resolved_id": "CF-005",
+      "src_ids": [
+        "DRIFT-CF-005"
+      ],
+      "target_ids": [
+        "CF-005"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 354,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 839,
+      "resolved_id": "CF-006",
+      "src_ids": [
+        "DRIFT-CF-006"
+      ],
+      "target_ids": [
+        "CF-006"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 355,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 840,
+      "resolved_id": "CF-008",
+      "src_ids": [
+        "DRIFT-CF-008"
+      ],
+      "target_ids": [
+        "CF-008"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 356,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 841,
+      "resolved_id": "CF-009",
+      "src_ids": [
+        "DRIFT-CF-009"
+      ],
+      "target_ids": [
+        "CF-009"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 357,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 843,
+      "resolved_id": "CF-012",
+      "src_ids": [
+        "DRIFT-CF-012"
+      ],
+      "target_ids": [
+        "CF-012"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 358,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 844,
+      "resolved_id": "CF-013",
+      "src_ids": [
+        "DRIFT-CF-013"
+      ],
+      "target_ids": [
+        "CF-013",
+        "UTF-16",
+        "UTF-8"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 359,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 845,
+      "resolved_id": "CF-014",
+      "src_ids": [
+        "DRIFT-CF-014"
+      ],
+      "target_ids": [
+        "CF-014"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 360,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 846,
+      "resolved_id": "CF-015",
+      "src_ids": [
+        "DRIFT-CF-015"
+      ],
+      "target_ids": [
+        "CF-015"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 361,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 847,
+      "resolved_id": "CF-017",
+      "src_ids": [
+        "DRIFT-CF-017"
+      ],
+      "target_ids": [
+        "CF-017"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 365,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 854,
+      "resolved_id": "LOG-001",
+      "src_ids": [
+        "DRIFT-LOG-001"
+      ],
+      "target_ids": [
+        "LOG-001"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 366,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 855,
+      "resolved_id": "LOG-002",
+      "src_ids": [
+        "DRIFT-LOG-002"
+      ],
+      "target_ids": [
+        "LOG-002"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 621,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 856,
+      "resolved_id": "LOG-003",
+      "src_ids": [
+        "DRIFT-LOG-003"
+      ],
+      "target_ids": [
+        "LOG-003"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 367,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 858,
+      "resolved_id": "LOG-005",
+      "src_ids": [
+        "DRIFT-LOG-005"
+      ],
+      "target_ids": [
+        "LOG-001",
+        "LOG-005"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 368,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 859,
+      "resolved_id": "LOG-006",
+      "src_ids": [
+        "DRIFT-LOG-006"
+      ],
+      "target_ids": [
+        "LOG-006"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 369,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 860,
+      "resolved_id": "LOG-007",
+      "src_ids": [
+        "DRIFT-LOG-007"
+      ],
+      "target_ids": [
+        "LOG-007"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 373,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 867,
+      "resolved_id": "SF-002",
+      "src_ids": [
+        "DRIFT-SF-002"
+      ],
+      "target_ids": [
+        "SF-002"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 374,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 868,
+      "resolved_id": "SF-003",
+      "src_ids": [
+        "DRIFT-SF-003"
+      ],
+      "target_ids": [
+        "SF-003"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 339,
+      "target": "DRIFT/users/admin/rpc.md",
+      "target_line": 1302,
+      "resolved_id": "DRIFT-ARPC-008",
+      "src_ids": [
+        "ADJ-01"
+      ],
+      "target_ids": [
+        "DRIFT-ARPC-008"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/_cross/stage1-derivation.md",
+      "src_line": 339,
+      "target": "DRIFT/users/user/rpc.md",
+      "target_line": 995,
+      "resolved_id": "V-002",
+      "src_ids": [
+        "ADJ-01"
+      ],
+      "target_ids": [
+        "V-002"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/article/api.md",
+      "src_line": 2758,
+      "target": "DRIFT/article/api.md",
+      "target_line": 1291,
+      "resolved_id": "F-3",
+      "src_ids": [
+        "CASE-16"
+      ],
+      "target_ids": [
+        "DRIFT-ARTICLE-API-003",
+        "F-3"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/article/api.md",
+      "src_line": 2762,
+      "target": "DRIFT/article/api.md",
+      "target_line": 2338,
+      "resolved_id": "FIX-18",
+      "src_ids": [
+        "Latin-1"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/article/api.md",
+      "src_line": 1157,
+      "target": "DRIFT/common/http.md",
+      "target_line": 117,
+      "resolved_id": "DRIFT-006",
+      "src_ids": [
+        "DRIFT-024"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/article/api.md",
+      "src_line": 904,
+      "target": "DRIFT/users/_shared.md",
+      "target_line": 103,
+      "resolved_id": "DRIFT-018",
+      "src_ids": [
+        "DRIFT-024"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/article/api.md",
+      "src_line": 1158,
+      "target": "DRIFT/users/admin/api.md",
+      "target_line": 723,
+      "resolved_id": "DRIFT-ADMINAPI-007",
+      "src_ids": [
+        "DRIFT-024"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/article/api.md",
+      "src_line": 1158,
+      "target": "DRIFT/users/admin/api.md",
+      "target_line": 950,
+      "resolved_id": "UNRESOLVED-ADMINAPI-001",
+      "src_ids": [
+        "DRIFT-024"
+      ],
+      "target_ids": [
+        "DRIFT-ADMINAPI-005"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/article/rpc.md",
+      "src_line": 2664,
+      "target": "DRIFT/article/rpc.md",
+      "target_line": 1161,
+      "resolved_id": "FIX-06",
+      "src_ids": [
+        "DRIFT-ARTICLE-RPC-009"
+      ],
+      "target_ids": [
+        "DRIFT-ARTICLE-RPC-009",
+        "FIX-06",
+        "U-5"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/article/rpc.md",
+      "src_line": 2666,
+      "target": "DRIFT/article/rpc.md",
+      "target_line": 1875,
+      "resolved_id": "FIX-17",
+      "src_ids": [
+        "P-U-2"
+      ],
+      "target_ids": [
+        "FIX-17",
+        "P-U-2"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/article/rpc.md",
+      "src_line": 2667,
+      "target": "DRIFT/article/rpc.md",
+      "target_line": 119,
+      "resolved_id": "O-6",
+      "src_ids": [
+        "O-5"
+      ],
+      "target_ids": [
+        "O-5"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/article/rpc.md",
+      "src_line": 2668,
+      "target": "DRIFT/article/rpc.md",
+      "target_line": 332,
+      "resolved_id": "S-3",
+      "src_ids": [
+        "U-3",
+        "U-4"
+      ],
+      "target_ids": [
+        "S-3",
+        "U-3"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/article/vs-common.md",
+      "src_line": 598,
+      "target": "DRIFT/_cross/open-items.md",
+      "target_line": 65,
+      "resolved_id": "DRIFT-INFRA-001",
+      "src_ids": [
+        "L-1"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/comment/vs-common.md",
+      "src_line": 329,
+      "target": "DRIFT/_cross/open-items.md",
+      "target_line": 65,
+      "resolved_id": "DRIFT-INFRA-001",
+      "src_ids": [
+        "L-1"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/comment/vs-common.md",
+      "src_line": 29,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 2010,
+      "resolved_id": "PIT-GLOBAL-050",
+      "src_ids": [
+        "PIT-GLOBAL-051",
+        "PIT-GLOBAL-51"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/comment/vs-common.md",
+      "src_line": 89,
+      "target": "Pitfalls/message/rpc.md",
+      "target_line": 911,
+      "resolved_id": "PIT-MESSAGE-31",
+      "src_ids": [
+        "E6",
+        "E7",
+        "G4-4",
+        "UTF-8"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/common/alignment-2026-10-23.md",
+      "src_line": 1071,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 661,
+      "resolved_id": "DRIFT-CF-018",
+      "src_ids": [
+        "CF-018",
+        "SF-002",
+        "SF-003"
+      ],
+      "target_ids": [
+        "DRIFT-CF-018"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/common/alignment-2026-10-23.md",
+      "src_line": 898,
+      "target": "DRIFT/global/common-tails.md",
+      "target_line": 551,
+      "resolved_id": "SD-2026-10-24-10",
+      "src_ids": [
+        "DRIFT-COMMON-005"
+      ],
+      "target_ids": [
+        "SD-2026-10-23-09",
+        "SD-2026-10-24-10"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/common/alignment-2026-10-23.md",
+      "src_line": 899,
+      "target": "DRIFT/users/admin/rpc.md",
+      "target_line": 2772,
+      "resolved_id": "UNRESOLVED-ARPC-002",
+      "src_ids": [
+        "DRIFT-COMMON-005"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/common/alignment-2026-10-23.md",
+      "src_line": 921,
+      "target": "Intentional_Deviations/comment/rpc.md",
+      "target_line": 67,
+      "resolved_id": "SD-2026-10-24-CAND-01",
+      "src_ids": [
+        "CAND-06",
+        "SD-2026-10-24-CAND-02"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/common/protection.md",
+      "src_line": 163,
+      "target": "DRIFT/like/api.md",
+      "target_line": 384,
+      "resolved_id": "DRIFT-LIKEAPI-002",
+      "src_ids": [
+        "DRIFT-003",
+        "DRIFT-LIKEAPI-003"
+      ],
+      "target_ids": [
+        "DRIFT-LIKEAPI-003"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/favorite/vs-common.md",
+      "src_line": 326,
+      "target": "DRIFT/_cross/open-items.md",
+      "target_line": 65,
+      "resolved_id": "DRIFT-INFRA-001",
+      "src_ids": [
+        "L-1"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/follow/api.md",
+      "src_line": 550,
+      "target": "DRIFT/users/vs-common.md",
+      "target_line": 47,
+      "resolved_id": "DRIFT-USERAPI-013",
+      "src_ids": [
+        "SD-2026-10-25-01"
+      ],
+      "target_ids": [
+        "DRIFT-USERAPI-013",
+        "SD-2026-10-25-01"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/follow/stage1-admission.md",
+      "src_line": 121,
+      "target": "DRIFT/hot/vs-common.md",
+      "target_line": 31,
+      "resolved_id": "DRIFT-HOTAPI-014",
+      "src_ids": [
+        "A-2",
+        "SD-2026-10-25-01",
+        "T-2"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/follow/stage1-admission.md",
+      "src_line": 383,
+      "target": "Pitfalls/users/user/rpc.md",
+      "target_line": 127,
+      "resolved_id": "PIT-USERS-34",
+      "src_ids": [
+        "E8",
+        "N-2",
+        "P-05",
+        "S1-USERS-011"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/follow/vs-common.md",
+      "src_line": 37,
+      "target": "DRIFT/hot/vs-common.md",
+      "target_line": 31,
+      "resolved_id": "DRIFT-HOTAPI-014",
+      "src_ids": [
+        "DRIFT-FOLLOW-008",
+        "SD-2026-10-25-01",
+        "T-2"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/follow/vs-common.md",
+      "src_line": 1246,
+      "target": "Intentional_Deviations/global/common-tails.md",
+      "target_line": 11,
+      "resolved_id": "SD-2026-10-25-01",
+      "src_ids": [
+        "DRIFT-FOLLOW-008",
+        "T-2"
+      ],
+      "target_ids": [
+        "SD-2026-10-25-01"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/global/_README.md",
+      "src_line": 994,
+      "target": "DRIFT/global/vs-common.md",
+      "target_line": 29,
+      "resolved_id": "E21",
+      "src_ids": [
+        "E46",
+        "E62"
+      ],
+      "target_ids": [
+        "E46"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/global/_README.md",
+      "src_line": 423,
+      "target": "DRIFT/like/rpc.md",
+      "target_line": 163,
+      "resolved_id": "DRIFT-LIKE-003",
+      "src_ids": [
+        "E43"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/global/_README.md",
+      "src_line": 1002,
+      "target": "DRIFT/like/rpc.md",
+      "target_line": 1742,
+      "resolved_id": "E60",
+      "src_ids": [
+        "E58",
+        "E59"
+      ],
+      "target_ids": [
+        "E60"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/global/_README.md",
+      "src_line": 1010,
+      "target": "DRIFT/users/user/rpc.md",
+      "target_line": 2257,
+      "resolved_id": "E58",
+      "src_ids": [
+        "DRIFT-ARPC-011",
+        "DRIFT-USERRPC-V-013",
+        "E-4"
+      ],
+      "target_ids": [
+        "E58"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/global/common-tails.md",
+      "src_line": 434,
+      "target": "Intentional_Deviations/like/api.md",
+      "target_line": 77,
+      "resolved_id": "SD-2026-10-23-09",
+      "src_ids": [
+        "SD-2026-10-24-10"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/global/cross-domain.md",
+      "src_line": 379,
+      "target": "DRIFT/users/_shared.md",
+      "target_line": 922,
+      "resolved_id": "DRIFT-USERRPC-V-005",
+      "src_ids": [
+        "ADJ-03"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/global/cross-domain.md",
+      "src_line": 1050,
+      "target": "DRIFT/users/admin/rpc.md",
+      "target_line": 488,
+      "resolved_id": "DRIFT-ARPC-003",
+      "src_ids": [
+        "PIT-GLOBAL-016"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/global/cross-domain.md",
+      "src_line": 380,
+      "target": "DRIFT/users/admin/rpc.md",
+      "target_line": 729,
+      "resolved_id": "UNRESOLVED-ARPC-002",
+      "src_ids": [
+        "UNRESOLVED-ARPC-004"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/global/cross-domain.md",
+      "src_line": 1050,
+      "target": "Pitfalls/users/admin/api.md",
+      "target_line": 386,
+      "resolved_id": "PIT-USERSADM-11",
+      "src_ids": [
+        "PIT-GLOBAL-016"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/global/lanes/L2-rpcgate.md",
+      "src_line": 81,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 548,
+      "resolved_id": "PIT-GLOBAL-017",
+      "src_ids": [
+        "PIT-GLOBAL-018"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/global/lanes/L5-signoff.md",
+      "src_line": 122,
+      "target": "DRIFT/global/cross-domain.md",
+      "target_line": 492,
+      "resolved_id": "DRIFT-HOTAPI-030",
+      "src_ids": [
+        "CAND-13",
+        "CAND-14"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/global/lanes/L5-signoff.md",
+      "src_line": 283,
+      "target": "DRIFT/users/user/rpc.md",
+      "target_line": 1415,
+      "resolved_id": "DRIFT-USERRPC-V-001",
+      "src_ids": [
+        "DRIFT-USERRPC-V-011",
+        "SD-2026-10-25-CAND-16"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/global/lanes/L5-signoff.md",
+      "src_line": 109,
+      "target": "Intentional_Deviations/hot/api.md",
+      "target_line": 332,
+      "resolved_id": "SD-HOT-API-008",
+      "src_ids": [
+        "DRIFT-HOTAPI-031",
+        "SD-2026-10-25-03",
+        "SD-2026-10-25-CAND-10"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/global/lanes/L5-signoff.md",
+      "src_line": 199,
+      "target": "Intentional_Deviations/like/api.md",
+      "target_line": 77,
+      "resolved_id": "SD-2026-10-23-09",
+      "src_ids": [
+        "SD-2026-10-24-10"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/global/lanes/L5-signoff.md",
+      "src_line": 127,
+      "target": "Intentional_Deviations/message/rpc.md",
+      "target_line": 141,
+      "resolved_id": "SD-2026-10-23-08",
+      "src_ids": [
+        "SD-2026-10-23-06"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/global/lanes/L5-signoff.md",
+      "src_line": 309,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 704,
+      "resolved_id": "PIT-GLOBAL-019",
+      "src_ids": [
+        "PIT-GLOBAL-022",
+        "SD-2026-10-24-04",
+        "SD-2026-10-24-CAND-01"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/global/lanes/_PROTOCOL.md",
+      "src_line": 182,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 548,
+      "resolved_id": "PIT-GLOBAL-017",
+      "src_ids": [
+        "PIT-GLOBAL-018"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/global/lanes/_PROTOCOL.md",
+      "src_line": 180,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 616,
+      "resolved_id": "PIT-GLOBAL-018",
+      "src_ids": [
+        "PIT-GLOBAL-019"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/global/vs-common.md",
+      "src_line": 229,
+      "target": "DRIFT/article/api.md",
+      "target_line": 676,
+      "resolved_id": "DRIFT-ARTICLE-API-005",
+      "src_ids": [
+        "DRIFT-ARTICLE-API-006"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/global/vs-common.md",
+      "src_line": 229,
+      "target": "DRIFT/article/vs-common.md",
+      "target_line": 27,
+      "resolved_id": "DRIFT-HOTAPI-030",
+      "src_ids": [
+        "DRIFT-ARTICLE-API-006"
+      ],
+      "target_ids": [
+        "CASE-02"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/global/vs-common.md",
+      "src_line": 4098,
+      "target": "DRIFT/global/common-tails.md",
+      "target_line": 551,
+      "resolved_id": "SD-2026-10-24-10",
+      "src_ids": [
+        "DRIFT-COMMON-005"
+      ],
+      "target_ids": [
+        "SD-2026-10-23-09",
+        "SD-2026-10-24-10"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/global/vs-common.md",
+      "src_line": 4099,
+      "target": "DRIFT/users/admin/rpc.md",
+      "target_line": 2772,
+      "resolved_id": "UNRESOLVED-ARPC-002",
+      "src_ids": [
+        "SD-2026-10-23-09"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/hot/vs-common.md",
+      "src_line": 377,
+      "target": "DRIFT/_cross/open-items.md",
+      "target_line": 65,
+      "resolved_id": "DRIFT-INFRA-001",
+      "src_ids": [
+        "L-1"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/hot/vs-common.md",
+      "src_line": 131,
+      "target": "Intentional_Deviations/hot/api.md",
+      "target_line": 332,
+      "resolved_id": "SD-HOT-API-008",
+      "src_ids": [
+        "DRIFT-HOTAPI-031",
+        "SD-2026-10-25-CAND-10"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/like/vs-common.md",
+      "src_line": 85,
+      "target": "DRIFT/article/api.md",
+      "target_line": 849,
+      "resolved_id": "DRIFT-ARTICLE-API-011",
+      "src_ids": [
+        "CASE-25"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/like/vs-common.md",
+      "src_line": 1782,
+      "target": "Intentional_Deviations/like/rpc.md",
+      "target_line": 13,
+      "resolved_id": "SD-2026-10-23-06",
+      "src_ids": [
+        "D-7"
+      ],
+      "target_ids": [
+        "SD-2026-10-23-06"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/message/api.md",
+      "src_line": 914,
+      "target": "DRIFT/message/vs-common.md",
+      "target_line": 38,
+      "resolved_id": "DRIFT-MSGAPI-010",
+      "src_ids": [
+        "T-6"
+      ],
+      "target_ids": [
+        "DRIFT-MSGAPI-010",
+        "T-6"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/message/api.md",
+      "src_line": 1545,
+      "target": "DRIFT/message/vs-common.md",
+      "target_line": 40,
+      "resolved_id": "DRIFT-MSGAPI-013",
+      "src_ids": [
+        "T-8"
+      ],
+      "target_ids": [
+        "DRIFT-MSGAPI-013",
+        "T-8"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/message/rpc.md",
+      "src_line": 1946,
+      "target": "Intentional_Deviations/message/rpc.md",
+      "target_line": 140,
+      "resolved_id": "SD-2026-10-23-08",
+      "src_ids": [
+        "SD-2026-10-23-07"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/message/vs-common.md",
+      "src_line": 84,
+      "target": "DRIFT/article/api.md",
+      "target_line": 849,
+      "resolved_id": "DRIFT-ARTICLE-API-011",
+      "src_ids": [
+        "CASE-25"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/message/vs-common.md",
+      "src_line": 1544,
+      "target": "Intentional_Deviations/message/rpc.md",
+      "target_line": 141,
+      "resolved_id": "SD-2026-10-23-08",
+      "src_ids": [
+        "SD-2026-10-23-06"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/message/vs-common.md",
+      "src_line": 1531,
+      "target": "Intentional_Deviations/message/rpc.md",
+      "target_line": 80,
+      "resolved_id": "SD-2026-10-24-03",
+      "src_ids": [
+        "DRIFT-MSG-V-020",
+        "SD-2026-10-24-04"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/task/vs-common.md",
+      "src_line": 77,
+      "target": "DRIFT/article/api.md",
+      "target_line": 849,
+      "resolved_id": "DRIFT-ARTICLE-API-011",
+      "src_ids": [
+        "CASE-25"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/users/admin/_shared.md",
+      "src_line": 241,
+      "target": "DRIFT/users/admin/_shared.md",
+      "target_line": 212,
+      "resolved_id": "U-2",
+      "src_ids": [
+        "DRIFT-USERRPC-V-002",
+        "V-002"
+      ],
+      "target_ids": [
+        "U-2",
+        "V-002"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/users/admin/_shared.md",
+      "src_line": 241,
+      "target": "DRIFT/users/admin/rpc.md",
+      "target_line": 1476,
+      "resolved_id": "U-2",
+      "src_ids": [
+        "DRIFT-USERRPC-V-002",
+        "V-002"
+      ],
+      "target_ids": [
+        "U-1",
+        "U-2"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/users/admin/_shared.md",
+      "src_line": 247,
+      "target": "DRIFT/users/user/rpc.md",
+      "target_line": 517,
+      "resolved_id": "DRIFT-USERRPC-V-001",
+      "src_ids": [
+        "U-1",
+        "V-001"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/users/common.md",
+      "src_line": 892,
+      "target": "DRIFT/users/common.md",
+      "target_line": 871,
+      "resolved_id": "UNRESOLVED-USERSCOMMON-004",
+      "src_ids": [
+        "DRIFT-USERRPC-V-002",
+        "DRIFT-USERRPC-V-011",
+        "U-2"
+      ],
+      "target_ids": [
+        "UNRESOLVED-USERSCOMMON-004"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/users/common.md",
+      "src_line": 892,
+      "target": "DRIFT/users/user/rpc.md",
+      "target_line": 1715,
+      "resolved_id": "UNRESOLVED-USERRPC-005",
+      "src_ids": [
+        "DRIFT-USERRPC-V-002",
+        "DRIFT-USERRPC-V-011",
+        "U-2"
+      ],
+      "target_ids": [
+        "UNRESOLVED-USERRPC-005"
+      ]
+    },
+    {
+      "src": "docs/DRIFT/users/stage1-admission.md",
+      "src_line": 532,
+      "target": "Pitfalls/users/user/rpc.md",
+      "target_line": 127,
+      "resolved_id": "PIT-USERS-34",
+      "src_ids": [
+        "N-2",
+        "P-05",
+        "S1-USERS-011",
+        "SD-2026-10-23-07"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/users/user/api.md",
+      "src_line": 1476,
+      "target": "DRIFT/users/admin/api.md",
+      "target_line": 592,
+      "resolved_id": "DRIFT-ADMINAPI-004",
+      "src_ids": [
+        "DRIFT-ADMINAPI-006"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/users/vs-common.md",
+      "src_line": 5228,
+      "target": "Intentional_Deviations/users/_shared.md",
+      "target_line": 101,
+      "resolved_id": "SD-2026-10-25-CAND-16",
+      "src_ids": [
+        "DRIFT-USERRPC-V-002",
+        "SD-2026-10-25-CAND-17"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/users/vs-common.md",
+      "src_line": 4936,
+      "target": "Intentional_Deviations/users/admin/rpc.md",
+      "target_line": 58,
+      "resolved_id": "SD-2026-10-23-06",
+      "src_ids": [
+        "SD-2026-10-23-07"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/DRIFT/users/vs-common.md",
+      "src_line": 4934,
+      "target": "Pitfalls/users/user/rpc.md",
+      "target_line": 127,
+      "resolved_id": "PIT-USERS-34",
+      "src_ids": [
+        "N-2",
+        "P-05"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Intentional_Deviations/_INDEX.md",
+      "src_line": 69,
+      "target": "DRIFT/global/cross-domain.md",
+      "target_line": 492,
+      "resolved_id": "DRIFT-HOTAPI-030",
+      "src_ids": [
+        "CAND-13",
+        "CAND-14",
+        "CAND-15",
+        "CAND-16",
+        "CAND-17",
+        "SD-2026-10-24-CAND-01"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Intentional_Deviations/article/rpc.md",
+      "src_line": 256,
+      "target": "Intentional_Deviations/message/rpc.md",
+      "target_line": 46,
+      "resolved_id": "SD-2026-10-24-01",
+      "src_ids": [
+        "SD-2026-10-24-02"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Intentional_Deviations/comment/api.md",
+      "src_line": 165,
+      "target": "Intentional_Deviations/comment/api.md",
+      "target_line": 79,
+      "resolved_id": "SD-2026-10-24-CAND-05",
+      "src_ids": [
+        "CAND-05",
+        "SD-2026-10-24-CAND-07"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Intentional_Deviations/global/cross-domain.md",
+      "src_line": 35,
+      "target": "Intentional_Deviations/message/rpc.md",
+      "target_line": 141,
+      "resolved_id": "SD-2026-10-23-08",
+      "src_ids": [
+        "SD-2026-10-23-06"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/PhaseGoal-judge.md",
+      "src_line": 526,
+      "target": "DRIFT/hot/vs-common.md",
+      "target_line": 67,
+      "resolved_id": "H-1",
+      "src_ids": [
+        "G-18"
+      ],
+      "target_ids": [
+        "H-1",
+        "H-3"
+      ]
+    },
+    {
+      "src": "docs/PhaseGoal-judge.md",
+      "src_line": 213,
+      "target": "DRIFT/users/admin/api.md",
+      "target_line": 1184,
+      "resolved_id": "DRIFT-ADMINAPI-011",
+      "src_ids": [
+        "DRIFT-ADMINAPI-001",
+        "DRIFT-ADMINAPI-006",
+        "DRIFT-ADMINAPI-013"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/PhaseGoal-judge.md",
+      "src_line": 215,
+      "target": "DRIFT/users/common.md",
+      "target_line": 556,
+      "resolved_id": "UNRESOLVED-USERSCOMMON-005",
+      "src_ids": [
+        "E4",
+        "G-4",
+        "UNRESOLVED-002"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Pitfalls/article/api.md",
+      "src_line": 678,
+      "target": "DRIFT/article/api.md",
+      "target_line": 714,
+      "resolved_id": "DRIFT-ARTICLE-API-006",
+      "src_ids": [
+        "DRIFT-ARTICLE-API-007"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Pitfalls/article/api.md",
+      "src_line": 838,
+      "target": "DRIFT/article/api.md",
+      "target_line": 737,
+      "resolved_id": "DRIFT-ARTICLE-API-007",
+      "src_ids": [
+        "DRIFT-ARTICLE-API-009"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Pitfalls/article/api.md",
+      "src_line": 940,
+      "target": "DRIFT/article/api.md",
+      "target_line": 765,
+      "resolved_id": "DRIFT-ARTICLE-API-009",
+      "src_ids": [
+        "DRIFT-ARTICLE-API-010"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Pitfalls/article/api.md",
+      "src_line": 801,
+      "target": "DRIFT/article/api.md",
+      "target_line": 837,
+      "resolved_id": "DRIFT-ARTICLE-API-011",
+      "src_ids": [
+        "DRIFT-024",
+        "UNRESOLVED-008"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Pitfalls/article/api.md",
+      "src_line": 737,
+      "target": "DRIFT/article/api.md",
+      "target_line": 1399,
+      "resolved_id": "F-2",
+      "src_ids": [
+        "DRIFT-ARTICLE-API-005"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Pitfalls/article/api.md",
+      "src_line": 262,
+      "target": "DRIFT/article/api.md",
+      "target_line": 1034,
+      "resolved_id": "UNRESOLVED-003",
+      "src_ids": [
+        "UNRESOLVED-007"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Pitfalls/article/api.md",
+      "src_line": 801,
+      "target": "DRIFT/article/api.md",
+      "target_line": 1059,
+      "resolved_id": "UNRESOLVED-004",
+      "src_ids": [
+        "DRIFT-024",
+        "UNRESOLVED-008"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Pitfalls/article/api.md",
+      "src_line": 801,
+      "target": "DRIFT/users/_shared.md",
+      "target_line": 103,
+      "resolved_id": "DRIFT-018",
+      "src_ids": [
+        "DRIFT-024",
+        "UNRESOLVED-008"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Pitfalls/article/rpc.md",
+      "src_line": 390,
+      "target": "DRIFT/article/rpc.md",
+      "target_line": 1160,
+      "resolved_id": "U-5",
+      "src_ids": [
+        "DRIFT-ARTICLE-RPC-009",
+        "FIX-06"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Pitfalls/comment/rpc.md",
+      "src_line": 81,
+      "target": "DRIFT/comment/api.md",
+      "target_line": 99,
+      "resolved_id": "MISMATCH-API-01",
+      "src_ids": [
+        "MISMATCH-API-02"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Pitfalls/favorite/rpc.md",
+      "src_line": 1921,
+      "target": "Pitfalls/message/rpc.md",
+      "target_line": 911,
+      "resolved_id": "PIT-MESSAGE-31",
+      "src_ids": [
+        "UTF-8"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Pitfalls/hot/api.md",
+      "src_line": 504,
+      "target": "DRIFT/hot/api.md",
+      "target_line": 1234,
+      "resolved_id": "DRIFT-HOTAPI-020",
+      "src_ids": [
+        "DRIFT-HOTAPI-018",
+        "PIT-HOT-17"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Pitfalls/hot/rpc.md",
+      "src_line": 714,
+      "target": "DRIFT/hot/api.md",
+      "target_line": 1237,
+      "resolved_id": "DRIFT-HOTAPI-020",
+      "src_ids": [
+        "P-HOTRPC-20",
+        "PIT-HOT-45"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/_dependencies.md",
+      "src_line": 143,
+      "target": "DRIFT/like/rpc.md",
+      "target_line": 1800,
+      "resolved_id": "E60",
+      "src_ids": [
+        "DEC-01",
+        "DRIFT-LIKE-003"
+      ],
+      "target_ids": [
+        "E4"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/_hardcoded-numbers.md",
+      "src_line": 52,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 669,
+      "resolved_id": "DRIFT-CF-018",
+      "src_ids": [
+        "HC-17",
+        "HC-30"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/_hardcoded-numbers.md",
+      "src_line": 33,
+      "target": "DRIFT/global/_README.md",
+      "target_line": 383,
+      "resolved_id": "E34",
+      "src_ids": [
+        "HC-11"
+      ],
+      "target_ids": [
+        "E34",
+        "T-15"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/_hardcoded-numbers.md",
+      "src_line": 34,
+      "target": "DRIFT/global/_README.md",
+      "target_line": 397,
+      "resolved_id": "E38",
+      "src_ids": [
+        "HC-12"
+      ],
+      "target_ids": [
+        "DRIFT-CF-018",
+        "DRIFT-SF-001"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/_hardcoded-numbers.md",
+      "src_line": 30,
+      "target": "DRIFT/global/_README.md",
+      "target_line": 338,
+      "resolved_id": "E7",
+      "src_ids": [
+        "HC-08"
+      ],
+      "target_ids": [
+        "CD-1",
+        "E7"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/_hardcoded-numbers.md",
+      "src_line": 40,
+      "target": "DRIFT/global/vs-common.md",
+      "target_line": 46,
+      "resolved_id": "E65",
+      "src_ids": [
+        "HC-18"
+      ],
+      "target_ids": [
+        "C-3",
+        "E65",
+        "G4-A4-05",
+        "X-6"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/_hardcoded-numbers.md",
+      "src_line": 39,
+      "target": "DRIFT/global/vs-common.md",
+      "target_line": 33,
+      "resolved_id": "E66",
+      "src_ids": [
+        "HC-17"
+      ],
+      "target_ids": [
+        "DRIFT-CF-018",
+        "E65"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/_hardcoded-numbers.md",
+      "src_line": 75,
+      "target": "DRIFT/users/admin/rpc.md",
+      "target_line": 1622,
+      "resolved_id": "DRIFT-ARPC-005",
+      "src_ids": [
+        "HC-53"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/_task-universe.md",
+      "src_line": 124,
+      "target": "DRIFT/global/_README.md",
+      "target_line": 391,
+      "resolved_id": "E38",
+      "src_ids": [
+        "E65",
+        "X-6"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/_task-universe.md",
+      "src_line": 143,
+      "target": "DRIFT/global/vs-common.md",
+      "target_line": 31,
+      "resolved_id": "E66",
+      "src_ids": [
+        "DRIFT-ARPC-010",
+        "FB-05",
+        "FB-06"
+      ],
+      "target_ids": [
+        "E66"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/_task-universe.md",
+      "src_line": 269,
+      "target": "DRIFT/like/api.md",
+      "target_line": 468,
+      "resolved_id": "DRIFT-LIKEAPI-015",
+      "src_ids": [
+        "S1-USERS-001",
+        "S1-USERS-003"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/_task-universe.md",
+      "src_line": 260,
+      "target": "DRIFT/like/rpc.md",
+      "target_line": 856,
+      "resolved_id": "DRIFT-LIKE-015",
+      "src_ids": [
+        "D-08"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/_task-universe.md",
+      "src_line": 260,
+      "target": "DRIFT/like/rpc.md",
+      "target_line": 891,
+      "resolved_id": "DRIFT-LIKE-017",
+      "src_ids": [
+        "D-08"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/_task-universe.md",
+      "src_line": 143,
+      "target": "DRIFT/users/admin/rpc.md",
+      "target_line": 3000,
+      "resolved_id": "DRIFT-ARPC-009",
+      "src_ids": [
+        "DRIFT-ARPC-010",
+        "FB-05",
+        "FB-06"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/_task-universe.md",
+      "src_line": 252,
+      "target": "DRIFT/users/stage1-admission.md",
+      "target_line": 107,
+      "resolved_id": "S1-USERS-001",
+      "src_ids": [
+        "S1-USERS-002"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/_unresolved.md",
+      "src_line": 121,
+      "target": "DRIFT/common/alignment-2026-10-23.md",
+      "target_line": 964,
+      "resolved_id": "CF-018",
+      "src_ids": [
+        "DEP-01"
+      ],
+      "target_ids": [
+        "CF-003",
+        "DRIFT-CF-003"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/_unresolved.md",
+      "src_line": 27,
+      "target": "DRIFT/global/_README.md",
+      "target_line": 391,
+      "resolved_id": "E38",
+      "src_ids": [
+        "BLK-02",
+        "C-2",
+        "C-3",
+        "E65",
+        "S1-1",
+        "S1-4"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/_unresolved.md",
+      "src_line": 108,
+      "target": "DRIFT/global/_README.md",
+      "target_line": 340,
+      "resolved_id": "E9",
+      "src_ids": [
+        "D-05",
+        "DEC-03",
+        "E31"
+      ],
+      "target_ids": [
+        "E9",
+        "PIT-GLOBAL-025",
+        "T-6"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/_unresolved.md",
+      "src_line": 121,
+      "target": "DRIFT/global/vs-common.md",
+      "target_line": 33,
+      "resolved_id": "E66",
+      "src_ids": [
+        "DEP-01"
+      ],
+      "target_ids": [
+        "DRIFT-CF-018",
+        "E65"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/_unresolved.md",
+      "src_line": 45,
+      "target": "DRIFT/like/api.md",
+      "target_line": 801,
+      "resolved_id": "G-14",
+      "src_ids": [
+        "GAP-03",
+        "U-01",
+        "X-1"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/_unresolved.md",
+      "src_line": 125,
+      "target": "Intentional_Deviations/comment/rpc.md",
+      "target_line": 67,
+      "resolved_id": "SD-2026-10-24-CAND-01",
+      "src_ids": [
+        "DEP-05",
+        "SD-2026-10-24-CAND-02"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/_unresolved.md",
+      "src_line": 97,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1307,
+      "resolved_id": "PIT-GLOBAL-033",
+      "src_ids": [
+        "ENV-04",
+        "PIT-GLOBAL-038"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/_unresolved.md",
+      "src_line": 98,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 2503,
+      "resolved_id": "PIT-GLOBAL-059",
+      "src_ids": [
+        "ENV-05",
+        "PIT-GLOBAL-068"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-01/README.md",
+      "src_line": 229,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 952,
+      "resolved_id": "PIT-GLOBAL-026",
+      "src_ids": [
+        "PIT-GLOBAL-029"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-01/README.md",
+      "src_line": 232,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 995,
+      "resolved_id": "PIT-GLOBAL-027",
+      "src_ids": [
+        "PIT-GLOBAL-030"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-01/README.md",
+      "src_line": 234,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1042,
+      "resolved_id": "PIT-GLOBAL-028",
+      "src_ids": [
+        "PIT-GLOBAL-031"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-01/README.md",
+      "src_line": 228,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1108,
+      "resolved_id": "PIT-GLOBAL-030",
+      "src_ids": [
+        "PIT-GLOBAL-032"
+      ],
+      "target_ids": [
+        "PIT-GLOBAL-030",
+        "PIT-GLOBAL-30"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/round-01/README.md",
+      "src_line": 231,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1203,
+      "resolved_id": "PIT-GLOBAL-031",
+      "src_ids": [
+        "PIT-GLOBAL-035"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-01/README.md",
+      "src_line": 227,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1307,
+      "resolved_id": "PIT-GLOBAL-033",
+      "src_ids": [
+        "PIT-GLOBAL-038"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-01/README.md",
+      "src_line": 230,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1962,
+      "resolved_id": "PIT-GLOBAL-049",
+      "src_ids": [
+        "PIT-GLOBAL-054"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 171,
+      "target": "DRIFT/global/_README.md",
+      "target_line": 392,
+      "resolved_id": "E38",
+      "src_ids": [
+        "FB-05",
+        "FB-06"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 171,
+      "target": "DRIFT/global/vs-common.md",
+      "target_line": 31,
+      "resolved_id": "E66",
+      "src_ids": [
+        "FB-05",
+        "FB-06"
+      ],
+      "target_ids": [
+        "E66"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 171,
+      "target": "DRIFT/users/admin/rpc.md",
+      "target_line": 3000,
+      "resolved_id": "DRIFT-ARPC-009",
+      "src_ids": [
+        "FB-05",
+        "FB-06"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 275,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 288,
+      "resolved_id": "PIT-GLOBAL-013",
+      "src_ids": [
+        "PIT-GLOBAL-014"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 266,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 414,
+      "resolved_id": "PIT-GLOBAL-015",
+      "src_ids": [
+        "PIT-GLOBAL-016"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 264,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 512,
+      "resolved_id": "PIT-GLOBAL-017",
+      "src_ids": [
+        "PIT-GLOBAL-018"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 265,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 576,
+      "resolved_id": "PIT-GLOBAL-018",
+      "src_ids": [
+        "PIT-GLOBAL-019"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 270,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 801,
+      "resolved_id": "PIT-GLOBAL-020",
+      "src_ids": [
+        "PIT-GLOBAL-026"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 276,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 735,
+      "resolved_id": "PIT-GLOBAL-022",
+      "src_ids": [
+        "PIT-GLOBAL-021"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 273,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 912,
+      "resolved_id": "PIT-GLOBAL-026",
+      "src_ids": [
+        "PIT-GLOBAL-028"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 274,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 995,
+      "resolved_id": "PIT-GLOBAL-027",
+      "src_ids": [
+        "PIT-GLOBAL-030"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 268,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1042,
+      "resolved_id": "PIT-GLOBAL-028",
+      "src_ids": [
+        "PIT-GLOBAL-031"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 267,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1149,
+      "resolved_id": "PIT-GLOBAL-030",
+      "src_ids": [
+        "PIT-GLOBAL-033"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 271,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1220,
+      "resolved_id": "PIT-GLOBAL-031",
+      "src_ids": [
+        "PIT-GLOBAL-036"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 262,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1719,
+      "resolved_id": "PIT-GLOBAL-042",
+      "src_ids": [
+        "PIT-GLOBAL-048"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 261,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1962,
+      "resolved_id": "PIT-GLOBAL-049",
+      "src_ids": [
+        "PIT-GLOBAL-054"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-02/README.md",
+      "src_line": 269,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 2310,
+      "resolved_id": "PIT-GLOBAL-054",
+      "src_ids": [
+        "PIT-GLOBAL-061"
+      ],
+      "target_ids": [
+        "E48"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/round-03/README.md",
+      "src_line": 322,
+      "target": "Pitfalls/_cross/domain-common-lanes.md",
+      "target_line": 168,
+      "resolved_id": "PIT-LANE-05",
+      "src_ids": [
+        "PIT-LANE-06"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-03/README.md",
+      "src_line": 323,
+      "target": "Pitfalls/_cross/domain-common-lanes.md",
+      "target_line": 196,
+      "resolved_id": "PIT-LANE-06",
+      "src_ids": [
+        "PIT-LANE-07"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-03/README.md",
+      "src_line": 321,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 952,
+      "resolved_id": "PIT-GLOBAL-026",
+      "src_ids": [
+        "PIT-GLOBAL-029"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-03/README.md",
+      "src_line": 320,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1149,
+      "resolved_id": "PIT-GLOBAL-030",
+      "src_ids": [
+        "PIT-GLOBAL-033"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-03/README.md",
+      "src_line": 324,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1220,
+      "resolved_id": "PIT-GLOBAL-031",
+      "src_ids": [
+        "PIT-GLOBAL-036"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-03/README.md",
+      "src_line": 318,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 2099,
+      "resolved_id": "PIT-GLOBAL-052",
+      "src_ids": [
+        "PIT-GLOBAL-055"
+      ],
+      "target_ids": [
+        "E61"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/round-03/README.md",
+      "src_line": 319,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 2310,
+      "resolved_id": "PIT-GLOBAL-054",
+      "src_ids": [
+        "PIT-GLOBAL-061"
+      ],
+      "target_ids": [
+        "E48"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/round-04/README.md",
+      "src_line": 329,
+      "target": "Pitfalls/_cross/domain-common-lanes.md",
+      "target_line": 196,
+      "resolved_id": "PIT-LANE-06",
+      "src_ids": [
+        "PIT-LANE-07"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-04/README.md",
+      "src_line": 326,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 288,
+      "resolved_id": "PIT-GLOBAL-013",
+      "src_ids": [
+        "PIT-GLOBAL-014"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-04/README.md",
+      "src_line": 330,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 660,
+      "resolved_id": "PIT-GLOBAL-019",
+      "src_ids": [
+        "PIT-GLOBAL-022"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-04/README.md",
+      "src_line": 324,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 952,
+      "resolved_id": "PIT-GLOBAL-026",
+      "src_ids": [
+        "PIT-GLOBAL-029"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-04/README.md",
+      "src_line": 322,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 995,
+      "resolved_id": "PIT-GLOBAL-027",
+      "src_ids": [
+        "PIT-GLOBAL-030"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-04/README.md",
+      "src_line": 325,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1042,
+      "resolved_id": "PIT-GLOBAL-028",
+      "src_ids": [
+        "PIT-GLOBAL-031"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-04/README.md",
+      "src_line": 323,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1220,
+      "resolved_id": "PIT-GLOBAL-031",
+      "src_ids": [
+        "PIT-GLOBAL-036"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-04/README.md",
+      "src_line": 328,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1719,
+      "resolved_id": "PIT-GLOBAL-042",
+      "src_ids": [
+        "PIT-GLOBAL-048"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-04/README.md",
+      "src_line": 320,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 2099,
+      "resolved_id": "PIT-GLOBAL-052",
+      "src_ids": [
+        "PIT-GLOBAL-055"
+      ],
+      "target_ids": [
+        "E61"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/round-04/README.md",
+      "src_line": 321,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 2310,
+      "resolved_id": "PIT-GLOBAL-054",
+      "src_ids": [
+        "PIT-GLOBAL-061"
+      ],
+      "target_ids": [
+        "E48"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/round-04/README.md",
+      "src_line": 319,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 2503,
+      "resolved_id": "PIT-GLOBAL-059",
+      "src_ids": [
+        "PIT-GLOBAL-068"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-05/README.md",
+      "src_line": 16,
+      "target": "DRIFT/message/api.md",
+      "target_line": 1528,
+      "resolved_id": "DRIFT-MSGAPI-011",
+      "src_ids": [
+        "DRIFT-MSGAPI-013"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-05/README.md",
+      "src_line": 82,
+      "target": "DRIFT/users/stage1-admission.md",
+      "target_line": 98,
+      "resolved_id": "S1-USERS-001",
+      "src_ids": [
+        "A-5",
+        "D-01",
+        "F-6",
+        "G-16",
+        "S1-USERS-002",
+        "X-11"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-05/README.md",
+      "src_line": 18,
+      "target": "DRIFT/users/stage1-admission.md",
+      "target_line": 123,
+      "resolved_id": "S1-USERS-002",
+      "src_ids": [
+        "S1-USERS-003"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-05/README.md",
+      "src_line": 252,
+      "target": "Pitfalls/_cross/domain-common-lanes.md",
+      "target_line": 196,
+      "resolved_id": "PIT-LANE-06",
+      "src_ids": [
+        "PIT-LANE-07"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-05/README.md",
+      "src_line": 256,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 288,
+      "resolved_id": "PIT-GLOBAL-013",
+      "src_ids": [
+        "PIT-GLOBAL-014"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-05/README.md",
+      "src_line": 249,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 660,
+      "resolved_id": "PIT-GLOBAL-019",
+      "src_ids": [
+        "PIT-GLOBAL-022"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-05/README.md",
+      "src_line": 254,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 952,
+      "resolved_id": "PIT-GLOBAL-026",
+      "src_ids": [
+        "PIT-GLOBAL-029"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-05/README.md",
+      "src_line": 251,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1042,
+      "resolved_id": "PIT-GLOBAL-028",
+      "src_ids": [
+        "PIT-GLOBAL-031"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-05/README.md",
+      "src_line": 250,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1149,
+      "resolved_id": "PIT-GLOBAL-030",
+      "src_ids": [
+        "PIT-GLOBAL-033"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-05/README.md",
+      "src_line": 253,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1220,
+      "resolved_id": "PIT-GLOBAL-031",
+      "src_ids": [
+        "PIT-GLOBAL-036"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-05/README.md",
+      "src_line": 247,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 2099,
+      "resolved_id": "PIT-GLOBAL-052",
+      "src_ids": [
+        "PIT-GLOBAL-055"
+      ],
+      "target_ids": [
+        "E61"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/round-05/README.md",
+      "src_line": 248,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 2310,
+      "resolved_id": "PIT-GLOBAL-054",
+      "src_ids": [
+        "PIT-GLOBAL-061"
+      ],
+      "target_ids": [
+        "E48"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/round-06/README.md",
+      "src_line": 264,
+      "target": "Pitfalls/_cross/domain-common-lanes.md",
+      "target_line": 196,
+      "resolved_id": "PIT-LANE-06",
+      "src_ids": [
+        "PIT-LANE-07"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-06/README.md",
+      "src_line": 261,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 288,
+      "resolved_id": "PIT-GLOBAL-013",
+      "src_ids": [
+        "PIT-GLOBAL-014"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-06/README.md",
+      "src_line": 258,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 512,
+      "resolved_id": "PIT-GLOBAL-017",
+      "src_ids": [
+        "PIT-GLOBAL-018"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-06/README.md",
+      "src_line": 259,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 952,
+      "resolved_id": "PIT-GLOBAL-026",
+      "src_ids": [
+        "PIT-GLOBAL-029"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-06/README.md",
+      "src_line": 262,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1042,
+      "resolved_id": "PIT-GLOBAL-028",
+      "src_ids": [
+        "PIT-GLOBAL-031"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-06/README.md",
+      "src_line": 253,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1108,
+      "resolved_id": "PIT-GLOBAL-030",
+      "src_ids": [
+        "PIT-GLOBAL-032"
+      ],
+      "target_ids": [
+        "PIT-GLOBAL-030",
+        "PIT-GLOBAL-30"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/round-06/README.md",
+      "src_line": 256,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1220,
+      "resolved_id": "PIT-GLOBAL-031",
+      "src_ids": [
+        "PIT-GLOBAL-036"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-06/README.md",
+      "src_line": 254,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1307,
+      "resolved_id": "PIT-GLOBAL-033",
+      "src_ids": [
+        "PIT-GLOBAL-038"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-06/README.md",
+      "src_line": 257,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1719,
+      "resolved_id": "PIT-GLOBAL-042",
+      "src_ids": [
+        "PIT-GLOBAL-048"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-06/README.md",
+      "src_line": 255,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1962,
+      "resolved_id": "PIT-GLOBAL-049",
+      "src_ids": [
+        "PIT-GLOBAL-054"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-06/README.md",
+      "src_line": 265,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 2099,
+      "resolved_id": "PIT-GLOBAL-052",
+      "src_ids": [
+        "PIT-GLOBAL-055"
+      ],
+      "target_ids": [
+        "E61"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/round-06/README.md",
+      "src_line": 263,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 2310,
+      "resolved_id": "PIT-GLOBAL-054",
+      "src_ids": [
+        "PIT-GLOBAL-061"
+      ],
+      "target_ids": [
+        "E48"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/round-06/README.md",
+      "src_line": 266,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 2503,
+      "resolved_id": "PIT-GLOBAL-059",
+      "src_ids": [
+        "PIT-GLOBAL-068"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-07/README.md",
+      "src_line": 198,
+      "target": "Pitfalls/_cross/domain-common-lanes.md",
+      "target_line": 196,
+      "resolved_id": "PIT-LANE-06",
+      "src_ids": [
+        "PIT-LANE-07"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-07/README.md",
+      "src_line": 200,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 288,
+      "resolved_id": "PIT-GLOBAL-013",
+      "src_ids": [
+        "PIT-GLOBAL-014"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-07/README.md",
+      "src_line": 195,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 660,
+      "resolved_id": "PIT-GLOBAL-019",
+      "src_ids": [
+        "PIT-GLOBAL-022"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-07/README.md",
+      "src_line": 197,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1042,
+      "resolved_id": "PIT-GLOBAL-028",
+      "src_ids": [
+        "PIT-GLOBAL-031"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-07/README.md",
+      "src_line": 194,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1149,
+      "resolved_id": "PIT-GLOBAL-030",
+      "src_ids": [
+        "PIT-GLOBAL-033"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-07/README.md",
+      "src_line": 193,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 1220,
+      "resolved_id": "PIT-GLOBAL-031",
+      "src_ids": [
+        "PIT-GLOBAL-036"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/RoundPlan/round-07/README.md",
+      "src_line": 199,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 2099,
+      "resolved_id": "PIT-GLOBAL-052",
+      "src_ids": [
+        "PIT-GLOBAL-055"
+      ],
+      "target_ids": [
+        "E61"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/round-07/README.md",
+      "src_line": 196,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 2310,
+      "resolved_id": "PIT-GLOBAL-054",
+      "src_ids": [
+        "PIT-GLOBAL-061"
+      ],
+      "target_ids": [
+        "E48"
+      ]
+    },
+    {
+      "src": "docs/RoundPlan/round-07/README.md",
+      "src_line": 203,
+      "target": "Pitfalls/global/cross-domain.md",
+      "target_line": 2503,
+      "resolved_id": "PIT-GLOBAL-059",
+      "src_ids": [
+        "PIT-GLOBAL-068"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Stage1/05-差异与暂缓项清单.md",
+      "src_line": 530,
+      "target": "DRIFT/global/cross-domain.md",
+      "target_line": 492,
+      "resolved_id": "DRIFT-HOTAPI-030",
+      "src_ids": [
+        "CAND-13",
+        "CAND-14"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Stage1/05-差异与暂缓项清单.md",
+      "src_line": 185,
+      "target": "DRIFT/hot/vs-common.md",
+      "target_line": 31,
+      "resolved_id": "DRIFT-HOTAPI-014",
+      "src_ids": [
+        "A-2",
+        "SD-2026-10-25-01",
+        "T-2"
+      ],
+      "target_ids": []
+    },
+    {
+      "src": "docs/Stage1/05-差异与暂缓项清单.md",
+      "src_line": 456,
+      "target": "Intentional_Deviations/message/rpc.md",
+      "target_line": 141,
+      "resolved_id": "SD-2026-10-23-08",
+      "src_ids": [
+        "DRIFT-MSG-V-020"
+      ],
+      "target_ids": []
+    }
+  ]
+}

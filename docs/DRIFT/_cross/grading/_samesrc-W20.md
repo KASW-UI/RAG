@@ -2,7 +2,7 @@
 
 | 编号 | 域 | 判定 | 依据（一句话，说明凭什么） | 本体位置 |
 |---|---|---|---|---|
-| `DRIFT-MSG-V-030` | `like` | 同一件事 | like 这段开篇自述「**登记方在 message 域** … 修法落在本模块自己的 `pom.xml`」⇒ 讲的正是本体那条「6 个 api 模块的 jar 根本不可执行」在 like-api 的**域内那半**（补 `<build>` + `spring-boot-maven-plugin` ⇒ 68 MB 可执行 fat jar）⇒ 同一件事，但**只覆盖域内那半**（本体的另外 5 域不在本段内） | （未派工 ⇒ 无本体）· 本体在 message 域 = `DRIFT/message/rpc.md:2473`／`:2734` |
+| `DRIFT-MSG-V-030` | `like` | 同一件事 | like 这段开篇自述「**登记方在 message 域** … 修法落在本模块自己的 `pom.xml`」⇒ 讲的正是本体那条「6 个 api 模块的 jar 根本不可执行」在 like-api 的**域内那半**（补 `<build>` + `spring-boot-maven-plugin` ⇒ 68 MB 可执行 fat jar）⇒ 同一件事，但**只覆盖域内那半**（本体的另外 5 域不在本段内） | （未派工 ⇒ 无本体）· 本体在 message 域 = `DRIFT/message/rpc.md:2513`／`:2774` |
 | `FB-04` | `message` | 同一件事 | message 这段是「FB-04 对本域 = N/A」的回执（commit `853767b`），讲的正是 global 那张单（A9：gRPC handler 执行期拿不到当前 server span ⇒ `onHalfClose` 里让 `makeCurrent()` 的 scope 包住 handler 执行期）⇒ 同一张单，但本段**只覆盖「message 域不受影响」这一面**（两侧 `SpanFromContext` ／ `Span.current()` 各 0 命中） | （未派工 ⇒ 无本体）· 本体 = global `DRIFT/global/vs-common.md:910`（派单出处 = like 域 `DRIFT/like/vs-common.md:94`） |
 | `D-4` | `message` | 不同的事 | message 的 D-4 讲「删除 **message-rpc** 的域侧 MyBatis-Plus 排序桥（须等 G4 共享层桥落码）」，而同号在 like 域讲的是「like-api 仍用 `RANDOM_PORT`」⇒ 现象与落点都不同 ⇒ 纯撞号（同一「排序桥删除」模板在 like ／ task 域登记为 **D-6**） | （未派工 ⇒ 无本体）· 同号对照 = like 域 `DRIFT/like/vs-common.md:70` |
 | `FB-01` | `message` | 同一件事 | message 这张单与 global 本体逐条同形（Go `patrouter.go:48`／`:60` 的 `path.Clean` 归一 ⇒ 共享层 `GoStylePathNormalizingFilter` 缺位 ⇒ 其余 9 个 api 受影响），且本段自述「与 like 域 `D-3` ／ task 域 `C-2` 是同一条」⇒ 同一张单，本段**只覆盖 message 域的现状与取证** | `DRIFT/global/vs-common.md:352` |

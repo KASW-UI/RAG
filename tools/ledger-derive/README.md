@@ -12,6 +12,7 @@
 | [`identity-groups.txt`](identity-groups.txt) | **同源关系表**（制表符分隔：`<编号A>\t<域A>\t<编号B>\t<域B>\t<关系>\t<来源>`）—— **例外清单**：这两**节点**是**同一件事** ⇒ 仍合并成一条。**节点 = (编号, 所属域)** ⇒ 支持「同编号跨域」与「不同编号别名（长/短编号）」两类 |
 | [`wave-map.txt`](wave-map.txt) | **波次映射（派工面）**（制表符分隔：`<匹配键>\t<波次>\t<理由>`）—— 键 = `file:<台账路径>`（**优先**）或 `domain:<域名>` ⇒ 该条归哪棵工作树 **G1~G4** 做。权威出处 = [`docs/Worktree.md`](../../docs/Worktree.md) §二「波次版：G1~G4」表 |
 | [`gen-overlay-scope.py`](gen-overlay-scope.py) | 由派工清单（`docs/DRIFT/_cross/grading/_lanes.json`）**重生成** `overlay-scope.txt`（`--check` 只校验不写盘） |
+| [`check-pointer-consistency.py`](check-pointer-consistency.py) | 🆕 **指针漂移棘轮守门**（2026-10-30 · 合并收口执行者）—— 派生层的**输入完整性**：`_unresolved.md` 与 `grading/*` 里有大量硬编码 `文件:行号` 指针，而 `resolve_pointer` 是**纯行号算术** ⇒ ⇒ 域台账插一行 ⇒ 指针偏一格 ⇒ **派工面被静默改掉** ⇒ ⇒ 本脚本判「**解析出的编号**」与「**指针所在那一行写的编号**」是否自相矛盾（两者独立算出 ⇒ 漂移时不等）⇒ ⇒ **棘轮**：基线 = 存量例外集（`docs/DRIFT/_cross/pointer-drift-baseline.json`），**只有新增漂移才红**（存量 237 条不刷屏）⇒ ⇒ 配套变异测试 `tools/difftest/mutate-pointer-consistency.py` ⇒ 说明见 [`docs/DRIFT/_cross/pointer-drift.md`](../../docs/DRIFT/_cross/pointer-drift.md) |
 | [`gen-identity-groups.py`](gen-identity-groups.py) | 由**人工同源判定**（`docs/DRIFT/_cross/grading/_samesrc-*.md`）**重生成** `identity-groups.txt`（`--check` 只校验不写盘）—— 本体位置**机械反查**（`resolve_pointer`），不手填编号与域 |
 
 ## 用法

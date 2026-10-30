@@ -231,15 +231,11 @@ follow:
 #   ⇒ ⇒ 而 Go 侧 rpc 域一个中间件都没挂 ⇒ ⇒ **与 Go 不同形**
 #   ⇒ ⇒ ⇒ 即：载体的目的（抓得到 `/actuator/prometheus`）会被自己的中间件挡掉。
 #
-# ⚠️ **本行的真实状态（2026-10-30 订正）**：共享层的 `ConditionalOnApiSide`
-#   **已落库**（进主干的提交 = `53bc05ec`，即 M-6 原子那笔）
-#   ⇒ ⇒ **本行现在真的生效**（不是死配置）⇒ ⇒ 那 13 个 api 侧 Bean
-#   **不会**挂到本域的观测口（16065）上 ⇒ ⇒ 抓取请求不会被自己域的中间件挡掉。
-#   ⚠️ **但本行仍是「必做项」，不是「可选项」** —— 因为
-#   `@ConditionalOnProperty(name="rag.side", havingValue="api", matchIfMissing=true)`
-#   的 **默认值就是 api 侧** ⇒ ⇒ rpc 域**必须显式写这一行** ⇒ ⇒ 删掉它 = 13 个
-#   api 侧中间件全部复活 ⇒ ⇒ 与 Go 的 `zrpc.MustNewServer`（零 rest 中间件）不同形。
-#   ⇒ ⇒ 结论 = **保留这一行**（它是域侧约定，不是共享层能兜住的那部分）。
+# ✅ **现状（2026-10-30 · 合并主干后订正）**：共享层的 `ConditionalOnApiSide` **已落库**（`53bc05ec`）
+#   ⇒ ⇒ **本行现在真的生效**（原写「本分支基线上尚未落库 ⇒ 死配置」是**分支相对**的说法 ⇒ 叠到主干后已不成立 ⇒ 原值保留备查）
+#   ⇒ ⇒ **本行是必做项**：该注解默认值是 api（`matchIfMissing=true`）⇒ ⇒ rpc 域**必须显式写这一行**
+#   ⇒ ⇒ 本模块**已是 servlet 形态**（`management.server.port: 16065`）⇒ ⇒ 不写它 ⇒ ⇒ 那 13 个 api 侧 web 类就挂到抓取口上
+#        （其中 `GoStyleCpuSheddingFilter` 在 CPU 高负载时会**拒掉抓取请求** ⇒ 而 Go 侧 rpc 域一个中间件都没挂 ⇒ ⇒ 与 Go 不同形）。
 rag:
   side: rpc
 
