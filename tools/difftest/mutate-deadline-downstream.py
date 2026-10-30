@@ -51,12 +51,28 @@ PROBE_JAVA = 'tools/semantic-probe/deadline-downstream/java/DeadlineDownstreamPr
 
 # ── 变异清单：(ID, 说明, 文件, 旧串, 新串, 期望红的键集合) ─────────────────
 MUTATIONS = [
+    # ⚠️ 锚点历史（2026-10-30 收口执行者修 · 两轮）：
+    #    ① 原锚点串 `DeadlineState.bindToCurrent(deadlineEpochMs)` ⇒ 生产代码在
+    #       `1f62a245`（DRIFT-COMMON-005 结案）里已改成 `bindRemainingNanos(...)`
+    #       ⇒ 锚点命中 **0 处** ⇒ **M1 变成空转**（变异没发生 ⇒ 判据失去判别力）。
+    #    ② 第一版改到 `RpcInterceptor.handle` 的 worker 绑定点（`:568`）⇒ 锚点命中了，
+    #       **但探针仍绿** ⇒ 根因 = **观测点与绑定点不在同一条路径**：
+    #       探针的 handler 是 `ServerCalls.asyncUnaryCall` 起的 ⇒ 它跑在
+    #       **`onHalfClose` 这条路径**上（`RpcInterceptor.java:466-480`）
+    #       ⇒ 而 `handle(...)` 那个 worker 池路径**探针根本没走**
+    #       ⇒ ⇒ 变异必须落在 `onHalfClose` 的绑定点。
+    #    ⇒ ⇒ 变异语义：在**探针 handler 所在的那个线程**上再绑一次
+    #    `GoStyleRequestDeadline` ⇒ 探针在 handler 内读 `GoStyleRequestDeadline.isPresent()`
+    #    ⇒ `outgoing_carrier` 从 `absent` 变 `present_expired` ⇒ 该漂移键消失 ⇒ 守门红。
+    #    ⚠️ **为什么必须绑在 handler 线程上**：`GoStyleRequestDeadline` 是 ThreadLocal
+    #    ⇒ 绑在别的线程上，handler（跑在 grpc 线程）根本读不到。
     ('M1 生产代码：在 gRPC 路径绑定 GoStyleRequestDeadline（候选修法的第一半）',
      RPC_INTERCEPTOR,
-     '                        try (DeadlineState.Scope ignoredScope = DeadlineState.bindToCurrent(deadlineEpochMs)) {',
-     '                        GoStyleRequestDeadline.begin(System.nanoTime()\n'
-     '                                + Math.max(0L, deadlineEpochMs - System.currentTimeMillis()) * 1_000_000L);\n'
-     '                        try (DeadlineState.Scope ignoredScope = DeadlineState.bindToCurrent(deadlineEpochMs)) {',
+     '                            try (DeadlineState.Scope ignoredScope =\n'
+     '                                         DeadlineState.bindRemainingNanos(effectiveTimeoutNanos)) {',
+     '                            GoStyleRequestDeadline.begin(System.nanoTime() + effectiveTimeoutNanos);\n'
+     '                            try (DeadlineState.Scope ignoredScope =\n'
+     '                                         DeadlineState.bindRemainingNanos(effectiveTimeoutNanos)) {',
      {'outgoing_carrier'}),
 
     ('M2 探针自身：给 RAG 半边的下游调用加 deadline（证明行为键不是恒定值）',
