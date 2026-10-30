@@ -4915,10 +4915,10 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 | **G4-14b** | `tools/semantic-probe/deadline-downstream/java/DeadlineDownstreamProbe.java`（**共享面**） | 探针的下游调用用**裸 stub** ⇒ 等值门不可能绿 | 同上 | `:193` 用裸 stub；`:187-188` 读 `GoStyleRequestDeadline.isPresent()`（⇒ 载体落地后这一格会翻） | E1 | 探针改用 `applyTo(stub)` ⇒ 才能测到「继承」真的生效 | 双侧探针 | 否（**但它是「E65 已闭合」的唯一可复算证据**） |
 | **G4-14c** | `docs/RoundPlan/round-02/outbound-stub-inventory.md` ＋ `count-outbound-stubs.py`（**共享面**） | P2-T01 的交付物**尚不存在**（`docs/RoundPlan/round-02/` 下只有 `README.md`） | —— | 本层已**独立重数**：**21 个出向 stub 类 / 27 处零 deadline 调用点 / 7 个零上界类**（台账的「30 处 / 11 类」已过期：favorite-rpc ×2 ＋ comment-rpc ×2 已于 2026-10-27 域侧自修） | E1（本层实测，检索命令可复算） | 按本层重数落盘 ＋ 跑一次 `--assert-no-zero-deadline` | 派工面 | 否（是本轮其余任务的前置） |
 | **G4-14d** | 各域 `application.yml`（`grpc.client.*` 的**上界**配置） | 客户端硬上界（Go 的 `Timeout`）本轮**未启用** | `go-zero@v1.10.2/zrpc/config.go:31`（default=2000）＋ 真源 `service/article/api/etc/article-api.yaml:12`（**70000** ⇒ api→article-rpc 的**客户端**上界）；⚠️ `service/article/rpc/etc/article.yaml:3` 的 70000 是**服务端**超时、同文件 `:90` 的 10000 才是客户端 | 共享层能力已具备（`rag.protection.outbound-deadline.cap-millis`），**默认 0 = 不启用** | E1 | 逐域按 Go 的 yaml 值启用；⚠️ devh `3.1.0.RELEASE` **没有** `grpc.client.*.deadline` 属性 ⇒ **不能靠那个键配** | 10 个 rpc ＋ 9 个 api 组件 | 否（**这一轴仍是漂移**） |
-| **G4-15a** | `docs/Intentional_Deviations/`（**共享面，不在 G4 写权面**） | 反馈单 2/3 的落码让 RAG 的 Redis 命令**比 Go 更严** | `go-redis/v9@v9.20.0/redis.go:1024-1032`（`baseClient.context(ctx)` ⇒ ctx 变成 `context.Background()`）＋ `internal/pool/conn.go:961-991`（socket deadline = 固定 3s） | 共享层已落「预算耗尽 ⇒ 不再下发命令」（Jason 2026-10-30 拍板） | E1（本层实测） | 登记为**有意偏离**并签字（Jason 2026-10-30 已口头批准「接受比 Go 更严」） | 全仓用 Redis 的 8 个域 | 否（但**不签字 ⇒ 后面会被当回归「修回去」**） |
+| **G4-15a** | `docs/Intentional_Deviations/`（**共享面，不在 G4 写权面**） | 【订正 · 见 §4.19.5】原写的现象「反馈单 2/3 的落码让 RAG 的 Redis 命令**比 Go 更严**」**不成立** ⇒ ⇒ 本行**整条作废**，不要按「有意偏离」去登记 | ①（**派发前 · 决定性**）`go-redis/v9@v9.20.0/internal/pool/pool.go:1098-1104`（`ConnPool.waitTurn` fast path **无条件先查 `ctx.Done()`** ⇒ `ctx.Err()` ⇒ **命令根本不下发**）②（socket 层）`go-redis/v9@v9.20.0/redis.go:1024-1032`（`baseClient.context(ctx)` ⇒ ctx 变 `context.Background()`）＋ `internal/pool/conn.go:961-991`（socket deadline = 固定 3s） | 共享层已落「预算耗尽 ⇒ 不再下发命令」⇒ **落码后与 Go ① 同形**（**不是更严**）；② 本层不动 ⇒ 仍同形 | E1（本层实测 · 逐行读过 · 完整调用链见 §4.19.5） | **不登记有意偏离**（前提已不成立）⇒ 若要继续做 `G4-15d` 的「socket 层收紧」⇒ **那才是比 Go 更严** ⇒ 需**另立一条**并签字 | 全仓用 Redis 的 8 个域 | 否（**但按原行去登记 = 会造一条假偏离**） |
 | **G4-15b** | 共享层 `RpcInterceptor` 的 Stat 落点（**链层位置**） | Go 的 Stat 层在 **breaker/shedding 之外** ⇒ 它量到的耗时**含**降载/熔断开销；RAG 的在最内层 ⇒ **不含** | `go-zero@v1.10.2/zrpc/server.go:151-153`（Stat 注册点）＋ `:157-163`（Breaker/Shedding 在其外） | 本层已落慢调用日志（在 `RpcInterceptor` 内 ⇒ 最内层） | E1 | 若要严格对齐 ⇒ 在 `GoStyleRpcProtectionChain` **新增一层** ⇒ ⇒ 改 `Composition` record ⇒ **破坏 3 个域级守门测试的编译** ⇒ ⇒ **跨域** ⇒ 转主线/全量回归波 | 10 个 rpc 组件 | 否（但**口径差异要签字**） |
 | **G4-15c** | 共享层 `GoStyleRpcProtectionChain` ＋ `service/common/pom.xml` | Stat 的 **Info 分支**（Go 每个请求打全量 body）**刻意不落**；Prometheus 两层 ＋ `stat.Metrics` 周期报告（qps/median/t99）**未落** | `go-zero@v1.10.2/zrpc/internal/serverinterceptors/statinterceptor.go:94`（Info 分支）＋ `:54-56`/`:120-181`（`stat.Metrics` 聚合）＋ `zrpc/server.go:154-156`（Prometheus 层） | RAG 侧：慢调用日志**已落**；Info 分支**有意不落**；周期报告**未落**；Prometheus **未落** | E1 | Prometheus 需给 `service/common/pom.xml` 加 `micrometer-core`（该模块现在零 micrometer）＋ **「出口口径」是运维决策**（Go 侧只有 article-rpc/hot-rpc 配了 `Prometheus.Host`，其余 8/10 个 `prometheus.Enabled()==false` ⇒ 配了也不产观测值）⇒ ⇒ 整包转主线 | 10 个 rpc ＋ 9 个 api 组件 | 否（命中 `docs/PhasedGoal.md` P1 面） |
-| **G4-15d** | 共享层 Redis 能力面的**严格模式** | 「命令等待不超过剩余预算」本轮**不落** | —— | 共享层只落了「预算耗尽 ⇒ 不再下发命令」；**「命令级 socket 超时随预算收紧」在公开 API 上不可达**（SDR 4.0.7 的 `RedisConnection` 无 `setTimeout`；`getNativeConnection()` 给的是 commands 而非连接） | E1（javap + 字节码实测） | 若要做 ⇒ 需把命令丢到另一线程再 `Future.get(remaining)` ⇒ 与**事务绑定**（ThreadLocal 事务连接在调用线程上）和线程亲和冲突 ⇒ ⇒ 另立一轮专项 | 8 个用 Redis 的域 | 否 |
+| **G4-15d** | 共享层 Redis 能力面的**严格模式** | 「命令等待不超过剩余预算」本轮**不落** | —— | 共享层只落了「预算耗尽 ⇒ 不再下发命令」；【订正 · 见 §4.19.5】原写「命令级 socket 超时随预算收紧」在公开 API 上不可达 ⇒ **是错的** ⇒ ⇒ **那条路线是可达的**：lettuce `TimeoutOptions$TimeoutSource`（public abstract · `getTimeout(RedisCommand)`）＋ `TimeoutOptions$Builder.timeoutSource(…)` ＋ `ClientOptions$Builder.timeoutOptions(…)` ＋ Boot 4 的 `LettuceClientOptionsBuilderCustomizer`（实测 `LettuceConnectionConfiguration.createClientOptions` 字节码：customizer 在硬编码 `timeoutOptions` **之后** ⇒ **可覆盖**）⇒ ⇒ **本轮不落的理由从「不可达」改为「会造成新的有意偏离（比 Go 严）⇒ 需另立一条并签字」** | E1（javap + 字节码实测 · §4.19.5） | ① 若要做「socket 超时随剩余预算收紧」⇒ 走 `TimeoutSource` 路线 ⇒ **先登记为有意偏离并签字**（Go 的 socket 层**不**收紧）；② 若要做「命令等待不超过剩余预算」⇒ 需把命令丢到另一线程再 `Future.get(remaining)` ⇒ 与**事务绑定**（ThreadLocal 事务连接在调用线程上）和线程亲和冲突 ⇒ ⇒ 另立一轮专项 | 8 个用 Redis 的域 | 否 |
 
 ### 4.19.3 🟡 本节的**诚实边界**（AGENTS.md §0：「已改」≠「已验证」）
 
@@ -5095,6 +5095,105 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 - 🔴 `derive-stage1.py --check` ⇒ **仍为红（已知原因，已登记在 §4.19.3 第 5 条）**：本节转派单 **8 行** ⇒ 宽口径计数 2609→**2617**（唯一编号 1370→**1378**）⇒ **机器层 TSV 逐字节不变** ⇒ ⇒ **不影响派工判断** ⇒ ⇒ **重生成 = 共享面 ⇒ 归合并收口执行者**（本 lane 未写 `docs/DRIFT/_cross/stage1-derivation.{md,tsv}`）。
   - ⚠️ **本小节追加后的复测**（**真正执行生成**再 diff，**不是** `--report` 只读模式）：`md` diff = **1 行**（**只有**那条计数行 2609/1370 → 2617/1378）· `tsv` diff = **0 行（逐字节不变）** ⇒ ⇒ **本小节（§4.19.4 ⑦）本身没有制造新的派生层候选条目**（若制造了，计数会 > 2617/1378）⇒ ⇒ 取证后已把两个共享面文件**逐字节还原**（`git status` 复核为空）。
 
+### 4.19.5 🔴🔴 本层自查订正（2026-10-30 15:2x · G4 lane）：**反馈单 2/3 的「结论反转」本身是错的** ＋ **`TimeoutSource` 路线可走** ＋ 四条连带订正
+
+> ⚠️⚠️ **本节标题里刻意不写任何编号 token**（如 `E66`）—— **这是被派生层咬过一次的教训**，见本节第十条。
+> 📌 **纪律**：本小节**只追加**，不改 §4.19.1~§4.19.4 的任何既有结论；凡与上文冲突处，**以本小节为准**，并在下文明写「上文哪一行要按本小节读」。
+> ⚠️ 本小节**不含表格**、首格也没有裸编号 ⇒ ⇒ **不制造新的派生层候选条目**（§4.19.4 ⑤ / ⑦ 的同款纪律）。
+> ⚠️ **触发**：G1 在 2026-10-30 14:36 的回信里**接受了**本层上一轮给的「E66 不是漂移」结论 ⇒ ⇒ 不订正 ⇒ 这个**错口径会被扩散**（G1 自己的 `docs/DRIFT/users/**` ＋ 主线的派工面）⇒ ⇒ 本层**主动订正**并已回执 G1。
+> ⚠️ **本轮只改断言与登记口径，**没有改任何**行为** ⇒ ⇒ 共享层的 Redis 落码**一行未动**。
+
+**一、错在哪：Go 的 Redis deadline 语义被当成了「一层」，实际是「两层，结论相反」**
+
+- **上一轮结论（本层自己写的 · 错）**：「Go 侧 go-redis 的 `ContextTimeoutEnabled=false` ⇒ `baseClient.context(ctx)` 把 ctx 换成 `context.Background()` ⇒ ⇒ **Go 的 Redis I/O 本就不受请求 deadline 约束** ⇒ ⇒ **E66 按 Go 的事实不是漂移**」。
+- 🔴 **根因**：那句话**只覆盖了 socket 层（②）**，**漏了派发前（①）** ⇒ ⇒ Go 的 Redis 命令**在真正下发之前**就已经查过 ctx 的 deadline ⇒ ⇒ 「Go 不受 deadline 约束」是**错的**。
+- ⇒ ⇒ **正确结论：E66 是真漂移**（RAG 的 Redis 层不感知请求预算，Go 侧感知）⇒ ⇒ **本层的 Redis 落码是「补齐漂移（同形化）」，不是「新增一条比 Go 更严的偏离」**。
+
+**二、① 派发前 —— Go **是**查 deadline 的（决定性一环，本层逐行读过）**
+
+- **决定性的一行**：`go-redis/v9@v9.20.0/internal/pool/pool.go:1098-1104`
+  ```go
+  func (p *ConnPool) waitTurn(ctx context.Context) error {
+  	// Fast path: check context first
+  	select {
+  	case <-ctx.Done():
+  		return ctx.Err()
+  	default:
+  	}
+  ```
+  ⇒ ⇒ **fast path 无条件先查 `ctx.Done()`** ⇒ ctx 已过期 ⇒ 返回 `ctx.Err()` ⇒ ⇒ **命令根本不下发**。
+- **上一层为什么没看到这一环**：只读了 `redis.go` 的 `baseClient.context`（socket 层的 ctx 替换）⇒ **没往下读到 pool 层** ⇒ ⇒ **「socket 层不查」≠「整条链不查」**。
+- **这条检查在池路径上是无条件的**：`internal/pool/pool.go:807-837` 的 `ConnPool.getConn`（除 `p.closed()` 外）**必调** `p.waitTurn(ctx)` ⇒ ⇒ **每一次从池里取连接都会先查 ctx** ⇒ ⇒ **每一次 Redis 命令下发前都会先查 ctx**。
+- **完整调用链（逐段读过 ⇒ 命中 ①）**：`logoutlogic.go:38` `BizRedis.SetexCtx(l.ctx, …)` → `go-zero@v1.10.2/core/stores/redis/redis.go:1517-1523` `conn.Set(ctx, …)` → `go-redis/v9@v9.20.0/string_commands.go:451-469` `cmdable.Set` → `redis.go:1434-1438` `Client.Process` → `redis.go:212-214` `processHook` → `redis.go:830` `baseClient.process` → `redis.go:961` `withConn` → `redis.go:383-400` `getConn` → `redis.go:402-403` `_getConn` → `internal/pool/pool.go:802-804` `ConnPool.Get` → `pool.go:807-837` `getConn` → **`pool.go:837` `waitTurn`** ⇒ **命中 fast path**。
+- **不是 go-zero 的特例**：Go 侧**三处自建客户端**同样没开那个开关 ⇒ `service/task/rpc/internal/svc/service_context.go:25` · `service/hot/rpc/internal/svc/service_context.go:17` · `service/comment/rpc/internal/cache/redis.go:17`；另 `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-40`（`red.NewClient` **未设** `ContextTimeoutEnabled`；字段默认值见 `go-redis/v9@v9.20.0/options.go:172-174`）⇒ ⇒ **Go 全仓的 Redis 写都在派发前受请求 deadline 约束**。
+
+**三、② socket 层 —— Go 不查请求 deadline（**这一层 RAG 与 Go 同形，结论不变**）**
+
+- `go-redis/v9@v9.20.0/redis.go:1024-1032` 的 `baseClient.context(ctx)`：`ContextTimeoutEnabled=false` ⇒ 返回 `context.Background()` ⇒ ⇒ `redis.go:968`/`:985` 的 `cn.WithWriter/WithReader(c.context(ctx), …)` 拿到的 ctx **已无 deadline** ⇒ ⇒ `internal/pool/conn.go:961-991` 的 `cn.deadline(ctx, timeout)` 只能用**固定的 `ReadTimeout` = 3s**（`options.go:364-379`）。
+- ⇒ ⇒ RAG 侧 `spring.data.redis.timeout: 3s`（**10/10 个模块都配了 3s**，见第七节）与之**同形** ⇒ ⇒ **「固定 3s socket 超时」这一轴不是漂移**（**这一条上一轮是对的 ⇒ 保留**）。
+
+**四、🔴 连带订正之二：「命令级 socket 超时随剩余预算收紧」**不是**「技术上不可达」**
+
+- **上一轮写的（错的）**：「在公开 API 上不可达 —— SDR 4.0.7 的 `RedisConnection` 没有 `setTimeout`；`getNativeConnection()` 给的是 commands 而非连接 ⇒ Lettuce 的 `StatefulConnection.setTimeout(Duration)` 够不着」。
+- **那两条观察本身没错**，但**结论下错了** ⇒ ⇒ **那条路线其实走得通**（本层实测，不是推测）：
+  - lettuce 6.8.2 的 `io.lettuce.core.TimeoutOptions$TimeoutSource` 是 **public abstract class**，抽象方法 `public abstract long getTimeout(io.lettuce.core.protocol.RedisCommand<?, ?, ?>)` ＋ `getTimeUnit()`（javap 实测）；
+  - `io.lettuce.core.TimeoutOptions$Builder` 有 `public TimeoutOptions$Builder timeoutSource(TimeoutOptions$TimeoutSource)`（javap 实测）；
+  - `io.lettuce.core.ClientOptions$Builder` 有 `public ClientOptions$Builder timeoutOptions(TimeoutOptions)`（javap 实测）；
+  - ⚠️ **customizer 的位置是能否覆盖的关键**：Boot 4.0.8 `LettuceConnectionConfiguration.createClientOptions` 的字节码 —— offset 143 `TimeoutOptions.enabled()`（**硬编码无参**）→ offset 146 `timeoutOptions(...)` → offset 150+ 才 apply `LettuceClientOptionsBuilderCustomizer` ⇒ ⇒ **customizer 在硬编码之后 ⇒ 可覆盖**。
+- ⇒ ⇒ **「Lettuce `TimeoutSource` 逐命令动态返回剩余 deadline」这条路 = 可行**（上一轮说它不可行 ⇒ **也是错的**）。
+- 🔴 **但本轮仍然不落它 —— 理由改了**：Go 的 socket 层**不**收紧（固定 3s）⇒ ⇒ 收紧 = **RAG 比 Go 更严** = **一条新的有意偏离** ⇒ ⇒ 需**另立一条并签字** ⇒ ⇒ 本轮不落 ⇒ ⇒ `G4-15d` 的「不落理由」已就地订正。
+- ⚠️ **诚实边界**：本层**没有落**这条 ⇒ ⇒ **不得**写成「已实现逐命令动态超时」；本轮只是把「不可达」这个**错误断言**改成「可达、但会造成新的偏离、故需另立一条」。
+
+**五、连带订正之三：`G4-15a` / `G4-15d` 两行转派单的口径（**已就地标注**）**
+
+- `G4-15a`（把「Redis 比 Go 更严」登记为有意偏离）⇒ **整条作废**（前提不成立）⇒ ⇒ **不要按它去 `docs/Intentional_Deviations/` 登记** ⇒ ⇒ 否则会造一条**假偏离**。
+- `G4-15d`（「命令级 socket 超时随预算收紧」不可达）⇒ **口径已订正**（见上）⇒ ⇒ **落点与阻塞面不变**，只是「不落的理由」换了。
+- ⇒ ⇒ **对 Jason 的净效果 = 少一个签字项**（`G4-15a` 不需要签了）⇒ ⇒ 原先登记待签的 4 条 ⇒ **实剩 3 条**（`G4-15b` / `G4-15c` ＋ `G4-15d` 若要推进则需**新立一条**再签）。
+
+**六、连带订正之四：两个**悬空锚点**（`§4.19.5` 这个编号**原本是空的**）**
+
+- `service/common/src/main/java/com/rag/common/redis/GoStyleRedisDeadline.java` 与 `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:815` 的 javadoc 都指向「台账 §4.19.5」⇒ ⇒ **那个小节当时并不存在**（本节内容实际在 **§4.19.4**，其 ⑥ 是落码节）⇒ ⇒ **两个指针已就地改指**（本节 §4.19.5 / §4.19.4 ⑥ 二）。
+- ⇒ ⇒ **纪律**：「指针存在」≠「指针背后有内容」—— 与 §3.1「有指针不保证机制描述对」同族，但这次是**指向了一个不存在的节** ⇒ ⇒ 凡是本层写出去的锚点，**发出去之前要自己点开那一节确认它存在**。
+
+**七、连带订正之五：一条**自查出来的假轴**（「follow-api / task-rpc 未配 redis timeout ⇒ 60s」）**
+
+- 本层上一轮的工作笔记里起过一条怀疑：`follow-api` 与 `task-rpc` **没配** `spring.data.redis.timeout` ⇒ ⇒ 会落 Lettuce 的 `RedisURI.DEFAULT_TIMEOUT` = **60s**（vs Go 的固定 3s）⇒ ⇒ 疑似一条新漂移轴。
+- 🔴 **实测：这条轴不存在** —— **10 个用 Redis 的模块 100% 都配了 `timeout: 3s`**：`comment/comment-rpc:125` · `favorite/favorite-api:36` · `follow/follow-api:41` · `hot/hot-rpc:28` · `like/like-rpc:94` · `task/task-rpc:108` · `users/admin/admin-api:38` · `users/admin/admin-rpc:75` · `users/user/user-api:26` · `users/user/user-rpc:65` ⇒ ⇒ **两侧都是固定 3s ⇒ 同形**。
+- ⇒ ⇒ **根因 = 判据本身坏了**：上一轮用**点号路径**（`spring.data.redis.timeout`）去 grep **嵌套 YAML** ⇒ ⇒ **那个字符串在任何模块里都不出现** ⇒ ⇒ 恒 0 命中 ⇒ ⇒ 被读成「没配」⇒ ⇒ **判据与被测物各错一半**。
+- ⇒ ⇒ **这条怀疑从未进过台账、也从未外传给 G1 / 调度员**（只停在工作笔记）⇒ ⇒ **无扩散、无需回滚**。
+- ⇒ ⇒ **纪律**：核 YAML 的某个键 ⇒ **逐模块看「嵌套块 + 目标子键」**，不要 grep 点号路径 ⇒ ⇒ 先怀疑判据，再怀疑被测物。
+
+**八、这一轮的诚实边界**
+
+1. **本轮仍是源码级证据（E1）** —— **没有任何一侧的活体对拍** ⇒ ⇒ 「E66 是真漂移」在本节一律读作「**在 Go 源码的调用链上同形**」，**不得**外推为「已用活体验证的行为等价」。
+2. **本轮只订正断言与登记口径** ⇒ ⇒ 共享层的 Redis 落码**一行未动** ⇒ ⇒ §4.19.4 ⑦ 的回归结果（`service/common` 424 条 / 全仓 3312 条）**对代码仍然有效**；但**回归之后又改了 javadoc** ⇒ ⇒ **纯注释改动 ⇒ 已重跑 `service/common` 模块级回归**（结果见第九节）。
+3. **Go 侧 `logoutlogic.go` 没有 `checkDeadline()` 等价物**（本层读全文 46 行确认）⇒ ⇒ RAG 的 `AdminDomainService.logout`（`:259` `checkDeadline()` → `:267` Redis 写）**在错误码面上仍与 Go 不同**（RAG `DEADLINE_EXCEEDED` vs Go `codes.Internal "注销失败,Redis写入异常"`）⇒ ⇒ **那是域侧（users）的面，本层共享层改不了** ⇒ ⇒ 归 G1 / 域侧（**本层不越界**）。
+4. **Redis 能力面已知不覆盖的面不变**：`connection.getRedisCommands().xxx(...)` 直调绕过检查；pipeline 命令在 `closePipeline()` 才下发 ⇒ 不受预算约束；集群 / 哨兵连接不包装。
+
+**九、本轮复跑（**纯 javadoc 改动后的模块级回归**）**
+
+- **命令**：`mvn -o -B -pl service/common -am test`（**只跑本层写权面**）⇒ **BUILD SUCCESS · 53.9s · 零红**。
+- **数字**：`Tests run: 424, Failures: 0, Errors: 0, Skipped: 0` ⇒ **424 条**（与 §4.19.4 ⑦ 那一轮**逐条相同**）⇒ ⇒ 本轮**纯注释改动没有改变任何用例数** ⇒ ⇒ 再次印证「本轮只改断言与登记口径，零行为变化」。
+- ⚠️ **为什么只跑模块级、没再跑全量**：本轮改的是 **javadoc 注释**（`GoStyleRedisDeadline.java` 的类级 javadoc ＋ `RpcInterceptor.java:815` 的一处指针）⇒ ⇒ **零行为变化** ⇒ ⇒ 模块级回归足以覆盖；且 §4.19.4 ⑥ 四那条坑（「回归期间改 `service/common` 源码 ⇒ 污染那些**自己会跑 maven** 的测试」）要求落码与回归**严格串行** ⇒ ⇒ 本轮**先改完注释、再跑回归**（顺序正确）⇒ ⇒ **全量回归留给合并收口执行者**在主干上与 G1 的域侧改动一起跑。
+- **机器守门（9 项）**：`check-wave-lane-ownership` · `check-wave-role-model` · `check-phasegoal-lanes` · `check-phasegoal-consistency` · `check-surface-parity` · `check-wave-coupling` · `check-agents-budget` · `check-ledger-tables` · `check-ledger-count` ⇒ **9/9 全 `EXIT=0`**。
+- **派生层取证（备份 → 真正执行生成 → diff → 逐字节还原）**：`md` diff = **1 行**（**只有**那条计数行 2609/1370 → 2617/1378）· `tsv` diff = **0 行（逐字节不变）** ⇒ ⇒ **本节的订正没有制造新的派生层候选条目**，且**与上一轮同款** ⇒ ⇒ §4.19.3 第 5 条的登记**仍然成立、无须改写** ⇒ ⇒ 取证后已把两个共享面文件**逐字节还原**（`git checkout` 回 HEAD ⇒ `git status` 复核为空）。
+- ⚠️ **取证过程本身先踩了第十条那两个坑**：第一次取证时 `md` 差 **3 处**、`tsv` 差 **7 行**（比修完后的结果大）⇒ ⇒ **那一次 diff 正是发现坑的依据**（多出的 2 行 = 被误提升进施工单的两条派工单；`E66` 的证据强度被改判 = 标题里的编号 token 劫持）⇒ ⇒ **修完再取一次证，才得到上面这个「机器层回到基线」的结果**。
+
+**十、🔴 本轮踩到并已订正的**派生层自噬**两坑（**都写在这里，避免下一轮重犯**）**
+
+- **坑 ① · 小节标题里带编号 token ⇒ 派生层会把这一节当成「那个编号」的条目候选**：
+  本节标题**最初写的是**「…：**`E66`** 的「结论反转」本身是错的 …」⇒ ⇒ 派生层会在标题里取第一个编号 token ⇒ ⇒ **`### 4.19.5` 这一节被登记成了 `E66` 的条目候选** ⇒ ⇒ 后果两条，都很坏：
+  ① **`E66` 的证据强度被静默改判**（从「C 无指针」升成「B 静态」⇒ 因为新候选的段里全是 `文件:行号`）⇒ ⇒ **机器层 TSV 变了** ⇒ ⇒ 上一轮「TSV 逐字节不变 ⇒ 不影响派工判断」的前提**当场失效**；
+  ② `E66` 条目的**出处/文本**被这一节劫持 ⇒ ⇒ 派工面上那条 `E66` 指向的内容不再是她自己的原文。
+  ⇒ ⇒ **订正**：本节标题**不写任何编号 token**（编号只放正文）⇒ ⇒ 派生层看不见这一节 ⇒ ⇒ 机器层回到基线。
+  ⇒ ⇒ **纪律**：**小节标题里出现编号 ⇒ 等于向派生层登记一个新条目** ⇒ ⇒ 凡只想「写一节说明」的小节，**标题里一律不写编号**。
+- **坑 ② · 派工单（转派单）的表格行内出现状态标记 ⇒ 该行会被当成「问题项」进施工单**：
+  派生层对 `tablerow` 型条目，**段 = 该行本身** ⇒ ⇒ 行内只要出现状态标记（`🔴`/`🟡`/`✅`/`⚫`/`⏳` 等），就会被读成「带状态的问题项」⇒ ⇒ **进 TSV（= 派工面）**。
+  ⇒ ⇒ 实测：本轮我给 `G4-15a` / `G4-15d` 两行的订正文字里各写了一个状态标记 ⇒ ⇒ **两行从「只被计数、不进施工单」变成「两条新的 P1 未定级条目」** ⇒ ⇒ **派工面凭空多 2 条**，而且**阶段归属是空的**（md 里「开放状态又没有阶段归属的只有 2 条」**正是它们**）⇒ ⇒ 会污染施工单口径。
+  ⇒ ⇒ **订正**：那两行的订正文字**改用「【订正 · 见 §4.19.5】」这种无标记写法** ⇒ ⇒ 两行回到「只计数、不进施工单」⇒ ⇒ **机器层 TSV 回到基线**。
+  ⇒ ⇒ **纪律**：**转派单的行内不得写状态标记**（状态标记只属于「差异条目」）；要标订正就写「【订正 · 见 §x.y】」。
+- ⚠️ **取证口径**：本节 ⑨ 的复算方法是 **备份 → 真正执行 `derive-stage1.py` → diff → 逐字节还原**（**不是** `--report` 只读模式；理由见 §4.19.3 第 5 条的取证教训）⇒ ⇒ 本轮**正是靠它**才发现上面这两个坑 ⇒ ⇒ 否则这两处会一路带到合并收口执行者的主干上。
+
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
 > 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
@@ -5186,6 +5285,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 
 > ⚠️ **为什么这一条要单独记**：反馈单 2/3 与 3/3 是**本轮之后**的新任务 ⇒ 按 AGENTS.md §5.3b-0（**未经用户批准不得写代码/台账；调度员不得代批准**）⇒ ⇒ 调度员 14:00 的通知**不构成批准**（它自己写的是「授权依据 = Jason 在主会话的明示」）⇒ ⇒ 回执人**用问卷直接向 Jason 取的批准**（requestId `ask_0b5f6f9e2dcd9e0b8543730a`）⇒ ⇒ **回执人未自批**。
 > ⚠️ 同时并入 **G1 的【订正单】**（1/3 的 Go 侧机制描述原本是错的 ⇒ 结论方向不变、坐标按订正后的锚点重述 ⇒ 见 §4.19.4 ①）。
+> 🔴 **本条批准的前提已被本层自查订正（2026-10-30 15:2x · 见 §4.19.5）**：Jason 当时选「接受比 Go 更严」，是基于本层回执里「Go 的 Redis I/O 本就不受请求 deadline 约束 ⇒ E66 不是漂移」这一（**错的**）结论 ⇒ ⇒ **订正后落码的性质变了**：不是「新增一条比 Go 更严的偏离」，而是「**把 RAG 拉回与 Go 同形（补齐漂移）**」⇒ ⇒ **落码范围不变（Jason 批的就是「仍要落码」）**、**不需要新的批准**、**并且 `G4-15a` 的偏离签字请求随之作废** ⇒ ⇒ **对 Jason 的净效果 = 少一签字项**（不是多一项）。
 
 **⑤ 之三 · 本轮**未获批准**、已登记转派的部分（不得落码）**
 
@@ -5193,6 +5293,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 - 反馈单 3/3 的 **Prometheus 两层 ＋ `stat.Metrics` 周期报告 ＋ Stat 的 Info 分支** ⇒ **整包转主线**（含「出口口径」运维决策）⇒ 见 §4.19.2 的 `G4-15b`/`G4-15c`。
 - **「命令等待不超过剩余预算」的严格模式** ⇒ 未获批准 ⇒ 见 `G4-15d`。
 - 反馈单 2/3 造成的**有意偏离签字** ⇒ 落点 `docs/Intentional_Deviations/`（**不在 G4 写权面**）⇒ 转合并收口执行者 ⇒ 见 `G4-15a`。
+  - 🔴 **本条已于 2026-10-30 15:2x 作废**（§4.19.5）：批准时依据的「Go 不查 deadline ⇒ E66 不是漂移」前提**是错的** ⇒ **E66 是真漂移** ⇒ ⇒ 本落码是**补齐漂移（同形化）** ⇒ ⇒ **不产生有意偏离 ⇒ 不需要签字** ⇒ ⇒ `G4-15a` 整条作废（该行已就地标注）。
 
 ### 附 · 一 · 本轮收到的反馈单（登记 ＋ **独立复核结论**）
 
@@ -5200,8 +5301,8 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 |---|---|---|---|
 | **1/3** | G1（会话 `mvs_e2b9a331ab69415f957ee84212509ce3` · 2026-10-30） | 出向 gRPC 不继承请求 deadline；Go 侧 `depCtx`（otel span ctx）保父 deadline；RAG 侧 `RpcInterceptor.onHalfClose` 只绑 `DeadlineState` ⇒ `applyTo` 在 gRPC 路径 no-op | ✅ **结论方向成立**｜🔴 **Go 出处错**：`depCtx` **不在 follow 域** —— `follow/rpc/internal/logic/helper.go:82` 是**直接透传 ctx**（无 `depCtx`、无 otel）；`depCtx` 实际在 **favorite** 域（`favorite/rpc/internal/logic/helper.go:93`·`:98`·`:127`·`:133`）｜✅ RAG 侧描述成立（`RpcInterceptor.java:475-476` 只绑 `DeadlineState`；`GoStyleRequestDeadline.begin` 全仓生产代码**只有 1 处** = `HttpMiddleware.java:324` ⇒ rpc 进程恒 no-op）｜⚠️ **不是新发现** = 已排期的 **P2-T02~P2-T05**（Round 2）｜⚠️ 台账数过期：「30 处零 deadline / 11 个零上界类」⇒ 实测 **27 处 / 7 类** |
 | **1/3 订正** | G1（同上 · 11:12 后） | 订正 1/3 的 Go 侧机制描述：行号对、**机制描述错**（该行是直接透传 ctx；`depCtx` 只在 favorite 域）；G1 自陈**根因是从 global 台账的 E65 抄的** | ✅ **已并入**（§4.19.4 ①）｜**结论方向不变**｜⇒ **纪律**：台账引用的 `文件:行号` 也要**自己打开那行读过**（§3.1 只保证「有指针」）｜⚠️ 本层顺带查出一处**自己的**同类错：`article.yaml:3`（服务端）与 `:90`（客户端）曾被说反 ⇒ 已订正（§4.19.4 ②） |
-| **2/3** | G1（同上） | Redis 调用不感知 deadline（含写）⇒ global `E66` ⇒ 与 1/3 同源 ⇒ 建议**与 1/3 一起立项**（共享层加「请求期限载体」覆盖 Redis） | 🔴 **结论反转**：Go 侧 go-redis 的 `ContextTimeoutEnabled=false`（go-zero 建客户端时未设）⇒ `baseClient.context(ctx)` 把 ctx 换成 `context.Background()` ⇒ ⇒ **Go 的 Redis I/O 本就不受请求 deadline 约束**（只靠固定 3s 读超时）⇒ ⇒ **E66 按 Go 的事实不是漂移**；RAG 的 `spring.data.redis.timeout: 3s` 与之**同形**｜✅ **Jason 拍板「仍要落码，接受比 Go 更严」** ⇒ 本层已落共享层半边（§4.19.5 ⑥ 一）｜⇒ 偏离签字落点不在 G4 写权面 ⇒ 转 `G4-15a` |
-| **3/3** | G1（同上） | gRPC 服务端拦截器链缺 go-zero 框架级 **Stat + Prometheus** 两层 ⇒ 落点必在 `service/common` 的 `GoStyleRpcProtectionChain.compose()`（10 个 rpc 域共用） | 🔴 **派单前提有两处偏差**：① Stat 层**不走 Prometheus**（go-zero `core/stat/metrics.go` 无 prometheus 依赖 ⇒ 它是每分钟打一行 qps/median/t99 的进程内聚合器）；② 500ms 阈值走**全局兜底**而非 `StatConf`｜⇒ **不能纯 G4 落**（改 `Composition` record ⇒ 破坏 3 个域级守门测试编译 ⇒ 跨域；Prometheus 需加 micrometer 依赖；「出口口径」是运维决策）｜✅ **Jason 拍板「只落 Stat 的慢调用日志」** ⇒ 本层已落（§4.19.5 ⑥ 二）｜⇒ 其余转 `G4-15b`/`G4-15c` |
+| **2/3** | G1（同上） | Redis 调用不感知 deadline（含写）⇒ global `E66` ⇒ 与 1/3 同源 ⇒ 建议**与 1/3 一起立项**（共享层加「请求期限载体」覆盖 Redis） | 🔴🔴 **本条结论已在 §4.19.5 再次反转（原写「E66 不是漂移」是错的）**：Go 的 Redis 语义必须**拆成两层** —— ①（**派发前**）Go **是**查 deadline 的（`go-redis/v9@v9.20.0/internal/pool/pool.go:1098-1104` 的 `waitTurn` fast path **无条件先查 `ctx.Done()`** ⇒ 命令根本不下发）⇒ ⇒ **E66 是真漂移**；②（**socket 层**）Go 不查请求 deadline（`redis.go:1024-1032` 的 `baseClient.context(ctx)` 把 ctx 换成 `context.Background()` ⇒ 只剩固定 3s `ReadTimeout`）⇒ ⇒ **「固定 3s」那一轴与 RAG 同形**｜✅ **Jason 拍板「仍要落码，接受比 Go 更严」** ⇒ 本层已落共享层半边（**§4.19.4 ⑥ 一**）⇒ ⇒ **落码性质 = 补齐漂移（同形化），不是新增偏离**｜⇒ **原「偏离签字 → `G4-15a`」的处置作废**（§4.19.5 已订正） |
+| **3/3** | G1（同上） | gRPC 服务端拦截器链缺 go-zero 框架级 **Stat + Prometheus** 两层 ⇒ 落点必在 `service/common` 的 `GoStyleRpcProtectionChain.compose()`（10 个 rpc 域共用） | 🔴 **派单前提有两处偏差**：① Stat 层**不走 Prometheus**（go-zero `core/stat/metrics.go` 无 prometheus 依赖 ⇒ 它是每分钟打一行 qps/median/t99 的进程内聚合器）；② 500ms 阈值走**全局兜底**而非 `StatConf`｜⇒ **不能纯 G4 落**（改 `Composition` record ⇒ 破坏 3 个域级守门测试编译 ⇒ 跨域；Prometheus 需加 micrometer 依赖；「出口口径」是运维决策）｜✅ **Jason 拍板「只落 Stat 的慢调用日志」** ⇒ 本层已落（**§4.19.4 ⑥ 二**）｜⇒ 其余转 `G4-15b`/`G4-15c` |
 
 ### 附 · 二 · 独立核验的 Go 侧证据链（**取代派单那一组坐标**）
 

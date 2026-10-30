@@ -812,7 +812,7 @@ public final class RpcInterceptor {
      * <ul>
      *   <li>Go 的 <b>Info 分支</b>（`:94`）会把<b>每个请求的完整 JSON body</b>打进 Info 日志
      *       ⇒ <b>本层刻意不落</b>：① 体量（每请求一行全量 body）；② 内容面（body 含业务数据）
-     *       ⇒ ⇒ 这是一处**有意的部分对齐**，已在台账登记（`docs/DRIFT/global/vs-common.md` §4.19.5）。</li>
+     *       ⇒ ⇒ 这是一处**有意的部分对齐**，已在台账登记（`docs/DRIFT/global/vs-common.md` §4.19.4 ⑥ 二）。</li>
      *   <li>Go 的 <b>慢调用分支</b>（`:85`/`:92`）⇒ <b>本方法落它</b>
      *       ⇒ 文案对齐 Go 的 {@code "[RPC] slowcall - <addr> - <method>"}，
      *       并<b>额外</b>带一个 duration（Go 侧 duration 在日志<b>元数据</b>里，不在文本里）。</li>
