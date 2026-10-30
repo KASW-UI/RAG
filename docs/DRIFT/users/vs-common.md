@@ -5912,7 +5912,7 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
 - 本次订正**只覆盖 `E66` / `DRIFT-ARPC-010` 这条链**（admin 域 `logout` 的 Redis 写）⇒ ⇒ **不外推**到本域其它 DB 路径（`getSelf` / `createAdmin` / `updateSelf` / …）的同类表述 ⇒ ⇒ 那些地方已把措辞改成「**按集合读、本条只主张集合里有 1015**」（**不是**「两侧都是 1015」），**但其集合值未复核** ⇒ ⇒ **列为待复核项**（见第七段）
 
 **五、M-6 合批三要素（现状）**
-① 共享层代理的预算检查已在 `delegate.getConnection()` **之前**（G4 commit `e8cb769a` ＋ L1/L2/L3 三层守门 ＋ 双向变异）② Go 侧集合 = {1015, 5001}（`1c6bcda6`）③ **域侧删掉抢先 `checkDeadline()`**（本域已落码）⇒ ⇒ **那一个原子 commit 的三要素齐了** ⇒ ⇒ 交合并收口执行者做
+① 共享层代理的预算检查已在 `delegate.getConnection()` **之前**（**内容坐标** = `service/common/.../redis/GoStyleRedisDeadlineConnectionFactory.java:58` 的 `assertNotExhausted("getConnection")` ⇒ 早于 `:60` 的 `delegate.getConnection()`；⚠️ **【2026-10-31 订正】** 原引 G4 的 `e8cb769a` **已作废** —— 该 hash **不在主干**（只在 `align/g4-service-common`）⇒ ⇒ **悬空引用** ⇒ ⇒ 改指内容坐标 ＋ L1/L2/L3 三层守门 ＋ 双向变异）② Go 侧集合 = {1015, 5001}（`1c6bcda6`）③ **域侧删掉抢先 `checkDeadline()`**（本域已落码）⇒ ⇒ **那一个原子 commit 的三要素齐了** ⇒ ⇒ 交合并收口执行者做
 
 **六、就地订正清单（本轮，零行位移）**
 - 本文件 `:5457` —— 反馈单「现象」列的「客户端可见面两侧逐字一致」→ 改为集合读法

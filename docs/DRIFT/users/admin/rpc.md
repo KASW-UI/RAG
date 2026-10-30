@@ -4665,7 +4665,7 @@ if (connectTimeout != null) {                                     // :16
 - `service/users/admin/admin-rpc/.../AdminDomainService.java` —— **29 处**「两侧都是 1015」措辞改为集合读法 ⇒ **行数 1373 → 1373 不变**（该文件有跨文件行号指针 ⇒ 必须行数中性）
 
 **五、M-6 合批三要素（现状）**
-① 共享层代理的预算检查已在 `delegate.getConnection()` **之前**（G4 `e8cb769a`）② Go 侧集合 = {1015, 5001}（`1c6bcda6`）③ **域侧删掉抢先 `checkDeadline()`**（本域已落码）⇒ ⇒ **那一个原子 commit 的三要素齐了** ⇒ ⇒ 交合并收口执行者做。
+① 共享层代理的预算检查已在 `delegate.getConnection()` **之前**（**内容坐标** = `service/common/.../redis/GoStyleRedisDeadlineConnectionFactory.java:58` 的 `assertNotExhausted("getConnection")` ⇒ 早于 `:60` 的 `delegate.getConnection()`；⚠️ **【2026-10-31 订正】** 原引 G4 的 `e8cb769a` **已作废** —— 该 hash **不在主干**（只在 `align/g4-service-common`）⇒ ⇒ **悬空引用** ⇒ ⇒ 改指内容坐标）② Go 侧集合 = {1015, 5001}（`1c6bcda6`）③ **域侧删掉抢先 `checkDeadline()`**（本域已落码）⇒ ⇒ **那一个原子 commit 的三要素齐了** ⇒ ⇒ 交合并收口执行者做。
 
 ---
 
