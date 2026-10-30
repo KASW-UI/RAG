@@ -282,3 +282,19 @@ EOF
 2. **可核的判据**：`git merge-base --is-ancestor <机制落库提交> <我这一笔>` ⇒ 返回 0 ⇒ ⇒ **机制在叠取前就已在主干** ⇒ ⇒ **凡引用该机制的「尚未落库」措辞一律过期**。
 3. **假陈述的害处方向要分清**：「以为已生效其实没生效」会把人引向**重复实现**；「以为没生效其实已生效」会把人引向**把必做项当成可选项省掉** ⇒ ⇒ **后者更危险**（它让「必做项」被省）。
 4. **落在别人写权面的假陈述**：不要自己改 ⇒ ⇒ **登记 + 发消息 + 附可核证据（哪个提交、先后顺序）** ⇒ ⇒ 域 owner 改完再叠。
+
+## 🔴 **叠取别人的分支 ≠ 取它的「最后 N 笔」⇒ 漏取代码 / 未编译的测试 / commit message 里的状态断言**
+
+**症状**：收口执行者按「lane 分支最后两笔 commit」叠取 ⇒ ⇒ ① cherry-pick 报「冲突」且 **HEAD 侧为空**（看着像普通 add/add）⇒ ⇒ 真相是**基线选错**：lane 在那次 merge **之前**还有自己的提交，而被漏掉的**正是代码**（三个域的载体落码 + 6 条真启动守门）⇒ ⇒ ② 叠进来的测试**从未编译过**（缺两个 import）⇒ ⇒ 主干 `mvn test-compile` 直接红 ⇒ ⇒ ③ 我在 commit message 里写「**代提交 · lane 会话已停摆**」⇒ ⇒ 那个前提后来被**证伪**（该 lane 一直活着）⇒ ⇒ **错误的断言进了永久产物**。
+
+**本仓的活体样本（2026-10-31 凌晨 · G1~G4 收口轮）**：
+- **漏取**：G3 分支形状 = `主线` merge 进 lane（`b03504d0`）＋ lane 自己的 `a4ee7b43` / `dc11d7df` / `6e39d96a` / `af58f601` ⇒ ⇒ 我只取后两笔 ⇒ ⇒ `docs/DRIFT/favorite/rpc.md` 的第三轮整段（**含三域 Actuator 载体落码**）**整段没进来** ⇒ ⇒ cherry-pick 报冲突且 ours 侧为空。
+- **未编译**：`UserRpcPrometheusCarrierGateTest` 缺 `org.springframework.context.annotation.Bean` 与 `net.devh.boot.grpc.server.config.GrpcServerProperties` ⇒ ⇒ 叠进主干后编译断 ⇒ ⇒ 补齐后 `test-compile` EXIT=0（devh 真实包名用 `unzip -l grpc-server-spring-boot-starter-3.1.0.RELEASE.jar` 核实）。
+- **状态断言**：三笔主干 commit 的 message 写了「lane 会话已停摆」⇒ ⇒ 而该 lane 的消息流显示它**距我取数仅 34 秒仍在写代码** ⇒ ⇒ **前提为假**（见下一节「status ≠ liveness」）。
+
+**判定式**：
+1. **叠取前先算「独有提交全集」**：`git log <merge-commit>^1 --not <目标分支>` ⇒ ⇒ 那串才是该 lane 的独有内容 ⇒ ⇒ **「最后 N 笔」只是你恰好看见的那几笔** ⇒ ⇒ 且必须**按原分支顺序**叠（台账 commit 若以代码 commit 为父 ⇒ 代码+台账按序一起叠）。
+2. **症状识别**：cherry-pick 冲突且 **ours 侧为空** ⇒ ⇒ 那不是冲突 ⇒ ⇒ **是基线选错** ⇒ ⇒ 正确解法 = **补叠前序提交后重叠**，而不是解冲突。
+3. **叠取带测试代码 ⇒ 叠完必跑 `test-compile`**（不是 `compile`）⇒ ⇒ 且 **「编译通过」≠「守门转绿」**（Testcontainers 依赖 ⇒ Docker 挂 ⇒ 全 SKIP ⇒ 「BUILD SUCCESS」是 SKIP 不是通过，见 `ENV-06`）。
+4. ⚠️ **commit message 里不写状态断言**（谁活着 / 谁已死 / 什么时候做的）⇒ ⇒ **commit message 是永久的，状态是会变的** ⇒ ⇒ 状态只配写进**台账与会话回执** ⇒ ⇒ commit message 只写「**做了什么 + 为什么 + 依据**」。
+5. ⚠️ **要动别人的工作树之前，先跑一次行为证据**（读它最后一轮的消息时间戳 ＋ `find -newermt` 看它有没有在写文件）⇒ ⇒ 会话列表的 `status` / `status.message` 是**每轮告警**，**不能当执行前提** ⇒ ⇒ 我本轮据它判「四棵 lane 全部停摆」⇒ ⇒ 随后核到其中一棵距取数仅 34 秒仍在写代码 ⇒ ⇒ 基于假前提做的动作（在**它的**工作树里代提交、代修 import）**全部要返工核对**。
