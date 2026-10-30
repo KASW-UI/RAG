@@ -23,8 +23,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *
  * <p><b>背景（2026-10-21）</b>：AGENTS.md §3.4.1 B-1 原写
  * 「当前 {@code user-rpc} 一处都未使用 {@code DeadlineState}」——
- * <b>该描述已过时</b>：{@code UserDomainService} 实有 <b>11 处</b> {@code checkDeadline()}
- * （代码注释标 DRIFT-018），而 {@code AdminDomainService} 此前<b>一处都没有</b>。本类补齐。
+ * <b>该描述已过时</b>：{@code UserDomainService} 实有 {@code checkDeadline()}（代码注释标 DRIFT-018；
+ * ⚠️ <b>2026-10-31</b>：原记 <b>11 处</b> ⇒ 撤掉 {@code logout} 那处抢先闸门后 <b>10 处</b> ⇒ logout 由 handoff 网单独守），而 {@code AdminDomainService} 此前<b>一处都没有</b>。本类补齐。
  *
  * <p><b>为什么是行为断言、不是数行数 / 扫字节码</b>：
  * 本条要防的回退是「有人删掉了 13 处里的某一处」。试过三种做法，各有各的坑：
