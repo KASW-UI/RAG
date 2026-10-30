@@ -2,7 +2,6 @@ package com.rag.article.article.rpc;
 
 import com.rag.article.article.rpc.support.RealContainerHostPort;
 import com.rag.article.article.rpc.support.RealGrpcPort;
-import com.rag.common.http.GoStyleJsonContentTypeAdvice;
 import com.rag.common.http.GoStyleTomcatParameterLimitCustomizer;
 import com.rag.common.protection.GoStyleBreakerFilter;
 import com.rag.common.protection.GoStyleCpuSheddingFilter;
@@ -11,7 +10,12 @@ import com.rag.common.protection.GoStyleMaxConnsFilter;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.web.context.WebApplicationContext;
 import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -42,8 +46,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  *   <li><b>属性在位</b>：生产 yml 里的 {@code rag.side} 真的进了容器的 Environment
  *       （<b>不</b>用 {@code @SpringBootTest(properties=...)} 覆盖 ⇒ 读的就是生产配置）
  *       ⇒ 「yml 里写了这一行」从此变成「运行期真的读到了这一行」；</li>
- *   <li><b>正向对照</b>：共享层那个 <b>同样带 servlet 条件</b>的自动配置
- *       （{@link GoStyleJsonContentTypeAdvice}）<b>确实在容器里</b>
+ *   <li><b>正向对照</b>：本类自带的 {@link ServletContextProbeConfiguration}
+ *       （<b>只</b>带 {@code @ConditionalOnWebApplication(SERVLET)}、<b>不带</b> api 侧条件）
+ *       <b>确实在容器里</b>
  *       ⇒ ⇒ 证明「servlet web app 这个前提在本上下文里成立」
  *       ⇒ ⇒ <b>否则第 ③ 条的「不在」就是空断言</b>
  *       （可能只是因为压根没有 servlet 上下文）；</li>
@@ -88,8 +93,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
                 "article-rpc.article-sync-result-consumer-conf.brokers=127.0.0.1:1"
         })
 @Testcontainers
+@Import(ServletContextProbeConfiguration.class)
 class ArticleRpcSharedLayerWebBeanGateTest {
-
     @Container
     static final PostgreSQLContainer<?> POSTGRES =
             new PostgreSQLContainer<>("postgres:16-alpine")
@@ -120,11 +125,15 @@ class ArticleRpcSharedLayerWebBeanGateTest {
     }
 
     @Test
-    @DisplayName("② 正向对照：同样带 servlet 条件的共享层自动配置确实在容器里 ⇒ 证明 servlet 前提成立")
+    @DisplayName("② 正向对照：上下文本身就是 servlet web app，且本类自带的「只带 servlet 条件」的探针确实在容器里 ⇒ 证明 servlet 前提成立")
     void servletConditionHoldsInThisContext() {
-        assertThat(context.getBeanNamesForType(GoStyleJsonContentTypeAdvice.class))
-                .as("正向对照：共享层那个带 `@ConditionalOnWebApplication(SERVLET)` 的自动配置"
-                        + "应当**在**容器里 —— 它不在 ⇒ 本上下文压根不是 servlet web app "
+        assertThat(context)
+                .as("上下文本身就是 servlet web app（WebApplicationContext）"
+                        + " —— 若不是 ⇒ 第 ③ 条「api 侧 Bean 不在容器里」就是**空断言**（无鉴别力）")
+                .isInstanceOf(WebApplicationContext.class);
+        assertThat(context.getBeanNamesForType(ServletContextProbe.class))
+                .as("正向对照：本类自带的那个**只带 servlet 条件**的探针配置应当**在**容器里"
+                        + " —— 它不在 ⇒ 本上下文压根不是 servlet web app "
                         + "⇒ 下一条「api 侧 Bean 不在容器里」就是**空断言**（无鉴别力）")
                 .isNotEmpty();
     }
@@ -143,4 +152,37 @@ class ArticleRpcSharedLayerWebBeanGateTest {
                         + "⇒ ⇒ hot 域「段数轴已销账」那条结论会从绿变红 ⇒ ⇒ 必须钉住")
                 .isEmpty();
     }
+
+}
+
+/**
+ * 🔴 <b>测试自带探针</b>：<b>只</b>带 {@code @ConditionalOnWebApplication(SERVLET)}、
+ * <b>不带</b> api 侧条件 ⇒ 它在容器里 ⟺ 本上下文**确实是 servlet web app**。
+ *
+ * <p>⚠️ <b>为什么不用共享层里的某个 Bean 当参照物（2026-10-31 订正）</b>：
+ * 共享层 {@code 53bc05ec}（G4 lane，2026-10-30）把一批 web Bean 从「只有 servlet 条件」
+ * 改成了「<b>servlet 条件 + api 侧条件</b>」（{@code ConditionalOnApiSide}）
+ * ⇒ ⇒ 共享层里**已经找不到**「只带 servlet 条件」的参照物了
+ * ⇒ ⇒ 本守门原先拿 {@code GoStyleJsonContentTypeAdvice} 当正向对照
+ * ⇒ ⇒ 它在 2026-10-31 的回归里**转红**（它现在是 api 侧 Bean，在 rpc 容器里本就不该在）
+ * ⇒ ⇒ 改用**本类自带探针** ⇒ 判据不依赖共享层某个具体 Bean 的条件组合 ⇒ 更稳。
+ *
+ * <p>⚠️ <b>为什么放在「文件顶层」而不是「类的嵌套类」</b>（2026-10-31 实测）：
+ * {@code @Import(Xxx.class)} 写在<b>类自身的注解</b>上时，javac 按 JLS 作用域规则
+ * <b>解析不到本类的嵌套成员类型</b>（嵌套类型的作用域是「类体内部」，
+ * 而类声明上的注解在类体之外）⇒ ⇒ 编译报「找不到符号」。
+ * ⇒ ⇒ 搬到文件顶层（包私有）⇒ 包作用域可见 ⇒ {@code @Import} 可解析。
+ */
+@Configuration(proxyBeanMethods = false)
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
+class ServletContextProbeConfiguration {
+
+    @Bean
+    ServletContextProbe probe() {
+        return new ServletContextProbe();
+    }
+}
+
+/** 探针本体（只作类型标记，断言「它在不在容器里」）。 */
+final class ServletContextProbe {
 }
