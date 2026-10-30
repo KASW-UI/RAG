@@ -43,7 +43,7 @@
 | **E21** | ✅ 已修（L12/L13） | 本轮改动面**不涉及** ⇒ **未复核** ⇒ 维持快照状态（不为其补新的核对日期） | 维持 ✅ |
 | **E38②** | 🔴 A 类 backlog | 🔴 **口径已过期**：**第 ① 层已闭环** —— 本层**自己复跑** `bash tools/semantic-probe/rpc-timeout/run-rpc-timeout-parity.sh` ⇒ **EXIT=0**、`client_deadline_ctx` **一致**（另 1 条 `timeout_telemetry` 是**已签字的 C-1 表述差异**，不计入失败）。⇒ 剩下的 **②** = **E65 / E66**（架构级第四十六轮已否决原修法 ⇒ 窄化） | 🟡 **① 已闭环 / ② 另立项** |
 | **E46 / E62** | ✅ 已修并合回主干 | 本轮改动面**不涉及** ⇒ **未复核** ⇒ 维持 | 维持 ✅ |
-| **E65** | 🔴 OPEN（**现象快照** · 现行状态见末格 ＝ ✅ 已闭合）＋ 附注「**`applyTo` 是 no-op**」**已订正**（`applyTo` 不是 no-op ⇒ 见本格说明） | 🔴 **仍 OPEN，但附注错**：`applyTo` **不是 no-op** —— `service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java:110-119` 实测会 `stub.withDeadlineAfter(remainingNanos, NANOSECONDS)`（`:115` 算 `remainingNanos` · `:117`/`:119` 两个 `withDeadlineAfter` 分支）⇒ ⇒ 且有**真实调用点** —— 🆕 **2026-10-27 复测定正：全仓生产代码共 6 处，完整模块路径逐条如下**（原写「3 处 + 等」且**无完整路径** ⇒ 复核者定位不到）：<br>① `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/client/FollowRpcClient.java:123`<br>② `service/message/message-api/src/main/java/com/rag/message/message/api/client/MessageRpcClient.java:87`<br>③ `service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/client/UserRpcClient.java:46`<br>④ `service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/client/ArticleRpcClient.java:50` ← **原台账未列**（**【2026-10-30 二次订正】** 这两条 **rpc 侧 `applyTo`** 调用点此前因载体缺席而**恒 no-op**（**这一条成立**）⇒ 现载体已绑进 `RpcInterceptor.onHalfClose` ⇒ ⇒ `applyTo` 这层现在生效 ⇒ ⚠️ **但「favorite-rpc 出向调用继承请求 deadline」这个行为结论不依赖它** ⇒ ⇒ **域侧出向 stub 全部走 devh channel**（域侧 main 代码 `ManagedChannelBuilder`/`NettyChannelBuilder` **零命中**）⇒ ⇒ devh `AbstractChannelFactory.createChannel(String,List,boolean)` 在 **`:95` `ClientInterceptors.interceptForward(channel, interceptors)`** ⇒ **全局客户端拦截器接在 channel 上** ⇒ ⇒ **凡建在 devh channel 上的 stub（哪怕不显式调 `applyTo`）都经过拦截器链** ⇒ ⇒ **域侧出向调用本来就继承请求 deadline** ⇒ ⇒ **行为不变**（本就继承）⇒ ⇒ 属**共享层行为变更**（多了一层冗余但等价的保护）⇒ 须记账 + 通知域 owner（G3））<br>⑤ `service/favorite/favorite-api/src/main/java/com/rag/favorite/favorite/api/client/FavoriteRpcClient.java:136` ← **原台账未列**<br>⑥ `service/article/article-api/src/main/java/com/rag/article/article/api/client/ArticleRpcClient.java:68` ← **原台账未列**<br>⇒ ⇒ ⚠️ **注意：另有一批**出向 client** 走的是 `remainingMillis()` 手搓、不是 `applyTo`**（`like-api/LikeRpcClient.java:138` · `comment-api/CommentRpcClient.java:97` · `task-api/TaskRpcClient.java:106` · `article-api/UserRpcClient.java:83`）⇒ ⇒ **E65/U15 的「统一载体」改造要覆盖的是这两类合计 10 处出向 stub，不是 6 处**（Jason 已拍板走 global 统一载体 `applyTo(stub)` ⇒ ⇒ **本轮不改**）<br>**🔴🔴 订正（2026-10-28 · §4.11 G4-A4-05 / A1-01 / A1-02）**：**「合计 10 处」这个数**本身也错了** ⇒ ⇒ **实测 = 全仓 21 个出向 stub**（api 侧 12 + rpc 侧 9）⇒ ⇒ 其中 **11 个类是「零 deadline」**（**比「不继承请求预算」更严重** = **连上界都没有**，可无限期挂起）：<br>**🔴 订正（2026-10-29 · §4.11.5）**：上一轮写「**零 deadline 的 7 处**」⇒ ⇒ **实测 = 11 个类 / 30 个调用点**（上一轮把 stub **提供者**当成调用点 ⇒ 漏 `user-api` 8 处 + `admin-api` 12 处）⇒ ⇒ 且上一轮的第二条交叉证据「`grpc.client.*.deadline` 只有 `article-rpc` 的 2 处」**本身失效** —— **devh `3.1.0.RELEASE` 根本没有 `deadline` 这个属性** ⇒ 那 2 处是**空配** ⇒ ⇒ **零上界的类数 = 11（不是 9）**（详见 §4.11.5 与 §4.11.7）**：<br>① `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/client/UserRpcClient.java:42`（裸注入 stub，`@GrpcClient("user-rpc")`）<br>② `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/client/AdminRpcClient.java:58` · `:92`<br>③ `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/client/MessageRpcClient.java:85`<br>④ `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java:50`<br>⑤ `service/users/user/user-api/src/main/java/com/rag/users/user/api/client/UserRpcClient.java:144`<br>⑥ `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/client/AdminRpcClient.java:174`<br>⇒ ⇒ **Go 侧全部有 2000ms 硬上界**（本地 pin 住的 `go-zero@v1.10.2` 源码：`zrpc/config.go:31` `Timeout int64 json:",default=2000"` · `zrpc/client.go:70-71` `if c.Timeout > 0 { opts = append(opts, WithTimeout(...)) }` · `zrpc/internal/client.go:116` `interceptors = append(interceptors, clientinterceptors.TimeoutInterceptor(timeout))` · `zrpc/internal/config.go:15` `Timeout bool json:",default=true"`）⇒ ⇒ **这 11 个类是「真漂移」而非「等价」**<br>⇒ ⇒ ⚠️ **并且**：原枚举里 ④ 个行号**指错**（复核者按它定位会落到 javadoc）⇒ ⇒ **已订正**：`follow-api/FollowRpcClient.java:123` → **`:231`** · `message-api/MessageRpcClient.java:87` → **`:112`** · `favorite-rpc/UserRpcClient.java:46` → **`:56`** · `favorite-rpc/ArticleRpcClient.java:50` → **`:57`**（2026-10-28 逐条实测 ⇒ 四个新行号**精确落在 `applyTo(...)` 调用上**）<br>⇒ ⇒ **完整 20 行表 + Go 对照 + 逐条判定 ⇒ §4.11 §4.11.5「出向 stub 全表（21 类 / 30 处零 deadline）」**（本行不再重复）⇒ ⇒ ⚠️ **别把 `hot-api/HotArticleQueryService.java:102` 算进来** —— 那是**本地查询**读剩余预算，不是出向 stub。⇒ **【2026-10-30 订正】真正的不继承发生在 rpc 进程** —— 原写「预算 ThreadLocal **只**由 `HttpMiddleware.java:324`（`begin`）/ `:356`（`clear`）写入 ⇒ rpc 进程无 HTTP 入口 ⇒ `DEADLINE_NANOS` 恒 `null` ⇒ `applyTo` 原样返回 stub ⇒ **rpc→rpc 出向不挂 deadline**」**已过期** ⇒ **共享层已把载体绑进 `RpcInterceptor.onHalfClose`**（`GoStyleRequestDeadline.bindAbsoluteNanos(absoluteDeadlineNanos)`）⇒ ⇒ rpc 进程的 `DEADLINE_NANOS` **不再恒 `null`** ⇒ ⇒ `applyTo` 在 rpc 路径**不再恒 no-op** ⇒ ⇒ **「不继承」的真正残余（2026-10-30 二次订正）**：**不是**「裸 stub 不接载体」⇒ ⇒ **域侧出向 stub 全部走 devh channel**（域侧 main 代码 `ManagedChannelBuilder`/`NettyChannelBuilder` **零命中**）⇒ ⇒ devh `AbstractChannelFactory.createChannel(String,List,boolean)` 在 **`:95` `ClientInterceptors.interceptForward(channel, interceptors)`** ⇒ **全局客户端拦截器接在 channel 上** ⇒ ⇒ **凡建在 devh channel 上的 stub（哪怕不显式调 `applyTo`）都经过拦截器链** ⇒ ⇒ **域侧出向调用本来就继承请求 deadline** ⇒ ⇒ ⚠️ **「11 类零上界」这个数**〔**【2026-10-30 订正 · G4 lane · 采纳其口径**：**「11 类零上界」说的是客户端硬上界 2000ms 未启用（P2-T04 · 域侧 yml），与「是否继承请求预算」是<b>两个不同的面</b>** ⇒ ⇒ 那 11 类**照样继承请求预算**（经 devh 的全局客户端拦截器）⇒ ⇒ ⇒ **该数沿用**（⇒ ⇒ 二次订正里写的「待重算」是**过度保守** —— 把「另一个面」误当成「一个面没算清」）〕⇒ ⇒ **真实残余 = 出向传播的双侧活体证据仍缺**（探针 RAG 半边 `:86` 自建裸 netty channel ⇒ 绕开 devh 装配 ⇒ 测不到真实链路） ⇒ ⇒ **运行期守门见 §4.19.15**（G4 `3499249a`：真 devh 上下文 ＋ 真 `@GrpcClient` stub ＋ **不调 `applyTo`** ⇒ ⇒ 断言出向调用在请求预算处失败；负控＝裸 channel 挂满）<br>**【2026-10-30 第四次订正：E65 本条 = ✅ 已闭合】** —— 探针 RAG 半边已改走 **devh 生产装配路径**（`e796a4ed`：`GrpcChannelFactory` ＝ 生产建 channel 的那条路径 ＋ 真 Spring 上下文 ＋ `@ImportAutoConfiguration(GrpcClientAutoConfiguration.class)` ＋ `@Import(GoStyleProtectionConfiguration.class)` ＋ 显式 `InProcessChannelFactory` bean ⇒ 拦截器由 devh 的 `GlobalClientInterceptorRegistry` 按 `@GrpcGlobalClientInterceptor` 收集 ⇒ **不是探针手工塞的**） ⇒ ⇒ **四键逐键相等**：`failed_fast=true` / `code=4` / `outgoing_carrier=present_expired` / `sql_carrier=present_expired`（Go 真源 ⇔ RAG 生产类；本轮实测 `python3 tools/difftest/check-deadline-downstream.py` ⇒ **EXIT=0**）⇒ ⇒ `EXPECTED_DRIFT = {}`（四键全成 parity 键） ⇒ ⇒ 守门三连 EXIT=0（`check-deadline-verdict.py` · `check-deadline-downstream.py` · `mutate-deadline-downstream.py`，**变异 M1/M2 2/2 精确命中**） ⇒ ⇒ **「真因 = 探针自建裸 netty channel」这条可结案** ⇒ ⇒ ⚠️ **本行旧结论（「真实残余 = 出向传播的双侧活体证据仍缺」/ 「探针 RAG 半边 `:86` 自建裸 netty channel ⇒ 测不到真实链路」）已作废** ⇒ ⇒ ⚠️ **E65 本条（出向调用是否继承请求 deadline）= ✅ 已闭合**；⚠️ **但 X-6 判据整体（下游 deadline = min(客户端 deadline, 服务端 timeout)）仍 🔴** ⇒ **残余 = 客户端硬上界 2000ms 未启用**（**P2-T04 · 域侧 yml · 另一轴**）⇒ ⇒ **两者不是同一个面** ⇒ ⇒ **别把本条的 ✅ 读成 X-6 已闭合** | ✅ **已闭合（2026-10-30 第四次订正）**（**描述订正**；旧值「🔴 OPEN」保留在本行下方 2026-10-29 复核段作历史存证） |<br>**🔴 2026-10-29 复核（核对日期刷新）**：**状态不变（仍 🔴 OPEN）**，且**升级为 🔴 A（阶段一准入阻断项）** —— 🔴 **2026-10-29 双侧活体实测**：实跑 `python3 tools/difftest/check-deadline-downstream.py` ⇒ **EXIT=0**（⚠️ 该守门是**漂移形态门** ⇒ **PASS ⇒ 漂移仍在**）⇒ Go = `{'failed_fast':'true','code':'4','outgoing_carrier':'present_expired','sql_carrier':'present_expired'}` · RAG = `{'failed_fast':'false','code':'0','outgoing_carrier':'absent','sql_carrier':'present_expired'}` ⇒ ⇒ **`outgoing_carrier` 两侧不等** ⇒ **RAG 的出向 gRPC 不继承请求 deadline** ⇒ ⇒ **X-6 判据不满足 ⇒ 阶段一 C-3 破** ⇒ ⇒ **定级 = 🔴 A**（阶段一准入阻断项 · 依据 `docs/PhaseGoal-judge.md` v5 §五 X-6） ⇒ ⇒ **本条的「仍 OPEN」已由双侧活体实测确认**（不是转述）
+| **E65** | 🔴 OPEN（**现象快照** · 现行状态见末格 ＝ ✅ 已闭合）＋ 附注「**`applyTo` 是 no-op**」**已订正**（`applyTo` 不是 no-op ⇒ 见本格说明） | 🟡 **本行首格与末格的状态指针**（**【2026-10-31 订正 · G4 lane】原写「🔴 仍 OPEN，但附注错」= **状态格与末格矛盾** ⇒ 末格已写「✅ 已闭合（2026-10-30 第四次订正）」⇒ ⇒ 行内指针是断的 ⇒ ⇒ 本格状态**以末格为准（= 已闭合）**；本格保留的历史快照「🔴 OPEN」**只作 2026-10-29 复核段的存证**）** —— `applyTo` **不是 no-op** —— `service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java:110-119` 实测会 `stub.withDeadlineAfter(remainingNanos, NANOSECONDS)`（`:115` 算 `remainingNanos` · `:117`/`:119` 两个 `withDeadlineAfter` 分支）⇒ ⇒ 且有**真实调用点** —— 🆕 **2026-10-27 复测定正：全仓生产代码共 6 处，完整模块路径逐条如下**（原写「3 处 + 等」且**无完整路径** ⇒ 复核者定位不到）：<br>① `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/client/FollowRpcClient.java:123`<br>② `service/message/message-api/src/main/java/com/rag/message/message/api/client/MessageRpcClient.java:87`<br>③ `service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/client/UserRpcClient.java:46`<br>④ `service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/client/ArticleRpcClient.java:50` ← **原台账未列**（**【2026-10-30 二次订正】** 这两条 **rpc 侧 `applyTo`** 调用点此前因载体缺席而**恒 no-op**（**这一条成立**）⇒ 现载体已绑进 `RpcInterceptor.onHalfClose` ⇒ ⇒ `applyTo` 这层现在生效 ⇒ ⚠️ **但「favorite-rpc 出向调用继承请求 deadline」这个行为结论不依赖它** ⇒ ⇒ **域侧出向 stub 全部走 devh channel**（域侧 main 代码 `ManagedChannelBuilder`/`NettyChannelBuilder` **零命中**）⇒ ⇒ devh `AbstractChannelFactory.createChannel(String,List,boolean)` 在 **`:95` `ClientInterceptors.interceptForward(channel, interceptors)`** ⇒ **全局客户端拦截器接在 channel 上** ⇒ ⇒ **凡建在 devh channel 上的 stub（哪怕不显式调 `applyTo`）都经过拦截器链** ⇒ ⇒ **域侧出向调用本来就继承请求 deadline** ⇒ ⇒ **行为不变**（本就继承）⇒ ⇒ 属**共享层行为变更**（多了一层冗余但等价的保护）⇒ 须记账 + 通知域 owner（G3））<br>⑤ `service/favorite/favorite-api/src/main/java/com/rag/favorite/favorite/api/client/FavoriteRpcClient.java:136` ← **原台账未列**<br>⑥ `service/article/article-api/src/main/java/com/rag/article/article/api/client/ArticleRpcClient.java:68` ← **原台账未列**<br>⇒ ⇒ ⚠️ **注意：另有一批**出向 client** 走的是 `remainingMillis()` 手搓、不是 `applyTo`**（`like-api/LikeRpcClient.java:138` · `comment-api/CommentRpcClient.java:97` · `task-api/TaskRpcClient.java:106` · `article-api/UserRpcClient.java:83`）⇒ ⇒ **E65/U15 的「统一载体」改造要覆盖的是这两类合计 10 处出向 stub，不是 6 处**（Jason 已拍板走 global 统一载体 `applyTo(stub)` ⇒ ⇒ **本轮不改**）<br>**🔴🔴 订正（2026-10-28 · §4.11 G4-A4-05 / A1-01 / A1-02）**：**「合计 10 处」这个数**本身也错了** ⇒ ⇒ **实测 = 全仓 21 个出向 stub**（api 侧 12 + rpc 侧 9）⇒ ⇒ 其中 **11 个类是「零 deadline」**（**比「不继承请求预算」更严重** = **连上界都没有**，可无限期挂起）：<br>**🔴 订正（2026-10-29 · §4.11.5）**：上一轮写「**零 deadline 的 7 处**」⇒ ⇒ **实测 = 11 个类 / 30 个调用点**（上一轮把 stub **提供者**当成调用点 ⇒ 漏 `user-api` 8 处 + `admin-api` 12 处）⇒ ⇒ 且上一轮的第二条交叉证据「`grpc.client.*.deadline` 只有 `article-rpc` 的 2 处」**本身失效** —— **devh `3.1.0.RELEASE` 根本没有 `deadline` 这个属性** ⇒ 那 2 处是**空配** ⇒ ⇒ **零上界的类数 = 11（不是 9）**（详见 §4.11.5 与 §4.11.7）**：<br>① `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/client/UserRpcClient.java:42`（裸注入 stub，`@GrpcClient("user-rpc")`）<br>② `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/client/AdminRpcClient.java:58` · `:92`<br>③ `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/client/MessageRpcClient.java:85`<br>④ `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java:88`（**【2026-10-31 订正 · G4 lane】原写 `:50` 指错** —— `:50` 是**空 javadoc 行**（javadoc 结束于 `:74`）⇒ 真实调用点是 `:88` 的 `capByClientTimeout(userStub)`）<br>⑤ `service/users/user/user-api/src/main/java/com/rag/users/user/api/client/UserRpcClient.java:144`<br>⑥ `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/client/AdminRpcClient.java:174`<br>🆕 **【2026-10-31 订正 · G4 lane · 本层自测】枚举 ④⑤⑥ **从来不是「零上界」** ⇒ ⇒ 本格「**11 个类是「零 deadline」（比「不继承请求预算」更严重 = 连上界都没有）**」这一列**归错了类** —— ⇒ **根因 = 把「裸 provider（无 per-call 载体）」当成了「零上界」**（**这是两个不同的量**）⇒ ⇒ 逐条实测（判据打在**消费点**、非声明点）：<br>· **④** `follow/follow-rpc/.../client/UserRpcClient.java` —— 自 **`88c206ce`（2026-10-30 21:24 · G1「出向 2s 客户端超时」落码）**起即带 **2000ms 客户端硬上界**：`:75` `public static final long CLIENT_TIMEOUT_MILLIS = 2000L;` · `:88` `return capByClientTimeout(userStub)`（**真实调用点**）· `:104` `return stub.withDeadlineAfter(capNanos, NANOSECONDS);` ⇒ ⇒ **有上界**<br>· **⑤** `users/user/user-api/.../client/UserRpcClient.java:194-196` —— `userRpc()` 返回 `capByClientTimeout(GoStyleRequestDeadline.applyTo(userServiceBlockingStub))` ⇒ ⇒ **入向剩余 ∧ 2s 上界**双维 ⇒ ⇒ **有上界**<br>· **⑥** `users/admin/admin-api/.../client/AdminRpcClient.java:219-221` —— `adminRpc()` 返回 `capByClientTimeout(GoStyleRequestDeadline.applyTo(adminServiceBlockingStub))` ⇒ ⇒ **入向剩余 ∧ 2s 上界**双维 ⇒ ⇒ **有上界**<br>⇒ ⇒ **④⑤⑥ 的真实形态 = 「有 per-call 载体 + 有 2000ms 上界」** ⇒ ⇒ **它们属于 §4.11.5 的 A 组形态（不是 B 组）** ⇒ ⇒ ⚠️ **「11 个类零上界」这个数已不成立**（见本行下方【2026-10-31 第三次订正】的重算口径）⇒ ⇒ ⚠️ **别把这三条读成「零 deadline 的调用点」** —— 它们的调用点**继承请求预算**（经 devh 全局客户端拦截器链）**且自带 2s 上界** ⇒ ⇒ 与 Go 侧 `context.WithTimeout(ctx, 2s)` **同值** ⇒ ⇒ **不是真漂移**<br>⇒ ⇒ **Go 侧全部有 2000ms 硬上界**（本地 pin 住的 `go-zero@v1.10.2` 源码：`zrpc/config.go:31` `Timeout int64 json:",default=2000"` · `zrpc/client.go:70-71` `if c.Timeout > 0 { opts = append(opts, WithTimeout(...)) }` · `zrpc/internal/client.go:116` `interceptors = append(interceptors, clientinterceptors.TimeoutInterceptor(timeout))` · `zrpc/internal/config.go:15` `Timeout bool json:",default=true"`）⇒ ⇒ **这 11 个类是「真漂移」而非「等价」**<br>⇒ ⇒ ⚠️ **并且**：原枚举里 ④ 个行号**指错**（复核者按它定位会落到 javadoc）⇒ ⇒ **已订正**：`follow-api/FollowRpcClient.java:123` → **`:231`** · `message-api/MessageRpcClient.java:87` → **`:112`** · `favorite-rpc/UserRpcClient.java:46` → **`:56`** · `favorite-rpc/ArticleRpcClient.java:50` → **`:57`**（2026-10-28 逐条实测 ⇒ 四个新行号**精确落在 `applyTo(...)` 调用上**）<br>⇒ ⇒ **完整 20 行表 + Go 对照 + 逐条判定 ⇒ §4.11 §4.11.5「出向 stub 全表（21 类 / 30 处零 deadline）」**（本行不再重复）⇒ ⇒ ⚠️ **别把 `hot-api/HotArticleQueryService.java:102` 算进来** —— 那是**本地查询**读剩余预算，不是出向 stub。⇒ **【2026-10-30 订正】真正的不继承发生在 rpc 进程** —— 原写「预算 ThreadLocal **只**由 `HttpMiddleware.java:324`（`begin`）/ `:356`（`clear`）写入 ⇒ rpc 进程无 HTTP 入口 ⇒ `DEADLINE_NANOS` 恒 `null` ⇒ `applyTo` 原样返回 stub ⇒ **rpc→rpc 出向不挂 deadline**」**已过期** ⇒ **共享层已把载体绑进 `RpcInterceptor.onHalfClose`**（`GoStyleRequestDeadline.bindAbsoluteNanos(absoluteDeadlineNanos)`）⇒ ⇒ rpc 进程的 `DEADLINE_NANOS` **不再恒 `null`** ⇒ ⇒ `applyTo` 在 rpc 路径**不再恒 no-op** ⇒ ⇒ **「不继承」的真正残余（2026-10-30 二次订正）**：**不是**「裸 stub 不接载体」⇒ ⇒ **域侧出向 stub 全部走 devh channel**（域侧 main 代码 `ManagedChannelBuilder`/`NettyChannelBuilder` **零命中**）⇒ ⇒ devh `AbstractChannelFactory.createChannel(String,List,boolean)` 在 **`:95` `ClientInterceptors.interceptForward(channel, interceptors)`** ⇒ **全局客户端拦截器接在 channel 上** ⇒ ⇒ **凡建在 devh channel 上的 stub（哪怕不显式调 `applyTo`）都经过拦截器链** ⇒ ⇒ **域侧出向调用本来就继承请求 deadline** ⇒ ⇒ ⚠️ **「11 类零上界」这个数**〔**【2026-10-30 订正 · G4 lane · 采纳其口径**：**「11 类零上界」说的是客户端硬上界 2000ms 未启用（P2-T04 · 域侧 yml），与「是否继承请求预算」是<b>两个不同的面</b>** ⇒ ⇒ 那 11 类**照样继承请求预算**（经 devh 的全局客户端拦截器）⇒ ⇒ ⇒ **该数沿用**（⇒ ⇒ 二次订正里写的「待重算」是**过度保守** —— 把「另一个面」误当成「一个面没算清」）〕⇒ ⇒ **真实残余 = 出向传播的双侧活体证据仍缺**（探针 RAG 半边 `:86` 自建裸 netty channel ⇒ 绕开 devh 装配 ⇒ 测不到真实链路） ⇒ ⇒ **运行期守门见 §4.19.15**（G4 `3499249a`：真 devh 上下文 ＋ 真 `@GrpcClient` stub ＋ **不调 `applyTo`** ⇒ ⇒ 断言出向调用在请求预算处失败；负控＝裸 channel 挂满）<br>**【2026-10-30 第四次订正：E65 本条 = ✅ 已闭合】** —— 探针 RAG 半边已改走 **devh 生产装配路径**（`e796a4ed`：`GrpcChannelFactory` ＝ 生产建 channel 的那条路径 ＋ 真 Spring 上下文 ＋ `@ImportAutoConfiguration(GrpcClientAutoConfiguration.class)` ＋ `@Import(GoStyleProtectionConfiguration.class)` ＋ 显式 `InProcessChannelFactory` bean ⇒ 拦截器由 devh 的 `GlobalClientInterceptorRegistry` 按 `@GrpcGlobalClientInterceptor` 收集 ⇒ **不是探针手工塞的**） ⇒ ⇒ **四键逐键相等**：`failed_fast=true` / `code=4` / `outgoing_carrier=present_expired` / `sql_carrier=present_expired`（Go 真源 ⇔ RAG 生产类；本轮实测 `python3 tools/difftest/check-deadline-downstream.py` ⇒ **EXIT=0**）⇒ ⇒ `EXPECTED_DRIFT = {}`（四键全成 parity 键） ⇒ ⇒ 守门三连 EXIT=0（`check-deadline-verdict.py` · `check-deadline-downstream.py` · `mutate-deadline-downstream.py`，**变异 M1/M2 2/2 精确命中**） ⇒ ⇒ **「真因 = 探针自建裸 netty channel」这条可结案** ⇒ ⇒ ⚠️ **本行旧结论（「真实残余 = 出向传播的双侧活体证据仍缺」/ 「探针 RAG 半边 `:86` 自建裸 netty channel ⇒ 测不到真实链路」）已作废** ⇒ ⇒ ⚠️ **E65 本条（出向调用是否继承请求 deadline）= ✅ 已闭合**；⚠️ **但 X-6 判据整体（下游 deadline = min(客户端 deadline, 服务端 timeout)）仍 🔴** ⇒ **残余 = 客户端硬上界 2000ms 未启用**（**P2-T04 · 域侧 yml · 另一轴**）⇒ ⇒ **两者不是同一个面** ⇒ ⇒ **别把本条的 ✅ 读成 X-6 已闭合** | ✅ **已闭合（2026-10-30 第四次订正）**（**描述订正**；旧值「🔴 OPEN」保留在本行下方 2026-10-29 复核段作历史存证） |<br>**🔴 2026-10-29 复核（核对日期刷新）**：**状态不变（仍 🔴 OPEN）**，且**升级为 🔴 A（阶段一准入阻断项）** —— 🔴 **2026-10-29 双侧活体实测**：实跑 `python3 tools/difftest/check-deadline-downstream.py` ⇒ **EXIT=0**（⚠️ 该守门是**漂移形态门** ⇒ **PASS ⇒ 漂移仍在**）⇒ Go = `{'failed_fast':'true','code':'4','outgoing_carrier':'present_expired','sql_carrier':'present_expired'}` · RAG = `{'failed_fast':'false','code':'0','outgoing_carrier':'absent','sql_carrier':'present_expired'}` ⇒ ⇒ **`outgoing_carrier` 两侧不等** ⇒ **RAG 的出向 gRPC 不继承请求 deadline** ⇒ ⇒ **X-6 判据不满足 ⇒ 阶段一 C-3 破** ⇒ ⇒ **定级 = 🔴 A**（阶段一准入阻断项 · 依据 `docs/PhaseGoal-judge.md` v5 §五 X-6） ⇒ ⇒ **本条的「仍 OPEN」已由双侧活体实测确认**（不是转述）
 | **E66** | 🔴 OPEN | 🔴 **仍 OPEN** ⇒ 本轮**转立项**（路线已探明：Lettuce `TimeoutOptions.TimeoutSource` 逐命令动态返回剩余 deadline ⇒ 零域侧改动；**硬约束**：Boot 4 `LettuceConnectionConfiguration.createClientOptions` 字节码顺序 = offset 146 **先**写 `timeoutOptions` → offset 151 **才**应用 customizer ⇒ customizer 再调 `timeoutOptions(...)` 会**覆盖运维配置**；🔴 **2026-10-27 订正（G2 独立核实 · 本层采纳）**：`offset 146` 写的是**硬编码 `TimeoutOptions.enabled()`**，**不是** `spring.data.redis.timeout` ⇒ ⇒ 后者走 `:173-174` 的 `builder.commandTimeout(...)` ⇒ 落 `LettuceClientConfiguration.getCommandTimeout()` ⇒ **RedisURI.timeout**（`ClientOptions` 上**没有** `getCommandTimeout()`）⇒ ⇒ ⇒ **顺序结论不变、归因订正**） | 🔴 **OPEN**（转立项 · 处方与回归口径已齐；🆕 **2026-10-30：共享层半边已落** `3d5b4924` ⇒ **残余未闭合** —— 检查点位置仍差「取连接窗口」· handler 级业务码待 G1 去抢先检查（🆕 **2026-10-30 17:2x：该项曾于 16:9x 被撤销，理由 = 「不可观察」⇒ 该撤销本身被真源探针推翻（5/20000）⇒ 恢复**）⇒ **逐条见 §4.19.7 / §4.19.10**） |<br>**【2026-10-30 复核 · 核对日期刷新】**：**状态不变（仍 🔴 OPEN）** —— ⚠️ **本轮未重新实测 Redis 侧**（本轮 = **源码级**复核）⇒ 沿用 2026-10-27 的结论（处方与回归口径已齐）⇒ ⇒ **不写「已复测」**
 | **E68 / E69 / E70** | ✅ 已落 | 本轮改动面**不涉及** ⇒ **未复核** ⇒ 维持 | 维持 ✅ |
 | **未修 28 项**（23 条编号 + 5 项未编号） | 🔴 未修（**旧快照的「27 条」已过期**） | ✅ **2026-10-29 R3 轮已复核**（`align/r3-service-common` · commit `cc5126ad`）—— ① **基数订正**：**28 项未修**（23 编号 + 5 未编号）· **G-16 的「3 个 vs 4 个包」矛盾已消解**（见 §1 表同名词条）② **逐条定级**：**A 类 0 · B 类 0 · C 类 21 · D 类 6 · 证据缺口 1** ⇒ **域内硬阻塞 = 0**（⚠️ **仅限这 28 项** ⇒ ⇒ **共享层还有 1 条 A 类未修项 = `E65`**，见上 ⇒ ⇒ **「域内硬阻塞 = 0 ⇒ 阶段一通过」这句话作废** ⇒ **阶段一已改判「❌ 未通过」**） ③ **真缺陷 `DRIFT-CF-018` 已修**（`Dispatcher` 阻塞重载交不出句柄 ⇒ 进程停不下来）＋ 变异验证 3 组精确转红 ④ **405 例 / 0F / 0E / 0S** ⇒ ⇒ **组件 R2 → R3 · 状态 🔴 → 🟡** | 🟡 **未修但不再阻塞**（C 类按 judge §1.1 ⑥ 第 4 条不计入） |
@@ -3809,7 +3809,7 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 
 ---
 
-##### §4.11.5 🔴 G4-A4-05：出向 stub 全表重算 ⇒ **21 个类 / 30 处零 deadline**（上一轮写 20 类 / 7 处）
+##### §4.11.5 🔴 G4-A4-05：出向 stub 全表重算 ⇒ **21 个类 / 30 处零 deadline**（上一轮写 20 类 / 7 处）🆕 **【2026-10-31 订正 · G4 lane】⚠️ 「零 deadline」≠「零上界」** —— 这两个是**不同的量** ⇒ ⇒ **B-06 / B-10 / B-11 三条已订正**（它们**有** per-call 载体 + **有** 2000ms 上界 ⇒ 不属本组）⇒ ⇒ **「零 deadline 的调用点」的真实数 = 30 − 1（B-06）− 8（B-10）− 12（B-11）= 9 处 / 8 个类** ⇒ ⇒ **「零上界」这个数 = 0**（三个域侧 yml 侧由 `991ea75b` 统一为「补该域 Go `Timeout` 硬上界」· **P2-T04 · 域侧写权**）
 
 > **口径**：以 **proto 的 rpc 方法集合**为权威方法名表（10 个 proto · 66 个 rpc），逐个 `service/**/src/main/java/**` 扫出向调用点；
 > **「零 deadline」判据 = 该调用点上既无 `withDeadlineAfter`、无 `applyTo(...)`、无 `GoStyleGrpcCallDeadline.apply(...)`、也无 `grpc.client.*.deadline` 生效**。
@@ -3830,7 +3830,7 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | A-09 | `message/message-api/.../client/MessageRpcClient.java` | `GoStyleRequestDeadline.applyTo(stub)` | `:112` |
 | A-10 | `task/task-api/.../client/TaskRpcClient.java` | `withDeadlineAfter(max(1, budget), MILLISECONDS)` | `:110` |
 
-**B 组：零 per-call deadline（11 个类 · 30 个调用点）** —— 🔴 **比「不继承请求预算」更严重 = 连上界都没有**
+**B 组：零 per-call deadline（11 个类 · 30 个调用点）** —— 🔴 **比「不继承请求预算」更严重 = 连上界都没有**🆕 **【2026-10-31 订正 · G4 lane】本组小标题的「= 连上界都没有」是**错分类** ⇒ ⇒ **「零 per-call deadline」≠「零上界」**（前者 = 调用点没挂 per-call 载体；后者 = 客户端硬上界没配）⇒ ⇒ **本组三条（B-06 / B-10 / B-11）已订正**（它们**有** 2000ms 上界 ⇒ 属 A 组形态）⇒ ⇒ **本组真实数 = 8 个类 / 9 个调用点**（30 − 1 − 8 − 12）⇒ ⇒ ⚠️ **别把本组的「零 deadline」读成「零上界」**
 
 | # | 类 | 形态 | 行号 | 调用点 |
 |---|---|---|---|---|
@@ -3839,14 +3839,14 @@ G1 的 `0c2a902`（第十四轮）标题里的「**同机制不同形态**」指
 | B-03 | `comment/comment-rpc/.../client/MessageRpcClient.java` | 裸调 | `:81` | 1 |
 | B-04 | `favorite/favorite-rpc/.../client/ArticleRpcClient.java` | 裸调 | `:75` | 1 |
 | B-05 | `favorite/favorite-rpc/.../client/UserRpcClient.java` | `applyTo`（**【2026-10-30 二次订正 · 合并 G4 lane 同轮订正】** 原写「🔴 rpc 进程 ⇒ `GoStyleRequestDeadline` 的 ThreadLocal 恒 `null` ⇒ 恒 no-op ⇒ 实际零」**已过期** ⇒ 共享层已把载体绑进 `RpcInterceptor.onHalfClose` ⇒ ⇒ rpc 进程**不再恒 null** ⇒ ⇒ `applyTo` 这层现在生效 ⇒ ⚠️ **但本行「实际零」不成立 ≠ 出向调用此前零 deadline** ⇒ ⇒ favorite-rpc 的出向 stub 走 devh channel ⇒ **全局拦截器链**本就给 deadline ⇒ ⇒ **行为结论不变：favorite-rpc 出向调用继承请求 deadline** ⇒ ⇒ 属共享层行为变更 ⇒ 已通知域 owner（G3））**【2026-10-30 第四次订正：探针已改走 devh 生产装配路径 ⇒ 本行行为结论现已由双侧活体对拍证实（四键逐键相等：`failed_fast=true` / `code=4` / `outgoing_carrier=present_expired` / `sql_carrier=present_expired`）⇒ ⇒ 「真因 = 探针自建裸 netty channel」可结案】** | `:56`（provider）· 消费点 `FavoriteUserGuard.java:94` | 1 |
-| B-06 | `follow/follow-rpc/.../client/UserRpcClient.java` | 裸调 | `:50` | 1 |
+| B-06 | `follow/follow-rpc/.../client/UserRpcClient.java` | 🆕 **【2026-10-31 订正 · G4 lane】原写「裸调」** ⇒ ⇒ **不是「零上界」**：自 `88c206ce`（2026-10-30 21:24）起 **有 2000ms 客户端上界**（`:75` `CLIENT_TIMEOUT_MILLIS = 2000L` · **`:88` `capByClientTimeout(userStub)`** · `:104` `withDeadlineAfter(capNanos, NANOSECONDS)`）⇒ ⇒ ⚠️ **原行号 `:50` 指错**（空 javadoc 行）⇒ **`:88`** | **`:88`**（**原 `:50` = 空 javadoc 行 ⇒ 已订正**） | 1 |
 | B-07 | `like/like-rpc/.../client/MessageRpcClient.java` | 裸调 | `:85` | 1 |
 | B-08 | `message/message-rpc/.../client/UserRpcClient.java` | 裸调 | `:42` | 1 |
 | B-09 | `message/message-rpc/.../client/AdminRpcClient.java` | 裸调 | `:58` · `:92` | 2 |
-| B-10 | `users/user/user-api/.../client/UserRpcClient.java` | 🔴 **裸 provider**（api 侧也有零的 —— 上一轮只记了 rpc 侧） | `:143` | **8** |
-| B-11 | `users/admin/admin-api/.../client/AdminRpcClient.java` | 🔴 **裸 provider**（同上） | `:173` | **12** |
+| B-10 | `users/user/user-api/.../client/UserRpcClient.java` | 🆕 **【2026-10-31 订正 · G4 lane】原写「🔴 裸 provider」** ⇒ ⇒ **不是「零上界」**：**`:194-196`** 的 `userRpc()` 返回 `capByClientTimeout(GoStyleRequestDeadline.applyTo(userServiceBlockingStub))` ⇒ ⇒ **入向剩余 ∧ 2s 上界**双维 ⇒ ⇒ ⚠️ **原行号 `:143` 已过期**（provider 当时在 `:143`；`88c206ce` 之后移至 `:194`） | **`:194`**（**原 `:143` = 旧 provider 位 ⇒ 已订正**） | **8** |
+| B-11 | `users/admin/admin-api/.../client/AdminRpcClient.java` | 🆕 **【2026-10-31 订正 · G4 lane】原写「🔴 裸 provider」** ⇒ ⇒ **不是「零上界」**：**`:219-221`** 的 `adminRpc()` 返回 `capByClientTimeout(GoStyleRequestDeadline.applyTo(adminServiceBlockingStub))` ⇒ ⇒ **入向剩余 ∧ 2s 上界**双维 ⇒ ⇒ ⚠️ **原行号 `:173` 已过期**（provider 当时在 `:173`；`88c206ce` 之后移至 `:219`） | **`:219`**（**原 `:173` = 旧 provider 位 ⇒ 已订正**） | **12** |
 
-⇒ ⇒ **调用点合计 = 1+1+1+1+1+1+1+1+2+8+12 = 30 处**。
+⇒ ⇒ **调用点合计 = 1+1+1+1+1+1+1+1+2+8+12 = 30 处**。🆕 **【2026-10-31 订正 · G4 lane】本式的 30 处是「**订正前**」的快照** ⇒ ⇒ **B-06（1）/ B-10（8）/ B-11（12）三条已订正为「有 2000ms 上界」⇒ ⇒ 「零 per-call deadline 的调用点」真实数 = 30 − 1 − 8 − 12 = 9 处 / 8 个类** ⇒ ⇒ ⚠️ **原式保留作历史存证**（它对应 2026-10-29 复核点）
 
 **Go 侧对照（本地 pin 住的 `go-zero@v1.10.3` 源码 · 本轮逐行核过）**
 
@@ -5556,8 +5556,8 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
 |---|---|---|---|---|---|
 | `B-05` | D | P3 | 否 | Go `go-zero@v1.10.2/zrpc/client.go:70-71`（Go 侧每次调用**无条件**装 2000ms 上界）vs RAG `service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/client/UserRpcClient.java:55-56`（现已改为 `GoStyleClientCallTimeout.capByClientTimeout(GoStyleRequestDeadline.applyTo(userServiceBlockingStub))`）＋ `service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/client/GoStyleClientCallTimeout.java:89-99`（取 min(剩余预算, 2000ms)；**无 ctx 预算时也给 2000ms 上界**，与 Go 的拦截器级语义同形）⇒ **差异已消失**（2026-10-27 G3 域侧自修 ⇒ 台账记的「rpc 进程 ⇒ `GoStyleRequestDeadline` 的 ThreadLocal 恒 null ⇒ 恒 no-op ⇒ 实际零」**不再成立** ⇒ 该类已出 `B` 组零 deadline 清单） | 2026-10-30 |
-| `B-10` | A | P0 | 是 | Go `go-zero@v1.10.2/zrpc/client.go:70-71`（Go 侧每次调用**无条件**装 2000ms 上界）＋ `go-zero@v1.10.2/zrpc/internal/client.go:115-116`（`clientinterceptors.TimeoutInterceptor(timeout)` ⇒ 客户端侧超时中间件）vs RAG `service/users/user/user-api/src/main/java/com/rag/users/user/api/client/UserRpcClient.java:143-145`（`public UserServiceGrpc.UserServiceBlockingStub userRpc() { return userServiceBlockingStub; }` ⇒ **裸 provider** ⇒ 8 个出向调用点既不继承请求预算、**连上界都没有**）⇒ **差异仍成立**（命中 P0 #4「核心失败路径具有明确行为，不会无声吞掉关键异常」⇒ 下游挂死 ⇒ 请求无限期挂住）⇒ 归 **A**（`docs/RoundPlan/_task-universe.md` P2-T03「各域裸 stub 调用点改用 `applyTo(stub)`」＋ P2-T04「零上界类补 2000ms 硬上界」**均已把它点名为阻断阶段一**） | 2026-10-30 |
-| `B-11` | A | P0 | 是 | Go `go-zero@v1.10.2/zrpc/client.go:70-71`（Go 侧每次调用**无条件**装 2000ms 上界）＋ `go-zero@v1.10.2/zrpc/internal/client.go:115-116`（`clientinterceptors.TimeoutInterceptor(timeout)`）vs RAG `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/client/AdminRpcClient.java:173-175`（`public AdminServiceGrpc.AdminServiceBlockingStub adminRpc() { return adminServiceBlockingStub; }` ⇒ **裸 provider** ⇒ 12 个出向调用点零 deadline 零上界）⇒ **差异仍成立**（同 B-10 ⇒ 命中 P0 #4）⇒ 归 **A**（P2-T03／P2-T04 已把它点名为阶段一阻断项）⚠️ **台账指针过期**：`_task-universe.md` 写 `admin-api/client/AdminRpcClient.java:174`，实测 provider 在 **`:173`** | 2026-10-30 |
+| `B-10` | D | P3 | 否 | Go `go-zero@v1.10.2/zrpc/client.go:70-71`（Go 侧每次调用**无条件**装 2000ms 上界）＋ `go-zero@v1.10.2/zrpc/internal/client.go:115-116`（`clientinterceptors.TimeoutInterceptor(timeout)` ⇒ 客户端侧超时中间件）vs RAG `service/users/user/user-api/src/main/java/com/rag/users/user/api/client/UserRpcClient.java:194-196`（`userRpc()` ⇒ `capByClientTimeout(GoStyleRequestDeadline.applyTo(userServiceBlockingStub))` ⇒ **入向剩余 ∧ 2s 上界**双维）＋ `:208-222`（`capByClientTimeout` ⇒ `Math.min(remainingNanos, capNanos)`，**`capNanos` = `CLIENT_TIMEOUT_MILLIS` = 2000ms**；无入向预算时 `remainingNanos` = `Long.MAX_VALUE` ⇒ min = 2s ⇒ **恒有上界**）⇒ **8 个出向调用点全部经 `userRpc()`**（`UserLogoutService:85` · `UserLoginService:83` · `AvatarSelectService:76` · `UserRegisterService:58` · `UserUpdateService:73` · `UserDeleteService:68` · `AvatarHistoryService:80` · `AvatarUploadService:79`）⇒ ⇒ **差异已消失**（**【2026-10-31 订正 · G4 lane · 本层自测】原写「裸 provider ⇒ 8 个调用点既不继承请求预算、**连上界都没有** ⇒ 差异仍成立 ⇒ 归 A ⇒ 阻断阶段一」= **前提已过期** ⇒ 根因 = **把「裸 provider（无 per-call 载体）」当成了「零上界」** —— 这是两个不同的量；`88c206ce`（2026-10-30 21:24 · G1「出向 2s 客户端超时」落码）已给 `user-api` 补上 2000ms 上界）⇒ ⇒ **与 Go 的 `context.WithTimeout(ctx, 2s)`（min 语义）逐字同形** ⇒ ⇒ **归 D（差异已消失 ⇒ 无待实现内容）**⚠️ **上界的所有权仍有一层未收**：该 2000ms 由**域侧私有副本**承担 ⇒ ⇒ G1 的 `6d04dc19`（**未入主干**）把它移交共享层（删域侧副本 ＋ 只配 `cap-millis=2000`）⇒ ⇒ **该笔入主干后本行结论不变**（上界一直都在，变的只是由谁承担）（`docs/RoundPlan/_task-universe.md` P2-T03「各域裸 stub 调用点改用 `applyTo(stub)`」＋ P2-T04「零上界类补 2000ms 硬上界」**均已把它点名为阻断阶段一**） | 2026-10-30 |
+| `B-11` | D | P3 | 否 | Go `go-zero@v1.10.2/zrpc/client.go:70-71`（Go 侧每次调用**无条件**装 2000ms 上界）＋ `go-zero@v1.10.2/zrpc/internal/client.go:115-116`（`clientinterceptors.TimeoutInterceptor(timeout)`）vs RAG `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/client/AdminRpcClient.java:219-221`（`adminRpc()` ⇒ `capByClientTimeout(GoStyleRequestDeadline.applyTo(adminServiceBlockingStub))` ⇒ **入向剩余 ∧ 2s 上界**双维）＋ `:229-243`（`capByClientTimeout` ⇒ `Math.min(remainingNanos, capNanos)`，**`capNanos` = 2000ms**；无入向预算时 min = 2s ⇒ **恒有上界**）⇒ **12 个出向调用点全部经 `adminRpc()`**（`AdminCreateInviteCodeService:57` · `AdminGetUserService:43` · `AdminLoginService:58` · `AdminUpdateUserService:69` · `AdminLogoutService:49` · `AdminBanUserService:50` · `AdminListUserService:55` · `AdminDeleteUserService:50` · `AdminUpdateSelfService:64` · `AdminResetUserPasswordService:50` · `AdminUnBanUserService:50` · `AdminCreateService:54`）⇒ ⇒ **差异已消失**（**【2026-10-31 订正 · G4 lane · 本层自测】原写「裸 provider ⇒ 12 个调用点零 deadline 零上界 ⇒ 差异仍成立 ⇒ 归 A」= **前提已过期**（同 B-10 ＝ 错分类）⇒ ⇒ **与 Go 的 `context.WithTimeout(ctx, 2s)` 逐字同形**）⇒ ⇒ **归 D（差异已消失 ⇒ 无待实现内容）**⚠️ **上界的所有权仍有一层未收**：同 B-10 ⇒ ⇒ G1 的 `6d04dc19`（**未入主干**）把它移交共享层 ⇒ ⇒ **结论不变**（P2-T03／P2-T04 已把它点名为阶段一阻断项）⚠️ **台账指针过期**：`_task-universe.md` 写 `admin-api/client/AdminRpcClient.java:174`，实测 provider 在 **`:173`** | 2026-10-30 |
 | `FB-03` | D | P3 | 否 | Go `go-zero@v1.10.2/zrpc/server.go:157-159`（`if c.Middlewares.Breaker` ⇒ 无条件装 breaker 拦截器）＋ `:160-163`（`if c.CpuThreshold > 0 { ... UnarySheddingInterceptor }` ⇒ shedding **条件**装 ⇒ 链的构成**依赖配置**）vs RAG `service/common/src/main/java/com/rag/common/protection/GoStyleRpcProtectionChain.java:126`（`public static Composition compose(props)` ⇒ **唯一**构成计算点，`build` 内部消费它 ⇒ 配置推出的构成与实际构造出的链不可能不一致）＋ `:142`（`public static List<String> layerNames(ServerInterceptor chain)` ⇒ 对**已构造出的链**的只读观测）＋ `:80-87`（`Layered` 标记接口）⇒ **差异已消失**（共享层已提供只读的「链层构成」查询入口 ⇒ 域级守门可直接分别断言 breaker／shedding，不必再「关掉降载换确定性」；like 域 `LikeProtectionChainWiringTest` 已 2⇒4 条并完成变异验证 ⇒ 该域 A2 轴 L1⇒L2）⇒ 本条原为「守门能力缺口」，现已闭合 | 2026-10-30 |
 | `G4-A4-01` | B | P2 | 否 | Go `service/message/common/errmsg.go:108-111`（`status.FromError` 失败 ⇒ `CodeServerBusy`）＋ `:117-132`（`switch st.Code()` 的 `default` ⇒ `CodeServerBusy` = 1015 ⇒ Go 侧错误码契约真源）vs RAG `service/users/users-common/src/main/java/com/rag/users/common/errmsg/ErrorCode.java:10`（`CODE_SERVER_BUSY(1015, "服务繁忙")` ⇒ **1015 的定义在共享层** ⇒「改一条码值没人变红」的风险落在共享层）＋ `tools/semantic-probe/run-parity.sh:27`（`MODULE="service/message/message-api"` ⇒ 被引的「56 例全绿」只跑 message-api 的 JSON 解析 ⇒ **错误码用例 = 0**）⇒ **差异仍成立**（本层这条 L4 证据**绑定错层** ⇒ A6「错误码契约」在共享层的覆盖面 = 0 ⇒ 本层一条【假绿证据】）⇒ 归 B（阶段一竞争力补强：改引 `tools/errmsg-probe/*` ＋ 补 users 域变体；judge 已把 A6 降为 🟡 且明写「不阻断阶段一」） | 2026-10-30 |
 | `G4-A4-02` | D | P3 | 否 | Go `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-40`（`red.NewClient(&red.Options{...})` **未设任何命令超时** ⇒ 「Go 侧无命令超时」是**另一条轴**，不是本条判据）vs RAG `service/common/src/test/java/com/rag/common/redis/GoStyleRedisClientOptionsGateTest.java:141`（批次 B 的新断言 `isTimeoutCommands() == true` ⇒ `TimeoutOptions.create()` 给 `false` ⇒ 红 ⇒ **有判别力**）＋ `:147`／`:152`／`:157`／`:167`（4 条语义位 ＋ 1 条值断言）⇒ **差异已消失**（旧的恒真断言 `assertThat(options.getTimeoutOptions()).isNotNull()` —— `timeoutOptions` 是 final 字段 ⇒ 结构上不可能为 null ⇒ 零判别力 —— 已被整条替换 ⇒ 台账记的「零判别力的断言」在仓内不复存在） | 2026-10-30 |
@@ -6529,3 +6529,131 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 - **本层只改了 `service/common/**` 写权面内的这 1 处**；其余 8 条例外分属 comment / hot / users 三域（各域 lane 的面）⇒ ⇒ **不代改**。
 - 静态守门是**词法级**判据（剥注释与字符串字面量）⇒ 它拦的是**形态**，不是运行时行为 ⇒ ⇒ 「本模块无 Nacos ⇒ 这处不会被接管」这条限定**静态守门看不出来**（只能靠本节的依赖树实测）⇒ ⇒ **别把「守门绿」读成「运行时同形已证」**。
 - ⚠️ **「同跑红」的真实现场在「真发 RPC」的那几处** ⇒ ⇒ users 域 4 个 logout 测试 ＋ user-api 的 `UserApiGrpcNegotiationTest`（**接收者是 `NettyChannelBuilder`** ⇒ 它也继承 `ManagedChannelBuilder` ⇒ **改法同形**）⇒ ⇒ 归 **G1**；comment-rpc ＋ hot-rpc 那两处 G3 已修 ⇒ ⇒ **本节这条「惰性点」限定只对共享层这一处成立** ⇒ ⇒ **别把它外推成「这类形态都不必改」**。
+
+### §4.19.26 · 第二十二次订正轮次（2026-10-31 · G4 lane）—— **`:46` 枚举 ④⑤⑥ 的归类订正 ＋ 派工面矛盾转派**
+
+> **本节只写「做了什么 + 为什么 + 依据」**；逐条实测读数见 §四。
+
+**一、🔴 本轮订正的根因一句话**
+
+⇒ ⇒ **「零 per-call deadline」与「零上界」被当成同一个量** ⇒ ⇒ 台账 `:46` 与 §4.11.5 把「**裸 provider（无 per-call 载体）**」误列进「**零上界（连上界都没有）**」那一列 ⇒ ⇒ **该列的三条（④⑤⑥）其实都带 2000ms 客户端上界** ⇒ ⇒ **归错类**。
+
+**二、本轮改了什么（全部「就地单行替换」⇒ 零行位移 ⇒ 派生层指针棘轮不动）**
+
+| # | 位置 | 改动 | 依据 |
+|---|---|---|---|
+| ① | `:46` · 格 2 枚举 ④ | 行号 `:50` ⇒ **`:88`** | `:50` 是**空 javadoc 行**（javadoc 结束于 `:74`）⇒ 真实调用点是 `:88` 的 `capByClientTimeout(userStub)` |
+| ② | `:46` · 格 2 枚举 ④⑤⑥ | 补【2026-10-31 订正】段：**三条从来不是「零上界」** ＋ 逐条实测证据 | ④ `88c206ce`（2026-10-30 21:24）起带 2000ms 上界；⑤ `:194-196`；⑥ `:219-221`（均 = `capByClientTimeout(applyTo(stub))`） |
+| ③ | `:46` · 格 3 状态 | 「🔴 **仍 OPEN，但附注错**」⇒ **以末格为准（= 已闭合）** ＋ 历史快照留存 | 原格与末格「✅ 已闭合（2026-10-30 第四次订正）」**自相矛盾** ⇒ 行内指针是断的 |
+| ④ | §4.11.5 · 标题 / B 组小标题 / 合计式 | 补「**「零 deadline」≠「零上界」**」的重算口径 | 三条订正后 ⇒ 「零 per-call deadline 的调用点」= **9 处 / 8 个类**（30 − 1 − 8 − 12）；**「零上界」= 0** |
+| ⑤ | §4.11.5 · B-06 / B-10 / B-11 三行 | 形态订正（「裸调」/「裸 provider」→「有 2000ms 上界」/「cap+applyTo 双维」）＋ 行号订正（`:50`→`:88` · `:143`→`:194` · `:173`→`:219`） | 同 ② |
+| ⑥ | `:5559` / `:5560`（P0 定级表 B-10 / B-11） | 依据列订正 ＋ **分类 `A`/`P0`/阻断`是` ⇒ `D`/`P3`/阻断`否`** | 同 ②；且 **8 个 / 12 个调用点全部经 provider**（逐点实测，见 §四） |
+
+**三、🔴 派工面矛盾 ⇒ 转派收口执行者（本层无写权，不代改）**
+
+⚠️ **本轮发现一个必须显式说明的机制事实**（否则下一轮会误判「我改了却没生效」）：
+
+- 派生层对 `B-10` / `B-11` 的 **`stage` / `prio` / `blocking` 三列**，**来源不是本文件** ⇒ ⇒ 是
+  **`docs/DRIFT/_cross/grading/W3.md` 的 U5-O 显式定级叠加层**（**优先级最高** ⇒ 压过 U5-0 的台账表格判定；
+  键 = `(lane, 编号)`，lane 从文件名取 ⇒ `W3` = global 域）。
+- ⇒ ⇒ **本层改完本文件后，派生层的 `stage`/`prio`/`blocking` 三列**仍**读作 `A` / `P0` / `是`**
+  ⇒ ⇒ **派工面会继续挂一条「已不成立」的阶段一阻断项** ⇒ ⇒ **这就是派工面与源台账矛盾**。
+- ⇒ ⇒ **`docs/DRIFT/_cross/grading/**` 不在本层写权面**（机器口径：`docs/RoundPlan/**` 与 `docs/DRIFT/_cross/**`
+  同归合并收口执行者）⇒ ⇒ **本层只登记 + 转派，不代改** ⇒ ⇒ **收口执行者需要把 `W3.md` 的 `B-10` / `B-11`
+  两行按本节 ② 的实测口径改成 `D` / `P3` / 阻断`否`**。
+- ⚠️ **另一处联动（同样在收口执行者面）**：`docs/DRIFT/_cross/grading/_lanes.json` 里 `B-10` / `B-11` 的
+  **`title` 是快照**（仍含旧文本「🔴 **裸 provider** … `:143`」）⇒ ⇒ 它与本层已订正的台账行**已经不一致**
+  ⇒ ⇒ **收口执行者叠取本层这笔后需要一并刷新那两个 `title`**（否则派工清单会指向旧文本）。
+- ⇒ ⇒ **本层已实测的派生层影响**：条目数 **1174 → 1174**（新增 0 / 消失 0）· 改列 **2 条**（`B-10` / `B-11` 的
+  **内容列**）· **状态 / 证据档 / 阶段归属三列未动**（那三列归 U5-O 叠加层 ⇒ 见上）· 产物 MD **逐字节一致**。
+
+**四、逐条实测读数（本层自测，不采信转述）**
+
+| 项 | 实测 |
+|---|---|
+| ④ `follow/follow-rpc/.../client/UserRpcClient.java` | `:75` `CLIENT_TIMEOUT_MILLIS = 2000L` · **`:88`** `return capByClientTimeout(userStub)` · `:104` `stub.withDeadlineAfter(capNanos, NANOSECONDS)` ⇒ ⇒ **有 2000ms 上界**（`88c206ce` · 2026-10-30 21:24 引入） |
+| ⑤ `users/user/user-api/.../client/UserRpcClient.java` | `:194-196` `userRpc()` ⇒ `capByClientTimeout(GoStyleRequestDeadline.applyTo(userServiceBlockingStub))` · `:208-222` `capByClientTimeout` ⇒ `Math.min(remainingNanos, capNanos)`，**`capNanos` = 2000ms**；无入向预算时 `remainingNanos` = `Long.MAX_VALUE` ⇒ min = 2s ⇒ **恒有上界** |
+| ⑥ `users/admin/admin-api/.../client/AdminRpcClient.java` | `:219-221` + `:229-243` ⇒ **同 ⑤** |
+| ⑤ 的 8 个调用点 | **全部经 `userRpc()`**：`UserLogoutService:85` · `UserLoginService:83` · `AvatarSelectService:76` · `UserRegisterService:58` · `UserUpdateService:73` · `UserDeleteService:68` · `AvatarHistoryService:80` · `AvatarUploadService:79` |
+| ⑥ 的 12 个调用点 | **全部经 `adminRpc()`**：`AdminCreateInviteCodeService:57` · `AdminGetUserService:43` · `AdminLoginService:58` · `AdminUpdateUserService:69` · `AdminLogoutService:49` · `AdminBanUserService:50` · `AdminListUserService:55` · `AdminDeleteUserService:50` · `AdminUpdateSelfService:64` · `AdminResetUserPasswordService:50` · `AdminUnBanUserService:50` · `AdminCreateService:54` |
+| 「零 per-call deadline」的真实数 | **9 处 / 8 个类**（30 − 1（B-06）− 8（B-10）− 12（B-11）） |
+| 「零上界」的真实数 | **0**（三处 2000ms 上界均已在位；`6d04dc19` 未入主干 ⇒ 它改的是**上界的承担方**，不是上界的有无） |
+
+**五、本轮的诚实边界（三条）**
+
+1. **本轮零代码改动**（只改台账）⇒ ⇒ **不需要新的批准** ⇒ ⇒ **不需要升级为全量回归波**。
+2. **「零上界 = 0」这个结论的适用范围 = 本轮实读的 3 条**（④⑤⑥）⇒ ⇒
+   **其余 8 个类未逐一重核** ⇒ ⇒ **不得外推成「全仓 21 个出向 stub 都零上界 = 0」** ⇒ ⇒
+   ⚠️ **其余 8 个类的上界由 P2-T04（域侧 yml）承担** ⇒ ⇒ **`991ea75b` 已把口径统一为「补该域 Go `Timeout` 硬上界」**
+   ⇒ ⇒ **那 8 个类的「零上界」是否也已消解 = 域侧面，本层未核**。
+3. **本节的证据强度 = L1（源码级逐行对照）** ⇒ ⇒ **不是活体对拍** ⇒ ⇒
+   ⚠️ **「有 2000ms 上界」≠「下游挂死时必然收口」** —— 上界是 `withDeadlineAfter` 施加的**客户端 call deadline** ⇒ ⇒
+   **真收口行为需活体验证** ⇒ ⇒ **本层未做该活体实测**（该面归 users 域的运行期守门，见 §4.19.15 口径）。
+
+### §4.19.27 · 第二十三次订正轮次（2026-10-31 · G4 lane）—— **共享层单源棘轮扩面（判据 ④：内联形态）**
+
+> **本节只写「做了什么 + 为什么 + 依据」**；逐条实测读数见 §四。
+
+**一、本轮做的是什么**
+
+⇒ ⇒ 把共享层棘轮守门 `GoStyleClientCallTimeoutSingleSourceGateTest` 的检测面**从「按类名」扩到「内联形态」** ⇒ ⇒
+补上该类 javadoc **原自陈的第二个盲区**（api 侧内联形态不在检测面）。
+
+**二、🔴 判据形态是怎么定的（先验过一条错判据）**
+
+⚠️ **G1 建议的判据「域内不得出现 `withDeadlineAfter` 的代码行」原样搬过来会误伤** ⇒ ⇒ 因为
+**「纯预算传播」也是合法形态**（只把剩余预算往下传、不自算上界）⇒ ⇒ **token 级判据必然脆**。
+
+⇒ ⇒ 本轮实测得出：**真正的分界不是「有没有 cap」，而是「cap 从哪来」**：
+
+| 形态 | cap 来源 | 判定 |
+|---|---|---|
+| 域侧私有副本 | 域侧**私有常量**（`XXX_TIMEOUT_MILLIS = 2000L`）或域侧**私有配置**（`properties.getXxx().getTimeout()`） | 🔴 违规 |
+| 共享层唯一实现 | `getOutboundDeadline().getCapMillis()`（共享层参数） | ✅ 合法 |
+| 纯预算传播 | **无 cap** | ✅ 合法 |
+
+⚠️ **一条反直觉的实测事实（本轮踩到的）**：**api 侧的 5 处「合法传播」（article-api / comment-api / hot-api /
+like-api / task-api）其实也自算 cap**（`Math.min(DEFAULT_CALL_TIMEOUT_MILLIS, remaining)`）⇒ ⇒
+它们与「副本」在**形态上同形** ⇒ ⇒ 「是否自算 cap」**不能**区分 ⇒ ⇒ **唯一能分开的是 cap 的来源** ⇒ ⇒
+⇒ 这 5 处因此**也会被本判据判红** ⇒ ⇒ 按**棘轮**形态处理（登记为例外 ⇒ 不是豁免）。
+
+**三、判据 ④ 的三条必要条件（缺一即不判红）**
+
+1. **代码态**出现 `withDeadlineAfter(...)` ⇒ ⇒ **词法级**剥注释与字符串字面量（**保留换行**以免行号失真）
+   ⇒ ⇒ 「javadoc 里写了 `withDeadlineAfter`」不命中；
+2. 该文件**自带 cap**：出现**域侧私有常量**或**域侧私有配置**；
+3. **不是**读共享层参数（`getOutboundDeadline().getCapMillis()`）⇒ ⇒ 那种是合法形态。
+
+⇒ ⇒ **例外集 = 点位级**（文件 ＋ 归一化调用点文本，**去空白**⇒ 换行/缩进差异不算新点位）
+⇒ ⇒ **点位级 vs 文件级**：文件级 ⇒ 同文件**新增**的副本抓不到 ⇒ 永久白地 ⇒ 本轮实测已证伪文件级做法
+⇒ ⇒ 点位级 ⇒ **同文件新增仍会红**。
+
+⇒ ⇒ **例外带「失效检测」**：条目指向的点位被修好 ⇒ ⇒ 守门**红**并提示「请剪掉」⇒ ⇒ **棘轮只能变紧**。
+
+**四、逐条实测读数（本层自测）**
+
+| 项 | 读数 |
+|---|---|
+| 判据 ④ 实际抓到的域侧点位 | **18 处 / 12 个文件**（含已知 2 份命名副本的 4 个调用点 ＋ G1 `88c206ce` 的 3 份 ＋ api 侧 7 处） |
+| 共享层（正确排除） | `common/observability/GoStyleRequestDeadline.java`（无 cap · 纯传播）＋ `common/protection/GoStyleOutboundDeadlineInterceptor.java`（读共享层参数） |
+| 变异 **M1**（**已登记文件**内注入同文件不同形态的私有 cap） | 🔴 **精确转红**（点位级生效 ⇒ 文件级会漏掉这一类） |
+| 变异 **M2**（注释里写 `withDeadlineAfter`） | ✅ **豁免**（代码态判据不看注释） |
+| 变异 **M3**（新建只读共享层参数的域侧文件 = 正确终态） | ✅ **豁免**（合法形态不判红） |
+| 变异 **M4**（把一个已登记点位修好 ⇒ 例外失效） | 🔴 **精确转红**并提示「请把对应条目从 `KNOWN_INLINE_CAP_CALL_SITES` 里剪掉」 |
+
+**五、⚠️ 与 G1 的 `6d04dc19` 的联动（窗口期，须登记）**
+
+⚠️ **G1 的 `6d04dc19`（**未入主干**）会删掉 follow-rpc / user-api / admin-api 三处私有副本**
+⇒ ⇒ 那 3 个点位**会从例外集里消失** ⇒ ⇒ **本守门会报「例外已失效」并红** ⇒ ⇒
+⇒ **这不是缺陷，是棘轮在正常工作**（提示「这 3 条可以剪了」）⇒ ⇒
+⚠️ **但落码窗口内会有一段时间红** ⇒ ⇒ **剪例外的时机需与收口执行者 / G1 约定** ⇒ ⇒
+**本层建议**：等 `6d04dc19` 入主干后**一并剪**这 3 条（避免两次红）。
+
+**六、本轮的诚实边界（四条）**
+
+1. **静态形态门挡不住「刻意伪装」** —— 一份副本若**伪装**成读共享层参数、实际用自己的常量 ⇒ ⇒ **逃得过**
+   ⇒ ⇒ 那一面只能靠 §3.3 的运行期证据（真进程读出实际生效的上界）⇒ ⇒ **本层未做该活体实测**。
+2. **盲区 ① 仍在**：判据 ① 仍按**类名**识别副本 ⇒ ⇒ 一份**改了名**的同款实现仍不在视野内 ⇒ ⇒ 靠 review 纪律互补。
+3. **本轮零生产代码改动**（只改共享层**测试**）⇒ ⇒ **不影响任何域侧** ⇒ ⇒ **不需要升级为全量回归波**。
+4. **例外集里那 5 处 api 侧「合法传播但自带域侧私有 cap」** ⇒ ⇒ 它们**当前是绿的**（登记为例外）
+   ⇒ ⇒ **但它们终态也应改读共享层参数** ⇒ ⇒ 本层**不代改**（域侧写权）⇒ ⇒ 登记在此，**不外推**为「它们已对齐」。
