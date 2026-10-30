@@ -5,6 +5,20 @@
 > **DRIFT 记「与 Go 不一致」（需要对齐的差异），Pitfalls 记「为什么会踩」（教训本身）。**
 > 每条都应回答：**症状像什么 · 真实原因 · 怎么证伪 / 怎么确认 · 留下的守门网**。
 
+> 📌 **更新日期：2026-10-30（新增 `PIT-AXIS-04` + `PIT-SCAN-01` · 合并收口执行者轮 · 「指标抓取载体」派工前）**
+> **本轮做了什么**：为「给 7 个 rpc 域补指标抓取载体」这个决策做前置取证 ⇒ 过程中**自踩了两个坑** ⇒ 各立一条：
+> **🆕 `PIT-AXIS-04`**（**判据红了 ⇒ 先定位「红在哪一行」** —— 根因常在**更前面一层**，你正在查的那层**根本没被测到**）——
+> 实证：G4 的 Redis 期限探针报红在 `:44` = `f.getConnection()`（**不是**发命令那行）⇒ ⇒ SDR 4.0 的
+> `LettuceConnectionFactory.getConnection()` **会立刻建连** ⇒ ⇒ 读实现 `GoStyleRedisDeadlineConnectionFactory.getConnection()`（`:39-43`）
+> **先连后包** ⇒ ⇒ **预算检查不在生效路径上** ⇒ ⇒ 「命令级拦截为什么没生效」这个问题**问错了层**；
+> ⇒ 修法 = 把检查提到 `delegate.getConnection()` **之前** ⇒ ⇒ 顺带把守门从「需要真 Redis」变成「无 Redis 也能跑」⇒ ⇒ **可证明性提升**；
+> **🆕 `PIT-SCAN-01`**（**路径模式里的 `*` 只跨一层** ⇒ 嵌套 ≥2 层的目录**必然漏** ⇒ 「零命中」= **没查到**，不是 **不存在**）——
+> 实证：扫 Go 真源各域观测端口时用 `ls service/*/rpc/etc/*.yaml` ⇒ ⇒ **漏掉 `service/user/user/rpc/…` 与 `service/user/admin/rpc/…`**
+> ⇒ ⇒ 首轮结论「Go 侧有观测端口的 rpc 域 = 6/10」⇒ ⇒ **实际 8/10**（`user-rpc 9094` + `admin-rpc 9097` 都有）⇒ ⇒
+> 若据此派工 ⇒ **漏掉 2 个域不补载体**；⚠️ 同轮第二个坑：macOS 自带 bash 3.2 **没有 `shopt -s globstar`** ⇒ `**` 写法**直接报错**（不是零命中）；
+> ⇒ 新增文件 [`_cross/scan-coverage.md`](_cross/scan-coverage.md)；
+> ⚠️ **本轮两条都在 `_cross/` 目录里、都不新建编号族**（`PIT-AXIS-` 与 `PIT-SCAN-` 前缀已登记）⇒ ⇒ **全域条目 434 → 436**（机器回填）。
+
 > 📌 **更新日期：2026-10-30（三目录真实性重核轮 · Pitfalls 侧）**
 > **本轮做了什么**：Pitfalls 域的 **428 条**（**守门口径** = `tools/difftest/ledger-status-coverage.py` · 与 `check-ledger-count.py` 同源）
 > 全部**逐条回源核过** —— 分域：`_cross` 7 · `article` 38 · `comment` 19 · `common` 13 · `favorite` 61 · `follow` 16 ·
@@ -156,8 +170,8 @@
 
 | 项 | 值 |
 |---|---|
-| **全域坑位条目** | **434 条** / **34 份编号式台账**（另 **16 份散文式台账**用散文标题、不计入条数 · **0 份 0 字节**坑位待填）⇒ **口径由 `tools/check-ledger-count.py` 写死**（标题文本以 `PIT-`/`PF-`/`P-` 开头且以 `-<数字>` 结尾）⇒ **数字是机器生成的，不是手抄的** |
-| **编号前缀族** | **23 个具体前缀**（实测 2026-10-27 · 口径同上）：`P-` · `P-HOTAPI-` · `P-HOTRPC-` · `PF-ARTICLE-RPC-` · `PIT-AXIS-` · `PIT-COMMENT-API-` · `PIT-COMMENT-RPC-` · `PIT-COMMON-` · `PIT-DERIVE-` · `PIT-FAV-API-` · `PIT-FAV-COMMON-` · `PIT-FAV-PROTO-` · `PIT-FAV-RPC-` · `PIT-FOLLOW-` · `PIT-GLOBAL-` · `PIT-LANE-` · `PIT-LIKE-RPC-` · `PIT-LIKEAPI-` · `PIT-MESSAGE-` · `PIT-TASK-` · `PIT-USERS-` · `PIT-USERSADM-` · `PIT-USERSCOMMON-` |
+| **全域坑位条目** | **436 条** / **35 份编号式台账**（另 **16 份散文式台账**用散文标题、不计入条数 · **0 份 0 字节**坑位待填）⇒ **口径由 `tools/check-ledger-count.py` 写死**（标题文本以 `PIT-`/`PF-`/`P-` 开头且以 `-<数字>` 结尾）⇒ **数字是机器生成的，不是手抄的** |
+| **编号前缀族** | **24 个具体前缀**（实测 2026-10-27 · 口径同上）：`P-` · `P-HOTAPI-` · `P-HOTRPC-` · `PF-ARTICLE-RPC-` · `PIT-AXIS-` · `PIT-COMMENT-API-` · `PIT-COMMENT-RPC-` · `PIT-COMMON-` · `PIT-DERIVE-` · `PIT-FAV-API-` · `PIT-FAV-COMMON-` · `PIT-FAV-PROTO-` · `PIT-FAV-RPC-` · `PIT-FOLLOW-` · `PIT-GLOBAL-` · `PIT-LANE-` · `PIT-LIKE-RPC-` · `PIT-LIKEAPI-` · `PIT-MESSAGE-` · `PIT-SCAN-` · `PIT-TASK-` · `PIT-USERS-` · `PIT-USERSADM-` · `PIT-USERSCOMMON-` |
 | **编号撞号** | **22 处** —— 见下方「编号撞号」 |
 
 > ⚠️ **2026-10-25 第二十五轮复核（口径已复现）**：本表原先写 **280 条 / 29 份 / 16 份 0 字节**，其中
@@ -248,7 +262,7 @@
 | `follow` | 2 份 | 16 | —— |
 | `common` | 5 份 | 散文式 | 请求保护层四层：**recover → breaker → shedding → 业务观测**；链的定义点必须在共享模块，否则 10 个 rpc server 各写一遍 = 10 个可能写错的地方 |
 | 🆕 `global` | **3 份** | **53** | **跨微服务 + `service/common` 影响的搁置漂移**（§3.5）收口域。按议题分档：`common-tails` / `cross-domain` / `cycle-deps`。<br>主要坑：**查 Go 出处只在项目树里 grep 必落空**（真源在 `~/go/pkg/mod` 的 go-zero 源码里）· **「配置里没写」≠「没开」**· **变异两种假绿**（编译不过⇒读旧 XML / 红在更早断言上）· **改上游资源做变异而只跑下游⇒假阴性**· **用被测常量构造输入⇒恒绿**· **阻塞式启动器 + 句柄设在返回之后⇒句柄永远拿不到⇒调度器泄漏⇒守门失真**（024）· **MockMvc 与真 Tomcat 是两条观测路径⇒共享层改响应头会打红别的域的 MockMvc 守门**（025）· **守门期望值可能落在已登记偏离范围里⇒一条漂移要按维度拆开判（033）**· **`@DynamicPropertySource` 不进 context cache key⇒靠 properties 恰好不同隔离上下文是侥幸（036）**· **还原变异用 `copy2` ⇒ mtime 被保留 ⇒ Maven 跳过重编译 ⇒ 跑的是旧字节码（037）**· **`BindException` ⇒ 先三步定性（单独复跑 / lsof 查占用 / 抓实际绑的端口）⇒ 端口号不在随机范围 ⇒ 那次 `port` 不是 0 ⇒ 有外部来源（038）**· **遍历 `set` 做判定 ⇒ 门禁输出不可复现 ⇒ 同一条引用每次落进不同桶（039）** · **「变异后是红的」≠「变异有效」：规则被掩护 / 对照 flaky / 变异打错层 / 阳性对照依赖分支 / 台账引述错路径（040）**· **断言「剩余时间原样传递」⇒ 一次性初始化开销（首次建 mock ≈400ms / 首次建代理）会把预算吃掉 ⇒ 稳定偏差看着像实现算错了（041）** · **驱动扩展 API 只在实现类上 ⇒ 反射探测；且超时 API 的「0」= 无上限（042）** · **Spring 异常翻译层换掉异常链形态 ⇒ 跨层断言只认 wire 契约（043）**· **注入进上下文的 `AGENTS.md` 快照可能落后于磁盘 ⇒ 别拿快照当现状（044）**· **跨域回执要自己核；写进代码注释里的数字也要实测（045）**· **判据的输入必须行级局部 ⇒ 文件级前缀 = 假阴性（046）**· **「文件在哪」的定位通道必须齐全；权威清单来自真源 manifest ⇒ 缺一条就是假 FAIL（047）**· **变异判据本身也会假阴性 ⇒ 用集合差分不要用关键词匹配（048）**· **加了 `--domain` ≠ 每层都接住 ⇒ 某一层没接住 ⇒ 输出的是别的域的结论（049）**· **「与主干的公共祖先」当窗口 ⇒ 主干上恒空 ⇒ 门禁恒红（050）**· **登记「某域把异常改写了」之前 ⇒ 必须逐条核 Go 侧 ⇒ 否则会让本来正确的域去改本来正确的代码（051）**· **去噪词表的宽窄两难：窄 ⇒ 逼台账迎合工具 · 宽 ⇒ 吃真缺陷 ⇒ 新词必须自带语义或语境搭配 + 缺陷标记护栏（052）*· **跨域回执里的「文件:行号」必须在回执方自己的分支上复核 ⇒ 照抄行号 = 假证据（053）*· **「接进编排」≠「有了闸门」**：判定只写在注释里 / 退出码是意外得来的 / 守门分支短路 ⇒ 三种假绿（054）** |
-| `_cross` | 5 份 | 散文式 + 4 条编号 | Flyway 账本撞号；框架机制静默失效实证；「跑绿 ≠ 对」的元教训；**陈旧 surefire 报告抬高测试计数**；🆕 [`_cross/domain-common-lanes.md`](_cross/domain-common-lanes.md)（`PIT-LANE-01..07`）：**lane 基点早于脚手架 ⇒ 回并 add/add** · 「改一处受益全域」≠「可以并行改」 · **共享层已验 ≠ 本域已验** · 同域两套 lane 语义打架 · **统计「类被谁用」的两个假阳性陷阱**（javadoc 提及 / 裸类名撞同名类）· **守门登记了已不存在的 lane ⇒ 恒绿假绿**（+ 白名单路径写错 ⇒ 对该面失明）· **守门用全文 grep 判措辞 ⇒ 改掉锚点那一行仍绿** |
+| `_cross` | **11 份** | 散文式 + **11 条编号** | Flyway 账本撞号；框架机制静默失效实证；「跑绿 ≠ 对」的元教训；**陈旧 surefire 报告抬高测试计数**；🆕 [`_cross/domain-common-lanes.md`](_cross/domain-common-lanes.md)（`PIT-LANE-01..07`）：**lane 基点早于脚手架 ⇒ 回并 add/add** · 「改一处受益全域」≠「可以并行改」 · **共享层已验 ≠ 本域已验** · 同域两套 lane 语义打架 · **统计「类被谁用」的两个假阳性陷阱**（javadoc 提及 / 裸类名撞同名类）· **守门登记了已不存在的 lane ⇒ 恒绿假绿**（+ 白名单路径写错 ⇒ 对该面失明）· **守门用全文 grep 判措辞 ⇒ 改掉锚点那一行仍绿**；🆕 [`_cross/derived-layer.md`](_cross/derived-layer.md)（`PIT-DERIVE-01..03`）：**派生层自噬三形态**（标题编号 token 劫持条目 / 行内状态标记把行提升成问题项 / 订正表把旧状态再登记）；🆕 [`_cross/pointer-axes.md`](_cross/pointer-axes.md)（`PIT-AXIS-01..04`）：**行号对 + 机制对 ≠ 轴对** · **错误码两层读法**（客户端可见层 vs handler 级）· **机制文件 ≠ 生效路径**（先找禁用开关）· **判据红了先定位红在哪一行**；🆕 [`_cross/scan-coverage.md`](_cross/scan-coverage.md)（`PIT-SCAN-01`）：**路径模式只跨一层 ⇒ 零命中 ≠ 不存在** |
 
 ## 待填（空文件即坑位）
 

@@ -526,7 +526,9 @@ Go 侧边界是 api→rpc，rpc 没验对就先验 api，产出的是「RAG api 
 | **M-3** | **漂移形态门口径**（`tools/difftest/check-deadline-downstream.py` ＋ `mutate-deadline-downstream.py:56` 的 **M1 锚点**） | 出向 deadline 载体落地后 `outgoing_carrier` 由 `absent` 翻 `present` ⇒ ⇒ 不改口径就会被当**回归**「修回去」⇒ ⇒ **必须与 M-2 同批** | 按新形态重判 + 变异锚点同步改（`mutate-…` 的 M1 口径） |
 | **M-4** | **有意偏离候选登记**（`SD-2026-10-30-CAND-18 / -19 / -20`） | 登记会描述「**RAG 侧的行为**」⇒ 合并前主干上**那个行为还不存在** ⇒ ⇒ 登记即描述一个**不存在的行为**（假偏离） | `python3 tools/difftest/ledger-deviation-count.py --strict` ⇒ EXIT=0<br>⚠️ **`G4-15a` 不登记**（前提已被 G4 自身订正为假 ⇒ 登记即造假偏离） |
 | **M-5** | **搬移清单**（`tools/drift-move.py verify`） | ⚠️ **主线既有红**（2026-10-30 实测 · 与本波无关）：4 个 DRIFT 档与 AGENTS.md↔docs 搬移清单不符（`docs/DRIFT/like/rpc.md` · `docs/DRIFT/message/rpc.md` · `docs/DRIFT/message/api.md` · `docs/DRIFT/_cross/fix-round-2026-10-23.md`） | `python3 tools/drift-move.py verify` ⇒ EXIT=0 |
-| **M-6** | 🔴 **「`logout` 域内预检删除」必须与共享层 Redis 代理同一个 commit**（G1 提 · 收口执行者独立复核通过） | 共享层代理在 `service/common/**`（G4 写权）⇒ 域侧那一行在 `service/users/admin/admin-rpc/**`（G1 写权）⇒ ⇒ **AGENTS.md §5.3c「必须同一次提交」** ⇒ ⇒ **G1 不能自己合 G4 的 commit**（`tools/difftest/check-wave-lane-ownership.py` 判红）⇒ ⇒ **只能由合并收口执行者在主干上做那一个原子 commit**<br>⚠️ **单独合 G1 = 真回归**（两道闸门都没了 ⇒ RAG 把 token 写进黑名单、Go 不写 ⇒ 数据面倒退）⇒ ⇒ **单独合 G4 是中性的** ⇒ ⇒ **若因故先合 G4 ⇒ 不得先合 G1** | 两处**同一个 commit** ⇒ ⇒ 复跑 `AdminDomainServiceDeadlineTest`（`logout` 已移出 `GUARDED` 清单）＋ `AdminRpc*Logout*` 两个客户端可见码用例 ⇒ ⇒ **客户端可见码仍须是 1015**（拦截器先 `close`）· **handler 级码须是 5001**<br>⇒ **逐条机制与四种合并态对照 ⇒ §3-2** |
+| **M-6** | 🔴 **「`logout` 域内预检删除」必须与共享层 Redis 代理同一个 commit**（G1 提 · 收口执行者独立复核通过）<br>🔴 **合并门已改写（2026-10-30 收口执行者复核 G4 自身探针后）**：门不是「共享层**已提交**」⇒ 而是「共享层的**效果已被运行证据证明**」 | 共享层代理在 `service/common/**`（G4 写权）⇒ 域侧那一行在 `service/users/admin/admin-rpc/**`（G1 写权）⇒ ⇒ **AGENTS.md §5.3c「必须同一次提交」** ⇒ ⇒ **G1 不能自己合 G4 的 commit**（`tools/difftest/check-wave-lane-ownership.py` 判红）⇒ ⇒ **只能由合并收口执行者在主干上做那一个原子 commit**<br>⚠️ **单独合 G1 = 真回归**（两道闸门都没了 ⇒ RAG 把 token 写进黑名单、Go 不写 ⇒ 数据面倒退）⇒ ⇒ **若因故先合 G4 ⇒ 不得先合 G1**<br>🔴 **新事实（2026-10-30 · G4 自己的探针）**：G4 已提交的代理（`3d5b4924`）**预算检查不在生效路径上** —— `GoStyleRedisDeadlineConnectionFactory.getConnection()`（`service/common/.../redis/GoStyleRedisDeadlineConnectionFactory.java:39-43`）**先 `delegate.getConnection()` 再包代理**，而 SDR 4.0 的 `getConnection()` **会立刻建连**（G4 探针报红在 `:44` = `getConnection()` 那一行，不是发命令那行）⇒ ⇒ **「代理已提交」≠「代理在拦」** ⇒ ⇒ 真正的门 = **G4 把检查提到 `delegate.getConnection()` 之前 ＋ 那条守门转绿** ⇒ ⇒ 详见 [`PIT-AXIS-04`](Pitfalls/_cross/pointer-axes.md) | 两处**同一个 commit** ⇒ ⇒ 复跑 `AdminDomainServiceDeadlineTest`（`logout` 已移出 `GUARDED` 清单）＋ `AdminRpc*Logout*` 两个客户端可见码用例 ⇒ ⇒ **客户端可见码仍须是 1015**（拦截器先 `close`）· **handler 级码须是 5001**<br>⇒ **逐条机制与四种合并态对照 ⇒ §3-2**<br>⇒ ⚠️ **另有一层**：`BeanPostProcessor` 改的是 `RedisTemplate` 的**字段**，**不是 bean** ⇒ ⇒ `@Autowired RedisConnectionFactory` 拿到的仍是裸 factory（域侧 main 代码实测**零**直接注入 ⇒ 当时只是潜在缺口） |
+
+| **M-7** | 🔴 **载体落地后的「rpc 域观测端口不挂 Go 的 rest 中间件」opt-out**（G4 裁定 → 域侧 yml 一行） | 补载体 = 给 rpc 域加 servlet 容器 ⇒ ⇒ `service/common` 里 12 个 `@ConditionalOnWebApplication(SERVLET)` 的 web Bean ＋ 4 个无条件 `@Component` 会**在 rpc 域激活**（⇒ `GoStyleCpuSheddingFilter` 可能**拒掉抓取请求**）⇒ ⇒ 而 **Go 的 rpc 侧一个 rest 中间件都没挂** ⇒ ⇒ 修法必然落在**共享层**（G4 写权）＋ **域侧 yml**（G1~G3 写权）⇒ ⇒ **按 §5.3c 必须同一次提交** ⇒ ⇒ 域侧那一行**不能由各 lane 自己加**（G1~G3 对 `service/common` 只读）⇒ ⇒ **由合并收口执行者统一加** | 等 G4 的裁定落地（属性名 + 取值语义写进 `service/common`）⇒ ⇒ **合并收口执行者**把该属性写进 7 个域的 yml ⇒ ⇒ **与 G4 的共享层 commit 同一次提交** ⇒ ⇒ 复跑：7 个 rpc 域各起一次 ⇒ `/actuator/prometheus` 有内容 **且** 抓取请求**不被 CPU 降载拦掉**<br>⚠️ **判据**：**不得**用「注解在」当证据（§3.3）⇒ ⇒ 要有**真启动 + 真 curl** |
 
 ---
 
@@ -561,14 +563,16 @@ Go 侧边界是 api→rpc，rpc 没验对就先验 api，产出的是「RAG api 
 |---|---|---|---|
 | 现状（无代理 · 有域内预检） | 域内预检先拦 ⇒ 客户端可见 1015 · **handler 级 1015** | 客户端可见 1015 · **handler 级 5001** | 客户端可见同形 · **handler 级分叉** |
 | **只合 G1**（删预检 · 无代理） | **预算耗尽仍把 token 写进黑名单** | **不写** | **真回归（数据面）** |
-| 只合 G4（有代理 · 预检仍在） | 域内预检先拦 ⇒ 客户端可见 1015 · handler 级 1015 | 客户端可见 1015 · handler 级 5001 | 同现状（未消） |
+| 只合 G4（代理已合 · **但预算检查不在生效路径上** · 预检仍在） | 域内预检先拦 ⇒ 客户端可见 1015 · handler 级 1015 | 客户端可见 1015 · handler 级 5001 | 数据面与现状一致（预检仍拦）⇒ ⚠️ **但共享层此刻是「空转」的 ⇒ 不能据此说「代理已生效」** |
 | **G4 + G1 同一次提交** | 代理在派发前抛 `QueryTimeoutException` ⇒ 域侧 `catch (Exception e)` ⇒ **handler 级 5001** · **不写**；客户端可见仍 1015（拦截器先 close） | 不写 · handler 级 5001 · 客户端可见 1015 | **两层同形** |
 
 **⇒ 结论（硬约束，不是偏好）**：
 
 1. **G4 的 `3d5b4924` 与 G1 的 logout 改动必须落在主干上的同一个 commit** ⇒ ⇒ 任何「先合 G1 后合 G4」或「拆成两个 commit」的做法 ⇒ **中间态就是上表第 2 行 = 真回归**。
 2. **G1 不能自己合 G4 的提交**（`service/common/**` 不在 G1 写权面 ⇒ `tools/difftest/check-wave-lane-ownership.py` 判红）⇒ ⇒ **那一个原子 commit 由合并收口执行者在主干上做**。
-3. G4 的共享层**单独合入是中性的**（域内预检仍在 ⇒ 行为不变）⇒ ⇒ 若因故必须先合 G4 ⇒ **不得先合 G1**。
+3. G4 的共享层**单独合入在数据面上是中性的**（域内预检仍在 ⇒ 行为不变）⇒ ⇒ 若因故必须先合 G4 ⇒ **不得先合 G1**。
+   ⚠️ **但这条中性只讲「数据面行为」** —— **不等于「共享层已生效」**：已提交的代理把预算检查放在**连接获取之后**（`GoStyleRedisDeadlineConnectionFactory.java:39-43` 先连后包）⇒ ⇒ **它在生效路径上拦不住** ⇒ ⇒ **合并门 = 「检查被提到 `delegate.getConnection()` 之前 ＋ 守门转绿」**，不是「commit 在位」。
+   ⇒ ⇒ 实证与判定式 ⇒ [`PIT-AXIS-04`](Pitfalls/_cross/pointer-axes.md)。
 4. ⚠️ **落码顺序（AGENTS.md §3.3 ③ 先改断言）**：先改 `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/service/AdminDomainServiceDeadlineTest.java:41-43` 的 `GUARDED` 清单（**含 `"logout"`** ⇒ `:77` 断言 `DEADLINE_EXCEEDED`）⇒ 再改 `AdminDomainService.java:259` 的实现。
 
 **⇒ ⇒ 另附一条同源的「出口口径分层」（G1 提 · 收口执行者核过成立）**：
@@ -577,10 +581,13 @@ Go 侧边界是 api→rpc，rpc 没验对就先验 api，产出的是「RAG api 
 
 - **配置层** = actuator endpoint 有没有开（G4 逐域实测：3 个三重关闭 ＋ 三态划分）；
 - **载体层** = 进程**有没有 HTTP 容器**（`spring-boot-starter-web` ⇒ `tomcat-embed-core`）⇒ G1 逐模块 `mvn -o -B dependency:list` 实测：**10 个 rpc 里只有 `follow-rpc` 有 web starter ＋ tomcat** ⇒ **9/10 无载体** ⇒ ⇒ `exposure.include` 写了但没载体 ⇒ 抓取方连不上 HTTP；
-- ⇒ ⇒ **净差 = Go 侧 6/10 有独立 DevServer 抓取端口 vs RAG 侧 1/10 有载体 ⇒ 5/10 域「RAG 侧抓不到」**；
+- ⇒ ⇒ **净差 = Go 侧 8/10 有独立观测端口 vs RAG 侧 1/10 有载体 ⇒ 7/10 域「RAG 侧抓不到」**
+  （🔴 **订正**：本节原写「Go 侧 6/10 · 净差 5/10」⇒ ⇒ **是枚举漏了嵌套路径**：`ls service/*/rpc/etc/*.yaml` **跨不过两层** ⇒ ⇒ 漏掉 `service/user/user/rpc/…`（**9094**）与 `service/user/admin/rpc/…`（**9097**）⇒ ⇒ 实际 **8/10**；教训 ⇒ [`PIT-SCAN-01`](Pitfalls/_cross/scan-coverage.md)）；
+  ⇒ ⇒ **Go 侧观测端口全表（2026-10-30 收口执行者逐个 yaml 核过）**：`article-rpc 9092`（`article.yaml:21-24` 的 `Prometheus:`）· `favorite-rpc 16062`（`favorite.yaml:23-26` 的 `DevServer:`）· `follow-rpc 16065`（`follow.yaml:20-23`）· `hot-rpc 19091`（`hot.yaml:8-11`；另有 hot2=19092 / hot3=19093）· `like-rpc 9098`（`like.yaml:19-22`）· `message-rpc 16067`（`message.yaml:19-22`）· `user-rpc 9094`（`user.yaml:23-26`）· `admin-rpc 9097`（`admin.yaml:31-34`）⇒ ⇒ **`comment-rpc` 与 `task-rpc` 两侧都没有 ⇒ 同形 ⇒ 不补**；
 - ⚠️ **判据纪律**：**不要 grep pom，要查依赖树**（`service/common/pom.xml:361` 的 web starter 是 `test` scope ⇒ 不传递；且父子继承下「grep 不到」≠「运行时没有」）⇒ ⇒ 这是 AGENTS.md §3.3.1 的**反面**：「配置里写了」≠「开得了」；
 - ⚠️ **JMX 边界**：Prometheus 的抓取模型是 HTTP scrape ⇒ JMX 不能替代 ⇒ 仍记为无出口；
-- ⇒ ⇒ **落点是各域 yml（域侧写权）⇒ 不归 G4** ⇒ ⇒ **是否补载体 = 一条待拍板项**（不是逐条缺陷）。
+- ⇒ ⇒ **落点是各域 yml（域侧写权）⇒ 不归 G4** ⇒ ⇒ ✅ **已拍板（Jason 2026-10-30：「这波就补载体」）** ⇒ ⇒ **派工面 = 7 个域**（G1：`user-rpc 9094` + `admin-rpc 9097` ＋ 核对 `follow-rpc 16065`；G2：`message-rpc 16067` + `like-rpc 9098`；G3：`article-rpc 9092` + `favorite-rpc 16062` + `hot-rpc 19091`）⇒ ⇒ **模板 = `follow-rpc` 现有形态**（pom 第 5 段加 `spring-boot-starter-web` ＋ yml `server.port` = Go 端口 ＋ actuator exposure）⇒ ⇒ ⚠️ **端口一字不差、路径不同**（Go `/metrics` vs RAG `/actuator/prometheus`）⇒ ⇒ 照 follow-rpc 已登记的口径写，**不新造偏离登记**；
+- 🔴 **补载体的共享层副作用（待 G4 裁定 · 合并期动作 ⇒ M-7）**：加了 web starter 之后，`service/common` 的 **12 个 `@ConditionalOnWebApplication(SERVLET)` 的 web Bean**（含 `GoStyleCpuSheddingFilter` / `GoStyleMaxConnsFilter` / `GoStyleBreakerFilter` / `GoStyleTomcatParameterLimitCustomizer` …）＋ **4 个无 servlet 条件的 `@Component`**（`GoStyleFormValues` / `GoStylePathNormalizingFilter` / `AuthorityHandlerFactory` / `AuthorityHandler`）会**在 rpc 域激活** ⇒ ⇒ 而 **Go 的 rpc 侧是 `zrpc.MustNewServer` ⇒ 一个 rest 中间件都没挂**（`rest.With*` 全在 api 侧）⇒ ⇒ **「rpc 域观测端口挂 Go 的 api 侧中间件」= 一处真偏离**（有杀伤力的是 CPU 降载：超阈时它会**拒掉抓取请求**，而 Go 的 DevServer 没有这层）⇒ ⇒ **G4 须在 `service/common` 裁定 + 落码**。
 
 ---
 

@@ -116,9 +116,41 @@
 
 ---
 
+## PIT-AXIS-04 · 判据红了 ⇒ **先定位「红在哪一行」** —— 根因常常在**更前面一层**，你正在查的那层根本没被测到
+
+> **状态**：仍生效 · **核对日期**：2026-10-30 · **是否影响当前轮次**：是 —— 本仓共享层 Redis 期限代理正在修。
+> **证据**：`service/common/src/main/java/com/rag/common/redis/GoStyleRedisDeadlineConnectionFactory.java:39-43`（先 `delegate.getConnection()` 再包代理 ⇒ **预算检查不在生效路径上**）· G4 lane 的 `TempDiagnoseTest` 实测报红在 **`:44`** = `RedisConnection c = f.getConnection();`（**不是**发命令那一行）⇒ ⇒ `LettuceConnectionFactory.getConnection()`（SDR 4.0）**会立刻建连** · `service/common/src/main/java/com/rag/common/redis/GoStyleRedisDeadlineAutoConfiguration.java:63-75`（`BeanPostProcessor` 改的是 `RedisTemplate` 的**字段**，不是 bean ⇒ `@Autowired RedisConnectionFactory` 拿到的仍是裸 factory）。
+
+### 症状长什么样
+
+- 守门 / 探针红了 ⇒ 你立刻提出一个**机制假设**（「命令级代理没命中」「`stringCommands()` 绕过了」「`enabled` 开关是 false」）；
+- ⇒ ⇒ 那些假设**一个都没被测到** —— 因为**失败发生在更前面一层**，流程**根本没走到**你怀疑的那一步；
+- ⇒ ⇒ 越查越深，**离根因越远**：改的是命令层，实际要改的是**连接获取层**；
+- ⇒ ⇒ 更坏的一层：你在命令层加的补丁**看起来能修好**（守门转绿）⇒ ⇒ **但机制从未在生产路径上生效过**。
+
+### 实证（2026-10-30 · 本仓共享层 Redis 期限代理）
+
+> ⚠️ **本小节标题里刻意不写编号** —— 标题里若出现任何编号 token，派生层的退化分支（`find_id_token` 扫标题全文取**第一个**编号 token）会把**本节**当成**那个编号的候选** ⇒ ⇒ **劫持它的 domain / wave / basis** ⇒ ⇒ 编号只写在正文里（见 `PIT-DERIVE-01`）。
+
+- G4 的探针断言「异常链里必须有 `QueryTimeoutException`」⇒ 红了 ⇒ **但红在 `:44`（`getConnection()`）**，拿到的是 `RedisConnectionFailure: Unable to connect to Redis` ⇒ ⇒ **失败层 = 获取连接**，不是命令派发；
+- ⇒ ⇒ 读实现：`GoStyleRedisDeadlineConnectionFactory.getConnection()`（`:39-43`）**先连后包** ⇒ ⇒ `assertNotExhausted` **不在生效路径上** ⇒ ⇒ 预算耗尽时 RAG 仍然会开一条 TCP 连接；Redis 不可达时得到的是**连接失败**而不是**期限错误**；
+- ⇒ ⇒ 于是「命令级拦截为什么没生效」这个问题**问错了层** —— 它压根没被执行到；
+- ⇒ ⇒ **修法**：把 `assertNotExhausted` 放进 `getConnection()`、放在 `delegate.getConnection()` **之前** ⇒ ⇒ 预算耗尽时真的不碰 socket，**且异常类型与「Redis 在不在线」无关** ⇒ ⇒ 守门**不需要真 Redis 就能跑** ⇒ ⇒ 这才是把「未证明」变成「已证明」的那一步。
+
+### 判定式
+
+1. **守门红 ⇒ 第一件事是读「红在哪一行」**（断言消息里的行号 / stack trace / **异常类型**），**不是**立刻提机制假设。
+2. **异常类型本身就是层级线索**：`RedisConnectionFailure`（连不上）⇒ 失败在**获取连接**层 ⇒ ⇒ 修法在连接层；`QueryTimeoutException` ⇒ 失败在**命令派发前** ⇒ ⇒ 修法在派发层。⇒ **两个类型指向两个不同的修法**。
+3. **「机制有没有接上」要追问「接在哪一步」**：包在连接对象上 ≠ 检查发生在命令之前 ⇒ ⇒ **检查点必须早于任何 I/O** —— 而**获取连接本身就是 I/O**。
+4. **把检查提前 ⇒ 守门从「需要环境」变成「不依赖环境」**：检查点提到 `getConnection()` 之前 ⇒ 无 Redis 时异常类型仍然确定 ⇒ ⇒ 守门可在 CI 跑 ⇒ ⇒ **这本身就是可证明性的提升**，不只是修法选择。
+5. **别用否定式假设开路**（「是不是被绕过了？」）：先证明「失败发生在哪一层」，再问「这一层为什么没拦住」。
+6. **连带要核「覆盖面」**：包住 `RedisTemplate` 的字段 ≠ 包住 `RedisConnectionFactory` 这个 **bean** ⇒ ⇒ `@Autowired RedisConnectionFactory` 的注入点**不在覆盖内** ⇒ ⇒ 覆盖面要**逐个注入点**列出来核（本仓实测：域侧 main 代码**零**直接注入 ⇒ 当时只是潜在缺口，但类 javadoc 的覆盖面表述已经超出实际）。
+
+---
+
 ## 效力边界（2026-10-30）
 
-- 本文件管**三个维度**：**指针的「轴 / 归属」**（`PIT-AXIS-01`）· **错误码的两层读法**（`PIT-AXIS-02`）· **机制是否在生效路径上**（`PIT-AXIS-03`）；
+- 本文件管**四个维度**：**指针的「轴 / 归属」**（`PIT-AXIS-01`）· **错误码的两层读法**（`PIT-AXIS-02`）· **机制是否在生效路径上**（`PIT-AXIS-03`）· **判据红在哪一层**（`PIT-AXIS-04`）；
   **「指针对不对」**由 `tools/difftest/ledger-claim-audit.py` 管（落空 / 实体错位）· **「指针时效性」**由派生层管。
 - ⚠️ **本文的表格首格一律不用编号**、**行内不写状态标记** ⇒ ⇒ 否则本文件会被派生层当成**新的台账条目**（见 `docs/Pitfalls/_cross/derived-layer.md` 的 `PIT-DERIVE-01/02`）。
-- ⚠️ **本文的编号 token 只出现在标题首 token 位置**（`PIT-AXIS-01` / `-02` / `-03`）⇒ ⇒ 本文件**不自噬**。
+- ⚠️ **本文的编号 token 只出现在标题首 token 位置**（`PIT-AXIS-01` / `-02` / `-03` / `-04`）⇒ ⇒ 本文件**不自噬**。
