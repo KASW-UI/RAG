@@ -109,6 +109,22 @@ public class GoStyleProtectionProperties {
     @NestedConfigurationProperty
     private Breaker breaker = new Breaker();
 
+    /**
+     * 出向 gRPC 的 deadline 传播（Go 的 <b>ctx 传播</b>）。
+     *
+     * <p>🆕 2026-10-30（E65 落码）：见 {@link GoStyleOutboundDeadlineInterceptor}。
+     */
+    @NestedConfigurationProperty
+    private OutboundDeadline outboundDeadline = new OutboundDeadline();
+
+    /**
+     * Redis 的「请求期限感知」（G1 反馈单 2/3 · 2026-10-30 · G4 lane）。
+     *
+     * <p>🆕 见 {@link com.rag.common.redis.GoStyleRedisDeadline}。
+     */
+    @NestedConfigurationProperty
+    private RedisDeadline redisDeadline = new RedisDeadline();
+
     public int getMaxConns() {
         return maxConns;
     }
@@ -139,6 +155,119 @@ public class GoStyleProtectionProperties {
 
     public void setBreaker(Breaker breaker) {
         this.breaker = breaker;
+    }
+
+    public OutboundDeadline getOutboundDeadline() {
+        return outboundDeadline;
+    }
+
+    public void setOutboundDeadline(OutboundDeadline outboundDeadline) {
+        this.outboundDeadline = outboundDeadline;
+    }
+
+    public RedisDeadline getRedisDeadline() {
+        return redisDeadline;
+    }
+
+    public void setRedisDeadline(RedisDeadline redisDeadline) {
+        this.redisDeadline = redisDeadline;
+    }
+
+    /**
+     * Redis 的「请求期限感知」开关。
+     *
+     * <p>🆕 2026-10-30（G1 反馈单 2/3 · G4 lane）：见
+     * {@link com.rag.common.redis.GoStyleRedisDeadline}。
+     *
+     * <p>⚠️ <b>本开关默认开启，且这一层让 RAG <b>比 Go 更严</b></b>（Jason 2026-10-30 明确批准）：
+     * Go 侧的 Redis 命令<b>本来就不受请求 deadline 约束</b>
+     * （go-redis 的 {@code ContextTimeoutEnabled=false} ⇒ {@code baseClient.context(ctx)}
+     * 把 ctx 换成 {@code context.Background()}）⇒ ⇒ 本开关让 RAG 在「请求预算已耗尽」时
+     * <b>不再下发新的 Redis 命令</b> ⇒ ⇒ <b>这是一处有意偏离，不是「对齐」</b>
+     * ⇒ 已登记为有意偏离候选（签字落点不归 G4 ⇒ 转合并收口执行者）。
+     */
+    public static class RedisDeadline {
+
+        /**
+         * 是否启用「请求预算耗尽 ⇒ 不再下发 Redis 命令」。
+         *
+         * <p>默认 <b>true</b>：因为它<b>只影响「请求已经死了」的那一小段</b>
+         * ⇒ 对正常请求<b>零行为变化</b>。
+         */
+        private boolean enabled = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+    }
+
+    /**
+     * 出向 gRPC 的 deadline 传播（Go 的 ctx 传播 ＋ 客户端上界）。
+     *
+     * <p>🆕 2026-10-30（E65 落码 · G4 lane）。
+     *
+     * <h2>Go 出处</h2>
+     * <pre>
+     * // ① go-zero@v1.10.2 zrpc/internal/config.go:15   —— 客户端超时中间件默认开
+     * Timeout    bool `json:",default=true"`
+     * // ② go-zero@v1.10.2 zrpc/internal/client.go:115-116 —— client 侧装配
+     * if c.middlewares.Timeout {
+     *     interceptors = append(interceptors, clientinterceptors.TimeoutInterceptor(timeout))
+     * }
+     * // ③ go-zero@v1.10.2 zrpc/client.go:70-71 —— 客户端默认上界
+     * if c.Timeout &gt; 0 {
+     *     opts = append(opts, WithTimeout(time.Duration(c.Timeout)*time.Millisecond))
+     * }
+     * // ④ go-zero@v1.10.2 zrpc/config.go:31 —— 上界默认值
+     * Timeout       int64           `json:",default=2000"`
+     * </pre>
+     *
+     * <h2>为什么 {@code capMillis} 默认是 0（不设上界）</h2>
+     * <p>Go 的 2000ms 是<b>默认值</b>，而<b>各域可覆盖</b>（真源
+     * {@code service/article/api/etc/article-api.yaml:12} = {@code Timeout: 70000}
+     * ⇒ 那是 <b>api 侧出向 article-rpc 的客户端</b>上界；<b>注意别引错</b>：
+     * {@code service/article/rpc/etc/article.yaml:3} = 70000 是<b>服务端</b>超时
+     * （顶层、挨着 {@code ListenOn} ⇒ 落在 {@code zrpc.RpcServerConf.Timeout}），
+     * 同文件 {@code :90} = 10000 才是<b>客户端</b>（在 {@code SecurityConf} 块内 ⇒
+     * {@code zrpc.RpcClientConf}））⇒ ⇒ 把 2000ms 写成 RAG 的<b>全局默认</b>
+     * 会让 article 的出向调用<b>比 Go 严格 35 倍</b>（70s → 2s）⇒ ⇒ **必须按域配**，
+     * 而按域配 = 域侧 yml（各域 lane 的写权面）⇒ ⇒ 本轮共享层只提供<b>能力</b>，
+     * <b>默认不启用上界</b>，逐域启用登记在 {@code docs/RoundPlan/} 的 P2-T04。
+     * ⇒ ⚠️ 启用前这一轴仍是漂移（**不假装已对齐**）。
+     */
+    public static class OutboundDeadline {
+        /**
+         * 是否把<b>请求 deadline</b>（入向 ctx 的剩余）传播给出向 gRPC 调用。
+         *
+         * <p>Go 出处：{@code go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25}
+         * —— {@code context.WithTimeout(ctx, t)} ⇒ 父 ctx 的 deadline <b>参与 min</b>。
+         */
+        private boolean enabled = true;
+
+        /**
+         * 客户端硬上界（毫秒）；{@code 0} = <b>不设上界</b>（见本类 javadoc「为什么默认是 0」）。
+         */
+        private long capMillis = 0L;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public long getCapMillis() {
+            return capMillis;
+        }
+
+        public void setCapMillis(long capMillis) {
+            this.capMillis = capMillis;
+        }
     }
 
     /**

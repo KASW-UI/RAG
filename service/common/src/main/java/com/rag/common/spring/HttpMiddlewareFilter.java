@@ -2,6 +2,7 @@ package com.rag.common.spring;
 
 import com.rag.common.observability.HttpMiddleware;
 import com.rag.common.observability.Observability;
+import com.rag.common.web.ConditionalOnApiSide;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -35,9 +36,13 @@ import java.time.Duration;
  * 那个扩展点不存在。Go 侧 {@code DisableNativeRestTimeout} 的产物是 {@code conf.Timeout}
  * （user 系 yaml 未配置 → go-zero 默认 3000ms），现在由各模块 yaml 的
  * {@code observability.http-timeout: 3s} 承载。
+ * <p>⚠️ <b>2026-10-30 · G4 lane：本类属 api 侧 rest 中间件 ⇒ 已挂 {@link com.rag.common.web.ConditionalOnApiSide}</b>
+ * ⇒ ⇒ 此前「rpc 域不注册本类」的依据是<b>域侧不扫 {@code com.rag.common} 这道约定</b>（不是本类的条件）
+ * ⇒ ⇒ 现由共享层自己兜住 ⇒ ⇒ Go 出处与语义等价论证见该注解。
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 7)
+@ConditionalOnApiSide
 public class HttpMiddlewareFilter implements Filter {
 
     private final Filter delegate;

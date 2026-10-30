@@ -1,5 +1,6 @@
 package com.rag.common.http;
 
+import com.rag.common.web.ConditionalOnApiSide;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
@@ -26,9 +27,13 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * （servlet Filter 在 DispatcherServlet 之外 ⇒ 抛出的异常到不了 advice）。
  * <br>⇒ 副作用（也是优点）：<b>未匹配到路由的路径（404 / 405）不会走本闸门</b>
  * ⇒ 与 Go 一致（Go 的 404 分支在 {@code patrouter.go:73} 直接返回，<b>不解析 form</b>）。
+ * <p>⚠️ <b>2026-10-30 · G4 lane：本类属 api 侧 rest 中间件 ⇒ 已挂 {@link com.rag.common.web.ConditionalOnApiSide}</b>
+ * ⇒ ⇒ 此前「rpc 域不注册本类」的依据是<b>域侧不扫 {@code com.rag.common} 这道约定</b>（不是本类的条件）
+ * ⇒ ⇒ 现由共享层自己兜住 ⇒ ⇒ Go 出处与语义等价论证见该注解。
  */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
+@ConditionalOnApiSide
 public class GoStyleFormLimitWebMvcConfig implements WebMvcConfigurer {
 
     private final GoStyleFormValueLimitInterceptor interceptor;

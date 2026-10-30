@@ -57,10 +57,16 @@ say() { printf '%s\n' "$*"; }
 #    Go 侧的 code=4 = grpc-go 的 codes.DeadlineExceeded。
 EXPECTED_DRIFT_FILE="${TMP}/expected-drift.txt"
 cat >"${EXPECTED_DRIFT_FILE}" <<'EOF'
-failed_fast|true|false|Go 的出向调用吃 handler 的 ctx（已到期）⇒ grpc-go 立刻失败；RAG 的出向调用没有任何 deadline ⇒ 挂住|docs/DRIFT/global/_README.md E38② 重估（第四十六轮）
-code|4|0|Go 侧拿到 DEADLINE_EXCEEDED(4)；RAG 侧根本没有失败（调用悬着 ⇒ 无码）|docs/DRIFT/global/_README.md E38② 重估（第四十六轮）
-outgoing_carrier|present_expired|absent|Go 的 ctx 一直带 deadline；RAG 出向调用用的 GoStyleRequestDeadline 在 gRPC 路径**从未绑定**⇒ 缺席|docs/DRIFT/global/_README.md E38② 重估（第四十六轮）
+failed_fast|true|false|Go 的出向调用吃 handler 的 ctx（已到期）⇒ grpc-go 立刻失败；RAG 侧出向调用的 deadline **尚未全域闭合**（① 域侧裸 stub 调用点仍在：comment/like/message/follow；② 本探针的 RAG 半边手搓 Netty channel ⇒ 不走 devh 全局拦截器路径 ⇒ 测不到已落地的 GoStyleOutboundDeadlineInterceptor）⇒ 挂住|docs/DRIFT/global/_README.md E65 行（2026-10-30 合并收口轮复核）
+code|4|0|Go 侧拿到 DEADLINE_EXCEEDED(4)；RAG 侧出向调用未继承请求 deadline ⇒ 悬着 ⇒ 无码|docs/DRIFT/global/_README.md E65 行（2026-10-30 合并收口轮复核）
 EOF
+# ⚠️ 2026-10-30（合并收口轮）：**`outgoing_carrier` 行已删除** ⇒ 它不再是「drift 键」，
+#    而是落进「不在 drift 名单 ⇒ 两侧必须相等」的分支 ⇒ 变成 **parity 键**。
+#    理由：G4 波次把 `GoStyleRequestDeadline` 绑进了 `RpcInterceptor.onHalfClose`
+#    ⇒ 出向载体在位 ⇒ 实测 RAG 侧 `outgoing_carrier=present_expired` ⇒ **与 Go 一致**
+#    ⇒ 该键的漂移**已闭合** ⇒ 继续留在 drift 名单里会把「已闭合」记成「仍是漂移形态」。
+#    ⚠️ **不要**把它的期望值改成两侧相等来蒙混 ⇒ 那样它仍被当 drift 键判；
+#    ⇒ **移出名单**才是「它现在是 parity 键」的正确表达（判据更强：两侧必须相等）。
 
 # ══════════════════════════════════════════════════════════════════════════
 # 1) Go 半边：引用冻结仓 → 离线构建 → 跑

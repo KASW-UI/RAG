@@ -128,7 +128,7 @@ G4 拿 `service/users/users-common/**`（**跨 6 个外域的共享层**）⇒ *
 | 🔴 `DRIFT-MSGAPI-011` 状态行缺 reason phrase | message ＋ 全域 | `service/common` | **OPEN**（同上） |
 | 🔴 `DRIFT-MSGAPI-013` 缺 `Traceparent` | message ＋ 全域 | `service/common` | **OPEN** |
 | 🔴 E38② 业务层吞掉「SQL 被 deadline 取消」（机制层） | **users ＋ comment ＋ favorite ＋ …** | `service/common` | **A 类 backlog**（`global` 写权内 ⇒ 不需拍板） |
-| 🔴 E65 出向 gRPC 不继承请求 deadline | favorite ＋ comment ＋ users | `service/common`（`RpcInterceptor` 只绑 `DeadlineState`、**不绑** `GoStyleRequestDeadline` ⇒ gRPC 路径 `applyTo` 是 **no-op**） | **OPEN** |
+| 🔴 E65 出向 gRPC 不继承请求 deadline | favorite ＋ comment ＋ users | `service/common`（**【2026-10-30 订正】** 原写「`RpcInterceptor` 只绑 `DeadlineState`、不绑 `GoStyleRequestDeadline` ⇒ gRPC 路径 `applyTo` 是 no-op」**已过期** ⇒ 载体已绑进 `RpcInterceptor.onHalfClose` ⇒ **共享层载体面已闭合**；**残余面 = 各域出向调用点未接载体**（comment/like/message/follow 裸 stub ⇒ 落点＝各域写权面）＋ **出向传播的双侧活体证据仍缺**） | **OPEN** |
 | 🔴 E66 = `DRIFT-ARPC-010` Redis 写不绑 deadline | users/admin ＋ 各域 | `service/common` | **OPEN**（两侧同编号 ⇒ 销账别当两条） |
 | 🟡 `DRIFT-ADMINAPI-007` 503 响应的 `Content-Type` **分号后空格**残差 | users/admin ＋ 全域 | `service/common` | **半修**（`nosniff` 已落地于 `HttpMiddleware.java:692` ⇒ 原条自动消失；**charset 空格残差仍在** ⇒ 需重开一条） |
 | 🟡 `article-rpc` / `favorite-rpc` 缺 `baseline-version: 0` | article ＋ favorite | 各自 `application.yml`（**域侧** ⇒ 域 lane 自修） | **未修** ⇒ 非空 schema + `baseline-on-migrate=true` ⇒ **V1 被整条跳过**（起得来、首次查库才炸） |
