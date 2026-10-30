@@ -1438,46 +1438,46 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时（`service/users/user/
 - E66 的本体是「Redis **写**不绑 deadline」（admin `logout` 的黑名单写入）⇒ ⇒ **本域没有 Redis 写调用点**（实测：`service/follow/**` 的 `main` 代码里 Redis 调用仅 3 处命中，**全在 `follow-api` 的 `FollowBlacklistInterceptor`** ⇒ 是**读**黑名单）。
 - ⇒ ⇒ 本域命中的是**读**这一面：`FollowBlacklistInterceptor` 的 `redisTemplate.hasKey(blacklistKey)`（`follow-api/src/main/java/com/rag/follow/follow/api/interceptor/FollowBlacklistInterceptor.java:154`）⇒ **不绑 ctx** ⇒ 与 Go 侧 `service/follow/api/internal/middleware/checkblacklistmiddleware.go:40` 的 `m.Redis.ExistsCtx(r.Context(), blacklistKey)`（**绑 HTTP ctx**）形成对照。
 - ⇒ ⚠️ **但读侧的后果与写侧不同**：Go 的判据是 `:41` 的 `if err == nil && exists` ⇒ **fail-open**（Redis 不可达 ⇒ 放行）⇒ RAG 侧同样 fail-open（`FollowBlacklistInterceptor.java:155-158` 刻意吞异常 ⇒ `exists = null` ⇒ 放行）⇒ ⇒ **fail-open 语义两侧同形**；读侧的差异（超时/慢）**归属 follow api 域自己的 Redis 条目**，**不在 E66 的「写」半边** ⇒ ⇒ **本域不因 E66 领新条目**。
-### 🟡 订正小节：rpc 层「指标抓取出口」必须**分两层**看 —— 配置层 vs 载体层（2026-10-30 16:7x · G1 实测）
+### 🟡 订正小节：rpc 层「指标抓取出口」必须**分三层**看 —— 配置面 / 载体面 / 可抓取面（**口径源 = `docs/DRIFT/global/vs-common.md` §4.19.23** · 2026-10-31 · G1 lane 订正）
 
 > ⚠️ **本小节标题刻意不含任何编号 token** ⇒ 派生层不把它当条目候选 ⇒ 也不劫持任何既有编号的 `domain` / `wave` / `basis`。
 
-**（1）为什么必须分两层**
+**（1）为什么必须分三层**
 
-- **配置层** = `management:` 段里 actuator 的 endpoint 有没有开（`management.server.port` / `endpoints.enabled-by-default` / `endpoint.prometheus.enabled` / `endpoints.web.exposure.include`）。
-- **载体层** = **这个进程到底有没有 HTTP 容器**（`spring-boot-starter-web` ⇒ `tomcat-embed-core`）⇒ ⇒ **没有载体 ⇒ 配置写得再对，抓取方也连不上**。
-- ⚠️ **只报配置层 ⇒ 会得出「7 个 rpc 有出口」的假结论** ⇒ ⇒ **这是「配置里写了 ≠ 开得了」在指标出口这一面上的同族**。
+- **配置面（L1）** = yml 的 `management:` 段**没有把 prometheus endpoint 关掉**：`endpoint.prometheus.enabled` ≠ false ∧ `endpoints.enabled-by-default` ≠ false ∧ `endpoints.web.exposure.include` 含 `prometheus` ⇒ ⇒ **实测 10/10**（10 个 rpc 域的 `exposure.include` 全含 `prometheus`；**无一个**被 `enabled-by-default:false` / `endpoint.prometheus.enabled:false` 关掉）。
+- **载体面（L2）** = **这个进程真能不能起 HTTP 容器** ⇒ 判据 = 部署 classpath **同时**含 `jakarta.servlet.Servlet` ＋ `org.springframework.web.context.ConfigurableWebApplicationContext` ⇒ `WebApplicationType.deduceFromClasspath()` 推出 **SERVLET** **∧ 未被 `spring.main.web-application-type: none` 关掉** **∧ 真有 servlet 容器实现**（`tomcat-embed-core` / `jetty-server` / `undertow-core`）⇒ ⇒ **没有载体 ⇒ 配置写得再对，抓取方也连不上**。
+- ⚠️ **只报配置面 ⇒ 会得出「10/10 都有出口」的假结论**（**配置面 ≠ 可抓取面**）⇒ ⇒ **这是「配置里写了 ≠ 开得了」在指标出口这一面上的同族**。
 
-**（2）载体层实测（依赖树级证据，不是 grep pom）**
+**（2）三层判据（判据 = 运行时语义，不是文本命中；逐层可复算）**
 
-- 判据命令（逐模块跑）：`mvn -o -B dependency:list -DincludeArtifactIds=spring-boot-starter-web,tomcat-embed-core,spring-boot-starter-webflux,spring-boot-starter-undertow,spring-boot-starter-actuator`。
-- ⚠️ **为什么不用 grep pom**：`service/common/pom.xml:361` 的 `spring-boot-starter-web` 是 **`test` scope ⇒ 不传递**；但在父子继承场景下「grep 不到子模块 pom」**不构成**「运行时没有」的等价 ⇒ ⇒ 必须查依赖树（AGENTS.md §3.3.1：配置/声明 ≠ 实际生效）。
+- **判据与逐域清单 = `docs/DRIFT/global/vs-common.md` §4.19.23**（**唯一口径源** · 2026-10-31 · 合并收口执行者实测）⇒ ⇒ **本节只引用、不复述判据**（两处各写一套判据 ⇒ 正是这个数分叉三次的成因）⇒ ⇒ 复算入口 = `javap -p -c -cp ~/.m2/.../spring-boot-4.0.8.jar org.springframework.boot.WebApplicationType`（**读常量、不推理**）＋ `mvn -o -B dependency:list -pl <模块>`（**不是 grep pom**）。
+- ⚠️ **为什么不用 grep pom**：`service/common/pom.xml:361` 的 `spring-boot-starter-web` 是 **`test` scope ⇒ 不传递**；但在父子继承场景下「grep 不到子模块 pom」**不构成**「运行时没有」的等价 ⇒ ⇒ 必须查依赖树（AGENTS.md §3.3.1：配置/声明 ≠ 实际生效）。⚠️ **且依赖树里有 `tomcat-embed-core` 只是三条件之一**（另两个 = `spring-web` 指示类在 classpath 上 ＋ 未被 `web-application-type: none` 关掉）⇒ ⇒ **单看「依赖树里有 tomcat」就判「有载体」不成立**。
 
-| 模块 | actuator 依赖 | web starter | tomcat | webflux | undertow | **HTTP 载体** |
-|---|---|---|---|---|---|---|
-| `article-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
-| `comment-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
-| `favorite-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
-| `hot-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
-| `like-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
-| `message-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
-| `task-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
-| `users/user/user-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
-| `users/admin/admin-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
-| `follow-rpc` | 有 | **有** | **有** | 无 | 无 | **有** |
+| 组件 | L1 配置面 | L2 载体面 | L3 可抓取面 | 备注 |
+|---|---|---|---|---|
+| `article-rpc` | ✔ | ✔ | ✔ | |
+| `favorite-rpc` | ✔ | ✔ | ✔ | |
+| `follow-rpc` | ✔ | ✔ | ✔ | 载体端口 16065 |
+| `hot-rpc` | ✔ | ✔ | ✔ | |
+| `like-rpc` | ✔ | ✔ | ✔ | |
+| `message-rpc` | ✔ | ✔ | ✔ | |
+| `users/admin/admin-rpc` | ✔ | ✔ | ✔ | 载体端口 9097 |
+| `users/user/user-rpc` | ✔ | ✔ | ✔ | 载体端口 9094 |
+| `comment-rpc` | ✔ | ✘ | ✘ | 显式 `spring.main.web-application-type: none` ＋ 产物无 servlet 容器实现 ⇒ yml 的 `exposure.include` 是**死配置** |
+| `task-rpc` | ✔ | ✘ | ✘ | classpath 无 `jakarta.servlet.Servlet` ⇒ `WebApplicationType` 推出 NONE ⇒ yml 的 `exposure.include` 是**死配置** |
 
-⇒ ⇒ **载体层 = 8/10 有、2/10 无** ⇒ ⇒ **「RAG 侧能被 Prometheus 抓到的 rpc」有 8 个**（⚠️ **2026-10-31 订正 · 合并收口执行者**：原写「**1/10 有、9/10 无**」**已被实测推翻** ⇒ ⇒ **逐模块 `mvn -o -B dependency:list` 实测 `tomcat-embed-core`**：有载体 = article / favorite / follow / hot / like / message / user-user-rpc / user-admin-rpc；无载体 = **comment-rpc / task-rpc** 两域 ⇒ ⇒ ⇒ **「只有 follow-rpc 一个」这句话已作废**）。
+⇒ ⇒ **三层口径 = 配置面 10/10 · 载体面 8/10 · 可抓取面 8/10** ⇒ ⇒ **无载体 / 不可抓 = 2 域**（`comment-rpc` 显式 `web-application-type: none` ＋ 产物无容器实现 · `task-rpc` classpath 无 servlet 指示物）⇒ ⇒ 逐格见 `docs/DRIFT/global/vs-common.md` §4.19.23（**唯一口径源**）⇒ ⇒ ⇒ **本表原写的 9 行「无 web starter / 无 tomcat」已作废**（那 9 行是「依赖树有 tomcat ⇒ 有载体」这个**已判不成立的判据**的产物）。
 
-**（3）叠上配置层（G4 的三态划分）后的净结论**
+**（3）叠上载体面后的净结论（Go 侧逐域实测 · 2026-10-31 订正）**
 
-- **配置层三态**（G4 逐域读 `management:` 段给出，判据正确）：① **Go 有 / RAG 无** = `admin-rpc` · `user-rpc` · `hot-rpc`（三重关闭）；② **两侧都有但路径 + 端口都不同** = `article-rpc` · `favorite-rpc` · `follow-rpc` · `like-rpc` · `message-rpc`；③ **Go 无 / RAG 有（反向差异）** = `comment-rpc` · `task-rpc`。
-- ⚠️ **叠载体层后**：② 里除 `follow-rpc` 外的 4 个（`article-rpc` / `favorite-rpc` / `like-rpc` / `message-rpc`）虽在配置层「有 prometheus endpoint」，但**无载体 ⇒ 实际抓不到** ⇒ ⇒ **三态划分只覆盖配置层，不覆盖运行时可抓取性**。
-- ⇒ ⇒ **净结论**：Go 侧 = **6/10 有独立 DevServer 抓取端口**（据本文件 `rpc.md` 的 6 rpc 对照表：follow / favorite / message / like / user-user / user-admin；Go 侧走 `/metrics` @ DevServer 端口）⇒ RAG 侧 = **1/10 有载体**（且路径 `/actuator/prometheus` + 端口都不同）⇒ ⇒ **净差 = 5/10 个 rpc 域「RAG 侧抓不到」**。
+- **配置面 = 10/10**（逐域读 `management:` 段实测：10 域 `exposure.include` 全含 `prometheus`，**无一个**被 `enabled-by-default:false` / `endpoint.prometheus.enabled:false` 关掉）⇒ ⇒ ⚠️ **原写「① Go 有 / RAG 无 = `admin-rpc` · `user-rpc` · `hot-rpc`（三重关闭）」已过期** —— `admin-rpc` / `user-rpc` 现**显式写 true** · `hot-rpc` **从未关过** ⇒ ⇒ **「RAG 配置面比 Go 窄」的域 = 0 个**。
+- ⚠️ **叠载体面后**：配置面「有 prometheus endpoint」的 10 域里，**`comment-rpc` / `task-rpc` 两域无载体 ⇒ 实际抓不到**（其余 8 域可抓）⇒ ⇒ **三态划分只覆盖配置面，不覆盖运行时可抓取性** ⇒ ⇒ 且 **`article-rpc` / `hot-rpc` 的 Go 侧根本没有 DevServer**（真源 yaml **无该段**）⇒ ⇒ 那 2 域属**反向差异（RAG 更宽）**，不是「RAG 更窄」。
+- ⇒ ⇒ **净结论（2026-10-31 订正 · Go 侧逐域实测 ＋ RAG 侧三层判据）**：**Go 侧可抓 = 6/10**（真源 yaml 实测有 `DevServer` 段 = `favorite` `16062` · `follow` `16065` · `like` `9098` · `message` `16067` · `user` `9094` · `admin` `9097`；`article` / `hot` / `task` / `comment` **无 DevServer 段** ⇒ `optional` ⇒ 整段缺失 ⇒ `Enabled=false` ⇒ **不启动** ⇒ 无 `/metrics`）· **RAG 侧可抓 = 8/10**（§4.19.23）⇒ ⇒ **「RAG 侧抓不到」的域 = 0 个**（⚠️ **原写「净差 = 5/10 个 rpc 域『RAG 侧抓不到』』已作废、且方向反了**）⇒ ⇒ **净差方向 = RAG 更宽 2/10**（`article-rpc` / `hot-rpc`：Go 侧无 DevServer ⇒ 无出口，而 RAG 侧 L1/L2/L3 全 ✔ ⇒ **RAG 多出可抓性**）⇒ ⇒ **两侧都不可抓 = 2 域**（`comment-rpc` / `task-rpc`）。
 - ⚠️ **JMX 边界（别拿它当出口）**：actuator 无 web 载体时 JMX 端点仍可暴露（10/10 都**未配** `management.endpoints.jmx.exposure` ⇒ 走默认 health/info），但 **Prometheus 的抓取模型是 HTTP scrape endpoint** ⇒ ⇒ **JMX 不能替代** ⇒ ⇒ 「抓取出口」口径下仍记为无。
 
 **（4）对我域台账的两处影响（已同步）**
 
-- `docs/DRIFT/follow/rpc.md:273` 的「8 个 rpc / 0/8」⇒ 订正为「**10 个 rpc / 载体层 8/10 有 / 2/10 无**」＋ 补两层口径与判据来源（⚠️ **2026-10-31 再订正**：原写的「1/10 有 / 9/10 无」**已被依赖树实测推翻** ⇒ ⇒ 有载体 8 个 · 无载体 2 个（comment-rpc / task-rpc））。
+- `docs/DRIFT/follow/rpc.md:273` 的「8 个 rpc / 0/8」⇒ 订正为「**10 个 rpc / 载体层 8/10 有 / 2/10 无**」＋ 补两层口径与判据来源（⚠️ **2026-10-31 再订正**：原写的「1/10 有 / 9/10 无」**已被推翻** ⇒ ⇒ 有载体 8 个 · 无载体 2 个（comment-rpc / task-rpc）⇒ ⇒ ⚠️ **归因也改了**：不是「依赖树实测推翻」（**那个判据本身已被判不成立** —— 依赖树里有 `tomcat-embed-core` 只是三条件之一）⇒ ⇒ 现在的口径 = **`docs/DRIFT/global/vs-common.md` §4.19.23 的三层判据**（配置面 10/10 · 载体面 8/10 · 可抓取面 8/10））。
 - `docs/DRIFT/follow/stage1-admission.md:79` 的「`favorite-rpc` / `message-rpc` / `like-rpc` / `user-user-rpc` **均已补上** ⇒ 出口已开」⇒ **被本轮实测证伪**（这 4 个模块的依赖树里都没有 web starter/tomcat）⇒ 已订正。
 - ✅ **users 域 `user/rpc.md:280` 的「指标可抓取性」改判（OBSERVABLE DIFFERENCE）成立且更强** —— 已补载体层证据（`user-rpc` 依赖树只有 actuator、无 tomcat）⇒ ⇒ **不是 users 域孤例，是 9/10 的通例** ⇒ ⇒ **该改判不撤**。
 
