@@ -6496,3 +6496,36 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 - **派生层产物未由本层提交**（`docs/DRIFT/_cross/**` 不在本层写权面 ⇒ 每次取证后 `git checkout --` 还原）。
 
 （**本节编号：§4.19.24** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
+### gRPC channel target 的 scheme 显式化（共享层那 1 处 · 第二十一次订正 · 2026-10-31 · G4 lane）
+
+> **本节追加在文件末尾 ⇒ 零行位移 ⇒ 不影响任何硬编码行号指针。**
+
+**一、落的那 1 处**（`service/common` 写权面内）
+
+- `service/common/src/test/java/com/rag/common/protection/GoStyleGrpcClientBreakerTargetKeyTest.java:226`
+  ⇒ `ManagedChannelBuilder.forAddress("127.0.0.1", port)` ⇒ `ManagedChannelBuilder.forTarget("dns:///127.0.0.1:" + port)`
+  ⇒ 附**主干既有 14 处先例的同款注释**（`// ⚠️ **必须显式写 dns:/// scheme**：Nacos discovery 在全局 NameResolverRegistry 里 …`）⇒ **显式 scheme 直接选定 grpc-java 自带的 DNS resolver ⇒ 不受 devh 注册影响**。
+- ⚠️ 用 `dns:///`（grpc-java 自带）**而不是** devh 的 `static://` ⇒ 前者不依赖 devh 是否注册。
+- **语义等价论证**：authority 不变 —— `forAddress(host, port)` 与 `forTarget("dns:///" + host + ":" + port)` 的 authority 都是 `host:port`（本类 javadoc「直连地址 ⇒ authority = host:port」自述该口径）⇒ ⇒ 该类断言的「两个真实 channel ⇒ 两份独立 breaker」语义**不变**；且该类只调 `interceptCall`、**不发 RPC** ⇒ 不引入新的网络等待。
+
+**二、⚠️ 必须写清的限定：这处在本模块内是「潜在引信」，不是「正在起火的红项」**
+
+- **机制**（合并收口执行者 javap 实测）：devh `GrpcClientAutoConfiguration.grpcNameResolverRegistration(List<NameResolverProvider>)` ⇒ `io.grpc.NameResolverRegistry.getDefaultRegistry()`（**进程级全局**）⇒ `DiscoveryClientResolverFactory.getDefaultScheme()` = `"discovery"` ⇒ ⇒ **无显式 scheme 的 target** 被接管去 Nacos 查服务名 ⇒ `UNAVAILABLE` ⇒ 「单跑绿、同跑红」。
+- ⚠️ **但 `service/common` 的依赖树里没有 `nacos-discovery`**（本层实测：`mvn -o -pl service/common dependency:list` ⇒ 无 `nacos*` / `*discovery*`）⇒ ⇒ 本模块**没有** `DiscoveryClientResolverFactory` 这个 `NameResolverProvider` ⇒ ⇒ `grpcNameResolverRegistration` 注入的是**空列表** ⇒ ⇒ **本模块内不存在接管者**。
+- ⇒ ⇒ **实测证据**：同一 JVM 里先跑 `@SpringBootTest`（`GoStyleGrpcClientBreakerRpcAssemblyTest` · `@ImportAutoConfiguration(GrpcClientAutoConfiguration.class)`）再跑本类 ⇒ **改前（`forAddress`）与改后（`forTarget("dns:///…")`）都是 9/9 全绿** ⇒ ⇒ 「同跑红」在**本模块复现不出来**。
+- ⇒ ⇒ **本处改动 = 按静态守门口径的预防性消歧**（不是修一个可观察的红）。改它的理由是**守门**：`tools/difftest/check-grpc-channel-target-scheme.py` 的判据 = 扫 `service/**/*.java` 的**代码态** `forAddress(`，**不区分模块有没有 Nacos** ⇒ ⇒ 不改就得登记例外 ⇒ 而例外集的目标是「**剪到 0 ⇒ 零豁免**」⇒ ⇒ **改代码是唯一出路**；且共享层将来若引入 discovery（依赖面一变）这处即刻变成真陷阱。
+
+**三、验证**
+
+| 项 | 读数 |
+|---|---|
+| 目标测试类 | **6 条 / 0 失败** |
+| `service/common` 全量回归 | **476 条 / 0 失败 / 0 错误 / 0 跳过 · BUILD SUCCESS · 01:16** |
+| 静态守门（改完） | 报 **E2（例外已失效）** ⇒ 那条例外在 `tools/**` = 合并收口执行者的面 |
+| 静态守门（临时剪例外后 · 本层本地复跑） | **EXIT=0（基线绿）** ＋ `--mutation-test` **5/5 全部按预期被捕获**（M1 点位级精度 · M2 未登记文件 · M3 注释不误报 · M4 字符串字面量不误报 · M5 例外失效检测）⇒ ⇒ 随后已 `git checkout --` **还原检查器**（`tools/**` 非本层写权面）⇒ ⇒ **待合并收口执行者剪掉那条例外**（剪完即 EXIT=0） |
+
+**四、诚实边界**
+
+- **本层只改了 `service/common/**` 写权面内的这 1 处**；其余 8 条例外分属 comment / hot / users 三域（各域 lane 的面）⇒ ⇒ **不代改**。
+- 静态守门是**词法级**判据（剥注释与字符串字面量）⇒ 它拦的是**形态**，不是运行时行为 ⇒ ⇒ 「本模块无 Nacos ⇒ 这处不会被接管」这条限定**静态守门看不出来**（只能靠本节的依赖树实测）⇒ ⇒ **别把「守门绿」读成「运行时同形已证」**。
+- 「同跑红」的真实现场在**带 Nacos discovery 的域模块**（like / message / comment / follow / users / task）—— 那 14 处先例都在那些域里 ⇒ ⇒ 本节这条**限定**只对共享层这一处成立。
