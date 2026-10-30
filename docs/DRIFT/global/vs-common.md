@@ -4904,7 +4904,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 | **⑤ 实际变更文件** | **生产代码（共享层，G4 写权面）**：`service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java`（＋`remainingNanos` / ＋`bindAbsoluteNanos` / ＋`Scope`）· `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`（`onHalfClose` 双载体同刻绑定 ＋ `DeadlineState.bindAbsoluteNanos` ＋ 饱和加法）· **新增** `service/common/src/main/java/com/rag/common/protection/GoStyleOutboundDeadlineInterceptor.java` · **新增** `service/common/src/main/java/com/rag/common/protection/GoStyleOutboundDeadlineConfiguration.java` · `service/common/src/main/java/com/rag/common/protection/GoStyleProtectionConfiguration.java`（＋一行 `@Import`）· `service/common/src/main/java/com/rag/common/protection/GoStyleProtectionProperties.java`（＋嵌套 `OutboundDeadline`）<br>**守门（同一写权面）**：**新增** `service/common/src/test/java/com/rag/common/protection/GoStyleOutboundDeadlinePropagationGateTest.java`（真 in-process gRPC）· **新增** `service/common/src/test/java/com/rag/common/protection/GoStyleOutboundDeadlineRpcAssemblyTest.java`（真 Spring 上下文 ＋ devh registry）· **新增** `service/common/src/test/java/com/rag/common/observability/GoStyleRequestDeadlineScopeGateTest.java`<br>**台账**：本文件（本节 ＋ 回执小节 ＋ 转派单） |
 | **⑥ 测试场景和断言** | ① **传播守门**（真 gRPC）：上游装真 `RpcInterceptor`（**服务端超时故意给 5s**）＋ 客户端 deadline **300ms**；上游 handler 用**裸 stub**（**不调** `applyTo`）调一个**挂起 5s** 的下游 ⇒ 断言：出向调用**耗时 < 2s**（落码前必挂满 5s ⇒ **红**）、出向以 **`DEADLINE_EXCEEDED`** 失败、**下游此刻还没跑完**（⇒ 失败来自 deadline 而非下游提前返回）、handler 入口能读到请求载体剩余（>0 且 ≤ 300ms+100）；② **装配守门**：真 Spring 上下文（`RpcLikeApplication`，**不扫** `com.rag.common`、只 `@Import`）⇒ 断言拦截器**在 devh 的 `GlobalClientInterceptorRegistry` 里**（**不是**「Bean 存在」）＋ 默认开启 ＋ 客户端上界默认 0；③ **作用域守门**：关闭后载体消失 ＋ **嵌套关闭后外层值被原样还原** ＋ 别的线程看不到（ThreadLocal 语义） |
 | **⑦ 实际执行结果** | ✅ **共享层模块全绿**：`mvn -o -B -pl service/common -am test` ⇒ **413 条 / 0 失败 / 0 错误 / 0 跳过**（含新增 8 条）<br>✅ **变异精确转红**（红绿两向都有鉴别力）：把 `onHalfClose` 的载体绑定改成 `Long.MAX_VALUE`（= 无预算）⇒ `GoStyleOutboundDeadlinePropagationGateTest` **转红**（`EXIT=1`，红在「出向调用必须在 2000ms 内结束」这条断言上）⇒ ⇒ 随即**还原**并复核（`grep` 命中即原值）<br>🟢 **全量回归已完成**（**代码定稿后**重跑：`mvn -o -B clean test -DfailIfNoTests=false`）⇒ **52 模块 · BUILD SUCCESS · 28:45 min · 零红**；`service/common` = **424 条 / 0 失败 / 0 错误 / 0 跳过**（surefire **80 个** `TEST-*.xml` 逐 `testsuite` 求和 = 424，与 maven 汇总行**逐字一致**）⇒ **全仓 29 个有测试的模块 / 3312 条 / 0 failures / 0 errors / 4 skipped**（4 条 skipped 全在 favorite 域的 parity 门 ⇒ **非本轮引入**）⇒ **详证见 §4.19.4 ⑦**（含 G1 回信的处置）<br>⚠️ 上一轮（14:2x）那 **14 处失败已作废** —— 根因是「回归跑着的时候改了 `service/common` 源码 ⇒ 污染那些**自己会跑 maven** 的测试」（§4.19.4 ⑥ 四）⇒ ⇒ 本条只以**定稿后**这一轮为准 |
-| **⑧ 尚未解决的问题** | ① 🔴 **E65 未整体闭合** —— 本轮闭合的是「**继承**」这一面〔**【2026-10-30 订正 · G4 lane】这一面现已由**运行期**证据闭合**（不再只是「本轮」）：devh 的 `@GrpcClient` stub **不调 `applyTo`** 也继承请求 deadline ⇒ ⇒ 运行期守门见 §4.19.15 ⇒ ⇒ **残余只剩「客户端硬上界」那一轴 ＋ 探针侧改法**〕；**客户端硬上界**（Go 的 2000ms）**本轮默认不启用**（`capMillis=0`）⇒ 理由：Go 的 2000ms 是**默认值**而**各域可覆盖**（真源 `service/article/api/etc/article-api.yaml:12` = **70000** ⇒ 那是 **api 侧出向 article-rpc 的客户端**上界；⚠️ **别引错**：`service/article/rpc/etc/article.yaml:3` = 70000 是**服务端**超时（顶层挨着 `ListenOn`）、同文件 `:90` = 10000 才是客户端）⇒ 写成全局默认会让 article 比 Go 严 35 倍 ⇒ ⇒ **逐域启用 = P2-T04（域侧 yml = 各域 lane 的写权面）** ⇒ **这一轴仍是漂移，不假装已对齐**；② 🔴 **漂移形态门会红** —— `tools/difftest/check-deadline-downstream.py` 的 `EXPECTED_DRIFT` 钉死 RAG=`absent`，而载体落地后 `outgoing_carrier` 变 `present` ⇒ **该门会红（预期红，不是回归）** ⇒ **必须与 P2-T05 同批改口径**（否则会被当回归「修回去」）⇒ **P2-T05 落点不在 G4 写权面**（`tools/**` 无 lane 拥有）⇒ **转派主线**；③ 🔴 **探针本身也要改** —— `tools/semantic-probe/deadline-downstream/java/DeadlineDownstreamProbe.java:193` 的下游调用用**裸 stub** ⇒ 只改共享层则 `failed_fast`/`code` 仍 false/0 ⇒ **等值门不可能绿** ⇒ 探针改造 **同属主线**；④ 🔴 **`mutate-deadline-downstream.py` 的 M1 锚点已失效**（指向 `bindToCurrent(deadlineEpochMs)`，现码是 `bindRemainingNanos`/`bindAbsoluteNanos`）⇒ **今天跑就是红的** ⇒ 须重锚 ＋ 反转语义（去掉绑定 ⇒ 必红）⇒ **同属主线**；⑤ 🟡 **api 侧的传播面**已随本改动生效（9 个 api 进程扫描 `com.rag.common` ⇒ 拿到该拦截器 ⇒ api 侧裸 stub 也开始继承 HTTP 预算）⇒ **这是行为面变化**（Go 侧同形：api 层的 ctx deadline 同样传播给出向 gRPC）⇒ 但**本轮未跑 api 侧的行为对拍** ⇒ 登记为「待双侧活体验证」；⑥ 🟡 **20 个「有载体、无上界」的调用点**（A 类 6 个里的 2 个 + B 类）**仍未加上界** ⇒ 同 ① |
+| **⑧ 尚未解决的问题** | ① 🔴 **E65 未整体闭合** —— 本轮闭合的是「**继承**」这一面〔**【2026-10-30 订正 · G4 lane】这一面现已由**运行期**证据闭合**（不再只是「本轮」）：devh 的 `@GrpcClient` stub **不调 `applyTo`** 也继承请求 deadline ⇒ ⇒ 运行期守门见 §4.19.15 ⇒ ⇒ **残余只剩「客户端硬上界」那一轴 ＋ 探针侧改法**〕；**客户端硬上界**（Go 的 2000ms）**本轮默认不启用**（`capMillis=0`）⇒ 理由：Go 的 2000ms 是**默认值**而**各域可覆盖**（真源 `service/article/api/etc/article-api.yaml:12` = **70000** ⇒ 那是 **api 侧出向 article-rpc 的客户端**上界；⚠️ **别引错**：`service/article/rpc/etc/article.yaml:3` = 70000 是**服务端**超时（顶层挨着 `ListenOn`）、同文件 `:90` = 10000 才是客户端）⇒ 写成全局默认会让 article 比 Go 严 35 倍 ⇒ ⇒ **逐域启用 = P2-T04（域侧 yml = 各域 lane 的写权面）** ⇒ **这一轴仍是漂移，不假装已对齐**；② 🔴 **漂移形态门会红** —— `tools/difftest/check-deadline-downstream.py` 的 `EXPECTED_DRIFT` 钉死 RAG=`absent`，而载体落地后 `outgoing_carrier` 变 `present` ⇒ **该门会红（预期红，不是回归）** ⇒ **必须与 P2-T05 同批改口径**（否则会被当回归「修回去」）⇒ **P2-T05 落点不在 G4 写权面**（`tools/**` 无 lane 拥有）⇒ **转派主线**；③ 🔴 **探针本身也要改** —— `tools/semantic-probe/deadline-downstream/java/DeadlineDownstreamProbe.java:86` **自建裸 netty channel** ＋ `:198` 显式 `CallOptions.DEFAULT` ⇒ ⇒ **绕开了 devh 的拦截器装配** ⇒ 只改共享层则 `failed_fast`/`code` 仍 false/0 ⇒ **等值门不可能绿** ⇒ 探针改造 **同属主线**〔**【2026-10-30 订正 · G4 lane】真因订正**（与本表 `:5697` 同口径：不是「`:193` 裸 stub」，而是「`:86` 自建裸 netty channel ＋ `:198` `CallOptions.DEFAULT`」）⇒ ⇒ 且**机制链已由运行期守门证实**（`RpcInterceptor` 绑的载体 ⇒ devh 出向拦截器读到 ⇒ 载体已过期 ⇒ 出向调用立即失败）⇒ ⇒ **探针改完下游走 devh channel 就会绿** ⇒ ⇒ 逐条见 §4.19.17〕；④ 🔴 **`mutate-deadline-downstream.py` 的 M1 锚点已失效**（指向 `bindToCurrent(deadlineEpochMs)`，现码是 `bindRemainingNanos`/`bindAbsoluteNanos`）⇒ **今天跑就是红的** ⇒ 须重锚 ＋ 反转语义（去掉绑定 ⇒ 必红）⇒ **同属主线**；⑤ 🟡 **api 侧的传播面**已随本改动生效（9 个 api 进程扫描 `com.rag.common` ⇒ 拿到该拦截器 ⇒ api 侧裸 stub 也开始继承 HTTP 预算）⇒ **这是行为面变化**（Go 侧同形：api 层的 ctx deadline 同样传播给出向 gRPC）⇒ 但**本轮未跑 api 侧的行为对拍** ⇒ 登记为「待双侧活体验证」；⑥ 🟡 **20 个「有载体、无上界」的调用点**（A 类 6 个里的 2 个 + B 类）**仍未加上界** ⇒ 同 ① |
 | **⑨ 对阶段 2 的影响** | ① 本轮把「出向 deadline」从**逐点手工**升级为**共享层能力面** ⇒ 阶段 2 若要按 Go 的 per-domain 值逐域配上界（P2-T04），**不再需要改 27 个调用点** ⇒ 只改各域 yml ⇒ 阶段 2 的工作量与风险都显著下降；② 载体**作用域化**后，「线程池复用串味」这一类缺陷在共享层**不再可能** ⇒ 阶段 2 不必再为此单独立项；③ ⚠️ **阶段 2 仍需做**：客户端硬上界的 per-domain 配置（①）+ 门禁与探针的等值化（②③④）⇒ 这三项**都在阶段 1 的范围内被显式登记为「未闭合」**，不是被隐去 |
 
 ### 4.19.2 🔴 转派单（本层**零落码**的部分 ⇒ 交合并收口执行者 / 各域 lane）
@@ -6029,8 +6029,8 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 - 形态②的负控**刻意**复刻了探针的构造 ⇒ ⇒ 它证明的是「**那条探针量不到本层的能力**」⇒ ⇒ **不等于**「探针的结论对」⇒ ⇒ 探针本身该怎么改（`tools/**`）**不在本 lane 写权面** ⇒ ⇒ 归合并收口执行者。
 - 域侧**零改动**（本节没有碰任何域侧文件）⇒ ⇒ 第五节只改**共享层台账**；那 5 处共享文件（`_README.md` / `W6.md` / `domain-common-lanes.md` / `_signed-deviations.md` / `PhaseGoal-judge.md`）**在本 lane 写权面之外** ⇒ ⇒ 已发纠正面给合并收口执行者，由其就地改回。
 - 「11 类零上界」**这一轴仍是漂移**（客户端硬上界 2000ms 未启用）⇒ ⇒ 归 **P2-T04（域侧 yml）** ⇒ ⇒ **本节不改变那条结论**。
-- **回归**：本轮改动 = **1 个新测试类 ＋ 1 段 javadoc ＋ 台账文本** ⇒ ⇒ **生产代码零行为改动**。`mvn -o -B -pl service/common -am clean test` ⇒ **435 条 / 0 失败 / 0 错误 / 0 跳过**（82 个测试类；权威数按 `TEST-*.xml` 的 `tests=` 求和）⇒ ⇒ ⚠️ **该轮排除了 2 个 Testcontainers 类**（`GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` 3 条 ＋ `MybatisPlusInterceptorChainGateTest` 3 条 ＝ **6 条**）⇒ ⇒ **排除原因 = 本机 Docker 守护进程不响应**（`docker ps` 12 秒无输出 ⇒ 测试卡在 dockerjava 等 Docker ⇒ 整轮卡了 11 分钟才人工中断）⇒ ⇒ **这不是回归**（本轮改动**不涉及**这两个类）⇒ ⇒ ⇒ **补齐口径 = 441 条**（＝上一轮基线 437 ＋ 本层新守门 4 条）⇒ ⇒ ⚠️ **别用 `grep -c` 数 `@Test` 方法数**（会把 `@Testcontainers` 一并算进去 ⇒ 多 1 条）；要用 `@Test` 加词边界的精确计数。
-- ⚠️ **顺带登记一条既有环境缺陷（本轮只登记、不改）**：那 2 个 Testcontainers 类在 **Docker 不可用时是「挂死」而不是「快速失败」** ⇒ ⇒ **整轮回归会卡住直到人工中断** ⇒ ⇒ 修法应是加「Docker 不可用 ⇒ 该类 skip」的判据 ⇒ ⇒ ⚠️ **但改它们会动全仓测试计数口径**（skipped 数会变 ⇒ 各域 lane 的「条数」基线要跟着改）⇒ ⇒ ⇒ **本轮不动** ⇒ ⇒ 归属待定（两个类都在 `service/common` = 本 lane 写权面内，但口径影响跨 lane）。
+- **回归**：本轮改动 = **1 个新测试类 ＋ 1 段 javadoc ＋ 台账文本** ⇒ ⇒ **生产代码零行为改动**。`mvn -o -B -pl service/common -am clean test` ⇒ **435 条 / 0 失败 / 0 错误 / 0 跳过**（82 个测试类；权威数按 `TEST-*.xml` 的 `tests=` 求和）⇒ ⇒ ⚠️ **该轮排除了 2 个 Testcontainers 类**（`GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` 3 条 ＋ `MybatisPlusInterceptorChainGateTest` 3 条 ＝ **6 条**）⇒ ⇒ **排除原因 = 本机 Docker 守护进程不响应**（`docker ps` 12 秒无输出 ⇒ 测试卡在 dockerjava 等 Docker ⇒ 整轮卡了 11 分钟才人工中断）⇒ ⇒ **这不是回归**（本轮改动**不涉及**这两个类）⇒ ⇒ ⇒ **补齐口径 = 441 条**〔**【2026-10-30 订正 · G4 lane】排除原因订正**：Docker 不可用时**真挂死的只有 `MybatisPlusInterceptorChainGateTest` 一个类**⇒ ⇒ `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` **实测不需要 Docker**（第十三轮那轮 **2.742s 跑通 3 条 / 0 失败 0 错误**）⇒ ⇒ 「整轮卡 11 分钟」是**那一个类**造成的 ⇒ ⇒ ⇒ **该缺陷的实际影响面 = 1 个类 / 3 条**（不是 2 个类 / 6 条）〕（＝上一轮基线 437 ＋ 本层新守门 4 条）⇒ ⇒ ⚠️ **别用 `grep -c` 数 `@Test` 方法数**（会把 `@Testcontainers` 一并算进去 ⇒ 多 1 条）；要用 `@Test` 加词边界的精确计数。
+- ⚠️ **顺带登记一条既有环境缺陷（本轮只登记、不改）**：那 2 个 Testcontainers 类在 **Docker 不可用时是「挂死」而不是「快速失败」** ⇒ ⇒ **整轮回归会卡住直到人工中断** ⇒ ⇒ 修法应是加「Docker 不可用 ⇒ 该类 skip」的判据 ⇒ ⇒ ⚠️ **但改它们会动全仓测试计数口径**（skipped 数会变 ⇒ 各域 lane 的「条数」基线要跟着改）⇒ ⇒ ⇒ **本轮不动** ⇒ ⇒ 归属待定（两个类都在 `service/common` = 本 lane 写权面内，但口径影响跨 lane）。〔**【2026-10-30 订正 · G4 lane】实测收窄**：**真挂死的只有 `MybatisPlusInterceptorChainGateTest`**（真 PG ＋ Testcontainers）⇒ ⇒ `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` **实测不需要 Docker** ⇒ ⇒ ⇒ **修法可以只针对那一个类**⇒ ⇒ ⇒ 且本表 `:466` 记的「`MybatisPlusInterceptorChainGateTest` **3 / 3 绿**」⇒ ⇒ 说明 **Docker 曾可用**⇒ ⇒ ⇒ 「Docker 不可用」是**某时点的环境状态**、不是永久属性 ⇒ ⇒ ⇒ **别把一次的环境抖动写成架构缺陷**〕
 （**本节编号：§4.19.15** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
 
 
@@ -6072,6 +6072,57 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 #### 六 · 诚实边界
 
 - 本轮改动 ＝ **台账文本 ＋ 一个构造器的可见性 ＋ 探针复用说明** ⇒ ⇒ **生产行为零改动**（可见性放宽不改变任何已装配实例的行为：Spring 仍走 `@Autowired` 的那个构造器）。
-- 本轮**未跑双侧活体对拍**；「探针改法」**尚未落地**（`tools/**` ＝ 合并收口执行者的面）⇒ ⇒ 「探针能测到继承」目前只是**预期**，等它们改完探针才算数。
+- 本轮**未跑双侧活体对拍**；「探针改法」**尚未落地**（`tools/**` ＝ 合并收口执行者的面）⇒ ⇒ 「探针能测到继承」目前只是**预期**，等它们改完探针才算数。〔**【2026-10-30 订正 · G4 lane】这一半已被**单侧运行期**证据顶上一层**：「`RpcInterceptor` 绑的载体 ⇒ devh 出向拦截器读到 ⇒ 载体已过期 ⇒ 出向调用立即失败」这条**机制链**已由新守门真跑证实 ⇒ ⇒ 但**探针本体仍未跑** ⇒ ⇒ 「探针实测到 `failed_fast=true`/`code=4`」这件事**仍然只是预期** ⇒ ⇒ 逐条见 §4.19.17〕
 - 本层**未改任何域侧文件**、**未改探针**、**未改 `_README.md`**。
 - **回归**：`mvn -o -B -pl service/common -am clean test`（同 §4.19.15 的口径 ⇒ 排除 2 个 Testcontainers 类）⇒ ⇒ **435 条 / 0 失败 / 0 错误 / 0 跳过 · BUILD SUCCESS · 1:05**（82 个测试类；权威数按 `TEST-*.xml` 的 `tests=` 求和）⇒ ⇒ ⚠️ **同一条命令的第一次跑出现过一次瞬时 `BUILD FAILURE`（测试全绿但构建失败）** ⇒ ⇒ **重跑即绿** ⇒ ⇒ 但**当时用 `grep` 过滤掉了 ERROR 块 ⇒ 没取到失败原因** ⇒ ⇒ **如实记为「原因未捕获的瞬时失败」** ⇒ ⇒ ⚠️ **可疑项**：同期 G1/G3 也在并发跑 maven ⇒ ⇒ **并发写 `~/.m2` 本地仓库**是可能的一种（**未证实**）⇒ ⇒ ⇒ 教训：**过滤日志时别把 ERROR 块一起滤掉**。
+
+---
+
+### 端到端链的运行期实证（第十三次订正 · 2026-10-30 · G4 lane）
+
+#### 一 · 本轮补的是哪一个洞
+
+- 本层已有的两条守门**各覆盖半条链**：
+  - `GoStyleDevhOutboundDeadlineAssemblyGateTest`（第十一次订正）⇒ 覆盖「devh 把全局拦截器接到 channel 上」＋「拦截器读得到 ThreadLocal 载体」⇒ ⇒ 但载体是**手工** `GoStyleRequestDeadline.bindAbsoluteNanos(...)` 绑的 ⇒ ⇒ **没有**覆盖「生产上真正绑载体的那个组件」。
+  - `GoStyleOutboundDeadlineRpcAssemblyTest`（更早）⇒ 只断言「拦截器在 devh 的 registry 里」＝ 静态断言。
+- ⇒ ⇒ 缺的那一截 ＝ **生产链路的起点**：`RpcInterceptor.onHalfClose` 绑出来的载体，能不能被**下游**的出向拦截器读到。
+- ⇒ ⇒ 这一截**正是探针改造的必经之路** ⇒ ⇒ 若中间有一环不通，探针改完会**仍然红** ⇒ ⇒ 而那会被**误判成「探针改错了」** ⇒ ⇒ 故本轮先把它钉死。
+
+#### 二 · 新增守门
+
+- **类**：`service/common/src/test/java/com/rag/common/protection/GoStyleRpcInterceptorOutboundDeadlineChainGateTest.java`（新增 · 4 形态）。
+- **装置**：上游 ＝ 真 in-process gRPC 服务端（**挂生产 `RpcInterceptor`**，`newUnaryServerInterceptor(300ms, 1ms)`）＋ 另起一个**不挂** `RpcInterceptor` 的上游（负控用）· 下游 ＝ 真 in-process 服务端（挂起 5s）· 客户端 ＝ **devh 的真装配面**（`GrpcClientAutoConfiguration` ＋ 自顶 `InProcessChannelFactory` ⇒ 与生产 netty 工厂**同属** `AbstractChannelFactory` ⇒ ⇒ 装全局拦截器那一步**一字不差**）。
+- **形态①（主形态）**：上游挂 `RpcInterceptor` ＋ 载体**已过期** ＋ 下游走 devh channel ⇒ ⇒ 出向调用**立即** `DEADLINE_EXCEEDED`（实测 **< 200ms**，不是挂满 5s）⇒ ⇒ 下游**没跑完**。
+- **形态②（负控 A · 只差「下游走没走 devh」）**：同上游 ＋ 载体已过期 ＋ 下游走**裸** channel ⇒ ⇒ **挂满 5s** ＋ 失败码 `CANCELLED` ⇒ ⇒ 证明形态①的绿来自 **devh 拦截器**，不是「载体存在就会让调用失败」。
+- **形态③（负控 B · 只差「上游绑没绑载体」）**：上游**不挂** `RpcInterceptor`（⇒ 无载体）＋ 下游走 devh channel ⇒ ⇒ **挂满 5s** ＋ `CANCELLED` ⇒ ⇒ 证明形态①的绿来自 **`RpcInterceptor` 绑的载体**，不是「devh channel 自己会失败」。
+- **形态④（互补分支）**：上游挂 `RpcInterceptor` ＋ 载体**未过期** ⇒ ⇒ 出向调用**继承剩余预算** ⇒ ⇒ 在预算处 `DEADLINE_EXCEEDED`（实测 ≈ 300ms）⇒ ⇒ **既不是立即、也不是挂满** ⇒ ⇒ 与形态①一起钉死「过期」与「未过期」**两个分支**（否则「只有过期这一条路能走通」的半边实现也能蒙混过关）。
+
+#### 三 · 新发现的机制脆弱点（本轮最有价值的产出）
+
+- `GoStyleRequestDeadline.remainingNanos()` 在**已过期**时返回的是 **`0`**（`Math.max(0L, d - now)`）⇒ **不是负数**。
+- ⇒ 出向拦截器里 `if (requestRemaining >= 0L)` **成立** ⇒ ⇒ 预算被压成 `0` ⇒ ⇒ 命中「预算已耗尽 ⇒ 立即失败」分支 ⇒ ⇒ **「已过期 ⇒ 立即失败」这条路径是已实现的**。
+- ⚠️⚠️ **但这条路径只靠一个字符撑着**：若有人把那个 `>= 0L` 改成 `> 0L` ⇒ ⇒ 过期值（`0`）被跳过 ⇒ ⇒ **没有任何预算** ⇒ ⇒ 出向调用**静默退回「挂满」** ⇒ ⇒ 而这一行离「语义正确」只差一个字符 ⇒ ⇒ **极易被无声改坏**。
+- ⇒ ⇒ 这就是本类存在的理由：**它把那条分支钉死**，且 §4.19.16 末尾那句「『探针能测到继承』目前只是**预期**」也据此收窄为「**机制链已钉死 · 探针本体仍未跑**」。
+- ⚠️ **顺带一条给探针的判据提示**：期望文件里 RAG 半边应是 `failed_fast=true` / `code=4`（Go 侧 ＝ `present_expired`）⇒ ⇒ **别把「过期」读成「被跳过」** ⇒ ⇒ 那会把期望值写反。
+
+#### 四 · 变异（两个维度 · 不重叠）
+
+- **M1 ＝ 拿掉载体绑定**：`RpcInterceptor` 里 `GoStyleRequestDeadline.bindAbsoluteNanos(...)` ⇒ 换成 `Scope.NOOP` ⇒ ⇒ **形态① + 形态④ 转红**（各变 `CANCELLED` / 挂满 5s）· 形态②③ 保持绿 ⇒ ⇒ 「载体是必要条件」被精确命中。
+- **M2 ＝ 把过期值排除出 min**：`effectiveCallOptions` 的 `requestRemaining >= 0L` ⇒ 改成 `> 0L` ⇒ ⇒ **只有形态① 转红**（`CANCELLED` / 挂满 5s）· 形态②③④ 保持绿 ⇒ ⇒ 「已过期 ⇒ 立即失败」这条分支被**单独**命中。
+- ⇒ ⇒ 两个变异**互不重叠** ⇒ ⇒ 判据活着（不是「什么都能红」的宽松断言）。
+- ⚠️ 两个变异都**只改生产码**、跑完**逐字还原**（`diff -q` 复核通过）⇒ ⇒ **本轮生产码零改动**（`git diff --stat` 为空）。
+
+#### 五 · 对探针改造的结论（给合并收口执行者）
+
+- 机制链已由**运行期**证据钉死 ⇒ ⇒ 探针 RAG 半边若把下游改成**走 devh channel**（生产装配面）⇒ ⇒ 载体已过期 ⇒ ⇒ 出向调用**立即** `DEADLINE_EXCEEDED` ⇒ ⇒ 期望值 ＝ **`failed_fast=true` / `code=4`** ⇒ ⇒ 与 Go 侧的 `{'failed_fast':'true','code':'4','outgoing_carrier':'present_expired'}` **同形** ⇒ ⇒ **等值门可绿**。
+- ⚠️ **诚实边界**：**探针本体本轮未跑**（`tools/**` ＝ 合并收口执行者的面）⇒ ⇒ 「探针实测会绿」是**机制层已被运行期钉死**的推断，**不是**探针实测 ⇒ ⇒ **仍须他们改完自己跑**。
+
+#### 六 · 本轮改了什么
+
+- **新增 1 个测试类**（4 形态 ＋ 2 变异）⇒ ⇒ **生产码零改动**。
+- **台账就地订正 3 处（零行位移）**：`:4907` ③（探针真因：`:86` 自建裸 netty channel ＋ `:198` `CallOptions.DEFAULT` ⇒ 与 `:5697` 同口径）· `:6032` ＋ `:6033`（**Docker 缺陷面收窄**：真挂死的只有 1 个类）· `:6075`（「探针能测到继承」收窄为「机制链已钉死 · 探针本体未跑」）。
+- **本层未改任何域侧文件**、**未改探针**、**未改 `_README.md`**、**未改 `tools/**`**。
+- **回归**：`mvn -o -B -pl service/common -am clean test -Dtest='!GoStyleRedisDeadlineLiveRedisWriteFaceTest,!MybatisPlusInterceptorChainGateTest' -DfailIfNoTests=false` ⇒ ⇒ **442 条 / 0 失败 / 0 错误 / 0 跳过 · BUILD SUCCESS · 1:10**（84 个测试类；权威数按 `TEST-*.xml` 的 `tests=` 求和；⚠️ **javadoc 改动前后各跑一轮、两轮数字逐字一致** ⇒ ⇒ 改动前那轮是 1:20 ⇒ ⇒ **javadoc 零行为改动**）⇒ ⇒ ⚠️ **本轮排除模式里的类名漏了 `Gate` 后缀**（写成 `GoStyleRedisDeadlineLiveRedisWriteFaceTest`）⇒ ⇒ 该模式**匹配不到任何类** ⇒ ⇒ **实际只排除了 1 个类 / 3 条** ⇒ ⇒ ⇒ 与 §4.19.15 同口径（排 6 条）时应为 **439 条**（442 − 3）⇒ ⇒ ⇒ **跑全量 ＝ 445 条**（441 ＋ 新守门 4）⇒ ⇒ ⚠️ **补齐口径 = 441 ＋ 4 ＝ 445**（上一轮基线 441）⇒ ⇒ ⇒ ⚠️ **别把「一条命令写了什么」当成「实际排了什么」** ⇒ ⇒ 排除是否生效，要看 `surefire-reports` 里**有没有那个类的 XML**。
+- ⚠️ **本轮没有再出现瞬时 `BUILD FAILURE`**（上一轮那次「原因未捕获」的瞬时失败**本轮两轮均未复现** ⇒ ⇒ 那个可疑项仍**未证实** ⇒ ⇒ 且**两轮都全绿**这一点本身也说明「上一轮那次瞬时失败」更像**环境/并发**而非**代码确定性缺陷**）。
+
+（**本节编号：§4.19.17** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
