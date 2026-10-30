@@ -204,3 +204,51 @@ Go `getlikestatelogic.go:57-63` 的 `status.FromError` 对非 status 错误返�
 - 守门按**类名**识别副本 ⇒ ⇒ 一份**改了名**的同款实现不在它的视野内 ⇒ ⇒ 那类靠 review 纪律互补。
 - 本轮用 devh 的 **in-process** channel factory（与生产同一 `createChannel` 实现）⇒ ⇒ 上游 hop 的
   传输层与生产不同 ⇒ ⇒ 测的是「deadline 到点 ⇒ 立即失败」这个语义，**不依赖传输层**。
+
+### api 侧装配面实测结论（2026-10-31 · G4 lane · 本层自测）
+
+> **触发**：G1 回执 item 5 —— 「api 侧扫描面实测结论」⇒ 本节是本层的**独立复核**（不采信转述）。
+
+#### 结论一句话
+
+**api 侧不需要改启动类就能装上共享层的出向拦截器** ⇒ ⇒ 与 rpc 侧靠 `@Import` **同形** ⇒ ⇒ **「域侧只配参数」两侧都通**。
+
+#### 两侧装配面逐条实测（判据打在**消费点**，非声明点）
+
+| 侧 | 装配手段 | 出处 | 实测读数 |
+|---|---|---|---|
+| **rpc** | `@Import(GoStyleProtectionConfiguration.class)`（**显式导入**） | `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/ArticleRpcApplication.java:92` · `service/comment/comment-rpc/.../CommentRpcApplication.java:74` · `service/favorite/favorite-rpc/.../FavoriteRpcApplication.java:83` · `service/follow/follow-rpc/.../FollowRpcApplication.java:94` · `service/hot/hot-rpc/.../HotRpcApplication.java` | 4+ 个 rpc 域实测同一形态 |
+| **api** | `@SpringBootApplication(scanBasePackages = {…, "com.rag.common"})`（**组件扫描**） | `service/users/user/user-api/src/main/java/com/rag/users/user/api/UserApiApplication.java:21-24`（`"com.rag.users.user.api"` ＋ `"com.rag.common"`）· `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/AdminApiApplication.java:23-26`（`"com.rag.users.admin.api"` ＋ `"com.rag.common"`） | 两个 users api 域实测同一形态 |
+
+⇒ ⇒ **两侧的差别只是「谁来登记这个 Bean」**（rpc = 显式 `@Import` · api = 包扫描）⇒ ⇒
+**共享层 `GoStyleProtectionConfiguration` 在两侧都能被注册** ⇒ ⇒ **域侧只需配参数（yml），不必改启动类**。
+
+#### ⚠️ 一条**必须写清**的限定：两种装配手段**不是同一件事**
+
+| | rpc 侧 `@Import` | api 侧 `scanBasePackages` |
+|---|---|---|
+| 粒度 | **单个** Configuration 类 | **整包**（`com.rag.common` 下全部 `@Component` / `@Configuration`） |
+| 漏配的代价 | 该 rpc 域**少装**保护链 ⇒ ⇒ 保护链**静默缺层** | 该 api 域**少扫**整个共享层 ⇒ ⇒ 保护层**静默全缺** |
+| 可观测性 | 保护链守门会红（`layerNames()` 断言链构成） | 保护层守门会红（Bean 存在性断言） |
+
+⇒ ⇒ **api 侧的漏配面更大**（整包 vs 单类）⇒ ⇒ **api 侧更需要「域侧只配参数」这条路走通** ⇒ ⇒
+本节结论对 api 侧的意义比 rpc 侧更大。
+
+#### 🟡 诚实边界（三条，别读宽）
+
+1. **本节是源码级证据（E1）** —— 本轮**没有起真进程**验证「api 进程里出向拦截器真在链上」。
+   ⇒ ⇒ 与既有口径一致：**读作「按装配面推导」，不读作「已实测」**。
+2. **`scanBasePackages` 只保证「Bean 被注册」，不保证「拦截器被接在链上」** ——
+   ⚠️ 这正是 AGENTS.md §3.3.3 的核心形态（「**断言『Bean 存在』≠ 断言『机制生效』**」）⇒ ⇒
+   **「api 侧扫描面够用」与「api 侧出向 deadline 真生效」是两个面** ⇒ ⇒
+   **后者必须另有运行期证据**（真 devh 上下文 ＋ 真 `@GrpcClient` stub）⇒ ⇒
+   本层的运行期守门见 `docs/DRIFT/global/vs-common.md` §4.19.15（G4 `3499249a`）。
+3. **本节只覆盖 users 域的两个 api**（`user-api` / `admin-api`，本轮实读的）⇒ ⇒
+   **其余 7 个 api 域未逐一实测** ⇒ ⇒ **不得外推成「10 个 api 域全部如此」** ⇒ ⇒
+   「其余 api 域的 `scanBasePackages` 是否都含 `com.rag.common`」= **待核**（域侧可自核）。
+
+#### 🏷 一条**纠偏**（G1 自查纠偏的确认）
+
+G1 上一轮曾误判成「api 侧配 `cap-millis` 无效」⇒ ⇒ **本层独立复核结论 = 该误判不成立** ⇒ ⇒
+**api 侧配参数是有效的**（装配面走通 ⇒ 参数载体 `GoStyleProtectionProperties` 会被注册 ⇒ 参数会生效）⇒ ⇒
+**G1 的自查纠偏成立** ⇒ ⇒ 记此条以免该误判在后续轮次复发。

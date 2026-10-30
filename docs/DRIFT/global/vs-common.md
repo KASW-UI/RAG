@@ -6529,3 +6529,63 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 - **本层只改了 `service/common/**` 写权面内的这 1 处**；其余 8 条例外分属 comment / hot / users 三域（各域 lane 的面）⇒ ⇒ **不代改**。
 - 静态守门是**词法级**判据（剥注释与字符串字面量）⇒ 它拦的是**形态**，不是运行时行为 ⇒ ⇒ 「本模块无 Nacos ⇒ 这处不会被接管」这条限定**静态守门看不出来**（只能靠本节的依赖树实测）⇒ ⇒ **别把「守门绿」读成「运行时同形已证」**。
 - ⚠️ **「同跑红」的真实现场在「真发 RPC」的那几处** ⇒ ⇒ users 域 4 个 logout 测试 ＋ user-api 的 `UserApiGrpcNegotiationTest`（**接收者是 `NettyChannelBuilder`** ⇒ 它也继承 `ManagedChannelBuilder` ⇒ **改法同形**）⇒ ⇒ 归 **G1**；comment-rpc ＋ hot-rpc 那两处 G3 已修 ⇒ ⇒ **本节这条「惰性点」限定只对共享层这一处成立** ⇒ ⇒ **别把它外推成「这类形态都不必改」**。
+
+### §4.19.26 · 第二十二次订正轮次（2026-10-31 · G4 lane）—— **`:46` 枚举 ④⑤⑥ 的归类订正 ＋ 派工面矛盾转派**
+
+> **本节只写「做了什么 + 为什么 + 依据」**；逐条实测读数见 §四。
+
+**一、🔴 本轮订正的根因一句话**
+
+⇒ ⇒ **「零 per-call deadline」与「零上界」被当成同一个量** ⇒ ⇒ 台账 `:46` 与 §4.11.5 把「**裸 provider（无 per-call 载体）**」误列进「**零上界（连上界都没有）**」那一列 ⇒ ⇒ **该列的三条（④⑤⑥）其实都带 2000ms 客户端上界** ⇒ ⇒ **归错类**。
+
+**二、本轮改了什么（全部「就地单行替换」⇒ 零行位移 ⇒ 派生层指针棘轮不动）**
+
+| # | 位置 | 改动 | 依据 |
+|---|---|---|---|
+| ① | `:46` · 格 2 枚举 ④ | 行号 `:50` ⇒ **`:88`** | `:50` 是**空 javadoc 行**（javadoc 结束于 `:74`）⇒ 真实调用点是 `:88` 的 `capByClientTimeout(userStub)` |
+| ② | `:46` · 格 2 枚举 ④⑤⑥ | 补【2026-10-31 订正】段：**三条从来不是「零上界」** ＋ 逐条实测证据 | ④ `88c206ce`（2026-10-30 21:24）起带 2000ms 上界；⑤ `:194-196`；⑥ `:219-221`（均 = `capByClientTimeout(applyTo(stub))`） |
+| ③ | `:46` · 格 3 状态 | 「🔴 **仍 OPEN，但附注错**」⇒ **以末格为准（= 已闭合）** ＋ 历史快照留存 | 原格与末格「✅ 已闭合（2026-10-30 第四次订正）」**自相矛盾** ⇒ 行内指针是断的 |
+| ④ | §4.11.5 · 标题 / B 组小标题 / 合计式 | 补「**「零 deadline」≠「零上界」**」的重算口径 | 三条订正后 ⇒ 「零 per-call deadline 的调用点」= **9 处 / 8 个类**（30 − 1 − 8 − 12）；**「零上界」= 0** |
+| ⑤ | §4.11.5 · B-06 / B-10 / B-11 三行 | 形态订正（「裸调」/「裸 provider」→「有 2000ms 上界」/「cap+applyTo 双维」）＋ 行号订正（`:50`→`:88` · `:143`→`:194` · `:173`→`:219`） | 同 ② |
+| ⑥ | `:5559` / `:5560`（P0 定级表 B-10 / B-11） | 依据列订正 ＋ **分类 `A`/`P0`/阻断`是` ⇒ `D`/`P3`/阻断`否`** | 同 ②；且 **8 个 / 12 个调用点全部经 provider**（逐点实测，见 §四） |
+
+**三、🔴 派工面矛盾 ⇒ 转派收口执行者（本层无写权，不代改）**
+
+⚠️ **本轮发现一个必须显式说明的机制事实**（否则下一轮会误判「我改了却没生效」）：
+
+- 派生层对 `B-10` / `B-11` 的 **`stage` / `prio` / `blocking` 三列**，**来源不是本文件** ⇒ ⇒ 是
+  **`docs/DRIFT/_cross/grading/W3.md` 的 U5-O 显式定级叠加层**（**优先级最高** ⇒ 压过 U5-0 的台账表格判定；
+  键 = `(lane, 编号)`，lane 从文件名取 ⇒ `W3` = global 域）。
+- ⇒ ⇒ **本层改完本文件后，派生层的 `stage`/`prio`/`blocking` 三列**仍**读作 `A` / `P0` / `是`**
+  ⇒ ⇒ **派工面会继续挂一条「已不成立」的阶段一阻断项** ⇒ ⇒ **这就是派工面与源台账矛盾**。
+- ⇒ ⇒ **`docs/DRIFT/_cross/grading/**` 不在本层写权面**（机器口径：`docs/RoundPlan/**` 与 `docs/DRIFT/_cross/**`
+  同归合并收口执行者）⇒ ⇒ **本层只登记 + 转派，不代改** ⇒ ⇒ **收口执行者需要把 `W3.md` 的 `B-10` / `B-11`
+  两行按本节 ② 的实测口径改成 `D` / `P3` / 阻断`否`**。
+- ⚠️ **另一处联动（同样在收口执行者面）**：`docs/DRIFT/_cross/grading/_lanes.json` 里 `B-10` / `B-11` 的
+  **`title` 是快照**（仍含旧文本「🔴 **裸 provider** … `:143`」）⇒ ⇒ 它与本层已订正的台账行**已经不一致**
+  ⇒ ⇒ **收口执行者叠取本层这笔后需要一并刷新那两个 `title`**（否则派工清单会指向旧文本）。
+- ⇒ ⇒ **本层已实测的派生层影响**：条目数 **1174 → 1174**（新增 0 / 消失 0）· 改列 **2 条**（`B-10` / `B-11` 的
+  **内容列**）· **状态 / 证据档 / 阶段归属三列未动**（那三列归 U5-O 叠加层 ⇒ 见上）· 产物 MD **逐字节一致**。
+
+**四、逐条实测读数（本层自测，不采信转述）**
+
+| 项 | 实测 |
+|---|---|
+| ④ `follow/follow-rpc/.../client/UserRpcClient.java` | `:75` `CLIENT_TIMEOUT_MILLIS = 2000L` · **`:88`** `return capByClientTimeout(userStub)` · `:104` `stub.withDeadlineAfter(capNanos, NANOSECONDS)` ⇒ ⇒ **有 2000ms 上界**（`88c206ce` · 2026-10-30 21:24 引入） |
+| ⑤ `users/user/user-api/.../client/UserRpcClient.java` | `:194-196` `userRpc()` ⇒ `capByClientTimeout(GoStyleRequestDeadline.applyTo(userServiceBlockingStub))` · `:208-222` `capByClientTimeout` ⇒ `Math.min(remainingNanos, capNanos)`，**`capNanos` = 2000ms**；无入向预算时 `remainingNanos` = `Long.MAX_VALUE` ⇒ min = 2s ⇒ **恒有上界** |
+| ⑥ `users/admin/admin-api/.../client/AdminRpcClient.java` | `:219-221` + `:229-243` ⇒ **同 ⑤** |
+| ⑤ 的 8 个调用点 | **全部经 `userRpc()`**：`UserLogoutService:85` · `UserLoginService:83` · `AvatarSelectService:76` · `UserRegisterService:58` · `UserUpdateService:73` · `UserDeleteService:68` · `AvatarHistoryService:80` · `AvatarUploadService:79` |
+| ⑥ 的 12 个调用点 | **全部经 `adminRpc()`**：`AdminCreateInviteCodeService:57` · `AdminGetUserService:43` · `AdminLoginService:58` · `AdminUpdateUserService:69` · `AdminLogoutService:49` · `AdminBanUserService:50` · `AdminListUserService:55` · `AdminDeleteUserService:50` · `AdminUpdateSelfService:64` · `AdminResetUserPasswordService:50` · `AdminUnBanUserService:50` · `AdminCreateService:54` |
+| 「零 per-call deadline」的真实数 | **9 处 / 8 个类**（30 − 1（B-06）− 8（B-10）− 12（B-11）） |
+| 「零上界」的真实数 | **0**（三处 2000ms 上界均已在位；`6d04dc19` 未入主干 ⇒ 它改的是**上界的承担方**，不是上界的有无） |
+
+**五、本轮的诚实边界（三条）**
+
+1. **本轮零代码改动**（只改台账）⇒ ⇒ **不需要新的批准** ⇒ ⇒ **不需要升级为全量回归波**。
+2. **「零上界 = 0」这个结论的适用范围 = 本轮实读的 3 条**（④⑤⑥）⇒ ⇒
+   **其余 8 个类未逐一重核** ⇒ ⇒ **不得外推成「全仓 21 个出向 stub 都零上界 = 0」** ⇒ ⇒
+   ⚠️ **其余 8 个类的上界由 P2-T04（域侧 yml）承担** ⇒ ⇒ **`991ea75b` 已把口径统一为「补该域 Go `Timeout` 硬上界」**
+   ⇒ ⇒ **那 8 个类的「零上界」是否也已消解 = 域侧面，本层未核**。
+3. **本节的证据强度 = L1（源码级逐行对照）** ⇒ ⇒ **不是活体对拍** ⇒ ⇒
+   ⚠️ **「有 2000ms 上界」≠「下游挂死时必然收口」** —— 上界是 `withDeadlineAfter` 施加的**客户端 call deadline** ⇒ ⇒
+   **真收口行为需活体验证** ⇒ ⇒ **本层未做该活体实测**（该面归 users 域的运行期守门，见 §4.19.15 口径）。
