@@ -1,0 +1,77 @@
+package com.rag.common.redis;
+
+import com.rag.common.protection.GoStyleProtectionProperties;
+import org.springframework.beans.factory.config.BeanPostProcessor;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.core.RedisTemplate;
+
+/**
+ * <b>把「Redis 请求期限感知」接到各域的 {@code RedisTemplate} / {@code StringRedisTemplate} 上。</b>
+ *
+ * <h2>为什么是 {@link BeanPostProcessor}（而不是让各域换注入点）</h2>
+ * <p>各域注入的是 {@code StringRedisTemplate} / {@code RedisTemplate}
+ * ⇒ 若要「域侧零改动」生效，就只能<b>把这些 Bean 背后的 connection factory 换掉</b>
+ * ⇒ ⇒ 用 {@link BeanPostProcessor} 在 Bean 初始化后调
+ * {@link RedisTemplate#setConnectionFactory(RedisConnectionFactory)}
+ * ⇒ ⇒ <b>域侧一行都不用改</b>（形态①）。
+ *
+ * <h2>⚠️ 为什么用字符串形式的 {@code @ConditionalOnClass}</h2>
+ * <p>本类的方法签名引用了 {@code RedisTemplate} ⇒ 若 Redis 不在 classpath，
+ * <b>加载本类就会失败</b>（{@code NoClassDefFoundError}）⇒ 条件必须写成字符串形式，
+ * 让 Spring 用 ASM 读元数据、<b>在加载本类之前</b>完成判定。
+ *
+ * <h2>装配面</h2>
+ * <p>本类在 {@code META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports}
+ * 里登记 ⇒ ⇒ <b>凡是依赖 {@code service/common} 且用 Redis 的进程都自动生效</b>
+ * ⇒ ⇒ 10 个 api ＋ 8 个用 Redis 的 rpc 组件<b>零改动</b>获得该能力。
+ */
+@AutoConfiguration
+@ConditionalOnClass(name = {
+        "org.springframework.data.redis.core.RedisTemplate",
+        "org.springframework.data.redis.connection.RedisConnectionFactory"
+})
+@EnableConfigurationProperties(GoStyleProtectionProperties.class)
+public class GoStyleRedisDeadlineAutoConfiguration {
+
+    /**
+     * 把各 {@code RedisTemplate} 的 connection factory 换成预算感知版。
+     *
+     * <p>⚠️ <b>必须是 {@code static}</b>：否则这个 BeanPostProcessor 会过早实例化
+     * {@link GoStyleProtectionProperties} ⇒ 触发「配置类还没准备好」的告警
+     * ⇒ 而 {@code static} 的 {@code @Bean} 方法允许带参数注入 ⇒ 正好绕开这个问题。
+     */
+    @Bean
+    static BeanPostProcessor goStyleRedisDeadlineBeanPostProcessor(GoStyleProtectionProperties props) {
+        return new GoStyleRedisDeadlineBeanPostProcessor(props.getRedisDeadline().isEnabled());
+    }
+
+    /**
+     * 把 {@code RedisTemplate} 的 connection factory 换成 {@link GoStyleRedisDeadlineConnectionFactory}。
+     */
+    static final class GoStyleRedisDeadlineBeanPostProcessor implements BeanPostProcessor {
+
+        private final boolean enabled;
+
+        GoStyleRedisDeadlineBeanPostProcessor(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        @Override
+        public Object postProcessAfterInitialization(Object bean, String beanName) {
+            if (!(bean instanceof RedisTemplate<?, ?> template)) {
+                return bean;
+            }
+            RedisConnectionFactory current = template.getConnectionFactory();
+            if (current == null || current instanceof GoStyleRedisDeadlineConnectionFactory) {
+                // ① 没有 factory ⇒ 不管；② 已经是包装版 ⇒ 幂等（避免重复包装）
+                return bean;
+            }
+            template.setConnectionFactory(new GoStyleRedisDeadlineConnectionFactory(current, enabled));
+            return bean;
+        }
+    }
+}
