@@ -147,6 +147,24 @@ python3 tools/difftest/check-wave-lane-ownership.py     # ⇒ EXIT=0
 - **每条问题** ⇒ 标 `twoStage.md` §10 的**阶段归属**（**A**=阶段 1 准入阻断 / **B**=竞争力补强 / **C**=阶段 2 建设项 / **D**=可不实现）⇒ 别把 C 类当 A 类做，也别把 A 类挂着不做。
 - 🔴 **不碰** `twoStage.md` 的 §1.3 / §4 / §6 / §7（阶段 2 的业务语义逐项核对 + 12 维度生产级审查）⇒ **那是收口执行者的事**。
 
+### 0-1. 🆕 派工清单 = **派生层施工单**（2026-10-30）
+
+**两份标准文件给的是「标准」，派工清单给的是「这一轮具体做什么」** —— 后者 = 三目录台账的**派生层**：
+
+| 位置 | 是什么 | lane 怎么用 |
+|---|---|---|
+| [`DRIFT/_cross/stage1-derivation.md`](DRIFT/_cross/stage1-derivation.md) | **人读层** —— **§四 = 可开工清单**（**§4.1** = A/B 类 · 阶段一范围内 · §4.2 = C/D 类 · 阶段二承接） | **先看 §4.1** ⇒ 只取**自己域** + **阶段归属 A/B** 的条目 |
+| [`DRIFT/_cross/stage1-derivation.tsv`](DRIFT/_cross/stage1-derivation.tsv) | **机器层** —— 全量问题项 × **16 列**（`id / 域 / 状态 / 证据强度 / 优先级 / 阶段归属 / 是否阻断阶段一 / 排期指针 / 证据缺口 / rules / basis`） | 按 `domain` + `stage` + `blocking` 过滤 ⇒ 直接生成自己的待办 |
+| `tools/ledger-derive/derive-stage1.py` | **生成器 + 守门**（`--check`：源台账改了而派生层没重生成 ⇒ `EXIT=1`） | 改完台账**必须**重跑，否则守门红 |
+
+⚠️ **三条效力边界（越界即失效）**：
+① **只读台账、不读产品代码** ⇒ 它是台账的**投影**、不是代码的事实 ⇒ 派工时台账写「✅ 已闭合」的**仍须**按 AGENTS.md §3.3 确认（**注解存在 ≠ 机制生效 · 跑绿 ≠ 对**）；
+② **每行都带 `rules` 规则号 + `basis` 双侧 `文件:行号`** ⇒ **可回源**；`basis` 缺 Go 侧或 RAG 侧一侧 ⇒ 派生层**整行丢弃**（**不猜**）；
+③ **台账结论会过期**（实测：`D-7` 的「熔断打开 ⇒ 1015」半句已死 · `G-3` 的 🔴 标题是历史快照 · `SF-001` 的 MISMATCH 早已修好）⇒ 派工前**按 `basis` 抽查**，别照抄标题。
+
+⚠️ **派生层指标自己被修过 3 次（§七 ⑦⑧⑨）** ⇒ **「真缺口 A/B 未排期 = 0」只有在修完后才成立**；
+派工前若发现「某条该有指针却没有」，先查 [`DRIFT/_cross/grading/_README.md`](DRIFT/_cross/grading/_README.md) §七，别直接当成漏排。
+
 ### 1. 台账写入边界 —— 不碰共享索引
 
 | 文件 | 谁写 |
@@ -181,6 +199,7 @@ docs/Intentional_Deviations/<本域>/   ← 本域签字偏离：哪些「看着
 docs/Pitfalls/<本域>/                 ← 本域踩过的坑：这个域特有的陷阱
 docs/PhaseGoal/                       ← 本轮判定项：g<N>.md（per-lane 投影）+ PhaseGoal-judge.md（权威）
 docs/DRIFT/_cross/                    ← 跨模块档案（跨域不变量：共享 Flyway 账本 / 建表责任交叉 / 事实投递链路）
+docs/DRIFT/_cross/stage1-derivation.md ← 🆕 派生层施工单（§三·0-1）：§四 = 可开工清单（先看 §4.1）
 ```
 
 ⚠️ `_cross/` 必看的原因：跨组件不变量不属于任何单个组件，**塞进组件任务里就会被漏掉**。
@@ -549,6 +568,9 @@ git merge-base --is-ancestor align/g4-service-common do-my-own-gh && echo "已�
 | 建波次工作树 | `git worktree add "../RAG.worktrees/g<N>-<slug>" -b "align/g<N>-<slug>" do-my-own-gh` |
 | 确认脚手架在位 | `ls ../RAG.worktrees/g4-service-common/docs/DRIFT/global/vs-common.md` |
 | **验写权（机器）** | `python3 tools/difftest/check-wave-lane-ownership.py` |
+| **取自己的派工清单（施工单）** | `python3 tools/ledger-derive/derive-stage1.py --report`（只打印统计不写盘）· 人读版 = `docs/DRIFT/_cross/stage1-derivation.md` §四 |
+| **重生成施工单**（改完台账必跑） | `python3 tools/ledger-derive/derive-stage1.py` |
+| **验施工单没漂移** | `python3 tools/ledger-derive/derive-stage1.py --check`（源台账改了而派生层没重生成 ⇒ `EXIT=1`） |
 | 推 feature 分支 | `git push -u upstream align/<域>` |
 | 合回主干 | `git merge --no-ff align/<域>` |
 | 同步基线 | `git merge do-my-own-gh`（在工作树内） |
