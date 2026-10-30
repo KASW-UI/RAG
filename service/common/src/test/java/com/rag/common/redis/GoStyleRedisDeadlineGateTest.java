@@ -57,15 +57,19 @@ class GoStyleRedisDeadlineGateTest {
     }
 
     @Test
-    @DisplayName("请求预算<b>已耗尽</b> ⇒ 命令<b>没有</b>被下发（比 Go 更严的那一面）")
+    @DisplayName("请求预算<b>已耗尽</b> ⇒ <b>连连接都建不出来</b>，命令更没被下发（比 Go 更严的那一面）")
     void exhaustedBudgetBlocksTheCommand() {
         RedisStubFactory.reset();
         GoStyleRequestDeadline.clear();
         try (GoStyleRequestDeadline.Scope ignored = GoStyleRequestDeadline.bindAbsoluteNanos(
                 System.nanoTime() - TimeUnit.SECONDS.toNanos(1))) {
-            RedisConnection connection = redisTemplate.getConnectionFactory().getConnection();
-            assertThatThrownBy(() -> connection.get("k".getBytes(StandardCharsets.UTF_8)))
-                    .as("预算耗尽 ⇒ 必须在下发命令之前就失败（Spring 标准超时异常 ⇒ 域侧 catch(Exception) 不用改）")
+            // ⚠️ 2026-10-30（第六次订正）：检查点**前移到建连之前**（对齐 Go 的 pool.go:1098-1103
+            //   waitTurn「先查 ctx → 再取/拨连接 → 再写」）⇒ ⇒ 预算耗尽时**连连接都建不出来**
+            //   ⇒ ⇒ 本条现在钉的是「建连前」那道；「命令下发前」那道由
+            //   GoStyleRedisDeadlineLiveRedisWriteFaceGateTest 的「已建连接」序列钉住。
+            assertThatThrownBy(() -> redisTemplate.getConnectionFactory().getConnection())
+                    .as("预算耗尽 ⇒ 必须在下发命令之前就失败（Spring 标准超时异常 ⇒ 域侧 catch(Exception) 不用改）"
+                            + "；且本轮起检查点<b>前移到建连之前</b> ⇒ ⇒ 连连接都建不出来（比原先更早 ⇒ 更强）")
                     .isInstanceOf(QueryTimeoutException.class);
         } finally {
             GoStyleRequestDeadline.clear();

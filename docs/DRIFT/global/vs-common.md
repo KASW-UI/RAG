@@ -5698,3 +5698,105 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 3. 🔴 **`GoStyleRequestDeadline` 缺作用域化 API ⇒ 漏 `clear()` 会串味** ⇒ 落码须同时加作用域化 API ＋ 补一条「跨请求不串味」断言（**派单没有这条**）。
 4. 🟡 **`outgoing_carrier` 会在共享层半边落地后翻红** —— 探针 `:187-188` 读的是 `GoStyleRequestDeadline.isPresent()` ⇒ 绑定后由 `absent` 变 `present` ⇒ 漂移形态门 `check-deadline-downstream.py`（`EXPECTED_DRIFT` 钉死 RAG=`absent`）**会红** ⇒ 这是**预期**的红（不是回归）⇒ 必须与 P2-T05 同批改口径，否则会被当成回归「修回去」。
 
+
+### 共享层 · Redis 期限能力面 · 第六次订正（2026-10-30 · G4 lane）
+
+> **本节只追加在文件末尾 ⇒ 零行位移 ⇒ 不影响 `_unresolved.md` 与 `grading/*` 的硬编码行号指针。**
+> **本节不写状态标记、不以编号 token 作标题 ⇒ 不触发派生层自噬（标题劫持 / 表格行状态标记提升 / 订正表首格旧状态再登记）。**
+
+#### 一 · 上一版守门是「零判别力」的假绿（本轮最重要的一条教训）
+
+上一版新增的「真生产路径」守门（Boot 自造 template ＋ 真 Lettuce factory）**首跑 5 条里 1 条红**。逐层定位后得到的根因是**判据本身错了，不是机制错了**：
+
+| 项 | 事实 | 出处 |
+|---|---|---|
+| `LettuceConnectionFactory.getConnection()` **会真去拨号** | 栈迹：`GoStyleRedisDeadlineConnectionFactory.getConnection` → `LettuceConnectionFactory.getConnection` → `StandaloneConnectionProvider.getConnection` → `RedisClient.connect()` ⇒ ⇒ **在「预算检查」之前就炸连接异常** | 实测（2026-10-30） |
+| ⇒ ⇒ **上一版判据零判别力** | 上一版拿「本地无 Redis ⇒ 连接异常」当「没碰 socket」的证据 ⇒ ⇒ 但预算耗尽时**也是先炸连接异常** ⇒ ⇒ **两个方向形状一样 ⇒ 判别力 = 0** | 同上 |
+| ⇒ ⇒ **真 Redis 一存在就露馅** | 起一个真 `redis-server`（本机 8.6.3）后复跑 ⇒ ⇒ 预算充足 ⇒ `template.get("g4probe")` **返回 `v1`**（真往返）；预算耗尽 ⇒ **抛 `QueryTimeoutException: redis command skipped (op=get)`** ⇒ ⇒ **机制是对的** | 同上 |
+
+**教训（本轮新增，跨项目可复用）**：**当判据依赖「外部依赖不可达」这类环境状态时，必须先问「被测物在这个状态下真的会走到那一步吗」** —— 本例中 `getConnection()` 的拨号发生在命令之前 ⇒ ⇒ 「连不上」根本不是「命令有没有下发」的信号 ⇒ ⇒ **判据从一开始就不成立**。
+⇒ ⇒ **同族**：与「你以为你测的是 A 实际测的是 B」「弱兜底判据会把真缺陷洗成 0」同一族，但方向相反 —— **这一次的判据不是太松，是「用一个与被测量无关的失败当证据」** ⇒ ⇒ **凡拿「异常类型」当证据的，必须先确认那个异常只能由被测量产生**。
+
+#### 二 · 设计订正：预算检查前移到「建连之前」（对齐 Go 的 `waitTurn`）
+
+**Go 侧出处（自读，非引用）**：`go-redis v9.20.0 internal/pool/pool.go:1098-1103`
+
+```go
+func (p *ConnPool) waitTurn(ctx context.Context) error {
+    // Fast path: check context first
+    select {
+    case <-ctx.Done():
+        return ctx.Err()
+    default:
+    }
+```
+
+`waitTurn` 由 `pool.go:837` 的 `getConn` 调用 ⇒ 而拨号在 `pool.go:591` 的 `dialConn(ctx, …)` ⇒ ⇒ **Go 的顺序 = 「先查 ctx → 再取/拨连接 → 再写」**。
+
+**RAG 侧改前 = 「先拨连接 → 再在命令下发前查」** ⇒ ⇒ 两处不同 ⇒ ⇒ 落码改为 **`GoStyleRedisDeadlineConnectionFactory.getConnection()` 在 `delegate.getConnection()` 之前查预算** ⇒ ⇒ **与 Go 的检查位置逐条对齐**（预算耗尽 ⇒ **连都不拨**）。
+
+**⇒ ⇒ 对 §4.19.7 第三节「残余方向 = RAG 更宽 ⇒ RAG 照写」的订正**：那句话**是错的** ⇒ ⇒ 改前的真实残余是「**RAG 多建一次连接**（资源层）」，而**写行为两侧同形**（两侧都不写）⇒ ⇒ 改后连**资源层**也同形 ⇒ ⇒ **「派发前检查」这一层不再有残余**。
+
+#### 三 · 两层检查的分工（各对应 Go 的一处）
+
+| 层 | 落点 | 对应 Go | 为什么必须留 |
+|---|---|---|---|
+| 建连前 | `GoStyleRedisDeadlineConnectionFactory.getConnection()` | `pool.go:1098-1103` 的 `waitTurn` | 预算耗尽 ⇒ 不拨号（与 Go 同序） |
+| 命令下发前 | `GoStyleRedisDeadlineConnection`（代理） | Go 的「**每条命令**都过一次 `pool.Get(ctx)`」 | **事务绑定 / 手动持有连接**时不再重新取连接 ⇒ ⇒ 只有这一层能查到 ⇒ ⇒ 少了它 ⇒ 事务内第 2 条命令漏检 ⇒ ⇒ 多了它 ⇒ 每命令一次 ⇒ ⇒ 与 Go 同形 |
+
+⇒ ⇒ **只留建连前 = 漏（事务场景）**；**只留命令前 = 多（为已死的请求先拨一次连接）** ⇒ ⇒ 两层并存才是同形。
+
+#### 四 · 守门（三层 ＋ 双向变异）
+
+| 层 | 文件 | 断言的「量」 | 变异 M1（删建连前检查） | 变异 M2（删命令处检查） |
+|---|---|---|---|---|
+| L1（无外部依赖 · 生产路径） | `GoStyleRedisDeadlineRealLettuceGateTest` | 预算耗尽 ⇒ 抛 `QueryTimeoutException` **且**异常链里**没有** `RedisConnectionFailureException`（⇒ 没拨号）；预算充足 ⇒ 绝不抛 `QueryTimeoutException` | **转红** | 仍绿 |
+| L2（真 Redis 写面） | `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` | 预算耗尽 ⇒ `set` 抛异常 ⇒ **用独立通道读回仍是基线值**（⇒ 真没写进去，不是靠异常类型推断）；预算充足 ⇒ 写进去并读回 | 仍绿 | 仍绿 |
+| L3（已建连接序列） | 同上 | 连接**已建立**后耗尽预算 ⇒ 命令仍被拦下 ⇒ **只有命令处那道能拦** | 仍绿 | **转红** |
+
+⇒ ⇒ **三层各抓一处、互不重叠**（M1 ⇒ L1 ③ 红；M2 ⇒ L3 红）⇒ ⇒ 覆盖了「建连前」「写面」「命令处」三个面。
+
+#### 五 · 对合并收口执行者第 4 点的订正：覆盖面不是「零改动」
+
+- **实测**：`@Autowired RedisConnectionFactory` 拿到的**仍是裸 `LettuceConnectionFactory`**（不是包装版）⇒ ⇒ **本能力只覆盖「经 `RedisTemplate` 的路径」**，**不覆盖直接注入 factory 的写法**。
+- **今天还不是活 bug**：全仓检索，域侧 **main** 代码对 `RedisConnectionFactory` **零**直接注入（只有测试注入）。
+- ⇒ ⇒ `GoStyleRedisDeadlineAutoConfiguration` 的类 javadoc 原写「10 个 api ＋ 8 个 rpc 组件**零改动**获得该能力」**超出实际覆盖面** ⇒ ⇒ **已改为「经 RedisTemplate 的路径」**（并写明「若将来要覆盖直接注入这条路 ⇒ 需把包装器也注册成 Bean ⇒ 本轮不做」）。
+
+#### 六 · 第 5 点的裁与落码：rpc 域的观测端口**不挂** Go 的 api 侧中间件
+
+**裁的结论**：**不挂**（Go 的 rpc 服务是 `zrpc.MustNewServer` ⇒ **一个 rest 中间件都没挂**；`rest.With*` 全在 api 侧 ⇒ ⇒ 挂上去的是「Go 的 api 侧策略」⇒ ⇒ 属真偏离）。
+
+**⚠️ 但清单必须按类判定 —— 实测推翻了其中一条更大的担忧**（真起进程，三形态）：
+
+| 形态 | 主 context | `com.rag.common` 的 Filter 名单（实测） |
+|---|---|---|
+| ① | non-web（**rpc 现状**） | **空** |
+| ② | servlet（加载体后，未设 side） | **只有** 路径归一 Filter（**判据自检**：它确实注册 ⇒ 探针有区分力） |
+| ③ | non-web ＋ 独立 `management.server.port` | 空，**且 `local.management.port` 为空 ⇒ management 端口根本没起** |
+| ④ | servlet ＋ `rag.side=rpc` | **空**（= opt-out 生效） |
+
+⇒ ⇒ **「CPU 降载 Filter 会拒掉抓取请求」这个担忧不成立**：它是 `@Component` ⇒ 靠组件扫描 ⇒ 而**各 rpc 域的 `@SpringBootApplication` 刻意不扫 `com.rag.common`**（`article-rpc` 的 Application 注释点名 `HttpMiddlewareFilter` 作为「不扫」的理由）⇒ ⇒ **不会成为候选** ⇒ ⇒ 且**即便主 context 变 servlet，实测名单里也没有它**。
+
+⇒ ⇒ **真正会激活的只有 2 条**（它们在 `AutoConfiguration.imports` 里 ⇒ **不靠扫描**）：`GoStylePathNormalizingAutoConfiguration`（→ 路径归一 Filter）＋ `GoStyleJsonContentTypeAdvice`（→ `ResponseBodyAdvice`）。
+
+**落码（已在本 lane 写权面内完成）**：给这 2 条加 **`rag.side=api` 限定**（`@ConditionalOnProperty(name = "rag.side", havingValue = "api", matchIfMissing = true)`）⇒ ⇒ **默认 `api` ⇒ 零回归**；⇒ ⇒ **rpc 域设 `rag.side=rpc` 即不挂** ⇒ ⇒ 与 Go 同形。
+
+⇒ ⇒ **守门**：`GoStyleApiSideMiddlewareActivationGateTest`（4 格 = 上述四形态，真起进程）。
+⇒ ⇒ **⚠️ 本轮被守门抓到的自己的错**：第一版写成 `@ConditionalOnProperty(prefix = "rag.side", name = "side", …)` ⇒ ⇒ **prefix 与 name 会被 `.` 连接 ⇒ 属性名变成 `rag.side.side`** ⇒ ⇒ 条件恒成立（形态④ 红）⇒ ⇒ **判据有牙的自证**。
+
+#### 七 · 转派（落点不在 G4 写权面）
+
+| 事项 | 落点 | 归属 |
+|---|---|---|
+| 各 rpc 域的 `application.yml` 加 `rag.side=rpc` | 各域 yml | **合并收口执行者**（合并窗口统一加） |
+| 「rpc 域必须继续不扫 `com.rag.common`」的护栏（跨域静态检查） | `tools/difftest/check-*.py` | **合并收口执行者**（`tools/**` 不在 G4 白名单） |
+| `check-plaintext400-headers.sh` 的陈旧注释 ＋ 全 SKIP 仍 `exit 0` 的假绿 | `tools/difftest/**` | **合并收口执行者** |
+| `check-deadline-downstream.py` 的 `outgoing_carrier` 口径 ＋ `mutate-deadline-downstream.py:56` 的 M1 锚点失效 | `tools/difftest/**` | **合并收口执行者**（须与代码同批） |
+| 派生层产物（`docs/DRIFT/_cross/stage1-derivation.md` / `.tsv`）随本节重新生成 | `docs/DRIFT/_cross/**` | **合并收口执行者**（`docs/DRIFT/_cross/**` 不在 G4 写权面） |
+
+#### 八 · 本轮诚实边界
+
+- **无 Redis 服务端时的活体对拍仍未做**（L2 依赖 Testcontainers 起 `redis:7-alpine`；本地镜像在 ⇒ 本轮真跑了 ⇒ **CI 未必有镜像 ⇒ 该层会诚实跳过（Skipped），不能靠「构建绿」推断它跑过**）。
+- **Go 侧「预算耗尽 ⇒ 不写」** 仍是**读源码 + 真源探针**（`pool.go:1098-1103` / `pool.go:837` / `pool.go:591`）⇒ **未做 Go↔RAG 双侧活体对拍** ⇒ 「与 Go 一致」只能读作「在同一个 ctx 语义下同形」。
+- **两处检查的位置**（建连前 / 命令前）是**按 Go 源码逐行推得** ⇒ ⇒ 「亚毫秒级的窗口差异」本仓守门区分不了。
+- **`GoStyleRedisDeadlineConnection` 的白名单**只拦「声明类 == `DefaultedRedisConnection`」的命令（实测该接口有 274 个 default 方法，含 `get`/`set`/`exists`/`del`）⇒ ⇒ **直接调 `connection.stringCommands().xxx(...)` 绕过检查**（已知边界，已写进该类 javadoc）。

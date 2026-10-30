@@ -28,6 +28,21 @@ import org.springframework.data.redis.core.RedisTemplate;
  * <p>本类在 {@code META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports}
  * 里登记 ⇒ ⇒ <b>凡是依赖 {@code service/common} 且用 Redis 的进程都自动生效</b>
  * ⇒ ⇒ 10 个 api ＋ 8 个用 Redis 的 rpc 组件<b>零改动</b>获得该能力。
+ *
+ * <h2>🔴 覆盖面边界（2026-10-30 G4 第六次订正 · 实测）</h2>
+ * <p>⚠️ <b>本能力只覆盖「经 {@link RedisTemplate} 的路径」</b> ——
+ * 本类换的是 <b>{@code RedisTemplate} 里的那个 factory 引用</b>
+ * ⇒ ⇒ <b>不是把容器里的 {@code RedisConnectionFactory} Bean 换掉</b>
+ * ⇒ ⇒ ⇒ <b>直接注入 {@code RedisConnectionFactory} 的代码拿到的仍是裸 factory</b>（实测：
+ * 注入点是 {@code LettuceConnectionFactory}，不是包装版）。
+ * <ul>
+ *   <li><b>今天为什么还不是活 bug</b>：全仓 grep，域侧 <b>main</b> 代码对
+ *       {@code RedisConnectionFactory} <b>零</b>直接注入（只有测试注入）⇒ ⇒ <b>潜在</b>缺口。</li>
+ *   <li><b>但「10 个 api ＋ 8 个 rpc 组件零改动获得该能力」这句话本身超出实际覆盖面</b>
+ *       ⇒ ⇒ 已改成「<b>经 RedisTemplate 的路径</b>」（本节）。</li>
+ *   <li><b>若将来要覆盖「直接注入 factory」这条路</b> ⇒ ⇒ 需把包装器<b>也注册成 Bean</b>
+ *       （并处理「既有注入点拿到的是哪个」的替换问题）⇒ ⇒ <b>本轮不做</b>（无活需求 ⇒ 不造无用抽象）。</li>
+ * </ul>
  */
 @AutoConfiguration
 @ConditionalOnClass(name = {

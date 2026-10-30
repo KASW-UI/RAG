@@ -34,10 +34,28 @@ import java.lang.reflect.Proxy;
  *       ⇒ <b>不拦截</b>（否则会破坏事务回滚与 pipeline 收尾）。</li>
  * </ul>
  *
+ * <h2>⚠️ 两层检查的分工（2026-10-30 G4 第六次订正 · 实证）</h2>
+ * <p>预算检查<b>有两处</b>，缺一不可，<b>各自对应 Go 的一处</b>：
+ * <ul>
+ *   <li><b>①「取连接 / 拨号」前</b> ⇒ {@link GoStyleRedisDeadlineConnectionFactory#getConnection()}
+ *       ⇒ 对应 Go 的 {@code waitTurn}（<code>pool.go:1098-1103</code>）
+ *       ⇒ ⇒ <b>预算耗尽 ⇒ 连都不拨</b>（与 Go 同形）。</li>
+ *   <li><b>②「命令下发」前</b> ⇒ <b>本类</b> ⇒ 对应 Go 的「<b>每条命令</b>都过一次 waitTurn」
+ *       ⇒ ⇒ <b>事务绑定场景的兜底</b>：事务内复用同一条连接 ⇒ 不再走 ① ⇒ ⇒
+ *       ② 保证<b>每条命令</b>仍被查一次（与 Go 每命令一次同形）。</li>
+ * </ul>
+ * <p>⚠️ <b>只留 ① 会漏（事务内第 2 条命令）</b>；<b>只留 ② 会多（为已死的请求先拨一次连接）</b>
+ * ⇒ ⇒ 两处并存 ⇒ ⇒ <b>写行为与资源行为都与 Go 同形</b>。
+ *
  * <h2>⚠️ 已知不覆盖的面（诚实边界）</h2>
  * <ul>
  *   <li><b>{@code connection.getRedisCommands().xxx(...)} 直接调底层命令 ⇒ 绕过检查</b>
- *       （本仓各域的实际写法是 {@code connection.set(...)} 这类<b>上层</b>调用 ⇒ 命中）。</li>
+ *       （本仓各域的实际写法是 {@code connection.set(...)} 这类<b>上层</b>调用 ⇒ 命中）。
+ *       <p>⚠️ <b>实测细节（SDR 4.0.7）</b>：{@code DefaultedRedisConnection.get(byte[])} 的默认实现
+ *       是 {@code stringCommands().get(key)} ⇒ ⇒ <b>外层</b> {@code get(byte[])} 声明在
+ *       {@code DefaultedRedisConnection} ⇒ <b>命中本类的拦截判据</b>（预算检查在派发前触发）⇒
+ *       ⇒ 但<b>内层</b>那个 {@code stringCommands()} 上的命令是<b>直接下发</b>的（不经过代理）⇒
+ *       ⇒ 若业务<b>直接</b>调 {@code connection.stringCommands().get(...)} ⇒ ⇒ 绕过检查。</li>
  *   <li><b>pipeline</b>：命令在 {@code closePipeline()} 时才真正下发 ⇒ 而
  *       {@code closePipeline} <b>不拦截</b> ⇒ ⇒ pipeline 内的命令<b>不</b>受预算约束。</li>
  *   <li><b>集群 / 哨兵连接</b>（{@code getClusterConnection} / {@code getSentinelConnection}）

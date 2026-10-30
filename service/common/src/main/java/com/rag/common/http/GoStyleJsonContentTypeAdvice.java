@@ -1,6 +1,7 @@
 package com.rag.common.http;
 
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.core.MethodParameter;
 import org.springframework.http.HttpHeaders;
@@ -92,6 +93,10 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
  */
 @AutoConfiguration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
+@ConditionalOnProperty(
+        name = "rag.side",
+        havingValue = "api",
+        matchIfMissing = true)
 @RestControllerAdvice
 public class GoStyleJsonContentTypeAdvice implements ResponseBodyAdvice<Object> {
 
