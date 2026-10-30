@@ -17,6 +17,7 @@ import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.ApplicationContext;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -109,6 +110,16 @@ class AdminRpcPrometheusCarrierGateTest {
     @DynamicPropertySource
     static void httpPort(DynamicPropertyRegistry registry) {
         registry.add("server.port", RealTomcatPort::pick);
+        // ⚠️ **必须把 gRPC 业务口覆盖成 0**（= 随机口）——
+        //   本测试**刻意不排除** devh 的 `GrpcServerAutoConfiguration`：
+        //   排除它 = 连带拆掉它提供的 `GrpcServerProperties` / `GrpcServiceDiscoverer` /
+        //   `GlobalServerInterceptorRegistry` 三个 bean ⇒ 而 `GrpcServerFactoryAutoConfiguration`
+        //   又 @Autowired 后两个 ⇒ ⇒ 连锁 `NoSuchBeanDefinitionException` ⇒ 上下文起不来。
+        //   ⚠️ **实测连着踩了三层**（2026-10-31 · 合并收口执行者跑载体门时）：
+        //   ① `GrpcServerProperties` → ② `GrpcServiceDiscoverer` → ③ `GlobalServerInterceptorRegistry`
+        //   ⇒ ⇒ **保持生产装配面不动**，改用「端口置 0」避开与本机已跑服务抢口。
+        //   ⇒ 域侧业务口 = 8081（AdminRpcApplication）⇒ ⇒ 置 0 ⇒ 绑随机口。
+        registry.add("grpc.server.port", () -> 0);
     }
 
     @LocalServerPort
@@ -138,18 +149,11 @@ class AdminRpcPrometheusCarrierGateTest {
      * ＋ 显式 {@code @Import}）⇒ ⇒ 只装被测机制需要的件。
      */
     @SpringBootConfiguration
-    @EnableAutoConfiguration(exclude = {
-            // ⚠️ **必须排除 devh 的 gRPC server 自动配置**：
-            //    devh 3.1.0 的 `GrpcServerAutoConfiguration` **无条件**起 gRPC server
-            //    （它的 `spring-configuration-metadata.json` 里**没有** `grpc.server.enabled`
-            //    ⇒ ⇒ 没有「关掉 gRPC」这个开关）⇒ ⇒ 不排除 ⇒ 它会去绑域侧业务口 8081
-            //    ⇒ ⇒ 与本机已跑的服务抢口 ⇒ BindException ⇒ 上下文起不来。
-            //    ⇒ ⇒ 本测试**不验 gRPC**（验的是 HTTP 载体与暴露面）⇒ ⇒ 排除掉最干净
-            //    ⇒ ⇒ 且**不需要**任何 gRPC 端口（也就不会碰「OS 盲选口」那条红线）。
-            net.devh.boot.grpc.server.autoconfigure.GrpcServerAutoConfiguration.class
-    })
+    @EnableAutoConfiguration
     @Import(AdminRpcMetrics.class)
     static class MinimalCarrierApp {
+
+
     }
 
     // ====================================================================================
