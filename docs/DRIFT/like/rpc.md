@@ -2658,7 +2658,7 @@ like_rpc_action_total{action="unknown",result="invalid_param",target_type="artic
   **3 个** api 侧**自动配置**（`GoStylePathNormalizingAutoConfiguration` /
   `GoStyleJsonContentTypeAdvice` / `GoStyleBreakerRouteTemplateAutoConfiguration`）不许注册。
   ⚠️ **【订正 · 见文末「rebase 后守门转强制判据」小节】**：共享层的 `rag.side` 门**已在树上**（**内容口径** —— 不再写「本分支基线 hash」，理由见该小节末段）
-  ⇒ ⇒ 这条**不再 skip**、**执行**且**通过**（本域 `like-rpc`：`tests=4 / failures=0 / errors=0 / skipped=0` ⇒ **真执行**；⚠️ 原写「两域各 `Tests run 4 / Skipped 0`」⇒ ⇒ **该口径已作废** —— `message-rpc` 侧 = **未评估**，见该小节）⇒ ⇒ 已是**强制判据**；⚠️ 但「机制到位 ⇒ 自动转强制」
+  ⇒ ⇒ 这条**不再 skip**、**执行**且**通过**（本域 `like-rpc`：`tests=4 / failures=0 / errors=0 / skipped=0` ⇒ **真执行**；⚠️ 原写「两域各 `Tests run 4 / Skipped 0`」⇒ ⇒ **该口径已作废** —— `message-rpc` 侧 = **未评估**，见该小节 ⇒ ⇒ **【订正 · 见文末「docker 恢复后载体守门与三域回归的真读数」小节】该结论已于同日被新证据取代 ⇒ 已转「已评估」**）⇒ ⇒ 已是**强制判据**；⚠️ 但「机制到位 ⇒ 自动转强制」
   ⇒ 当时是**假的**（探针用 JDK `getAnnotation` **不穿透元注解** ⇒ rebase 后仍 skip）⇒ ⇒ 已改用 `AnnotatedElementUtils.findMergedAnnotation`。
 
 **🔴 跨 lane 依赖（登记给 G4 / 合并收口执行者）**：共享层把 `rag.side` 门从 **2 个类**
@@ -2762,7 +2762,7 @@ RAG 侧**实测**（2026-10-30 20:07 · 真 fat jar ＋ 不设 `POSTGRES_PASSWOR
   Tomcat 参数上限）**一个都不在容器里**；
 - 同一测试的 `apiSideAutoConfigurationsMustNotRegisterWhenSideIsRpc()` ⇒ **3 个**自动配置面类不在容器里
   ⚠️ **【订正 · 见文末「rebase 后守门转强制判据」小节】**：共享层的门**已在树上** ⇒ ⇒ 这条**执行**且**通过**（本域 `like-rpc`：`tests=4 / failures=0 / errors=0 / skipped=0`）
-  ⇒ ⇒ 已是**强制判据**（原写「两域各 `Tests run 4 / Skipped 0`」⇒ ⇒ **该口径已作废** —— `message-rpc` 侧 = **未评估**，见该小节；「skip ≠ 通过」的纪律依然成立 —— **「未评估」也不是「通过」**）。
+  ⇒ ⇒ 已是**强制判据**（原写「两域各 `Tests run 4 / Skipped 0`」⇒ ⇒ **该口径已作废** —— `message-rpc` 侧 = **未评估**，见该小节 ⇒ ⇒ **【订正 · 见文末「docker 恢复后载体守门与三域回归的真读数」小节】同日已闭环（干净绿 ＋ 变异红在目标断言）**；「skip ≠ 通过」的纪律依然成立 —— **「未评估」也不是「通过」**）。
 - ⇒ ⇒ 合计：**rpc 进程里 api 侧 web 中间件 = 0**。
 
 **依据三 · `HttpPoolLifecycle` 不属于「剩余项」（否掉一版错误口径）**
@@ -2872,23 +2872,23 @@ RAG 侧**实测**（2026-10-30 20:07 · 真 fat jar ＋ 不设 `POSTGRES_PASSWOR
   - `defaultObservationPortMatchesGoDevServerPort` **PASS**（唯一一条与容器无关 ⇒ 它绿**不能**代表载体到位）
   ⇒ ⇒ **这次变异跑不构成判据证据**（变异必须红在**目标断言**，而不是「容器没起来」）
   ⇒ ⇒ 且**干净跑（2026-10-30 22:51-22:52）的 XML 被这次变异跑在同一 `target/` 目录覆写**
-  ⇒ ⇒ ⇒ **干净读数现已不可取证** ⇒ ⇒ ⇒ **`message-rpc` = 未评估**（**不是**「已通过」）。
+  ⇒ ⇒ ⇒ **干净读数现已不可取证** ⇒ ⇒ ⇒ **`message-rpc` = 未评估**（**不是**「已通过」）。**【订正 · 见文末「docker 恢复后载体守门与三域回归的真读数」小节】此处为 02:0x（docker 仍坏）的读数；同日 02:2x 已重跑 ⇒ 干净树 `4/0/0/0` ＋ 变异红在目标断言 ⇒ 现行态 = 已评估。**
 
 **环境（与合并收口执行者登记的环境受阻项 `ENV-06` 同源）**
 
 - 2026-10-31 `curl --unix-socket ~/.docker/run/docker.sock http://localhost/_ping` ⇒ **HTTP `000`**（socket 不可达）
-  ⇒ ⇒ **容器类用例全部不可用** ⇒ ⇒ 恢复前一律写「**未评估**」，**不得**写「已通过」。
+  ⇒ ⇒ **容器类用例全部不可用** ⇒ ⇒ 恢复前一律写「**未评估**」，**不得**写「已通过」。**【订正 · 见文末「docker 恢复后载体守门与三域回归的真读数」小节】docker 已于同日恢复（`_ping` = 200）⇒ 本段口径已过期 ⇒ 容器类用例本轮全部真跑（`skipped=0`）。**
 - ⇒ ⇒ 恢复后需**重跑两次**才算闭环：① **干净树** ⇒ 必须 `skipped=0` 且全绿；
   ② **变异树**（摘掉 `message-rpc` 的 `rag.side: rpc`）⇒ ⇒ 必须**红在目标断言**
   ⇒ ⇒ **不是**红在「`Tomcat started on` 缺失」或 `pg_filenode.map` ⇒ ⇒ 跑完还原。
 
-**🔴 三域回归本轮无效（读数 = 0 条，不是「789 条 / 0F / 0E / 2S」）**
+**🔴 三域回归本轮无效（读数 = 0 条，不是「789 条 / 0F / 0E / 2S」）**【订正 · 见文末「docker 恢复后载体守门与三域回归的真读数」小节】本段为 02:0x（docker 仍坏 ⇒ `common` 先炸 ⇒ 三域全 `banned`）的读数；同日 02:2x 已重跑 ⇒ **789 条 / 0F / 0E / 0S**。
 
 - 2026-10-30 23:10 的三域八模块回归 ⇒ `service/common` 的 `MybatisPlusInterceptorChainGateTest` **1 条 ERROR**
   （`Previous attempts to find a Docker environment failed. Will not retry.`）⇒ ⇒ `common` **FAILURE**
   ⇒ ⇒ `message-rpc` / `message-api` / `like-api` / `like-rpc` / `task-api` / `task-rpc` **全部 `banned`（Skipped）**
   ⇒ ⇒ **本波三域一条测试都没跑** ⇒ ⇒ **本轮三域读数 = 0 条**。
-- ⚠️ 那组「789 条 / 0 failures / 0 errors / 2 skipped」是 **rebase 之前**的读数 ⇒ ⇒ **不可**当作本轮读数引用。
+- ⚠️ 那组「789 条 / 0 failures / 0 errors / 2 skipped」是 **rebase 之前**的读数 ⇒ ⇒ **不可**当作本轮读数引用。**【订正 · 见文末「docker 恢复后载体守门与三域回归的真读数」小节】同日重跑得 **789 条 / 0F / 0E / 0S** —— 总数相同、skipped 由 2 ⇒ 0（那 2 条容器用例这次真跑了）⇒ 现行态以文末小节为准。**
 - ⇒ ⇒ 该失败点在**共享层 `service/common`（G4 写权面）** ⇒ ⇒ **本域不写** ⇒ ⇒ 已报合并收口执行者。
 
 **2026-10-31 非容器守门新鲜读数（rebase 后实跑 · 全部 `EXIT=0`）**
@@ -2903,3 +2903,61 @@ RAG 侧**实测**（2026-10-30 20:07 · 真 fat jar ＋ 不设 `POSTGRES_PASSWOR
 - 上文原写「本分支**已 rebase 到主干 `89ec4245`**」⇒ ⇒ ⚠️ **凡把「分支基线 hash」写进台账断言，主干每前进一步就过期一次**
   （本轮主干已再前移 ⇒ ⇒ 那句当天就再次过期）⇒ ⇒ 本次统一改为**内容口径**
   （「共享层的门**已在树上**」/「`tools/` **已在树上**」）⇒ ⇒ 以后**不再**把分支基线 hash 写进台账断言。
+### 【闭环 · 2026-10-31 02:2x · G2 lane】docker 恢复后载体守门与三域回归的真读数
+
+**触发**：上文那节的两条结论（「`message-rpc` = 未评估」/「三域回归本轮无效 = 0 条」）都是在 **docker 仍坏**时取到的读数
+⇒ ⇒ docker 恢复（`_ping` = **200** · server **29.2.1** · 真 `postgres:16-alpine` 容器起得来）后 ⇒ ⇒ **全部重跑**
+⇒ ⇒ 本节是取代上文那两段的**现行态**（上文保留作历史留档）。
+
+**一 · 载体守门 · 干净树 —— 两域各 `tests=4 / failures=0 / errors=0 / skipped=0`**
+
+- `message-rpc`：`service/message/message-rpc/target/surefire-reports/TEST-com.rag.message.message.rpc.MessageRpcMetricsCarrierGateTest.xml`
+  ⇒ `tests=4 / failures=0 / errors=0 / skipped=0` ⇒ ⇒ **真执行且通过**（`skipped=0` ⇒ 不是跳过）· 真 PG 容器起来 · 34.17 s
+- `like-rpc`：同形 ⇒ `tests=4 / failures=0 / errors=0 / skipped=0` ⇒ ⇒ **真执行且通过** · 24.70 s
+- ⇒ ⇒ 两域各 4 条 = `rpcSideMustNotCarryApiSideHttpMiddleware` · `defaultObservationPortMatchesGoDevServerPort` ·
+  `realFatJarExposesPrometheusAndKeepsGrpcAlive` · `apiSideAutoConfigurationsMustNotRegisterWhenSideIsRpc` ⇒ ⇒ 全 PASS。
+
+**二 · 变异验证 —— 摘掉 `message-rpc` 的 `rag.side` ⇒ 必须红在目标断言 ⇒ 已满足**
+
+- 变异内容：`service/message/message-rpc/src/main/resources/application.yml` 的 `rag:` / `side: rpc` **整块摘除**
+  ⇒ ⇒ `rag.side` 缺失 ⇒ ⇒ 共享层 `@ConditionalOnProperty(name="rag.side", havingValue="api", matchIfMissing=true)` ⇒ ⇒ **默认 api 形态**
+  （该文件 `:195` 的注释本就写明「默认（matchIfMissing=true）= **api 形态** ⇒ ⇒ **rpc 模块必须显式写 `rag.side: rpc`**」）
+- 变异跑读数：`tests=4 / failures=2 / errors=0 / skipped=0` ⇒ ⇒ **`errors=0` ＝ 不是 infra 失败**
+  （上轮那次变异跑是 `failures=2 / errors=1`，红在「`Tomcat started on` 缺失」＋ NPE ⇒ 那是 infra ⇒ 本轮**不是**同一形态）
+- 两条红**都在目标断言**：
+  - `rpcSideMustNotCarryApiSideHttpMiddleware`（`:348`）⇒ 「🔴 运行期属性表里**没有** `rag.side` ⇒ 本模块的形态声明**没进运行时**
+    ⇒ 共享层的门（`@ConditionalOnProperty(name="rag.side")`）拿不到值 ⇒ ⇒ 共享层的门**形同虚设**。」
+  - `apiSideAutoConfigurationsMustNotRegisterWhenSideIsRpc`（`:393`）⇒ 「🔴 共享层已落 `rag.side` 门，但本模块的 rpc 容器里**仍注册**了
+    api 侧自动配置：[`GoStylePathNormalizingAutoConfiguration`, `GoStyleJsonContentTypeAdvice`, `GoStyleBreakerRouteTemplateAutoConfiguration`]
+    ⇒ ⇒ 本模块的 `rag.side: rpc` 没生效（或共享层的门没吃到这个值）。」
+  - 另两条仍 PASS（与形态声明**无关** ⇒ 它们绿**不能**说明载体到位）
+- ⇒ ⇒ **判据有区分力**：变异 ⇒ **红在目标断言** ⇒ ⇒ 这条守门**不是假绿**。
+- ⇒ ⇒ **还原后复跑 = 绿**（两域各 `4/0/0/0`）⇒ ⇒ 还原后工作区 `git status` 干净 ⇒ yml 与 `HEAD` **逐字节一致**。
+
+**三 · 三域八模块回归 —— 真读数 = `789` 条 / `0 failures` / `0 errors` / `0 skipped`**
+
+- 命令：`mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end -pl service/message/message-api,service/message/message-rpc,service/message/message-common,service/like/like-api,service/like/like-rpc,service/like/like-common,service/task/task-api,service/task/task-rpc -am test`
+- **`BUILD SUCCESS`** · 总耗时 **19:09** ⇒ ⇒ 逐模块（以 `TEST-*.xml` 的 `tests=` 求和为准，不读 stdout 汇总行）：
+  `message-api` **114** · `message-rpc` **105** · `message-common` **21** · `like-api` **104** · `like-rpc` **155** ·
+  `like-common` **18** · `task-api` **135** · `task-rpc` **137**
+  ⇒ ⇒ **合计 789 条 / 0 failures / 0 errors / 0 skipped**（旁证：上游 `common` **445** / `users-common` **39**，亦全绿 —— 上轮正是 `common` 先炸把三域全 `banned`）
+- ⚠️ **与上文「789 条 / 0F / 0E / 2S」的区别不在总数，在 skipped** ⇒ ⇒ 同样 789 条 ⇒ ⇒ **那 2 条从「跳过」变成「真跑」**
+  （容器可用 ⇒ 真 PG 活体）⇒ ⇒ **证据强度升级**（skip ≠ 通过）。
+- ⇒ ⇒ 上文那条「本轮读数 = 0 条」与「789 是 rebase 之前的读数」**都已被本节取代**。
+
+**四 · 环境**
+
+- docker 已恢复：`_ping` = **200** · `docker version` = **29.2.1** · `docker run --rm postgres:16-alpine` ⇒ **PG_OK**
+  ⇒ ⇒ 上文那节的环境受阻口径**已过期** ⇒ ⇒ 本轮容器类用例**全部真跑**（三域 `skipped=0`）
+  ⇒ ⇒ 与合并收口执行者登记的环境受阻项（`docs/RoundPlan/_unresolved.md` · 环境或权限受阻项）同源的那条**已消**（主干亦已销账）。
+
+**五 · 本轮留下的纪律**
+
+- ① **产物会被覆盖**：变异跑与干净跑写**同一个 `target/surefire-reports/`** ⇒ ⇒ 上文那节「干净读数被变异跑覆写、不可再取证」就是这个坑
+  ⇒ ⇒ 本轮先 `cp` **快照**干净 XML 再跑变异（快照留在 `/tmp/g2-clean-snapshot-*` / `/tmp/g2-mutant-snapshot-*`）。
+  ⚠️ 附带一条工具事实：**`-Dsurefire.reportsDirectory=<dir>` 在本仓 surefire 3.5.6 下不生效**（该目录仍为空，报告照旧落模块 `target/`）
+  ⇒ ⇒ 想隔离两次跑**只能靠快照**，不能靠该属性。
+- ② **变异必须红在目标断言**：红在「容器没起来 / 端口占用 / `System.exit` 慢」等 infra 形态 ⇒ 等于没跑
+  ⇒ ⇒ 判据式：**先定位红在哪一行**，再判这条判据是死是活。
+- ③ **跑门禁前要一次覆盖该模块的全量跑**：门禁读的是 `target/` 里的报告 ⇒ ⇒ 任何定向 `-Dtest=` 跑都会改写它
+  ⇒ ⇒ 本轮顺序 = 干净跑 → 变异跑 → 还原复跑 → **三域全量回归（19:09）** → 再跑门禁。
