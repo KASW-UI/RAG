@@ -359,6 +359,7 @@
 > ✅ **本轮：27 个守门全部实跑**（上一轮只执行了 24 个、另外 3 个当时被跳过 ⇒ 本轮**全部补执行且全绿**）：`check-flyway-concurrent.sh`（EXIT=0 · L4）· `check-plaintext400-headers.sh`（EXIT=0）· `check-merge-tree-content.py`（EXIT=0 · 带 4 棵 lane ref）。
 > ⚠️ **仍有 1 个门是红的**（`check-ledger-selfcheck.py`）⇒ **原因明确**（task 域台账的测试数 134 vs 实测 137）⇒ **属 task 域写权面** ⇒ 按 §5.3f **不越界改** ⇒ **派单 R5-F9** ⇒ **如实记账，不粉饰成全绿**。
 > ⚠️ **`check-ddl-static.py` 的 1 / 2 / 3 三个退出码不是「门坏了」** ⇒ 分别是「**刻意保留的 DEFAULT 残留**」「**已签字偏离**」「**N/A**」⇒ 三者**均已按 §十定级（A 类 0）** ⇒ **不阻阶段一**。
+> ⚠️ **本轮（2026-10-29）未跑**：`check-datasource-password-form.py` —— **2026-10-30 才落**的「rpc 模块口令占位符形态」守门 ⇒ ⇒ **不属本轮** ⇒ ⇒ §6.3 的「27 项」仍按本轮口径；该门在 2026-10-30 已实跑（EXIT=0 · 内置变异自测 6/6）⇒ ⇒ 记在 [`docs/Worktree.md`](Worktree.md) 的 **M-8** 行。
 
 ---
 

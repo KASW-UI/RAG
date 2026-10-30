@@ -246,7 +246,7 @@ RAG 不是从 Go「推测」行为，而是**逐字对照 Go 源码**（§3.1）
 | `tools/errmsg-probe/` | 错误码契约逐字节对拍（**9 域**） | `bash tools/errmsg-probe/<域>/run-parity.sh` |
 | `tools/difftest/` | 双端运行时对拍（两套栈 + 请求矩阵） | `bash tools/difftest/run.sh` |
 | `tools/difftest/check-ddl-static.py` | **DDL 列级对照**（类型/可空性/DEFAULT/索引/触发器）· **9 域** · **源码↔活库** | `python3 … [--domain <域>] [--indexes] [--check-source]` |
-| `tools/difftest/check-{proto-static.sh,plaintext400-headers.sh,jar-executable.sh}` | proto 契约 · **真 Tomcat** 400 头（MockMvc 测不到）· **产物可执行性**（漏配 `Main-Class` ⇒ 行为分叉） | `bash …` |
+| `tools/difftest/check-{proto-static.sh,plaintext400-headers.sh,jar-executable.sh}` | proto 契约 · **真 Tomcat** 400 头（MockMvc 测不到）· **产物可执行性**（漏配 `Main-Class` ⇒ 行为分叉）· 🆕 rpc 模块**口令占位符形态**（不得带默认值 ⇒ Go 侧 `os.ExpandEnv` 不认该语法） | `bash …` |
 | `tools/difftest/check-{flyway-ledger.py,grpc-runtime-classpath.py}` | Flyway 账本隔离（按库+schema）⇒ `EXIT=0`；运行时同库共存 ⇒ `check-flyway-concurrent.sh`（§6.3 问题 4）· devh client 运行时 classpath + 服务发现地址门禁（baseline 机制） | `python3 …` |
 | `tools/difftest/check-{grpc-interceptor-wiring,tomcat-limits,global-lane-ownership,wave-coupling,wave-lane-ownership,wave-role-model,surface-parity,phasegoal-consistency,phasegoal-lanes}.py` | 九个装配/写权/基线守门：rpc 拦截器接线 · api 容器上限 · `global` 历史 lane 写权 · **跨域耦合漂移** · **G1~G4 波次写权** · **G4 角色措辞** · **对外契约面** · **阶段一基线自检** · **per-lane 矩阵**（⇒ `EXIT=0`） | `python3 tools/difftest/check-*.py`|
 | `tools/difftest/{check,mutate}-deadline-*.py` | **deadline 家族**：E48 harness 守门+变异 · E62 守门变异 · **E38② 漂移形态守门**（漂移被修好就红） | `python3 tools/difftest/check-deadline-*.py` |
