@@ -1,6 +1,8 @@
 package com.rag.common.protection;
 
+import com.rag.common.observability.GoStylePrometheusInterceptor;
 import com.rag.common.observability.GoStyleRecoverInterceptor;
+import com.rag.common.observability.GoStyleStatInterceptor;
 import io.grpc.ServerCall;
 import io.grpc.ServerCallHandler;
 import io.grpc.ServerInterceptor;
@@ -84,6 +86,28 @@ public final class GoStyleRpcProtectionChain {
 
         /** 本层包裹的<b>内层</b>拦截器（供 {@link #layerNames(ServerInterceptor)} 逐层下行）。 */
         ServerInterceptor inner();
+
+        /**
+         * 本层是否计入 {@link #layerNames(ServerInterceptor)} 的<b>名单</b>。
+         *
+         * <p>默认 {@code true}（保护层：recover / breaker / shedding）。
+         *
+         * <p>🔴 <b>为什么需要这个开关</b>（2026-10-30 · G4）：Go 的链是
+         * {@code Trace → Recover → Stat → Prometheus → Breaker → Shedding → Timeout}
+         * ⇒ 本仓补上 <b>Stat</b> / <b>Prometheus</b> 两个<b>观测层</b>后，
+         * 链上多了两层 ⇒ 若它们也进名单，{@code layerNames} 的输出就会从
+         * {@code [recover, breaker, shedding]} 变成 5 项
+         * ⇒ ⇒ <b>8 个域级守门</b>（{@code *ProtectionChainWiringTest}）里
+         * 「层名列表 == [recover, breaker, shedding]」与
+         * 「层名列表 == compose(props).layerNames()」两条断言会<b>整体变红</b>
+         * ⇒ ⇒ 而那些守门在<b>域侧写权面</b>（本层不能改）⇒ ⇒ 只能让观测层<b>不进名单</b>。
+         *
+         * <p>⇒ <b>名单的语义</b>因此收窄为「<b>保护层</b>的层名」；
+         * 观测层确实在链上 ⇒ 用 {@link #allLayerNames(ServerInterceptor)} 看<b>全链</b>。
+         */
+        default boolean countedInLayerNames() {
+            return true;
+        }
     }
 
     /**
@@ -143,6 +167,29 @@ public final class GoStyleRpcProtectionChain {
         List<String> names = new ArrayList<>(3);
         ServerInterceptor current = chain;
         while (current instanceof Layered layered) {
+            if (layered.countedInLayerNames()) {
+                names.add(layered.layerName());
+            }
+            current = layered.inner();
+        }
+        return List.copyOf(names);
+    }
+
+    /**
+     * 观测<b>已构造出的链</b>的<b>全部</b>层名（由外到内，<b>含观测层</b>）。
+     *
+     * <p>⚠️ 与 {@link #layerNames(ServerInterceptor)} 的区别：那个方法只报<b>保护层</b>
+     * （recover / breaker / shedding）⇒ 它的输出与 {@link Composition#layerNames()} 恒等
+     * ⇒ 域级守门依赖这条恒等式；而本方法报<b>全链</b>（含 stat / prometheus 两个观测层）。
+     *
+     * <p>Go 对照：{@code zrpc/server.go:144-167} 的注册序
+     * {@code Trace → Recover → Stat → Prometheus → Breaker → Shedding → Timeout}
+     * ⇒ 本仓对应 {@code [recover, stat, prometheus, breaker, shedding]}（本仓无 Trace 层）。
+     */
+    public static List<String> allLayerNames(ServerInterceptor chain) {
+        List<String> names = new ArrayList<>(5);
+        ServerInterceptor current = chain;
+        while (current instanceof Layered layered) {
             names.add(layered.layerName());
             current = layered.inner();
         }
@@ -168,13 +215,119 @@ public final class GoStyleRpcProtectionChain {
             chain = sheddingThen(chain, shedder);
         }
 
-        // ② Breaker（Go: zrpc/server.go:157-159，Middlewares.Breaker 默认 true）
+        // ④ Breaker（Go: zrpc/server.go:157-159，Middlewares.Breaker 默认 true）
         if (composition.breaker()) {
             chain = breakerThen(chain);
         }
 
+        // ③ Prometheus（Go: zrpc/server.go:154-156，Middlewares.Prometheus 默认 true）
+        //    🔴 **位置**：在 breaker / shedding 的**外层** ⇒ ⇒ 被降载 / 熔断拒绝的请求
+        //    **也会被 Prometheus 层记一笔**（Go 侧同理：shedding 层是「返回 error」，
+        //    Prometheus 层的后置代码照样执行 ⇒ 记到 code=8 / code=14）。
+        //    ⇒ 若把它装到 breaker / shedding **内侧**，这两类请求在指标里会**整个消失**。
+        if (props.getPrometheus().isEnabled()) {
+            chain = prometheusThen(chain);
+        }
+
+        // ② Stat（Go: zrpc/server.go:151-153，Middlewares.Stat 默认 true）
+        //    🔴 **位置**：在 Prometheus 的外层、breaker / shedding 的外层
+        //    ⇒ ⇒ 量到的耗时**含**降载 / 熔断开销（Go 的 Stat 层同样在外面）。
+        if (props.getStat().isEnabled()) {
+            chain = statThen(chain);
+        }
+
         // ① Recover（Go: zrpc/server.go:148-150，Middlewares.Recover 默认 true）—— **最外层**
         return recoverThen(chain);
+    }
+
+    /**
+     * 把 {@code stat} 串在 {@code inner} 的<b>外层</b>。
+     *
+     * <p>Go 对应：{@code zrpc/server.go:151-153} 的 {@code UnaryStatInterceptor}，
+     * 位于 {@code Recover} 之内、{@code Prometheus} 之外。
+     */
+    public static ServerInterceptor statThen(ServerInterceptor inner) {
+        return statThen(new GoStyleStatInterceptor(), inner);
+    }
+
+    /** 测试注入用（让断言能拿到具体的 stat 实例与聚合器）。 */
+    static ServerInterceptor statThen(GoStyleStatInterceptor stat, ServerInterceptor inner) {
+        return new Layered() {
+            @Override
+            public String layerName() {
+                return "stat";
+            }
+
+            @Override
+            public ServerInterceptor inner() {
+                return inner;
+            }
+
+            @Override
+            public boolean countedInLayerNames() {
+                // ⚠️ 观测层**不计入**保护层的名单（见 {@link Layered#countedInLayerNames()} 的说明）。
+                return false;
+            }
+
+            @Override
+            public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
+                    ServerCall<ReqT, RespT> call,
+                    Metadata headers,
+                    ServerCallHandler<ReqT, RespT> next) {
+                ServerCallHandler<ReqT, RespT> delegateToInner =
+                        new ServerCallHandler<ReqT, RespT>() {
+                            @Override
+                            public ServerCall.Listener<ReqT> startCall(
+                                    ServerCall<ReqT, RespT> c, Metadata h) {
+                                return inner.interceptCall(c, h, next);
+                            }
+                        };
+                return stat.interceptCall(call, headers, delegateToInner);
+            }
+        };
+    }
+
+    /**
+     * 把 {@code prometheus} 串在 {@code inner} 的<b>外层</b>。
+     *
+     * <p>Go 对应：{@code zrpc/server.go:154-156} 的 {@code UnaryPrometheusInterceptor}，
+     * 位于 {@code Stat} 之内、{@code Breaker} 之外。
+     */
+    public static ServerInterceptor prometheusThen(ServerInterceptor inner) {
+        final GoStylePrometheusInterceptor prometheus = new GoStylePrometheusInterceptor();
+        return new Layered() {
+            @Override
+            public String layerName() {
+                return "prometheus";
+            }
+
+            @Override
+            public ServerInterceptor inner() {
+                return inner;
+            }
+
+            @Override
+            public boolean countedInLayerNames() {
+                // ⚠️ 观测层**不计入**保护层的名单（见 {@link Layered#countedInLayerNames()} 的说明）。
+                return false;
+            }
+
+            @Override
+            public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
+                    ServerCall<ReqT, RespT> call,
+                    Metadata headers,
+                    ServerCallHandler<ReqT, RespT> next) {
+                ServerCallHandler<ReqT, RespT> delegateToInner =
+                        new ServerCallHandler<ReqT, RespT>() {
+                            @Override
+                            public ServerCall.Listener<ReqT> startCall(
+                                    ServerCall<ReqT, RespT> c, Metadata h) {
+                                return inner.interceptCall(c, h, next);
+                            }
+                        };
+                return prometheus.interceptCall(call, headers, delegateToInner);
+            }
+        };
     }
 
     /**

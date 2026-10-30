@@ -125,6 +125,38 @@ public class GoStyleProtectionProperties {
     @NestedConfigurationProperty
     private RedisDeadline redisDeadline = new RedisDeadline();
 
+    /**
+     * Stat 层（Go 的 {@code Middlewares.Stat}）。
+     *
+     * <p>🆕 2026-10-30（G4 lane）：见 {@link com.rag.common.observability.GoStyleStatInterceptor}。
+     */
+    @NestedConfigurationProperty
+    private Stat stat = new Stat();
+
+    /**
+     * Prometheus 层（Go 的 {@code Middlewares.Prometheus}）。
+     *
+     * <p>🆕 2026-10-30（G4 lane）：见 {@link com.rag.common.observability.GoStylePrometheusInterceptor}。
+     */
+    @NestedConfigurationProperty
+    private Prometheus prometheus = new Prometheus();
+
+    public Stat getStat() {
+        return stat;
+    }
+
+    public void setStat(Stat stat) {
+        this.stat = stat;
+    }
+
+    public Prometheus getPrometheus() {
+        return prometheus;
+    }
+
+    public void setPrometheus(Prometheus prometheus) {
+        this.prometheus = prometheus;
+    }
+
     public int getMaxConns() {
         return maxConns;
     }
@@ -334,9 +366,56 @@ public class GoStyleProtectionProperties {
         }
     }
 
+    /**
+     * <b>Stat 层</b>的开关（Go {@code zrpc/internal/config.go:23}）。
+     *
+     * <p>Go 出处：{@code zrpc/internal/config.go:23} {@code Stat bool `json:",default=true"`}
+     * ⇒ 真源各域 yaml <b>没写</b> ⇒ 生效值 = <b>true</b>。
+     *
+     * <p>⚠️ <b>这个开关不进 {@code Composition}</b>：{@code Composition} 是 record，
+     * 加字段会<b>破坏 8 个域级守门的编译</b>（域侧写权面）⇒
+     * ⇒ 保护层的构成仍由 {@code compose()} 唯一计算；观测层的开关在
+     * {@link GoStyleRpcProtectionChain#build} 内直接读本属性。
+     */
+    public static class Stat {
+
+        /** Go {@code zrpc/internal/config.go:23} {@code Stat bool `json:",default=true"`}。 */
+        private boolean enabled = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+    }
+
+    /**
+     * <b>Prometheus 层</b>的开关（Go {@code zrpc/internal/config.go:24}）。
+     *
+     * <p>Go 出处：{@code zrpc/internal/config.go:24} {@code Prometheus bool `json:",default=true"`}
+     * ⇒ 真源各域 yaml <b>没写</b> ⇒ 生效值 = <b>true</b>。
+     *
+     * <p>⚠️ 关掉它<b>只</b>停掉「写指标」这一件事，<b>不</b>停掉「暴露面」
+     * （暴露面由各域的 actuator 决定 ⇒ 域侧写权面）。
+     */
+    public static class Prometheus {
+
+        /** Go {@code zrpc/internal/config.go:24} {@code Prometheus bool `json:",default=true"`}。 */
+        private boolean enabled = true;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+    }
+
     /** CPU 采样口径，见 {@link CpuShedding#getCpuSource()}。 */
-    public enum CpuSource {
-        /** 整机 CPU，等价 Go {@code /proc/stat} 口径。 */
+    public enum CpuSource {        /** 整机 CPU，等价 Go {@code /proc/stat} 口径。 */
         SYSTEM,
         /** 仅本 JVM 进程 CPU。 */
         PROCESS
