@@ -9,16 +9,19 @@ spring:
     # POSTGRES_ADDR/POSTGRES_PORT 来自 docker-compose.yaml（默认 postgres:5432）
     url: jdbc:postgresql://${POSTGRES_ADDR:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}?sslmode=disable
     username: ${POSTGRES_USER:admin}
-    # ⚠️ 默认口令必须是全仓 rpc 模块的**同一个**值（`password`）——
-    #    另 7 个 rpc 模块（article/comment/favorite/like/message/task/follow）都用它，
-    #    此前只有 user-rpc / admin-rpc 用 `Sea-TryGo` ⇒ 全仓 9 处分裂成 2 种
-    #    ⇒ 同一套 PG，裸跑时「最多一组能连上」。
-    #    Go 侧（`service/user/admin/rpc/etc/admin.yaml:14`）**没有默认值**：
-    #    go-zero `core/conf/config.go:63` 用 `os.ExpandEnv` 展开 ⇒ 未设 env 即空串 ⇒ 连库失败（fail-fast）。
-    #    本行保留 fallback 仅为本地便利；**取消 fallback 属跨域改动（9 个模块 / 8 个域）**，见
-    #    `docs/DRIFT/users/stage1-admission.md` §3 `S1-USERS-002`。
-    #    ⚠️ env 存在时 Spring 优先取 env ⇒ compose / manage.sh / 对拍装置的注入值一字不变。
-    password: ${POSTGRES_PASSWORD:password}
+    # ⚠️ **本行无默认值（2026-10-30 按 Go 同形取消 fallback · `S1-USERS-002`）**
+    #    Go 侧（`service/user/admin/rpc/etc/admin.yaml:14`）=
+    #    `DataSource: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@…"` ⇒ **无默认值**：
+    #    go-zero `core/conf/config.go:63` 用 `os.ExpandEnv` 展开 ⇒ 它**不认** `${VAR:default}` 语法
+    #    ⇒ 未设 env 即展开成**空串** ⇒ 用空口令连库 ⇒ 认证失败 ⇒ **fail-fast**。
+    #    RAG 侧此前给这个占位符挂了**明文默认口令** ⇒ 缺变量时**用那个公开口令连上**
+    #    ⇒ 与 Go **不同形**（Go 连不上 / RAG 连得上）⇒ ⇒ 那是一条**真漂移** ⇒ 本轮取消。
+    #    ⚠️ **残余差异（RAG 更严的一侧）**：Go = 启动成功、**连库时**失败；RAG = **启动即失败**
+    #    （Spring 解析不到占位符 ⇒ DataSource bean 创建失败）⇒ ⇒ 失败时刻不同 ⇒ 属有意偏离候选。
+    #    ⚠️ 注入侧一字不变：根级 `docker-compose.yaml` 用 `${POSTGRES_PASSWORD:?…}` 强制要求并透传、
+    #    `manage.sh` 硬校验 `.env`、`tools/difftest/*` 对拍装置显式 export ⇒ **不打断任何现有流程**。
+    #    ⚠️ 其余 7 处（article×2 / comment / favorite / like / message / task）属 G2/G3 面 ⇒ 口径尚未全仓统一。
+    password: ${POSTGRES_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
   # ===== 2. MyBatis-Plus + Flyway（Phase 3 重构：去 JPA，用 MyBatis-Plus + Flyway DDL）=====

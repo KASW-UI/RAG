@@ -18,6 +18,7 @@
 | DRIFT-FOLLOW-003 | `discovery://user-rpc` 两斜杠被 devh 拒绝 ⇒ 启动失败 | **启动阻塞（硬失败）** | ✅ 已修<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 子结论订正）**：RAG `service/follow/follow-rpc/src/main/resources/application.yml:163` = `address: discovery:///user-rpc`（**三斜杠**）⇒ **现行态 = ✅ 已修（不变）**；⚠️ **「域外 5 个模块仍是两斜杠 ⇒ 待修」已陈旧**（本轮逐模块实测：全仓已无两斜杠）⇒ **该跨域待办已销账**；核对日期 2026-10-30 |
 | DRIFT-FOLLOW-004 | `server-addr` 硬编码 `:8848`、忽略 `NACOS_PORT`，与 follow-api 语义冲突 ⇒ api/rpc 连到两台 Nacos | 运行时故障（业务码塌成 1015） | ✅ 已修<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针）**：RAG `service/follow/follow-api/src/main/resources/application.yml:58` ＋ `service/follow/follow-rpc/src/main/resources/application.yml:95` = **同一串** `${NACOS_ADDR:nacos}:${NACOS_PORT:8848}` ⇒ **现行态 = ✅ 已修（不变）**；核对日期 2026-10-30 |
 | DRIFT-FOLLOW-006 | 5 个 `follow_rpc_*` 指标**无任何抓取出口**（Go 有 DevServer `/metrics`，RAG 的 follow-rpc 是纯 gRPC 进程） | **可观察（抓取侧）** | ✅ **已修（2026-10-29 · 编号 `S1-FOLLOW-001`）** —— 出口已落地（Tomcat + Actuator，**端口 16065 与 Go 一字不差**）⇒ 双侧 series 集合**逐条一致**（仅余 **P3/D 类**的 8 条 `_max` 增项）⇒ 详见下方 §「DRIFT-FOLLOW-006 的落地（2026-10-29）」<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针）**：RAG `service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web` ＋ `service/follow/follow-rpc/src/main/resources/application.yml:131` = `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}` ＋ `:112` = `register-enabled: false` · Go `service/follow/rpc/etc/follow.yaml:23` = `Port: 16065` ⇒ **现行态 = ✅ 已落地（不变）**；核对日期 2026-10-30 <br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/metrics-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 04:32:14 · 32s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 故障[follow_relation] Follow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[follow_relation] Unfollow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[block_relation] Block 两；<br>`tools/metrics-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 04:32:14 · 32s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 故障[follow_relation] Follow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[follow_relation] Unfollow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[block_relation] Block 两。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。|
+| DRIFT-FOLLOW-014 | 出向 user-rpc **缺 2s 客户端超时** ⇒ 失败只能由**服务端**兜底 ⇒ 失败**归因**与**收口时刻**与 Go 不同 | **可观察（失败归因）** | ✅ **已修（2026-10-30 · G1 lane · 域侧自修）** —— 客户端侧 2s deadline 已补（`service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java:75`）⇒ 守门 `UserRpcClientDeadlineCapTest`（**3 条**，含**真发一次调用**）＋ **变异 M4 实测红**（拿掉 cap ⇒ 挂死 ⇒ `@Timeout` 触发）⇒ 证据强度 **L3**（未做双侧活体对拍 ⇒ **不是 L4**）⇒ 详见下方 §「DRIFT-FOLLOW-014」|
 
 > ⚠️ **三条都发生在「测试全绿」的状态下** —— 修复前 63 条测试 0 失败（**原写「现为 68 条」，已过期** —— 🆕 **2026-10-29 实测 = 86 条**：`mvn -o -B -pl service/follow/follow-rpc test` ⇒ surefire XML `testsuite` 求和 = **86** / 0 failures / 0 errors / 0 skipped · **14 个测试类**），
 > 而 `java -jar` 起不来。根因见 [`docs/Pitfalls/follow/rpc.md`](../../Pitfalls/follow/rpc.md)。
@@ -269,7 +270,7 @@ curl: (1) Received HTTP/0.9 when not allowed                 ← 那不是 HTTP
 | | `spring-boot-starter-web` | 进程形态 | `/actuator/prometheus` 实际出口 |
 |---|---|---|---|
 | **8 个 api 模块** | **8/8 有** | servlet 应用 | ✅ **全部走 B**（actuator 挂主端口）—— B 是 api 层的**既定形态** |
-| **8 个 rpc 模块** | **0/8 有**（只有 `spring-boot-web-server` 抽象，供 nacos-discovery 反射引用） | 纯 gRPC 进程 | ❌ **零出口**（actuator 的 web endpoint 没有载体） |
+| **10 个 rpc 模块** | **1/10 有**（仅 `follow-rpc`；其余 9 个只有 `spring-boot-web-server` 抽象，供 nacos-discovery 反射引用） | 纯 gRPC 进程 | ❌ **9/10 无 actuator web 端点载体**（⚠️ **2026-10-30 16:6x 实测更新**：原写「8 个 rpc 模块 0/8」—— 当时范围只有 8 个 rpc ⇒ 现范围 10 个（新增 `user-user-rpc` / `user-admin-rpc`）⇒ ⇒ 口径 = **9/10 无 web 载体**；⚠️ 判据要点：**载体判据 = 依赖树实测**（`mvn -o -B dependency:list` 逐模块查 `spring-boot-starter-web` / `tomcat-embed-core`），**不是 grep pom** —— `service/common/pom.xml:361` 的 web starter 是 **`test` scope ⇒ 不传递** ⇒ 但父子继承下「grep 不到」≠「没有」⇒ ⇒ 必须查依赖树；⚠️ **本表是「载体层」口径；另有一层「配置层」**（`management:` 段三重关闭 = `admin-rpc` / `user-rpc` / `hot-rpc` 3 个）⇒ ⇒ **两个层都要看，只看配置层会得出「7 个有出口」的假结论**（`exposure.include` 写了但没有载体 ⇒ 抓取方连不上 HTTP）⇒ ⇒ **完整论证见 `docs/DRIFT/follow/vs-common.md` 末尾的对应小节**；⚠️ 边界：**10/10 都有 actuator 依赖**，且 10/10 都**未配 `management.endpoints.jmx.exposure`** ⇒ ⇒ JMX 侧走默认暴露 ⇒ ⇒ 本行的「零出口」严格指 **actuator 的 web endpoint 无载体**，不是「进程完全没有可观测出口」） |
 
 - ⚠️ **全仓无 Pushgateway** ⇒ **C 不是既有形态**，无需考虑。
 - `hot-rpc` 写得最直白：`management.server.port: -1` + `management.endpoints.prometheus.enabled: false`，
@@ -290,7 +291,7 @@ curl: (1) Received HTTP/0.9 when not allowed                 ← 那不是 HTTP
 | `like/rpc` | ✅ | 9098 | ❌ 零出口 | 🔴 同款缺口（**其它域**） |
 | `user/user/rpc` | ✅ | 9094 | ❌ 零出口 | 🔴 同款缺口（**其它域**） |
 | `user/admin/rpc` | ✅ | 9097 | ❌ 零出口 | 🔴 同款缺口（**其它域**） |
-| `article/rpc`、`comment/rpc`、`hot/rpc`、`task/rpc` | ❌ **无 DevServer 段** | — | ❌ 零出口 | ⚠️ **不是漂移**（Go 侧同样抓不到） |
+| `article/rpc`、`comment/rpc`、`hot/rpc`、`task/rpc` | ❌ **无 DevServer 段** | — | ❌ 零出口 | ⚠️ **不是漂移**（Go 侧同样抓不到 —— 精确原因：这 4 个域的 Go yaml **没有 DevServer 段** ⇒ `go-zero@v1.10.2/core/service/serviceconf.go:40` 的 `DevServer` 字段带 `optional` ⇒ **整段缺失 ⇒ 零值 ⇒ `Enabled=false` ⇒ 不起 DevServer** ⇒ ⇒ **不是「Go 侧没这个端口」，而是「Go 侧根本没起」**） |
 
 ⇒ **「Go 有、RAG 无」一共 6 处**，follow 是其中之一；
 ⇒ **另外 4 个 rpc（article/comment/hot/task）在 Go 侧也没有指标出口** ⇒ RAG 侧同样没有 **不构成漂移**
@@ -709,3 +710,69 @@ Go  : 0.005 0.01 0.025 0.05 0.1 0.25 0.5 1   2.5 5   10  +Inf
 |---|---|---|
 | `DRIFT-FOLLOW-006` 的**双侧 series 逐条一致**（含 8 条 `_max` 增项） | 需**真 Go follow-rpc + 真 RAG follow-rpc 同时跑**并各抓一次 `/metrics` vs `/actuator/prometheus` ⇒ 本轮**未起进程** | 已核**配置层**（端口 / `register-enabled` / starter-web / 探针就绪判据）⇒ 状态**沿用 2026-10-29 结论**，本轮**未独立改判** |
 | `DRIFT-FOLLOW-002` 的**真启动复验**（`NoClassDefFoundError` 未复现） | 需**真容器起 `follow-rpc`** ⇒ 本轮**未起** | 已核 **pom 的 scope**（L1 源码）⇒ 未独立改判 |
+
+## DRIFT-FOLLOW-014 ✅ 出向 user-rpc **缺 2s 客户端超时**（2026-10-30 · G1 lane · 域侧自修 · 已落码）
+
+> **证据强度 = L3**（Go ↔ RAG 源码逐条对照 ＋ 本域**真跑**守门 ＋ **变异实测**）
+> ⚠️ **未做双侧活体对拍** ⇒ **不标 L4** ⇒ 「已修」读作「**在 L3 强度下一致**」，不是已闭环（AGENTS.md §〇）。
+
+### 一、现象
+
+Go 侧 `follow-rpc → user-rpc` 的出向调用**恒带 2s 客户端超时**；RAG 侧 `devh` 注入的是**裸 stub**
+（**无 call deadline**）⇒ ⇒ **缺「客户端侧」收口**：失败只能由**服务端**拦截器兜底
+⇒ ⇒ 失败**归因**与**收口时刻**都可能与 Go 不同。
+
+### 二、Go 侧出处（逐条 · 本轮亲自读过）
+
+| # | 出处 | 事实 |
+|---|---|---|
+| G1 | `go-zero@v1.10.2/zrpc/config.go:31` | `RpcClientConf.Timeout int64 `json:",default=2000"` ` ⇒ **默认 2000ms** |
+| G2 | `go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25` | `ctx, cancel := context.WithTimeout(ctx, t)` ⇒ **取更早者** ⇒ 出向 deadline = min(入站 ctx 剩余, 2s) |
+| G3 | `service/follow/rpc/etc/follow.yaml:37-41` | `UserRpc:` 段**只有 `Etcd`**、**无 `Timeout`** ⇒ ⇒ 走 G1 默认值 |
+| G4 | `service/follow/rpc/internal/logic/helper.go:82` | `svcCtx.UserRpc.GetUser(ctx, &userservice.GetUserReq{Uid: userID})` ⇒ 出向调用**直接透传 handler 的 ctx**（无 `depCtx`、无 otel 派生 ⇒ 该行曾被台账误描述，已订正） |
+| G5 | `service/follow/rpc/internal/logic/helper.go:84-89` | `st, ok := status.FromError(err)`；`NotFound` → `GRPCError(codes.NotFound, ErrorUserNotFound)`；**其余一切（含 `DeadlineExceeded`）→ `GRPCError(codes.Internal, ErrorServerCommon)`** |
+| G6 | `service/follow/common/errmsg.go:38` / `:47` | `ErrorServerCommon = 5001` ／ `ErrorUserNotFound = 5101` |
+| G7 | `go-zero@v1.10.2/zrpc/config.go:46` ＋ `service/follow/rpc/follow.go:34` ＋ `:44` ＋ `service/common/observability/rpc.go:38` | **服务端 2s 的确切出处**（2026-10-30 14:4x 实测补）：`zrpc/config.go:46` = `Timeout int64 `json:",default=2000"` ⇒ **服务端默认也是 2000ms**；`follow.go:34` = `DisableNativeRpcTimeout(&c.RpcServerConf)` ⇒ 读 2s 并把 go-zero **原生**超时关掉（`rpc.go:19-23` 把 `conf.Timeout = 0`）；`follow.go:44` = `AddUnaryInterceptors(NewUnaryServerInterceptor(rpcTimeout, …))` ⇒ **自定义**拦截器接管；`rpc.go:38` = `context.WithTimeout(ctx, timeout)` ⇒ **`handler(timeoutCtx, req)` 拿到的 ctx 带 2s deadline** ⇒ ⇒ **G4 的 handler ctx 确实带 2s** ⇒ ⇒ **数值等价、机制不同**（原生被关、自定义接管） |
+
+⇒ ⇒ **Go 的失败在客户端侧被观测 ⇒ 下游拿到的是 `INTERNAL` + 业务码 `5001`**。
+
+### 三、⚠️ 差异的准确边界（不要读宽）
+
+RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
+（`service/users/user/user-rpc/src/main/resources/application.yaml:209` = `rpc-timeout: 2s`；
+接线在位由 `python3 tools/difftest/check-grpc-interceptor-wiring.py` = **EXIT=0** 实测确认）⇒ ⇒
+
+| 形态 | Go（真源） | RAG **修前** | RAG **修后** |
+|---|---|---|---|
+| **① 请求到达下游、业务挂死** | 客户端 2s 收口 ⇒ `helper.go:84-89` ⇒ **`INTERNAL` + 5001** | **服务端** 2s 收口 ⇒ `DEADLINE_EXCEEDED` ⇒ `FollowUserExistenceService.java:86-91` 分支② ⇒ **`INTERNAL` + 5001** | 同左 ⇒ **与 Go 同形** |
+| **② 请求没到达下游**（进程不可达 / 网络黑洞 / 连接建好但无响应） | 客户端 2s 收口 ⇒ **`INTERNAL` + 5001** | **无任何客户端收口** ⇒ 只能等**服务端**兜底（`service/follow/follow-rpc/src/main/resources/application.yml:247` = `rpc-timeout: 2s`，管的是**入站**调用）⇒ ⇒ **形态②才是差异** | 客户端 2s 收口 ⇒ **`INTERNAL` + 5001** ⇒ **与 Go 同形** |
+
+⇒ ⇒ **本条要修的是形态②**（下游看到的 status 与业务码都不同），**不是**形态①。
+
+### 四、RAG 侧修前 / 修后
+
+| | 修前 | 修后（2026-10-30 · G1 lane） |
+|---|---|---|
+| 出向 stub | `devh` 注入的裸 stub ⇒ **无 call deadline** | `capByClientTimeout(stub)` ⇒ **2s 客户端 deadline** |
+| 旧注释 | `UserRpcClient` 的 javadoc 写「**没有**在此处设 deadline ⇒ 与 Go 一致：Go 的 `zrpc.MustNewClient` 也只靠 client interceptor 兜底」⇒ ⇒ **只说对了一半**（漏了「那个 client interceptor **就是** 2s 客户端超时」这一半） | **已订正**（原文保留在类注释里，标注「已订正」并给出完整论证） |
+| 落码 | — | `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java`（新增 `CLIENT_TIMEOUT_MILLIS = 2000L` ＋ 包可见 `capByClientTimeout` ＋ `getUser` 改走它） |
+
+### 五、守门网 ＋ 变异实测（AGENTS.md §3.3.3）
+
+- **守门**：`service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/client/UserRpcClientDeadlineCapTest.java`（**3 条**）
+  - `clientTimeoutConstantMatchesGoDefault` —— 常量 == 2000ms（对齐 G1）
+  - `capProducesRealTwoSecondDeadline` —— **真**构造 `UserServiceBlockingStub` ＋ **真**读回 `CallOptions.getDeadline()`（非文本断言）
+  - `downstreamHangs_clientTimesOutOnItsOwnDeadline` —— **真发一次调用**：起 **in-process 真实 gRPC server**，其 `GetUser` **故意不响应** ⇒ 客户端**真的阻塞** ⇒ 只能靠**自己套的 2s deadline** 收口 ⇒ 断言拿到 **`DEADLINE_EXCEEDED`**（Go 侧 ctx 到期同样是 `DeadlineExceeded`）⇒ 且实测耗时 ≈2s（防「秒失败」被误判成「超时生效」）
+- **变异实测（M4）**：把 `getUser` 的 `capByClientTimeout(userStub)` 改成 `userStub` ⇒ **用例挂死 ⇒ `@Timeout(30s)` 触发 ⇒ 红** ⇒ ⇒ 证明「`DEADLINE_EXCEEDED` **确实是那 2s cap 造成的**」，不是别的东西兜的底 ⇒ 还原后**复绿**（实测 2.094s / 3 条全绿）。
+
+### 六、边界（诚实声明）
+
+- ⚠️ **未做双侧活体对拍** ⇒ 本条**不是 L4**。
+- ⚠️ 守门**不**起真实 user-rpc、**不**连 Nacos、**不**带生产链路上的 `GoStyleGrpcClientBreakerInterceptor` ⇒ 证的是「**follow-rpc 自己套的客户端 deadline 真在生效**」，**不**证「整条生产链路的端到端超时表现」。
+- ⚠️ **rpc 进程没有入站 ctx 预算载体**：`GoStyleRequestDeadline.begin` 的**生产**调用点全仓**只有 1 处** = `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:324` ⇒ **只在 api 进程** ⇒ **rpc 进程恒 no-op** ⇒ ⇒ 这里**只有「2s 上界」这一维** ⇒ ⇒ 与 Go 的 min(服务端 2s, 客户端 2s) **同值**。
+- ⚠️ **共享层那半边不在本条**：rpc 进程要拿到「入站预算」需 `GoStyleRequestDeadline` 有作用域化 API ⇒ 落点 `service/common` ⇒ **G4 写权** ⇒ 已随 `E65` 反馈单转派。
+- ✅ **共享层那半边已于 2026-10-30 由 G4 落码并提交**（commit **`3d5b4924`** · 分支 `align/g4-service-common` · 未 push/未开 PR）：`RpcInterceptor` 的**绝对时刻只算一次**（入口处，`:311-312`）⇒ 两个载体（`DeadlineState` ＋ `GoStyleRequestDeadline`）**共用同一时刻**（⇒ 不会出现「SQL 已过期但出向还活着」）＋ 新增 `GoStyleOutboundDeadlineInterceptor`（`service/common/src/main/java/com/rag/common/protection/GoStyleOutboundDeadlineInterceptor.java`）⇒ ⇒ **与本条的域侧半边（2s 客户端上界）叠加后仍是 min** ⇒ ⇒ **与 Go 的 `context.WithTimeout(ctx, 2s)` 仍同形** ⇒ ⇒ **两条不冲突**。
+  - ⚠️ **叠加语义的坐标（G1 已逐行独立核实，不是采信转述）**：`GoStyleOutboundDeadlineInterceptor.java:151-154`（请求载体剩余 → min）＋ `:157-159`（`cap-millis` → min，**默认 0 = 不启用** ⇒ **users/follow 无需为此开 yaml**）＋ **`:162-166`（调用点自带的 deadline → `Math.min`，**不覆盖**）** ⇒ ⇒ **我域侧那 2s 不会被共享层的 cap 顶掉** ⇒ ⇒ **域侧那层保留，不撤**。
+  - ⚠️ **服务端侧同形（同样已核实）**：`RpcInterceptor.java:302-303`（服务端预算 = `timeout` = 2s）＋ **`:304`（`effectiveTimeoutNanos = Math.min(serverBudgetNanos, clientDeadlineRemainingNanos())` ⇒ min(服务端 2s, 客户端剩余)**）＋ `:317`（三项皆无 ⇒ 不绑载体）⇒ ⇒ 与 Go 的服务端 `context.WithTimeout(ctx, timeout)`（父 ctx 已带客户端 deadline ⇒ 取更早者）**同形** ⇒ ⇒ **本条「形态① 两侧同形」的结论被进一步加强**。
+  - ⚠️ **回跑口径（写死，别踩）**：G1 **不能**在自己的工作树合入 `3d5b4924`（`service/common/**` **不在 G1 写权面** ⇒ 合入会让 `check-wave-lane-ownership.py` 判越界）⇒ ⇒ **本条的 3 个域侧守门复跑必须由合并收口执行者在主干上做**（已随交接单上报）。
+- ⚠️ **Go 侧客户端 2s 与服务端 2s 是两个独立字段**（`zrpc/config.go:31` 与 `:46`，都默认 2000，**互不联动**）⇒ ⇒ **不可互推**（已同步 G4，建议其 P2-T04 判据把两个数分开写）。
