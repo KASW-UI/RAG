@@ -122,17 +122,17 @@
 | 字段 | 内容 |
 |---|---|
 | **任务 ID** | `P2-T04` |
-| **原始编号** | `E65`（零上界子集）· `E38②` |
-| **来源** | `docs/DRIFT/global/vs-common.md:46`（11 类 / 30 调用点清单 + Go 的 `zrpc/config.go:31` 对照）· `docs/DRIFT/global/_README.md:391` |
+| **原始编号** | **`X-6` 轴②**（`docs/PhaseGoal-judge.md:260` §五 X-6 行 · 残余 = 「客户端硬上界 2000ms 未启用」）· **⚫ `E65` 已解绑**（E65 本条 = **✅ 已闭合** —— 继承面经双侧活体四键逐键相等证成 ⇒ ⇒ 挂在 E65 上会让本单指向一条**已闭合**项）· `E38②`（历史来源，保留） |
+| **来源** | **`docs/DRIFT/global/vs-common.md:3812`**（**`G4-A4-05`** · §4.11.5「出向 stub 全表」= 21 个类 / 30 处零 deadline ＋ Go 的 `zrpc/config.go:31` 对照；⚠️ **原指针 `:46` 已漂移** —— 那行现在是 E65 的 §1.1 表行，**不是清单**）· **`docs/DRIFT/global/_README.md:430`**（E65 行；⚠️ **原指针 `:391` 已漂移** —— 那行现在是空的）· **`docs/PhaseGoal-judge.md:260`**（§五 X-6 行 = 本条现在的**挂靠点**） |
 | **当前状态** | 🔴 **未做**。已点名的类（以 `P2-T01` 重数为准）：`message-rpc/client/UserRpcClient.java:42`（裸注入 stub · `@GrpcClient("user-rpc")`）· `message-rpc/client/AdminRpcClient.java:58`/`:92` · `like-rpc/client/MessageRpcClient.java:85` · `follow-rpc/client/UserRpcClient.java:50` · `user-api/client/UserRpcClient.java:144` · `admin-api/client/AdminRpcClient.java:174` |
 | **当前状态（补）** | ⚠️ 「11 个」这个数**本身被订正过**（原写 9 ⇒ 后订正 11）⇒ 以 `P2-T01` 的重数为准 |
 | **执行目的** | 「零 deadline」比「不继承请求预算」**更严重** —— **连上界都没有** ⇒ 可无限期挂起 ⇒ 与 Go 的 2000ms 硬上界**直接相反** |
-| **具体操作** | ① 对 `P2-T01` 标为「③ 裸 stub / 零上界」的**每一个类**：补一个**默认 2000ms** 的出向上界（与 Go `zrpc/config.go:31` `Timeout int64 json:",default=2000"` 同形）② 上界**可 env 覆盖**（便于压测与故障注入）③ 补断言：**即使入向没有 deadline**，出向也必须带 ≤2000ms 的上界 ④ ⚠️ **`devh 3.1.0.RELEASE` 没有 `deadline` 这个属性** ⇒ `grpc.client.*.deadline` 是**空配** ⇒ **不要**靠它配（台账里那 2 处交叉证据已失效） |
+| **具体操作** | ① 对 `P2-T01` 标为「③ 裸 stub / 零上界」的**每一个类**：补一个**默认 2000ms** 的出向上界（与 Go `zrpc/config.go:31` `Timeout int64 json:",default=2000"` 同形）② 上界**可 env 覆盖**（便于压测与故障注入）③ 补断言：**即使入向没有 deadline**，出向也必须带 ≤2000ms 的上界 ④ ⚠️ **`devh 3.1.0.RELEASE` 没有 `deadline` 这个属性** ⇒ `grpc.client.*.deadline` 是**空配** ⇒ **不要**靠它配（台账里那 2 处交叉证据已失效） ⑤ 🟢 **域侧只配参数 ⇒ 不得再造私有 helper** —— 共享层的**唯一实现已在本仓**：`service/common/src/main/java/com/rag/common/protection/GoStyleOutboundDeadlineInterceptor.java`（带 devh 的 `@GrpcGlobalClientInterceptor` ⇒ 装在**每个**出向 devh 调用上 ⇒ 与 Go 的 `zrpc/client.go:70-71` 同形 ⇒ ⇒ **域侧零代码改动**）⇒ ⇒ 只配 `rag.protection.outbound-deadline.cap-millis` = 该域 Go 的 `Timeout`；⚠️ **`capMillis` 默认 = 0（不启用）**，理由见 `GoStyleProtectionProperties.java:261`（Go 的 2000ms 是**默认值**且各域可覆盖 —— article api 侧是 70000 ⇒ 写成全局默认会让 article **比 Go 严 35 倍**）⇒ ⇒ **必须逐域配**；共享层已补**运行期证据**（`GoStyleOutboundDeadlineClientCapGateTest`：cap 生效 / cap=0 负控 / min 语义 三形态） ⑥ 🔴 **副本数 = 漂移面** —— 仓里**已存在 2 份**域侧私有副本（comment-rpc 139 行 · favorite-rpc 121 行）⇒ ⇒ 再逐域补就是第三、四份 ⇒ ⇒ **正确形态 = 共享层给可复用实现 ＋ 域侧只配参数**；⚠️ 那两份是**既成的漂移面**（**不是**模板）⇒ ⇒ 域侧改造时**删掉它们、改用共享实现** ⇒ ⇒ 共享层已有一道**棘轮守门**（`GoStyleClientCallTimeoutSingleSourceGateTest`）**禁止第三份** |
 | **具体落点** | 同 `P2-T03` 的调用点所在类 + 各域 `src/test/**` |
-| **执行主体** | **各域 lane**（与 `P2-T03` **同一批提交**） |
+| **执行主体** | **各域 lane**（与 `P2-T03` **同一批提交**）＋ **共享层那半 = G4**（`service/common/**`：唯一实现 ＋ 运行期证据 ＋ 棘轮守门 · **已在共享层就位** ⇒ ⇒ 域侧只剩 yml 与删副本） |
 | **前置条件** | `P2-T01` |
 | **并行关系** | 与 `P2-T03` **同域同提交**（同一批文件）⇒ 不可拆 |
-| **写权限** | `service/<域>/**` = 各域 lane |
+| **写权限** | `service/<域>/**` = 各域 lane（**共享层那半** = `service/common/**` = **G4**） |
 | **验收命令** | ```bash# ① 零上界类归零（脚本判定）\npython3 docs/RoundPlan/round-02/count-outbound-stubs.py --assert-no-zero-deadline\n# ② 域级测试 0F/0E\nmvn -o -B -DargLine=-Xmx2g -pl service/<域>/<域>-rpc -am test``` |
 | **验收证据** | ① 「零上界类数」= **0** ② 每个类有断言断「即使无入向 deadline，出向也带 ≤2000ms」③ 变异必红（把上界去掉 ⇒ 断言红） |
 | **完成条件** | **零 deadline 的类 = 0**（这是本轮最硬的一条量化判据） |
