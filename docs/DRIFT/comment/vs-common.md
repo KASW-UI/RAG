@@ -109,14 +109,14 @@
 
 ### 4.2 ✅ 拍板结论（2026-10-27 · Jason）—— 本域的**唯一**真决策项已定
 
-#### ① 🔴 **C-3 / U15（= global E65）出向 gRPC 不继承请求 deadline ⇒ 方向已定：等 global 统一载体**
+#### ① 🔴 **C-3 / U15（= global E65）出向 gRPC 不继承请求 deadline ⇒ 方向已定：等 global 统一载体** ｜ 📌 **2026-10-30 订正 · 标题口径已过期**：共享层 `53bc05ec` 已把统一载体绑进 `RpcInterceptor.onHalfClose` ⇒ 「等 global」这一步**已完成** ⇒ ⇒ **「继承」那一半本域已闭合**（逐出口证据见 `docs/DRIFT/comment/rpc.md` 本轮新增段）⇒ ⇒ 现行开放面收窄为 **精度对齐（毫秒 → 纳秒，差 ≤1ms）** ＋ **逐出口线程差异**（一条继承 / 一条不继承，**两侧同形 ⇒ 非漂移**）
 
 | 项 | 内容 |
 |---|---|
 | **拍板** | **走 global 的统一载体**（`GoStyleRequestDeadline.applyTo(stub)`）⇒ **本轮不改** ⇒ 共享层那半落地后本域照做 ｜ 📌 **2026-10-30 前置已满足**：共享层 `53bc05ec` 已把 `GoStyleRequestDeadline` 绑进 `RpcInterceptor.onHalfClose` ⇒ 「共享层那半」**已落地** ⇒ 本域那半（裸 stub 改 `applyTo`）**现在可执行** ⇒ 本域**尚未落码** ｜ ⚠️ **2026-10-30 订正 · 本域那半的「真实内容」已收窄**：**「继承」本身已闭合**（本域出口 `withDeadline` 读 `remainingMillis()` ⇒ 载体在位即继承）⇒ ⇒ 本域那半的真实内容 = **精度对齐（毫秒 → 纳秒）**，**不是**「从零继承」 |
 | **被否决的备选** | 用 `DeadlineState.remainingMillis()` 直接构造出向 stub deadline |
 | **否决理由（三条）** | ① 会引入**第二种载体** —— 仓内已有 `GoStyleRequestDeadline` 与 `DeadlineState` 两种互不相通的载体，**这正是 global 认定的病根**；② **偏离 Go 的单载体语义** —— Go 侧只有 `ctx` 一个载体（靠 ctx 传播）⇒ **「统一载体」才对应它**；③ 需 global 改探针期望值（`outgoing_carrier` 探针键当前钉的是 `absent` ⇒ 改实现即变红）⇒ **代价明确 ⇒ 不选** ｜ 📌 **2026-10-30 订正**：理由③**已失效** —— 共享层已把 `outgoing_carrier` 由 drift 键**升为 parity 键**（`tools/difftest/check-deadline-downstream.py:53`）⇒ 「改实现即变红」的前提**消失**；理由①②（统一载体 / 不引第二种载体）**仍成立** ⇒ ⇒ 本域那半**不再受阻**（且其内容已收窄为**精度对齐**，见「拍板」格） |
-| **影响面** | 本域 `comment-rpc` 的 2 个出向出口（`client/ArticleRpcClient.java` · `client/MessageRpcClient.java`）＋ 跨域的 like / message（**G2 域**）⇒ ⇒ **本域那半的前置 = 共享层统一载体落地** |
+| **影响面** | 本域 `comment-rpc` 的 2 个出向出口（`client/ArticleRpcClient.java` · `client/MessageRpcClient.java`）＋ 跨域的 like / message（**G2 域**）⇒ ⇒ **本域那半的前置 = 共享层统一载体落地** ｜ 📌 **2026-10-30 订正 · 两个出口的载体可见性不同**（逐出口证据见 `docs/DRIFT/comment/rpc.md` 本轮新增段）：`ArticleRpcClient` 在 **gRPC handler 线程** ⇒ 载体 ThreadLocal **可见** ⇒ 继承入向 deadline；`MessageRpcClient` 在 **Kafka consumer 线程**（`service/CommentAuditListener.java:99` 的 `@KafkaListener`）⇒ 载体 **不可见** ⇒ 只有 2s 客户端封顶 ⇒ ⇒ 而 Go 侧该出口的 ctx 是 **Kafka 消费 ctx（无 deadline）** ⇒ **两侧同形 ⇒ 该出口不是漂移** ⇒ ⇒ **「继承」那一半只对 handler 线程那条出口成立** |
 
 ⚠️ **本轮核出的新事实（防下一个人误引先例）**：本域台账原引「同仓既有先例：`users/admin/AdminDomainService.java:140` · `users/user/UserDomainService.java:145` 已用 `DeadlineState.isExpired()`」⇒
 **实测该先例不成立** —— 那两处是**本地超时检查**（`if (Thread.currentThread().isInterrupted() || DeadlineState.isExpired())` ⇒ 判到期后走本地降级）⇒
