@@ -82,6 +82,22 @@ import java.util.concurrent.TimeUnit;
  * （真 devh 上下文 ＋ 真 {@code @GrpcClient} stub ＋ <b>不调 {@code applyTo}</b>
  * ⇒ ⇒ 断言出向调用在请求预算处失败；负控＝裸 channel 挂满 ⇒ ⇒ 变异＝去掉
  * {@code @GrpcGlobalClientInterceptor} ⇒ ⇒ 该守门<b>精确转红</b>）。
+ * <p>🔴 <b>2026-10-30 订正（第十三次）·「已过期 ⇒ 立即失败」这条分支只靠一个字符撑着</b>：
+ * {@link GoStyleRequestDeadline#remainingNanos()} 在<b>已过期</b>时返回的是
+ * <b>{@code 0}</b>（{@code Math.max(0L, d - now)}）⇒ <b>不是负数</b>
+ * ⇒ ⇒ 本类里 {@code if (requestRemaining >= 0L)} <b>成立</b>
+ * ⇒ ⇒ 预算被压成 {@code 0} ⇒ ⇒ 命中「预算已耗尽 ⇒ 立即失败」分支
+ * ⇒ ⇒ <b>「载体已过期 ⇒ 出向调用立即失败」这条路径是已实现的</b>
+ * ⇒ ⇒ ⚠️ <b>但若有人把那个 {@code >= 0L} 改成 {@code > 0L}</b>
+ * ⇒ ⇒ 过期值（{@code 0}）会被跳过 ⇒ ⇒ <b>没有任何预算</b>
+ * ⇒ ⇒ 出向调用<b>静默退回「挂满」</b>（实测挂满 5s ⇒ 失败码 {@code CANCELLED}）
+ * ⇒ ⇒ <b>而这一行离「语义正确」只差一个字符 ⇒ 极易被无声改坏</b>
+ * ⇒ ⇒ 因此补一条<b>运行期</b>锁定用例
+ * {@code GoStyleRpcInterceptorOutboundDeadlineChainGateTest}
+ * （上游＝<b>真</b> {@link com.rag.common.observability.RpcInterceptor} ＋ 下游＝devh channel ＋
+ * <b>3×2 行为差分</b>＋「未过期 ⇒ 继承剩余预算」的互补分支
+ * ⇒ ⇒ 变异①＝拿掉载体绑定 ⇒ 形态①④ 转红；变异②＝{@code >= 0L} ⇒ {@code > 0L}
+ * ⇒ ⇒ <b>只有</b>形态①转红 ⇒ ⇒ 两个变异互不重叠 ⇒ ⇒ 判据活着）。
  *
  * <h2>效力边界（诚实声明）</h2>
  * <ol>
