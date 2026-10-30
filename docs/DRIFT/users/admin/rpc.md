@@ -3010,7 +3010,7 @@ public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryS
 - 唯一那个是 `RpcInterceptor.newUnaryServerInterceptor(rpcTimeout, slowThreshold)`（`RpcServerInterceptorFactory.java:41-46`）⇒ **超时 + 观测**合一。
 - `service/users/admin/admin-rpc/src/main/` 对 `com.rag.common.protection` **零引用**（grep 零命中）
   ⇒ **recover / breaker / shedding 三层全无**；
-- `recover` grep 零命中、admin-rpc 的 `application.yml` 关掉了 `management.endpoint.prometheus` ⇒ **stat / prometheus 两层全无**。
+- `recover` grep 零命中、admin-rpc 的 `application.yml` **曾**关掉 `management.endpoint.prometheus` ⇒ **stat / prometheus 两层全无**（⚠️ 该关闭已于 2026-10-30 载体落地时反转 ⇒ 现状见本文件末尾载体小节）。
 
 ⇒ **缺 6 层：Tracing / Recover / Stat / Prometheus / Breaker / Shedding**。
 
@@ -3034,7 +3034,7 @@ public GrpcServerConfigurer rpcInterceptorConfigurer(ServerInterceptor rpcUnaryS
 | **Breaker** | 熔断（`Middlewares.Breaker` 默认 true） | 无 ⇒ 慢下游不熔断，请求持续堆积 |
 | **Shedding** | CPU > 90% 自适应降载 | 无 ⇒ 无降载保护 |
 | **Stat** | go-zero stat 日志（慢请求阈值默认 **500ms**，`go-zero@v1.10.2/zrpc/internal/serverinterceptors/statinterceptor.go`） | 无 |
-| **Prometheus** | gRPC server 侧指标 | admin-rpc 的 `application.yml` 关掉了 `management.endpoint.prometheus` ⇒ 无 HTTP 抓取口 |
+| **Prometheus** | gRPC server 侧指标 | admin-rpc 的 `application.yml` **曾**关掉 `management.endpoint.prometheus` ⇒ 无 HTTP 抓取口（⚠️ 该关闭已于 2026-10-30 载体落地时反转） |
 | **Tracing** | go-zero `UnaryTracingInterceptor` | RAG 侧有 span（`RpcInterceptor` + 8 处 `AdminSpans.traced`）⇒ **部分覆盖**，但**不是同一层**，覆盖度未实测 |
 
 ### 1.5 处置：`align/message` 分支**已修**（未合并），本域**不重复改**
@@ -4471,7 +4471,7 @@ if (connectTimeout != null) {                                     // :16
 |---|---|---|---|---|---|
 | DRIFT-ARPC-007 | D | P3 | 否 | Go `service/user/admin/rpc/internal/logic/getselflogic.go:37`（`status.Error(codes.NotFound, …)` 的字面量在磁盘上即**转码损坏的乱码字节**；同语义在 `createadminlogic.go:50` 同样损坏）vs RAG `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminDomainService.java:296`（`Status.NOT_FOUND.withDescription("用户不存在")`）＋ `AdminDomainService.java:476`（`"管理员邀请码错误"`）⇒ **差异仍成立**（gRPC `status.description` 字节不同；**gRPC code 两侧全同**；HTTP 层不可见）⇒ **已签字偏离 `SD-2026-10-23-07@users`**（`docs/Intentional_Deviations/users/admin/rpc.md:72` · 状态 ✅ 仍成立）⇒ 是决策不是缺陷 ⇒ **不复刻乱码**、无落码动作（守门 `AdminRpcGoWireParityTest` 钉住） | 2026-10-30 |
 | DRIFT-ARPC-008 | D | P3 | 否 | Go `service/user/admin/rpc/internal/model/data_model.go:41`（`Status int64 gorm:"column:status;default:0"` ⇒ 值类型 · 无 not null ⇒ 该列恒写 0、实际永不出现 NULL）＋ `service/user/user/rpc/internal/model/data_model.go:11`（同款 tag）vs RAG `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/domain/UserEntity.java:136`（`private Long status = 0L;` ⇒ NULL 读成 0）＋ `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/domain/UserEntity.java:110`（`private Long status = 0L;`）⇒ **差异已消失**（两侧「NULL ⇒ 0」同形：Go 靠 GORM 值类型恒写 0、RAG 靠 MyBatis `callSettersOnNulls=false` 跳过 setter ⇒ 字段保持 0）⇒ 结论：**admin-rpc 的 `= 0L` 不是漂移**（台账原先「Go 读不出来」的前提已被证伪）⇒ 经分析确认**不需要改**（改掉反而制造新漂移）⇒ 无落码动作 | 2026-10-30 |
-| DRIFT-ARPC-009 | B | P2 | 否 | Go `go-zero@v1.10.2/zrpc/server.go:144`（`setupUnaryInterceptors` ⇒ Trace/Recover/Stat/Prometheus/Breaker/Shedding 六层默认全装）＋ `service/user/admin/rpc/admin.go:43`（`s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, …))`）vs RAG `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/AdminRpcApplication.java:112`（`server.intercept(GoStyleRpcProtectionChain.build(rpcUnaryServerInterceptor, protectionProps))`）＋ `service/common/src/main/java/com/rag/common/protection/GoStyleRpcProtectionChain.java:158`（`build` ⇒ recover → breaker → shedding → business）＋ `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:54`（业务拦截器内起 otel server span ⇒ tracing 已覆盖）＋ `service/users/admin/admin-rpc/src/main/resources/application.yml:156`（`prometheus: enabled: false` ⇒ 无 Prometheus 抓取口）⇒ **差异仍成立但已缩小**：原「缺 6 层」中 recover/breaker/shedding 三层已补上、tracing 由业务拦截器覆盖 ⇒ 真正仍缺 = **Stat + Prometheus 两层**（最严重的 panic ⇒ 5001 vs 1015 分叉已由 recover 层消除）⇒ 归 B（「结构化日志、关键运行指标及问题定位」= `docs/PhasedGoal.md` P1 面；不阻断阶段一准入） | 2026-10-30 |
+| DRIFT-ARPC-009 | B | P2 | 否 | Go `go-zero@v1.10.2/zrpc/server.go:144`（`setupUnaryInterceptors` ⇒ Trace/Recover/Stat/Prometheus/Breaker/Shedding 六层默认全装）＋ `service/user/admin/rpc/admin.go:43`（`s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, …))`）vs RAG `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/AdminRpcApplication.java:112`（`server.intercept(GoStyleRpcProtectionChain.build(rpcUnaryServerInterceptor, protectionProps))`）＋ `service/common/src/main/java/com/rag/common/protection/GoStyleRpcProtectionChain.java:158`（`build` ⇒ recover → breaker → shedding → business）＋ `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:54`（业务拦截器内起 otel server span ⇒ tracing 已覆盖）＋ `service/users/admin/admin-rpc/src/main/resources/application.yml:260`（`include: health,info,prometheus,metrics` ⇒ **已开** HTTP 抓取口；⚠️ 原写 `:156` 的 `prometheus: enabled: false` 已于 2026-10-30 载体落地时反转）⇒ **差异仍成立但已缩小**：原「缺 6 层」中 recover/breaker/shedding 三层已补上、tracing 由业务拦截器覆盖 ⇒ 真正仍缺 = **Stat + Prometheus 两层**（最严重的 panic ⇒ 5001 vs 1015 分叉已由 recover 层消除）⇒ 归 B（「结构化日志、关键运行指标及问题定位」= `docs/PhasedGoal.md` P1 面；不阻断阶段一准入） | 2026-10-30 |
 | DRIFT-ARPC-010 | C | P2 | 否 | Go `service/user/admin/rpc/internal/logic/logoutlogic.go:38`（`l.svcCtx.BizRedis.SetexCtx(l.ctx, blackListKey, "banned", int(expireTime))` ⇒ Redis 写绑 ctx ⇒ deadline 到点立即失败）＋ `logoutlogic.go:41`（`status.Error(codes.Internal, "注销失败,Redis写入异常")`）vs RAG `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminDomainService.java:267`（`stringRedisTemplate.opsForValue().set(key, "banned", Duration.ofSeconds(ttlSeconds));` ⇒ **不绑 deadline**）＋ `AdminDomainService.java:274`（`Status.INTERNAL.withDescription("注销失败,Redis写入异常")`）⇒ **差异仍成立**（**wire 面两侧逐字一致**；差异只在**观测面** —— RAG 的日志归因晚于客户端，把超时记成「Redis 挂了」）⇒ 修法落点 = 共享层的 deadline 传播（与 global `E66` 同一条，本域无权改）⇒ 归 C（生产工程机制；当前不阻断阶段一） | 2026-10-30 |
 | DRIFT-ARPC-011 | D | P3 | 否 | Go `service/user/admin/rpc/internal/logic/getuserlogic.go:39`（DB 出口统一改写 `status.Error(codes.Internal, …)` ⇒ admin 域 26 处 `codes.Internal`）＋ `service/user/admin/api/internal/logic/admin/getselflogic.go:56`（api 层 `case codes.Internal: return nil, errmsg.ErrorServerCommon` ⇒ 渲染 5001）vs RAG `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminDomainService.java:59`（类级 javadoc「B-1 放行分支」论证在位）＋ `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/advice/GlobalExceptionHandler.java:84`（`INTERNAL → 5001`）＋ `GlobalExceptionHandler.java:90`（`default → 1015`）⇒ **差异仍成立**（**仅源码层形态**：Go 把 DB 错统一写成 INTERNAL；RAG 的 B-1 放行分支保留 `DEADLINE_EXCEEDED`）**但客户端可见面通常同为 1015**（Go 侧靠拦截器超时分支竞速胜出；E-4 四组采样全中 1015，仍存在 Go=5001 的竞速窗口）⇒ 归 D（**留档防回退**：改回 Go 的 `codes.Internal` 会让 RAG 渲染 5001 ⇒ **离 Go 更远**；29 处 catch 注释的理由已订正）⇒ 无落码动作 | 2026-10-30 |
 | DRIFT-ARPC-012 | C | P2 | 否 | Go `go-zero@v1.10.2/zrpc/server.go:25`（`MustNewServer` ⇒ `logx.Must(err)` ⇒ 注册失败即**进程退出** fail-fast）＋ `go-zero@v1.10.2/zrpc/internal/rpcpubserver.go:49`（`if err := s.registerEtcd(); err != nil { return err }`）＋ `service/user/admin/rpc/etc/admin.yaml:9`（Go 的服务发现 = **etcd**，`Key: admin.rpc`；`admin.go:40` 的 `reflection.Register` 只是 Dev/Test 模式的 gRPC reflection，**不是**注册）vs RAG `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/bootstrap/NacosRegistration.java:110`（`catch (NacosException e)` / `catch (UnknownHostException e)` ⇒ 只记日志 ⇒ **fail-open**；且 nacos-client 3.x 实际抛 shaded `StatusRuntimeException` ⇒ **catch 捕不到** ⇒ 与自身 javadoc 声明不一致）⇒ **差异仍成立**（① catch 类型与实际抛出不匹配 ② fail-open vs Go 的 fail-fast）⇒ 「fail-open 还是 fail-fast」口径仍**未定** ⇒ 归 C（生产工程机制；当前逃逸不中断启动 ⇒ 不阻断阶段一） | 2026-10-30 |
@@ -4575,3 +4575,69 @@ if (connectTimeout != null) {                                     // :16
 - ❌ **原写**：`RpcInterceptor.java:314-320` 调度器 + 「首次 close 定客户端 status（`:346-356`）」。
 - ✅ **现行**：调度器 `:338-367`（`:344` `timeoutScheduler().schedule(...)` ⇒ `:361-363` `target.close(Status.DEADLINE_EXCEEDED ...)`）；**首次 close 定 status 的那句在 `:377-378`**（`:377` 注释「M6：只有第一次 close 负责打标 + end span」· `:378` `if (!spanFinalized.compareAndSet(false, true)) {`）⇒ ⇒ 本文件正文里凡写 `:346-356` 的**已就地订正**。
 - ⚠️ `:353-354` = 「造 `TimeoutException`」那两行（`new TimeoutException(goStyleStatusMessage(...))`）⇒ ⇒ **不是** M6 那句。
+
+## 指标抓取出口补载体（2026-10-31 · G1 lane）
+
+> ⚠️ **本小节标题刻意不含任何编号 token** ⇒ 派生层不把它当条目候选 ⇒ 也不劫持任何既有编号的 `domain` / `wave` / `basis`。
+> ⚠️ **本小节不重登记** ⇒ 本体仍是本文件既有的 `DRIFT-ARPC-009` 那条 ⇒ ⇒ **销账时不要当新条目**。
+
+**一、落码清单（域侧自修 · 全部在 G1 写权面）**
+
+| 落点 | 文件与行号 | 内容 |
+|---|---|---|
+| servlet 载体 | `service/users/admin/admin-rpc/pom.xml:182` | 新增 `spring-boot-starter-web`（**非 test 作用域**；版本由 `spring-boot-dependencies` BOM 管 ⇒ 不写 `<version>`） |
+| HTTP 观测口 | `service/users/admin/admin-rpc/src/main/resources/application.yml:225-226` | `server.port: ${ADMIN_RPC_MANAGEMENT_PORT:9097}`（与 gRPC 业务口 8081 严格分离） |
+| 暴露面 | `service/users/admin/admin-rpc/src/main/resources/application.yml:260` | `include: health,info,prometheus,metrics`；`:263` 与 `:265` 打开两个 endpoint；`:269-271` 打开导出开关 |
+| Nacos 自动注册 | `service/users/admin/admin-rpc/src/main/resources/application.yml:119` | `spring.cloud.nacos.discovery.register-enabled: false` |
+
+**二、Go 出处（真源 · 消费点 · 逐条读过）**
+
+- `service/user/admin/rpc/etc/admin.yaml:31-38` —— `DevServer: {Enabled: true, Host: 0.0.0.0, Port: 9097, MetricsPath: /metrics, HealthPath: /healthz, EnableMetrics: true, EnablePprof: true}`
+- `go-zero@v1.10.2/core/service/serviceconf.go:77` —— `devserver.StartAgent(sc.DevServer)`
+- `go-zero@v1.10.2/internal/devserver/server.go:44-49` —— `if s.config.EnableMetrics { prometheus.Enable(); s.handleFunc(s.config.MetricsPath, promhttp.Handler().ServeHTTP) }`
+- `go-zero@v1.10.2/internal/devserver/server.go:67-75` —— **独立端口** `http.ListenAndServe(addr, s.server)`（不是主端口）
+- ⇒ ⇒ **端口一字不差**：Go 9097 ↔ RAG `${ADMIN_RPC_MANAGEMENT_PORT:9097}`
+- ⇒ ⇒ **路径不同**：Go `/metrics` + `/healthz` ↔ RAG `/actuator/prometheus` + `/actuator/health` ⇒ **抓取配置改路径不改端口**
+- ⚠️ `management.metrics.tags.application` **刻意不加**：Go 侧 `service/user/admin/rpc/internal/metrics/metrics.go:9-21` 用 `Namespace:""` + `Subsystem:"admin_rpc"` ⇒ **不存在 `application` 标签** ⇒ 再挂就是多一个标签 ⇒ 同一份 PromQL 两侧聚合结果会不同
+- ⚠️ **已签字的框架差异（同族，不在本条范围）**：Go 的 `admin_rpc_high_risk_action_logal` 名字**不带** `_total` ⇒ RAG 侧 Micrometer 强制追加 ⇒ 渲染成 `admin_rpc_high_risk_action_logal_total`（同族 `DEV-FAV-RPC-001`）⇒ ⇒ 守门断言的是 **RAG 侧实际形态**，**不是**两侧同名
+
+**三、为什么必须同时关掉 Nacos 自动注册（必做项，不是可选项）**
+
+- `AbstractAutoServiceRegistration implements ApplicationListener<WebServerInitializedEvent>`（spring-cloud-commons `AbstractAutoServiceRegistration.java:49`）
+- ⇒ ⇒ 有了 web 容器 ⇒ 该事件**就会发** ⇒ ⇒ 自动注册被触发
+- `NacosAutoServiceRegistration.getRegistration()`（`NacosAutoServiceRegistration.java:59-64`）取的是 **web server 端口**（= 观测口 9097），**不是** gRPC 业务口 8081
+- ⇒ ⇒ Nacos 里会出现「admin-rpc → 9097」这条**错端口实例** ⇒ ⇒ admin-api 按它连 ⇒ 连到一个只提供 `/actuator/**` 的 HTTP 口 ⇒ ⇒ **gRPC 链路直接断（业务码塌成 1015）**
+- ⇒ ⇒ 本域注册是**手写**的（`bootstrap/NacosRegistration.java` 用 `GrpcServerProperties.getPort()`）⇒ ⇒ 与 Go 侧 `zrpc.MustNewServer` 注册 `ListenOn` 同形 ⇒ ⇒ 自动注册必须关掉，否则同一服务名下会有两个端口的实例
+
+**四、守门网**
+
+- `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcPrometheusCarrierGateTest.java` —— **4 条**（载体存在 / 暴露面真抓得到 / 指标名与 Go 同形 / 标签集与 Go 同形）
+- `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/support/RealTomcatPort.java` —— 域内固定段 **22295–22299**（禁 OS 盲选口）
+- ⚠️ 守门读的是**域侧真实 `application.yml`** ⇒ ⇒ **改坏配置就红**
+
+**五、变异实测（判别力）**
+
+- 变异 M1：`include` 里去掉 `prometheus` ⇒ **3 条转红**
+- 变异 M2：pom 里去掉 `spring-boot-starter-web` ⇒ **4 条转 Error**
+- 变异 M3：写回 `management.server.port: -1` ⇒ **3 条转红**
+- ⇒ ⇒ 三个变异**各自**精确转红、还原后复绿 ⇒ ⇒ **守门不是假绿**
+
+**六、证据强度与诚实边界**
+
+- 证据强度 **L3**（真 Tomcat ＋ 真 HTTP 抓取 ＋ 真 Prometheus 文本 ＋ 真指标名与标签核对）—— **不是 L4**
+- ⚠️ **未做**「业务启动类在真 PG/Redis 下真起一遍」⇒ ⇒ **L4 活体验证仍缺**（需 Docker；本机 Docker 全停）
+- ⚠️ **未做双侧活体对拍**
+- ⚠️ 守门用**独立最小上下文**（**无 `@ComponentScan`**）⇒ ⇒ 不被 PG/Redis 绑架
+- ⚠️ **「13 个 api 侧 Bean 不在容器里」这条运行期断言本轮交不了**（`@ConditionalOnApiSide` 不在本分支基线 ⇒ 必然恒红）⇒ ⇒ **交阻塞清单，不交恒红守门**
+- ⚠️ **载体改动的进程形态差异**（残余项，不修）：Go = 无 servlet 的小 server；RAG = Tomcat（无业务 HTTP 路由）⇒ ⇒ 对外可观测面一致
+
+**七、端口号待统一分配**
+
+- 现状取 **Go DevServer 端口一字对齐**（admin-rpc 9097），env 可覆盖 ⇒ ⇒ 统一分配后**只改默认值一行**
+- ⚠️ **端口号不是本域自选** ⇒ 等合并收口执行者一句话
+
+**八、指针位移登记（供后续重锚用）**
+
+- 本轮给 `application.yml` 加了内容 ⇒ ⇒ **该文件行号整体下移** ⇒ ⇒ 指向它的硬指针（`docs/DRIFT/_cross/grading/W5.md` 与 `W10.md`、本文件 `:4474` 那一行）**本轮未重锚**；其中本文件 `:4474` 里那处 `application.yml:156` 的引用**已就地改指**到新位置（`:260`）
+- ⇒ ⇒ 理由：**端口号还要再改一次**（统一分配）⇒ ⇒ **重锚应在端口定稿后做一次**
+- ⇒ ⇒ 已就地核对：本轮**只改注释**的 4 个 java 文件**行数与 HEAD 完全一致** ⇒ ⇒ 代码行指针未漂移

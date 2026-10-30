@@ -277,7 +277,7 @@ Result 只用 5 个枚举值。证据列的记号：
 | Logout | **`success` 字段** | 恒 `false` | 恒 `false` | **EQUIVALENT**（跟随后 Go 的可疑形态） | `[GO] :43` `[RAG] :756` |
 | Logout | token 有效性检查 | **无** | **无** | **EQUIVALENT** | `[GO] 全文 35 行` `[RAG] :737-757` |
 | 全组件 | 指标名 / label | `user_rpc_register_total{result=success\|fail_exists\|db_error\|internal_error}`、`user_rpc_login_total{result=success\|user_not_found\|db_error\|internal_error}` | 逐条 1:1 | **EQUIVALENT** | `[GO] metrics/metrics.go:9-22` `[RAG] UserRpcMetrics.java:47-79` |
-| 全组件 | 指标**可抓取性** | 🔴 **生产也起 DevServer**（`go-zero@v1.10.2/core/service/serviceconf.go:77` `devserver.StartAgent(sc.DevServer)` 在 `SetUp()` 里**无条件**调用 ⇒ `:83-89` `initMode()` 只做 `load.Disable()` + `stat.SetReporter(nil)`、**不门控 DevServer** ⇒ `internal/devserver/server.go:79-82` 只判 `c.Enabled` ⇒ `internal/devserver/config.go:5` `Enabled` **default=true**（⚠️ **该默认值只在「DevServer 段存在但没给值」时生效** —— 真源 `go-zero@v1.10.2/core/service/serviceconf.go:40` 的 `DevServer DevServerConfig` 带 **`optional`** 标签 ⇒ **整段缺失 ⇒ 保持零值 ⇒ `Enabled=false` ⇒ 不启动** ⇒ ⇒ **本域成立是因为 `user.yaml:23-27` 显式写了 `DevServer: Enabled: true`**（`admin.yaml:31-35` 同款，端口 9097）⇒ ⇒ **不是「DevServer 默认全开」**）⇒ `zrpc/server.go:63` `c.SetUp()` 走同一条路）⇒ **生产就有** `/metrics` + `/healthz`（`user.yaml:23-30` ⇒ 端口 **9094**） | `management.server.port:-1` + 全端点关（`application.yaml:155-167`）⇒ **零出口** | 🔴 **OBSERVABLE DIFFERENCE**（⚠️ 原判「**EQUIVALENT**（两侧生产都不可抓）」的 **Go 侧前提已被推翻** ⇒ 订正依据见本行 Evidence 末） | `[GO] user.yaml:23-30` + `go-zero@v1.10.2/core/service/serviceconf.go:77` / `:83-89` + `internal/devserver/server.go:79-82` + `internal/devserver/config.go:5` + `zrpc/server.go:63`；`[RAG] application.yaml:155-167`<br>⚠️ **2026-10-30 订正（G1 lane · `align/g1-users-follow`）**：原判「**DevServer 仅 dev/test 起，生产无端点 ⇒ 两侧生产都不可抓 ⇒ EQUIVALENT**」**不成立** —— Go 侧 `SetUp()` **无条件**起 DevServer、**`initMode()` 也不门控它** ⇒ ⇒ **Go 生产可抓、RAG 零出口** ⇒ 改判 **OBSERVABLE DIFFERENCE**。落点 = **users 域 rpc 层的指标出口方案**（与 follow 域 `DRIFT-FOLLOW-006` / `S1-FOLLOW-001` 同族；`docs/DRIFT/follow/rpc.md:330-336` 已把 **9094 / 9097** 明确划归 **users 域**）⇒ ⚠️ **修法 = 引入 `spring-boot-starter-web`（纯 gRPC 进程 → 带 Tomcat ⇒ 部署形态变更）+ 关 Nacos 自动注册（否则注册的是 web 容器端口）** ⇒ **属「全仓 rpc 层指标出口统一方案」** ⇒ **用户 2026-10-24 已定交主会话拍板** ⇒ ⇒ **本轮只订正判定、只登记，不落码**（且**不在 `docs/DRIFT/_cross/stage1-derivation.tsv` 的 `wave=G1` 开放行内** ⇒ 不在本波派工面）。核对日期 2026-10-30。 ⚠️ **2026-10-30 16:7x 补载体层证据（依赖树实测，非 grep pom）**：`service/users/user/user-rpc` 的实际 classpath 只有 `spring-boot-starter-actuator`（**无** `spring-boot-starter-web` / **无** `tomcat-embed-core`）⇒ ⇒ **无 servlet 载体 ⇒ `/actuator/prometheus` 没有载体 ⇒ 「`management:` 段三重关闭」不是本域独有问题** ⇒ ⇒ **10 个 rpc 里 9 个无载体**（仅 `follow-rpc` 有）⇒ ⇒ 本行「RAG 侧零出口」的改判**成立且比原判更强**（不是本域孤例，是 9/10 的通例）⇒ 完整两层口径见 `docs/DRIFT/follow/vs-common.md` 末尾对应小节 |
+| 全组件 | 指标**可抓取性** | 🔴 **生产也起 DevServer**（`go-zero@v1.10.2/core/service/serviceconf.go:77` `devserver.StartAgent(sc.DevServer)` 在 `SetUp()` 里**无条件**调用 ⇒ `:83-89` `initMode()` 只做 `load.Disable()` + `stat.SetReporter(nil)`、**不门控 DevServer** ⇒ `internal/devserver/server.go:79-82` 只判 `c.Enabled` ⇒ `internal/devserver/config.go:5` `Enabled` **default=true**（⚠️ **该默认值只在「DevServer 段存在但没给值」时生效** —— 真源 `go-zero@v1.10.2/core/service/serviceconf.go:40` 的 `DevServer DevServerConfig` 带 **`optional`** 标签 ⇒ **整段缺失 ⇒ 保持零值 ⇒ `Enabled=false` ⇒ 不启动** ⇒ ⇒ **本域成立是因为 `user.yaml:23-27` 显式写了 `DevServer: Enabled: true`**（`admin.yaml:31-35` 同款，端口 9097）⇒ ⇒ **不是「DevServer 默认全开」**）⇒ `zrpc/server.go:63` `c.SetUp()` 走同一条路）⇒ **生产就有** `/metrics` + `/healthz`（`user.yaml:23-30` ⇒ 端口 **9094**） | 载体已补（`pom.xml:218` `spring-boot-starter-web` ＋ `application.yaml:231-232` `server.port: ${USER_RPC_MANAGEMENT_PORT:9094}` ＋ `:266` `include` 含 prometheus）⇒ **有 HTTP 抓取口**（端口与 Go 的 9094 一致） | 🔴 **OBSERVABLE DIFFERENCE**（⚠️ 原判「**EQUIVALENT**（两侧生产都不可抓）」的 **Go 侧前提已被推翻** ⇒ 订正依据见本行 Evidence 末） | `[GO] user.yaml:23-30` + `go-zero@v1.10.2/core/service/serviceconf.go:77` / `:83-89` + `internal/devserver/server.go:79-82` + `internal/devserver/config.go:5` + `zrpc/server.go:63`；`[RAG] application.yaml:155-167`<br>⚠️ **2026-10-30 订正（G1 lane · `align/g1-users-follow`）**：原判「**DevServer 仅 dev/test 起，生产无端点 ⇒ 两侧生产都不可抓 ⇒ EQUIVALENT**」**不成立** —— Go 侧 `SetUp()` **无条件**起 DevServer、**`initMode()` 也不门控它** ⇒ ⇒ **Go 生产可抓、RAG 零出口** ⇒ 改判 **OBSERVABLE DIFFERENCE**。落点 = **users 域 rpc 层的指标出口方案**（与 follow 域 `DRIFT-FOLLOW-006` / `S1-FOLLOW-001` 同族；`docs/DRIFT/follow/rpc.md:330-336` 已把 **9094 / 9097** 明确划归 **users 域**）⇒ ⚠️ **修法 = 引入 `spring-boot-starter-web`（纯 gRPC 进程 → 带 Tomcat ⇒ 部署形态变更）+ 关 Nacos 自动注册（否则注册的是 web 容器端口）** ⇒ **属「全仓 rpc 层指标出口统一方案」** ⇒ **用户 2026-10-24 已定交主会话拍板** ⇒ ⇒ **本轮只订正判定、只登记，不落码**（且**不在 `docs/DRIFT/_cross/stage1-derivation.tsv` 的 `wave=G1` 开放行内** ⇒ 不在本波派工面）。核对日期 2026-10-30。 ⚠️ **2026-10-30 16:7x 补载体层证据（依赖树实测，非 grep pom）**：`service/users/user/user-rpc` 的实际 classpath 只有 `spring-boot-starter-actuator`（**无** `spring-boot-starter-web` / **无** `tomcat-embed-core`）⇒ ⇒ **无 servlet 载体 ⇒ `/actuator/prometheus` 没有载体 ⇒ 「`management:` 段三重关闭」不是本域独有问题** ⇒ ⇒ **10 个 rpc 里 9 个无载体**（仅 `follow-rpc` 有）⇒ ⇒ 本行「RAG 侧零出口」的改判**成立且比原判更强**（不是本域孤例，是 9/10 的通例）⚠️ **2026-10-30 载体落地后本句已过期** —— 现为 **3/10 有载体**（`follow-rpc` ＋ `user-user-rpc` ＋ `user-admin-rpc`）⇒ ⇒ 本域那一格已闭合（详见本文件末尾载体小节）⇒ 完整两层口径见 `docs/DRIFT/follow/vs-common.md` 末尾对应小节 |
 | 全组件 | 指标注册形态 | `prometheus.Unregister(GoCollector/ProcessCollector)`（`:25-26`） | Micrometer 保留默认 collector | **IMPLEMENTATION DIFFERENCE** | 无行为影响 |
 | 全组件 | 死代码 | 无 | 3 个异常类 + 2 个 mapper 方法零调用点，其中 3 个异常类的 javadoc 引用**不存在的 Go 出处** | **OBSERVABLE DIFFERENCE**（无行为影响） | **V-008** |
 
@@ -2777,3 +2777,73 @@ span 状态恒为 **`Unset`** ⇒ ⇒ **RAG 侧多置一个 `ERROR`** 就是**�
 | DRIFT-USERRPC-V-016 | D | P3 | 否 | Go `service/user/user/rpc/user.go:36`（`zrpc.MustNewServer(c.RpcServerConf, …)` ⇒ 生产侧等价面；Go 全仓 `forPort(0)` ／ `new ServerSocket(0)` ／ `RANDOM_PORT` 三个模式串 **0 命中** ⇒ Go 侧无对应物 ⇒ 不构成 Go 对照项）vs RAG `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcSlowThresholdGateTest.java:304`（`ServerBuilder.forPort(RealGrpcPort.pick())`）＋ `UserRpcSlowThresholdGateTest.java:331` ＋ `UserRpcGrpcInterceptorWiringTest.java:139` ＋ `UserRpcLogoutClientVisibleGrpcStatusTest.java:221` ＋ `UserRpcLogoutClientVisibleGrpcStatusDefaultBehaviorTest.java:225` ⇒ **差异已消失**（本组件 5 处「OS 盲选口」已全部改走域内私有固定段端口 `22220–22239`）⇒ 且**生产代码零改动**（全在 `src/test/java`）⇒ 无落码动作（域级守门 `BlindPortGateTest.java` 5 条在位） | 2026-10-30 |
 | V-002 | D | P3 | 否 | Go `service/user/user/rpc/internal/model/data_model.go:11`（`gorm:"column:status;default:0"` ⇒ 值类型 · 无 `not null` ⇒ 建出可空列，但 GORM 恒写 0 ⇒ 实际永不出现 NULL）vs RAG `service/users/users-common/src/main/resources/db/01_create_user.sql:39`（`status BIGINT NOT NULL DEFAULT 0`）＋ `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/domain/UserEntity.java:136`（`private Long status = 0L;` ⇒ 读成 0）⇒ **差异仍成立**（DDL 层可空性：Go `is_nullable=YES` ／ RAG `NO`）**但行为层零差异**（Go 读 NULL ⇒ 0；RAG 读不到 NULL ⇒ 也是 0）⇒ 2026-10-27 逐层证据链已推翻「必须与 admin 域同一次提交」⇒ 正确处置 = **保持 RAG NOT NULL**（放开可空反而制造新漂移：RAG `callSettersOnNulls=false` ⇒ 读出 `null` ≠ Go 的 `0`）⇒ 无落码动作；唯一残留落点 = `SD-2026-10-25-CAND-17` 签字（合并收口执行者写权面） | 2026-10-30 |
 | V-013 | D | P3 | 否 | Go `service/user/user/rpc/internal/logic/getuserlogic.go:44`（`status.Error(codes.Internal, "DB查询失败")` ⇒ logic 层根本不返回 1015）vs RAG `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/service/UserDomainService.java:209`（`catch (StatusRuntimeException e)` ⇒ `DEADLINE_EXCEEDED` 原样上抛）＋ `service/common/src/main/java/com/rag/common/persistence/SqlTimeoutStatusTranslator.java:107`（PG `57014` ⇒ `Status.DEADLINE_EXCEEDED`）⇒ **差异仍成立**（**仅源码层形态**；客户端可见面两侧同为 1015 ⇒ **不构成 wire 漂移**）⇒ 归 D（**不得改回 Go 的 `codes.Internal`** —— 那样 RAG 渲染 5001 反而离 Go 更远；17 处注释理由已订正 + 类级 javadoc 完整论证在位）⇒ 无落码动作 | 2026-10-30 |
+
+## 指标抓取出口补载体（2026-10-31 · G1 lane）
+
+> ⚠️ **本小节标题刻意不含任何编号 token** ⇒ 派生层不把它当条目候选 ⇒ 也不劫持任何既有编号的 `domain` / `wave` / `basis`。
+> ⚠️ **本小节不重登记** ⇒ 本体仍是本文件既有的那条「指标可抓取性」行（`:280`）⇒ ⇒ **销账时不要当新条目**。
+
+**一、落码清单（域侧自修 · 全部在 G1 写权面）**
+
+| 落点 | 文件与行号 | 内容 |
+|---|---|---|
+| servlet 载体 | `service/users/user/user-rpc/pom.xml:218` | 新增 `spring-boot-starter-web`（**非 test 作用域**；版本由 `spring-boot-dependencies` BOM 管 ⇒ 不写 `<version>`） |
+| HTTP 观测口 | `service/users/user/user-rpc/src/main/resources/application.yaml:231-232` | `server.port: ${USER_RPC_MANAGEMENT_PORT:9094}`（与 gRPC 业务口 49210 严格分离） |
+| 暴露面 | `service/users/user/user-rpc/src/main/resources/application.yaml:266` | `include: health,info,prometheus,metrics`；`:269` 与 `:271` 打开两个 endpoint；`:275-277` 打开导出开关 |
+| Nacos 自动注册 | `service/users/user/user-rpc/src/main/resources/application.yaml:115` | `spring.cloud.nacos.discovery.register-enabled: false` |
+
+**二、Go 出处（真源 · 消费点 · 逐条读过）**
+
+- `service/user/user/rpc/etc/user.yaml:23-30` —— `DevServer: {Enabled: true, Host: 0.0.0.0, Port: 9094, MetricsPath: /metrics, HealthPath: /healthz, EnableMetrics: true, EnablePprof: true}`
+- `go-zero@v1.10.2/core/service/serviceconf.go:77` —— `devserver.StartAgent(sc.DevServer)`
+- `go-zero@v1.10.2/internal/devserver/server.go:44-49` —— `if s.config.EnableMetrics { prometheus.Enable(); s.handleFunc(s.config.MetricsPath, promhttp.Handler().ServeHTTP) }`
+- `go-zero@v1.10.2/internal/devserver/server.go:67-75` —— **独立端口** `http.ListenAndServe(addr, s.server)`（不是主端口）
+- ⇒ ⇒ **端口一字不差**：Go 9094 ↔ RAG `${USER_RPC_MANAGEMENT_PORT:9094}`
+- ⇒ ⇒ **路径不同**：Go `/metrics` + `/healthz` ↔ RAG `/actuator/prometheus` + `/actuator/health`（Actuator 固定前缀）⇒ **抓取配置改路径不改端口**（表达层差异，已按 `docs/twoStage.md` §10 定级）
+- ⚠️ `management.metrics.tags.application` **刻意不加**（与 follow-rpc 同口径）：Go 侧 `service/user/user/rpc/internal/metrics/metrics.go:9-21` 用 `Namespace:""` + `Subsystem:"user_rpc"` ⇒ **不存在 `application` 标签** ⇒ RAG 侧 meter 名已自带 `user_rpc_` 前缀 ⇒ 再挂就是多一个标签 ⇒ 同一份 PromQL 两侧聚合结果会不同
+
+**三、为什么必须同时关掉 Nacos 自动注册（必做项，不是可选项）**
+
+- `AbstractAutoServiceRegistration implements ApplicationListener<WebServerInitializedEvent>`（spring-cloud-commons `AbstractAutoServiceRegistration.java:49`）
+- ⇒ ⇒ 有了 web 容器 ⇒ 该事件**就会发** ⇒ ⇒ 自动注册被触发
+- `NacosAutoServiceRegistration.getRegistration()`（`NacosAutoServiceRegistration.java:59-64`）取的是 **web server 端口**（= 观测口 9094），**不是** gRPC 业务口 49210
+- ⇒ ⇒ Nacos 里会出现「user-rpc → 9094」这条**错端口实例** ⇒ ⇒ user-api 按它连 ⇒ 连到一个只提供 `/actuator/**` 的 HTTP 口 ⇒ ⇒ **gRPC 链路直接断（业务码塌成 1015）**
+- ⇒ ⇒ 本域注册是**手写**的（`bootstrap/NacosRegistration.java` 用 `GrpcServerProperties.getPort()`）⇒ ⇒ 与 Go 侧 `zrpc.MustNewServer` 注册 `ListenOn` 同形 ⇒ ⇒ 自动注册必须关掉，否则同一服务名下会有两个端口的实例
+- ⚠️ **实测坑（载体守门首跑踩到）**：devh 3.1.0 的 `GrpcServerAutoConfiguration` **无条件**起 gRPC server（`spring-configuration-metadata.json` 里**没有** `grpc.server.enabled` ⇒ **没有**「关掉 gRPC」的开关）⇒ ⇒ 守门必须**排除**它；排除后 `GrpcServerProperties` bean 随之消失 ⇒ ⇒ 还得**自己补一个空壳**；`GrpcServerFactoryAutoConfiguration` 的 `@ConditionalOnClass` 认 shaded Netty ⇒ ⇒ 本域 classpath 上有 ⇒ ⇒ **还得排除它**（否则 `GrpcServiceDiscoverer` 缺失 ⇒ 上下文起不来 ⇒ 4 条用例全 Error）
+
+**四、守门网**
+
+- `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcPrometheusCarrierGateTest.java` —— **4 条**
+  - `servletContainerIsActuallyPresent` —— 上下文确实是 `WebServerApplicationContext`（= `WebApplicationType` 推导出 SERVLET ⇒ servlet 容器真在 classpath 上）
+  - `prometheusEndpointIsReachableOnMainPort` —— 真 HTTP GET `/actuator/prometheus` ⇒ **200** ＋ body 含 `# HELP` 与 `# TYPE`
+  - `exportedMetricNamesMatchGo` —— 指标名与 Go 逐条同形
+  - `exportedLabelSetMatchesGo` —— 标签集与 Go 逐条同形 ＋ 两条负向断言（无 `application` 标签、无 `_total` 重复追加）
+- `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/RealTomcatPort.java` —— 域内固定段 **22290–22294**（禁 OS 盲选口）
+- ⚠️ 守门读的是**域侧真实 `application.yaml`**（本类不带自己的 management 配置）⇒ ⇒ **改坏配置就红**
+
+**五、变异实测（判别力）**
+
+- 变异 M1：`include` 里去掉 `prometheus` ⇒ **3 条转红**（端点 404 ＋ 指标缺失）
+- 变异 M2：pom 里去掉 `spring-boot-starter-web` ⇒ **4 条转 Error**（上下文起不来）
+- 变异 M3：写回 `management.server.port: -1` ⇒ **3 条转红**
+- ⇒ ⇒ 三个变异**各自**精确转红、还原后复绿 ⇒ ⇒ **守门不是假绿**
+
+**六、证据强度与诚实边界**
+
+- 证据强度 **L3**（真 Tomcat ＋ 真 HTTP 抓取 ＋ 真 Prometheus 文本 ＋ 真指标名与标签核对）—— **不是 L4**
+- ⚠️ **未做**「业务启动类在真 PG/Redis 下真起一遍」⇒ ⇒ **L4 活体验证仍缺**（需 Docker；本机 Docker 全停）
+- ⚠️ **未做双侧活体对拍**（Go 侧真进程与 RAG 侧真进程的同请求抓取比对）
+- ⚠️ 守门用**独立最小上下文**（`@SpringBootConfiguration` ＋ `@EnableAutoConfiguration` ＋ 显式 `@Import`，**无 `@ComponentScan`**）⇒ ⇒ 不被 PG/Redis 绑架 ⇒ ⇒ 测的正是「载体 + 暴露面 + 指标定义」三件事
+- ⚠️ **「13 个 api 侧 Bean 不在容器里」这条运行期断言本轮交不了** —— 共享层的 `@ConditionalOnApiSide` **不在本分支基线** ⇒ ⇒ 写出来必然恒红 ⇒ ⇒ **交阻塞清单，不交恒红守门**
+- ⚠️ **载体改动的进程形态差异**（已按 `docs/twoStage.md` §10 登记为残余项，不修）：Go 侧是 `http.ListenAndServe` 的小 server（无 servlet、无业务路由）；RAG 侧是 Tomcat（有 servlet 容器，但**无任何业务 HTTP 路由**）⇒ ⇒ 两者对外可观测面（独立端口 + Prometheus 文本）一致
+
+**七、端口号待统一分配**
+
+- 现状取 **Go DevServer 端口一字对齐**（user-rpc 9094 · admin-rpc 9097 · follow-rpc 16065），且都用 `${<X>_RPC_MANAGEMENT_PORT:<默认值>}` env 可覆盖 ⇒ ⇒ 统一分配后**只改默认值一行**
+- ⚠️ **端口号不是本域自选** ⇒ 等合并收口执行者一句话
+
+**八、指针位移登记（供后续重锚用）**
+
+- 本轮给 `application.yaml` 加了内容 ⇒ ⇒ **该文件行号整体下移** ⇒ ⇒ 指向它的硬指针（如 `docs/DRIFT/_cross/grading/W10.md` 里的 `application.yaml:89-90`、以及本文件 `:1947` 的 `:40-45`）**本轮未重锚**
+- ⇒ ⇒ 理由：**端口号还要再改一次**（统一分配）⇒ ⇒ **重锚应在端口定稿后做一次**，避免改两遍
+- ⇒ ⇒ 已就地核对：本轮**只改注释**的 4 个 java 文件（`UserRpcApplication.java` / `AdminRpcApplication.java` 与两个 `NacosRegistration.java`）**行数与 HEAD 完全一致** ⇒ ⇒ 指向它们的代码行指针（`AdminRpcApplication.java:85` 与 `:112`、`UserRpcApplication.java:118`、两个 `NacosRegistration.java` 的 `:56`/`:62`/`:77`/`:96`/`:110`）**未漂移**

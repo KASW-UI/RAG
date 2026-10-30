@@ -149,7 +149,19 @@ class UserRpcPrometheusCarrierGateTest {
             //    ⇒ ⇒ 与本机已跑的服务抢口 ⇒ BindException ⇒ 上下文起不来。
             //    ⇒ ⇒ 本测试**不验 gRPC**（验的是 HTTP 载体与暴露面）⇒ ⇒ 排除掉最干净
             //    ⇒ ⇒ 且**不需要**任何 gRPC 端口（也就不会碰「OS 盲选口」那条红线）。
-            net.devh.boot.grpc.server.autoconfigure.GrpcServerAutoConfiguration.class
+            net.devh.boot.grpc.server.autoconfigure.GrpcServerAutoConfiguration.class,
+            // ⚠️ **还必须排除 devh 的 server 工厂自动配置**（2026-10-31 实测踩到）：
+            //    `GrpcServerFactoryAutoConfiguration` 的 `@ConditionalOnClass` 认的是
+            //    `io.grpc.netty.shaded.io.netty.channel.Channel` 与
+            //    `io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder`
+            //    ⇒ ⇒ 这两个类在本域 classpath 上（`grpc-server-spring-boot-starter` 传递引入
+            //    `grpc-netty-shaded`）⇒ ⇒ 这个自动配置**照样激活**
+            //    ⇒ ⇒ 它的 `shadedNettyGrpcServerFactory` bean 要 `GrpcServiceDiscoverer`
+            //    ⇒ ⇒ 而那个 bean 是**被排除的**
+            //    `GrpcServerAutoConfiguration.defaultGrpcServiceDiscoverer()` 提供的
+            //    ⇒ ⇒ `NoSuchBeanDefinitionException` ⇒ **上下文起不来** ⇒ 4 条用例全 Error。
+            //    ⇒ ⇒ 本测试**不验 gRPC** ⇒ ⇒ 排除掉最干净 ⇒ ⇒ 且不需要任何 gRPC 端口。
+            net.devh.boot.grpc.server.autoconfigure.GrpcServerFactoryAutoConfiguration.class,
     })
     @Import(UserRpcMetrics.class)
     static class MinimalCarrierApp {

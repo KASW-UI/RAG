@@ -269,7 +269,7 @@ curl: (1) Received HTTP/0.9 when not allowed                 ← 那不是 HTTP
 | | `spring-boot-starter-web` | 进程形态 | `/actuator/prometheus` 实际出口 |
 |---|---|---|---|
 | **8 个 api 模块** | **8/8 有** | servlet 应用 | ✅ **全部走 B**（actuator 挂主端口）—— B 是 api 层的**既定形态** |
-| **10 个 rpc 模块** | **1/10 有**（仅 `follow-rpc`；其余 9 个只有 `spring-boot-web-server` 抽象，供 nacos-discovery 反射引用） | 纯 gRPC 进程 | ❌ **9/10 无 actuator web 端点载体**（⚠️ **2026-10-30 16:6x 实测更新**：原写「8 个 rpc 模块 0/8」—— 当时范围只有 8 个 rpc ⇒ 现范围 10 个（新增 `user-user-rpc` / `user-admin-rpc`）⇒ ⇒ 口径 = **9/10 无 web 载体**；⚠️ 判据要点：**载体判据 = 依赖树实测**（`mvn -o -B dependency:list` 逐模块查 `spring-boot-starter-web` / `tomcat-embed-core`），**不是 grep pom** —— `service/common/pom.xml:361` 的 web starter 是 **`test` scope ⇒ 不传递** ⇒ 但父子继承下「grep 不到」≠「没有」⇒ ⇒ 必须查依赖树；⚠️ **本表是「载体层」口径；另有一层「配置层」**（`management:` 段三重关闭 = `admin-rpc` / `user-rpc` / `hot-rpc` 3 个）⇒ ⇒ **两个层都要看，只看配置层会得出「7 个有出口」的假结论**（`exposure.include` 写了但没有载体 ⇒ 抓取方连不上 HTTP）⇒ ⇒ **完整论证见 `docs/DRIFT/follow/vs-common.md` 末尾的对应小节**；⚠️ 边界：**10/10 都有 actuator 依赖**，且 10/10 都**未配 `management.endpoints.jmx.exposure`** ⇒ ⇒ JMX 侧走默认暴露 ⇒ ⇒ 本行的「零出口」严格指 **actuator 的 web endpoint 无载体**，不是「进程完全没有可观测出口」） |
+| **10 个 rpc 模块** | **3/10 有**（`follow-rpc` ＋ **2026-10-30 载体落地新增的 `user-user-rpc` / `user-admin-rpc`**；其余 7 个只有 `spring-boot-web-server` 抽象，供 nacos-discovery 反射引用） | 纯 gRPC 进程 | ❌ **7/10 无 actuator web 端点载体**（⚠️ **2026-10-30 16:6x 实测更新**：原写「8 个 rpc 模块 0/8」—— 当时范围只有 8 个 rpc ⇒ 现范围 10 个（新增 `user-user-rpc` / `user-admin-rpc`）⇒ ⇒ 口径 = **9/10 无 web 载体**；⚠️ 判据要点：**载体判据 = 依赖树实测**（`mvn -o -B dependency:list` 逐模块查 `spring-boot-starter-web` / `tomcat-embed-core`），**不是 grep pom** —— `service/common/pom.xml:361` 的 web starter 是 **`test` scope ⇒ 不传递** ⇒ 但父子继承下「grep 不到」≠「没有」⇒ ⇒ 必须查依赖树；⚠️ **本表是「载体层」口径；另有一层「配置层」**（`management:` 段三重关闭 = `admin-rpc` / `user-rpc` / `hot-rpc` 3 个）⇒ ⇒ **两个层都要看，只看配置层会得出「7 个有出口」的假结论**（`exposure.include` 写了但没有载体 ⇒ 抓取方连不上 HTTP）⇒ ⇒ **完整论证见 `docs/DRIFT/follow/vs-common.md` 末尾的对应小节**；⚠️ 边界：**10/10 都有 actuator 依赖**，且 10/10 都**未配 `management.endpoints.jmx.exposure`** ⇒ ⇒ JMX 侧走默认暴露 ⇒ ⇒ 本行的「零出口」严格指 **actuator 的 web endpoint 无载体**，不是「进程完全没有可观测出口」） |
 
 - ⚠️ **全仓无 Pushgateway** ⇒ **C 不是既有形态**，无需考虑。
 - `hot-rpc` 写得最直白：`management.server.port: -1` + `management.endpoints.prometheus.enabled: false`，
@@ -288,8 +288,8 @@ curl: (1) Received HTTP/0.9 when not allowed                 ← 那不是 HTTP
 | `favorite/rpc` | ✅ | 16062 | ❌ 零出口 | 🔴 同款缺口（**其它域**） |
 | `message/rpc` | ✅ | 16067 | ❌ 零出口 | 🔴 同款缺口（**其它域**） |
 | `like/rpc` | ✅ | 9098 | ❌ 零出口 | 🔴 同款缺口（**其它域**） |
-| `user/user/rpc` | ✅ | 9094 | ❌ 零出口 | 🔴 同款缺口（**其它域**） |
-| `user/admin/rpc` | ✅ | 9097 | ❌ 零出口 | 🔴 同款缺口（**其它域**） |
+| `user/user/rpc` | ✅ | 9094 | ✅ **已开**（2026-10-30 载体落地） | — 同款缺口**已闭合** |
+| `user/admin/rpc` | ✅ | 9097 | ✅ **已开**（2026-10-30 载体落地） | — 同款缺口**已闭合** |
 | `article/rpc`、`comment/rpc`、`hot/rpc`、`task/rpc` | ❌ **无 DevServer 段** | — | ❌ 零出口 | ⚠️ **不是漂移**（Go 侧同样抓不到 —— 精确原因：这 4 个域的 Go yaml **没有 DevServer 段** ⇒ `go-zero@v1.10.2/core/service/serviceconf.go:40` 的 `DevServer` 字段带 `optional` ⇒ **整段缺失 ⇒ 零值 ⇒ `Enabled=false` ⇒ 不起 DevServer** ⇒ ⇒ **不是「Go 侧没这个端口」，而是「Go 侧根本没起」**） |
 
 ⇒ **「Go 有、RAG 无」一共 6 处**，follow 是其中之一；
@@ -504,7 +504,7 @@ Go  : 0.005 0.01 0.025 0.05 0.1 0.25 0.5 1   2.5 5   10  +Inf
 上表 §「全仓调查结论」列的另外 5 个 rpc 组件
 （`favorite-rpc` 16062 / `message-rpc` 16067 / `like-rpc` 9098 /
 `user-user-rpc` 9094 / `user-admin-rpc` 9097）
-**仍是「Go 有 DevServer、RAG 零出口」** ⇒ 本轮**只落 follow 域**
+**仍是「Go 有 DevServer、RAG 零出口」** ⇒ 本轮**只落 follow 域**（⚠️ **2026-10-30 订正**：`user-user-rpc` / `user-admin-rpc` 的这一格已由 G1 lane 的载体落地闭合 ⇒ ⇒ 现为 **3/10 有载体**）
 ⇒ 跨域派单**保持原样**（本工作树不得改域外文件）。
 
 > **🧾 第二轮复核（2026-10-24 · 最全性）**：补录「逐文件对照索引」——
@@ -626,13 +626,13 @@ Go  : 0.005 0.01 0.025 0.05 0.1 0.25 0.5 1   2.5 5   10  +Inf
    **域内结论、逐行比对、差异定级、探针、变异必红**见
    §「DRIFT-FOLLOW-006 的落地（2026-10-29）」。
    ⚠️ **全仓统一方案仍未做**：另外 5 个 rpc 组件（`favorite-rpc` / `message-rpc` / `like-rpc` /
-   `user-user-rpc` / `user-admin-rpc`）**仍是「Go 有 DevServer、RAG 零出口」**
+   `user-user-rpc` / `user-admin-rpc`）**当时**是「Go 有 DevServer、RAG 零出口」**（⚠️ `user-user-rpc` / `user-admin-rpc` 两格已于 2026-10-30 由 G1 lane 载体落地闭合）**
    ⇒ **跨域派单保持原样**（本工作树不得改域外文件）。
    ⚠️ 本轮**选的是「方案 B 变体」**（Tomcat 承载 Actuator，**观测端口与 Go 同为 16065**），
    而非台账里列的「方案 A」（`com.sun.net.httpserver` 小 server）：
    ⇒ 原因与代价已登记在 §「残余差异登记」的第 2/3 条（**D 类**）。
 5. **跨域派单（5 处同款缺口）**：`favorite-rpc`(16062) / `message-rpc`(16067) / `like-rpc`(9098) /
-   `user-user-rpc`(9094) / `user-admin-rpc`(9097) —— Go 有 DevServer、RAG 零出口。
+   `user-user-rpc`(9094) / `user-admin-rpc`(9097) —— Go 有 DevServer、RAG 零出口（⚠️ 后两者已于 2026-10-30 由 G1 lane 载体落地闭合 ⇒ 上表该两行已就地订正）。
    ⇒ 连同端口规划一起交主会话（本域不得改域外文件）。
 6. 🔴 **共享索引已过时 ⇒ 交主会话更新（本工作树不得改共享文件）** ——
    `AGENTS.md:32` 的域表仍写「`comment`/`favorite`/`follow`/`task` **14 个组件全部零台账**」，
@@ -785,3 +785,55 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
 > ⇒ ⇒ 判据：`python3 tools/ledger-derive/check-pointer-consistency.py`（派生层输入完整性棘轮）。
 
 | DRIFT-FOLLOW-014 | 出向 user-rpc **缺 2s 客户端超时** ⇒ 失败只能由**服务端**兜底 ⇒ 失败**归因**与**收口时刻**与 Go 不同 | **可观察（失败归因）** | ✅ **已修（2026-10-30 · G1 lane · 域侧自修）** —— 客户端侧 2s deadline 已补（`service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java:75`）⇒ 守门 `UserRpcClientDeadlineCapTest`（**3 条**，含**真发一次调用**）＋ **变异 M4 实测红**（拿掉 cap ⇒ 挂死 ⇒ `@Timeout` 触发）⇒ 证据强度 **L3**（未做双侧活体对拍 ⇒ **不是 L4**）⇒ 详见下方 §「DRIFT-FOLLOW-014」|
+
+## 载体守门补网（2026-10-31 · G1 lane）
+
+> ⚠️ **本小节标题刻意不含任何编号 token** ⇒ 派生层不把它当条目候选 ⇒ 也不劫持任何既有编号的 `domain` / `wave` / `basis`。
+> ⚠️ **本小节不重登记** ⇒ 本体仍是本文件既有的 `DRIFT-FOLLOW-006`（`:20`）⇒ ⇒ **销账时不要当新条目**。
+> ⚠️ **本小节只登记「守门」这一件事** —— 载体本身（`pom.xml:216` 的 `spring-boot-starter-web` ＋ `application.yml:142` 的 `server.port` ＋ `:260` 的 `include`）是 2026-10-29 落地的，**本轮没动**。
+
+**一、为什么这条守门比新增 user-rpc / admin-rpc 的两条更该先有**
+
+- follow-rpc 是本域**唯一早就存在载体**的 rpc 模块（`DRIFT-FOLLOW-006` · 2026-10-29 落地）⇒ ⇒ 但它此前**零守门** ⇒ ⇒ 「唯一已存在的载体却没有网」⇒ ⇒ 载体哪天掉了 / 暴露面被谁改坏 / 路径不再是抓取口，都**没人拦得住**
+- ⇒ ⇒ 本轮补的就是这张网（**不改载体实现**，只加守门 + 端口设施）
+
+**二、落码清单（域侧自修 · 全部在 G1 写权面）**
+
+| 落点 | 文件与行号 | 内容 |
+|---|---|---|
+| 载体守门 | `service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/FollowRpcPrometheusCarrierGateTest.java` | **4 条**：载体存在 / 暴露面真抓得到 / 指标名与 Go 同形 / 标签集与 Go 同形 |
+| 端口设施 | `service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/support/RealTomcatPort.java` | 域内固定段 **22360–22364**（禁 OS 盲选口；与本模块 gRPC 段 `22320–22339` 及 follow-api 的 Tomcat 段 `22340–22359` 均不重叠） |
+
+**三、实测抓到的真实输出（本轮真跑，逐字记录）**
+
+- `follow_rpc_request_total{method="Follow",result="success"}` ⇒ 与 Go `service/follow/rpc/internal/metrics/metrics.go:13-17` 的 `Subsystem:"follow_rpc"` + `Name:"request_total"` + `labels=[method,result]` **逐字同形**（且 Micrometer **没有**再追加一个 `_total`）
+- `follow_rpc_request_duration_seconds_bucket{method="Follow",le="0.005"}` 起，桶边界为 `.005 .01 .025 .05 .1 .25 .5 1.0 2.5 5.0 10.0` + `+Inf` ⇒ 与 Go 侧 `prometheus.DefBuckets`（`client_golang@v1.23.2/prometheus/histogram.go:271`，由 `metrics.go:23` 的 `Buckets: prometheus.DefBuckets` 消费）**逐条同形**
+- `follow_rpc_recommendation_size`（gauge，无 label）⇒ 与 Go `metrics.go:39-42` 同形
+- ⚠️ **RAG 多出来的**：`follow_rpc_request_duration_seconds_max` ⇒ Go 侧没有这条 ⇒ 属**已登记的 P3/D 类残余**（本文件既有「8 条 `_max` 增项」那条），**不在本轮范围**
+
+**四、实测踩到的两个坑（写下来免得下一个人再踩）**
+
+- 坑一：follow-rpc 用的是 **Flyway**（users 域两个 rpc 用 SchemaInitializer，故那边没这问题）⇒ ⇒ `FlywayAutoConfiguration` 会在上下文启动时**真连 PG** ⇒ ⇒ 本机没有 `postgres` 主机 ⇒ `UnknownHostException` ⇒ ⇒ 载体守门必须**排除** `FlywayAutoConfiguration`（⚠️ 这**不改变**生产行为，生产仍会跑迁移）
+- 坑二：devh 的 `GrpcServerFactoryAutoConfiguration` 的 `@ConditionalOnClass` 认 shaded Netty ⇒ ⇒ follow-rpc 的 classpath 上有（它比 users 域两个 rpc 多了 `grpc-client-spring-boot-starter`）⇒ ⇒ 排除 `GrpcServerAutoConfiguration` **还不够** ⇒ ⇒ **还得排除它**（否则 `GrpcServiceDiscoverer` 缺失 ⇒ 上下文起不来 ⇒ 4 条用例全 Error）
+
+**五、变异实测（判别力）**
+
+- 变异 M1：`include` 里去掉 `prometheus` ⇒ **3 条转红**（端点 404 ＋ 指标缺失）
+- 变异 M2：pom 里去掉 `spring-boot-starter-web` ⇒ **4 条转 Error**（上下文起不来）
+- 变异 M3：写回 `management.server.port: -1` ⇒ **3 条转红**
+- ⇒ ⇒ 三个变异**各自**精确转红、还原后复绿 ⇒ ⇒ **守门不是假绿**
+
+**六、证据强度与诚实边界**
+
+- 证据强度 **L3**（真 Tomcat ＋ 真 HTTP 抓取 ＋ 真 Prometheus 文本 ＋ 真指标名/标签/桶边界核对）—— **不是 L4**
+- ⚠️ **未做**「业务启动类在真 PG/Redis 下真起一遍」⇒ ⇒ **L4 活体验证仍缺**（需 Docker；本机 Docker 全停）
+- ⚠️ **未做** Go 侧真进程的同请求抓取比对（本文件 `:20` 记的那次活体对拍 `tools/metrics-probe/follow/run.sh` EXIT=0 是 2026-10-30 那一轮，与本轮守门是**两件事**）
+- ⚠️ 守门用**独立最小上下文**（**无 `@ComponentScan`**）⇒ ⇒ 不被 PG/Redis 绑架 ⇒ ⇒ 测的正是「载体 + 暴露面 + 指标定义」三件事
+- ⚠️ 守门**不覆盖**「13 个 api 侧 Bean 不在容器里」这条运行期断言（`@ConditionalOnApiSide` 不在本分支基线 ⇒ 必然恒红）⇒ ⇒ **交阻塞清单，不交恒红守门**
+
+**七、端口段表需扩（共享层写权面 ⇒ 已登记转派）**
+
+- 本轮新增的 Tomcat 子段：`user-rpc` **22290–22294** · `admin-rpc` **22295–22299** · `follow-rpc` **22360–22364**
+- ⇒ ⇒ users 域的**脚手架段**（域级守门 `BlindPortGateTest` ⑤ 造「被占」样本用）原为 `22280–22299` ⇒ ⇒ 与前两个子段**重叠** ⇒ ⇒ 已就地收窄为 **`22280–22289`**
+- ⇒ ⇒ 该收窄**属共享层段表**（`docs/DRIFT/global/vs-common.md` §4.10.19.3）⇒ ⇒ **G4 写权面** ⇒ ⇒ **已登记并转派**，本域只按已分配号取，**不改共享层台账**
+- ⇒ ⇒ 域级守门 `BlindPortGateTest` ② 的「端口类个数」期望值已如实从 **11 改为 12**（新增 follow-rpc 的 Tomcat 口）⇒ ⇒ **是扩覆盖面，不是削弱判据**

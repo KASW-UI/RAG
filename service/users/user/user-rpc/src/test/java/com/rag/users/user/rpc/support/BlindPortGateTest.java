@@ -76,7 +76,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <ol>
  *   <li><b>源扫</b>：我域 6 个模块的 {@code src/test/java} 里<b>零</b>盲选口写法
  *       ⇒ ⚠️ <b>必须先剥注释</b>，否则 javadoc 里引用 {@code forPort(0)} 会假阳性；</li>
- *   <li><b>段归属</b>：9 个端口类的段必须落在<b>共享层预分配给本域</b>的段里
+ *   <li><b>段归属</b>：12 个端口类的段必须落在<b>共享层预分配给本域</b>的段里
  *       （users 22200–22299 / follow 22300–22399）⇒ 子段互不重叠
  *       ⇒ 不在临时段 ⇒ 不与 Testcontainers 段 22700–22999 重叠；</li>
  *   <li><b>运行期</b>：挑到的口<b>真的能起一个 gRPC server</b>且客户端连得上
@@ -133,7 +133,20 @@ class BlindPortGateTest {
     private static final String SELF_FILE_NAME = "BlindPortGateTest.java";
 
     private static final int SCRATCH_FIRST = 22280;
-    private static final int SCRATCH_LAST = 22299;
+    /**
+     * 脚手架段上界 —— ⚠️ **2026-10-30 · G1 lane · 指标抓取出口补载体后收窄**。
+     *
+     * <p>原值 = {@code 22299} ⇒ ⇒ 与本轮新增的两个 Tomcat 端口类<b>重叠</b>：
+     * user-rpc 的 {@code RealTomcatPort} 占 {@code 22290–22294} ·
+     * admin-rpc 的占 {@code 22295–22299} ⇒ ⇒ ⑤ 若仍按 {@code 22299} 扫，
+     * 就可能挑到**属于别的端口类**的口去造「被占」样本
+     * ⇒ ⇒ 那会让 ② 的「子段互不重叠」判据与 ⑤ 的脚手架段<b>互相打架</b>。
+     * <p>⇒ ⇒ 收窄为 {@code 22280–22289}（脚手架段实际可用区间）。
+     * <p>⚠️ 该收窄<b>同时影响共享层段表</b>（{@code docs/DRIFT/global/vs-common.md} §4.10.19.3
+     * 记的「users 域脚手架段 = 22280–22299」）⇒ ⇒ 属 G4 写权面 ⇒ ⇒ **已登记并转派**，
+     * 本类只按已分配号取，<b>不改共享层台账</b>。
+     */
+    private static final int SCRATCH_LAST = 22289;
 
     // ==================================================================
     // ① 源扫：我域测试树零盲选口
@@ -159,7 +172,7 @@ class BlindPortGateTest {
     // ==================================================================
 
     @Test
-    @DisplayName("② 段归属：11 个端口类的段落在本域预分配段内、子段互不重叠、不在临时段、不撞 Testcontainers 段")
+    @DisplayName("② 段归属：12 个端口类的段落在本域预分配段内、子段互不重叠、不在临时段、不撞 Testcontainers 段")
     void portClassesStayInsideDomainBand() throws IOException {
         Map<String, int[]> bands = new LinkedHashMap<>();
         for (String module : DOMAIN_MODULE_DIRS) {
@@ -174,12 +187,13 @@ class BlindPortGateTest {
         }
 
         assertThat(bands)
-                .as("要有 6 个 RealGrpcPort + 5 个 RealTomcatPort"
+                .as("要有 6 个 RealGrpcPort + 6 个 RealTomcatPort"
                         + "（user-api / admin-api / follow-api 各要一个 Tomcat 口"
                         + "；🆕 2026-10-30 · G1 lane · 指标抓取出口补载体："
                         + "**user-rpc 与 admin-rpc 也各要一个 Tomcat 口**"
-                        + "——它们现在有了 servlet 载体，载体守门要真起 web server ⇒ 必须有固定段端口）")
-                .hasSize(11);
+                        + "——它们现在有了 servlet 载体，载体守门要真起 web server ⇒ 必须有固定段端口；"
+                        + "**follow-rpc 也要一个**——它 2026-10-29 就有载体，却一直<b>零守门</b>（唯一已存在的载体没有网））")
+                .hasSize(12);
 
         List<int[]> ranges = new ArrayList<>();
         for (Map.Entry<String, int[]> e : bands.entrySet()) {
