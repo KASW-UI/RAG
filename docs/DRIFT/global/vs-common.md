@@ -5167,7 +5167,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 
 1. **本轮仍是源码级证据（E1）** —— **没有任何一侧的活体对拍** ⇒ ⇒ 「E66 是真漂移」在本节一律读作「**在 Go 源码的调用链上同形**」，**不得**外推为「已用活体验证的行为等价」。
 2. **本轮只订正断言与登记口径** ⇒ ⇒ 共享层的 Redis 落码**一行未动** ⇒ ⇒ §4.19.4 ⑦ 的回归结果（`service/common` 424 条 / 全仓 3312 条）**对代码仍然有效**；但**回归之后又改了 javadoc** ⇒ ⇒ **纯注释改动 ⇒ 已重跑 `service/common` 模块级回归**（结果见第九节）。
-3. **Go 侧 `logoutlogic.go` 没有 `checkDeadline()` 等价物**（本层读全文 46 行确认）⇒ ⇒ 🔴 **（本条已于 2026-10-30 16:2x 订正 ⇒ 逐条证据见 §4.19.7）**：RAG 的 `AdminDomainService.logout`（`:259` `checkDeadline()` → `:267` Redis 写）与 Go 的错误码面**必须分两层看** —— ① **客户端可见码：两侧都是 1015（DEADLINE_EXCEEDED）⇒ 逐字一致 ⇒ 不是 wire 级漂移**（Go 的 `codes.Internal "注销失败,Redis写入异常"` 在 ctx 已 Done 时**到不了客户端**：`service/common/observability/rpc.go:55-75` 的 select 里 `done` 分支**要先拿锁**（那把锁被 handler 整个执行期持有）而 `timeoutCtx.Done()` 分支**不拿锁** ⇒ **超时分支先就绪** ⇒ Go 返回的是 `codes.DeadlineExceeded`）② **handler 级业务码：确实不同**（Go = `codes.Internal` 5001 · RAG = 域侧抢先 `checkDeadline()` 抛的 `DEADLINE_EXCEEDED` 1015）⇒ ⇒ **那一面属域侧（users）⇒ 共享层改不了 ⇒ 归 G1 / 域侧（本层不越界）**。
+3. **Go 侧 `logoutlogic.go` 没有 `checkDeadline()` 等价物**（本层读全文 46 行确认）⇒ ⇒ 🔴 **（本条已于 2026-10-30 16:2x 订正 ⇒ 逐条证据见 §4.19.7）**：RAG 的 `AdminDomainService.logout`（`:259` `checkDeadline()` → `:267` Redis 写）与 Go 的错误码面**必须分两层看** —— ① **客户端可见码：两侧都是 1015（DEADLINE_EXCEEDED）⇒ 逐字一致 ⇒ 不是 wire 级漂移**（Go 的 `codes.Internal "注销失败,Redis写入异常"` 在 ctx 已 Done 时**到不了客户端**：`service/common/observability/rpc.go:55-75` 的 select 里 `done` 分支**要先拿锁**（那把锁被 handler 整个执行期持有）而 `timeoutCtx.Done()` 分支**不拿锁** ⇒ **超时分支先就绪** ⇒ Go 返回的是 `codes.DeadlineExceeded`）② **handler 级业务码：确实不同**（Go = `codes.Internal` 5001 · RAG = 域侧抢先 `checkDeadline()` 抛的 `DEADLINE_EXCEEDED` 1015）⇒ ⇒ **那一面属域侧（users）⇒ 共享层改不了 ⇒ 归 G1 / 域侧（本层不越界）**。〔**【订正 · 见 §4.19.10 · §4.19.12】本条 ① 的原论证是错的**：「Go 的 `codes.Internal` 在 ctx 已 Done 时**到不了客户端**」**不成立** —— 真源 `service/common/observability/rpc.go:47-72` 的 `select`（`:59`）里 `done` 分支（`:63`）虽然要 `lock.Lock()`（`:64`），但那把锁由 handler goroutine 在 `close(done)`（`:56`）之后**立即释放**（`:54` 的 `defer lock.Unlock()`）⇒ ⇒ **父 goroutine 若在 `close(done)` 之后才到达 `select`，`done` 与 `timeoutCtx.Done()` 两个分支同时就绪 ⇒ Go 的 `select` 在就绪分支间随机选** ⇒ ⇒ 走 `done` 分支就返回 handler 的 `codes.Internal`（5001）⇒ ⇒ **Go 侧客户端可见码是集合 {1015, 5001}、不是单点 1015** ⇒ ⇒ ⇒ **RAG 保留域侧抢先检查 ⇒ RAG = {1015} = Go 集合的真子集**（⇒ 「RAG 更严的一侧」⇒ 需签字候选）⇒ ⇒ **①② 不是两个面，而是同一个客户端可见面里的两个码** ⇒ ⇒ 逐条见 §4.19.12。〕
 4. **Redis 能力面已知不覆盖的面不变**：`connection.getRedisCommands().xxx(...)` 直调绕过检查；pipeline 命令在 `closePipeline()` 才下发 ⇒ 不受预算约束；集群 / 哨兵连接不包装。
 
 **九、本轮复跑（**纯 javadoc 改动后的模块级回归**）**
@@ -5268,20 +5268,20 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 2. **Go 侧结论来自「读源码 ＋ 一个 `conf.Load` 行为探针」** ⇒ ⇒ 探针验证的是**配置填充语义**，**不是**「进程真的起了 :9091」⇒ ⇒ 出口是否真可达，仍需活体验证。
 3. **RAG 侧「有出口」的结论来自 yml 文本** ⇒ ⇒ 未验证「`/actuator/prometheus` 在真进程里真的可达」（那要看依赖与容器条件）⇒ ⇒ 同上，读作配置面。⇒ ⇒ 🆕 **2026-10-30 16:7x 补层**：该边界已由**依赖树实测**推进到「**载体层已量**」⇒ ⇒ **10 个 rpc 域里只有 `follow-rpc` 有 HTTP 容器**（其余 9 个只有 actuator）⇒ ⇒ ⇒ **「7 个有出口」是配置面、可被抓取只有 1/10** ⇒ ⇒ 逐格见 **§4.19.8**（⚠️ **依赖树仍是静态证据** ⇒ 真进程 curl 一次仍未做）。
 
-### 4.19.7 🔴 本层第三次自查订正（2026-10-30 16:2x · G4 lane）：**客户端可见错误码两侧同形**（原判「仍与 Go 不同」⇒ 错）＋ **副作用差异的方向被再次订正**（原判与反馈单的转述**都错**）＋ **两层错误面必须分开说**
+### 4.19.7 🔴 本层第三次自查订正（2026-10-30 16:2x · G4 lane）：**客户端可见错误码两侧同形**（原判「仍与 Go 不同」⇒ 错）〔**【订正 · 见 §4.19.12】此处「同形」是**单点口径** ⇒ 已被真源探针推翻**：Go 侧**集合** = {1015, 5001}、RAG 侧（保留域侧抢先检查）= {1015} ⇒ ⇒ **真同集合要等域侧删掉抢先检查之后**〕＋ **副作用差异的方向被再次订正**（原判与反馈单的转述**都错**）＋ **两层错误面必须分开说**
 
 > ⚠️ **触发源 = G1 的 16:0x 回执**（三条主张）⇒ ⇒ 本层**逐条自己打开源文件重读**（AGENTS.md §3.1「不采信转述」）⇒ ⇒ **三条里两条成立、一条不成立** ⇒ ⇒ ⇒ **本节含本层自己的第三处错断言的订正**（§3.3 ③「先改/删错误断言，再改实现」）。
 > ⚠️ **本轮共享层零代码改动**（只改 javadoc ＋ 台账）⇒ ⇒ 落码范围不变 ⇒ ⇒ **不需要新批准**。
 
-**一、🔴 订正一：客户端可见的错误码，两侧**逐字一致** ⇒ 「不是 wire 级漂移」**
+**一、🔴 订正一：客户端可见的错误码，两侧**逐字一致** ⇒ 「不是 wire 级漂移」**〔**【订正 · 见 §4.19.12】本节「逐字一致」是**单点口径** ⇒ 已被真源探针推翻**：Go 侧**集合** = {1015, 5001} ⇒ ⇒ 本节 ①/② 两层说法要按**集合**读 ⇒ ⇒ 主体形态（1015）两侧确实一致，但**不是「逐字一致」** ⇒ ⇒ 集合口径见 §4.19.10 与 §4.19.12。〕
 
 - **本层原断言**（§4.19.5 第八节第 3 条）：「RAG 的 `AdminDomainService.logout` 在**错误码面上仍与 Go 不同**（RAG `DEADLINE_EXCEEDED` vs Go `codes.Internal "注销失败,Redis写入异常"`）」⇒ ⇒ **这句错**。
 - **为什么错（本层自读 Go 真源）** —— `Sea-RideTheWind_golang/service/common/observability/rpc.go:55-75` 的 select 有三个出口：
   - `case <-done:`（`:63`）⇒ ⇒ **要先 `lock.Lock()`**（`:64`）⇒ 而那把锁**被 handler 整个执行期持有**（`:53-54` 的 `lock.Lock()` / `defer lock.Unlock()` 包住 `:55` 的 `resp, err = handler(timeoutCtx, req)`）；
   - `case <-timeoutCtx.Done():`（`:68`）⇒ ⇒ **不拿锁** ⇒ ⇒ **ctx 已 Done ⇒ 这个分支先就绪**；
   - ⇒ ⇒ **ctx 已过期 ⇒ 走超时分支 ⇒ 返回 `status.Error(codes.DeadlineExceeded, …)`（`:69`）** ⇒ ⇒ **handler 自己返回的 `codes.Internal`（`logoutlogic.go:41`）被丢弃** ⇒ ⇒ ⇒ **Go 的 `codes.Internal` 到不了客户端**。
-- **RAG 侧（本层自读 `RpcInterceptor.java`）**：客户端 deadline 已过 ⇒ `effectiveTimeoutNanos = 0`（`:304` 的 `min`）⇒ ⇒ 超时调度器**立即** fire ⇒ ⇒ **首次 `close(DEADLINE_EXCEEDED)`** ⇒ ⇒ ⇒ **客户端可见码 = 1015** ⇒ ⇒ 与 Go **逐字一致**。
-- ⇒ ⇒ **结论**：**两侧客户端可见码都是 1015（DEADLINE_EXCEEDED）⇒ 不是 wire 级漂移** ⇒ ⇒ 真正不同的只在 **handler 级业务码**（第二节）。
+- **RAG 侧（本层自读 `RpcInterceptor.java`）**：客户端 deadline 已过 ⇒ `effectiveTimeoutNanos = 0`（`:304` 的 `min`）⇒ ⇒ 超时调度器**立即** fire ⇒ ⇒ **首次 `close(DEADLINE_EXCEEDED)`** ⇒ ⇒ ⇒ **客户端可见码 = 1015** ⇒ ⇒ 与 Go **逐字一致**。〔**【订正 · 见 §4.19.12】原写「与 Go 逐字一致」是单点口径 ⇒ 错**：Go 侧客户端可见码**集合** = {1015, 5001} ⇒ ⇒ **RAG 这一格 = {1015} ⊊ Go 集合（真子集）** ⇒ ⇒ 「同集合」只在**删掉域侧抢先 `checkDeadline()`** 之后才成立 ⇒ ⇒ 见 §4.19.10 / §4.19.12。〕
+- ⇒ ⇒ **结论**：**两侧客户端可见码都是 1015（DEADLINE_EXCEEDED）⇒ 不是 wire 级漂移** ⇒ ⇒ 真正不同的只在 **handler 级业务码**（第二节）。〔**【订正 · 见 §4.19.12】原结论是单点口径 ⇒ 错**：Go 侧**集合** = {1015, 5001}、RAG 侧（保留域侧抢先检查）= **{1015}** ⇒ ⇒ ⇒ **RAG 是 Go 集合的真子集** ⇒ ⇒ 「不是 wire 级漂移」**只对主体形态成立**（1015 占绝大多数）⇒ ⇒ ⇒ **「真正不同的只在 handler 级业务码」这句也要改** —— handler 级码（5001）**在客户端可见面之内**（窄窗口）⇒ ⇒ ①② **不是两个面，是同一个面里的两个码**。〕
 
 **二、🔴 订正二：handler 级业务码**确实**不同 —— 差别在「谁先看到 deadline 过期」**
 
@@ -5314,7 +5314,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 **四、⇒ ⇒ 对本层既有结论的三处收紧**
 
 1. **「E66 落码 ⇒ 两侧同形」⇒ 收紧为「『派发前检查』这一层同形；『检查点位置』仍差取连接窗口」** ⇒ ⇒ **不是完全闭合** ⇒ ⇒ ⇒ **登记为新的开放项**（**本轮不落码**：收紧取连接阶段 = 改 socket / 连接超时 = 已在 `G4-15d` 那条「会新造有意偏离」的口径里 ⇒ ⇒ 需另立一条再签）。
-2. **`GoStyleRedisDeadline.assertNotExhausted` 的 javadoc** ⇒ ⇒ 原写「对外错误面（错误码 / 错误文案）与 Go 侧**保持一致**」⇒ ⇒ **过强** ⇒ ⇒ 已改成**两层分说**（① 客户端可见码 = 1015 ⇒ 与 Go 一致；② handler 级业务码 = 域侧 `catch (Exception e)` 映射的 5001 ⇒ 与 Go 的 handler 级一致，但**带域侧抢先检查的路径走不到** ⇒ ✅ **【订正 · 见 §4.19.10】「那一面归 G1」的判断成立**（§4.19.9 曾作废它，那个作废错了 —— 它**可观察**：Go 侧有 ~0.025% 的 5001 窗口）⇒ ⇒ **完全同形需域侧去掉那处抢先检查 ⇒ 归 G1 ⇒ 且必须与共享层代理同批合**）。
+2. **`GoStyleRedisDeadline.assertNotExhausted` 的 javadoc** ⇒ ⇒ 原写「对外错误面（错误码 / 错误文案）与 Go 侧**保持一致**」⇒ ⇒ **过强** ⇒ ⇒ 已改成**两层分说**（① 客户端可见码 = 1015 ⇒ 与 Go 一致；② handler 级业务码 = 域侧 `catch (Exception e)` 映射的 5001 ⇒ 与 Go 的 handler 级一致，但**带域侧抢先检查的路径走不到** ⇒ ✅ **【订正 · 见 §4.19.10】「那一面归 G1」的判断成立**（§4.19.9 曾作废它，那个作废错了 —— 它**可观察**：Go 侧有 ~0.025% 的 5001 窗口）⇒ ⇒ **完全同形需域侧去掉那处抢先检查 ⇒ 归 G1 ⇒ 且必须与共享层代理同批合**）。〔**【订正 · 见 §4.19.12】本条 ①「客户端可见码 = 1015 ⇒ 与 Go 一致」要改读集合**：Go = {1015, 5001}、RAG（保留抢先检查）= {1015} ⇒ ⇒ 是**真子集**（「RAG 更严的一侧」⇒ 需签字候选）；② 的「~0.025% 的 5001 窗口」**已被探针坐实**（本层独立复跑：`fast_handler` 码集合 = {4,13} · `code_13` = 22/200000 ≈ 0.011%）。〕
 3. **反馈单的「同批合」结论** ⇒ ⇒ ✅ **【订正 · 见 §4.19.10】恢复有效**（§4.19.9 曾整条作废，那个作废错了）—— 结论不变、**理由也恢复为原理由**：「零检查 ⇒ RAG 会写、Go 不写 ⇒ 倒退」⇒ ⇒ ⇒ **⇒ 必须同一次提交**（与共享层代理同一个 commit 进主干）。
 
 **五、本节对反馈单三条主张的逐条判定（本层独立复核，**不采信转述**）**
@@ -5442,9 +5442,9 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 - **Go 侧（`service/common/observability/rpc.go`）**：`:30` 返回的拦截器闭包；`:38` `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)`；`:47-57` handler goroutine（`:53-54` **全程持锁**、`:55` `resp, err = handler(timeoutCtx, req)`、`:56` `close(done)`）；`:59-72` 的 select：
   - `:63-67` **`case <-done:`** ⇒ `:64` `lock.Lock()`（**要等 handler 放锁**）⇒ `:67` `return resp, err`（**handler 的码**）；
   - `:68-71` **`case <-timeoutCtx.Done():`** ⇒ `:69` `status.Error(codes.DeadlineExceeded, …)` ⇒ `:71` `return nil, err`；
-  - ⇒ ⇒ **ctx 过期时 handler 仍在持锁运行 ⇒ `done` 未就绪 ⇒ 超时分支先就绪 ⇒ 客户端必然拿到 1015** ⇒ ⇒ **handler 事后返回的 5001 被丢弃** ✔
+  - ⇒ ⇒ **ctx 过期时 handler 仍在持锁运行 ⇒ `done` 未就绪 ⇒ 超时分支先就绪 ⇒ 客户端必然拿到 1015** ⇒ ⇒ **handler 事后返回的 5001 被丢弃** ✔〔**【订正 · 见 §4.19.10 · §4.19.12】本条是**单点口径 ⇒ 已被真源探针推翻**：「`done` 未就绪」**不必然** —— handler goroutine 在 `close(done)`（`rpc.go:56`）之后**立即释放锁**（`:54`）⇒ ⇒ 父 goroutine 若在 `close(done)` 之后到达 `select`，**两个分支同时就绪 ⇒ Go 随机选** ⇒ ⇒ 客户端**可能**拿到 5001 ⇒ ⇒ 实测 `fast_handler` 码集合 = **{4, 13}**（`code_13` = 22/200000）⇒ ⇒ **「必然 1015 / 5001 被丢弃」错**；「超时分支先就绪」只说明**它是主体形态**（`slow_handler` 对照组 = {4}）。〕
 - **Go 侧「实际生效的是哪一层」**：`service/user/admin/rpc/admin.go:33` `rpcTimeout := observability.DisableNativeRpcTimeout(&c.RpcServerConf)` ⇒ ⇒ **把 `conf.Timeout` 清零 ⇒ go-zero 原生那层超时拦截器不生效**；真正生效的是 `admin.go:43` `s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, observability.SlowThreshold()))` ⇒ ⇒ ⇒ **台账里引 `go-zero/zrpc/internal/clientinterceptors/timeoutinterceptor.go` 当「服务端超时生效层」是错的层**（那是**客户端出向**那层）⇒ ⇒ **结论不变、理由换层**。
-- **RAG 侧（`service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`）**：`:338-367` 超时调度器 ⇒ 到点 ⇒ `:361-363` `target.close(Status.DEADLINE_EXCEEDED, …)`；`:371-380` 包装 `ServerCall` ⇒ `:377` 注释「**M6：只有第一次 close 负责打标**」+ `:378` `if (!spanFinalized.compareAndSet(false, true)) { super.close(status, trailers); return; }` ⇒ ⇒ ⇒ **第一次 close 定客户端可见 status** ⇒ ⇒ **deadline 过期 ⇒ 1015** ✔
+- **RAG 侧（`service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java`）**：`:338-367` 超时调度器 ⇒ 到点 ⇒ `:361-363` `target.close(Status.DEADLINE_EXCEEDED, …)`；`:371-380` 包装 `ServerCall` ⇒ `:377` 注释「**M6：只有第一次 close 负责打标**」+ `:378` `if (!spanFinalized.compareAndSet(false, true)) { super.close(status, trailers); return; }` ⇒ ⇒ ⇒ **第一次 close 定客户端可见 status** ⇒ ⇒ **deadline 过期 ⇒ 1015** ✔〔**【订正 · 见 §4.19.12】RAG 侧同样要读**集合**：删掉域侧抢先检查后，handler 的 5001 与调度器的 1015 **抢同一个「第一次 close」** ⇒ ⇒ RAG 侧集合 = **{1015, 5001}**（与 Go 同集合）⇒ ⇒ 保留抢先检查时 = **{1015}**（真子集）。〕
 - **RAG 侧「确实挂上了」**：`service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/AdminRpcApplication.java:69` 登记 `RpcServerInterceptorFactory.class`（注释「Go admin.go:43」）+ `:105-112` `rpcInterceptorConfigurer(...)` ⇒ `:112` `server.intercept(GoStyleRpcProtectionChain.build(rpcUnaryServerInterceptor, protectionProps))` ✔
 
 **三、⇒ ⇒ 撤回成立 ⇒ ⇒ 本层 §4.19.7 的对应结论作废**（🔴 **【订正 · 见 §4.19.10 —— 本节三条结论已由 §4.19.10 逐条取代】**）
@@ -5463,7 +5463,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 
 **五、本节的诚实边界**
 
-1. **仍是源码级 ＋ 配置面证据** —— 「handler 级不可观察」的判定 = **读 `rpc.go` 的 select 结构** ＋ **`conf.Load` 探针坐实 `timeout > 0`** ⇒ ⇒ **未跑活体对拍**（没真起 Go / RAG 进程打一发超时的 logout、看客户端实际拿到哪个码）⇒ ⇒ 「客户端必然看到 1015」读作「**在源码调用链上同形**」。
+1. **仍是源码级 ＋ 配置面证据** —— 「handler 级不可观察」的判定 = **读 `rpc.go` 的 select 结构** ＋ **`conf.Load` 探针坐实 `timeout > 0`** ⇒ ⇒ **未跑活体对拍**（没真起 Go / RAG 进程打一发超时的 logout、看客户端实际拿到哪个码）⇒ ⇒ 「客户端必然看到 1015」读作「**在源码调用链上同形**」。〔**【订正 · 见 §4.19.12】**这一层已被真源探针补上**：Go 侧**集合** = {1015, 5001}（活体实测）⇒ ⇒ 「必然看到 1015」本身是**错断言**、不再只是「只到源码级」的保留；⇒ ⇒ 仍保留的边界只剩 **RAG 侧未跑活体对拍**（真客户端收码未验）〕
 2. **RAG 侧客户端可见码**同理只到源码级：「首次 close 定码」是读出来的，**未跑活体**（`service/common` 的守门测的是装配与机制，不是真客户端收码）。
 3. **亚毫秒竞速窗口**（域侧 `checkDeadline()` 与拦截器超时调度器同时到点）⇒ ⇒ 两侧都落在 1015 ⇒ ⇒ **不是新轴**，但**不可被本仓守门区分** ⇒ ⇒ 与 §4.19.7 已登记的同款边界一致。
 4. **本节不改任何实现** ⇒ ⇒ **共享层落码范围不变**（仍**零代码改动**）⇒ ⇒ **不需要新批准**。
@@ -5754,7 +5754,7 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 | L2（真 Redis 写面） | `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` | 预算耗尽 ⇒ `set` 抛异常 ⇒ **用独立通道读回仍是基线值**（⇒ 真没写进去，不是靠异常类型推断）；预算充足 ⇒ 写进去并读回 | 仍绿 | 仍绿 |
 | L3（已建连接序列） | 同上 | 连接**已建立**后耗尽预算 ⇒ 命令仍被拦下 ⇒ **只有命令处那道能拦** | 仍绿 | **转红** |
 
-⇒ ⇒ **三层各抓一处、互不重叠**（M1 ⇒ L1 ③ 红；M2 ⇒ L3 红）⇒ ⇒ 覆盖了「建连前」「写面」「命令处」三个面。
+⇒ ⇒ **三层各抓一处、互不重叠**（M1 ⇒ L1 ③ 红；M2 ⇒ L3 红）⇒ ⇒ 覆盖了「建连前」「写面」「命令处」三个面。〔**【口径 · 见 §4.19.12 三】本节的「已生效」必须钉住「哪个 commit 之后」**：**`e8cb769a`（G4 第六次订正）之后 ＋ L1/L2/L3 三条守门在该 commit 上转绿** ⇒ ⇒ 才成立；⇒ ⇒ 在此之前（`3d5b4924` / `d0f6474c` / `30030229`）**代理虽已提交、但检查在 `delegate.getConnection()` 之后 ⇒ 不在生效路径上** ⇒ ⇒ **「已提交 ≠ 已生效」**。〕
 
 #### 五 · 对合并收口执行者第 4 点的订正：覆盖面不是「零改动」
 
@@ -5802,3 +5802,38 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 - **`GoStyleRedisDeadlineConnection` 的白名单**只拦「声明类 == `DefaultedRedisConnection`」的命令（实测该接口有 274 个 default 方法，含 `get`/`set`/`exists`/`del`）⇒ ⇒ **直接调 `connection.stringCommands().xxx(...)` 绕过检查**（已知边界，已写进该类 javadoc）。
 
 （**本节编号：§4.19.11** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
+
+### 共享层 · 客户端可见码「集合」口径的第八次订正（2026-10-30 · G4 lane）
+
+> **本节追加在文件末尾 ⇒ 零行位移 ⇒ 不影响 `_unresolved.md` 与 `grading/*` 的硬编码行号指针。**
+> **本节不写状态标记、不以编号 token 作标题 ⇒ 不触发派生层自噬（标题劫持 / 表格行状态标记提升 / 订正表首格旧状态再登记）。**
+
+#### 一 · 触发源：合并收口执行者的两条写法口径 ＋ 主干落仓的探针
+
+- **触发**：合并收口执行者回执转来两条**台账写法口径** ＋ 一条**新证据**：主干 commit `1c6bcda6` 把「客户端可见码集合」这条探针落进仓（`tools/semantic-probe/client-visible-code/` ＋ `docs/DRIFT/_cross/client-visible-code-set.md`）⇒ ⇒ 报称 Go 侧客户端可见码**集合 = {1015, 5001}**（200000 轮 · `code_13` = 22）⇒ ⇒ **「Go 侧客户端可见码恒 1015」是错的**（是「≈99.99% 是 1015」）⇒ ⇒ **比较必须用集合，不用单点**。
+- **本层不采信转述**（AGENTS.md §3.1）⇒ ⇒ **自己复跑了一遍探针**（取自主干 `1c6bcda6` 的两份文件、跑在临时目录、8 秒）：`fast_handler` 码集合 = **4,13**（`code_4`=199978 · `code_13`=**22**）；`slow_handler` 码集合 = **4**（`code_4`=200000）⇒ ⇒ **EXIT=0 · 与已登记形态一致** ⇒ ⇒ **转述成立**。
+- **并且自己逐行读了真源**：`Sea-RideTheWind_golang/service/common/observability/rpc.go:47-72` ⇒ ⇒ `:53-54` handler goroutine **全程持锁**、`:55` 执行 handler、`:56` `close(done)`、`:54` 的 `defer lock.Unlock()` **在 `close(done)` 之后立即释放那把锁** ⇒ ⇒ `:63-67` 的 `done` 分支虽要 `:64` `lock.Lock()`，但**等得到** ⇒ ⇒ `:59` 的 `select` 在 `done` 与 `timeoutCtx.Done()` **同时就绪时随机选** ⇒ ⇒ **5001 确实能到客户端**。
+  ⇒ ⇒ ⇒ **本台账 §4.19.7（`:5170` / `:5271` / `:5276` / `:5283` / `:5284` / `:5317`）与 §4.19.8（`:5445` / `:5447` / `:5466`）那批「单点」断言是错的** ⇒ ⇒ 而 §4.19.10（`:5327` / `:5506`）当时已改用集合口径 ⇒ ⇒ **同一文件内两套口径并存 ⇒ 本节把前者就地订正**（原值全部保留）。
+
+#### 二 · 集合口径的最终形状（两态）
+
+| 形态 | Go 侧 | RAG 侧 | 判定 |
+|---|---|---|---|
+| **RAG 保留域侧抢先 `checkDeadline()`** | **{1015, 5001}**（`fast_handler` 实测 · `code_13` = 22/200000 ≈ 0.011%） | **{1015}**（域侧抢先检查先抛 1015 ⇒ handler 的码就是 1015） | **RAG = Go 集合的真子集** ⇒ 「RAG 更严/更确定的一侧」⇒ ⇒ **需登记为有意偏离候选并签字** |
+| **RAG 删掉域侧抢先检查**（= 合并收口执行者那一个原子 commit 的域侧半边） | **{1015, 5001}** | **{1015, 5001}**（handler 的 5001 与调度器的 1015 抢同一个「第一次 close」⇒ 与 Go 同形） | **同集合 ⇒ 同形** |
+
+⇒ ⇒ **对 M-6 合并门的三要素**：① 共享层代理的检查已在 `delegate.getConnection()` **之前**（`e8cb769a`）⇒ 有运行证据；② Go 侧集合 = {1015, 5001}（探针 `1c6bcda6` · 本层已独立复跑）；③ 域侧删掉抢先检查（G1 那半边）⇒ ⇒ **三件齐 ⇒ 由合并收口执行者在主干做那一个原子 commit**。
+
+#### 三 · 两条写法口径（落进本台账的纪律）
+
+1. **读集合，不读单点** —— 凡写「Go 侧恒为 X / RAG 恒为 Y」，必须先问「**有没有另一个码也可能被客户端看到**」⇒ ⇒ 结论要写成**集合**（`{1015, 5001}`）而不是单点（`1015`）⇒ ⇒ **命中比例不是判据**（受调度竞争影响 ⇒ 不进期望值）⇒ ⇒ 探针的断言是「**集合里有没有 13**」⇒ ⇒ 若复跑出来集合不含 13 ⇒ ⇒ **那是前提变了（回源头重核），不是改期望值**。
+2. **别把「已提交」写成「已生效」** —— 凡写共享层能力「已生效」，必须钉住 **① 哪个 commit 之后 ＋ ② 哪条守门转绿之后** ⇒ ⇒ 本节补记：Redis 期限代理**在 `e8cb769a` 之后 ＋ L1/L2/L3 三条守门在该 commit 上转绿**才成立 ⇒ ⇒ 此前（`3d5b4924` / `d0f6474c` / `30030229`）**代理虽已提交、但检查在 `delegate.getConnection()` 之后 ⇒ 不在生效路径上**。
+
+#### 四 · 诚实边界
+
+- **本层跑的是 Go 半边**：探针直调真源 `observability.NewUnaryServerInterceptor` ＋ 真 ctx ⇒ ⇒ **Go 侧集合是活体实测**；**RAG 侧仍是读出来的**（「第一次 close 定码」是读 `RpcInterceptor.java` 得到的）⇒ ⇒ **RAG↔Go 双侧活体对拍仍未做** ⇒ ⇒ 「同集合」只到「两侧机制同形」这一层。
+- **比例不可复算**：本层复跑得到 `code_13` = 22（与登记值一致）⇒ 但**比例受调度竞争影响** ⇒ ⇒ 只把它当「窗口确实存在」的佐证，**不进任何期望值**。
+- **窄窗口的量级依赖机器**：换机器 / 换负载 ⇒ 比例会变 ⇒ ⇒ **断言只认集合成员**。
+- **`slow_handler` 对照组的作用**：它证明「1015 是主体形态」不是因为探针写错了 ⇒ ⇒ 但它**不**证明「只有 1015」。
+
+（**本节编号：§4.19.12** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
