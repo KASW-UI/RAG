@@ -89,7 +89,15 @@ public final class GoStylePrometheusInterceptor implements ServerInterceptor {
             }
         };
 
-        ServerCall.Listener<ReqT> listener = next.startCall(watched, headers);
+        ServerCall.Listener<ReqT> listener;
+        try {
+            listener = next.startCall(watched, headers);
+        } catch (RuntimeException | Error e) {
+            // ⚠️ Go 的 Prometheus 层：handler **在 startCall 这一步**就 panic 时，
+            //    后置的两行 Observe/Inc 同样不会执行 ⇒ 也不记。
+            panicked.set(true);
+            throw e;
+        }
         return new ForwardingServerCallListener.SimpleForwardingServerCallListener<ReqT>(listener) {
             @Override
             public void onHalfClose() {
