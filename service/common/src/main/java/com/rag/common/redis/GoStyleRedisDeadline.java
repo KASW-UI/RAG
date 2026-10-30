@@ -139,23 +139,27 @@ public final class GoStyleRedisDeadline {
      *       由 {@code RpcInterceptor} 的<b>首次</b> {@code close(...)} 决定
      *       （预算已耗尽 ⇒ 超时调度器立即 fire ⇒ 首次 close 即 DEADLINE_EXCEEDED）⇒ ⇒
      *       <b>Go 侧也拿 1015</b> —— Go 的 {@code codes.Internal}
-     *       （{@code logoutlogic.go:41}）在 ctx 已 Done 时<b>到不了客户端</b>：
-     *       {@code service/common/observability/rpc.go:55-75} 的 select 里，
-     *       <b>done 分支要先拿锁</b>（那把锁被 handler 整个执行期持有），
-     *       而 <b>timeout 分支不拿锁</b> ⇒ <b>超时分支先就绪</b>
-     *       ⇒ ⇒ <b>两侧客户端可见码逐字一致 ⇒ 不是 wire 级漂移</b>。</li>
+     *       （{@code logoutlogic.go:41}）在 ctx 已 Done 时<b>基本到不了客户端</b>：
+     *       {@code service/common/observability/rpc.go:59-72} 的 select 里，
+     *       <b>timeout 分支不拿锁</b> ⇒ ctx 已过期时<b>超时分支先就绪</b>
+     *       ⇒ ⇒ <b>两侧客户端可见码基本一致 ⇒ 不是 wire 级漂移</b>。
+     *       <p>⚠️ <b>「基本」不等于「必然」</b> —— 本层用<b>真源拦截器实跑探针</b>
+     *       （{@code sea-try-go/service/common/observability} 真模块）测得：deadline 场景下
+     *       Go 侧有 <b>5/20000（≈0.025%）</b> 的窗口会让 {@code done} 分支也赢
+     *       （handler goroutine 抢到空锁 + {@code waitTurn} fast path 秒失败 ⇒ 先 {@code close(done)}）
+     *       ⇒ ⇒ 客户端会拿到 5001 ⇒ ⇒ <b>逐条见 §4.19.10</b>。</li>
      *   <li><b>② handler 级业务码 = 域侧 {@code catch (Exception e)} 映射的 {@code Status.INTERNAL}（5001）</b>
      *       ＋ 文案「注销失败,Redis写入异常」⇒ ⇒ 那正是 Go 的 handler 级码
      *       （{@code logoutlogic.go:41}）；⚠️ <b>但带域侧抢先 {@code checkDeadline()} 的路径
      *       根本走不到这里</b>（域侧检查先触发 ⇒ handler 级是 1015）⇒ ⇒ ⇒
-     *       <b>该路径的 handler 级业务码与 Go 的 5001 不同 —— 但这一面【不可观察】</b>：
-     *       客户端可见码由<b>拦截器层</b>决定，不是由 handler 内部返回什么码决定 ——
-     *       Go 侧 {@code service/common/observability/rpc.go:59-72} 的 select 竞速
-     *       （timeout 分支不拿锁 ⇒ 先就绪 ⇒ 1015，handler 事后返回的码被丢弃），
-     *       本层 {@code RpcInterceptor.java:377-378} 的「只有第一次 close 负责打标」
-     *       （第一次 close 定客户端可见 status ⇒ 1015）
-     *       ⇒ ⇒ <b>⇒ 故不是漂移 ⇒ 域侧零落码（那道抢先的 checkDeadline 保留）</b>
-     *       ⇒ ⇒ 逐条证据见 {@code docs/DRIFT/global/vs-common.md} §4.19.9 第二节。</li>
+     *       <b>该路径的 handler 级业务码与 Go 的 5001 不同</b>
+     *       ⇒ ⇒ <b>完全同形需域侧去掉那处抢先检查 ⇒ 归 G1（users 域写权）</b>，
+     *       且<b>必须与本类的共享层代理同一个提交进主干</b>
+     *       （无代理而先删 ⇒ 两道闸门都没了 ⇒ RAG 写、Go 不写 ⇒ 数据面回归）
+     *       ⇒ ⇒ 客户端可见码由<b>拦截器层</b>决定，不是由 handler 内部返回什么码决定 ——
+     *       Go 侧 {@code service/common/observability/rpc.go:59-72} 的 select，
+     *       本层 {@code RpcInterceptor.java:377-378}「只有第一次 close 负责打标」
+     *       ⇒ ⇒ 逐条证据见 {@code docs/DRIFT/global/vs-common.md} §4.19.10 第二节。</li>
      * </ul>
      *
      * @param operation 被拦下的操作名（进消息，便于排查）
