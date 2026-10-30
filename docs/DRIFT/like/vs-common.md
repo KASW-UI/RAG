@@ -1776,7 +1776,7 @@ git diff --stat -- service/ # ⇒ 0 行
 > 本表的**权威来源 = `docs/DRIFT/_cross/grading/*.md`（U5-O 叠加层）**，
 > 而 `docs/DRIFT/_cross/**` 属**合并收口执行者**的共享面 ⇒ **G2 不可写** ⇒
 > ⇒ 本轮由 G2 完成的是**逐条 Go 对照 + 结论**（已写入本表与
-> [`docs/Intentional_Deviations/like/api.md`](../Intentional_Deviations/like/api.md) 的 `lane W7` 小节），
+> [`docs/Intentional_Deviations/like/api.md`](../../Intentional_Deviations/like/api.md) 的 `lane W7` 小节），
 > **落 overlay 那一步需由收口执行者补** ⇒
 > ⚠️ **在 overlay 落地前，派生层 `stage1-derivation.tsv` 里 `SD-2026-10-23-09@like` 仍显示 `stage=—`（未定级）**
 > ⇒ ⇒ **这是「定级已结论、但未落到权威源」的已知状态，不是「没人定级」**
