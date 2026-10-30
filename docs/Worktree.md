@@ -472,6 +472,35 @@ python3 tools/difftest/check-wave-lane-ownership.py     # ⇒ EXIT=0 是收口�
    ⇒ 它**不落码、不写台账、不做跨 lane 协调、不碰共享面、不做合并收口**
    ⇒ ⇒ **请把结论写进文件**，而不是交给某个会话。
 
+### 1g. 🆕 **回执的发送纪律：回执只在「带新事实 / 新任务 / 需要对方动作」时才发**（2026-10-30 实测 · 根治「回执乒乓」）
+
+> **为什么加这一节**：2026-10-30 实测到一次**跨 lane 回执乒乓** ——
+> G1 把反馈单发给 G4 ⇒ G4 回执 ⇒ G1 再回执 ⇒ G4 再回执 …
+> ⇒ **每回一条就在对方队列里再排一条**，而 `session send` 的返回**只保证「已受理」**
+> （目标**忙** ⇒ `mode: "queued"` 落队列；目标**闲** ⇒ `mode: "started"` 直接起一个 turn、**不落队列**）
+> ⇒ ⇒ 两侧都在 `started` 时，**队列就变成了回执交换机** ⇒ ⇒ **每个回执都会唤起对方一次 turn（白烧 token）**，
+> 且**真正的技术结论被埋在回执往复里**（结论本该落在台账里）。
+>
+> ⚠️ **与 §1e 硬边界 2 的分工**：那条讲「**送达是尽力而为、丢失是静默的 ⇒ 结论必须落文件**」；
+> **本条讲「发回执本身要有节制」** —— **落文件 ≠ 要互相回执确认**。
+
+**规则（lane 通用 · 硬约束）**
+
+| 回执里有没有这三样 | 该不该发 |
+|---|---|
+| **新事实**（新测出的数据 / 新的结论 / 对既有结论的**订正**） | ✅ **发** |
+| **新任务 / 新反馈单**（对方需要动作） | ✅ **发** |
+| **需要对方动作**（要它改代码 / 回填 / 决定） | ✅ **发** |
+| **只有「收到了 / 一致 / 已处理 / 已知悉」** | ⛔ **不发** |
+
+⇒ **纯确认回执一律不发** ⇒ **台账才是事实源，回执只是通知** ⇒ ⇒ **不丢任何技术结论**。
+
+**重复投递的入站消息怎么回**：回一句「**已处理，见 `<commit>`**」即可 ⇒
+⛔ **不重跑落码** · ⛔ **不重复写台账**（重复条目会污染派生层 ⇒ 见 `docs/Pitfalls/_cross/derived-layer.md` 的 `PIT-DERIVE-01/02`）
+⚠️ **重复投递是运行时的正常行为**（§1e 硬边界 2：目标忙 ⇒ 落队列 ⇒ 空闲时必被投递）⇒ **不是异常，不必上报**。
+
+---
+
 ### 2. 域内顺序：`rpc → common → api → proto 消费`
 
 §3.5 的硬约束，在并发语境下**依然生效**——只是从「域与域之间串行」变成「工作树内部串行」。
@@ -482,6 +511,78 @@ Go 侧边界是 api→rpc，rpc 没验对就先验 api，产出的是「RAG api 
 - 中间产物全走 `align/<域>` 分支
 - 每个域跑完先 `git push -u upstream align/<域>`，再 `git merge --no-ff align/<域>`
 - ⇒ `do-my-own-gh` 始终「随时可启动」（§3.3 那条纪律的实践形态），合出问题 revert 一个 merge commit 即可
+
+### 3-1. 🆕 合并收口时的「合并后必做清单」（2026-10-30 立）
+
+> **为什么要有这一节**：有些收口项**只能在主干合入后做** —— 在 lane 工作树里做会**撞写权守门**
+> ⇒ ⇒ 若不提前登记，合并完**没人记得** ⇒ ⇒ **合并收口执行者**按本清单逐项核销。
+>
+> ⚠️ **本清单是「收口义务」的登记处，不是差异台账** ⇒ 不进派生层（不写编号 token 首格、不写状态标记 —— 见 `PIT-DERIVE-01/02`）。
+
+| # | 事项 | 为什么只能在合并后做 | 判据 / 核销方式 |
+|---|---|---|---|
+| **M-1** | **复跑 G1 的 3 个域侧守门类（13 条）**<br>· `service/users/user/user-api/.../client/UserRpcClientDeadlineCapTest.java`（5）<br>· `service/users/admin/admin-api/.../client/AdminRpcClientDeadlineCapTest.java`（5）<br>· `service/follow/follow-rpc/.../client/UserRpcClientDeadlineCapTest.java`（3） | G1 要在**自己的**工作树里 merge G4 的提交 ⇒ 而 `service/common/**` **不在 G1 写权面**（`tools/difftest/check-wave-lane-ownership.py` 的 `ACTIVE["g1-users-follow"]` 白名单）⇒ ⇒ 合并会**让写权守门判红** ⇒ ⇒ 只能在主干合入后跑<br>⚠️ **前置 = G1 先提交它那批未提交文件** | `mvn -o -B -pl <三个模块> -am test` ⇒ **13 条全绿**<br>⚠️ **重点看 follow-rpc 那条「真发一次调用」**（in-process 真 server + 故意不响应 ⇒ 客户端真阻塞 ⇒ 只能靠自己套的 **2s** deadline 收口 ⇒ 断言 `DEADLINE_EXCEEDED`）⇒ **在 G4 的出向拦截器落码后，它必须仍在 2s 收口** ⇒ ⇒ **若它红了 = 有价值的信号（拦截器把调用点自带的 2s 收紧或放宽了）⇒ 别当回归「修回去」** |
+| **M-2** | **派生层重生成**（`tools/ledger-derive/derive-stage1.py`） | 四棵 lane 的台账改动**只在各自工作树/分支**里 ⇒ 主干台账在合并前**不含这一波** ⇒ ⇒ 合并前重生成 = **缺一整波** ⇒ 合并后还得再作废一次 | `python3 tools/ledger-derive/derive-stage1.py`（**真跑**）⇒ 产物与源同步 ⇒ `diff` 逐字节核对<br>⚠️ **不是** `--report` 只读模式（只读不写 ⇒ diff 恒 0 行 ⇒ 恒「无漂移」） |
+| **M-3** | **漂移形态门口径**（`tools/difftest/check-deadline-downstream.py` ＋ `mutate-deadline-downstream.py:56` 的 **M1 锚点**） | 出向 deadline 载体落地后 `outgoing_carrier` 由 `absent` 翻 `present` ⇒ ⇒ 不改口径就会被当**回归**「修回去」⇒ ⇒ **必须与 M-2 同批** | 按新形态重判 + 变异锚点同步改（`mutate-…` 的 M1 口径） |
+| **M-4** | **有意偏离候选登记**（`SD-2026-10-30-CAND-18 / -19 / -20`） | 登记会描述「**RAG 侧的行为**」⇒ 合并前主干上**那个行为还不存在** ⇒ ⇒ 登记即描述一个**不存在的行为**（假偏离） | `python3 tools/difftest/ledger-deviation-count.py --strict` ⇒ EXIT=0<br>⚠️ **`G4-15a` 不登记**（前提已被 G4 自身订正为假 ⇒ 登记即造假偏离） |
+| **M-5** | **搬移清单**（`tools/drift-move.py verify`） | ⚠️ **主线既有红**（2026-10-30 实测 · 与本波无关）：4 个 DRIFT 档与 AGENTS.md↔docs 搬移清单不符（`docs/DRIFT/like/rpc.md` · `docs/DRIFT/message/rpc.md` · `docs/DRIFT/message/api.md` · `docs/DRIFT/_cross/fix-round-2026-10-23.md`） | `python3 tools/drift-move.py verify` ⇒ EXIT=0 |
+| **M-6** | 🔴 **「`logout` 域内预检删除」必须与共享层 Redis 代理同一个 commit**（G1 提 · 收口执行者独立复核通过） | 共享层代理在 `service/common/**`（G4 写权）⇒ 域侧那一行在 `service/users/admin/admin-rpc/**`（G1 写权）⇒ ⇒ **AGENTS.md §5.3c「必须同一次提交」** ⇒ ⇒ **G1 不能自己合 G4 的 commit**（`tools/difftest/check-wave-lane-ownership.py` 判红）⇒ ⇒ **只能由合并收口执行者在主干上做那一个原子 commit**<br>⚠️ **单独合 G1 = 真回归**（两道闸门都没了 ⇒ RAG 把 token 写进黑名单、Go 不写 ⇒ 数据面倒退）⇒ ⇒ **单独合 G4 是中性的** ⇒ ⇒ **若因故先合 G4 ⇒ 不得先合 G1** | 两处**同一个 commit** ⇒ ⇒ 复跑 `AdminDomainServiceDeadlineTest`（`logout` 已移出 `GUARDED` 清单）＋ `AdminRpc*Logout*` 两个客户端可见码用例 ⇒ ⇒ **客户端可见码仍须是 1015**（拦截器先 `close`）· **handler 级码须是 5001**<br>⇒ **逐条机制与四种合并态对照 ⇒ §3-2** |
+
+---
+
+### 3-2. 🔴 合并原子性硬约束（2026-10-30 落码轮定 · 合并收口执行者核销）
+
+> **为什么要有这一节**：AGENTS.md §5.3c 说「修法同时涉及共享层与别的域代码时**必须同一次提交**」，
+> 但**没说哪几处必须成对** ⇒ ⇒ 并发 lane 各自提交后，合并者若按「域先共享后」的直觉顺序合 ⇒ ⇒
+> **中间态不是一个「短暂不一致」，而是一个真回归**（RAG 做了 Go 不会做的事）。
+
+**本波唯一一对必须同提交的改动（收口执行者已独立复核）**：
+
+| 侧 | 改动 | 落点 |
+|---|---|---|
+| 共享层（G4） | Redis **派发前**期限感知（`GoStyleRedisDeadline*` ＋ `AutoConfiguration.imports` 登记 ＋ `BeanPostProcessor` 换掉 `RedisTemplate` 的 connection factory） | `service/common/src/main/java/com/rag/common/redis/GoStyleRedisDeadline*.java`（G4 commit `3d5b4924`） |
+| 域侧（G1） | `AdminDomainService.logout` **删掉域内预检 `checkDeadline()`** | `service/users/admin/admin-rpc/.../service/AdminDomainService.java:259` |
+
+**Go 侧的机制事实（收口执行者自读逐行核对 · 不采信任何一方的转述）**：
+
+- **客户端可见层**：真源**自己**的超时拦截器（`Sea-RideTheWind_golang/service/common/observability/rpc.go:25-74`，注册于 `service/user/admin/rpc/admin.go:43`）⇒ `:59-72` 的 `select`：`done` 分支要**先拿锁**（`:64`），而那把锁被 handler goroutine 在**整个 handler 执行期**持有（`:53-54`）⇒ ⇒ 预算超了时 `done` 分支拿不到锁 ⇒ ⇒ **超时分支先就绪** ⇒ ⇒ `:69` `status.Error(codes.DeadlineExceeded, …)` ⇒ ⇒ **Go 客户端可见码 = 1015，且是确定的**。
+  - ⚠️ **别引错拦截器**：`go-zero@v1.10.2/zrpc/internal/serverinterceptors/timeoutinterceptor.go` **在这条链路上是死代码** ⇒ 真源 `rpc.go:19-23` 的 `DisableNativeRpcTimeout` **先取出原 timeout、再把 `conf.Timeout` 置 0** ⇒ 置 0 关掉的是 **go-zero 的原生拦截器**（`zrpc/server.go:164` 的 `if c.Timeout > 0` 不成立）⇒ ⇒ **生效的是真源自己那个**（它带着刚取出的原 timeout）。
+- **handler 级层**：`Sea-RideTheWind_golang/service/user/admin/rpc/internal/logic/logoutlogic.go:38` ⇒ `BizRedis.SetexCtx(l.ctx, …)`（**写绑请求 ctx**）；失败 ⇒ 同文件 `:39-41` ⇒ `status.Error(codes.Internal, "注销失败,Redis写入异常")` ⇒ 业务码 `service/user/common/errmsg/errmsg.go:7` = **5001**。
+- **Redis 派发前**：Go 侧唯一的写闸门 = `go-redis/v9@v9.20.0/internal/pool/pool.go:1098-1104` 的 `waitTurn` fast path（无条件先查 `ctx.Done()`）⇒ `pool.go:837` 的 `getConn` 必调它 ⇒ ⇒ **Go 侧没有任何域内预检** ⇒ ⇒ **RAG 侧要同形，就必须只有一道闸门** ⇒ ⇒ 域内那第二道（`checkDeadline()`）必须让位给共享层那道。
+
+**⇒ ⇒ ⚠️ 两层别混读（本节最容易判反的地方）**：
+
+- **客户端可见层**：Go 1015 = RAG 1015 ⇒ **已同形** ⇒ ⇒ 域内预检删不删，**这一层都不变**（RAG 侧 `service/common/.../observability/RpcInterceptor.java:341-342`（客户端 deadline 已过期 ⇒ `effective=0` ⇒ 调度器**立即** fire）＋ `:358-366`（`close(DEADLINE_EXCEEDED)`）⇒ ⇒ 先 close 的赢）。
+- **handler 级层**：Go 5001 ≠ RAG 现状 1015 ⇒ ⇒ **这一层不同形 ⇒ 正是域侧要改的那一层** ⇒ ⇒ **删掉域内预检 = 向 Go 对齐**（域侧不再抢先拦 ⇒ 共享层在派发前拦 ⇒ 落进既有 `catch (Exception e)` ⇒ `INTERNAL`「注销失败,Redis写入异常」）。
+
+**⇒ 四种合并态的行为对照**（判据 = 「RAG 是否写了 Go 不会写的 Redis」）：
+
+| 合并态 | RAG 的 logout 行为 | Go 的行为 | 判定 |
+|---|---|---|---|
+| 现状（无代理 · 有域内预检） | 域内预检先拦 ⇒ 客户端可见 1015 · **handler 级 1015** | 客户端可见 1015 · **handler 级 5001** | 客户端可见同形 · **handler 级分叉** |
+| **只合 G1**（删预检 · 无代理） | **预算耗尽仍把 token 写进黑名单** | **不写** | **真回归（数据面）** |
+| 只合 G4（有代理 · 预检仍在） | 域内预检先拦 ⇒ 客户端可见 1015 · handler 级 1015 | 客户端可见 1015 · handler 级 5001 | 同现状（未消） |
+| **G4 + G1 同一次提交** | 代理在派发前抛 `QueryTimeoutException` ⇒ 域侧 `catch (Exception e)` ⇒ **handler 级 5001** · **不写**；客户端可见仍 1015（拦截器先 close） | 不写 · handler 级 5001 · 客户端可见 1015 | **两层同形** |
+
+**⇒ 结论（硬约束，不是偏好）**：
+
+1. **G4 的 `3d5b4924` 与 G1 的 logout 改动必须落在主干上的同一个 commit** ⇒ ⇒ 任何「先合 G1 后合 G4」或「拆成两个 commit」的做法 ⇒ **中间态就是上表第 2 行 = 真回归**。
+2. **G1 不能自己合 G4 的提交**（`service/common/**` 不在 G1 写权面 ⇒ `tools/difftest/check-wave-lane-ownership.py` 判红）⇒ ⇒ **那一个原子 commit 由合并收口执行者在主干上做**。
+3. G4 的共享层**单独合入是中性的**（域内预检仍在 ⇒ 行为不变）⇒ ⇒ 若因故必须先合 G4 ⇒ **不得先合 G1**。
+4. ⚠️ **落码顺序（AGENTS.md §3.3 ③ 先改断言）**：先改 `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/service/AdminDomainServiceDeadlineTest.java:41-43` 的 `GUARDED` 清单（**含 `"logout"`** ⇒ `:77` 断言 `DEADLINE_EXCEEDED`）⇒ 再改 `AdminDomainService.java:259` 的实现。
+
+**⇒ ⇒ 另附一条同源的「出口口径分层」（G1 提 · 收口执行者核过成立）**：
+
+指标抓取出口**必须分两层**，单层任一数都会误导拍板：
+
+- **配置层** = actuator endpoint 有没有开（G4 逐域实测：3 个三重关闭 ＋ 三态划分）；
+- **载体层** = 进程**有没有 HTTP 容器**（`spring-boot-starter-web` ⇒ `tomcat-embed-core`）⇒ G1 逐模块 `mvn -o -B dependency:list` 实测：**10 个 rpc 里只有 `follow-rpc` 有 web starter ＋ tomcat** ⇒ **9/10 无载体** ⇒ ⇒ `exposure.include` 写了但没载体 ⇒ 抓取方连不上 HTTP；
+- ⇒ ⇒ **净差 = Go 侧 6/10 有独立 DevServer 抓取端口 vs RAG 侧 1/10 有载体 ⇒ 5/10 域「RAG 侧抓不到」**；
+- ⚠️ **判据纪律**：**不要 grep pom，要查依赖树**（`service/common/pom.xml:361` 的 web starter 是 `test` scope ⇒ 不传递；且父子继承下「grep 不到」≠「运行时没有」）⇒ ⇒ 这是 AGENTS.md §3.3.1 的**反面**：「配置里写了」≠「开得了」；
+- ⚠️ **JMX 边界**：Prometheus 的抓取模型是 HTTP scrape ⇒ JMX 不能替代 ⇒ 仍记为无出口；
+- ⇒ ⇒ **落点是各域 yml（域侧写权）⇒ 不归 G4** ⇒ ⇒ **是否补载体 = 一条待拍板项**（不是逐条缺陷）。
+
+---
 
 ### 4. 基线漂移要重新对齐
 

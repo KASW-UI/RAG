@@ -156,8 +156,8 @@
 
 | 项 | 值 |
 |---|---|
-| **全域坑位条目** | **428 条** / **32 份编号式台账**（另 **16 份散文式台账**用散文标题、不计入条数 · **0 份 0 字节**坑位待填）⇒ **口径由 `tools/check-ledger-count.py` 写死**（标题文本以 `PIT-`/`PF-`/`P-` 开头且以 `-<数字>` 结尾）⇒ **数字是机器生成的，不是手抄的** |
-| **编号前缀族** | **21 个具体前缀**（实测 2026-10-27 · 口径同上）：`P-` · `P-HOTAPI-` · `P-HOTRPC-` · `PF-ARTICLE-RPC-` · `PIT-COMMENT-API-` · `PIT-COMMENT-RPC-` · `PIT-COMMON-` · `PIT-FAV-API-` · `PIT-FAV-COMMON-` · `PIT-FAV-PROTO-` · `PIT-FAV-RPC-` · `PIT-FOLLOW-` · `PIT-GLOBAL-` · `PIT-LANE-` · `PIT-LIKE-RPC-` · `PIT-LIKEAPI-` · `PIT-MESSAGE-` · `PIT-TASK-` · `PIT-USERS-` · `PIT-USERSADM-` · `PIT-USERSCOMMON-` |
+| **全域坑位条目** | **434 条** / **34 份编号式台账**（另 **16 份散文式台账**用散文标题、不计入条数 · **0 份 0 字节**坑位待填）⇒ **口径由 `tools/check-ledger-count.py` 写死**（标题文本以 `PIT-`/`PF-`/`P-` 开头且以 `-<数字>` 结尾）⇒ **数字是机器生成的，不是手抄的** |
+| **编号前缀族** | **23 个具体前缀**（实测 2026-10-27 · 口径同上）：`P-` · `P-HOTAPI-` · `P-HOTRPC-` · `PF-ARTICLE-RPC-` · `PIT-AXIS-` · `PIT-COMMENT-API-` · `PIT-COMMENT-RPC-` · `PIT-COMMON-` · `PIT-DERIVE-` · `PIT-FAV-API-` · `PIT-FAV-COMMON-` · `PIT-FAV-PROTO-` · `PIT-FAV-RPC-` · `PIT-FOLLOW-` · `PIT-GLOBAL-` · `PIT-LANE-` · `PIT-LIKE-RPC-` · `PIT-LIKEAPI-` · `PIT-MESSAGE-` · `PIT-TASK-` · `PIT-USERS-` · `PIT-USERSADM-` · `PIT-USERSCOMMON-` |
 | **编号撞号** | **22 处** —— 见下方「编号撞号」 |
 
 > ⚠️ **2026-10-25 第二十五轮复核（口径已复现）**：本表原先写 **280 条 / 29 份 / 16 份 0 字节**，其中
