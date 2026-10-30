@@ -2826,6 +2826,61 @@ bash tools/api-full-parity-probe/article/mutate-parity.sh          # ⇒ EXIT=0 
 - ❌ **不证**：「生产装配面（真 `@GrpcClient` ⇒ devh 拦截器链）真的把 deadline 给到了」⇒ ⇒ 本守门是**域侧计算点**的证据，不是**装配面**的证据。
 - ⚠️ 生产出口落在「无载体」那一档 ⇒ ⇒ 本守门的**第 ⑤ 条**才是与生产同形的那一条；第 ①②③④ 条证的是**同一段代码**的另一半（用来排除「写死 2s、完全不看载体」的假实现 ⇒ 否则第 ⑤ 条会成假绿）。
 
+## 📌 追加 · 🟡 **本域新增了第三份 `GoStyleClientCallTimeout` 私有副本 ⇒ 「副本数 = 漂移面」的收敛面是 3 份**（2026-10-31 · G3 第九轮）
+
+> **一句话**：上一段落的落码让本域多了一份 `GoStyleClientCallTimeout` 私有副本
+> ⇒ ⇒ 全仓私有副本从 **2 份**变成 **3 份**（article-rpc / comment-rpc / favorite-rpc，**全在 G3 域内**）
+> ⇒ ⇒ 合并收口执行者的「副本收敛到共享层」派工单**其前提已被本轮改变**（已发纠正面）
+> ⇒ ⇒ 收敛的必要性**更强**，但**不是**本域单方面能做的（共享层是 G4 写权）。
+
+### 副本清单与「代码体逐字一致」的实测
+
+| 副本 | 归属 | 总行 | 代码行（去 javadoc） | 封顶值来源 |
+|---|---|---|---|---|
+| `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/client/GoStyleClientCallTimeout.java` | 本域（**本轮新增**） | 132 | 21 | Go `service/article/rpc/etc/article.yaml` 的 `MessageRpc:` 段（`:92`）**没写 `Timeout`** ⇒ default **2000** |
+| `service/comment/comment-rpc/.../client/GoStyleClientCallTimeout.java` | G3 域 | 139 | 21 | `comment.yaml` 的 `MessageRpc:` / `ArticleRpc:` 两段都没写 ⇒ **2000** |
+| `service/favorite/favorite-rpc/.../client/GoStyleClientCallTimeout.java` | G3 域 | 121 | 21 | `favorite.yaml` 的 `UserRpc:` / `ArticleRpc:` 两段都没写 ⇒ **2000** |
+
+⇒ **三份的代码体除 `package` 行外逐字一致**（逐行 diff 只差 package）⇒ ⇒ **三份是纯复制**，收敛时可直接取任一份改 package ⇒ ⇒ 差别只在 javadoc。
+
+### 🔴 收敛时必须防的粒度坑：**组件级 `capMillis` 装不下本域的两个出向方向**
+
+- Go 的 `c.Timeout` 是**每个 zrpc client（方向）**一个值；而共享层的
+  `GoStyleProtectionProperties.OutboundDeadline#capMillis` 是**组件级**一个值。
+- 本域 `article-rpc` 组件内两个出向方向**真值不同**：
+
+| 方向 | Go yaml 真值 | 依据 |
+|---|---|---|
+| `article-rpc` → `message-rpc` | **2000**（default） | `service/article/rpc/etc/article.yaml` 的 `MessageRpc:` 段（`:92`）**没写 `Timeout`** |
+| `article-rpc` → `security-rpc` | **10000** | 同文件 `SecurityConf:` 段 `:90` `Timeout: 10000` |
+
+⇒ ⇒ **组件级 `capMillis` 表达不了本域** ⇒ ⇒ 只有两条路：
+① `security-rpc` 那个方向继续不实现（**现状如此**：`SecurityRpcClient` / `ImageSecurityRpcClient`
+都是**骨架占位**、无真实调用）⇒ ⇒ 收敛**当下**不构成实际冲突；
+② 或按「取最小值」保守处理 ⇒ ⇒ 会把 security-rpc 从 10s 改严到 2s
+⇒ ⇒ **RAG 比 Go 严** ⇒ ⇒ 同样是漂移（只是方向相反）⇒ ⇒ **不可**。
+⇒ ⇒ ⚠️ **一旦 security-rpc 的骨架落地，本条就会变成真冲突** ⇒ 收敛方案必须留这个口。
+
+### ✅ 收敛**不会**丢纳秒精度（读共享层实现确认）
+
+`service/common/src/main/java/com/rag/common/protection/GoStyleOutboundDeadlineInterceptor.java:144-177`
+的 `effectiveCallOptions` 三项**全是纳秒**：
+① `GoStyleRequestDeadline.remainingNanos()` · ② `TimeUnit.MILLISECONDS.toNanos(capMillis)` ·
+③ `existing.timeRemaining(TimeUnit.NANOSECONDS)` ⇒ ⇒ 域侧 `applyTo` 挂的**纳秒** deadline
+被第③项**取 min 保留** ⇒ ⇒ 收敛后精度**不丢** ⇒ ⇒ 收敛是**语义等价**的（前提：`capMillis` 逐组件配对）。
+
+### ⚠️ 收敛的**必做配套**（别漏）
+
+三域那 5 例守门（**5 例 × 3 域**、变异矩阵已验精确转红）**依赖域侧常量**
+`GoStyleClientCallTimeout.CLIENT_TIMEOUT_MILLIS` ⇒ ⇒ 若收敛后改成读 `capMillis` 配置项
+⇒ ⇒ **三份守门的判据必须同步改**（否则它们直接红）⇒ ⇒ 这是收敛的**配套改动**。
+
+### 当前处置
+
+- 🟡 **本域不单方面动**（`service/common/**` 是 **G4 写权** ⇒ 收敛须**同一次提交**同时改共享层与域代码 · §5.3c）
+- ⇒ 等 G4 先落共享层那半（一份实现 ＋ `capMillis` 逐组件配），本域在**同一提交**里删私有副本、改走共享层、配 `capMillis = 2000`
+- ⇒ ⚠️ **`article-api` 那条不配**（Go `article-api.yaml:12` = **70000** ⇒ 配 2000 会改严 35 倍）
+
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
 > 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
