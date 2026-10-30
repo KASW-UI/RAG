@@ -3717,8 +3717,8 @@ global 第四十一轮：「第②层现在的可观察面（833ms）**主要来
 
 | global 条目 | 落点 | **admin-rpc 实测** | 结论 |
 |---|---|---|---|
-| **E65**（出向 gRPC 不继承 deadline） | `RpcInterceptor.onHalfClose` 只绑 `DeadlineState`、**从不绑** `GoStyleRequestDeadline` ⇒ gRPC 路径 `applyTo` 是 **no-op** | 🔴 **不命中** —— `grep -rn "Stub\|BlockingStub\|FutureStub\|GrpcClient" service/users/admin/admin-rpc/src/main/` ⇒ **零命中** ⇒ **admin-rpc 无任何出向 gRPC 调用** | 🟢 **本域无 E65 残余**（落点是 `service/common`，**global 单写权**） |
-| **E66**（Redis 调用不感知 deadline，**含写**） | `service/common` 无任何 Redis 期限载体 + 各域 Redis 调用点 | 🔴 **命中** —— admin-rpc **唯一**一处 Redis 写：`AdminDomainService.logout` 里的 `stringRedisTemplate.opsForValue().set(key, "banned", Duration.ofSeconds(ttlSeconds))`<br>（key/value 与 Go `logoutlogic.go` 的 `SetexCtx(l.ctx, "admin:jwt_blacklist:"+token, "banned", expireTime)` **逐字同契约**）<br>⚠️ 该方法开头虽有 `checkDeadline()`，但那是**前置守卫**（`DeadlineState.isExpired()` 才拒进）⇒ **Redis 写本身仍不感知 deadline** | 🔴 **就是我域已登记的 `DRIFT-ARPC-010`** ⇒ ⇒ **同一件事、两个编号**（我域 `DRIFT-ARPC-010` ＝ global `E66`）⇒ **已交叉引用**（见 §6） |
+| **E65**（出向 gRPC 不继承 deadline） | `RpcInterceptor.onHalfClose` **两个载体一起绑**（`DeadlineState` ＋ `GoStyleRequestDeadline`，共用**拦截器入口**算出的同一绝对时刻）⇒ gRPC 路径 `applyTo` **不再是 no-op**<br>⚠️ **2026-10-31 订正**：原写「只绑 `DeadlineState`、**从不绑** `GoStyleRequestDeadline` ⇒ `applyTo` 是 **no-op**」**已被主干证伪**（共享层现已把载体绑进 `onHalfClose`）⇒ ⇒ **落点描述已过期**；⚠️ **结论不变** | 🔴 **不命中** —— `grep -rn "Stub\|BlockingStub\|FutureStub\|GrpcClient" service/users/admin/admin-rpc/src/main/` ⇒ **零命中** ⇒ **admin-rpc 无任何出向 gRPC 调用** | 🟢 **本域无 E65 残余**（落点是 `service/common`，**global 单写权**） |
+| **E66**（Redis 调用不感知 deadline，**含写**） | `service/common` 的 **Redis 期限载体**（`GoStyleRedisDeadlineConnectionFactory` → 代理连接 ⇒ 每次命令**派发前** `assertNotExhausted`）+ 各域 Redis 调用点 | 🟡 **机制已落 · 运行期未验证**（M-6 · 主干 `53bc05ec` 原子提交：共享层 Redis 期限代理 ＋ 域侧撤入口闸门）—— admin-rpc **唯一**一处 Redis 写：`AdminDomainService.logout` 里的 `stringRedisTemplate.opsForValue().set(key, "banned", Duration.ofSeconds(ttlSeconds))`<br>（key/value 与 Go `logoutlogic.go` 的 `SetexCtx(l.ctx, "admin:jwt_blacklist:"+token, "banned", expireTime)` **逐字同契约**）<br>⚠️ **2026-10-31 订正**：原写「该方法开头虽有 `checkDeadline()`，但那是**前置守卫**（`DeadlineState.isExpired()` 才拒进）⇒ **Redis 写本身仍不感知 deadline**」**已过期** ⇒ ⇒ 现在**域内入口闸门已撤**（`logout` 不再有 `checkDeadline()`）＋ **共享层代理在派发前查预算** ⇒ ⇒ **Redis 写感知 deadline**（机制面）⇒ ⇒ 与 Go `SetexCtx(l.ctx, …)` **机制同形**<br>⚠️ **证据强度 = L3**（静态 ＋ 域内单测；新测试用 Mockito 替换数据层 ⇒ **不证**共享层代理的装配接线）⇒ ⇒ **真 Redis 活体验证待 Docker 恢复后补** | 🟡 **机制面已落 · 销账待活体验证**（本体 `DRIFT-ARPC-010` ＝ global `E66` ⇒ **同一件事、两个编号**，已交叉引用，见 §6）⇒ ⇒ **不再是「机制未做」的残余** |
 
 ⇒ 📌 **本域要改的那句**（**别照搬旧描述**）：
 本域台账此前写第③层是「**架构级 · 影响 10 个 rpc 组件**」⇒ ⇒ **该描述已过期** ⇒
@@ -4720,3 +4720,37 @@ if (connectTimeout != null) {                                     // :16
 
 - 三域合计 **379 条**（基线 373 ⇒ **+6** = 三域各 2 条新断言，数目严丝合缝）· **Failures = 0** · **Errors = 13**（user-rpc 7 + admin-rpc 6 + follow-rpc 0）⇒ ⇒ **13 个全部是 `Previous attempts to find a Docker environment failed`**（Docker 整个停了 ⇒ 真 PG/Redis 用例跑不了）⇒ ⇒ **无其它 Error** · Skipped 98
 - ⇒ ⇒ 证据强度 **L3**（真容器 + 真 HTTP 抓取已验；真 PG/Redis 那层**未跑** ⇒ 到不了 L4）
+
+---
+
+## logout 的期限感知归属与闭合登记（2026-10-31 · M-6 原子提交后）
+
+**一、域内入口闸门已撤，期限感知上移到共享层**
+
+- 域侧：`AdminDomainService.logout()` **删掉入口 `checkDeadline()`**（只删一行、不新增分支）⇒ 请求**照样走到 Redis 写** ⇒ 与 Go「先尝试写、失败才报」同形
+- 共享侧：`GoStyleRedisDeadlineConnectionFactory` → 代理连接 ⇒ 每次命令**派发前** `assertNotExhausted` ⇒ ⇒ **预算已耗尽时，Redis 写不会发出去**
+- ⚠️ **两边缺一不可**：只撤域侧闸门而共享层代理不在位 ⇒ 该方法**毫无**期限感知（仍会把黑名单写进 Redis ⇒ RAG 写、Go 不写）；只上代理而域侧闸门还在 ⇒ 请求根本走不到 Redis 写 ⇒ ⇒ 这就是「必须同一次提交」的由来（清单编号 **M-6** · 已由主干 `53bc05ec` 落为原子提交）
+
+**二、handler 级码 = `INTERNAL`(5001)「注销失败,Redis写入异常」**
+
+- 机制：共享层代理抛 `org.springframework.dao.QueryTimeoutException` ⇒ 它**不是** grpc 的 `StatusRuntimeException` ⇒ ⇒ **不被** `catch (StatusRuntimeException e)` 拦 ⇒ ⇒ 落进 `catch (Exception e)` ⇒ ⇒ `Status.INTERNAL`「注销失败,Redis写入异常」
+- Go 对照：`Sea-RideTheWind_golang/service/user/admin/rpc/internal/logic/logoutlogic.go:38-42` ⇒ `:38` `SetexCtx(l.ctx, …)` 写绑 ctx ⇒ `:39-42` 失败 ⇒ `status.Error(codes.Internal, "注销失败,Redis写入异常")` ⇒ ⇒ **逐字同形**（那个 catch 顺序是**有意**的，不是漏网）
+- ⚠️ **不要把这条与客户端可见码混为一谈**（见下条）
+
+**三、客户端可见码仍须是 1015**
+
+- RAG 侧：服务端拦截器的超时调度器**先** `close` ⇒ 客户端拿到 `DEADLINE_EXCEEDED`(1015) ⇒ ⇒ **handler 级 5001 与客户端可见 1015 是两层**
+- Go 对照：`Sea-RideTheWind_golang/service/common/observability/rpc.go:59-72` 的 `select` ⇒ 两分支同时就绪时**随机选** ⇒ ⇒ **5001 确实能到客户端**（探针活体实测 200000 轮命中 22 次 ≈ 0.011%）⇒ ⇒ ⇒ **「两侧都是 1015」那个单点读法是错的** ⇒ 客户端可见码**必须读集合**：Go 集合 = {1015, 5001}；RAG 删掉抢先闸门后 = {1015, 5001} ⇒ ⇒ **同集合 ⇒ 同形**
+- ⚠️ **边界**：探针跑的是 **Go 半边** ⇒ ⇒ Go 侧集合是**活体实测**，RAG 侧仍是**读出来的** ⇒ ⇒ **双侧活体对拍仍未做** ⇒ ⇒ 「同集合」只能读作「两侧**机制**同形」，**不能写成「两侧活体一致」**
+
+**四、守门分层（两支，职责不同）**
+
+| 守门 | 覆盖 | 边界 |
+|---|---|---|
+| `AdminDomainServiceDeadlineTest` | **12 个**方法**有**域内闸门（`logout` 已从 GUARDED 清单移出 ⇒ 13 → 12） | 只证**域内控制流**（闸门在/不在 ⇒ 拒进与否）⇒ **不证**共享层代理 |
+| `AdminLogoutDeadlineHandoffTest` | `logout` **例外 3 例**：① 期限已耗尽仍**调用到** Redis 写 ② handler 级码映射 = `INTERNAL`（用代理**实际抛的异常类型**驱动）③ 反向：token 为空仍 `INVALID_ARGUMENT`（防「撤闸门」顺手撤掉参数校验） | 用 **Mockito 替换数据层** ⇒ ⇒ **只证控制流与异常映射，不证共享层代理的装配接线** |
+
+**五、⚠️ 证据边界（如实，不夸大）**
+
+- 本轮证据强度 = **L3**（静态 ＋ 域内单测）⇒ ⇒ **不是 L4** ⇒ ⇒ 三处未覆盖：① 共享层代理**是否真在**本域的 Redis 连接链上（装配接线）② 真 Redis 上「预算耗尽 ⇒ 写不发生」的**活体**行为 ③ RAG↔Go **双侧活体对拍**（同请求、同 ctx 形态 ⇒ 比抓到的码集合）
+- ⇒ ⇒ **销账待 Docker 恢复后补** ⇒ ⇒ 本节登记的是**机制面已落**，**不是「已闭环」**
