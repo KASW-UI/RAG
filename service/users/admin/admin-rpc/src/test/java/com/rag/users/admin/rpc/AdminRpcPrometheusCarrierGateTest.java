@@ -6,6 +6,16 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 
+import com.rag.common.http.GoStyleFormLimitWebMvcConfig;
+import com.rag.common.http.GoStyleFormValueLimitInterceptor;
+import com.rag.common.http.GoStyleJsonBodyConverterConfig;
+import com.rag.common.http.GoStyleTomcatParameterLimitCustomizer;
+import com.rag.common.http.GoStyleTraceparentFilter;
+import com.rag.common.protection.GoStyleBreakerFilter;
+import com.rag.common.protection.GoStyleCpuSheddingFilter;
+import com.rag.common.protection.GoStyleMaxBytesFilter;
+import com.rag.common.protection.GoStyleMaxConnsFilter;
+import com.rag.common.spring.HttpMiddlewareFilter;
 import com.rag.users.admin.rpc.metrics.AdminRpcMetrics;
 import com.rag.users.admin.rpc.support.RealTomcatPort;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -236,6 +246,101 @@ class AdminRpcPrometheusCarrierGateTest {
         // ⚠️ 反向断言：Go 侧**没有** application 这个全局标签（Namespace:"" + Subsystem 已构成全名）
         //    ⇒ 若 yml 里把 management.metrics.tags.application 加回来，这里会红。
         assertThat(scrape).doesNotContain("application=\"admin-rpc\"");
+    }
+
+    // ====================================================================================
+    // ⑤ rpc 侧隔离（载体引入 web 容器后的新增风险面）
+    // ====================================================================================
+
+    /**
+     * 🟢 <b>rpc 侧隔离</b> —— 10 类 api 侧中间件<b>不在容器里</b>。
+     *
+     * <p><b>Go 出处（真源，逐行）</b>：
+     * <pre>
+     * service/user/admin/rpc/admin.go:36    s := zrpc.MustNewServer(c.RpcServerConf, ...)
+     * </pre>
+     * ⇒ ⇒ Go 侧 rpc 是 {@code zrpc.MustNewServer} ⇒ ⇒ <b>零 rest 中间件</b>
+     * （{@code rest.With*} 全在 api 侧 {@code service/<域>/api/internal/handler/routes.go}）
+     * ⇒ ⇒ RAG 侧 rpc 容器里<b>不得出现</b> api 侧中间件。
+     *
+     * <p>⚠️ <b>为什么这条在「加了 web 容器」之后才必须断言</b>：
+     * 本域 rpc 原先是纯 gRPC 进程 ⇒ classpath 上<b>没有</b> spring-webmvc
+     * ⇒ ⇒ 那 10 类 api 侧中间件<b>连类都加载不了</b>（{@code NoClassDefFoundError}）
+     * ⇒ ⇒ 「不在容器」当时是<b>免费的</b>；载体任务给 rpc 加了 {@code spring-boot-starter-web}
+     * ⇒ ⇒ classpath 上<b>有了</b> webmvc ⇒ ⇒ 这 10 类**技术上可以活**
+     * ⇒ ⇒ 「它们仍然不在」才变成一个<b>需要守门的事实</b>。
+     *
+     * <p>⚠️ <b>判据写成「结果」而不是「机制」</b>（跨分支稳定的关键）：
+     * <ul>
+     *   <li><b>本分支</b>：共享层的 {@code @ConditionalOnApiSide}（主干 {@code 53bc05ec}）
+     *       <b>不在本分支基线</b> ⇒ ⇒ 这 10 类靠<b>域侧约定</b>不活 ——
+     *       {@code AdminRpcApplication} 的 {@code @ComponentScan} 刻意<b>不扫</b>
+     *       {@code com.rag.common}（启动类注释写明不能加）⇒ ⇒ 不注册；</li>
+     *   <li><b>主干</b>：{@code @ConditionalOnApiSide} + {@code rag.side: rpc}（{@code e86ec93b}）
+     *       ⇒ ⇒ 即便有人把 {@code com.rag.common} 加进 {@code scanBasePackages} 也<b>仍不注册</b>
+     *       ⇒ ⇒ 护栏强度<b>高于</b>本分支。</li>
+     * </ul>
+     * ⇒ ⇒ 断言写成「不在容器」⇒ ⇒ 两侧都绿；
+     * ⇒ ⇒ <b>不能</b>断言成「靠 rag.side 挡住」⇒ ⇒ 那是跨分支不稳定的写法。
+     */
+    @Test
+    @DisplayName("🟢 rpc 侧隔离 —— 10 类 api 侧中间件不在容器里（Go 侧 rpc 零 rest 中间件）")
+    void apiSideMiddlewareIsAbsentFromRpcContainer() {
+        assertThat(context.getBeanNamesForType(GoStyleFormLimitWebMvcConfig.class))
+                .as("GoStyleFormLimitWebMvcConfig 属 api 侧 rest 中间件 ⇒ rpc 侧不得注册")
+                .isEmpty();
+        assertThat(context.getBeanNamesForType(GoStyleFormValueLimitInterceptor.class))
+                .as("GoStyleFormValueLimitInterceptor 属 api 侧 ⇒ rpc 侧不得注册")
+                .isEmpty();
+        assertThat(context.getBeanNamesForType(GoStyleJsonBodyConverterConfig.class))
+                .as("GoStyleJsonBodyConverterConfig 属 api 侧 ⇒ rpc 侧不得注册")
+                .isEmpty();
+        assertThat(context.getBeanNamesForType(GoStyleTomcatParameterLimitCustomizer.class))
+                .as("GoStyleTomcatParameterLimitCustomizer 属 api 侧 ⇒ rpc 侧不得注册")
+                .isEmpty();
+        assertThat(context.getBeanNamesForType(GoStyleTraceparentFilter.class))
+                .as("GoStyleTraceparentFilter 属 api 侧 ⇒ rpc 侧不得注册")
+                .isEmpty();
+        assertThat(context.getBeanNamesForType(GoStyleBreakerFilter.class))
+                .as("GoStyleBreakerFilter 属 api 侧 ⇒ rpc 侧不得注册")
+                .isEmpty();
+        assertThat(context.getBeanNamesForType(GoStyleCpuSheddingFilter.class))
+                .as("GoStyleCpuSheddingFilter 属 api 侧 ⇒ rpc 侧不得注册")
+                .isEmpty();
+        assertThat(context.getBeanNamesForType(GoStyleMaxBytesFilter.class))
+                .as("GoStyleMaxBytesFilter 属 api 侧 ⇒ rpc 侧不得注册")
+                .isEmpty();
+        assertThat(context.getBeanNamesForType(GoStyleMaxConnsFilter.class))
+                .as("GoStyleMaxConnsFilter 属 api 侧 ⇒ rpc 侧不得注册")
+                .isEmpty();
+        assertThat(context.getBeanNamesForType(HttpMiddlewareFilter.class))
+                .as("HttpMiddlewareFilter 属 api 侧 ⇒ rpc 侧不得注册")
+                .isEmpty();
+    }
+
+    /**
+     * 🟢 <b>进程形态</b> —— 本域必须显式声明 {@code rag.side: rpc}。
+     *
+     * <p>⚠️ <b>为什么这条现在有意义</b>：共享层的 {@code @ConditionalOnApiSide} 是
+     * 「api 侧中间件只在 api 侧注册」的<b>单一真源</b>条件注解（主干 {@code 53bc05ec}）
+     * ⇒ ⇒ {@code rag.side} 这个属性<b>必须有消费者</b>才有意义。
+     * ⇒ ⇒ 本条断言守的是<b>配置面事实</b>：「本域 yml 里那行没被删、没被改成 api」。
+     *
+     * <p>⚠️ <b>本条的边界（如实记录，不夸大）</b>：
+     * <ul>
+     *   <li>本断言读的是<b>域内真实 yml</b>（本测试<b>不自带</b> {@code rag.side}
+     *       ⇒ 它读的是 classpath 上 {@code target/classes/application.yml} 的真值）；</li>
+     *   <li><b>本分支基线尚未含</b> {@code @ConditionalOnApiSide} ⇒ ⇒ 在本分支上
+     *       这一行<b>还没有消费者</b>（护栏由「不扫 com.rag.common」兜着）；
+     *       ⇒ ⇒ 主干同步后它才有消费者、这条断言才与「机制」对齐。</li>
+     * </ul>
+     */
+    @Test
+    @DisplayName("🟢 进程形态 —— rag.side=rpc 已声明（读域内真实 yml ⇒ 不是测试自带配置）")
+    void rpcSideFlagIsDeclared() {
+        assertThat(context.getEnvironment().getProperty("rag.side"))
+                .as("本域 yml 必须显式声明 rag.side=rpc（api 侧中间件的唯一开关）")
+                .isEqualTo("rpc");
     }
 
     // ====================================================================================
