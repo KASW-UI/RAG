@@ -2813,7 +2813,7 @@ span 状态恒为 **`Unset`** ⇒ ⇒ **RAG 侧多置一个 `ERROR`** 就是**�
 
 **四、守门网**
 
-- `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcPrometheusCarrierGateTest.java` —— **4 条**
+- `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcPrometheusCarrierGateTest.java` —— **6 条**（载体存在 / 暴露面真抓得到 / 指标名与 Go 同形 / 标签集与 Go 同形 / **api 侧中间件不在容器** / **rag.side=rpc 已声明**；新增 2 条见文末小节）
   - `servletContainerIsActuallyPresent` —— 上下文确实是 `WebServerApplicationContext`（= `WebApplicationType` 推导出 SERVLET ⇒ servlet 容器真在 classpath 上）
   - `prometheusEndpointIsReachableOnMainPort` —— 真 HTTP GET `/actuator/prometheus` ⇒ **200** ＋ body 含 `# HELP` 与 `# TYPE`
   - `exportedMetricNamesMatchGo` —— 指标名与 Go 逐条同形
@@ -2834,7 +2834,7 @@ span 状态恒为 **`Unset`** ⇒ ⇒ **RAG 侧多置一个 `ERROR`** 就是**�
 - ⚠️ **未做**「业务启动类在真 PG/Redis 下真起一遍」⇒ ⇒ **L4 活体验证仍缺**（需 Docker；本机 Docker 全停）
 - ⚠️ **未做双侧活体对拍**（Go 侧真进程与 RAG 侧真进程的同请求抓取比对）
 - ⚠️ 守门用**独立最小上下文**（`@SpringBootConfiguration` ＋ `@EnableAutoConfiguration` ＋ 显式 `@Import`，**无 `@ComponentScan`**）⇒ ⇒ 不被 PG/Redis 绑架 ⇒ ⇒ 测的正是「载体 + 暴露面 + 指标定义」三件事
-- ⚠️ **「13 个 api 侧 Bean 不在容器里」这条运行期断言本轮交不了** —— 共享层的 `@ConditionalOnApiSide` **不在本分支基线** ⇒ ⇒ 写出来必然恒红 ⇒ ⇒ **交阻塞清单，不交恒红守门**
+- ⚠️ **「13 个 api 侧 Bean 不在容器里」已落 10 类**（那 10 个 `@Component`/`@Configuration` 扫描类；判据按**结果**写「不在容器」⇒ ⇒ **两侧都绿**）；**剩 3 个自动配置面交不了** —— 它们走 `AutoConfiguration.imports` ⇒ ⇒ 与组件扫描解耦 ⇒ ⇒ **在不在容器依赖分支基线**（本分支 = 在；主干有 `@ConditionalOnApiSide` = 不在）⇒ ⇒ 跨分支不稳定 ⇒ ⇒ **不给恒红守门**，待主干同步后补（见文末小节）
 - ⚠️ **载体改动的进程形态差异**（已按 `docs/twoStage.md` §10 登记为残余项，不修）：Go 侧是 `http.ListenAndServe` 的小 server（无 servlet、无业务路由）；RAG 侧是 Tomcat（有 servlet 容器，但**无任何业务 HTTP 路由**）⇒ ⇒ 两者对外可观测面（独立端口 + Prometheus 文本）一致
 
 **七、端口号待统一分配**
@@ -2847,3 +2847,57 @@ span 状态恒为 **`Unset`** ⇒ ⇒ **RAG 侧多置一个 `ERROR`** 就是**�
 - 本轮给 `application.yaml` 加了内容 ⇒ ⇒ **该文件行号整体下移** ⇒ ⇒ 指向它的硬指针（如 `docs/DRIFT/_cross/grading/W10.md` 里的 `application.yaml:89-90`、以及本文件 `:1947` 的 `:40-45`）**本轮未重锚**
 - ⇒ ⇒ 理由：**端口号还要再改一次**（统一分配）⇒ ⇒ **重锚应在端口定稿后做一次**，避免改两遍
 - ⇒ ⇒ 已就地核对：本轮**只改注释**的 4 个 java 文件（`UserRpcApplication.java` / `AdminRpcApplication.java` 与两个 `NacosRegistration.java`）**行数与 HEAD 完全一致** ⇒ ⇒ 指向它们的代码行指针（`AdminRpcApplication.java:85` 与 `:112`、`UserRpcApplication.java:118`、两个 `NacosRegistration.java` 的 `:56`/`:62`/`:77`/`:96`/`:110`）**未漂移**
+
+---
+
+## 载体运行期守门扩面：rpc 侧隔离（新增 2 条）
+
+**一、为什么这条现在才必须断言（背景）**
+
+- 本域 rpc 原先是**纯 gRPC 进程** ⇒ classpath 上**没有** spring-webmvc ⇒ ⇒ 那 10 类 api 侧中间件**连类都加载不了**（`NoClassDefFoundError`）⇒ ⇒ 「不在容器」当时是**免费的**
+- 载体任务给 rpc 加了 `spring-boot-starter-web` ⇒ ⇒ classpath 上**有了** webmvc ⇒ ⇒ 这 10 类**技术上可以活** ⇒ ⇒ 「它们仍然不在」才变成一个**需要守门的事实**
+
+**二、新增 2 条（判据按「结果」写，不按「机制」写）**
+
+| 用例 | 判据 | 为什么这个写法跨分支稳 |
+|---|---|---|
+| `apiSideMiddlewareIsAbsentFromRpcContainer` | 10 个 api 侧类的 `getBeanNamesForType` **全为空** | 本分支靠「rpc 不扫 `com.rag.common`」；主干靠 `@ConditionalOnApiSide` ＋ `rag.side: rpc` ⇒ ⇒ **机制不同、结果相同** ⇒ ⇒ 断言「结果」⇒ ⇒ 两侧都绿 |
+| `rpcSideFlagIsDeclared` | 读**域内真实 yml**（本测试**不自带** `rag.side`）⇒ 值 = `rpc` | 防「那行被删 / 被改成 api」；⚠️ 在本分支上它**还没有消费者**（见第四节） |
+
+被断言的 10 类（`@Component` / `@Configuration` 扫描类）：`GoStyleFormLimitWebMvcConfig` · `GoStyleFormValueLimitInterceptor` · `GoStyleJsonBodyConverterConfig` · `GoStyleTomcatParameterLimitCustomizer` · `GoStyleTraceparentFilter` · `GoStyleBreakerFilter` · `GoStyleCpuSheddingFilter` · `GoStyleMaxBytesFilter` · `GoStyleMaxConnsFilter` · `HttpMiddlewareFilter`
+
+**三、Go 出处（逐行读过）**
+
+- `service/user/user/rpc/user.go:36` ⇒ `s := zrpc.MustNewServer(c.RpcServerConf, ...)`
+- ⇒ ⇒ Go 侧 rpc 是 `zrpc.MustNewServer` ⇒ ⇒ **零 rest 中间件**（`rest.With*` 全在 api 侧 `service/<域>/api/internal/handler/routes.go`）⇒ ⇒ RAG 侧 rpc 容器里**不得出现** api 侧中间件
+
+**四、跨分支差异（同一句断言、两种机制、两种含义）**
+
+- **主干**：`@ConditionalOnApiSide`（`53bc05ec`）＋ `rag.side: rpc`（`e86ec93b`）⇒ ⇒ **13 类全部不注册** ⇒ ⇒ rpc 侧 web 容器上**零个 api 侧中间件** ⇒ ⇒ **载体任务没有引入偏离**，与 Go 的 `zrpc.MustNewServer` 同形
+- **本分支**：`@ConditionalOnApiSide` **不在本分支基线**（`53bc05ec` 不是本分支的祖先）⇒ ⇒
+  - 10 类扫描类 ⇒ 靠**域侧约定**不活（`UserRpcApplication` 的 `@ComponentScan` 刻意不扫 `com.rag.common`，启动类注释写明不能加）⇒ 不注册 ⇒ **结果同主干**
+  - **3 个自动配置面 ⇒ 会注册** ⇒ ⇒ 「它们在不在容器」**依赖分支基线** ⇒ ⇒ 断言写「在」⇒ 主干红；写「不在」⇒ 本分支红 ⇒ ⇒ **跨分支不稳定 ⇒ 不给恒红守门** ⇒ 待主干同步后补
+- ⇒ ⚠️ **边界**：载体守门测出的 prometheus 输出是在**本分支（3 个面挂着）**的条件下测的 ⇒ ⇒ **载体功能结论可外推**（两侧输出都对），但**「中间件洁净度」不可外推**
+
+**五、那 3 个面是谁（自读主干 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`，共 7 项）**
+
+- `GoStyleJsonContentTypeAdvice` —— `@AutoConfiguration` ＋ `@ConditionalOnWebApplication(SERVLET)`
+- `GoStylePathNormalizingAutoConfiguration` —— 同上
+- `GoStyleBreakerRouteTemplateAutoConfiguration` —— `@AutoConfiguration` ＋ `@ConditionalOnClass(RequestMappingHandlerMapping)`
+- ⚠️ **前两个的开关就是「有没有 web 容器」⇒ ⇒ 载体任务正是把它们从「不活」翻成「活」的那个开关**（第三个靠 classpath 有没有 spring-webmvc ⇒ 同一个开关）
+- ⇒ ⇒ **登记为「载体引入的行为变化」**：Go 侧 rpc 的 9094 是 go-zero DevServer（`devserver.StartAgent` ⇒ 独立端口 `http.ListenAndServe`，**不跑 rest 中间件链**）⇒ ⇒ RAG 侧 rpc 的 web 容器上（在本分支上）多挂了 3 层 api 侧中间件 ⇒ ⇒ 主干靠 `@ConditionalOnApiSide` 已消除 ⇒ ⇒ **本域不自行签字**
+
+**六、变异实测（user-rpc 单跑，三条）**
+
+| 变异 | 实测结果 | 读法 |
+|---|---|---|
+| `@Import` 一个**有依赖**的 api 侧类（`GoStyleBreakerFilter`） | **6 条全 Error**（上下文起不来：`No qualifying bean of type 'GoStyleProtectionProperties'`） | ⇒ **api 侧中间件一旦进 rpc 容器，rpc 域直接起不来** ⇒ 比「断言红」更硬 |
+| `@Import` 一个**无依赖**的 api 侧类（`GoStyleTraceparentFilter`） | **6 条里 1 条 Failure / 0 Error**（唯一红的是 `apiSideMiddlewareIsAbsentFromRpcContainer`） | ⇒ 新断言**有牙**：**精确转红**，不是上下文挂掉 |
+| （负面实测）把 yml 的 `rag.side` 改成 `api` | `rpcSideFlagIsDeclared` **红**；`apiSideMiddlewareIsAbsentFromRpcContainer` **仍绿** | ⇒ **实测坐实边界**：本分支上护栏是「不扫 common」不是 `rag.side` ⇒ ⇒ **这条类断言在本分支上抓不到 `rag.side` 回归**；主干上才有牙 |
+
+⇒ ⇒ 三个变异**全部还原**（`git diff` 只剩 3 个测试文件的 +105 行新增，`application.yaml` 无 diff）
+
+**七、回归（2026-10-31 · 三域同跑）**
+
+- 三域合计 **379 条**（基线 373 ⇒ **+6** = 三域各 2 条新断言，数目严丝合缝）· **Failures = 0** · **Errors = 13**（user-rpc 7 + admin-rpc 6 + follow-rpc 0）⇒ ⇒ **13 个全部是 `Previous attempts to find a Docker environment failed`**（Docker 整个停了 ⇒ 真 PG/Redis 用例跑不了）⇒ ⇒ **无其它 Error** · Skipped 98
+- ⇒ ⇒ 证据强度 **L3**（真容器 + 真 HTTP 抓取已验；真 PG/Redis 那层**未跑** ⇒ 到不了 L4）
