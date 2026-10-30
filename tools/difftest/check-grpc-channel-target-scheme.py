@@ -130,16 +130,6 @@ EXCEPTIONS: dict[str, list[tuple[str, str]]] = {
             "⇒ 待其分支合入主干后删本条。",
         ),
     ],
-    "service/common/src/test/java/com/rag/common/protection/"
-    "GoStyleGrpcClientBreakerTargetKeyTest.java": [
-        (
-            'Channel c = ManagedChannelBuilder.forAddress("127.0.0.1", port)',
-            "共享层（service/common）⇒ 写权归 G4；G3 lane 已提反馈单，待 G4 落码后删本条。"
-            "⚠️ **该 channel 只用于取 `authority()`（本地计算）⇒ 从不做 RPC ⇒ 属惰性点**"
-            "（同文件 `realChannel()` 的 javadoc 自证）⇒ ⇒ 即便被接管也不报错 ⇒ ⇒ "
-            "**但仍要改**：① 与全仓 14 处同形态修法保持一致 ② 它一旦有人加一次真调用就变成活雷。",
-        ),
-    ],
     "service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotRpcFailurePathMatrixTest.java": [
         (
             'channel = ManagedChannelBuilder.forAddress("127.0.0.1", port)'
