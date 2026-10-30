@@ -921,7 +921,24 @@ def load_unresolved(line_index) -> dict[str, dict]:
                     cls = v
         m = re.match(r"^\|\s*\*{0,2}`?(BLK-\d+|GAP-\d+|ENV-\d+|DEC-\d+)`?\*{0,2}\s*\|", l)
         if m:
-            out[m.group(1)] = {"id": m.group(1), "class": cls, "seg": l}
+            # ⚠️ **关闭判定（2026-10-30 第 4 轮修 · 指针时效性）** ——
+            #   该未解决项**已了结** ⇒ 指向它的指针**不再算排期**。
+            #   实测全表只有 `GAP-10`（已处置）与 `GAP-12`（已关闭）命中 ⇒ 判定无歧义。
+            #
+            # ⚠️ **为什么是「列作用域」而不是「整行子串」（2026-10-30 第 4 轮复盘 · 自造判据反测）** ——
+            #   整行子串 ⇒ **新增行会自触发**：新登记行里只要叙述一句「`GAP-10` 已处置 ⇒ 指针失效」，
+            #   本行就被判 closed ⇒ **刚补上的排期指针立刻失效** ⇒ **自我抵消**（补了等于没补）。
+            #   ⇒ 关闭是**状态字段**的语义，不是叙述里随便哪个词 ⇒ 只认**当前状态列（第 3 列）**。
+            #   ⇒ 配套：`GAP-10` 行原来把「已处置」写在第 6 列 ⇒ 已把标记**前移到第 3 列**（原值逐字保留为子串）。
+            cells = l.split("|")
+            # 表头固定 6 列 ⇒ `| a | b | c | d | e | f |` ⇒ split 出 8 段（首尾各一空串）
+            #   ⇒ cells[3] = 当前状态列。
+            malformed = len(cells) != 8
+            status_cell = "" if malformed else cells[3]
+            closed = ("已关闭" in status_cell) or ("已处置" in status_cell)
+            out[m.group(1)] = {"id": m.group(1), "class": cls, "seg": l,
+                               "closed": closed, "status_cell": status_cell.strip(),
+                               "malformed": malformed}
     for k, v in out.items():
         v["ids"] = set(all_id_tokens(v["seg"]))
         v["ids"] |= _link_ids_by_pointer(v["seg"], line_index)
@@ -1638,9 +1655,18 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
         for ident in t["ids"]:
             task_of[ident].append(tid)
     unres_of: dict[str, list[str]] = collections.defaultdict(list)
+    # ⚠️ **2026-10-30 第 4 轮修 · 指针时效性** ——
+    #   指向**已关闭**的未解决项（`GAP-10` 已处置 / `GAP-12` 已关闭）⇒ **不算「已排期」**。
+    #   ⇒ 原判据只看「`schedule` 字段是不是『未排期』」⇒ **不看指针是否还有效**
+    #   ⇒ 实测后果：**真缺口 A/B 未排期 = 0 是假的** —— `E1`（→`GAP-10`）与 `F-1`（→`GAP-12`）
+    #      两条 A/B 类开放条目**只**指向已关闭项 ⇒ **实际漏排 2 条**。
+    unres_closed_of: dict[str, list[str]] = collections.defaultdict(list)
     for uid, u in unresolved.items():
         for ident in u["ids"]:
-            unres_of[ident].append(uid)
+            if u.get("closed"):
+                unres_closed_of[ident].append(uid)
+            else:
+                unres_of[ident].append(uid)
 
     rows = []
     # ⚠️ **域适配（2026-10-30 · 用户拍板「条目身份 = 编号 + 所属域目录」）**
@@ -1748,8 +1774,18 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
             #   ⇒ 若把它们按 D 类塞进「阶段 2 承接」清单 ⇒ **阶段二工作量被虚增**
             #   ⇒ 那份清单会变成**假的待办**（同族教训：口径错位 ⇒ 数字最漂亮但内容是假的）。
             if ov.get("verdict") == "差异已消失":
-                closed = True
-                rules.append("U2-4")
+                # ⚠️ **2026-10-30 第 4 轮修 · 三态缺档** ——
+                #   「**差异已消失**」**不等于「无待实现内容」**。
+                #   三态只有「差异仍成立 / 差异已消失 / 无法证实」⇒ **缺「行为已对齐但验证闭环未补」这一档**
+                #   ⇒ 实测后果：`F-1`@favorite 的 verdict = 差异已消失，但 lane 给的归属是 **B**
+                #      （其依据明写「⚠️ 残留只余 `favorite/rpc.md:4136`（下游 article-rpc 在场的 create
+                #      成功路径『未验』）与 `:4139`（NULL title／cover 显式排除）⇒ 归 B」）
+                #   ⇒ 若一律判「已闭合 ⇒ 无待实现项」⇒ **一条 B 类待办被吞掉**
+                #   ⇒ 且它的排期指针 `GAP-12` 本轮已关闭 ⇒ **既没排期、也没被算成缺口** ⇒ 双重蒸发。
+                # ⇒ 规则：**归属 = D**（经分析确认不实现）⇒ 才算已闭合；
+                #   归属 = A/B/C ⇒ lane 明说「还有残留」⇒ **不得判已闭合**。
+                closed = (ov.get("stage") == "D")
+                rules.append("U2-4" if closed else "U2-4*")
         # U5-0：**台账里已经写好的施工单行**（十一项表 / 阶段归属列表）⇒ **最高优先级**
         # ⚠️ **域校验**：台账表格的定级**只对那张表所在的域生效**
         #   （实测：`E1` 在 `users/stage1-admission.md` 写 B 类、`global/_README.md` 另有一条同名
@@ -1852,6 +1888,7 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
         # U8
         tids = sorted(task_of.get(ident, []))
         uids = sorted(unres_of.get(ident, []))
+        closed_uids = sorted(unres_closed_of.get(ident, []))
         if tids and uids:
             schedule = ",".join(tids) + " ｜ " + ",".join(uids)
             rules.append("U8a")
@@ -1864,6 +1901,11 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
         else:
             schedule = "未排期"
             rules.append("U8c")
+        # ⚠️ **指针时效性**（2026-10-30 第 4 轮修）—— 指向**已关闭**的未解决项 ⇒ 不算「已排期」
+        if closed_uids:
+            schedule = (schedule + " ｜ ⚠️已关闭指针:" + ",".join(closed_uids)
+                        if schedule != "未排期" else "未排期")
+            rules.append("U8d")
         # U9
         if closed:
             gap = "已闭合 · 差异已消失 ⇒ 无待实现项"
@@ -2573,6 +2615,16 @@ def main() -> int:
     print(f"  已闭合（差异已消失）     {stats['n_closed']:5d}   ← 台账没销账 · 无待实现项")
     print(f"  U5-O 显式定级叠加层      {stats['n_overlay']:5d} 条登记 · "
           f"{stats['n_overlay_used']:5d} 条命中派生表")
+    # ⚠️ **关闭判定集合可审计**（2026-10-30 第 4 轮）——
+    #   「哪些未解决项被判 closed」必须**打出来**，否则「真缺口 A/B 未排期 = 0」无法证伪。
+    closed_ids = sorted(k for k, v in unresolved.items() if v.get("closed"))
+    malformed_ids = sorted(k for k, v in unresolved.items() if v.get("malformed"))
+    print(f"  指针时效性 · 已了结项     {len(closed_ids):5d}   "
+          f"← {' · '.join(closed_ids) if closed_ids else '（无）'}"
+          f"   · 指向它们的指针**不算排期**")
+    if malformed_ids:
+        print(f"  ⚠️ **未解决项表格结构异常** {len(malformed_ids)} 行（列数 ≠ 6）"
+              f"：{' · '.join(malformed_ids)} ⇒ 关闭判定对该行**失效** ⇒ 须人工核")
 
     if args.report:
         return 0
