@@ -5052,11 +5052,6 @@ wc -l /tmp/g1-gocite.txt        # ⇒ 819 行命中 / 177 个文件 / 展开后 
 
 1. 🔴 **候选任务的第 ③ 条要扩到 3 条**（**与 §8.7 的「1 条」不符 ⇒ 域内实测**）：清单只列 1 条，我域 grep 命中 **3 处** —— `admin-rpc/…/AdminSemanticDriftRegressionTest.java:340` 与 `admin-rpc/…/AdminDomainService.java:439`（均**多写了 `admin/`**）+ **`admin-api/…/AdminCreateService.java:20`**（引 `service/user/admin/api/internal/logic/admin/createadminlogic.go` ⇒ **该文件在 Go 仓不存在**；真身只在 **rpc 侧** `service/user/admin/rpc/internal/logic/createadminlogic.go`（**126 行** · `:44-46` = 两行 `strings.TrimSpace`）⇒ 这一条**指向了不存在的 api 侧文件**，修法要先定 admin-api 的 createAdmin 对应 Go 的哪个入口（⇒ 可能是 api↔rpc 边界问题）。
 2. ✅ **15 + 5 条的计数与落点已独立复核，与 §8.7 分布一致**：15 处 `gorm@v1.31.2` 全在 `service/users/**`（`user-rpc` 12 + `admin-rpc` 3）· 5 处 `schema/field.go:1009` **全在 `user-rpc`**（`UserDomainService.java:192` / `:447` · `UserDomainServiceTest.java:699` · `UserRpcLoginNullStatusReadsAsZeroTest.java:45` · `UserEntity.java:65`）⇒ 并已核真源：`go.mod:28` = **`gorm.io/gorm v1.31.1`** · `gorm@v1.31.1/schema/field.go` = **1004 行**（`v1.31.2` 是 **1011 行** ⇒ **旧引用在错的版本下看起来合法** ⇒ 这正是「引到另一份内容不同的副本」的隐蔽性）。
-   > ⚠️ **2026-10-30 口径订正（G1 lane · `align/g1-users-follow`）** —— 上句的**两条落点断言均不成立**：「15 处全在 `service/users/**`（`user-rpc` 12 + `admin-rpc` 3）」与「5 处 `schema/field.go:1009` 全在 `user-rpc`」。实测：`grep -rn "gorm@v1\.31\.2" service/users/` ⇒ **0 命中**；`grep -rn "field\.go:1009" service/users/` ⇒ **0 命中** ⇒ **15 处的真实落点 = 12 处 users 域台账 + 2 处 follow 域台账 + 1 处 like 域代码**：
-   > - **真错引（消费点引用）= 8 处**，全在 users 域台账：`admin/rpc.md` × 3（`:423` / `:1089` / `:1316`）· `user/rpc.md` × 4（`:550` / `:580` / `:1384` / `:1433`）· `_shared.md` × 1（`:986`）⇒ ⇒ **本轮已逐条订正**（`gorm@v1.31.2` → **`gorm@v1.31.1`**；行号按 **v1.31.1 真源重锚**：`callbacks/update.go:243-259` → **`:238-254`**、`:279-281` → **`:274-276`**（两段 **md5 逐字相同**）· `scan.go:153` **两版同行** ✓ · `schema/field.go:616-622` 与 `:195-199` **两版同行** ✓）。
-   > - **不是错引、⛔ 不得改 = 6 处**：`docs/DRIFT/users/vs-common.md` × 2 · `docs/DRIFT/users/stage1-admission.md` × 2 · `docs/DRIFT/follow/vs-common.md` × 2 —— 这 6 处的 `gorm@v1.31.2` **就是「被引用的那个错版本」本身**（描述缺陷的句子）⇒ 改了就把缺陷描述改没了。
-   > - **他域 = 1 处**：`service/like/like-rpc/src/main/resources/db/migration/V6__align_like_domain_fact_outbox_with_go.sql:21` ⇒ **like 域 = G2 面** ⇒ 📤 **登记上报 G2**（不在 G1 写权面）。（附：该处所引 `schema/field.go:330-341` 在 **v1.31.1 与 v1.31.2 内容逐字相同** ⇒ **版本标签错、内容不错**。）
-   > ⇒ **5 处 `schema/field.go:1009` 越界 ⇒ 已核销**：代码侧**早已全部订正为 `v1.31.1`**（`UserDomainService.java:192` / `:447` · `UserEntity.java:66` · `UserDomainServiceTest.java:696` / `:699` · `UserRpcLoginNullStatusReadsAsZeroTest.java:46` / `:52`）⇒ ⇒ **本轮 0 行代码改动**，只把「仍待修」的台账登记改成「**已核销**」。核对日期 **2026-10-30**。
 3. 🟡 **§8.4 与我域 §69 的关系**：§8.4 说「849/849 在严格口径下不成立」⇒ 但我域 §69.4 / §69.5 **已自行披露**了判据的两条失效模式（同名文件「多候选都试」+ 核验脚本自身的失效模式），并写明「**属『声明的，不是可复算的』**」⇒ ⇒ 建议收口把 §69 结论**限定表述**为「**在该判据口径下未发现错误**」；而 §8.7 的 21 条是**另一件事**（实测真欠账）⇒ **两者不冲突，不必整体推翻**（本轮**未改** §69 表述 ⇒ 交收口执行者）。
 4. ✅ **`admin-rpc` 的 `admin_invite.update_time` 不推进**（`admin/rpc.md:1783` 新发现 · 与 `Pitfalls/users/admin/rpc.md` **P-2** 同款形状：**user-rpc 修过、admin-rpc 漏修**）⇒ **域侧可自修**⇒ **已纳入本候选任务**（**Jason 2026-10-29 04:0x 追加拍板** ⇒ 范围见本节末尾 ⑤ 行）
 5. 🟡 **`S1-FOLLOW-001`**（follow-rpc 指标出口）—— 仍是唯一待**你重新拍板**项（**不在本轮候选任务内**；重开 = 全仓 8 个 rpc 组件的统一方案 ⇒ 非 G1 单方可定）。
@@ -5069,52 +5064,6 @@ wc -l /tmp/g1-gocite.txt        # ⇒ 819 行命中 / 177 个文件 / 展开后 
 ⚠️ **本节 ⑤ 留空 = 未获批准**（**留空不等于已批准**）；⇒ **本节 ⑤ 已由调度员于 2026-10-29 03:45 依据 Jason 的明示代填**（批准人 / 时间 / 范围见 ⑤ 行）⇒ **代填 ≠ 代批准**：批准来自 Jason 在本 lane 会话内的明示，调度员只负责落笔。
 
 **⑤ 批准记录：Jason · 2026-10-29 03:45 · 批准范围：本 lane 回执 ① 所列候选任务（修 §8.7 登记的 Go 出处真缺陷）—— §8.7 实测口径 = **23 条**（15 版本写错 + 5 越界 + 3 路径；回执 ① 的「21 条」已被本 lane ③ 第 1 条订正为 23）· ③ 第 4 项 `admin_invite.update_time` **已纳入**（Jason **2026-10-29 04:0x 追加拍板** ⇒ `admin-rpc` 的 `admin_invite.update_time` 不推进 ⇒ **域侧可自修**；与 `docs/Pitfalls/users/admin/rpc.md` **P-2** 同型：**user-rpc 修过、admin-rpc 漏修**）** · ⚠️ **2026-10-29 04:2x 实测结论：该项已闭合 ⇒ 本轮为它 0 行改动**（`AdminCreateAtomicService.java:201` 已有 `.setSql("update_time = CURRENT_TIMESTAMP")` ＋ `AdminRpcGoWireParityTest.createAdminAdvancesInviteUpdateTimeLikeGo()` 真 PG + 真 gRPC 前后对比断言 `after > before` ＋ **变异测精确红在目标用例** ⇒ 网有牙） ⇒ **「已批准但实测无需改动」是合法结果**，非漏做　← 由**调度员代填**（依据：Jason 于 2026-10-29 03:45 在**本 lane 会话内**明示「继续」· 消息 id `182057`；**回执人不得自批**· **代填 ≠ 代批准**）
-
----
-
-### 【开工前置回执 · G1（`align/g1-users-follow`）· 2026-10-30 轮】
-
-> **本轮定位**：**派工面 = 派生层施工单**（`docs/DRIFT/_cross/stage1-derivation.tsv` 的 **`wave` 列**）⇒ 本轮**不是**照抄 2026-10-29 轮的候选清单，而是**按 `wave=G1` 重新取件 + 按 `basis` 逐条回源**。
-> ⚠️ **基线**：`do-my-own-gh` @ `bdac3607`（含 `wave` 列那次提交）· 分支 `align/g1-users-follow` · 工作树 `../RAG.worktrees/g1-users-follow`。
-
-**① 任务范围（本 lane 本轮做什么）**
-
-| 项 | 值 |
-|---|---|
-| 取件口径 | `wave` 含 `G1` × `stage ∈ {A,B}` = **19 条** ⇒ 其中**状态仍开放** = **10 条** |
-| 10 条开放项 | `E65` · `S1-FOLLOW-007` · `DRIFT-ARPC-009` · `E1` · `E7` · `S1-FOLLOW-004` · `S1-FOLLOW-008` · `S1-FOLLOW-009` · `S1-USERS-002` · `S1-USERS-004` |
-| 分流结果 | **域侧落码 1 条**（`S1-USERS-004` 的守门半边）· **转派 G4 反馈单 3 条**（`E65` / `DRIFT-ARPC-010`=E66 / `DRIFT-ARPC-009` 残留）· **域外或他域只登记 6 条** · **台账订正 3 组**（零行为变更） |
-| 域内基线判定 | `docs/PhaseGoal/g1.md` §6 = **✅**（组件行 **10/10 ✅**）· §2.1「本 lane 自修」= **（无）** ⇒ **本轮不新开行为差异修复**，只做**派工面回源 + 反馈单 + 台账订正 + 收口复跑** |
-
-**不做（明确边界）**
-① 阶段二（`docs/twoStage.md` §1.3 / §2.2 / §6 / §7）；
-② 共享面：`service/common/**` + `service/users/users-common/**` + `tools/**` + `docs/DRIFT/_cross/**` + `AGENTS.md` + 三个 `_INDEX.md` + `docs/PhaseGoal-judge.md` + `docs/PhaseGoal/**` + `docs/Worktree.md`（⇒ 归 G4 / 合并收口执行者）；
-③ **`S1-FOLLOW-001`（全仓 rpc 层指标出口统一方案）** —— 用户 **2026-10-24** 已定「交主会话拍板」⇒ **不当新缺陷重提**（follow 域已自行落地 `DRIFT-FOLLOW-006` 的同款，9094/9097 已由 `docs/DRIFT/follow/rpc.md:330-336` 明确划归 users 域 ⇒ **本轮只订正本域台账里被推翻的前提，不落码**）；
-④ **不重开任何已签字偏离**（`DRIFT-FOLLOW-008` / MaxConns 半边 `SD-2026-10-25-01` / `DRIFT-USERS-002` / `DRIFT-ADMINAPI-001~004` / N-2 乱码）；
-⑤ 🔴 **订正（2026-10-30 16:5x）** —— 原写「**不改** `S1-USERS-002` 的 datasource 口令 fallback —— 台账 `docs/DRIFT/users/stage1-admission.md:477` 已裁定『取消 fallback ⇒ **RAG 比 Go 更严** ⇒ 属**有意偏离**（需签字），**不是纯域侧自修**』⇒ 本轮只登记」⇒ ⇒ **那个前提是错的**（`:477` 原句「Go 真源 yaml 是**字面量默认值**，恒能起栈」与 Go 源码不符）⇒ ⇒ **Go 侧全部 rpc yaml 都是 `"${POSTGRES_PASSWORD}"`（无默认值）** ⇒ `os.ExpandEnv` 不认 `${VAR:default}` ⇒ **缺变量即空串 ⇒ 连库失败 = fail-fast** ⇒ ⇒ **RAG 保留 `:password` 兜底 = 比 Go 松 = 真漂移** ⇒ ⇒ **不是有意偏离、不需要为「保留」签字** ⇒ ⇒ **本轮已落码**：G1 面 **3 处**取消 fallback（`user-rpc` `application.yaml:26` · `admin-rpc` `application.yml:24` · `follow-rpc` `application.yml:38` · ⚠️ **行号因本轮加注释位移 +2**）⇒ ⇒ 残余 **7 处**归 G2/G3。⚠️ **取消后的残余差异（RAG 更严的一侧）**：Go = 启动成功、连库时失败；RAG = **启动即失败** ⇒ **失败时刻**不同 ⇒ 这一条残余才属有意偏离候选（同 JWT fail-closed 族）。
-
-**② 已读四档（本 lane 面的具体路径 → 读到的关键结论）**
-
-| 档 | 具体路径 | 关键结论（本轮真正改变了判断的 7 条） |
-|---|---|---|
-| `docs/DRIFT/users/` | `stage1-admission.md`（§3 `S1-USERS-002` / `S1-USERS-004` · §4 阶段一任务表 · §5.6 有限例外）· `admin/rpc.md`（§1 `DRIFT-ARPC-009~012`）· `user/rpc.md`（§6.4 事务对照表 · `:280` 指标可抓取性判定）· `_shared.md`（`U-1`）· `vs-common.md`（§8.4 / §8.5 缺陷族 + 本回执节） | ① **`S1-USERS-004` 的可做面只有「守门」**：§4 任务表明写「把事务边界上移 ⇒ **阶段 1 不动**」，而 §518 写「**缺防退化**」⇒ ⇒ 本轮只**加守门**（零行为变更）· ② **`S1-USERS-002` 的「9 处 / 2 种默认值」前提已过期**（2026-10-30 实测 = **10 处全为 `${POSTGRES_PASSWORD:password}`**）⇒ 🔴 **2026-10-30 16:5x 再订正**：§477 原把它裁定为「**RAG 比 Go 更严** ⇒ 属**有意偏离（需签字）**」⇒ ⇒ **那个前提是错的**（Go 侧全部 rpc yaml **无默认值** ⇒ **保留 fallback 才是比 Go 松** ⇒ **真漂移**）⇒ ⇒ **本轮已落码**：G1 面 **3 处**取消 fallback + 3 个守门 ⇒ 残余 7 处归 G2/G3 · ③ **`DRIFT-ARPC-009` 台账 §1.5 称「`align/message` 分支已修（未合并）⇒ 合并后本条自动消失」** ⇒ **实测不成立**（共享链已合进主干，但只装 3 层 ⇒ 残留 = Stat + Prometheus）· ④ **`user/rpc.md:280` 的「DevServer 仅 dev/test 起 ⇒ 生产无端点 ⇒ EQUIVALENT」前提被本轮推翻** |
-| `docs/DRIFT/follow/` | `rpc.md`（§283-350 六 rpc 的 Go 有 DevServer / RAG 零出口对照表 · `:330-336` 跨域待办表 · `DRIFT-FOLLOW-006` 落地全记录）· `vs-common.md` | `DRIFT-FOLLOW-006` 已于 **2026-10-29** 落地（`S1-FOLLOW-001`）⇒ **follow-rpc 的指标出口 = 16065（与 Go `DevServer.Port` 一字不差）** ⇒ ⇒ **users 域的 9094 / 9097 是同一族缺口**，但**落点已明确划归 users 域**（同文件 `:330-336`）⇒ **本轮只订正前提，不落码**（理由见 ① ③） |
-| `docs/DRIFT/_cross/` | `stage1-derivation.md` §一~§四（§4.0 波次分布 · §4.1 A/B 真缺口）· `stage1-derivation.tsv`（**17 列 / `wave` 列**）· `domain-common-lanes.md`（9 轴 A1~A9）· `cross-domain-coupling.md`（§二 波次表 + 规则 C1~C7）· `global/lanes/_PROTOCOL.md`（反馈单 7 项 · 写权边界 · 「域内探针目录 `tools/<kind>/<域>/` 归对应域 lane」） | ① **派生层只是台账的投影**（`Worktree.md` §0-1 效力边界 ③：「台账结论会过期 ⇒ 派工前**按 `basis` 抽查**，别照抄标题」）⇒ 本轮 10 条开放项里有 **4 条前提已变**（`S1-FOLLOW-007` / `E1` / `E7` / `S1-USERS-002`）⇒ **派单不能照抄标题** · ② **反馈单 7 项 = 现象 / Go 侧 `文件:行号` / RAG 侧现状 / 证据强度 / 建议修法 / 影响面 / 是否阻塞本波** · ③ **写权判定**：`service/common/**` + `service/users/users-common/**` 只归 G4；`tools/<kind>/<域>/` **归对应域 lane**（⇒ `tools/api-full-parity-probe/users/` 是 G1 面） |
-| `docs/Intentional_Deviations/` | `_INDEX.md`（**已签字 60 / 未签字候选 12 / 条目总数 93**）· `users/_shared.md`（`CAND-16` / `CAND-17` 待签字候选）· `follow/api.md` · `global/common-tails.md:11`（`SD-2026-10-25-01`） | `DRIFT-FOLLOW-008`（MaxConns 闸门粒度）**已于 2026-10-25 签字** ⇒ ⇒ `S1-FOLLOW-007` 登记的「基线仍把已签字偏离记成开放缺陷」**风险实际已解除**（`docs/PhaseGoal/g1.md:21` 的「开放项归属」列**已改为** `→ 非开放（已签字 · 不是缺陷）`）⇒ **本轮只在本域台账登记订正，基线文件交收口执行者** |
-| `docs/PhaseGoal/` | `g1.md`（**机器生成投影** · §1 组件行 · §2 自修/转派 G4 · §3 P0 分摊 · §4 矩阵 C · §5 收口命令 · §6 lane 判定 · §7 交付物）· `judge.md`（A-2 users/follow 行 · §九 缺口） | G1 **lane 判定 = ✅**（10/10 ✅）· **§2.1 自修清单 = （无）** ⇒ **本轮不新开行为修复** · §2.2 已有 **1 条**转派 G4（`DRIFT-USERAPI-013`）⇒ 本轮**新增 3 条**反馈单（`E65` / `DRIFT-ARPC-010` / `DRIFT-ARPC-009` 残留） |
-| `docs/PhasedGoal.md` + `docs/twoStage.md` | `PhasedGoal.md:38-82`（P0 九条 / P1 / P2）· `twoStage.md` §4（阶段 0 事实基线）· §5.3（差异 11 项）· §5.4（改造记录 9 项）· §十（P0–P3 × A/B/C/D） | **A 类 = 阶段 1 准入阻断** ⇒ 本 lane 唯一的 A 类开放项（`S1-FOLLOW-007`）经复核**前提已解除** ⇒ **G1 无 A 类阻断** |
-| `docs/Pitfalls/users/` + `docs/Pitfalls/follow/` + `docs/Pitfalls/_cross/` | `users/_shared.md`（PIT-USERS-SHARED-001~020）· `users/user/rpc.md`（P-05 乱码 · P-06 假出处）· `users/admin/rpc.md`（P-2 `FieldStrategy.NEVER` · P-4 `@Import` ≠ 机制生效）· `follow/{api,rpc}.md`（PIT-FOLLOW-001~016）· `_cross/testing-pitfalls.md` | ① **P-05** = Go 源码里的错误文案是乱码 ⇒ 拿它当基准前先打字节（**已登记 N-2**，不重开）· ② **P-06** = 「假出处」⇒ **本轮的 gorm 版本订正正属此类**（`gorm@v1.31.2` 在 **v1.31.2 下看起来合法**、在真 pin 的 **v1.31.1 下越界** ⇒ **先钉版本再判行号**）· ③ **P-4 / `_cross/testing-pitfalls.md`** = 「注解存在 ≠ 机制生效」+「绿测试可能是**错误答案的守卫**」⇒ ⇒ 本轮新加的守门必须是**真触发**（真 Spring 容器 + 真 AOP 代理 + 真事务事件），不是纯 Mockito |
-| `docs/Worktree.md` | §二·五（回执模板 + **核验命令** + 「回执的 7 种不成立形态」）· §三·1d（波次工作树 · 写权 · 反馈单 7 项）· §三·1e（角色边界） | ① **核验命令 = `grep -c '^## 开工前置回执'` + `grep -cE '⑤ 批准记录：Jason · [0-9]{4}-'`** ⇒ ⇒ 本轮**在既有小节内追加**，**不新建第 2 个同名小节**（全仓 10 份 `vs-common.md` 均恰好 1 份 ⇒ 追加后仍是 1）· ② **「回执里自己写『已批准』不算批准」** ⇒ 本节 ⑤ 填的是 **Jason 在本 lane 会话内的明示**（`开始工作`） |
-
-**③ 待批准项（需 Jason / 调度员拍板）**
-
-**本轮 = 0 条新增待拍板项** —— 10 条开放项已全部按「域侧自修 / 转派 G4 / 域外登记」分流完毕，无一条卡在「必须 Jason 决策才能往下走」。
-⚠️ **1 条既有待拍板项仍在（不属本轮、也不重复提）**：**`S1-FOLLOW-001`** —— 全仓 rpc 层指标出口统一方案（用户 2026-10-24 已定「交主会话拍板」）⇒ ⇒ 本轮**只订正本域台账里被推翻的前提**（`user/rpc.md:280`），**不落码**、**不重提**为新缺陷。
-
-**④ 等批准 ⇒ 批准后才开工**
-**回执落笔时**本轮只读 + 写本回执（未获批准前不写任何代码、不改任何台账，本小节除外）；⇒ **Jason 于 2026-10-30 10:31 在本 lane 会话内明示「开始工作」**⇒ **已获批开工**（⑤ 由调度员代填，见本节末尾）⇒ 本轮按 ① 所列范围执行。
-
-**⑤ 批准记录：Jason · 2026-10-30 10:31 · 批准范围：本 lane 回执 ① 所列任务范围（派工面 `wave=G1` × A/B 的开放条目逐条回源后分流 = 域侧落码 1 条 + 台账订正 3 组 + 转派 G4 反馈单 3 条 + 域外登记 6 条）** —— ⚠️ **不含**共享面、阶段二、`S1-FOLLOW-001` 落码、已签字偏离重开　← 由**调度员代填**（依据：Jason 于 2026-10-30 10:31 在**本 lane 会话内**明示「开始工作」；**回执人不得自批**· **代填 ≠ 代批准**）
 
 ---
 
@@ -5842,3 +5791,63 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
 **四、给 users 两个 rpc 加观测载体这件事本身不在本轮授权面**
 
 - Go 侧 `user-rpc` / `admin-rpc` 的 DevServer 是**dev 模式工具**（Go 侧注释原文：「dev 模式工具，不是主进程一部分」「Docker 里也不抓」）⇒ ⇒ RAG 侧是否也开观测口 = **部署形态决策** ⇒ ⇒ 属 `S1-FOLLOW-001`（全仓 rpc 层指标出口统一方案）⇒ ⇒ **交主会话拍板** ⇒ ⇒ 本轮只把「载体一旦落地就必须带 `rag.side: rpc`」这件事钉在配置里。
+---
+
+> ⚠️ **以下内容原位于本文件中部 —— 2026-10-30（G1 lane）移到末尾**
+> 理由 = **零行位移**：`docs/RoundPlan/_unresolved.md` 与 `docs/DRIFT/_cross/grading/*` 里有指向本文件的
+> **硬编码 `文件:行号` 指针** ⇒ ⇒ 派生层按**纯行号算术**解析 ⇒ ⇒ 中部插一行 ⇒ 指针解析到别的条目
+> ⇒ ⇒ 「排期指针 / 证据缺口组」的成员被静默改写 ⇒ ⇒ **派工面被改掉**。
+> ⇒ ⇒ 纪律：**新增内容一律放文件末尾**；要改中部 ⇒ 用「**就地替换**」（行数不变）而不是「插入新行」。
+> ⇒ ⇒ 判据：`python3 tools/ledger-derive/check-pointer-consistency.py`（派生层输入完整性棘轮）。
+
+   > ⚠️ **2026-10-30 口径订正（G1 lane · `align/g1-users-follow`）** —— 上句的**两条落点断言均不成立**：「15 处全在 `service/users/**`（`user-rpc` 12 + `admin-rpc` 3）」与「5 处 `schema/field.go:1009` 全在 `user-rpc`」。实测：`grep -rn "gorm@v1\.31\.2" service/users/` ⇒ **0 命中**；`grep -rn "field\.go:1009" service/users/` ⇒ **0 命中** ⇒ **15 处的真实落点 = 12 处 users 域台账 + 2 处 follow 域台账 + 1 处 like 域代码**：
+   > - **真错引（消费点引用）= 8 处**，全在 users 域台账：`admin/rpc.md` × 3（`:423` / `:1089` / `:1316`）· `user/rpc.md` × 4（`:550` / `:580` / `:1384` / `:1433`）· `_shared.md` × 1（`:986`）⇒ ⇒ **本轮已逐条订正**（`gorm@v1.31.2` → **`gorm@v1.31.1`**；行号按 **v1.31.1 真源重锚**：`callbacks/update.go:243-259` → **`:238-254`**、`:279-281` → **`:274-276`**（两段 **md5 逐字相同**）· `scan.go:153` **两版同行** ✓ · `schema/field.go:616-622` 与 `:195-199` **两版同行** ✓）。
+   > - **不是错引、⛔ 不得改 = 6 处**：`docs/DRIFT/users/vs-common.md` × 2 · `docs/DRIFT/users/stage1-admission.md` × 2 · `docs/DRIFT/follow/vs-common.md` × 2 —— 这 6 处的 `gorm@v1.31.2` **就是「被引用的那个错版本」本身**（描述缺陷的句子）⇒ 改了就把缺陷描述改没了。
+   > - **他域 = 1 处**：`service/like/like-rpc/src/main/resources/db/migration/V6__align_like_domain_fact_outbox_with_go.sql:21` ⇒ **like 域 = G2 面** ⇒ 📤 **登记上报 G2**（不在 G1 写权面）。（附：该处所引 `schema/field.go:330-341` 在 **v1.31.1 与 v1.31.2 内容逐字相同** ⇒ **版本标签错、内容不错**。）
+   > ⇒ **5 处 `schema/field.go:1009` 越界 ⇒ 已核销**：代码侧**早已全部订正为 `v1.31.1`**（`UserDomainService.java:192` / `:447` · `UserEntity.java:66` · `UserDomainServiceTest.java:696` / `:699` · `UserRpcLoginNullStatusReadsAsZeroTest.java:46` / `:52`）⇒ ⇒ **本轮 0 行代码改动**，只把「仍待修」的台账登记改成「**已核销**」。核对日期 **2026-10-30**。
+### 【开工前置回执 · G1（`align/g1-users-follow`）· 2026-10-30 轮】
+
+> **本轮定位**：**派工面 = 派生层施工单**（`docs/DRIFT/_cross/stage1-derivation.tsv` 的 **`wave` 列**）⇒ 本轮**不是**照抄 2026-10-29 轮的候选清单，而是**按 `wave=G1` 重新取件 + 按 `basis` 逐条回源**。
+> ⚠️ **基线**：`do-my-own-gh` @ `bdac3607`（含 `wave` 列那次提交）· 分支 `align/g1-users-follow` · 工作树 `../RAG.worktrees/g1-users-follow`。
+
+**① 任务范围（本 lane 本轮做什么）**
+
+| 项 | 值 |
+|---|---|
+| 取件口径 | `wave` 含 `G1` × `stage ∈ {A,B}` = **19 条** ⇒ 其中**状态仍开放** = **10 条** |
+| 10 条开放项 | `E65` · `S1-FOLLOW-007` · `DRIFT-ARPC-009` · `E1` · `E7` · `S1-FOLLOW-004` · `S1-FOLLOW-008` · `S1-FOLLOW-009` · `S1-USERS-002` · `S1-USERS-004` |
+| 分流结果 | **域侧落码 1 条**（`S1-USERS-004` 的守门半边）· **转派 G4 反馈单 3 条**（`E65` / `DRIFT-ARPC-010`=E66 / `DRIFT-ARPC-009` 残留）· **域外或他域只登记 6 条** · **台账订正 3 组**（零行为变更） |
+| 域内基线判定 | `docs/PhaseGoal/g1.md` §6 = **✅**（组件行 **10/10 ✅**）· §2.1「本 lane 自修」= **（无）** ⇒ **本轮不新开行为差异修复**，只做**派工面回源 + 反馈单 + 台账订正 + 收口复跑** |
+
+**不做（明确边界）**
+① 阶段二（`docs/twoStage.md` §1.3 / §2.2 / §6 / §7）；
+② 共享面：`service/common/**` + `service/users/users-common/**` + `tools/**` + `docs/DRIFT/_cross/**` + `AGENTS.md` + 三个 `_INDEX.md` + `docs/PhaseGoal-judge.md` + `docs/PhaseGoal/**` + `docs/Worktree.md`（⇒ 归 G4 / 合并收口执行者）；
+③ **`S1-FOLLOW-001`（全仓 rpc 层指标出口统一方案）** —— 用户 **2026-10-24** 已定「交主会话拍板」⇒ **不当新缺陷重提**（follow 域已自行落地 `DRIFT-FOLLOW-006` 的同款，9094/9097 已由 `docs/DRIFT/follow/rpc.md:330-336` 明确划归 users 域 ⇒ **本轮只订正本域台账里被推翻的前提，不落码**）；
+④ **不重开任何已签字偏离**（`DRIFT-FOLLOW-008` / MaxConns 半边 `SD-2026-10-25-01` / `DRIFT-USERS-002` / `DRIFT-ADMINAPI-001~004` / N-2 乱码）；
+⑤ 🔴 **订正（2026-10-30 16:5x）** —— 原写「**不改** `S1-USERS-002` 的 datasource 口令 fallback —— 台账 `docs/DRIFT/users/stage1-admission.md:477` 已裁定『取消 fallback ⇒ **RAG 比 Go 更严** ⇒ 属**有意偏离**（需签字），**不是纯域侧自修**』⇒ 本轮只登记」⇒ ⇒ **那个前提是错的**（`:477` 原句「Go 真源 yaml 是**字面量默认值**，恒能起栈」与 Go 源码不符）⇒ ⇒ **Go 侧全部 rpc yaml 都是 `"${POSTGRES_PASSWORD}"`（无默认值）** ⇒ `os.ExpandEnv` 不认 `${VAR:default}` ⇒ **缺变量即空串 ⇒ 连库失败 = fail-fast** ⇒ ⇒ **RAG 保留 `:password` 兜底 = 比 Go 松 = 真漂移** ⇒ ⇒ **不是有意偏离、不需要为「保留」签字** ⇒ ⇒ **本轮已落码**：G1 面 **3 处**取消 fallback（`user-rpc` `application.yaml:26` · `admin-rpc` `application.yml:24` · `follow-rpc` `application.yml:38` · ⚠️ **行号因本轮加注释位移 +2**）⇒ ⇒ 残余 **7 处**归 G2/G3。⚠️ **取消后的残余差异（RAG 更严的一侧）**：Go = 启动成功、连库时失败；RAG = **启动即失败** ⇒ **失败时刻**不同 ⇒ 这一条残余才属有意偏离候选（同 JWT fail-closed 族）。
+
+**② 已读四档（本 lane 面的具体路径 → 读到的关键结论）**
+
+| 档 | 具体路径 | 关键结论（本轮真正改变了判断的 7 条） |
+|---|---|---|
+| `docs/DRIFT/users/` | `stage1-admission.md`（§3 `S1-USERS-002` / `S1-USERS-004` · §4 阶段一任务表 · §5.6 有限例外）· `admin/rpc.md`（§1 `DRIFT-ARPC-009~012`）· `user/rpc.md`（§6.4 事务对照表 · `:280` 指标可抓取性判定）· `_shared.md`（`U-1`）· `vs-common.md`（§8.4 / §8.5 缺陷族 + 本回执节） | ① **`S1-USERS-004` 的可做面只有「守门」**：§4 任务表明写「把事务边界上移 ⇒ **阶段 1 不动**」，而 §518 写「**缺防退化**」⇒ ⇒ 本轮只**加守门**（零行为变更）· ② **`S1-USERS-002` 的「9 处 / 2 种默认值」前提已过期**（2026-10-30 实测 = **10 处全为 `${POSTGRES_PASSWORD:password}`**）⇒ 🔴 **2026-10-30 16:5x 再订正**：§477 原把它裁定为「**RAG 比 Go 更严** ⇒ 属**有意偏离（需签字）**」⇒ ⇒ **那个前提是错的**（Go 侧全部 rpc yaml **无默认值** ⇒ **保留 fallback 才是比 Go 松** ⇒ **真漂移**）⇒ ⇒ **本轮已落码**：G1 面 **3 处**取消 fallback + 3 个守门 ⇒ 残余 7 处归 G2/G3 · ③ **`DRIFT-ARPC-009` 台账 §1.5 称「`align/message` 分支已修（未合并）⇒ 合并后本条自动消失」** ⇒ **实测不成立**（共享链已合进主干，但只装 3 层 ⇒ 残留 = Stat + Prometheus）· ④ **`user/rpc.md:280` 的「DevServer 仅 dev/test 起 ⇒ 生产无端点 ⇒ EQUIVALENT」前提被本轮推翻** |
+| `docs/DRIFT/follow/` | `rpc.md`（§283-350 六 rpc 的 Go 有 DevServer / RAG 零出口对照表 · `:330-336` 跨域待办表 · `DRIFT-FOLLOW-006` 落地全记录）· `vs-common.md` | `DRIFT-FOLLOW-006` 已于 **2026-10-29** 落地（`S1-FOLLOW-001`）⇒ **follow-rpc 的指标出口 = 16065（与 Go `DevServer.Port` 一字不差）** ⇒ ⇒ **users 域的 9094 / 9097 是同一族缺口**，但**落点已明确划归 users 域**（同文件 `:330-336`）⇒ **本轮只订正前提，不落码**（理由见 ① ③） |
+| `docs/DRIFT/_cross/` | `stage1-derivation.md` §一~§四（§4.0 波次分布 · §4.1 A/B 真缺口）· `stage1-derivation.tsv`（**17 列 / `wave` 列**）· `domain-common-lanes.md`（9 轴 A1~A9）· `cross-domain-coupling.md`（§二 波次表 + 规则 C1~C7）· `global/lanes/_PROTOCOL.md`（反馈单 7 项 · 写权边界 · 「域内探针目录 `tools/<kind>/<域>/` 归对应域 lane」） | ① **派生层只是台账的投影**（`Worktree.md` §0-1 效力边界 ③：「台账结论会过期 ⇒ 派工前**按 `basis` 抽查**，别照抄标题」）⇒ 本轮 10 条开放项里有 **4 条前提已变**（`S1-FOLLOW-007` / `E1` / `E7` / `S1-USERS-002`）⇒ **派单不能照抄标题** · ② **反馈单 7 项 = 现象 / Go 侧 `文件:行号` / RAG 侧现状 / 证据强度 / 建议修法 / 影响面 / 是否阻塞本波** · ③ **写权判定**：`service/common/**` + `service/users/users-common/**` 只归 G4；`tools/<kind>/<域>/` **归对应域 lane**（⇒ `tools/api-full-parity-probe/users/` 是 G1 面） |
+| `docs/Intentional_Deviations/` | `_INDEX.md`（**已签字 60 / 未签字候选 12 / 条目总数 93**）· `users/_shared.md`（`CAND-16` / `CAND-17` 待签字候选）· `follow/api.md` · `global/common-tails.md:11`（`SD-2026-10-25-01`） | `DRIFT-FOLLOW-008`（MaxConns 闸门粒度）**已于 2026-10-25 签字** ⇒ ⇒ `S1-FOLLOW-007` 登记的「基线仍把已签字偏离记成开放缺陷」**风险实际已解除**（`docs/PhaseGoal/g1.md:21` 的「开放项归属」列**已改为** `→ 非开放（已签字 · 不是缺陷）`）⇒ **本轮只在本域台账登记订正，基线文件交收口执行者** |
+| `docs/PhaseGoal/` | `g1.md`（**机器生成投影** · §1 组件行 · §2 自修/转派 G4 · §3 P0 分摊 · §4 矩阵 C · §5 收口命令 · §6 lane 判定 · §7 交付物）· `judge.md`（A-2 users/follow 行 · §九 缺口） | G1 **lane 判定 = ✅**（10/10 ✅）· **§2.1 自修清单 = （无）** ⇒ **本轮不新开行为修复** · §2.2 已有 **1 条**转派 G4（`DRIFT-USERAPI-013`）⇒ 本轮**新增 3 条**反馈单（`E65` / `DRIFT-ARPC-010` / `DRIFT-ARPC-009` 残留） |
+| `docs/PhasedGoal.md` + `docs/twoStage.md` | `PhasedGoal.md:38-82`（P0 九条 / P1 / P2）· `twoStage.md` §4（阶段 0 事实基线）· §5.3（差异 11 项）· §5.4（改造记录 9 项）· §十（P0–P3 × A/B/C/D） | **A 类 = 阶段 1 准入阻断** ⇒ 本 lane 唯一的 A 类开放项（`S1-FOLLOW-007`）经复核**前提已解除** ⇒ **G1 无 A 类阻断** |
+| `docs/Pitfalls/users/` + `docs/Pitfalls/follow/` + `docs/Pitfalls/_cross/` | `users/_shared.md`（PIT-USERS-SHARED-001~020）· `users/user/rpc.md`（P-05 乱码 · P-06 假出处）· `users/admin/rpc.md`（P-2 `FieldStrategy.NEVER` · P-4 `@Import` ≠ 机制生效）· `follow/{api,rpc}.md`（PIT-FOLLOW-001~016）· `_cross/testing-pitfalls.md` | ① **P-05** = Go 源码里的错误文案是乱码 ⇒ 拿它当基准前先打字节（**已登记 N-2**，不重开）· ② **P-06** = 「假出处」⇒ **本轮的 gorm 版本订正正属此类**（`gorm@v1.31.2` 在 **v1.31.2 下看起来合法**、在真 pin 的 **v1.31.1 下越界** ⇒ **先钉版本再判行号**）· ③ **P-4 / `_cross/testing-pitfalls.md`** = 「注解存在 ≠ 机制生效」+「绿测试可能是**错误答案的守卫**」⇒ ⇒ 本轮新加的守门必须是**真触发**（真 Spring 容器 + 真 AOP 代理 + 真事务事件），不是纯 Mockito |
+| `docs/Worktree.md` | §二·五（回执模板 + **核验命令** + 「回执的 7 种不成立形态」）· §三·1d（波次工作树 · 写权 · 反馈单 7 项）· §三·1e（角色边界） | ① **核验命令 = `grep -c '^## 开工前置回执'` + `grep -cE '⑤ 批准记录：Jason · [0-9]{4}-'`** ⇒ ⇒ 本轮**在既有小节内追加**，**不新建第 2 个同名小节**（全仓 10 份 `vs-common.md` 均恰好 1 份 ⇒ 追加后仍是 1）· ② **「回执里自己写『已批准』不算批准」** ⇒ 本节 ⑤ 填的是 **Jason 在本 lane 会话内的明示**（`开始工作`） |
+
+**③ 待批准项（需 Jason / 调度员拍板）**
+
+**本轮 = 0 条新增待拍板项** —— 10 条开放项已全部按「域侧自修 / 转派 G4 / 域外登记」分流完毕，无一条卡在「必须 Jason 决策才能往下走」。
+⚠️ **1 条既有待拍板项仍在（不属本轮、也不重复提）**：**`S1-FOLLOW-001`** —— 全仓 rpc 层指标出口统一方案（用户 2026-10-24 已定「交主会话拍板」）⇒ ⇒ 本轮**只订正本域台账里被推翻的前提**（`user/rpc.md:280`），**不落码**、**不重提**为新缺陷。
+
+**④ 等批准 ⇒ 批准后才开工**
+**回执落笔时**本轮只读 + 写本回执（未获批准前不写任何代码、不改任何台账，本小节除外）；⇒ **Jason 于 2026-10-30 10:31 在本 lane 会话内明示「开始工作」**⇒ **已获批开工**（⑤ 由调度员代填，见本节末尾）⇒ 本轮按 ① 所列范围执行。
+
+**⑤ 批准记录：Jason · 2026-10-30 10:31 · 批准范围：本 lane 回执 ① 所列任务范围（派工面 `wave=G1` × A/B 的开放条目逐条回源后分流 = 域侧落码 1 条 + 台账订正 3 组 + 转派 G4 反馈单 3 条 + 域外登记 6 条）** —— ⚠️ **不含**共享面、阶段二、`S1-FOLLOW-001` 落码、已签字偏离重开　← 由**调度员代填**（依据：Jason 于 2026-10-30 10:31 在**本 lane 会话内**明示「开始工作」；**回执人不得自批**· **代填 ≠ 代批准**）
+
+---
+
