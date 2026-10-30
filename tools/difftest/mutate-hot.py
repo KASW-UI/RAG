@@ -113,9 +113,16 @@ MUTATIONS = [
      "响应包装：不再识别「已成型的信封」⇒ 错误响应被套两层信封",
      "hotcenter.go:45-51（httpx.SetOkHandler 只包一层）"),
 
+    # ⚠️ **【2026-10-31 订正 · 合并收口执行者】锚点已重定基**：原锚点
+    #   `articleResp = articleRpcClient.getPublicArticle(hotItem.getArticleId(), remainingBudgetMs);`
+    #   在当前代码里**命中 0 处** ⇒ ⇒ 该条变异**跑不起来**（「变异转红」这个证据拿不到）
+    #   ⇒ ⇒ 根因 = **下游调用被重构成了多行形式**，且预算参数改成了
+    #   `remainingBudgetMs(deadlineNanos)`（由「绝对 deadline」现算剩余）
     ("M10", "hot-api", "service/HotArticleHydrator.java",
-     "articleResp = articleRpcClient.getPublicArticle(hotItem.getArticleId(), remainingBudgetMs);",
-     "articleResp = articleRpcClient.getPublicArticle(hotItem.getArticleId(), remainingBudgetMs + 1000);",
+     "articleResp = articleRpcClient.getPublicArticle(\n"
+     "                    hotItem.getArticleId(), remainingBudgetMs(deadlineNanos));",
+     "articleResp = articleRpcClient.getPublicArticle(\n"
+     "                    hotItem.getArticleId(), remainingBudgetMs(deadlineNanos) + 1000);",
      "补全预算：给下游多要 1s ⇒ 单条补全可能突破 HTTP 总预算",
      "getHotArticlesLogic.go:132（用 ctx 的 deadline，不额外加预算）"),
 
