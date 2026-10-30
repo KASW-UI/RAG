@@ -3164,11 +3164,11 @@ message_rpc_request_total{method="ListConversations",result="fail"} 1.0
   ⇒ **skip ≠ 通过**；门合入的那一刻起，它自动变成强制判据。
 
 **🔴 跨 lane 依赖（登记给 G4 / 合并收口执行者）**：共享层把 `rag.side` 门从 **2 个类**
-扩到**全部** api 侧 web 组件，尚余 **9 个**（`GoStyleBreakerRouteTemplateAutoConfiguration` ·
+扩到**全部** api 侧 web 组件，尚余 **9 个**（`GoStyleBreakerRouteTemplateAutoConfiguration` ·  ←【订正 · 见文末「跨 lane 依赖的数量订正」小节】：该数**已过期** ⇒ G4 已把门扩到**全部 13 个**（自动配置面 3 ＋ 扫描面 10）⇒ ⇒ 实际剩余 **0 个**（不是 9 / 10）
 `GoStyleCpuSheddingFilter` · `GoStyleMaxConnsFilter` · `GoStyleMaxBytesFilter` ·
 `GoStyleBreakerFilter` · `GoStyleTraceparentFilter` · `GoStyleFormValueLimitInterceptor` ·
 `GoStyleFormLimitWebMvcConfig` · `GoStyleTomcatParameterLimitCustomizer`）
-⇒ ⇒ **共享层写权面 ⇒ 本域不写** ⇒ ⇒ 已派单。
+⇒ ⇒ **共享层写权面 ⇒ 本域不写** ⇒ ⇒ 已派单。【订正 · 见文末「跨 lane 依赖的数量订正」小节】：该派单**已落地**（G4 共享层门已挂 13 个类 ＋ 本域 `rag.side: rpc` 已落码）⇒ ⇒ 剩余项**不是**「门没挂够」，而是**结构面**（rpc 域不扫 `com.rag.common` 仍是域侧约定 ⇒ 由主干 `check-rpc-common-scan-exclusion.py` 断言①机械守住）。
 
 ### ✅ `DRIFT-MSG-V-034` ✅ **已修（2026-10-30 · G2 落码）**：datasource 口令带默认值 ⇒ 缺变量时用默认口令连上去 ⇒ **RAG 比 Go 松** ⇒ 已取消兜底（与 Go 逐字同形）
 
@@ -3232,3 +3232,68 @@ message_rpc_request_total{method="ListConversations",result="fail"} 1.0
 | DRIFT-MSG-012 | C（阶段 2 最终工程建设项 · 部署面收敛） | P2 | 否（不阻断阶段一） | Go `service/message/rpc/message.go:25`（`func main()` ⇒ 纯 gRPC 进程）＋ `:37`（`s := zrpc.MustNewServer(c.RpcServerConf, …)` ⇒ **无 servlet 容器**、无 HTTP 监听面）vs RAG `service/message/message-rpc/pom.xml:86`（`<artifactId>spring-boot-web-server</artifactId>` ⇒ 引了 web-server 构件）＋ `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/bootstrap/NacosRegistration.java:33`（javadoc 明写「**本服务不带 web**，要走纯手动注册路径」）⇒ ⇒ **差异仍成立**：pom 引入的 web-server 构件与本模块自述「不带 web」互相矛盾（属部署面差异，不影响 gRPC 行为面）⇒ 阶段二收敛（移除该依赖或改口径，二选一）⇒ 归 C、不阻断阶段一；⚠️ 本条在 2026-10-30 活体对拍轮里 `tools/difftest/run.sh` ⇒ EXIT=0，但退出码只证该探针自身断言成立、不等于本条全量成立 | 2026-10-30 |
 | DRIFT-MSG-V-020 | D（差异已消失 ⇒ 无待实现内容） | P1 | 否（不阻断阶段一） | Go `service/message/rpc/internal/model/db.go:22`（DSN 钉 `TimeZone=Asia/Shanghai` ⇒ GORM 迁出的 `timestamptz` 存绝对时刻，`time.Time.Unix()` 读出真实 epoch）＋ `:42`（`db.AutoMigrate(&Notification{}, &Conversation{}, &ConversationMessage{})` ⇒ 三张表随实体声明迁出）vs RAG `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/service/MessageRpcSupport.java:107`（`private static long toEpochSecond(OffsetDateTime instant)` ⇒ 实体字段已由 `LocalDateTime` 改为 `OffsetDateTime`）＋ `:110`（`return instant.toEpochSecond();` ⇒ **与时区无关**、持有真实瞬时 ⇒ 等价于 Go 的 `time.Time.Unix()`）＋ `service/message/message-rpc/src/main/resources/db/migration/V5__message_time_columns_timestamptz.sql:2`（8 个时间列 `TIMESTAMP ⇒ TIMESTAMPTZ`）⇒ ⇒ **差异已消失**：2026-10-23 第五轮按 users 域规格落码（改已应用迁移会撞 Flyway 校验和 ⇒ 新写 V5 而非改 V1~V3）⇒ 类型与可空性两侧 0 差异；⚠️ 残留（不在本条范围）= `DEFAULT CURRENT_TIMESTAMP` 残留（Go 侧无 DB 层默认 ⇒ 已登记不修，两侧 INSERT 均显式绑定该列 ⇒ 不可观测） | 2026-10-30 |
 | DRIFT-MSG-V-027 | D（差异已消失 ⇒ 无待实现内容） | P0 | 否（不阻断阶段一） | Go `service/message/rpc/internal/model/db.go:42`（`db.AutoMigrate(&Notification{}, &Conversation{}, &ConversationMessage{})` ⇒ Go 侧**无版本化迁移账本** ⇒ 不存在「非空 schema 上 baseline 把 V1 整条跳过」这个失效面）vs RAG `service/message/message-rpc/src/main/resources/application.yml:102`（`baseline-version: 0` ⇒ baseline 标记打在 version 0 ⇒ V1 之后全部迁移照常执行）＋ `:105`（`table: flyway_schema_history_message` ⇒ 独立账本表名）＋ `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageFlywaySharedSchemaWiringTest.java:164`（`assertEquals("0", versions.get(i), …)` ⇒ 断言账本里 baseline 行是 version 0）＋ `:179`（`assertEquals("SQL", types.get(versions.indexOf("1")), …)` ⇒ 断言 V1 真的以 SQL 执行过、不是被 baseline 顶掉）＋ `:187`（`assertTrue(tableExists("message_notification"), …)`）⇒ ⇒ **差异已消失**：2026-10-24 起真栈时暴露的「Flyway baseline 跳过 V1 ⇒ `message_notification` 永远建不出来 ⇒ 服务起不来」已由 `baseline-version: 0` ＋ 独立账本表名闭合 ⇒ 本域不再阻断阶段一 | 2026-10-30 |
+
+### 【订正 · 2026-10-30 · G2 lane】跨 lane 依赖的数量订正：「尚余 9 个」⇒ 实际剩余 0 个
+
+**订正对象**：本文件上文「🔴 跨 lane 依赖（登记给 G4 / 合并收口执行者）」小节里那句
+「共享层把 `rag.side` 门从 **2 个类**扩到**全部** api 侧 web 组件，尚余 **9 个**」。
+
+**旧行按台账纪律保留**（推翻旧结论必须**就地改旧处**、零行位移；上文那两行已加【订正】括注），
+本节只承载**订正的依据**与**订正后的剩余项**。
+
+**⚠️ 订正结论**：「尚余 **9 个**」是**过期快照** ⇒ ⇒ **实际剩余 0 个**（不是 9，也不是 10）。
+
+**依据一 · 共享层门已扩到全部 13 个类（主干实测）**
+
+- 门 = `service/common/src/main/java/com/rag/common/web/ConditionalOnApiSide.java:58`
+  ⇒ `@ConditionalOnProperty(name = "rag.side", havingValue = "api", matchIfMissing = true)`。
+- 其 javadoc 自述：「此前 `rag.side=api` **只罩住了 2 个类**（`GoStylePathNormalizingAutoConfiguration` ＋
+  `GoStyleJsonContentTypeAdvice`）⇒ ⇒ **其余 11 个** api 侧中间件没有这层限定」
+  ⇒ ⇒ 门的目标集合 = **13 个**。
+- 主干实测（逐类点名 `ConditionalOnApiSide`）⇒ **13 个类全部已挂**：
+  - **自动配置面 3 个**（`AutoConfiguration.imports` ⇒ 不靠组件扫描 ⇒ servlet 形态 rpc 域必注册）：
+    `GoStyleJsonContentTypeAdvice` · `GoStylePathNormalizingAutoConfiguration` · `GoStyleBreakerRouteTemplateAutoConfiguration`；
+  - **扫描面 10 个**（`@Component` / `@Configuration` ⇒ 靠组件扫描）：
+    `GoStyleCpuSheddingFilter` · `GoStyleMaxConnsFilter` · `GoStyleMaxBytesFilter` · `GoStyleBreakerFilter` ·
+    `GoStyleTraceparentFilter` · `GoStyleTomcatParameterLimitCustomizer` · `HttpMiddlewareFilter` ·
+    `GoStyleFormValueLimitInterceptor` · `GoStyleFormLimitWebMvcConfig` · `GoStyleJsonBodyConverterConfig`。
+- **传递门控已验**（不是「类上挂了注解」而是「内层 Bean 也随之不注册」）：
+  `GoStylePathNormalizingAutoConfiguration.java:57`（类级 `@ConditionalOnApiSide` ⇒ 其 `@Bean` 随类不注册）·
+  `GoStyleBreakerRouteTemplateAutoConfiguration.java:37`（同上 ⇒ 其 `@Bean` 随类不注册）。
+
+**依据二 · 本域活体实证：rpc 进程里 api 侧 web 中间件 = 0（读数，不是推断）**
+
+- `MessageRpcMetricsCarrierGateTest`（**真 fat jar ＋ 真 `/actuator/beans` 清单**）⇒
+  **8 个**扫描面 api 侧 HTTP 中间件（CPU 降载 / 最大连接 / 最大字节 / 熔断 / traceparent / 表单限值 ×2 /
+  Tomcat 参数上限）**一个都不在容器里**；
+- 同一测试的 `apiSideAutoConfigurationsMustNotRegisterWhenSideIsRpc()` ⇒ **3 个**自动配置面类不在容器里
+  ⚠️ **本分支上这条是「显式 skip」而不是通过**（共享层门在 **G4 写权面**、尚未合入本分支 ⇒ 守门用
+  **反射探测机制是否存在**来决定跑/跳过 ⇒ ⇒ **skip ≠ 通过**；门合入的那一刻起自动变成强制判据）。
+- ⇒ ⇒ 合计：**rpc 进程里 api 侧 web 中间件 = 0**。
+
+**依据三 · `HttpPoolLifecycle` 不属于「剩余项」（否掉一版错误口径）**
+
+- `service/common/src/main/java/com/rag/common/spring/HttpPoolLifecycle.java:52` = `@Component` ·
+  `:53` = `@ConditionalOnWebApplication(SERVLET)` ⇒ ⇒ **要靠组件扫描才注册**；
+- 而 rpc 域**刻意不扫 `com.rag.common`** ⇒ ⇒ 它在 rpc 进程**根本不注册**
+  （其 javadoc `:32`-`:33` 自述：「rpc 模块一律不扫 `com.rag.common` ⇒ 本类在 rpc 进程里**根本不会被注册**」）。
+- ⇒ ⇒ 它**不是**「api 侧中间件在 rpc 域激活」⇒ ⇒ **不属于本项的剩余项**
+  ⇒ ⇒ 「12 激活 / 10 剩余（补 `HttpPoolLifecycle`）」这版口径**不成立**。
+
+**订正后本项的真正剩余**：**不是「门没挂够」**，而是**结构面** ——
+「rpc 域不扫 `com.rag.common`」目前仍是**域侧约定**（共享层无法从内部保证）
+⇒ ⇒ 由主干新守门 `tools/difftest/check-rpc-common-scan-exclusion.py` 断言①（结构面）机械守住；
+断言②（形态面：servlet 形态必须显式 `rag.side: rpc`）与本域本轮落码一致。
+
+**本轮只读实测（2026-10-30 · 未把 `tools/` 文件合入本分支 —— `tools/**` 是 G4 写权面）**
+
+- 守门在本分支上 **EXIT=0**：结构面 ✅（10 个 rpc 域都没有扫 `com.rag.common`）；
+  形态面 ✅（`like-rpc` / `message-rpc` 已显式 `rag.side: rpc` ⇒ 白名单那两条已 stale ⇒ 可剪枝）。
+- 🔴 **新发现（共享面缺口 · 登记给 G4）**：守门的 `_module_has_web_starter()` 是**纯文本正则**、**不剥 XML 注释**
+  ⇒ ⇒ 它把 pom **注释里**那句「本模块不引 `spring-boot-starter-web`」当成了**真依赖**
+  ⇒ ⇒ `task-rpc`（`service/task/task-rpc/pom.xml:57` 注释）被**误判**成 servlet 形态
+  ⇒ ⇒ 白名单里「task-rpc · G2 面 · 已派单（载体波次内一并加）」那条**前提不成立**
+  ⇒ ⇒ **task-rpc 不需要 `rag.side: rpc`**（它**无 servlet 容器** ⇒ 那一行是**死配置**）
+  ⇒ ⇒ **本域不给 task-rpc 加这一行**（不写死配置、不制造「配置存在但无载体」的假象）。
+- ⇒ ⇒ 修法在**共享面**：`_module_has_web_starter()` 应先剥 XML 注释
+  （与该脚本对 Java 侧 `strip_comments()` 的做法**对称**）⇒ 修后 `task-rpc` 形态面自动不命中 ⇒ 白名单那条即可剪枝。

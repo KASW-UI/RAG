@@ -2662,11 +2662,11 @@ like_rpc_action_total{action="unknown",result="invalid_param",target_type="artic
   ⇒ **skip ≠ 通过**；门合入的那一刻起，它自动变成强制判据。
 
 **🔴 跨 lane 依赖（登记给 G4 / 合并收口执行者）**：共享层把 `rag.side` 门从 **2 个类**
-扩到**全部** api 侧 web 组件，尚余 **9 个**（`GoStyleBreakerRouteTemplateAutoConfiguration` ·
+扩到**全部** api 侧 web 组件，尚余 **9 个**（`GoStyleBreakerRouteTemplateAutoConfiguration` ·  ←【订正 · 见文末「跨 lane 依赖的数量订正」小节】：该数**已过期** ⇒ G4 已把门扩到**全部 13 个**（自动配置面 3 ＋ 扫描面 10）⇒ ⇒ 实际剩余 **0 个**（不是 9 / 10）
 `GoStyleCpuSheddingFilter` · `GoStyleMaxConnsFilter` · `GoStyleMaxBytesFilter` ·
 `GoStyleBreakerFilter` · `GoStyleTraceparentFilter` · `GoStyleFormValueLimitInterceptor` ·
 `GoStyleFormLimitWebMvcConfig` · `GoStyleTomcatParameterLimitCustomizer`）
-⇒ ⇒ **共享层写权面 ⇒ 本域不写** ⇒ ⇒ 已派单。
+⇒ ⇒ **共享层写权面 ⇒ 本域不写** ⇒ ⇒ 已派单。【订正 · 见文末「跨 lane 依赖的数量订正」小节】：该派单**已落地**（G4 共享层门已挂 13 个类 ＋ 本域 `rag.side: rpc` 已落码）⇒ ⇒ 剩余项**不是**「门没挂够」，而是**结构面**（rpc 域不扫 `com.rag.common` 仍是域侧约定 ⇒ 由主干 `check-rpc-common-scan-exclusion.py` 断言①机械守住）。
 
 ### ✅ `DRIFT-LIKE-020` ✅ **已修（2026-10-30 · G2 落码）**：datasource 口令带默认值 ⇒ 缺变量时用默认口令连上去 ⇒ **RAG 比 Go 松** ⇒ 已取消兜底（与 Go 逐字同形）
 
@@ -2726,3 +2726,68 @@ RAG 侧**实测**（2026-10-30 20:07 · 真 fat jar ＋ 不设 `POSTGRES_PASSWOR
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
 |---|---|---|---|---|---|
 | OP-09 | D | P3 | 否 | Go `service/like/rpc/internal/model/domain_fact.go:76-138`（`appendLikeFact`：遗留未版本化事实 ⇒ 报错 `:101-110`；原子取号 `:111-116`；版本须 ∈ [1, 2^53-1] `:117-119`；payload 与冻结信封**同一份原文** `:120-132`；outbox 落库 `:133-137`）＋ `service/message/rpc/internal/logic/markconversationreadlogic.go:39-64`（校验 → 查会话 → 参与者校验 → `MarkConversationRead` **单条 UPDATE**，**不触碰 conversation 表**）。RAG `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/service/LikeDomainFactService.java:68-159`（逐条对应：遗留检查 `:100-104`；原子取号 `:107-112`；payload `:115-135`（`aggregate_version` `:121` / `target_revision` `:126` 恒 `null`）；信封 `:138-155`（内嵌**同一份 `payloadJson` 原文**）；outbox `:157-158`）＋ `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/service/MessageAtomicService.java:222-227`（`@Transactional` + **单条** `markReadByConversationAndRecipient`，不碰 conversation 表 ⇒ V-006 已修）⇒ ⇒ 两个来源（like 事实生产侧 / message MarkConversationRead）**两侧均一一对应** ⇒ **差异已消失**。⚠️ 台账尾部那句「投递侧与权威读侧仍是 4 行骨架 ⇒ `DRIFT-LIKE-003` 未关闭」是**陈旧快照**（实测 `LikeFactDispatchService.java` 275 行 / `LikeDeliveryValidator.java` 383 行 / `LikeAuthorityLookupService.java` 407 行 / `LikeFactDispatchScheduler.java` 138 行 ⇒ 投递侧已实现为 `DRIFT-LIKE-003-A`；残余的 003-B 取证缺口与 003-C 暴露形态**已另立编号** `DRIFT-LIKE-003-B/-003-C` ⇒ 不并入本条）⇒ **D**：本条无待实现项 | 2026-10-30 |
+
+### 【订正 · 2026-10-30 · G2 lane】跨 lane 依赖的数量订正：「尚余 9 个」⇒ 实际剩余 0 个
+
+**订正对象**：本文件上文「🔴 跨 lane 依赖（登记给 G4 / 合并收口执行者）」小节里那句
+「共享层把 `rag.side` 门从 **2 个类**扩到**全部** api 侧 web 组件，尚余 **9 个**」。
+
+**旧行按台账纪律保留**（推翻旧结论必须**就地改旧处**、零行位移；上文那两行已加【订正】括注），
+本节只承载**订正的依据**与**订正后的剩余项**。
+
+**⚠️ 订正结论**：「尚余 **9 个**」是**过期快照** ⇒ ⇒ **实际剩余 0 个**（不是 9，也不是 10）。
+
+**依据一 · 共享层门已扩到全部 13 个类（主干实测）**
+
+- 门 = `service/common/src/main/java/com/rag/common/web/ConditionalOnApiSide.java:58`
+  ⇒ `@ConditionalOnProperty(name = "rag.side", havingValue = "api", matchIfMissing = true)`。
+- 其 javadoc 自述：「此前 `rag.side=api` **只罩住了 2 个类**（`GoStylePathNormalizingAutoConfiguration` ＋
+  `GoStyleJsonContentTypeAdvice`）⇒ ⇒ **其余 11 个** api 侧中间件没有这层限定」
+  ⇒ ⇒ 门的目标集合 = **13 个**。
+- 主干实测（逐类点名 `ConditionalOnApiSide`）⇒ **13 个类全部已挂**：
+  - **自动配置面 3 个**（`AutoConfiguration.imports` ⇒ 不靠组件扫描 ⇒ servlet 形态 rpc 域必注册）：
+    `GoStyleJsonContentTypeAdvice` · `GoStylePathNormalizingAutoConfiguration` · `GoStyleBreakerRouteTemplateAutoConfiguration`；
+  - **扫描面 10 个**（`@Component` / `@Configuration` ⇒ 靠组件扫描）：
+    `GoStyleCpuSheddingFilter` · `GoStyleMaxConnsFilter` · `GoStyleMaxBytesFilter` · `GoStyleBreakerFilter` ·
+    `GoStyleTraceparentFilter` · `GoStyleTomcatParameterLimitCustomizer` · `HttpMiddlewareFilter` ·
+    `GoStyleFormValueLimitInterceptor` · `GoStyleFormLimitWebMvcConfig` · `GoStyleJsonBodyConverterConfig`。
+- **传递门控已验**（不是「类上挂了注解」而是「内层 Bean 也随之不注册」）：
+  `GoStylePathNormalizingAutoConfiguration.java:57`（类级 `@ConditionalOnApiSide` ⇒ 其 `@Bean` 随类不注册）·
+  `GoStyleBreakerRouteTemplateAutoConfiguration.java:37`（同上 ⇒ 其 `@Bean` 随类不注册）。
+
+**依据二 · 本域活体实证：rpc 进程里 api 侧 web 中间件 = 0（读数，不是推断）**
+
+- `LikeRpcMetricsCarrierGateTest`（**真 fat jar ＋ 真 `/actuator/beans` 清单**）⇒
+  **8 个**扫描面 api 侧 HTTP 中间件（CPU 降载 / 最大连接 / 最大字节 / 熔断 / traceparent / 表单限值 ×2 /
+  Tomcat 参数上限）**一个都不在容器里**；
+- 同一测试的 `apiSideAutoConfigurationsMustNotRegisterWhenSideIsRpc()` ⇒ **3 个**自动配置面类不在容器里
+  ⚠️ **本分支上这条是「显式 skip」而不是通过**（共享层门在 **G4 写权面**、尚未合入本分支 ⇒ 守门用
+  **反射探测机制是否存在**来决定跑/跳过 ⇒ ⇒ **skip ≠ 通过**；门合入的那一刻起自动变成强制判据）。
+- ⇒ ⇒ 合计：**rpc 进程里 api 侧 web 中间件 = 0**。
+
+**依据三 · `HttpPoolLifecycle` 不属于「剩余项」（否掉一版错误口径）**
+
+- `service/common/src/main/java/com/rag/common/spring/HttpPoolLifecycle.java:52` = `@Component` ·
+  `:53` = `@ConditionalOnWebApplication(SERVLET)` ⇒ ⇒ **要靠组件扫描才注册**；
+- 而 rpc 域**刻意不扫 `com.rag.common`** ⇒ ⇒ 它在 rpc 进程**根本不注册**
+  （其 javadoc `:32`-`:33` 自述：「rpc 模块一律不扫 `com.rag.common` ⇒ 本类在 rpc 进程里**根本不会被注册**」）。
+- ⇒ ⇒ 它**不是**「api 侧中间件在 rpc 域激活」⇒ ⇒ **不属于本项的剩余项**
+  ⇒ ⇒ 「12 激活 / 10 剩余（补 `HttpPoolLifecycle`）」这版口径**不成立**。
+
+**订正后本项的真正剩余**：**不是「门没挂够」**，而是**结构面** ——
+「rpc 域不扫 `com.rag.common`」目前仍是**域侧约定**（共享层无法从内部保证）
+⇒ ⇒ 由主干新守门 `tools/difftest/check-rpc-common-scan-exclusion.py` 断言①（结构面）机械守住；
+断言②（形态面：servlet 形态必须显式 `rag.side: rpc`）与本域本轮落码一致。
+
+**本轮只读实测（2026-10-30 · 未把 `tools/` 文件合入本分支 —— `tools/**` 是 G4 写权面）**
+
+- 守门在本分支上 **EXIT=0**：结构面 ✅（10 个 rpc 域都没有扫 `com.rag.common`）；
+  形态面 ✅（`like-rpc` / `message-rpc` 已显式 `rag.side: rpc` ⇒ 白名单那两条已 stale ⇒ 可剪枝）。
+- 🔴 **新发现（共享面缺口 · 登记给 G4）**：守门的 `_module_has_web_starter()` 是**纯文本正则**、**不剥 XML 注释**
+  ⇒ ⇒ 它把 pom **注释里**那句「本模块不引 `spring-boot-starter-web`」当成了**真依赖**
+  ⇒ ⇒ `task-rpc`（`service/task/task-rpc/pom.xml:57` 注释）被**误判**成 servlet 形态
+  ⇒ ⇒ 白名单里「task-rpc · G2 面 · 已派单（载体波次内一并加）」那条**前提不成立**
+  ⇒ ⇒ **task-rpc 不需要 `rag.side: rpc`**（它**无 servlet 容器** ⇒ 那一行是**死配置**）
+  ⇒ ⇒ **本域不给 task-rpc 加这一行**（不写死配置、不制造「配置存在但无载体」的假象）。
+- ⇒ ⇒ 修法在**共享面**：`_module_has_web_starter()` 应先剥 XML 注释
+  （与该脚本对 Java 侧 `strip_comments()` 的做法**对称**）⇒ 修后 `task-rpc` 形态面自动不命中 ⇒ 白名单那条即可剪枝。
