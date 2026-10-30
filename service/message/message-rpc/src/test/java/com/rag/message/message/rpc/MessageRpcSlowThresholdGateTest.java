@@ -9,6 +9,7 @@ import io.grpc.ServerBuilder;
 import io.grpc.ServerCallHandler;
 import io.grpc.ServerServiceDefinition;
 import io.grpc.stub.ServerCalls;
+import io.grpc.StatusRuntimeException;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.sdk.OpenTelemetrySdk;
@@ -52,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.rag.message.message.rpc.support.RealContainerPort;
+import com.rag.message.message.rpc.support.GrpcTestLifecycle;
 import com.rag.message.message.rpc.support.GrpcTestPort;
 
 /**
@@ -320,10 +322,68 @@ class MessageRpcSlowThresholdGateTest {
      * <p>⚠️ 预热必须用**独立的 server + 独立的 probe**：
      *    本类的 {@code probe.entered} 是一次性的 CountDownLatch ⇒ 被预热消耗掉的话，
      *    「handler 真的被调用过」那条断言就**永远为真** ⇒ 守门变空转。
+     *
+     * <h2>🔴🔴 为什么这里的拆除要「优雅关闭」而不是 {@code shutdownNow()}（V-032 加固）</h2>
+     * <p>{@code DRIFT-MSG-V-032} 登记的现象 = 本用例在**全量并发回归**里偶发
+     * {@code StatusRuntime UNAVAILABLE: Network closed for unknown reason}
+     * ⇒ 2026-10-30 复核确认根因在<b>拆除时序</b>：
+     * <ul>
+     *   <li>旧写法 = 「发一次调用 ⇒ <b>立刻</b> {@code ch.shutdownNow()} + {@code server.shutdownNow()}」
+     *       ⇒ 客户端 channel 在服务端连接拆除的**同时**还有在途帧 ⇒
+     *       ⇒ netty 侧读到「连接已关」⇒ 客户端抛 {@code UNAVAILABLE: Network closed}。</li>
+     *   <li>注意：这里的 {@code UNAVAILABLE} <b>不是</b>被测行为坏了（不是 slow 标记、不是阈值比较），
+     *       而是**被测环境自己拆除得太急** ⇒ ⇒ 表现为「这条用例偶发红」⇒
+     *       ⇒ 威胁的是<b>阶段一验收证据本身</b>（全量回归当场 BUILD FAILURE）。</li>
+     * </ul>
+     * ⇒ 修法 = <b>优雅关闭</b>：{@code shutdown()}（等在途调用自然收尾）⇒
+     * {@code awaitTermination(...)}（等真的终止）⇒ 超时后才降级成 {@code shutdownNow()}。
+     * <p>⚠️ 与同仓已有写法一致（favorite-api {@code FavoriteApiSpanWiringTest:288-298}、
+     * hot-rpc {@code HotRpcFailurePathMatrixTest:117-121} 都是 {@code shutdownNow()+awaitTermination}；
+     * 本类改用 <b>{@code shutdown()}</b> 优先，是<b>更严</b>的一侧 ⇒ 只影响测试自身时序、不改被测语义）。
      */
     private void warmUp() throws Exception {
         GrpcServerConfigurer configurer = ctx.getBean("rpcInterceptorConfigurer", GrpcServerConfigurer.class);
         assertNotNull(configurer, "rpcInterceptorConfigurer 必须产出 GrpcServerConfigurer Bean");
+        // 🔴 V-032 加固（第二半）：建连本身也可能瞬时失败 ⇒ **重试**。
+        //    「探测式端口」已治「撞口」（BindException），但治不了「端口在探测与 bind 之间被抢」
+        //    （TOCTOU 窗口）⇒ 那会表现为 server 起来后客户端连不上 / 连接被立刻关。
+        //    ⇒ 预热对「本类要验的 slow 标记」是**辅助动作** ⇒ 失败可重试（重试上限 3 次）。
+        //    ⚠️ 重试**只包住预热**，不包住被测断言 ⇒ 重试不会掩盖被测行为缺陷。
+        StatusRuntimeException lastFailure = null;
+        for (int attempt = 1; attempt <= WARMUP_MAX_ATTEMPTS; attempt++) {
+            try {
+                warmUpOnce(configurer);
+                return;
+            } catch (StatusRuntimeException e) {
+                lastFailure = e;
+                // 只重试「传输层」的失败（UNAVAILABLE / 未知原因）⇒
+                // 其它状态码（业务错误 / 参数错误）重试无意义 ⇒ 直接抛。
+                if (e.getStatus().getCode() != io.grpc.Status.Code.UNAVAILABLE
+                        && e.getStatus().getCode() != io.grpc.Status.Code.UNKNOWN) {
+                    throw e;
+                }
+                Thread.sleep(WARMUP_RETRY_BACKOFF_MILLIS * attempt);
+            }
+        }
+        throw new IllegalStateException("预热连续 " + WARMUP_MAX_ATTEMPTS
+                + " 次都因传输层失败（UNAVAILABLE/UNKNOWN）⇒ 本用例无法建立可测环境。"
+                + "最后一次异常 = " + lastFailure, lastFailure);
+    }
+
+    /** 预热重试上限（V-032 加固）。 */
+    private static final int WARMUP_MAX_ATTEMPTS = 3;
+
+    /** 预热重试的退避基数（毫秒）—— 第 n 次等待 n × 本值。 */
+    private static final long WARMUP_RETRY_BACKOFF_MILLIS = 200L;
+
+    /**
+     * 真正跑一次预热（独立 server + 独立 probe + 优雅拆除）。
+     *
+     * <p>⚠️ 预热必须用**独立的 server + 独立的 probe**：本类的 {@code probe.entered}
+     * 是一次性的 CountDownLatch ⇒ 被预热消耗掉的话，「handler 真的被调用过」那条断言
+     * 就**永远为真** ⇒ 守门变空转。
+     */
+    private void warmUpOnce(GrpcServerConfigurer configurer) throws Exception {
         // 🔴 不能用 forPort(0)：那是【OS 盲选口】⇒ 可能正好选到【Docker 发布口】
         //    （本机实测：Sea-redis 发布 0.0.0.0:49380->6379，而 macOS 临时段是 49152–65535 ⇒ 同池）
         //    ⇒ ⇒ gRPC server 在 IPv6 空间绑上了、而客户端走 IPv4 连到 Docker 代理 ⇒
@@ -341,9 +401,23 @@ class MessageRpcSlowThresholdGateTest {
             var stub = MessageServiceGrpc.newBlockingStub(ch);
             stub.withDeadlineAfter(20, TimeUnit.SECONDS).markNotificationRead(MarkNotificationReq.newBuilder().setUserId(1L).setNotificationId(2L).build());
         } finally {
-            ch.shutdownNow();
-            server.shutdownNow();
+            // 🔴 V-032 加固：优雅关闭 ⇒ 先 shutdown()（不在途帧自然收尾）⇒ 再 awaitTermination
+            //    ⇒ 只有超时才降级 shutdownNow()。
+            //    ⚠️ 旧写法（shutdownNow() 立刻拔网线）是本条偶发 UNAVAILABLE 的直接来源。
+            shutdownQuietly(ch, server);
         }
+    }
+
+    /**
+     * 🔴 **优雅关闭**（V-032 加固共用）—— 实现已抽到
+     * {@link com.rag.message.message.rpc.support.GrpcTestLifecycle#shutdownGracefully}。
+     *
+     * <p>⚠️ <b>为什么不是本类的 private 方法</b>：§3.3 —— 守门必须测「生产用的那个函数」⇒
+     * 若逻辑留在本类 private 方法里，守门只能测一份<b>副本</b> ⇒ 副本与正身可分叉
+     * ⇒ 「你测的是 A、跑的是 B」⇒ 故抽到 {@code support} 包 ⇒ 守门与本用例<b>共用同一个函数</b>。
+     */
+    private static void shutdownQuietly(ManagedChannel channel, Server server) {
+        GrpcTestLifecycle.shutdownGracefully(channel, server);
     }
 
     private SpanData callAndGetSpan(long holdMillis) throws Exception {
@@ -420,8 +494,10 @@ class MessageRpcSlowThresholdGateTest {
         } finally {
             probe.release.countDown();               // 放行 handler，让它别挂在超时上
             client.shutdownNow();
-            channel.shutdownNow();
-            server.shutdownNow();
+            // 🔴 V-032 加固：同 warmUp() ⇒ 优雅关闭（先 channel 后 server）⇒ 不再「拔网线」。
+            //    ⚠️ 旧写法 `channel.shutdownNow(); server.shutdownNow();` 是本条偶发
+            //    `UNAVAILABLE: Network closed for unknown reason` 的直接来源。
+            shutdownQuietly(channel, server);
         }
     }
 

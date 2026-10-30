@@ -1668,6 +1668,27 @@ DDL 对拍：Go AutoMigrate 55 行 vs RAG **V1~V5**，**归一化后剩余 19 �
 
 <!-- @fix 2026-10-23 23:2x 第五轮 · V-020 已修（照 users 域规格） · V-016 按用户指示推迟 -->
 
+#### ✅ 2026-10-30 · G2 复核销号：`DRIFT-MSG-V-020` 的**状态标记未销**（本轮正文已写「已修」，派生层仍判 🔴 未闭合）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `bdac3607` · **核对日期** 2026-10-30
+> **证据强度**：**E3**（两侧源码逐字对照 + 真源回核 + 仓内守门在仓）· **阶段归属**：**P1 · D 类**（**差异已消失 ⇒ 无待实现内容** ⇒ **不阻断**阶段 1）
+> ⚠️ **本条原章节标题（`:1671`）写的就是「已修」** ⇒ **不是标题标记过期，是「条目标记」那一层没销** ⇒ 本小节即为销号记录。
+
+**逐条回源复核（2026-10-30 · 本 lane 实测，非转述）**：
+
+| 侧 | 出处 | 实测内容 |
+|---|---|---|
+| Go | `service/message/rpc/internal/model/db.go:22` | DSN 钉 `TimeZone=Asia/Shanghai` ⇒ GORM 迁出的 `timestamptz` **存绝对时刻**，`time.Time.Unix()` 读出**真实 epoch** |
+| Go | `service/message/rpc/internal/model/db.go:42` | `db.AutoMigrate(&Notification{}, &Conversation{}, &ConversationMessage{})` ⇒ 三张表随实体声明迁出 ⇒ **无版本化迁移账本** |
+| RAG | `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/service/MessageRpcSupport.java:107` / `:110` | `private static long toEpochSecond(OffsetDateTime instant)` ⇒ `return instant.toEpochSecond();` ⇒ **与时区无关**、持有**真实瞬时** ⇒ 等价于 Go 的 `time.Time.Unix()` |
+| RAG | `service/message/message-rpc/src/main/resources/db/migration/V5__message_time_columns_timestamptz.sql:2` | 8 个时间列 `TIMESTAMP ⇒ TIMESTAMPTZ` |
+| RAG 守门 | `MessageRpcTimeColumnParityTest`（真 PG 查 `information_schema`）· `MessageRpcSupportTimeZoneTest`（7 例，含**时区无关性**断言） | 两侧在仓 |
+
+⇒ **结论**：2026-10-23 第五轮按 users 域规格落码（改已应用迁移会撞 Flyway 校验和 ⇒ **新写 V5** 而非改 V1~V3）⇒ **类型与可空性两侧 0 差异** ⇒ **差异已消失** ⇒ **本条无待实现内容** ⇒ 归 **D 类** · **不阻断阶段一** ⇒ **销号**。
+⇒ ⚠️ **残留（不在本条范围）**：`DEFAULT CURRENT_TIMESTAMP` 残留（Go 侧无 DB 层 default）⇒ 已登记不修（两侧 INSERT 均显式绑定该列 ⇒ 不可观测）—— 见 `docs/DRIFT/_cross/ddl-type-divergences.md`。
+
+---
+
 ## 2026-10-23 第五轮：`DRIFT-MSG-V-020` 已修（照 users 域规格单开）
 
 > **用户指示**：「v020 照 users 域的规格单开，配真 PG 双侧对拍，别混在语义修复里」
@@ -2107,7 +2128,26 @@ breaker-probe  ：A 组 17 条逐条一致 / B 组 prefix=AAAAA / C 组 go=0.25 
 
 ---
 
-### 1. 🔴 `DRIFT-MSG-V-027`（新挖出 · 已修）：**Flyway 的 baseline 把 V1 整条跳过 ⇒ `message_notification` 永远建不出来**
+### 1. ✅ ~~🔴~~ **已销号（2026-10-30 · G2 复核）**：`DRIFT-MSG-V-027`（新挖出 · 已修）：**Flyway 的 baseline 把 V1 整条跳过 ⇒ `message_notification` 永远建不出来**
+
+#### ✅ 2026-10-30 · G2 复核销号：标题的 🔴 标记**已过期**（正文已写「已修」但状态标记未销）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `bdac3607` · **核对日期** 2026-10-30
+> **证据强度**：**E3**（两侧源码逐字对照 + 真源回核 + 仓内守门在仓）· **阶段归属**：**P0 · D 类**（**差异已消失 ⇒ 无待实现内容** ⇒ **不阻断**阶段 1）
+> ⚠️ **原「🔴」标记保留不改**（§5.3b「原值一律保留」+ 改标题状态会断掉入链锚点）⇒ **以本小节为准**。
+
+**逐条回源复核（2026-10-30 · 本 lane 实测，非转述）**：
+
+| 侧 | 出处 | 实测内容 |
+|---|---|---|
+| Go | `service/message/rpc/internal/model/db.go:42` | `db.AutoMigrate(&Notification{}, &Conversation{}, &ConversationMessage{})` ⇒ Go 侧**无版本化迁移账本** ⇒ **不存在**「非空 schema 上 baseline 把 V1 整条跳过」这个失效面 |
+| RAG | `service/message/message-rpc/src/main/resources/application.yml:66` | `baseline-on-migrate: true` ⇒ 仍开 |
+| RAG | `service/message/message-rpc/src/main/resources/application.yml:94`（+ `:73` 注释） | `baseline-version: 0` ⇒ **baseline 标记打在 version 0** ⇒ **V1 之后全部迁移照常执行** ⇒ V1 **不会**被跳过 |
+| RAG | `service/message/message-rpc/src/main/resources/application.yml:105` | `table: flyway_schema_history_message` ⇒ **独立账本表名**（§6.3 问题 4 的定案）⇒ 同库共存不撞号 |
+| RAG 守门 | `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageFlywaySharedSchemaWiringTest.java:164` / `:179` / `:187` | `:164` 断言账本里 baseline 行是 **version 0**；`:179` 断言 **V1 真的以 SQL 执行过**（不是被 baseline 顶掉）；`:187` 断言 `message_notification` **表存在** ⇒ ⇒ 三条断言合起来 = **「V1 没被跳过」这件事本身被钉住了** |
+
+⇒ **结论**：2026-10-24 起真栈暴露的「Flyway baseline 跳过 V1 ⇒ `message_notification` 永远建不出来 ⇒ 服务起不来」**已由 `baseline-version: 0` ＋ 独立账本表名闭合** ⇒ **差异已消失** ⇒ **本条无待实现内容** ⇒ 归 **D 类** · **不阻断阶段一** ⇒ **销号**。
+⇒ ⚠️ **残留（不在本条范围）**：Go 侧**无 DB 层 default** vs RAG 侧 `DEFAULT CURRENT_TIMESTAMP` 残留 ⇒ 已登记不修（两侧 INSERT 均显式绑定该列 ⇒ 不可观测）—— 见 `docs/DRIFT/_cross/ddl-type-divergences.md`。
 
 **Component**: `message-rpc`　**Operation**: 启动（全部 RPC）
 **Category**: DDL / Lifecycle　**Classification**: **`SEMANTIC MISMATCH`（服务起不来）**
@@ -2798,7 +2838,44 @@ RAG: message_notification.created_at | timestamptz | 可空 | DEFAULT CURRENT_TI
 
 ---
 
-### 🟡 `DRIFT-MSG-V-032` 🟡 **登记（不改）**：`MessageRpcSlowThresholdGateTest` 在**全量并发回归**里偶发 `UNAVAILABLE: Network closed for unknown reason`
+### ✅ `DRIFT-MSG-V-032` ✅ **已修（2026-10-30 · G2 落码）**：拆除时序已加固 ⇒ 偶发 `UNAVAILABLE: Network closed for unknown reason` 的根因已消除
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **基线 commit** `bdac3607` · **核对日期** 2026-10-30
+> **证据强度**：**E3**（源码行号 + 仓内守门实跑 + **变异验证红在目标断言**）· ⚠️ **未做双侧活体对拍**（Go 侧无对应测试 ⇒ 本条**不是** Go↔RAG 行为差异）⇒ **不写 L4**
+> **阶段归属**：**P2 · B 类**（**不阻断**阶段 1 准入）· **排期指针** `GAP-11` · **处置 = 落码**（判定层 `docs/DRIFT/_cross/grading/W10.md` 判「剩余那部分 = 给 warm-up／建连加拆除时序加固 ⇒ 落点 `service/message/message-rpc/src/test/**` ⇒ G2 域内可自修」）
+> ⚠️ **原「🟡 登记（不改）」的定性已过期** —— 原判「域侧无法单独消除」的前提是「涉及其它模块的 gRPC 建连时序」；**2026-10-30 复核证明根因在本域自己的拆除写法**（见下 ③）⇒ **原值保留备查**，但结论已销号。
+
+#### ① §5.4「执行实际改造」九项
+
+| # | 项 | 内容 |
+|---|---|---|
+| 1 | **修改前的实现和行为** | `MessageRpcSlowThresholdGateTest` 的**两处**拆除都是「**发完就硬拆**」：① `warmUp()`（旧 `:340-346`）= 发一次调用 ⇒ `finally` 里 `ch.shutdownNow()` + `server.shutdownNow()`；② `callAndGetSpan()` 的 `finally`（旧 `:423-424`）= `channel.shutdownNow()` + `server.shutdownNow()` ⇒ **在途帧还没收尾就把连接拔了** ⇒ 客户端 netty 侧读到「连接已关」⇒ 抛 `UNAVAILABLE: Network closed for unknown reason` |
+| 2 | **具体问题** | ① **拆除顺序无等待**：`shutdownNow()` 是**立即**取消 ⇒ 客户端在途调用立刻被断链 ⇒ 症状 = V-032 登记的 `UNAVAILABLE`（**与被测的 slow 标记、阈值比较无关**）；② **建连无重试**：`GrpcTestPort.freePort()` 的「探测 + 二次确认」治的是**撞口**（`BindException`），治不了「探测与 bind 之间被抢」的 **TOCTOU 窗口** ⇒ 仍可能瞬时失败；③ **旧定性错**：原判「域侧无法单独消除（涉及其它模块的 gRPC 建连时序）」⇒ **2026-10-30 复核证明根因在本域自己的拆除写法** ⇒ 该前提**不成立** ⇒ 原「登记不改」改为**落码修** |
+| 3 | **修改后的实现** | ① 新增 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/support/GrpcTestLifecycle.java`（**优雅拆除器**）：`shutdown()` ⇒ `awaitTermination(5s)` ⇒ **仅超时**才降级 `shutdownNow()`；**顺序固定 = 先 channel 后 server**（先关 server ⇒ 在途调用立刻断链 ⇒ 复现症状）② `MessageRpcSlowThresholdGateTest` 的**两处**拆除都改调它 ③ `warmUp()` 拆成 `warmUp()`（重试壳）+ `warmUpOnce()`（单次），**只重试传输层失败**（`UNAVAILABLE` / `UNKNOWN`），**上限 3 次**、退避 200 ms×n ⇒ **业务码错误不重试**（重试无意义）⇒ **重试只包住预热、不包住被测断言** ⇒ 不掩盖被测行为缺陷 |
+| 4 | **修改理由** | AGENTS.md §3.3.3 第 ① 条「凡引入新的框架机制，必须配一条**能真正触发该机制**的测试」+ §3.3.3「跑绿 ≠ 对」⇒ 本条症状是**偶发**的 ⇒ 单次跑绿**证明不了**加固生效 ⇒ 必须补**能机械检出**的守门（见 ⑥）⇒ ⇒ 落码 = 优雅拆除 + 预热重试 + **新守门**，三者一体 |
+| 5 | **实际变更文件** | ① 🆕 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/support/GrpcTestLifecycle.java`（**新建** · 68 行）② 🆕 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcSlowThresholdTeardownGateTest.java`（**新建** · 守门）③ `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcSlowThresholdGateTest.java`（**仅测试侧** · 拆除写法 + 预热重试 + javadoc）⇒ ⚠️ **零 `src/main` 改动 ⇒ 不影响任何生产行为**（本条是**测试稳定性**问题，不是语义漂移） |
+| 6 | **测试场景和断言** | 🆕 `MessageRpcSlowThresholdTeardownGateTest.inFlightCallMustCompleteAcrossGracefulShutdown`（**1 条**）：起**真** gRPC server + **真** netty channel（`dns:///127.0.0.1:<port>`）⇒ handler 占用 300 ms ⇒ **异步** stub 发起**在途**调用 ⇒ 等 `entered` latch 确认 handler **真被调用过**（前提断言 ⇒ 否则「在途」不成立 ⇒ 判据空转）⇒ 调 `GrpcTestLifecycle.shutdownGracefully(channel, server)` ⇒ 断言 **① 在途调用成功返回**（`pending.get(20s)` 不抛）**② handler 已跑完**（`completed.get()` 为 true）。**判别依据** = gRPC-java 两种关闭语义的**可观察差异**：优雅 `shutdown()` 让**已有调用继续跑完**；`shutdownNow()` **立刻取消** ⇒ ⇒ 变异版必然红 |
+| 7 | **实际执行结果** | 🟢 **本轮域级回归（G2 三域八模块 · `-am` · `--fail-at-end`）** ⇒ **781 条 / 0 failures / 0 errors / 0 skipped**（8:26 min · BUILD SUCCESS）⇒ 逐模块（surefire `TEST-*.xml` 逐 `testsuite` 求和）：message-api 114 · message-rpc **101**（含本轮新增守门 1 条）· message-common 21 · like-api 104 · like-rpc 151 · like-common 18 · task-api 135 · task-rpc 137 ⇒ ⇒ **零红**⚠️ **口径**：本轮**未带 `clean`** ⇒ 增量编译 ⇒ 计数可能被 stale 产物影响 ⇒ **结论以「本轮实际执行过的模块全绿」为准**，不作为「全量条数基线」引用（§6.3 纪律）<br>① 正身：`mvn -o -B -pl service/message/message-rpc -am -Dtest='MessageRpcSlowThresholdTeardownGateTest,MessageRpcSlowThresholdGateTest' -Dsurefire.failIfNoSpecifiedTests=false test` ⇒ **`Tests run: 3, Failures: 0, Errors: 0, Skipped: 0`** · **BUILD SUCCESS**（拆解 = teardown 守门 1/1 + slow threshold 守门 2/2）② **变异验证**：把 `GrpcTestLifecycle` 的 channel 侧降级成 `shutdownNow()` ⇒ 守门 **红在目标断言** ⇒ `java.util.concurrent.ExecutionException: io.grpc.StatusRuntimeException: UNAVAILABLE: Channel shutdownNow invoked`（`MessageRpcSlowThresholdTeardownGateTest.java:109`）⇒ **BUILD FAILURE** ⇒ ⇒ **判据有判别力、不是恒真** ③ 恢复正身后复跑 ⇒ **3/3 绿** |
+| 8 | **尚未解决的问题** | ① **未做双侧活体对拍** —— 但 **Go 侧无任何对应测试**（判定层 `W10.md` 已核：Go `service/common/observability/observability.go:41` 是阈值真源、`service/message/rpc/message.go:44` 是打标唯一装配点，**Go 侧无对应测试**）⇒ ⇒ 本条**不是** Go↔RAG 行为差异 ⇒ 无双侧对拍可做 ⇒ **证据止于 E3** ② **偶发本身无法在单次跑里复现** ⇒ 本条的证据形态是「**机制论证 + 可机械检出的守门 + 变异验证**」，**不是**「跑了很多次都没红」 ③ **只改了 message-rpc 一个模块的测试** ⇒ 其它模块同款「发完就 `shutdownNow()`」写法（如 `favorite-common` / `follow-common` / `like-common` 的 errmsg 探针）**本轮未动** ⇒ 列为**阶段二**同族项（不阻断阶段一） |
+| 9 | **对阶段 2 的影响** | **无回退需求**（本条把「测试自身时序脆弱」修成「优雅拆除」）⇒ 阶段二只需 ① 补同族模块（其它 6 个 rpc 模块的同类写法）② 若将来要「双侧活体」口径，需 Go 侧先有对应测试（**不在本仓范围**） |
+
+#### ② §10「问题归属」十一项
+
+| # | 项 | 内容 |
+|---|---|---|
+| 1 | **唯一编号** | `DRIFT-MSG-V-032` |
+| 2 | **问题类型和优先级** | **测试稳定性**（非生产缺陷）· **P2** |
+| 3 | **阶段归属** | **B 类**（阶段 1 竞争力补强项 · **不阻断**阶段 1 准入） |
+| 4 | **涉及文件与实际证据** | RAG `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcSlowThresholdGateTest.java`（改造前 `:340-346` 拆除段 + `:423-424` finally 段）· 🆕 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/support/GrpcTestLifecycle.java`（**新建**）· 🆕 `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcSlowThresholdTeardownGateTest.java`（**新建**）· Go 侧：`service/common/observability/observability.go:41`（阈值真源）+ `service/message/rpc/message.go:44`（打标唯一装配点）⇒ **Go 侧无对应测试 ⇒ 非行为差异** |
+| 5 | **触发场景** | **全量并发回归**（机器负载高 + 多模块并行）下，客户端 channel 在服务端连接被硬拆的瞬间仍有在途帧 ⇒ netty 读到「连接已关」⇒ `UNAVAILABLE: Network closed for unknown reason` ⇒ 2026-10-27 实测：`message-rpc` 模块 `Tests run: 84, Failures: 0, Errors: 1` ⇒ **BUILD FAILURE**（后续模块未跑到 ⇒ 收口拿不到绿证据） |
+| 6 | **当前行为与预期行为** | 当前（旧）= 拆除时**不等待**、**不重试** ⇒ 偶发 `UNAVAILABLE` ⇒ 预期 = 拆除**优雅**（在途调用自然收尾）+ 建连**可重试** ⇒ 症状消除 |
+| 7 | **对简历展示准入的影响** | **无**（P2 · B 类 · **不阻断**阶段 1 准入）；但它**威胁的是验收证据本身**（全量回归当场红 ⇒ 收口拿不到绿）⇒ 故仍在本轮修 |
+| 8 | **对最终工程目标的影响** | **阶段二**：同族写法（其它 rpc 模块的「发完就 `shutdownNow()`」）统一收敛；⚠️ **Go 侧补对应测试**不在本仓范围 |
+| 9 | **修复方向** | 优雅拆除（`shutdown()` → `awaitTermination` → 超时才 `shutdownNow()`；**先 channel 后 server**）＋ 预热**只重试传输层失败**（上限 3 次）＋ **一条能机械检出该机制的守门**（否则「跑绿」无判别力） |
+| 10 | **验收条件和测试方案** | `mvn -o -B -pl service/message/message-rpc -am -Dtest='MessageRpcSlowThresholdTeardownGateTest,MessageRpcSlowThresholdGateTest' -Dsurefire.failIfNoSpecifiedTests=false test` ⇒ **3/3 绿**；**变异验证**（`GrpcTestLifecycle` 降级 `shutdownNow()`）⇒ **守门红在目标断言** ⇒ ⇒ 判据非恒真 |
+| 11 | **当前处理状态** | ✅ **已修（2026-10-30 · G2 落码）· 销号** —— 证据强度 **E3**（源码行号 + 守门实跑 + 变异验证红在目标断言）；⚠️ **未做双侧活体对拍**（Go 侧无对应测试 ⇒ 非行为差异 ⇒ 无从对拍）⇒ **不写 L4** |
+
+> ⚠️ **原登记（保留备查 · 原值不改）**：
 
 | 字段 | 内容 |
 |---|---|
@@ -2809,7 +2886,7 @@ RAG: message_notification.created_at | timestamptz | 可空 | DEFAULT CURRENT_TI
 | **定性** | **flaky，不是回归**：① **单独复跑该类 2/2 全绿**（8.158 s）；② 该模块**不在**本轮改动范围（本轮只改 like-api / message-api 两个 **api** 组件 + 台账；**message-rpc 不依赖 message-api**）；③ 症状是 gRPC 客户端在服务端拆除/连接关闭时读到 `Network closed`，属**建连/拆除时序**，不是行为语义 |
 | **Evidence** | 全量日志 `/tmp/g2-full-reg2.log:15549-15552`；单独复跑 `Tests run: 2, Failures: 0, Errors: 0` |
 | **Difference** | 与 Go 无对应关系（Go 侧无此测试）⇒ **不是语义漂移**，是**测试自身的时序脆弱性** |
-| **Disposition** | **登记不改**（域侧无法单独消除：涉及其它模块的 gRPC 建连时序）；⚠️ **不因此判 message-rpc 回归**；⇒ 后续遇到同一症状，按「先单独复跑定性」处理，不直接当回归修 |
+| **Disposition** | ~~**登记不改**（域侧无法单独消除：涉及其它模块的 gRPC 建连时序）~~ ⇒ **2026-10-30 已改判并落码修**（见上）；⚠️ **不因此判 message-rpc 回归** 这半句**仍成立** |
 
 ---
 

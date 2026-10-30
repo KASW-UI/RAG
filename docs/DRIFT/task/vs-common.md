@@ -1817,3 +1817,67 @@ git diff --stat -- service/ # ⇒ 0 行
 3. **不声称数据层已对齐** —— 本节是 **schema 层**。
 4. **不声称共享层已闭环** —— Flyway 账本隔离属 `global` 收口域（§6.3 问题 4）⇒ **本 lane 不写、不重复声称**。
 5. **不写共享面** —— `docs/DRIFT/_cross/**` · `docs/DRIFT/global/**` · `docs/PhaseGoal-judge.md` · `docs/RoundPlan/**` **本 lane 一律不写**（合并后由**合并收口执行者**统一更新）。
+
+---
+
+## 开工前置回执（2026-10-30 轮 · 派生层 `wave` 列落地后的第一轮）
+
+> **落点**：`align/g2-message-like-task` 工作树 · **基线 commit** `bdac3607`（= `do-my-own-gh` @ `bdac3607` · 施工单加 `wave` 列那次）· **日期** 2026-10-30
+> ⚠️ **三份 `vs-common.md` 的本节内容逐字相同**（模板要求「会话 + 台账各一份，**同一份内容**」）
+> ⚠️ **本节是「读完了」的回执** ⇒ **回执落笔时尚未获批 ⇒ 本 lane 不得开工**（`AGENTS.md` §五·3b-0 ④「经用户批准」＋「调度员不得代批准」）⇒ **Jason 于 2026-10-30 在本 lane 会话内明示「开始工作」** ⇒ **已获批开工**（⑤ 由调度员代填，见本节末尾）。
+
+【开工前置回执 · G2 · 2026-10-30】
+
+**① 任务范围**
+
+本 lane 本轮任务 = **按派生层施工单 `wave=G2` 派工面（281 条）取本 lane 可动的部分**，逐条**回真源复核**后落码/销号：
+
+| # | 条目 | 派生层判定 | 本轮处置 |
+|---|---|---|---|
+| 1 | `DRIFT-MSG-V-032` | **B 类 · 🟡 部分闭合**（**G2 唯一一条 A/B 类状态开放项**）· 缺口 =「无可复算指针」 | **落码加固**（`service/message/message-rpc/src/test/**` ⇒ G2 写权面内） |
+| 2 | `SD-04` / `DRIFT-MSG-V-027` / `DRIFT-MSG-V-020` | **D 类 · 差异已消失**（台账未销账） | **回源复核 ⇒ 回写台账销号**（原值保留） |
+| 3 | `D-2`（like）/ `D-6`（like）/ `D-4`（message） | **D 类 · 差异已消失** | **回源复核 ⇒ 回写台账销号** |
+| 4 | `SD-2026-10-23-09`（like） | **⏳ 未签字 · 未定级**（派生层 `stage=—`） | **复核前提成立 ⇒ 按 §10 定级为 C 类**（阶段 2 承接）⇒ **不推拍板、不改代码** |
+
+**不做**：① 共享面（`service/common/**` ＋ `service/users/users-common/**`）⇒ **只读**；缺陷一律**登记反馈单转 G4**（§5.3e 7 项）② `tools/**`（`tools/difftest/**` 与派生层产物**不属任何 lane** ⇒ 归合并收口执行者）③ **共享索引类文件**（`AGENTS.md` / 三个 `_INDEX.md` / `docs/DRIFT/_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/Worktree.md`）④ **阶段 2 不碰、不预支**（`twoStage.md` §1.3 / §2.2 / §6 / §7）⑤ **本轮只做「阶段一范围内 + 本域能自修」的活** ⇒ C/D 类只登记不定实现。
+
+**② 已读四档（本 lane 面）**
+
+| 档 | 路径 | 读到的关键结论（可核） |
+|---|---|---|
+| `docs/DRIFT/` | `message/{api,rpc,common,proto}.md` | `SD-2026-10-23-03`（`affected`：Go 返 `int64` 数字 / RAG 出字符串）**已签字** ⇒ 对拍必红、**不得单方面改回数字**；`message/rpc.md` 的 **E59 已销案**（DB 失败原样上抛 ⇒ `UNKNOWN`＋1015 ＝ Go）；`-010`/`-011`/`-013` 落点共享层 ⇒ 已在 `docs/DRIFT/message/feedback-to-g4.md` 转派 G4；`-012` 属容器层框架限制**不可修**；**`DRIFT-MSG-V-032` = 本轮唯一 A/B 类开放项**（`:2801`，登记形态「🟡 登记（不改）」） |
+| | `like/{api,rpc,proto}.md` | `like/rpc.md` §12：`DRIFT-LIKE-003` 拆三段 = A 投递链路已闭环 ＋ B 权威读语义 Java 化 ＋ **C 暴露形态待拍板**；**E60 已销案**；`L-U11` 已闭合；`L-U9` = 取证缺口（非必相对齐项）；`like/api.md`：`404 body` ＝ **19** 字节；`like/proto.md`：`LikeProtoContractTest` 4/4 |
+| | `task/{api,rpc,proto}.md` | `task/rpc.md`：`TaskRpcKafkaListenerRegistryGateTest` 3/3（listener **真进容器 registry**）；`DRIFT-TASK-RPC-008` 已落码；`task/api.md`：`DRIFT-TASK-API-004`（charset/空白）＝ **全域共性**，不在本域单修 |
+| `docs/Intentional_Deviations/`（**最危险的一档：漏读会把签字偏离当新回归「顺手修回 Go 行为」**） | `message/{api,rpc}.md` | `message/api.md`：**`SD-2026-10-23-03`**（`affected` 类型）＋「`-009` 已改正为签字」；`message/rpc.md`：**7 条**（`SD-07` 已撤销）= `-01` 索引名不同 · `-02` 直方图桶零交集 · `-03` `errors.As` vs `instanceof` · `-04` 6 个 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧多出来的 · `SD-2026-10-23-08` CPU 采样 fail-open · `SD-2026-10-23-06` 索引列数 1 vs 2 ⇒ ⇒ **这 6 条见到「不一致」不得当新回归去修** |
+| | `like/{api,proto,rpc}.md` | `like/proto.md`：**`SD-2026-10-23-05`**（proto `package` 由 `pb` 归一为 `like`，**wire 层可见**）；`like/api.md`：**`SD-2026-10-23-08` 已失效·已撤销**（共享层 T-6 已补 charset）＋ **`SD-2026-10-23-09` 仍成立·⏳ 未签字**（裸 503）＋ `SD-2026-10-24-10`（毫秒粒度）＋ `SD-2026-10-24-11`；`like/rpc.md`：**`SD-2026-10-23-06`**（业务码迁到 trailer `rag-like-biz-code`，**框架限制**）· **`SD-2026-10-23-07`**（Nacos 注册失败**不退出**）⇒ ⇒ **不得「顺手改回 Go 行为」** |
+| | `task/rpc.md` | **`SD-2026-10-23-TASK-01`**（Go 30 **纳秒** → RAG 30 分钟；Go 侧是**笔误不是设计**）· **`SD-2026-10-24-TASK-01`**（topic 缺失时 Go 进程退出 vs RAG 存活）＋ 4 项「不是偏离、但容易被误当成偏离」；`task/api.md` ＋ `task/proto.md` = **0 字节坑位**（勿建空壳） |
+| `docs/PhaseGoal/` | `g2.md` ＋ `PhaseGoal-judge.md` | `g2.md:21-31` = 11 组件矩阵（10 ✅ ＋ `like-rpc` 🟡）⇒ **机器生成**，权威源是 judge；`g2.md:24` = `like-rpc` 的 `DRIFT-LIKE-003` **仅剩 C 暴露形态待拍板**；`g2.md:41`（§2.1 自修清单）＝ **本 lane 自修项只有 `like-rpc` 一条**；`g2.md:47`（§2.2 转派 G4）＝ message-api `-010`/`-011`/`-013`；`g2.md:57-62`（P0 分摊）＝ **P0-1 本 lane 主责**（like 域事实投递链路 ＋ 双侧活体探针**不在版本控制内** ⇒ 未取证）· **P0-3** `check-ddl-static.py` **默认不开 `--indexes`** ⇒ 索引/唯一约束/触发器**至今没有机器核过** · **P0-6** 全量回归 2860 条 / 0F / 0E / 4S ⇒ **必须带 `clean`**；`g2.md:73-83`（矩阵 C）＝ **X-10**「落仓静态守门只覆盖 4/10」 |
+| `docs/PhasedGoal.md` | `:38-52`（P0 九条） | **P0-1**「核心业务链路**真实运行**」· **P0-4**「核心失败路径有明确行为」· **P0-6**「测试断言真实业务结果」· **P0-9**「已知缺陷、**无法验证的关键能力和运行前提**得到明确记录」⇒ ⇒ `003-C` 与 `L-U9` 属 P0-1/P0-9 的「运行前提」面 ⇒ 台账必须写「**未取证**」而不是「已对齐」 |
+| `docs/twoStage.md` | §4（`:258-313`）· §5.3（`:359-380`）· §5.4（`:381-398`）· §10（`:941-976`） | §5.3 = 差异与暂缓项**每项至少 11 条**（编号/原始契约/原始行为/阶段一当前行为/具体差异/暂缓理由/影响/是否阻断/阶段二恢复方案/阶段二测试场景/证据缺口）⇒ **「不得只写『后续优化』」**；§5.4 = 每次改造记录 **9 条**（改前/问题/改后/理由/变更文件/测试场景与断言/执行结果/未解决/对阶段二影响）⇒ ⇒「**必须实际修改项目，而不是只输出建议**」；§10 = **P0–P3 是严重程度、A–D 是阶段归属，两者不能互相替代**；每问题必含 12 项；**必须区分已确认缺陷与待验证风险** |
+| `docs/Pitfalls/` | `message/{api,rpc}.md` | `PIT-MESSAGE-01`（同组件同形态**第二次**「绿测试守卫错误答案」）· `-02`（Jackson `FAIL_ON_NULL_FOR_PRIMITIVES` 默认 true）· `PIT-MESSAGE-09`（「**测试全绿**」与「**一次没起过**」可同时成立）· `-10`（「断言 Bean 存在」≠「断言机制生效」）· `-12`（注释里的**默认行为**必须读到**消费点**） |
+| | `like/{api,rpc}.md` | `PIT-LIKE-01`（go-zero 解析层**不对称**，只学一半必然漏）· `PIT-LIKE-05`（「**应用入口类的 javadoc**」是最高杠杆的错误传播点）· `PIT-LIKE-06`（**同一个文件里会自相矛盾**）· `PIT-LIKE-RPC-013`（「**『错误断言已清理』这句话，本身也是一条需要被核的断言**」）· `-14`（共享组件 javadoc 与各域 javadoc **可以互相矛盾**） |
+| | `task/{api,rpc,proto}.md` | `PIT-TASK-01`（`@EnabledIfDockerAvailable` 把「拉不到镜像」压成「Docker 不可用」⇒ **15 条真 PG 用例静默全跳**）· `-06`（Go `Pipeline()` 不是事务、Spring `executePipelined` 也不开 MULTI ⇒ **两边都理解错了**）· `-07`（81 条测试**零真 Redis** 覆盖 ⇒「跑绿」证明不了 Redis 路径）· `-11`（方法签名对了 ≠ 方法会被调到，**调用时机**更致命） |
+| | `_cross/`（**四棵都要读**） | `testing-pitfalls.md`（证据分级 E0–E5 · **变异测试是另一半**）· `fix-round-lessons.md`（「**跑绿 ≠ 判据活着**」· 修漂移**先改/删错误断言再改实现**）· `flyway-ledger-collision.md`（**共享面修法 ⇒ G4 落码**）· `signed-deviations.md`（**签字偏离不得当新发现再修一遍**）· `framework-mechanism-evidence.md`（**框架机制必须验证实际生效**） |
+| `docs/DRIFT/_cross/`（**四棵都要读**） | `stage1-derivation.md` ＋ `.tsv` · `component-coverage-matrix.md` · `cross-domain-coupling.md` · `domain-common-lanes.md` · `ddl-type-divergences.md` · `go-anchors.md` · `decisions.md` | **施工单加 `wave` 列**（`bdac3607`）⇒ **本 lane 的派工面 = `wave=G2` 共 281 条**；§4.0 波次分布 = G2 **状态开放 77 条 / 其中 A/B 类 0 条**（⇒ **无漏排**）；§4.1 A/B 类真缺口 = **空表** ⇒ ⇒ **本轮 G2 的真活 = ① 唯一一条 A/B 类开放项（`DRIFT-MSG-V-032`）② §4.4 ④ 档的台账销账 ③ 1 条未定级的 ⏳ 未签字候选**；`cross-domain-coupling.md` = G1~G4 波次表 ＋ **共享层写权规则**（`service/common` ＋ `users-common` **只有 G4 能写**）＋ 依赖 DAG；`ddl-type-divergences.md` = 类型/长度 **9 域 0 差异**，`hot` = **N/A** ⇒ 不许写成「已对齐」；`decisions.md` = 问题 1「**直接丢掉 Flyway**」＋ 问题 4「**每模块独立账本表**」 |
+
+**③ 待批准项**
+
+1. **无**（本轮范围已由 Jason 在本 lane 会话内明示「开始工作」批准 ⇒ 无需额外拍板）。
+   ⚠️ **本轮刻意不做、留给阶段二或收口的**：① `DRIFT-LIKE-003-C`（like 域权威读**暴露形态**：Go 是**独立进程** `cmd/fact-authority/main.go`；RAG 侧无 HTTP 端点 ⇒ 落地需动**共享面** ⇒ **G2 不可写** ⇒ **形态决策须拍板**）② `D-7`（like 域 status 错误 ⇒ 业务码映射与 Go 不同类 ⇒ 阶段二做一次**双侧活体定值**再决定）③ `SD-2026-10-23-09` 的**签字**（本轮只定级为 C，**不推拍板**）④ 其它模块的同款「发完就 `shutdownNow()`」写法（**阶段二**同族项）。
+
+**④ 等批准 ⇒ 批准后才开工**
+
+**⑤ 批准记录：Jason · 2026-10-30 10:31 · 批准范围：本回执 ① 所列 G2 任务（`wave=G2` 派工面内的阶段一范围条目：`DRIFT-MSG-V-032` 落码 ＋ 5 条已闭合项销号 ＋ `SD-2026-10-23-09` 定级为 C）—— 依据：Jason 于 2026-10-30 在**本 lane 会话内**明示「开始工作」**　← 由**调度员代填**（**代填 ≠ 代批准**；回执人不得自批）**
+
+**⑥ 本轮 §3.3 回源复核的实测记录（**派工前按 `basis` 抽查，不照抄标题**）**
+
+| 条目 | 回源实测 | 结论 |
+|---|---|---|
+| `SD-04`（§⑥-A 复核行） | Go `proto/message.proto:3` = `package message;` ＋ `:5` = `option go_package = "./pb";` ＋ `service/message/rpc/pb/message_grpc.pb.go:383` = `ServiceName: "message.MessageService",` vs RAG `message-proto/src/main/proto/message.proto:3` = `package message;` | ✅ **两侧 proto package 本来都是 `message`** ⇒ 本域**从未引入**该偏离 ⇒ 派生层把标题里的**交叉引用**当成了**登记** ⇒ **差异已消失 ⇒ 销号** |
+| `DRIFT-MSG-V-027`（§⑥-B 复核行） | Go `service/message/rpc/internal/model/db.go:42` = `db.AutoMigrate(...)` ⇒ **Go 侧无版本化迁移账本** vs RAG `message-rpc/src/main/resources/application.yml:66` `baseline-on-migrate: true` ＋ **`:94` `baseline-version: 0`** ＋ `:105` `table: flyway_schema_history_message` ＋ 守门 `MessageFlywaySharedSchemaWiringTest.java:164`/`:179`/`:187` | ✅ **V1 不会被 baseline 跳过**（baseline 打在 version 0）⇒ **差异已消失 ⇒ 销号** |
+| `DRIFT-MSG-V-020`（§⑥-C 复核行） | Go `db.go:22` DSN 钉 `TimeZone=Asia/Shanghai` ＋ `:42` `AutoMigrate` vs RAG `MessageRpcSupport.java:107`/`:110` `toEpochSecond(OffsetDateTime)`（**与时区无关**）＋ `V5__message_time_columns_timestamptz.sql:2` | ✅ **两侧 0 差异** ⇒ **销号** |
+| `D-2`（like） | RAG `LikeSpans.java` **存在**（12298 B）＋ `service/like/*/src/main` 内 `setAttribute` **11 处命中** ＋ 守门 `LikeSpansAttributeGateTest.java` ＋ `LikeA9GrpcSpanEndToEndTest.java` **均在仓** ＋ 共享层 `RpcInterceptor.java:467-480`（`makeCurrent()` 包住 handler ⇒ 执行期 `Span.current()` **就是** server span） | ✅ **域侧落码 ＋ 共享层 FB-04 落码**两侧闭合 ⇒ **差异已消失 ⇒ 销号** |
+| `D-6`（like）/ `D-4`（message） | 域侧 `config/MybatisPlusOrderingBridgeAutoConfiguration.java` **两个域都已不在**（`find` 命中 = 0）＋ 共享层 `service/common/src/main/java/com/rag/common/persistence/MybatisPlusOrderingBridgeAutoConfiguration.java` **在** ⇒ ⇒ **闸门已开、域侧桥已收编** | ✅ **差异已消失 ⇒ 销号** |
+| `SD-2026-10-23-09`（§⑥-D 复核行） | Go `service/like/api/**` 内 `maxConns`/`Semaphore`/`worker` 命中 = **0** ⇒ Go 侧**无 worker 池概念** vs RAG `HttpMiddleware.java:154` `MAX_HTTP_WORKERS = 512` ＋ `:369` `catch (RejectedExecutionException saturated)` | ✅ **前提成立**（行为仍在）⇒ 但两侧「过载 ⇒ 拒绝」**大方向同向** ⇒ RAG 多的是**载体与形状** ⇒ **不改回去 ⇒ 不属 DRIFT** ⇒ 按 §10 **按问题本身定级 = C**（未签字候选**不得自动归 D**）⇒ **不推拍板** |
+| `DRIFT-MSG-V-032`（§⑥-E 复核行） | Go `service/common/observability/observability.go:41` = `func SlowThreshold() time.Duration`（阈值真源）＋ `service/message/rpc/message.go:44` = `s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, observability.SlowThreshold()))`（打标唯一装配点）⇒ **Go 侧无任何对应测试** ⇒ **本条不是 Go↔RAG 行为差异** vs RAG 守门 `MessageRpcSlowThresholdGateTest.java:280`（用例仍在）＋ `:324`（`warmUp()` —— ⚠️ **台账记的 `:318` 已漂移**）＋ `:349`（`callAndGetSpan` —— 仍准） | ✅ **缺口真实存在**（`:340-346` warm-up「发一次就 `shutdownNow()`」＋ **无重试**）⇒ **落码加固**（域内可自修）⇒ **落点 = `service/message/message-rpc/src/test/**`** |
+
