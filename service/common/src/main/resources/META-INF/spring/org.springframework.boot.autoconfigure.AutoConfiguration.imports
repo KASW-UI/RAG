@@ -5,3 +5,4 @@ com.rag.common.persistence.MybatisPlusOrderingBridgeAutoConfiguration
 com.rag.common.redis.GoStyleRedisClientAutoConfiguration
 com.rag.common.redis.GoStyleRedisDeadlineAutoConfiguration
 com.rag.common.protection.GoStyleBreakerRouteTemplateAutoConfiguration
+com.rag.common.observability.GoStyleRpcMetricsConfiguration
