@@ -591,7 +591,7 @@ Go 侧边界是 api→rpc，rpc 没验对就先验 api，产出的是「RAG api 
 指标抓取出口**必须分两层**，单层任一数都会误导拍板：
 
 - **配置层** = actuator endpoint 有没有开（G4 逐域实测：3 个三重关闭 ＋ 三态划分）；
-- **载体层** = 进程**有没有 HTTP 容器**（`spring-boot-starter-web` ⇒ `tomcat-embed-core`）⇒ G1 逐模块 `mvn -o -B dependency:list` 实测：**10 个 rpc 里只有 `follow-rpc` 有 web starter ＋ tomcat** ⇒ **9/10 无载体** ⇒ ⇒ `exposure.include` 写了但没载体 ⇒ 抓取方连不上 HTTP；
+- **载体层** = 进程**有没有 HTTP 容器**（`spring-boot-starter-web` ⇒ `tomcat-embed-core`）⇒ 逐模块 `mvn -o -B dependency:list` 实测（⚠️ **2026-10-31 合并收口执行者复测**）：**10 个 rpc 里 8 个有** `tomcat-embed-core`（article / favorite / follow / hot / like / message / user-user-rpc / user-admin-rpc）⇒ **只有 comment-rpc / task-rpc 两域无载体（2/10 无）** ⇒ ⇒ **原文「只有 follow-rpc 有 ⇒ 9/10 无载体」已被实测推翻** ⇒ ⇒ `exposure.include` 写了但没载体 ⇒ 抓取方连不上 HTTP；
 - ⇒ ⇒ **净差 = Go 侧 8/10 有独立观测端口 vs RAG 侧 1/10 有载体 ⇒ 7/10 域「RAG 侧抓不到」**
   （🔴 **订正**：本节原写「Go 侧 6/10 · 净差 5/10」⇒ ⇒ **是枚举漏了嵌套路径**：`ls service/*/rpc/etc/*.yaml` **跨不过两层** ⇒ ⇒ 漏掉 `service/user/user/rpc/…`（**9094**）与 `service/user/admin/rpc/…`（**9097**）⇒ ⇒ 实际 **8/10**；教训 ⇒ [`PIT-SCAN-01`](Pitfalls/_cross/scan-coverage.md)）；
   ⇒ ⇒ **Go 侧观测端口全表（2026-10-30 收口执行者逐个 yaml 核过）**：`article-rpc 9092`（`article.yaml:21-24` 的 `Prometheus:`）· `favorite-rpc 16062`（`favorite.yaml:23-26` 的 `DevServer:`）· `follow-rpc 16065`（`follow.yaml:20-23`）· `hot-rpc 19091`（`hot.yaml:8-11`；另有 hot2=19092 / hot3=19093）· `like-rpc 9098`（`like.yaml:19-22`）· `message-rpc 16067`（`message.yaml:19-22`）· `user-rpc 9094`（`user.yaml:23-26`）· `admin-rpc 9097`（`admin.yaml:31-34`）⇒ ⇒ **`comment-rpc` 与 `task-rpc` 两侧都没有 ⇒ 同形 ⇒ 不补**；

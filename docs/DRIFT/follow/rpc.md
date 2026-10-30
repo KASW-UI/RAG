@@ -346,7 +346,7 @@ threading.GoSafe(func() {
 **顺带修掉的一处**：`FollowRpcMetrics` 的直方图原来用 `publishPercentiles()`
 （**分位数**开关，Prometheus 文本格式**不支持 quantile** ⇒ 对抓取端是无效配置）
 ⇒ 已改成 `publishPercentileHistogram()`，**这样等出口补上时格式就已经是对的**
-（详见 `docs/DRIFT/follow/api.md` 的 DRIFT-FOLLOW-007）。
+（详见 `docs/DRIFT/follow/api.md` 的 DRIFT-FOLLOW-007）。 **活体证据（本条 = 抓取侧）**：本条目点名的活体探针实测 ⇒ `tools/metrics-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 04:32:14 · 32s）—— **活体跑通**（探针自身断言全部成立）⇒ ⇒ **本节证据强度 = A 活体 · 绿(0)**（⚠️ **2026-10-31 补记 · 合并收口执行者**：本节此前**只写现象与修法、没写活体探针** ⇒ ⇒ 派生层按「取最新核对日期的那一条」仲裁时 ⇒ 本节（2026-10-31）会挤掉主登记行（2026-10-30）⇒ ⇒ ⇒ **该条被误判成「B 静态」** ⇒ ⇒⇒ **本节补上它自己的活体证据** ⇒ ⇒⇒ **不是「降级」，是「把漏写的证据补回来」**）。
 
 ## 🟢 DRIFT-FOLLOW-006 的落地（2026-10-29 · 编号 `S1-FOLLOW-001` · G1 lane · follow 域）
 

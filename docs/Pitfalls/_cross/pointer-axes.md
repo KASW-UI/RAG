@@ -103,7 +103,7 @@
 
 - 指标抓取出口：**配置层**（actuator endpoint 有没有开）与**载体层**（进程有没有 HTTP 容器 —— `spring-boot-starter-web` ⇒ `tomcat-embed-core`）是**两个层**；
 - ⇒ ⇒ `endpoints.web.exposure.include` 写了 `prometheus` 但**模块没有 web starter** ⇒ ⇒ **抓取方连不上 HTTP** ⇒ ⇒ 「配了」不等于「开得了」；
-- ⇒ ⇒ 本仓实测：**10 个 rpc 里只有 1 个有 web starter ＋ tomcat** ⇒ ⇒ 9/10 无载体；
+- ⇒ ⇒ 本仓实测（⚠️ **2026-10-31 复测订正**）：**10 个 rpc 里 8 个有** web starter ＋ tomcat（article / favorite / follow / hot / like / message / user-user-rpc / user-admin-rpc）⇒ ⇒ **2/10 无载体**（comment-rpc / task-rpc）⇒ ⇒⇒ **原写「只有 1 个 ⇒ 9/10 无载体」已被实测推翻**；
 - ⚠️ **判据**：**不要 grep pom，要查依赖树** —— `service/common/pom.xml` 的 web starter 是 `test` scope ⇒ **不传递**；且父子继承下「grep 不到子模块 pom」**≠**「运行时没有」⇒ ⇒ **依赖树才是 §3.3.1 要求的「实际生效」证据**；
 - ⚠️ **同族的第三形态**：**能力已装配 ≠ 能力可用** —— 本仓实例：`GoStyleRedisDeadlineAutoConfiguration` 在 `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` 里有登记 ⇒ ⇒ 才是活的（反之，只在源码里看见一个类 = 不算数）。
 
