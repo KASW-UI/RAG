@@ -123,8 +123,27 @@ public class GoStyleOutboundDeadlineInterceptor implements ClientInterceptor {
         this.capMillis = props.getOutboundDeadline().getCapMillis();
     }
 
-    /** 测试构造：直接给开关与上界。 */
-    GoStyleOutboundDeadlineInterceptor(boolean enabled, long capMillis) {
+    /**
+     * <b>公开</b>的「直接给开关与上界」构造器 —— 供<b>探针与共享层外的守门</b>复用<b>本类</b>。
+     *
+     * <p>🔴 <b>2026-10-30 · G4 lane：为什么从 package-private 改成 public</b>：
+     * `tools/semantic-probe/deadline-downstream/` 的 RAG 半边要量「出向调用继承请求 deadline」
+     * 这件事 ⇒ ⇒ 它必须装<b>生产这个类</b> ⇒ ⇒ 而探针不在 {@code com.rag.common.protection} 包里
+     * ⇒ ⇒ **package-private 构造器它用不了** ⇒ ⇒ ⇒ 若不放开，探针只有两条路：
+     * <b>① 在探针里自己写一份等价拦截器</b>（⇒ 那它量的是**副本**不是产品 ⇒ ⇒ 又一处漂移面）
+     * ／ <b>② 起真 devh 上下文</b>（⇒ 探针变成集成测试 ⇒ ⇒ 与 Go 半边【独立进程】不对称
+     * ⇒ ⇒ 双侧对拍失去公平性）⇒ ⇒ **两条都更差** ⇒ ⇒ ⇒ 故本构造器<b>公开</b>，
+     * 让「探针复用生产类」这条路成立。
+     *
+     * <p>⚠️ <b>两个参数的口径必须与生产默认一致</b>：{@code enabled=true}（Go 侧
+     * {@code zrpc/config.go:15} 的 {@code Timeout} 默认开）＋ {@code capMillis=0}
+     * （客户端硬上界默认不启用，理由见 {@link GoStyleProtectionProperties.OutboundDeadline}）
+     * ⇒ ⇒ **与 {@link GoStyleProtectionProperties} 的出厂默认同形**。
+     *
+     * @param enabled  出向 deadline 传播是否开启
+     * @param capMillis 客户端硬上界（毫秒）；{@code 0} = 不启用
+     */
+    public GoStyleOutboundDeadlineInterceptor(boolean enabled, long capMillis) {
         this.enabled = enabled;
         this.capMillis = capMillis;
     }
