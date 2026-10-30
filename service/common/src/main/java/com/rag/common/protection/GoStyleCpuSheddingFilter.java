@@ -1,5 +1,6 @@
 package com.rag.common.protection;
 
+import com.rag.common.web.ConditionalOnApiSide;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -57,10 +58,14 @@ import java.io.IOException;
  * Java 的 {@code getSystemCpuLoad()} 在部分容器里可能恒为 {@code -1}，
  * 若把 -1 当过载，<b>会把全部流量杀光</b>；若当不过载，则退化为「不降载」，
  * 与 Go 在「读不到指标」时的行为同向。⇒ 选 fail-open。
+ * <p>⚠️ <b>2026-10-30 · G4 lane：本类属 api 侧 rest 中间件 ⇒ 已挂 {@link com.rag.common.web.ConditionalOnApiSide}</b>
+ * ⇒ ⇒ 此前「rpc 域不注册本类」的依据是<b>域侧不扫 {@code com.rag.common} 这道约定</b>（不是本类的条件）
+ * ⇒ ⇒ 现由共享层自己兜住 ⇒ ⇒ Go 出处与语义等价论证见该注解。
  */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 6)
+@ConditionalOnApiSide
 public class GoStyleCpuSheddingFilter implements Filter {
 
     private final boolean enabled;

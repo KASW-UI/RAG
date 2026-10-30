@@ -1,5 +1,6 @@
 package com.rag.common.protection;
 
+import com.rag.common.web.ConditionalOnApiSide;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -26,10 +27,14 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
  * <p><b>Go 出处</b>：{@code rest/engine.go:148-149}（每路由建一个 breaker）·
  * {@code rest/handler/breakerhandler.go:15,19}（键 = {@code METHOD://route.Path} 注册期模板）·
  * {@code rest/engine.go:244-268}（404 链里<b>没有</b> breaker）。
+ * <p>⚠️ <b>2026-10-30 · G4 lane：本类属 api 侧 rest 中间件 ⇒ 已挂 {@link com.rag.common.web.ConditionalOnApiSide}</b>
+ * ⇒ ⇒ 此前「rpc 域不注册本类」的依据是<b>域侧不扫 {@code com.rag.common} 这道约定</b>（不是本类的条件）
+ * ⇒ ⇒ 现由共享层自己兜住 ⇒ ⇒ Go 出处与语义等价论证见该注解。
  */
 @AutoConfiguration
 @ConditionalOnClass(RequestMappingHandlerMapping.class)
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
+@ConditionalOnApiSide
 public class GoStyleBreakerRouteTemplateAutoConfiguration {
 
     /**

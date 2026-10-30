@@ -1,5 +1,6 @@
 package com.rag.common.protection;
 
+import com.rag.common.web.ConditionalOnApiSide;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -90,10 +91,14 @@ import java.util.concurrent.Semaphore;
  * Tomcat 默认 {@code max-threads=200}，请求会先在容器层排队，
  * 理论上到不了 10000 在途。保留本层的理由是<b>口径对齐</b> ——
  * 当运维把 {@code max-threads} 调到万级做压测时，Go 会返回 503 而 RAG 若无此层会一直排队。
+ * <p>⚠️ <b>2026-10-30 · G4 lane：本类属 api 侧 rest 中间件 ⇒ 已挂 {@link com.rag.common.web.ConditionalOnApiSide}</b>
+ * ⇒ ⇒ 此前「rpc 域不注册本类」的依据是<b>域侧不扫 {@code com.rag.common} 这道约定</b>（不是本类的条件）
+ * ⇒ ⇒ 现由共享层自己兜住 ⇒ ⇒ Go 出处与语义等价论证见该注解。
  */
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 4)
+@ConditionalOnApiSide
 public class GoStyleMaxConnsFilter implements Filter {
 
     private final int maxConns;

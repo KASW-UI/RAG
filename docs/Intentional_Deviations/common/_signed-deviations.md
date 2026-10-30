@@ -49,7 +49,7 @@ Go ↔ RAG 对照审计 `service/common` 全部 8 个 Go 非测试源文件与 R
 |---|---|
 | **原关闭声明（保留）** | 「✅ **已关闭**（本行原写『无法靠改 `service/common` 关闭』，该结论**已过时**）」—— 关闭依据 = E-4 + issue #71187874（2026-10-21） |
 | **核「关闭的那个事实现在是不是真的成立」** | ✅ **成立（限「SQL 载体」这一面）**<br>① 关闭所依赖的**两个产物仍在位**：`service/common/src/main/java/com/rag/common/persistence/DeadlineQueryTimeoutInjector.java` ＋ `service/common/src/main/java/com/rag/common/persistence/SqlTimeoutStatusTranslator.java`<br>② 关闭的**前提**「gRPC `ServerInterceptor` 真挂到 server 上」**仍成立** —— 实跑 `python3 tools/difftest/check-grpc-interceptor-wiring.py` ⇒ **EXIT=0**（10/10 rpc 进程 ① `@Import` ＋ ② `GrpcServerConfigurer` 齐备） |
-| **🔴 追加订正（原句保留，不抹掉）** | B-1 的「已关闭」**覆盖面止于「SQL 载体」**。<br>⇒ **「grpc 出向载体」不归 B-1**：2026-10-29 双侧活体实测（RAG 侧 `outgoing_carrier=absent` vs Go 侧 `present_expired`）⇒ **出向 gRPC 不继承请求 deadline** ⇒ 该面是 **`E65`**（🔴 **OPEN**，落点 `service/common`）⇒ ⇒ **不得**据 B-1 的「已关闭」推断「所有超时载体都已闭合」。<br>**证据**：`docs/PhaseGoal-judge.md` §五 X-6（2026-10-29 实跑 `tools/difftest/check-deadline-downstream.py`）＋ `docs/DRIFT/global/vs-common.md` §1.1（E65 行） |
+| **🔴 追加订正（原句保留，不抹掉）** | B-1 的「已关闭」**覆盖面止于「SQL 载体」**。<br>⇒ **「grpc 出向载体」不归 B-1**：2026-10-29 双侧活体实测（RAG 侧 `outgoing_carrier=absent` vs Go 侧 `present_expired`）⇒ **出向 gRPC 不继承请求 deadline**（**【2026-10-30 订正】** 该键已于 2026-10-30 变为**两侧一致** ⇒ **载体面已闭合**；**但「出向 gRPC 不继承请求 deadline」这条结论仍成立** ⇒ 因为**各域出向调用点仍未接载体**（comment/like/message/follow 裸 stub）⇒ ⇒ 本条**不撤销**） ⇒ 该面是 **`E65`**（🔴 **OPEN**，落点 `service/common`）⇒ ⇒ **不得**据 B-1 的「已关闭」推断「所有超时载体都已闭合」。<br>**证据**：`docs/PhaseGoal-judge.md` §五 X-6（2026-10-29 实跑 `tools/difftest/check-deadline-downstream.py`）＋ `docs/DRIFT/global/vs-common.md` §1.1（E65 行） |
 | **结论** | **B-1 的「已关闭」仍成立（限 SQL 载体）**；**追加一条覆盖面订正** —— 出向 gRPC 载体单列为 `E65`（🔴 OPEN） |
 | **唯一别名** | `B-1@common`（见上方「撞号检查」） |
 

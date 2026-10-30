@@ -77,6 +77,6 @@ import org.springframework.context.annotation.Import;
  */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(GoStyleProtectionProperties.class)
-@Import(GoStyleGrpcClientBreakerConfiguration.class)
+@Import({GoStyleGrpcClientBreakerConfiguration.class, GoStyleOutboundDeadlineConfiguration.class})
 public class GoStyleProtectionConfiguration {
 }

@@ -1,0 +1,34 @@
+# rpc 域「不扫 com.rag.common」+「servlet 形态必须配 rag.side: rpc」· **已知未修白名单**（豁免，不是免检）
+#
+# 判据：`tools/difftest/check-rpc-common-scan-exclusion.py`
+#   ① **结构面**：任一 rpc 域的 `@SpringBootApplication` 不得带 `scanBasePackages={"com.rag.common"}`
+#      ⇒ 否则共享层**扫描面**那 10 个 api 侧 web Bean 会在 rpc 域注册
+#      （`GoStyleCpuSheddingFilter` / `GoStyleMaxConnsFilter` / `GoStyleMaxBytesFilter` /
+#        `GoStyleBreakerFilter` / `GoStyleTraceparentFilter` / `GoStyleTomcatParameterLimitCustomizer` /
+#        `HttpMiddlewareFilter` / `GoStyleFormValueLimitInterceptor` / `GoStyleFormLimitWebMvcConfig` /
+#        `GoStyleJsonBodyConverterConfig`）
+#   ② **形态面**：rpc 域若是 **servlet 形态** ⇒ 必须显式 `rag.side: rpc`
+#      ⇒ 否则**自动配置面**那 3 个（`GoStylePathNormalizingFilter` / `GoStyleJsonContentTypeAdvice` /
+#        `GoStyleRouteTemplateResolver`）不靠扫描 ⇒ 靠 `AutoConfiguration.imports` ⇒ **servlet 形态就会注册**
+#      ⇒ 而 `matchIfMissing=true` ⇒ 不写 = 默认落在 **api 侧**
+#
+# 为什么这是**真偏离**（不是无害的冗余）：
+#   Go 侧的 rpc 服务**全部**是 `zrpc.MustNewServer` ⇒ ⇒ **一个 rest 中间件都没挂**
+#   （`rest.With*` 全在 api 侧的 `routes.go`）⇒ ⇒ 在 rpc 域注册 api 侧中间件 = RAG 做了 Go 不会做的事。
+#   ⚠️ **有杀伤力的两个**：
+#     · `GoStyleCpuSheddingFilter` ⇒ CPU 超阈时**拒掉抓取请求** ⇒ 直接威胁「载体」这件事本身的目的；
+#     · `GoStyleTomcatParameterLimitCustomizer` ⇒ **容器级** ⇒ 它管的正是 `DRIFT-HOTAPI-030` 那条轴。
+#
+# ⚠️ **共享层门已在 G4 第九次订正 `6a7b1a2b` 落码**（`com.rag.common.web.ConditionalOnApiSide`
+#   元注解 + 13 个类全挂 + 5 形态真起进程守门 + 双向变异）⇒ ⇒ **自动配置面那 3 个已被护栏兜住**；
+#   ⇒ ⇒ **扫描面那 10 个仍只靠「域侧不扫 com.rag.common」活着** ⇒ ⇒ **本白名单只覆盖形态面**。
+#
+# 白名单用法：每行 `<模块标识>\t<归属 / 归期>`；模块标识 = 模块目录名（如 `follow-rpc`）。
+# 条目已无命中 ⇒ 守门会报「🟡 可删除」⇒ ⇒ **合入后请剪枝**。
+# ⚠️ **白名单只写「已定位、有人负责、归期明确」的项** ⇒ ⇒ 任何**新出现**的违例一律报红。
+
+follow-rpc	G1 面 · 载体波次内补 `rag.side: rpc`（其载体样板已在 G1 分支落码）⇒ 合入主干后即可删
+like-rpc	G2 面 · 已派单（载体波次内一并加）⇒ 改动后即可删
+message-rpc	G2 面 · 已派单（载体波次内一并加）⇒ 改动后即可删
+task-rpc	G2 面 · 已派单（载体波次内一并加）⇒ 改动后即可删
+user-rpc	G1 面 · 载体波次内补 `rag.side: rpc` ⇒ 合入主干后即可删
