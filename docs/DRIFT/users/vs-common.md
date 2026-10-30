@@ -5878,7 +5878,7 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
 |---|---|---|
 | 取连接 / 拨号 | `GoStyleRedisDeadlineConnectionFactory.java:57-59` | 已覆盖（预算耗尽 ⇒ 连都不拨） |
 | 命令下发前 | `GoStyleRedisDeadlineConnection.java:75-78` | 已覆盖 |
-| 命令已在 socket 上传输途中 | ——（检查点在**下发前** ⇒ 已下发的写无法撤回） | **盖不住**（Lettuce 写超时与 grpc deadline 无关 ⇒ 可能落库） |
+| 命令已在 socket 上传输途中、预算耗尽 | ——（检查点在**下发前** ⇒ 已下发的写无法撤回） | **盖不住**（Lettuce 写超时与 grpc deadline 无关 ⇒ 可能落库） |
 
 ⇒ ⇒ **E66 维持 OPEN**（理由 = 上表第三行；方向 = **RAG 更宽** ⇒ **框架限制** ⇒ **不追**）⇒ ⇒ **域侧仍零动作**（handler 级码那一环由命令前的检查覆盖）。
 
@@ -5948,7 +5948,7 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
 **三、⚠️ 本条仍维持 OPEN 的理由（收敛到两件）**
 
 1. 共享层 Redis 期限代理**是否真在**本域 Redis 连接链上（**装配接线** ⇒ 跨 lane ⇒ G4 侧守）
-2. **已达成（2026-10-31 03:23 · 主干真跑）** —— 真 Redis 上「**预算耗尽 ⇒ 写不发生**」的**活体**行为：共享层的 `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` ⇒ surefire `tests=3 · failures=0 · errors=0 · skipped=0`（**不是 SKIP**）⇒ ⇒ 该守门以「**独立通道读回仍是基线值**」证明命令真的没落进 Redis ⇒ ⇒ **原列的 ③「3 条全 skipped ⇒ 需外部 Redis 地址」已过期**
-3. **RAG↔Go 双侧活体对拍**（同请求、同 ctx 形态 ⇒ 比抓到的码集合）
+2. **已达成（2026-10-31 03:23 · 主干真跑）** —— 真 Redis 上「**预算耗尽 ⇒ 写不发生**」的**活体**行为：共享层的 `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` ⇒ surefire `tests=3 · failures=0 · errors=0 · skipped=0`（**不是 SKIP**）⇒ ⇒ 该守门以「**独立通道读回仍是基线值**」证明命令真的没落进 Redis ⇒ ⇒ **原列的 ③「3 条全 skipped ⇒ 需外部 Redis 地址」已过期** ⇒ ⇒ **写面那一半又由 Go 半边活体探针补齐**：`tools/semantic-probe/redis-deadline/run-redis-deadline-parity.sh` 本轮实跑 **EXIT=0** · 两侧 PROBE 行**逐键相等** ⇒ ⇒ **「预算耗尽 ⇒ 命令不下发」两侧活体同形已坐实**
+3. **handler 级码集合面的 RAG↔Go 双侧活体对拍**（同请求、同 ctx 形态 ⇒ 比抓到的码集合）⇒ ⇒ ⚠️ **写面那一半已于 2026-10-31 双侧活体闭合**（Go 半边探针实跑 EXIT=0）⇒ ⇒ **本条现只指 handler 级码集合面**（探针测的是写面、不是 handler 级码）
 
-⇒ ⇒ **E66 那格维持「机制已落 · 活体验证未做」**（**理由已收敛**：原「三件未做」⇒ 现为「① 装配接线 + ② 双侧活体对拍」两件；真 Redis 活体那一件已于 2026-10-31 达成）⇒ ⇒ **不改**
+⇒ ⇒ **E66 那格维持「机制已落 · 活体验证未做」**（**理由已收敛**：原「三件未做」⇒ 现为「① 装配接线 + ② 双侧活体对拍」两件；真 Redis 活体那一件已于 2026-10-31 达成，且**写面已双侧活体闭合**（Go 半边探针实跑 EXIT=0）⇒ ⇒ **② 只指 handler 级码集合面**）⇒ ⇒ **不改**
