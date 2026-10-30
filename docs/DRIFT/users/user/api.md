@@ -3812,3 +3812,27 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
 - ⚠️ 守门**不**起真实 user-rpc、**不**发真实请求 ⇒ 证的是「**出向调用的 deadline 口径**」；**不**证「下游挂死时端到端真的回 1015」。
 - ⚠️ **共享层那半边不在本条**：要让 rpc 进程也拿到「入站预算」，`GoStyleRequestDeadline` 需要**作用域化 API** ⇒ 落点 `service/common` ⇒ **G4 写权** ⇒ 已随 `E65` 反馈单转派。
 
+
+---
+
+## gRPC channel target 显式 scheme ＋ 负向对照断言加固（2026-10-31 · G1 lane）
+
+- **落点**：`service/users/user/user-api/src/test/java/com/rag/users/user/api/UserApiGrpcNegotiationTest.java`
+  - `:196` 负向对照那条手搓 channel：`.forAddress("127.0.0.1", PORT)` ⇒ `.forTarget("dns:///127.0.0.1:" + PORT)`
+  - `:203-208` 保留 `assertThrows(RuntimeException.class, …)`（**仍必须失败**这一条不能丢）
+  - `:209-214` 新增「取 cause chain」的调用与说明
+  - `:215-223` 新增「**不得是地址解析失败**」断言（`assertFalse` 用**全限定名** ⇒ ⇒ 不在文件顶部加 import ⇒ ⇒ **不破零行位移**）
+  - `:224-229` 新增「**失败原因必须是 TLS 握手被拒**」断言（`assertTrue` ⇒ cause chain 必须含 SSL/TLS 痕迹）
+  - 文件**末尾**追加 helper `describeCauseChain(Throwable)` ⇒ ⇒ **零行位移** ⇒ `docs/DRIFT/_cross/grading/W5.md:18` 与 `docs/DRIFT/_cross/stage1-derivation.tsv:305` 指的 `:101`（`return RealGrpcPort.pick();`）**逐字未动**（已逐个复核）
+- **机制（javap + 源码实测，不采信转述）**：
+  - devh `net/devh/boot/grpc/client/autoconfigure/GrpcDiscoveryClientAutoConfiguration:29` = `@ConditionalOnBean(DiscoveryClient.class)`；`:32-36` = `@Bean @ConditionalOnMissingBean @Lazy DiscoveryClientResolverFactory` ⇒ ⇒ 上下文里有 `DiscoveryClient` bean 时，该 provider 被 `NameResolverRegistration` 注册进 **进程级全局** `io.grpc.NameResolverRegistry`
+  - `DiscoveryClientResolverFactory.priority()` = **6**（源码注释原文「More important than DNS」）⇒ 高于 grpc 自带 DNS resolver 的 5
+  - grpc-java `io.grpc.NameResolverRegistry.refreshProviders()`（字节码实测）：`defaultScheme` = **priority 最高的 provider 的 scheme**（`>` 严格比较 ⇒ 同优先级先注册者胜）⇒ ⇒ priority 6 **必夺** ⇒ ⇒ **任何无 scheme 的 channel target 都被 discovery resolver 接管** ⇒ 把 `127.0.0.1:P` 当**服务名**去服务发现查 ⇒ `UNAVAILABLE`
+- **本条实测（活体，M-B 变异）**：把 target 回落成 `.forAddress("127.0.0.1", PORT)` ⇒ **RED**，客户端可见 `io.grpc.StatusRuntimeException: UNAVAILABLE: No servers found for 127.0.0.1:22200` ⇒ ⇒ 本条负向对照所在上下文**确实会被接管**（该测试显式 `spring.cloud.nacos.discovery.enabled=false` ⇒ 回落到 `SimpleDiscoveryClient` ⇒ `@ConditionalOnBean(DiscoveryClient.class)` 命中）
+- **⚠️ 旧断言无牙 —— 这就是要加固的理由**：改前只断言 `assertThrows(RuntimeException.class, …)` ⇒ ⇒ **解析失败同样抛 `RuntimeException`** ⇒ ⇒ 回落成 `forAddress` 时旧断言**照样绿** ⇒ ⇒ 「负向对照」会退化成假守卫 ⇒ ⇒ 现改为三件套：「**仍必须失败**」＋「**失败原因必须是 TLS 握手被拒**」＋「**不得是地址解析失败**」
+- **变异实测（有牙 ⇒ 不是恒绿）**：
+  - M-A（target 指向没人监听的 `127.0.0.1:1` ⇒ 失败原因变成「连接被拒」）⇒ **精确转红**，报错带完整 cause chain（`Connection refused: /127.0.0.1:1`）⇒ ⇒ 断言**能区分**「TLS 被拒」与「其它原因」
+  - M-B（回落 `.forAddress` ⇒ 被 discovery resolver 接管）⇒ **转红**（cause chain = `UNAVAILABLE: No servers found for 127.0.0.1:22200`）⇒ ⇒ **同一个变异在旧断言下是绿的** ⇒ ⇒ 加固是必要的
+  - 还原 ⇒ 3 条全绿
+- **Go 侧对应物（表达层，非行为偏离）**：`go-zero@v1.10.2/zrpc/internal/client.go:126` = `grpc.DialContext(timeCtx, server, options...)`；`go-zero@v1.10.2/zrpc/client.go:84` = `target, err := c.BuildTarget()` ⇒ ⇒ Go 侧把 target **直连**给 grpc ⇒ ⇒ **不存在**「无 scheme ⇒ 走默认 scheme ⇒ 默认 scheme 被进程级全局 resolver 抢」这一层 ⇒ ⇒ RAG 侧显式写 `dns:///` 属**表达层**对齐 ⇒ ⇒ **不构成有意偏离，无需登记签字**
+- **验收读数**：user-api **138 条**（0F/0E/0S）· 与改动前同数 ⇒ ⇒ `BUILD SUCCESS`

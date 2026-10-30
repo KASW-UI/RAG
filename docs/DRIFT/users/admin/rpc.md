@@ -4813,3 +4813,19 @@ if (connectTimeout != null) {                                     // :16
 - **user 侧本轮补齐同款**：Go 侧 `service/user/user/rpc/internal/logic/logoutlogic.go`（**全文 44 行** · 逐行读过 · **无 ctx 预检** ⇒ `:37 SetexCtx(l.ctx,…)` ⇒ `:38-40 codes.Internal`）与 admin 侧 `logoutlogic.go`（全文 46 行）**同构** ⇒ ⇒ 故 user 侧也**不设域内抢先闸门** ⇒ ⇒ handler 级码 = `INTERNAL`(5001) = Go
 - 新增 `UserLogoutDeadlineHandoffTest`（3 条，对齐 `AdminLogoutDeadlineHandoffTest`）；变异实测（把闸门加回）⇒ **精确 1 条转红** ⇒ ⇒ 有牙
 - ⚠️ **本域那一格的证据边界不变**：域侧测试用 Mockito 替换数据层 ⇒ **只证控制流与异常映射，不证共享层代理的装配接线** ⇒ ⇒ E66 那格**维持「机制已落 · 活体验证未做」**
+
+---
+
+## gRPC channel target 显式 scheme（2026-10-31 · G1 lane）
+
+- **落点（2 处，同形态）**：
+  - `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcLogoutClientVisibleGrpcStatusTest.java:123`
+  - `service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/AdminRpcLogoutClientVisibleGrpcStatusDefaultBehaviorTest.java:144`
+  - 两处形态一致：`ManagedChannelBuilder.forAddress("127.0.0.1", GRPC_PORT)` ⇒ `.forTarget("dns:///127.0.0.1:" + GRPC_PORT)`
+  - **同行替换**（行数不变）＋ **文件末尾追加**说明段 ⇒ ⇒ **零行位移** ⇒ `docs/DRIFT/_cross/grading/W5.md:15` 指的 `:171` / `:185`（`return RealGrpcPort.pick();`）**逐字未动**（已逐个复核）
+- **机制**：devh `net/devh/boot/grpc/client/autoconfigure/GrpcDiscoveryClientAutoConfiguration:29` = `@ConditionalOnBean(DiscoveryClient.class)`；`DiscoveryClientResolverFactory.priority()` = **6**（源码注释「More important than DNS」）⇒ 注册进**进程级全局** `io.grpc.NameResolverRegistry` 后，grpc 的 `refreshProviders()` 会把**默认 scheme** 判给它（priority 最高者胜）⇒ ⇒ 任何**无 scheme** 的 target 都被 discovery resolver 接管 ⇒ 把 `127.0.0.1:P` 当**服务名**去服务发现查 ⇒ `UNAVAILABLE` ⇒ ⇒ 典型「单跑绿、同跑红」（surefire 复用同一 JVM ⇒ 跨测试类顺序依赖）
+- **⚠️ 本域实测口径（如实，不照抄上游措辞）**：本模块测试**一律不关** `spring.cloud.nacos.discovery.enabled`（唯一命中处是 `AdminRpcPaginationGormSemanticsTest.java:73` 的**注释**「刻意**不**设」）⇒ ⇒ `DiscoveryClient` bean 由 spring-cloud-alibaba 的自动配置提供 ⇒ ⇒ devh 的 `@ConditionalOnBean(DiscoveryClient.class)` 在其处理时**未命中** ⇒ ⇒ provider **不注册** ⇒ ⇒ **这 2 处当前属「预防性修正」，不是修一个正在起火的红**
+  - ⚠️ **与上游例外集里的措辞不一致**：共享层例外集把 users 域这 5 条都标成「🔴 **活雷** … 同 JVM 里跑过任意 `@SpringBootTest` 之后 ⇒ ⇒ 被 discovery resolver 接管」⇒ ⇒ **本域实测不支持这句**（user-rpc 侧回落 `forAddress` 仍绿 + 日志零 resolver 痕迹；user-api 侧回落则确实被接管）⇒ ⇒ **区别在上下文有没有 `DiscoveryClient` bean**，不在「跑过任意 `@SpringBootTest`」⇒ ⇒ 已在域台账写明真实口径 ⇒ 共享层那条例外**本身仍要删**（修好即删），但**理由文字需按实测改写**（⇒ 转收口执行者）
+- **改它的理由（与上面那条限定分开写）**：① **跨域静态守门的判据不区分模块** —— `tools/difftest/check-grpc-channel-target-scheme.py` 扫的是**形态**（代码态 `forAddress(`）⇒ ⇒ 不改就得登记永久豁免（点位级例外集 = 只能变紧的棘轮，目标恒为 0 例外）② **机制面本身是错的**：无 scheme ⇒ 走「默认 scheme」⇒ 依赖进程级全局注册顺序 ⇒ 脆 ③ 一旦同 JVM 内出现 `DiscoveryClient` 上下文（未来任何一个新测试类关掉 Nacos discovery 就会发生）⇒ ⇒ 立刻从「预防性」变成「活雷」
+- **Go 侧对应物（表达层，非行为偏离）**：`go-zero@v1.10.2/zrpc/internal/client.go:126` = `grpc.DialContext(timeCtx, server, options...)`；`go-zero@v1.10.2/zrpc/client.go:84` = `target, err := c.BuildTarget()` ⇒ ⇒ Go 侧把 target **直连**给 grpc ⇒ ⇒ 不存在「默认 scheme 被全局 resolver 抢」这一层 ⇒ ⇒ RAG 侧显式 `dns:///` 属**表达层**对齐 ⇒ ⇒ **不构成有意偏离，无需登记签字**
+- **验收读数**：admin-rpc **139 条**（0F/0E/0S）· 与改动前同数 ⇒ ⇒ `BUILD SUCCESS`

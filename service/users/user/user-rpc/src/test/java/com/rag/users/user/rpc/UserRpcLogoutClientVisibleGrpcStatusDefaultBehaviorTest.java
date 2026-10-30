@@ -170,7 +170,7 @@ class UserRpcLogoutClientVisibleGrpcStatusDefaultBehaviorTest {
                 "断连行为必须是 DEFAULT（这才是本组的唯一变量）");
 
         ManagedChannel channel = ManagedChannelBuilder
-                .forAddress("127.0.0.1", GRPC_PORT)
+                .forTarget("dns:///127.0.0.1:" + GRPC_PORT)
                 .usePlaintext()
                 .build();
         try {
@@ -225,3 +225,10 @@ class UserRpcLogoutClientVisibleGrpcStatusDefaultBehaviorTest {
         return RealGrpcPort.pick();
     }
 }
+
+// ⚠️ **必须显式写 dns:/// scheme**：Nacos discovery 在全局 NameResolverRegistry 里
+//    注册了一个高优先级 provider，会把任何无 scheme 的 target 当作 serviceId 去 Nacos 拉实例。
+//    本测试要的是**直连**的裸 channel，显式 scheme 即可绕开服务发现。
+//    （2026-10-31 · G1 lane · P2-T04 转派单：原为 `.forAddress("127.0.0.1", GRPC_PORT)`
+//      ⇒ 无 scheme ⇒ 会被 devh 的 discovery resolver 接管 ⇒ 把 127.0.0.1:P 当服务名去 Nacos 查
+//      ⇒ UNAVAILABLE ⇒ 表现为「单跑绿、同跑红」。本段追加在**文件末尾** ⇒ 零行位移。）

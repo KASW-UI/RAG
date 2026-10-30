@@ -189,23 +189,77 @@ class UserApiGrpcNegotiationTest {
     @Test
     @DisplayName("负向对照：同一个 server 用 TLS 连必须失败（证明正向用例不是假绿）")
     void tlsChannelAgainstSamePlaintextServerFails() {
-        // forAddress(String,int) 用默认 TLS 凭据；显式再钉一次 TLS，与漏配时的形态一致。
+        // ⚠️ **必须显式写 dns:/// scheme**：devh 的 discovery resolver（priority=6 > DNS=5）注册在
+        //    **进程级全局** NameResolverRegistry 里 ⇒ 无 scheme 的 target 被当**服务名**去服务发现查
+        //    ⇒ UNAVAILABLE ⇒ 表现为「单跑绿、同跑红」。（另：显式再钉一次 TLS，与漏配 negotiation-type 同形。）
         ManagedChannel tlsChannel = NettyChannelBuilder
-                .forAddress("127.0.0.1", PORT)
+                .forTarget("dns:///127.0.0.1:" + PORT)
                 .negotiationType(io.grpc.netty.shaded.io.grpc.netty.NegotiationType.TLS)
                 .build();
         try {
             // TLS ClientHello 打到只收明文的 server ⇒ 失败。
             // 这正是生产上漏配 negotiation-type 时的形态
             // （服务端报 HTTP/2 client preface string missing）。
-            assertThrows(RuntimeException.class, () ->
+            RuntimeException failure = assertThrows(RuntimeException.class, () ->
                             UserServiceGrpc.newBlockingStub(tlsChannel)
                                     .withDeadlineAfter(5, TimeUnit.SECONDS)
                                     .getUser(GetUserReq.newBuilder().setUid(1L).build()),
                     "plaintext server 不该接受 TLS 握手；"
                             + "若这条失败，说明 server 侧被误配成了 TLS，正向用例也就失去意义");
+            // ⚠️ **必须钉住「失败原因」**：只断言「抛了 RuntimeException」**没有牙** ——
+            //    地址解析失败（无 scheme ⇒ 被 discovery resolver 当服务名去查）抛的也是 RuntimeException
+            //    ⇒ 判别力会被悄悄丢掉：这条负向对照可能因「另一种原因失败」而绿 ⇒ 变成假守卫。
+            //    负向对照要证明的是「**TLS 握手被 plaintext server 拒**」，
+            //    所以（a）不得是地址解析类失败，且（b）cause chain 里必须出现 SSL/TLS 痕迹。
+            String chain = describeCauseChain(failure);
+            org.junit.jupiter.api.Assertions.assertFalse(
+                    chain.contains("UnknownHostException")
+                            || chain.contains("Failed to resolve")
+                            || chain.contains("Unable to resolve")
+                            || chain.contains("No servers found")
+                            || chain.contains("Can not get hosts from nacos server"),
+                    "负向对照的失败原因不得是「地址解析失败」；"
+                            + "解析失败同样抛 RuntimeException，若不排除它，本条断言就失去判别力。"
+                            + " 实际 cause chain = " + chain);
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    chain.contains("SSL") || chain.contains("Ssl")
+                            || chain.contains("TLS") || chain.contains("Handshake"),
+                    "负向对照的失败原因必须仍然是「TLS 握手被 plaintext server 拒绝」；"
+                            + "若变成别的原因，说明本条已不能证明 server 只收明文。"
+                            + " 实际 cause chain = " + chain);
         } finally {
             tlsChannel.shutdownNow();
         }
+    }
+
+    /**
+     * 把异常的 cause chain 摊平成一行可读文本，用来断言「**失败原因**」而不是只断言「失败了」。
+     *
+     * <p>⚠️ 为什么必须摊平整条链：gRPC 失败的最外层几乎总是
+     * {@code io.grpc.StatusRuntimeException: UNAVAILABLE: io exception}，
+     * 而真正区分「TLS 握手被 plaintext server 拒」与「地址解析失败」的痕迹在**下层 cause** 里
+     * （前者实测 = {@code io.netty.handler.ssl.NotSslRecordException: not an SSL/TLS record: …}；
+     * 后者实测 = {@code UNAVAILABLE: No servers found for 127.0.0.1:<端口>}，Nacos 形态则是
+     * {@code Can not get hosts from nacos server}）⇒ 只看最外层 = 两个原因长得一样 = 判别力为零。
+     *
+     * <p>深度上限 16 层：既是防御性上限（防 cause 环导致死循环），也让输出可读。
+     */
+    private static String describeCauseChain(Throwable throwable) {
+        StringBuilder sb = new StringBuilder();
+        Throwable current = throwable;
+        int depth = 0;
+        while (current != null && depth < 16) {
+            if (depth > 0) {
+                sb.append(" | caused by ");
+            }
+            sb.append(current.getClass().getName());
+            String message = current.getMessage();
+            if (message != null && !message.isEmpty()) {
+                sb.append(": ").append(message);
+            }
+            current = current.getCause();
+            depth++;
+        }
+        return sb.toString();
     }
 }
