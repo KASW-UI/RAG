@@ -5818,3 +5818,27 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
 - ⇒ ⇒ **其余 5 处登记全部正常**（`comment/rpc.md:290` / `:1276` · `global/_README.md:431` · `like/vs-common.md:174` · `message/vs-common.md:142` · `task/vs-common.md:212` · `users/admin/rpc.md:3721`）⇒ ⇒ **`comment/rpc.md` 不用动**（G3 那边也不必去说）⇒ ⇒ **只有 global 一处要归一** ⇒ ⇒ **已由主线收口执行者直接通知 G4**（带位置与改法）。
 - ⚠️ **一处域归属订正**：`comment` 域属 **G3**（`article` + `comment` + `favorite` + `hot`），**不是 G2** ⇒ ⇒ **派工时别写错**（本文件其余位置的 comment 归属原本都写的 G3 ⇒ **只有本小节这一处写错，已改**）。
 - ⚠️ G1 侧的登记（`docs/DRIFT/users/admin/rpc.md` §1.7 与本文件 §3.2 / §4）**状态均为 🔴 未闭合**、与 global 一致 ⇒ ⇒ **G1 侧不是冲突来源**。
+
+### 🔴 订正小节：rpc 域的 `rag.side: rpc`（域侧那一行）—— 载体一旦存在，它就是必做项（2026-10-30 · G1 lane）
+
+> ⚠️ **本小节标题刻意不含任何编号 token** ⇒ 派生层不把它当条目候选 ⇒ 也不劫持任何既有编号的 `domain` / `wave` / `basis`。
+
+**一、落码（域侧 2 个 rpc 模块的 yml 各加一行）**
+
+- `service/users/user/user-rpc/src/main/resources/application.yaml` ＋ `service/users/admin/admin-rpc/src/main/resources/application.yml` ⇒ 各加顶层 `rag:` / `side: rpc`。
+- **Go 出处**：Go 的 rpc 进程**一个 rest 中间件都没挂**（全部 `zrpc.MustNewServer`）⇒ ⇒ rpc 侧不存在任何 servlet 过滤器 ⇒ ⇒ RAG 的 rpc 域**不得**挂 Go 侧没有的中间件。
+- **机制**：共享层用 `@ConditionalOnApiSide`（= `@ConditionalOnProperty(name="rag.side", havingValue="api", matchIfMissing=true)`）挡住 api 侧那 **13 个类**（11 个带 `@ConditionalOnWebApplication(SERVLET)` ＋ `HttpMiddlewareFilter`（无条件 `@Component`）＋ `GoStyleJsonBodyConverterConfig`（`@Configuration`），即 `GoStyleCpuSheddingFilter` · `GoStyleMaxConnsFilter` · `GoStyleMaxBytesFilter` · `GoStyleBreakerFilter` ＋ 路由模板 · `GoStyleTraceparentFilter` · `HttpMiddlewareFilter` · `GoStyleFormLimitWebMvcConfig` · `GoStyleFormValueLimitInterceptor` · `GoStyleJsonBodyConverterConfig` · `GoStyleJsonContentTypeAdvice` · `GoStylePathNormalizingAutoConfiguration` · `GoStyleTomcatParameterLimitCustomizer`）⇒ ⇒ ⚠️ **其中会「拒请求」的只有两个**：`GoStyleCpuSheddingFilter`（CPU 高负载）＋ `GoStyleMaxConnsFilter`（连接数超限）⇒ ⇒ ⚠️ 共享层另有 **4 个没有门的类**（`GoStyleProtectionConfiguration` / `GoStyleProtectionProperties` / `HttpPoolLifecycle` / `ObservabilityLifecycle`）⇒ ⇒ 它们是**配置 / 生命周期 Bean，不是请求路径组件** ⇒ ⇒ 激活**无害** ⇒ ⇒ **`matchIfMissing=true` ⇒ 默认就是 api 侧** ⇒ ⇒ rpc 域**必须显式写这一行**。
+
+**二、本模块当前的诚实边界（别把「加了」读成「封住了」）**
+
+- 这两个模块当前的 `management.server.port: -1` ⇒ ⇒ **没有 servlet 容器** ⇒ ⇒ 这一行当前是**防御性的**（没有载体 ⇒ 就没有 web 上下文 ⇒ 那 13 个 Bean 本来也不会活）。
+- ⚠️ **但**一旦按 `S1-FOLLOW-001` 的裁定给本模块加观测载体（Go 侧 `user.yaml:23-26` DevServer 9094 / `admin.yaml:31-34` DevServer 9097），这一行就是**必做项**：载体 = servlet 上下文 ⇒ ⇒ 不写它 ⇒ ⇒ 那 13 个 Bean 挂到观测口 ⇒ ⇒ 其中 **`GoStyleCpuSheddingFilter` 在 CPU 高负载时会拒掉抓取请求** ⇒ ⇒ 而 Go 侧 rpc 域一个中间件都没挂 ⇒ ⇒ **与 Go 不同形**。
+- ⚠️ **共享层的 `ConditionalOnApiSide` 在本分支基线上尚未落库** ⇒ ⇒ **本行在共享层那笔进来之前是死配置**（没有类读它）⇒ ⇒ 效果随共享层那笔生效 ⇒ ⇒ **本轮按 §0 读作「在该证据强度下一致」，不写「已封住」**。
+
+**三、为什么没落运行期守门（诚实说明，不是遗漏）**
+
+- 收口执行者要求配一条**运行期**断言（起 rpc 形态的 context ＋ `rag.side=rpc` ⇒ ⇒ 断言那 13 个**带门的类**不在容器里）⇒ ⇒ **这条断言在本分支基线上必然红**：共享层的条件注解类**还没进我的树** ⇒ ⇒ 「那 13 个 Bean」此刻**不受任何条件保护** ⇒ ⇒ 断言「不在容器里」= 断言「门生效了」⇒ ⇒ 门没进来 ⇒ ⇒ **断言不成立** ⇒ ⇒ 写它只能得到一个**恒红**的守门 ⇒ ⇒ 等共享层那笔进来后由域侧补（本轮已把该守门要断的 13 个类名写在本节第一段里）。
+
+**四、给 users 两个 rpc 加观测载体这件事本身不在本轮授权面**
+
+- Go 侧 `user-rpc` / `admin-rpc` 的 DevServer 是**dev 模式工具**（Go 侧注释原文：「dev 模式工具，不是主进程一部分」「Docker 里也不抓」）⇒ ⇒ RAG 侧是否也开观测口 = **部署形态决策** ⇒ ⇒ 属 `S1-FOLLOW-001`（全仓 rpc 层指标出口统一方案）⇒ ⇒ **交主会话拍板** ⇒ ⇒ 本轮只把「载体一旦落地就必须带 `rag.side: rpc`」这件事钉在配置里。
