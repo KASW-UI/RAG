@@ -5864,7 +5864,7 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 
 - **新建** `com.rag.common.web.ConditionalOnApiSide`（**元注解**形式：`@ConditionalOnProperty(name = "rag.side", havingValue = "api", matchIfMissing = true)`）⇒ ⇒ 「api 侧」这个语义**收成一处** ⇒ ⇒ 13 个类各挂一行 ⇒ ⇒ **Go 出处与语义等价论证只写一遍**（Go 的 rpc 侧 = `zrpc.MustNewServer` ⇒ 零 rest 中间件；`rest.With*` 全在 api 侧）。
 - **13 个类**：自动配置面 3 个 ＋ 扫描面 10 个（上表逐个点名）⇒ ⇒ 上一版的 2 个裸 `@ConditionalOnProperty` 已**收敛**到该注解 ⇒ ⇒ 全仓 `service/common` 里**再无第二处** `rag.side` 条件 ⇒ ⇒ **单一真源**。
-- ⚠️ **`matchIfMissing=true` 保留**（合并收口执行者认可）⇒ ⇒ **默认 = api** ⇒ ⇒ **10 个 api 域零改动**（实测全仓 yml **无人设** `rag.side`）⇒ ⇒ 域波不受影响；⇒ ⇒ **rpc 域必须显式写 `rag.side: rpc`**（域侧 yml ⇒ **各域 lane 加**，见 `:5791`）。
+- ⚠️ **`matchIfMissing=true` 保留**（合并收口执行者认可）⇒ ⇒ **默认 = api** ⇒ ⇒ **10 个 api 域零改动**（实测全仓 yml **无人设** `rag.side`）⇒ ⇒ 域波不受影响；⇒ ⇒ **rpc 域必须显式写 `rag.side: rpc`**（域侧 yml ⇒ **各域 lane 加**，见 `:5791`）。〔**【订正 · 见本节末】载体形态落定（主应用变 servlet）后 ⇒ 这一行从「配套建议」升为「硬性前提」**（未写 = 把 api 侧中间件装进 rpc 进程）**；且实测发现 `follow-rpc`（样板本体）**已经是 servlet 载体且未写这一行** ⇒ ⇒ 它**当前就注册着 3 个 api 侧中间件** ⇒ ⇒ 详见本节末小节。〕
 
 #### 四 · 守门：5 形态 ＋ 双向变异（`GoStyleApiSideMiddlewareActivationGateTest`）
 
@@ -5894,6 +5894,74 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 - 本轮**仍未跑任何 Go↔RAG 双侧活体对拍**；⇒ 「与 Go 同形」在 api 侧中间件这一格 = **两侧的机制面同形**（Go 的 rpc 侧 `zrpc.MustNewServer` ⇒ 零 rest 中间件），**不是**两侧跑起来逐字节对拍出来的。
 - 守门用**合成应用**复刻 rpc 形态 ⇒ ⇒ **不覆盖**「某个 rpc 域真把 `com.rag.common` 加进 `scanBasePackages`」时的逐类行为 ⇒ ⇒ 但那种情形下 `rag.side=rpc` **仍会挡住全部 13 个**（形态⑤ 即其等价形态）⇒ ⇒ ⇒ **护栏不再依赖域侧自觉**。
 - 形态③/⑤ 用**显式 `@Import`** 代表「扫描面」⇒ ⇒ 它与组件扫描**等价**（两者都产生同一条 Bean 定义 ⇒ 都走同一套 `@Conditional` 判定）。
-- **载体形态本身未定**：本轮只保证「**如果** rpc 域走 servlet 载体 ⇒ 它必须显式设 `rag.side: rpc`」⇒ ⇒ 载体选型（独立 management 端口 vs 主应用变 servlet）**仍是 P2 的运维决策**，未落。
+- **载体形态已定（2026-10-30 20:4x · 合并收口执行者拍板）**：**主应用变 servlet**（G1 的 `follow-rpc` 样板：`server.port` = Go 观测端口 ＋ gRPC 端口另设 ＋ `spring-boot-starter-web`）⇒ ⇒ 「独立 management 端口」这条**不成立**（non-web 下没有独立 HTTP 载体）⇒ ⇒ ⇒ **本条的「未定」已过期**；⇒ ⇒ 落定后**本 lane 的共享层代码一个字不用改**（`ConditionalOnApiSide` 的语义与载体形态无关 ⇒ 由 `rag.side` 这一个变量决定）⇒ ⇒ **但新增一条硬性前提**：`rag.side: rpc` 从「配套建议」升为「**不写就会漂**」⇒ ⇒ 且 `follow-rpc` **今天就没写** ⇒ ⇒ 详见本节末小节。
 
 （**本节编号：§4.19.13** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
+
+### 载体形态落定后的连带核对（第十次订正 · 2026-10-30 · G4 lane）
+
+#### 一 · 触发：合并收口执行者的三问（回话在案）
+
+- ① **「Redis 严格模式」是否认他们改登的未签字候选** ⇒ ⇒ **认**（依据见第三节）。
+- ② **上一条 lane commit 之后本 lane 还有无未落码的活儿** ⇒ ⇒ **无**（可独立落码的已清零；余项全部是转派或待拍板 ⇒ 清单见第四节）。
+- ③ **「载体形态归我」的确认** ⇒ ⇒ **确认**（共享层侧**一个字不用改**）⇒ ⇒ **但落定后新增一条硬性前提**，且**实测发现样板本体今天就缺这一行** ⇒ ⇒ 见第二、五节。
+
+#### 二 · 载体形态落定 ⇒ 本 lane 侧结论
+
+- **落定口径（合并收口执行者 · 2026-10-30 20:4x）**：**主应用变 servlet**（G1 的 `follow-rpc` 样板：`server.port` = Go 观测端口 ＋ gRPC 端口另设 ＋ `spring-boot-starter-web`）⇒ ⇒ 「独立 management 端口」这条**不成立**（non-web 下没有独立 HTTP 载体）。
+- **共享层侧不需要改代码**：`com.rag.common.web.ConditionalOnApiSide` 的语义是「**api 侧 rest 中间件只在 api 侧注册**」，**与载体形态无关** ⇒ ⇒ 载体是 servlet 还是 non-web，都由 `rag.side` 这一个变量决定 ⇒ ⇒ **本 lane 对载体形态的写权面为空**。
+- ⚠️ **但落定把 `rag.side: rpc` 从「配套建议」升为「硬性前提」**：
+  - `ConditionalOnApiSide` = `@ConditionalOnProperty(name = "rag.side", havingValue = "api", matchIfMissing = true)` ⇒ ⇒ **未设 `rag.side` ⇒ 视为 api 侧 ⇒ 13 个 api 侧中间件全部可注册**；
+  - 载体形态 = 主应用变 servlet ⇒ ⇒ **rpc 进程成了 servlet 容器** ⇒ ⇒ **「不写 `rag.side: rpc`」不再是「没配置」，而是「把 api 侧中间件装进 rpc 进程」**；
+  - ⇒ ⇒ 与 Go 侧 `service/follow/rpc/follow.go:37`（`zrpc.MustNewServer` ⇒ **零 rest 中间件**）**直接分叉**。
+- ⇒ ⇒ **`matchIfMissing=true` 不能改成 `false`**（那会让 10 个 api 域也不再注册 ⇒ 反而破坏 api 侧行为）⇒ ⇒ **只能靠域侧显式写 `rag.side: rpc`** ⇒ ⇒ 域侧 yml = **各域 lane 的写权面**（`:5791` 已订正归属）⇒ ⇒ **本 lane 不能写**。
+
+#### 三 · 第一问：认那一条候选登记（并把他们的 grep 复核升级成运行期证据）
+
+- **他们的 grep 结论我独立复核为正确**：`TimeoutSource` 在 main 代码里**只出现在 javadoc**（`GoStyleRedisDeadline.java:63`·`:65`）⇒ **无实现**；`Future.get(remaining)` 只出现在同文件 `:79` 的 javadoc ⇒ **无实现**（main 里真实存在的 `Future.get` 是 `Dispatcher.java:240` 与 `RpcInterceptor.java:624`，与 Redis 剩余预算无关）⇒ ⇒ **两条严格模式能力确未落码**。
+- **我补的更强证据（不是 grep，是运行期）**：`GoStyleRedisClientOptionsGateTest` 断言 `TimeoutOptions.getSource().getTimeout(null) == -1` ⇒ ⇒ 运行期证明 socket 层**不随请求预算收紧**（Boot 装的是 `DefaultTimeoutSource`）⇒ ⇒ 且该守门若有人换成 `FixedTimeoutSource` 会**转红** ⇒ ⇒ 它就是「严格模式未落码」的**活体守门**。
+- **认的理由**：那条候选自己写明的性质 = 「**落码即产生一条有意偏离**」的**前置登记**（能力本轮未落码 ⇒ 当前无行为差异）⇒ ⇒ 与本文件 `G4-15d` 行的建议修法 ①（「若要做 ⇒ **先登记为有意偏离并签字**」）**同一条** ⇒ ⇒ 本层第六次订正已把「派发前检查 = 比 Go 严」的前提作废（Go 侧 `pool.go:1098-1104` 的 `waitTurn` fast path 本来就先查 `ctx.Done()`）⇒ ⇒ **该候选的「与已落码部分的区别」那段与本层结论一致** ⇒ ⇒ **认**。
+- ⚠️ **一处精度补充（不推翻登记，但在他们的写权面内）**：该候选把两条并成一条「若落码则比 Go 严」⇒ ⇒ 对第②条（**命令等待不超过剩余预算**）来说，**主要风险不是「比 Go 严」，而是事务绑定 / 线程亲和冲突**（`RedisConnectionUtils` 的 ThreadLocal 事务连接在**调用线程**上 ⇒ 把命令丢到另一线程再 `Future.get(remaining)` 会脱离该事务连接）⇒ ⇒ 建议在其「关闭条件」补一句「第②条落码前须先解决事务绑定冲突（不只是签字）」⇒ ⇒ 落点 `docs/Intentional_Deviations/global/common-tails.md` = **他们的写权面，本 lane 不能改** ⇒ ⇒ **建议他们补**。
+
+#### 四 · 第二问：本 lane 无未落码活儿（余项全部转派 / 待拍板）
+
+| 余项 | 归属 | 为什么不是本 lane 的活儿 |
+|---|---|---|
+| 客户端硬上界（Go 2000ms）默认未启用（`cap-millis=0`） | **各域 lane**（域侧 yml） | 域内 yml 不在 G4 写权面 ⇒ 与 `:5791` 同一条归属 |
+| 共享层 Redis 代理 ＋ 域侧 `logout` 抢先检查删除（**原子提交**） | **合并收口执行者**（主干做） | 需域侧 3 个文件（G1 交付）⇒ 共享层那半已在本 lane 落码 |
+| 出向载体漂移形态门改**等值**口径 | **合并收口执行者**（`tools/**`） | `tools/**` 无 lane 拥有 ⇒ 其已修锚点，剩口径改动 |
+| Prometheus 两层 ＋ `stat.Metrics` 周期报告 | **待 Jason 拍板** | 运维出口决策；实测 10 个 rpc 域只有 `follow-rpc` 有 HTTP 容器 ⇒ 建议转阶段 2 |
+| Stat 链层位置（`G4-15b`） | **主线 / 全量回归波** | 要改 `Composition` record ⇒ 破坏 3 个域级守门测试的编译 ⇒ 跨域 |
+| api 侧双侧活体对拍 | **各域 lane** | 需各域真进程 ＋ 真上游 ⇒ 本 lane 只有共享层装配链证据 |
+| 派生层重生成 | **合并收口执行者**（合并窗口） | `docs/DRIFT/_cross/**` 不在 G4 写权面 ⇒ 四棵 lane 全合后统一做 |
+
+#### 五 · 第三问：载体形态归我 —— 确认，**但有一条现在就存在的偏离**
+
+⚠️ **本节最硬的一条发现（可复算）**：`follow-rpc` **已经是 servlet 载体**，而 **`rag.side` 全仓一个都没设** ⇒ ⇒ **它今天就注册着 3 个 api 侧中间件**。
+
+**三前提（逐条可复算）**：
+
+1. **`follow-rpc` 是 servlet 容器**：`service/follow/follow-rpc/pom.xml:216`（`spring-boot-starter-web`）＋ `application.yml` 的 `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}` ⇒ ⇒ `WebApplicationType` 推导出 `SERVLET`；
+2. **`rag.side` 未设**：实测**全仓 38 个组件的 yml 零命中**（本分支与主干皆然）⇒ ⇒ `matchIfMissing=true` ⇒ ⇒ **按 api 侧处理**；
+3. **自动配置面 3 个不依赖组件扫描**：`com.rag.common.http.GoStyleJsonContentTypeAdvice` · `com.rag.common.http.GoStylePathNormalizingAutoConfiguration` · `com.rag.common.protection.GoStyleBreakerRouteTemplateAutoConfiguration` 三者**都在** `service/common/src/main/resources/META-INF/spring/*.imports`（7 条之一）⇒ ⇒ 自动配置**看 classpath**、不看 `scanBasePackages` ⇒ ⇒ 而上一节的守门**形态②已实测**「servlet ＋ 未设 side ⇒ 自动配置面 3 个注册」（该形态的合成应用只扫 `com.rag.common.web`，即与「不扫 `com.rag.common`」同形）⇒ ⇒ **三前提合成 ⇒ `follow-rpc` 现在就注册着这 3 个**。
+
+⇒ ⇒ **Go 侧对照面**：`service/follow/rpc/follow.go:37` = `zrpc.MustNewServer(...)` ⇒ 全目录**无 `rest.With*`、无 `AddRoutes`** ⇒ ⇒ **零 rest 中间件** ⇒ ⇒ **RAG 的 follow-rpc 比 Go 多挂 3 个 api 侧中间件**。
+
+⇒ ⇒ **可观测影响（逐条，未活体验证）**：① `GoStylePathNormalizingFilter` 按 Go 的 `path.Clean` 清洗路径 ⇒ ⇒ Go 侧 DevServer 上 `/actuator//prometheus` 之类路径变体会 **404**、RAG 侧会被清洗后**命中**；② `GoStyleJsonContentTypeAdvice` 改响应 `Content-Type`（含 charset）⇒ ⇒ 命中 actuator 的 JSON 响应时与 Go 的 DevServer 不同；③ `GoStyleRouteTemplateResolver` 换掉 Spring 默认的路由模板解析器 ⇒ ⇒ 影响 actuator 路由匹配（**未逐条验**）⇒ ⇒ **本 lane 只登记「装配面分叉」这一层事实，不把上述三条写成已验证的行为差异**。
+
+⇒ ⇒ **修法在域侧**（`follow-rpc` 的 yml 加一行 `rag.side: rpc`）⇒ ⇒ **域内 yml = G1 的写权面**（`:5791` 已订正归属）⇒ ⇒ **本 lane 不能写** ⇒ ⇒ **转派 G1**（已发）。
+
+#### 六 · 新增转派单（本 lane 零落码的部分）
+
+| # | 落点 | 现象 | Go 侧 `文件:行号` | RAG 侧现状 | 证据强度 | 建议修法 | 影响面 | 阻塞本波 |
+|---|---|---|---|---|---|---|---|---|
+| **G4-16a** | 各 rpc 域的 `application.yml` ＋ 各域的运行期守门 | `follow-rpc` 已是 servlet 载体却**未设** `rag.side` ⇒ ⇒ **当前就多挂 3 个 api 侧中间件**（Go 侧零） | `service/follow/rpc/follow.go:37`（`zrpc.MustNewServer` ⇒ 零 rest 中间件） | `service/follow/follow-rpc/pom.xml:216` 有 `spring-boot-starter-web` ＋ `application.yml` 的 `server.port: 16065` ⇒ **servlet 容器**；`rag.side` 全仓零命中 ⇒ ⇒ `matchIfMissing=true` ⇒ **按 api 侧注册** ⇒ ⇒ 自动配置面 3 个**全活**（上一节守门形态②已实测该机制） | E1（三前提合成；**未活体起进程逐 Bean 枚举**） | ① 各 rpc 域 yml 加 `rag.side: rpc`（**域侧写权 ⇒ G1/G2/G3**）；② 各 rpc 域补一条**运行期**守门（断言 13 个 api 侧 web Bean 全不在），形态可仿 G3 的 `ArticleRpcSharedLayerWebBeanGateTest`；③ **其余 rpc 域转 servlet 之前**必须先加这一行 | 10 个 rpc 组件（**`follow-rpc` 当前即中**） | 否（但**载体形态落定后 ⇒ 变成硬性前提**） |
+
+#### 七 · 诚实边界
+
+- 本节**未起任何真实进程**逐 Bean 枚举 `follow-rpc` 的容器 ⇒ ⇒ 「follow-rpc 现在带着 3 个 api 侧中间件」是**三前提合成**（servlet 载体 ✔ · `rag.side` 未设 ✔ · 自动配置不依赖扫描 ✔〔且该机制由上一节的**真起进程**守门形态②证明〕）⇒ ⇒ 证据强度 = **L4 装配面推导**，**不是** L4 活体枚举 ⇒ ⇒ **域侧守门补齐后即可升级为活体**。
+- 本节**未跑任何 Go↔RAG 双侧活体对拍** ⇒ ⇒ 「与 Go 同形」仍只能读作「**机制面同形**」。
+- 本 lane **未改任何域侧代码**（`follow-rpc` 的 yml 一行没动）⇒ ⇒ 第五节的偏离**仍然存在**，本节只是**登记**它。
+- 「载体形态归我」这条**已确认** ⇒ ⇒ **共享层侧零改动** ⇒ ⇒ 本 lane 的代码面在本轮**没有新落码**（本轮 = 纯台账订正）⇒ ⇒ **派生层影响（已用分离验证确认：HEAD 影子 vs 当前，各真生成一次）**：**TSV 逐字节不变（diff = 0 行）⇒ 派工判断零影响**；**md 宽口径条目数 +1（2616 → 2617 条 / 1378 → 1379 个唯一编号）** ⇒ ⇒ 那正是本节新增的那一条转派单条目（与既有转派单行同款 ⇒ 只进宽口径、不进施工单）⇒ ⇒ ⚠️ **合并窗口重生成时，条目数预期值要跟着 +1**（调度员 M-2 里那个「≈2634」是**计数随动**的）。
+
+（**本节编号：§4.19.14** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
