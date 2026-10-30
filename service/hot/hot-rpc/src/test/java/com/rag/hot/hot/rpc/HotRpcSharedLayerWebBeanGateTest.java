@@ -1,0 +1,128 @@
+package com.rag.hot.hot.rpc;
+
+import com.rag.hot.hot.rpc.support.RealContainerHostPort;
+import com.rag.hot.hot.rpc.support.RealGrpcPort;
+import com.rag.common.http.GoStyleJsonContentTypeAdvice;
+import com.rag.common.http.GoStyleTomcatParameterLimitCustomizer;
+import com.rag.common.protection.GoStyleBreakerFilter;
+import com.rag.common.protection.GoStyleCpuSheddingFilter;
+import com.rag.common.protection.GoStyleMaxBytesFilter;
+import com.rag.common.protection.GoStyleMaxConnsFilter;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationContext;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+/**
+ * 🔴🔴 <b>共享层 web 能力的「分边」守门</b>（装配层）—— 断言 <b>api 侧</b>那批 web Bean
+ * <b>不在 rpc 形态的容器里</b>。
+ *
+ * <h2>为什么必须守</h2>
+ * <p>2026-10-30 本轮给 {@code hot-rpc} 补「指标抓取载体」⇒ pom 加了
+ * {@code spring-boot-starter-web} ⇒ ⇒ <b>rpc 进程首次成为 servlet web app</b>
+ * ⇒ ⇒ 共享层里那些 <b>{@code @ConditionalOnWebApplication(SERVLET)}</b> 的 Bean
+ * 才有机会进容器 ⇒ ⇒ 边界必须被**运行期**钉住，不能靠 yaml 里有一行。
+ * <p>⚠️ <b>其中 {@code GoStyleCpuSheddingFilter} 会拒请求</b>（CPU 降载）
+ * ⇒ ⇒ 它若挂在 rpc 的观测端口上 ⇒ <b>抓取请求被拒</b> ⇒ ⇒ <b>直接威胁「载体存在的目的」</b>
+ * ⇒ ⇒ 这不是「多了一个功能」，是「载体装了但抓不到」。
+ * <p>Go 侧 rpc <b>一个 rest 中间件都没挂</b>（全部 {@code zrpc.MustNewServer} ⇒ 不起容器
+ * ⇒ 没有 filter 链）⇒ ⇒ 边界必须是「rpc 侧 = 没有」。
+ *
+ * <h2>🔴 三条断言，缺一不可（否则就是空断言）</h2>
+ * <ol>
+ *   <li><b>属性在位</b>：生产 yml 里的 {@code rag.side} 真的进了容器的 Environment
+ *       （<b>不</b>用 {@code @SpringBootTest(properties=...)} 覆盖 ⇒ 读的就是生产配置）
+ *       ⇒ 「yml 里写了这一行」从此变成「运行期真的读到了这一行」；</li>
+ *   <li><b>正向对照</b>：共享层那个 <b>同样带 servlet 条件</b>的自动配置
+ *       （{@link GoStyleJsonContentTypeAdvice}）<b>确实在容器里</b>
+ *       ⇒ ⇒ 证明「servlet web app 这个前提在本上下文里成立」
+ *       ⇒ ⇒ <b>否则第 ③ 条的「不在」就是空断言</b>
+ *       （可能只是因为压根没有 servlet 上下文）；</li>
+ *   <li><b>边界</b>：api 侧那 5 个 web Bean <b>一个都不在</b>。</li>
+ * </ol>
+ *
+ * <h2>⚠️ 一条诚实的边界（写清楚，别误读成「门已经生效」）</h2>
+ * <p><b>共享层当前还没有消费 {@code rag.side} 的条件</b>：
+ * {@code grep -rn "rag.side" service/common/src/main/java/} <b>零命中</b>
+ * （2026-10-30 实测）⇒ ⇒ 共享层那道门在 <b>G4</b> 侧、<b>本轮尚未落地</b>
+ * ⇒ ⇒ 因此：<b>本类的第 ③ 条断言当前证明的是</b>「那 5 个 {@code @Component} 中间件
+ * <b>因为 rpc 模块不扫 {@code com.rag.common}</b>（{@code @SpringBootApplication} 无
+ * {@code scanBasePackages}）而不在容器里」<b>——而不是</b>「{@code rag.side} 把门挡住了」。
+ * <p>⇒ ⇒ <b>为什么这条边界现在仍然是活的</b>：一旦有人给 rpc 模块加上
+ * {@code scanBasePackages = "com.rag.common"} ⇒ 那 5 个 Bean 就会进容器
+ * ⇒ ⇒ 第 ③ 条<b>立刻转红</b> ⇒ ⇒ 本类是一个**真会响的**边界网（不是摆设）。
+ * <p>⇒ ⇒ 等 G4 把门扩到全部 api 侧中间件之后，本类**自动升级**为「{@code rag.side} 真的挡住了门」
+ * 的运行期证据 ⇒ ⇒ <b>域侧现在就要把 {@code rag.side: rpc} 写进生产 yml</b>
+ * （{@code matchIfMissing=true} ⇒ <b>不写 = 默认 api 侧</b> ⇒ ⇒ 那时就会挂上来）。
+ *
+ * <h2>Go 出处与语义等价论证</h2>
+ * <p>Go 侧 rpc 侧：<b>全部</b> {@code zrpc.MustNewServer(c.RpcServerConf, …)}
+ * ⇒ ⇒ <b>不起 servlet 容器</b> ⇒ ⇒ <b>没有</b> go-zero rest 那套中间件链
+ * ⇒ ⇒ 「rpc 侧 = 没有 api 侧中间件」两侧<b>一致</b> ⇒ ⇒ 本类守的就是这条一致。
+ */
+@SpringBootTest(
+        classes = HotRpcApplication.class,
+        // 🔴 **必须是 MOCK（不能是 NONE）** —— 本类的第 ③ 条断言是「**不在**容器里」
+        //    ⇒ ⇒ 若上下文压根不是 servlet web app ⇒ 那 5 个 Bean 自然不在 ⇒ **断言空转**。
+        //    ⇒ ⇒ MOCK = 「是 servlet web app，但不起真实服务器」⇒ 断言才有鉴别力。
+        webEnvironment = SpringBootTest.WebEnvironment.MOCK,
+        properties = {
+                "spring.cloud.nacos.discovery.server-addr=127.0.0.1:1",
+                "management.otlp.tracing.export.enabled=false",
+                "logging.level.com.alibaba.nacos=WARN",
+                "spring.kafka.bootstrap-servers=127.0.0.1:1",
+                "spring.data.redis.host=127.0.0.1",
+                "spring.data.redis.port=1"
+        })
+class HotRpcSharedLayerWebBeanGateTest {
+
+    @DynamicPropertySource
+    static void ports(DynamicPropertyRegistry r) {
+        // 🔴 gRPC server 端口走**本域专用段**（global 段表预分配给 hot 域的 22500-22579）
+        //    ⇒ 不用 `port=0`（0 ⇒ OS 临时段 ⇒ 与 Docker 随机发布口同段 ⇒ 会撞 EADDRINUSE）。
+        r.add("grpc.server.port", RealGrpcPort::pick);
+    }
+
+    @Autowired
+    private ApplicationContext context;
+
+    @Test
+    @DisplayName("① 属性在位：生产 yml 的 rag.side=rpc 真的进了容器 Environment（不靠 properties 覆盖）")
+    void productionDeclaresRpcSide() {
+        assertEquals("rpc", context.getEnvironment().getProperty("rag.side"),
+                "容器的 Environment 里读不到 `rag.side=rpc` ⇒ 生产 application.yml 缺这一行 "
+                        + "⇒ 共享层那道门是 `matchIfMissing=true` ⇒ **不写 = 默认 api 侧** "
+                        + "⇒ rpc 域会挂上 api 侧的 web 中间件（其中 CPU 降载会拒抓取请求）。");
+    }
+
+    @Test
+    @DisplayName("② 正向对照：同样带 servlet 条件的共享层自动配置确实在容器里 ⇒ 证明 servlet 前提成立")
+    void servletConditionHoldsInThisContext() {
+        assertThat(context.getBeanNamesForType(GoStyleJsonContentTypeAdvice.class))
+                .as("正向对照：共享层那个带 `@ConditionalOnWebApplication(SERVLET)` 的自动配置"
+                        + "应当**在**容器里 —— 它不在 ⇒ 本上下文压根不是 servlet web app "
+                        + "⇒ 下一条「api 侧 Bean 不在容器里」就是**空断言**（无鉴别力）")
+                .isNotEmpty();
+    }
+
+    @Test
+    @DisplayName("③ 边界：api 侧那 5 个 web Bean 一个都不在 rpc 容器里（含 Tomcat 参数上限定制器）")
+    void apiSideWebBeansAreAbsent() {
+        assertThat(context.getBeanNamesForType(GoStyleCpuSheddingFilter.class))
+                .as("CPU 降载 filter 挂在观测端口上 ⇒ 抓取请求会被拒 ⇒ 载体装了也抓不到")
+                .isEmpty();
+        assertThat(context.getBeanNamesForType(GoStyleMaxConnsFilter.class)).isEmpty();
+        assertThat(context.getBeanNamesForType(GoStyleMaxBytesFilter.class)).isEmpty();
+        assertThat(context.getBeanNamesForType(GoStyleBreakerFilter.class)).isEmpty();
+        assertThat(context.getBeanNamesForType(GoStyleTomcatParameterLimitCustomizer.class))
+                .as("Tomcat 参数上限定制器是**容器级**的 ⇒ 它若生效 ⇒ rpc 域的 Tomcat 会被抬到 10001 "
+                        + "⇒ ⇒ hot 域「段数轴已销账」那条结论会从绿变红 ⇒ ⇒ 必须钉住")
+                .isEmpty();
+    }
+}

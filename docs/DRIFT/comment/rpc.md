@@ -961,7 +961,7 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 
 1. **Go 侧（直连 go-redis）**：`service/comment/rpc/internal/cache/redis.go:17-19` `redis.NewClient(&redis.Options{Addr: Host})` ⇒ **只设了 Addr** ⇒ `PoolSize` 未设 ⇒ go-redis v9.20.0 `options.go:350-351` ⇒ **`PoolSize = 10 × GOMAXPROCS` 生效**；`MinIdleConns` 未设 ⇒ **= 0**。
 2. **Go yaml**：`service/comment/rpc/etc/comment.yaml:37-40` `BizRedis: {Host, Type, Pass}` ⇒ **无池字段**。
-3. **RAG 侧**：`service/comment/comment-rpc/src/main/resources/application.yml:138-143` ⇒ `lettuce.pool.enabled: true` ＋ `max-active: 64` ＋ `max-idle: 16` ＋ `min-idle: 4` ⇒ ⇒ `Pool.enabled = true` ⇒ **有池**（走 `PoolBuilderFactory` 分支）。
+3. **RAG 侧**：`service/comment/comment-rpc/src/main/resources/application.yml:152-157` ⇒ `lettuce.pool.enabled: true` ＋ `max-active: 64` ＋ `max-idle: 16` ＋ `min-idle: 4` ⇒ ⇒ `Pool.enabled = true` ⇒ **有池**（走 `PoolBuilderFactory` 分支）。
 4. **classpath 实测**：`mvn -B -o -pl service/comment/comment-rpc -am dependency:tree -Dincludes=org.apache.commons:commons-pool2` ⇒ EXIT=0 ⇒ **1 命中**：`org.apache.commons:commons-pool2:jar:2.12.1:compile` ⇒ ⇒ `PoolBuilderFactory` 需要的 `GenericObjectPoolConfig` **可用** ⇒ ⇒ 池**真的开得起来**（不是「配了但起不来」）。
    ⚠️ **这正是本域 pom 里显式声明 `commons-pool2` 的原因**（`service/comment/comment-rpc/pom.xml:181-191`）⇒ **Boot 4 的 starter 不传递 `commons-pool2`** ⇒ 缺它 ⇒ `NoClassDefFoundError: GenericObjectPoolConfig` ⇒ **组件起不来**（先例：`like-rpc`）⇒ ⇒ **本域这条是「配了 + 依赖在位」的完整闭环**，不是「只配了一半」。
 
@@ -1255,6 +1255,21 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 #### 🟡 **口径订正（2026-10-28 · G3）**：G2 报的本域数字与本树实测**不一致**
 
 ⇒ ⇒ **G2 报的「comment = 2 处」** vs **本树实测「5 处」（本轮迁的）** ⇒ ⇒ 两边数的**树不同**（本树另有上一轮已迁的 `grpc.server.port` 形态）⇒ ⇒ ⇒ **不是谁数错，是「比的不是同一份」** ⇒ ⇒ **口径**：迁**前**以本树实测为准，迁**后**以「各形态 = 0」为准。
+
+## 📌 追加 · 🟡 **「Go 侧无该面」这个派工前提被实测证伪（2026-10-30 · G3 第三轮）**
+
+**派工前提与实测结论**
+
+- 派工给的口径是「`comment-rpc` 的 Go 侧**没有**指标抓取面 ⇒ 本轮不补」。
+- **实测证伪**：Go 侧 `service/comment/rpc/comment.go:38-41` **自建** `promhttp` 处理器（`http.Handle("/metrics", promhttp.Handler())`）并**自起** HTTP 服务（`http.ListenAndServe(":9091", nil)`）⇒ ⇒ **Go 的 comment-rpc 确实有指标面**，在 **`:9091` 的 `/metrics`**。
+- ⇒ ⇒ **RAG 侧 comment-rpc 缺该面 = 一条真实漂移**（不是「无该面」）⇒ 已按 **C 类**登记（见 `docs/DRIFT/comment/vs-common.md`）⇒ **下一轮**补。
+- ⇒ **本轮仍不落码载体**，两个理由：① 超出本轮派工范围（本轮只批了三个域的载体）；② **comment 的 Go 侧是「自建 promhttp」**，与另三域的「go-zero 内建代理」**机制不同** ⇒ 载体形态要另做判断，**不能照抄** follow-rpc。
+
+**本轮本域的实际改动：取消口令兜底（1 处）**
+
+- Go `service/comment/rpc/etc/comment.yaml:9` 的 DataSource 串里口令是**裸** `${POSTGRES_PASSWORD}` ⇒ go-zero 的加载 = `core/conf/config.go:63` `loader([]byte(os.ExpandEnv(string(content))), v)` ⇒ `os.ExpandEnv` **不认** `${VAR:default}` ⇒ 缺变量 ⇒ **空口令** ⇒ 连库失败 = fail-fast。
+- ⇒ RAG 侧原先 `service/comment/comment-rpc/src/main/resources/application.yml:67` 的 `${POSTGRES_PASSWORD:password}`（走 Spring 的 `:default`）⇒ 缺变量时会用默认值连上去 ⇒ **RAG 比 Go 松** ⇒ 属**真漂移** ⇒ 本轮**取消兜底**。
+- ⚠️ **残余差异（失败时刻不同）**：Go = 启动成功、连库时失败；RAG = 启动即失败 ⇒ 属「RAG 更严」的一侧 ⇒ 由**合并收口执行者**在合并窗口统一登记。
 
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 

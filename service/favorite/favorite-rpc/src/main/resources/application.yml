@@ -16,30 +16,34 @@ spring:
     # 对应 Go Name: favorite.rpc（服务发现用）；Telemetry.Name 亦为 favorite-rpc
     name: favorite-rpc
 
-  main:
-    # 🔴🔴 **必须显式声明「不是 web 应用」**（2026-10-26 第十七轮实测后补上）。
-    #
-    # 现象：真 fat jar 用**生产 yaml 原样**起 ⇒ 直接死：
-    #   APPLICATION FAILED TO START
-    #   Description: Web application could not be started as there was no
-    #     org.springframework.boot.web.server.servlet.ServletWebServerFactory bean defined
-    #     in the context.
-    # 根因：classpath 上有 jakarta.servlet（pom 里为编译期引用
-    #   `jakarta.servlet.http.HttpServlet/Request/Response` 而显式声明了
-    #   `jakarta.servlet:jakarta.servlet-api`）⇒ Spring Boot 的
-    #   `WebApplicationType.deduceFromClasspath()` 判定为 **SERVLET**
-    #   ⇒ 但本服务**没有** servlet 容器（没有 tomcat）⇒ 找不到 ServletWebServerFactory。
-    #   ⚠️ 这与 pom 里那句「不引它…**不会**因此起 web 容器」是**相反**的（那条注释已更正）。
-    #
-    # 与 Go 的对应关系（不要误读成「少了一个功能」）：
-    #   Go 侧 favorite-rpc 的 gRPC 端口是 8082（etc/favorite.yaml:2 ListenOn: 0.0.0.0:8082），
-    #   另有 go-zero 内置的 DevServer（etc/favorite.yaml:23-30 → 16062 的 /metrics / /healthz / pprof）——
-    #   那是 **go-zero 自带的 HTTP server，不依赖 servlet 容器**。
-    #   ⚠️ RAG 侧**不**引 servlet 容器（纯 gRPC 进程，见本文件「权威读」段的注释）
-    #      ⇒ 就没有 16062 那个面 ⇒ **这本身是一条与 Go 的偏离**，
-    #      已单独登记为域内未决项 **U9**（部署形态类，待拍板）⇒ **不与本条混谈**。
-    #   ⇒ 本条只解决「**起不来**」：**不新增任何对外 wire 面**（与既有设计意图一致）。
-    web-application-type: none
+  # ============== main ==============
+  # ⚠️ **2026-10-30：原先这里的 `web-application-type: none` 已被删除**（本轮补 Actuator 载体）。
+  #
+  # 【为什么原先要写它】—— 2026-10-26 第十七轮实测：真 fat jar 用**生产 yaml 原样**起 ⇒ 直接死：
+  #   APPLICATION FAILED TO START
+  #   Description: Web application could not be started as there was no
+  #     org.springframework.boot.web.server.servlet.ServletWebServerFactory bean defined
+  #     in the context.
+  #   根因：classpath 上有 jakarta.servlet（pom 里为编译期引用
+  #   `jakarta.servlet.http.HttpServlet/Request/Response` 而显式声明了
+  #   `jakarta.servlet:jakarta.servlet-api`）⇒ Spring Boot 的
+  #   `WebApplicationType.deduceFromClasspath()` 判定为 **SERVLET**
+  #   ⇒ 而本服务**没有** servlet 容器（没有 tomcat）⇒ 找不到 ServletWebServerFactory。
+  #   ⇒ 「把 web 类型钉成 NONE」是当时的**缓解手段**（不是修复）。
+  #
+  # 【为什么现在可以删】—— 2026-10-30 本轮：pom 补了 `spring-boot-starter-web`
+  #   ⇒ **容器有了** ⇒ 启动期不再缺 `ServletWebServerFactory`
+  #   ⇒ 而 `web-application-type: none` 会**把刚补上的载体再关掉**
+  #   ⇒ ⇒ 删掉它，载体才真正有出口（这是本轮「补指标抓取载体」的前提）。
+  #
+  # 【Go 侧的对应面（不要误读成「多了一个业务功能」）】
+  #   Go 侧 favorite-rpc 的 gRPC 端口是 8082（etc/favorite.yaml:2 ListenOn: 0.0.0.0:8082），
+  #   另有 go-zero 内置的 DevServer（etc/favorite.yaml:23-30 → 0.0.0.0:16062 的
+  #   /metrics / /healthz / /debug/pprof/*）—— 那是 **go-zero 自带的 HTTP server，
+  #   不依赖 servlet 容器**。
+  #   ⇒ RAG 侧本轮补上载体 ⇒ **16062 那个面对上了**（原先缺它 = 域内未决项 U9）
+  #   ⇒ 但**载体不同**（Tomcat vs go-zero devserver）⇒ 属「暴露形态差异」，按 twoStage.md §10 登记
+  #   ⇒ 且**路径不同**：Go `/metrics` ↔ RAG `/actuator/prometheus`（Actuator 的固定前缀）。
 
   # ============== Postgres ==============
   # 对应 Go internal/config/config.go:7-14 的 Postgres{Host,Port,User,Password,DBName,Mode}
@@ -52,7 +56,21 @@ spring:
     #   与 users 域「TIMESTAMP⇒TIMESTAMPTZ」（AGENTS.md §0 users 行）是同一时区风险面。
     url: jdbc:postgresql://${POSTGRES_HOST:postgres}:${POSTGRES_PORT:5432}/${POSTGRES_DB:first_db}?TimeZone=Asia/Shanghai
     username: ${POSTGRES_USER:admin}
-    password: ${POSTGRES_PASSWORD:password}
+    # 🔴 **口令占位符必须是「裸」写法**（2026-10-30 · 合并收口执行者派工 · 与 Go **逐字同形**）
+    #   【Go 出处】service/favorite/rpc/etc/favorite.yaml:13
+    #   【Go 的展开语义】go-zero 的加载 = `core/conf/config.go:63`
+    #       `loader([]byte(os.ExpandEnv(string(content))), v)` ⇒ ⇒ **`os.ExpandEnv` 不认
+    #       `${VAR:default}` 语法** ⇒ 缺变量时它把**整串当变量名**去查 ⇒ ⇒ **空串**
+    #       ⇒ ⇒ Go 侧缺 `POSTGRES_PASSWORD` = **空口令** ⇒ 连库失败 = fail-fast
+    #   【为什么取消原先的兜底】原先这里是 `${POSTGRES_PASSWORD:password}` ⇒ 走 **Spring 的
+    #       `:default` 语义** ⇒ **缺变量时会用那个默认值连上去** ⇒ ⇒ **RAG 比 Go 松**
+    #       （Go 必然失败、RAG 照样起）⇒ ⇒ 属**真漂移**，**不是**「更严的有意偏离」
+    #       ⇒ ⇒ 不需要为「保留兜底」签字 ⇒ ⇒ 本轮取消。
+    #   ⚠️ **残余差异（失败时刻不同）**：Go = **启动成功、连库时**失败；
+    #      RAG = **启动即失败**（Spring 解析不到占位符 ⇒ DataSource bean 创建失败）
+    #      ⇒ ⇒ 属「**RAG 更严**的一侧」⇒ ⇒ 由**合并收口执行者**在合并窗口统一登记
+    #      ⇒ ⇒ **不是**「保留兜底」的理由。
+    password: ${POSTGRES_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
       # 对应 Go：sqlDB 未显式设置 ⇒ 用 database/sql 默认值（MaxIdleConns=2, MaxOpenConns=0=无上限）。
@@ -116,6 +134,75 @@ spring:
         server-addr: ${NACOS_ADDR:nacos:8848}
         namespace: ${NACOS_NAMESPACE:public}
         group: ${NACOS_GROUP:DEFAULT_GROUP}
+        # 🔴 **必须显式关掉自动注册**（2026-10-30 · 补 Actuator 载体时**实测**补上）。
+        #
+        # 【为什么】`spring-cloud-starter-alibaba-nacos-discovery` 的**自动注册**
+        # （NacosAutoServiceRegistration）注册的是 **web 容器端口** ——
+        # 而本模块的 web 容器（2026-10-30 起为了给 Actuator 载体才引入）
+        # 监听的是 **观测端口 16062**，**不是 gRPC 业务端口 8082**。
+        # ⇒ 自动注册一旦生效 ⇒ Nacos 里会出现「favorite-rpc → 16062」这条**错端口**实例
+        # ⇒ favorite-api 按 Nacos 给出的地址连过来 ⇒ 连到一个**只提供 /actuator/** 的 HTTP 端口
+        # ⇒ **gRPC 链路直接断**（业务码塌成 1015）。
+        # ⇒ 而且实测更狠：Nacos 不可达时自动注册**抛异常**（`failFast=true`）
+        #   ⇒ 直接把**启动**打断（`Failed to start bean 'webServerStartStop'`）⇒ **进程起不来**。
+        #
+        # 【本模块的注册是手写的】`bootstrap/FavoriteNacosRegistration.java` 用
+        # `GrpcServerProperties.getPort()`（= gRPC 端口 8082）注册 ⇒ 与 Go 侧
+        # `zrpc.MustNewServer` 注册 `ListenOn` 的语义一致。
+        # ⇒ 自动注册必须关掉，否则**同一个服务名下会有两个端口的实例**。
+        register-enabled: false
+
+# =============================================================================
+# 观测端口（Actuator 的 servlet 载体）
+# =============================================================================
+# 对应 Go service/favorite/rpc/etc/favorite.yaml:23-30
+#     DevServer: {Enabled: true, Host: 0.0.0.0, Port: 16062,
+#                 MetricsPath: /metrics, HealthPath: /healthz,
+#                 EnableMetrics: true, EnablePprof: true}
+# ⇒ go-zero@v1.10.2/zrpc/config.go:39   RpcServerConf **内嵌** service.ServiceConf
+# ⇒ go-zero@v1.10.2/core/service/serviceconf.go:40   ServiceConf.DevServer 字段
+# ⇒ ⇒ **消费点** go-zero@v1.10.2/zrpc/server.go:63  `c.SetUp()`
+#      ⇒ ⇒ core/service/serviceconf.go:77  `devserver.StartAgent(sc.DevServer)`
+#      ⇒ ⇒ internal/devserver/server.go:79-82 `if !c.Enabled { return }`
+#      ⇒ ⇒ internal/devserver/server.go:42 HealthPath / :48 MetricsPath / :53-57 pprof
+#      ⇒ ⇒ internal/devserver/server.go:70-73 **独立端口** `http.ListenAndServe(addr, s.server)`
+# ⇒ ⇒ Go 侧 favorite-rpc **真的**在 0.0.0.0:16062 起了一个 HTTP 服务
+#
+# ⚠️ **端口一字不差**（16062）⇒ 抓取配置只需改**路径**
+#    （Go `/metrics` → RAG `/actuator/prometheus`，Actuator 的固定前缀）
+#
+# ⚠️ **与 gRPC 业务端口严格分离**：本端口只承载 Actuator（**无任何业务 HTTP 路由**），
+#    gRPC 仍是 `grpc.server.port`（8082）。
+#    ⇒ 探针/部署可用 FAVORITE_RPC_MANAGEMENT_PORT 覆盖（探针会自动挑空闲端口）。
+server:
+  port: ${FAVORITE_RPC_MANAGEMENT_PORT:16062}
+
+# =============================================================================
+# 角色标记：rpc 侧（**不是** api 侧）
+# =============================================================================
+# 🔴 **这一行是「共享层 api 侧 web 能力的边界声明」**（2026-10-30 · 合并收口执行者要求）
+#
+# 【为什么必须写】—— 共享层那批 **api 侧**的 web 能力（`GoStyleCpuSheddingFilter` ·
+#   `GoStyleMaxConnsFilter` · `GoStyleMaxBytesFilter` · `GoStyleBreakerFilter` +
+#   `GoStyleTomcatParameterLimitCustomizer` 等）是**按 `rag.side` 分边**的
+#   ⇒ G4 侧把门扩成 `@ConditionalOnProperty(prefix="rag", name="side", havingValue="api",
+#   matchIfMissing=true)` ⇒ ⇒ **不写这一行 = 默认落在 api 侧** ⇒ ⇒ 那些 Bean 会照常活。
+#
+# 【为什么 rpc 侧必须落在 rpc 侧】—— Go 侧 rpc **一个 rest 中间件都没挂**
+#   （全部走 `zrpc.MustNewServer` ⇒ 不起 servlet 容器 ⇒ 没有 filter 链）
+#   ⇒ ⇒ 观测端口上**不该**挂着 Go 侧不存在的中间件 ⇒ 其中 **CPU 降载会拒请求**
+#   ⇒ ⇒ 直接威胁「载体存在的目的」（抓取请求被拒 ⇒ 载体装了但抓不到）。
+#
+# ⚠️ **当前状态（2026-10-30 实测 · 如实标注）**：
+#   共享层**当前还没有**消费 `rag.side` 的条件（`grep -rn "rag.side" service/common/src/main/java/`
+#   **零命中**）⇒ ⇒ **这一行现在还没有消费点** ⇒ ⇒ 它是**为 G4 正在扩的那道门预留的对侧**。
+#   ⇒ ⇒ 门落地前，它**不生效**；落地后，它**必须**已经在位（否则 rpc 域会挂上 api 侧的中间件）。
+#   ⇒ ⇒ 域侧的运行期断言见本域的 `*RpcSharedLayerWebBeanGateTest`（它断言「那些 Bean 不在容器里」）。
+
+rag:
+  # 🔴 **必须显式写 `rpc`**（2026-10-30 · 合并收口执行者要求）—— 见上方注释：
+  #   `matchIfMissing=true` ⇒ **不写 = 默认 api 侧** ⇒ 共享层的 api 侧 web Bean 会挂上来。
+  side: rpc
 
 # ============== gRPC server（devh）==============
 # 对应 Go etc/favorite.yaml:2  ListenOn: 0.0.0.0:8082

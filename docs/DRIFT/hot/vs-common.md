@@ -449,6 +449,70 @@
 
 ---
 
+
+---
+
+【开工前置回执 · G3 · **2026-10-30**】（第三轮 · rpc 域「指标抓取载体」轮）
+
+**① 任务范围**（本 lane = `article` + `comment` + `favorite` + `hot`，**阶段 1**）：
+
+本轮任务来源 = **调度员跨会话下发**（Jason 已明示批准「这波就补载体」）⇒ 给 rpc 域补「指标抓取载体」：
+
+- **落码三域**（载体 = **Actuator 的 servlet 载体**，形态照 `service/follow/follow-rpc` 已落地的同款：
+  `pom` 加 `spring-boot-starter-web` ＋ 顶层 `server.port` = Go 侧观测端口 ⇒ `management.endpoints.web.exposure.include` 才有出口）：
+  - `article-rpc` —— Go 观测端口 **9092**（go-zero `Prometheus:` 块）
+  - `favorite-rpc` —— Go 观测端口 **16062**（go-zero `DevServer:` 块）
+  - `hot-rpc` —— Go 观测端口 **19091**（go-zero `Prometheus:` 块）
+- **`comment-rpc` —— 不落码**，只写台账依据（**理由见 ③ 第 1 条：派工给的前提经实测证伪**）。
+
+- **不做**（明确边界）：
+  - **阶段 2**（`docs/twoStage.md` §1.3 / §2.2 / §6 / §7 · §9 故障矩阵 · 生产流量 · SLO）⇒ 收口执行者的事，**不预支**。
+  - **共享层** `service/common/**` ＋ `service/users/users-common/**` ⇒ **只有 G4 能写** ⇒ 本 lane **只读**；**本轮尤其不加任何 opt-out 属性**（共享层正在裁「rpc 域观测端口要不要挂 Go 的 rest 中间件」⇒ 那是 G4 的落点）。
+  - **共享索引面**：`AGENTS.md` / 三个 `_INDEX.md` / `docs/DRIFT/_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/Worktree.md` / `docs/PhaseGoal-judge.md` / `docs/PhaseGoal/g3.md`（机器生成物）⇒ **不写**。
+  - **根级文件**（`docker-compose.yaml` / 根 `README.md` / `.env.example`）⇒ **无人拥有 ⇒ 归合并收口执行者**。
+  - **已签字偏离 ＋ `CAND` 族未签字候选**（`docs/Intentional_Deviations/`）⇒ 按 AGENTS.md §5.3c「**登记完就躺着，不升级为拍板**」⇒ 不重复质疑、不推拍板。
+
+**② 已读四档 ＋ 本轮自读原文**（**每条带 `文件:行号`**；且**指消费点、不指声明点** —— AGENTS.md §3.3.1）：
+
+- **Go 侧观测面机制链（本轮核心，全部自读 ＋ 用真类型探针坐实）**：
+  - `zrpc.RpcServerConf` **内嵌** `service.ServiceConf` ⇒ `go-zero@v1.10.2/zrpc/config.go:39`
+  - `ServiceConf` 里有**两个**观测块字段 ⇒ `go-zero@v1.10.2/core/service/serviceconf.go:38`（`Prometheus prometheus.Config`）/ `:40`（`DevServer DevServerConfig`）
+  - **消费点**（不是声明点）⇒ `go-zero@v1.10.2/zrpc/server.go:63` `c.SetUp()` ⇒ `core/service/serviceconf.go:62` `prometheus.StartAgent(sc.Prometheus)` ＋ `:77` `devserver.StartAgent(sc.DevServer)`
+  - `Prometheus` 代理 ⇒ `go-zero@v1.10.2/core/prometheus/agent.go:31`（`Host` 为空 ⇒ **直接 return，不启动**）/ `:38`（`http.Handle(c.Path, promhttp.Handler())` ⇒ 只有 `/metrics` 一个路由）/ `:39-41`（**独立端口** `http.ListenAndServe`）
+  - `DevServer` 代理 ⇒ `go-zero@v1.10.2/internal/devserver/config.go:4-13`（`Enabled bool json:",default=true"`）+ `internal/devserver/server.go:79-88`（`:80` `if !c.Enabled { return }` ⇒ **整段缺失 ⇒ 零值 false ⇒ 不启动**）/ `:42`（`HealthPath`）/ `:48`（`MetricsPath`）/ `:53-57`（pprof）/ `:70-73`（**独立端口**）
+  - ⚠️ **yaml 里的块名对得上「go-zero 的内建字段」** —— 这是本轮最关键的一步：`Prometheus` / `DevServer` 看起来像 Go 仓自有的配置，**其实来自 go-zero 本身**（`service.ServiceConf`）⇒ ⇒ **它们是真的在被消费**（此前「grep Go 仓零命中 ⇒ 以为是死配置」的推断是错的）。
+- **Go 侧四域 yaml 的实测填充值**（探针 = **真类型** `zrpc.RpcServerConf` ＋ 真源 `conf.Load` ⇒ **不复刻结构体** ⇒ 避开「漏 tag ⇒ 结论翻转」那个坑）：
+  - `article-rpc`：`etc/article.yaml:21-24` ⇒ 探针读出 `Prometheus{Host:"0.0.0.0" Port:9092 Path:"/metrics"}` ⇒ Go 侧真起 **`0.0.0.0:9092` 的 `/metrics`**
+  - `hot-rpc`：`etc/hot.yaml:8-11` ⇒ 探针读出 `Prometheus{Host:"0.0.0.0" Port:19091 Path:"/metrics"}` ⇒ Go 侧真起 **`0.0.0.0:19091` 的 `/metrics`**
+  - `favorite-rpc`：`etc/favorite.yaml:23-30` ⇒ 探针读出 `DevServer{Enabled:true Host:"0.0.0.0" Port:16062 MetricsPath:"/metrics" HealthPath:"/healthz" EnableMetrics:true EnablePprof:true}` ⇒ Go 侧真起 **`0.0.0.0:16062` 的 `/metrics` ＋ `/healthz` ＋ `/debug/pprof/*`**
+  - `comment-rpc`：`etc/comment.yaml` **无该段** ⇒ 探针读出 `Prometheus{Host:""}` ＋ `DevServer{Enabled:false}` ⇒ **go-zero 层不起**；但 Go 侧**自建** ⇒ `service/comment/rpc/comment.go:38-41`（`http.Handle("/metrics", promhttp.Handler())` ＋ `http.ListenAndServe(":9091", nil)`）⇒ ⇒ Go 侧 comment-rpc **有**指标面，在 **`:9091` 的 `/metrics`**
+  - ⚠️ **去段变体探针**（把 yaml 里对应整段删掉再加载）⇒ 读出 `Prometheus{Host:""}` ＋ `DevServer{Enabled:false}` ⇒ ⇒ **坐实「整段缺失 ⇒ 零值 ⇒ `default=true` 不跨缺失段生效 ⇒ 不启动」**
+- **Go 侧两处「假声明 / 死代码」（本轮核出 ⇒ 不作为对齐依据）**：
+  - `service/hot/rpc/internal/metrics/metrics.go:14-26`（硬编码 `:9091`）**未被调用** —— `service/hot/rpc/hot.go` 全文无 `metrics.InitMetrics` ⇒ **死代码**；hot-rpc 的观测面**只有** go-zero 的 **19091**。
+  - `service/article/rpc/internal/` 下**无 metrics 包**（`service/article/rpc/article.go` 全文无 metrics import）⇒ **Go article-rpc 没有自定义 counter** ⇒ RAG 侧 `article-rpc` 的 `article_service_*` meter 是 **RAG 自有**（比 Go **宽**的一面）⇒ 本轮据实订正 RAG 注释里的假出处。
+- **RAG 侧现状（自读）**：`article-rpc` 的 `pom.xml:171`（actuator）＋ `:175`（micrometer-prometheus）**但无 `spring-boot-starter-web`** ⇒ `application.yml:232-247` 的 `management.endpoints.web.exposure.include` 是**死配置**（classpath 上没有 servlet 载体 ⇒ `WebApplicationType` 推导出 `NONE` ⇒ 那一族自动配置根本不加载）；`favorite-rpc` 的 `application.yml:42` **`spring.main.web-application-type: none`** ⇒ 即便补上 web starter 也**不会起容器** ⇒ 必须一并反转；`hot-rpc` 的 `application.yml:213-218` 是三处**反转项**（`management.server.port: -1` / `management.endpoints.enabled-by-default: false` / `management.prometheus.enabled: false`）。
+- **守门基建（自读）**：`article-rpc` 的 `ArticleRpcRuntimeBootGateTest`（**真 fat jar** ＋ **真 PG 容器** ＋ Nacos/Kafka/Redis 指向不可达地址）＝ 本轮「真启动守门」的模板；`support/RealGrpcPort`（本域专用端口段 `22400–22479`）＋ `support/RealContainerHostPort`（容器宿主口段 `22850–22869` ＋ 登记册守恒）＝ 端口基建。
+
+**③ 待批准项**：**无**（Jason 已明示批准「这波就补载体」⇒ 范围 / 端口 / 载体形态均已定）。
+
+1. ℹ️ **一条「派工前提被实测证伪」必须如实登记**（⇒ **不构成拍板项**，按 §5.3c 登记完就躺着）：
+   ⇒ 派工给的口径是「`comment-rpc` Go 侧无该面 ⇒ 不补」⇒ **本轮实测证伪**：Go 侧 `service/comment/rpc/comment.go:38-41` **自建** `promhttp` 处理器并在 **`:9091`** 起 HTTP 服务 ⇒ ⇒ **Go 侧 comment-rpc 有指标面（`:9091` `/metrics`）** ⇒ ⇒ **RAG 侧 comment-rpc 缺该面 = 一条真实漂移**（不是「无该面」）。
+   ⇒ **本轮仍不落码 comment-rpc**：① 超出本轮派工范围（本轮只批了三个域的载体）；② comment 的 Go 侧是**自建** `promhttp`（与另三域的 go-zero 代理**机制不同**）⇒ 载体形态要另做判断，不能照抄 follow-rpc。
+   ⇒ **已按 C 类登记**在 `docs/DRIFT/comment/vs-common.md` ⇒ **下一轮**补 ⇒ **不推拍板**。
+2. ℹ️ **暴露形态差异（路径）按 follow-rpc 已登记的口径处理，不新造偏离登记**：Go `/metrics`（＋ favorite 的 `/healthz` ＋ pprof）↔ RAG `/actuator/prometheus`（＋ `/actuator/health`）⇒ **端口一字不差、路径不同**（Actuator 的固定前缀）⇒ 属 `twoStage.md` §10 的**暴露形态差异**，与 `DRIFT-FOLLOW-006` 同款。
+
+**④ 等批准** ⇒ **批准后才开工**（本回执落笔时除本小节外未写任何代码 / 未改任何台账；已读动作仅限只读：四档台账 ＋ `_cross` ＋ 阶段标准 ＋ Go/RAG 原文自读 ＋ 本轮探针实跑）。
+⇒ **Jason 于 2026-10-30 明示批准「这波就补载体」**（经调度员跨会话转达）⇒ **已获批开工**（⑤ 由调度员代填，见本节末尾）。
+
+**⑤ 批准记录：Jason · 2026-10-30 · 批准范围：本轮 rpc 域「指标抓取载体」＝ `article-rpc`（9092）/ `favorite-rpc`（16062）/ `hot-rpc`（19091）三个模块的 pom ＋ yml 改造 ＋ 各一条真启动守门 ＋ 真启动验收证据 ＋ 台账回写 ＋ 提交到 G3 分支（不 push、不开 PR）；`comment-rpc` 只写台账依据　← 由**调度员代填**（依据：调度员跨会话转达 Jason 2026-10-30 明示批准「这波就补载体」；**回执人不得自批**· **代填 ≠ 代批准**）
+
+- **本域落码点**：`service/hot/hot-rpc` 补 Actuator servlet 载体（Go 观测端口 **19091**，go-zero `Prometheus:` 块）
+  - RAG 侧现状：`pom.xml:183`（actuator）＋ `:187`（micrometer-prometheus）**无** `spring-boot-starter-web`
+  - 🔴 **三处反转项**（`application.yml:212-221`）：`management.server.port: -1`（显式禁用 management HTTP server）/ `management.endpoints.enabled-by-default: false` / `management.prometheus.enabled: false` ⇒ 三处都要改，否则加了载体也没有出口
+  - ℹ️ **本轮订正的一处旧注释**：`application.yml:208-209` 写「Go 的 prometheus.StartAgent 在 19091 起的是**真的 HTTP 服务**」⇒ **这句话本轮被坐实为真**（`go-zero@v1.10.2/core/prometheus/agent.go:39-41` 确实是独立 HTTP 监听）⇒ 但它**据此得出的结论**（「纯 gRPC 的 Spring 进程没有 web 容器 ⇒ `/actuator/prometheus` 没有暴露路径」⇒ 不补）**已过时** ⇒ 随载体一起改写
+  - ⚠️ **go-zero 侧的一个易混点**（本轮核出，别写错出处）：`service/hot/rpc/internal/metrics/metrics.go` 里那个硬编码 `:9091` 的 metrics server 是**死代码**（`hot.go` 全文未调用）⇒ **hot-rpc 的观测端口是 19091，不是 9091** ⇒ 本轮注释**不得**引用那个文件当出处
+  - 本域新守门：`HotRpcPrometheusCarrierGateTest`（**真 fat jar** ⇒ 真启动后打 `/actuator/prometheus`）
+
 ## 10. ⚪ **DDL 逐域机器核**（`--indexes` + `--check-source`）· 2026-10-29 · R3·T-3.1（G3 lane · `hot` 域）
 
 > **本节为什么存在**：`tools/difftest/check-ddl-static.py` **默认不开 `--indexes`** ⇒ 索引 / 唯一约束 / 触发器**从未被机器核过**；**默认不开 `--check-source`** ⇒ 只比活库、不比仓里的 `.sql` ⇒ 「迁移改了但没人重跑」**不可见**。
@@ -598,6 +662,22 @@ python3 tools/difftest/check-ddl-static.py --domain hot --print-rag-sql
 
 ---
 
+## 📌 追加 · 🟡 **共享层轴后果：rpc 域首次成为 servlet web app（2026-10-30 · G3 第三轮）**
+
+> 本节只记**共享层轴**的后果（域内落地的细节在同域的 `rpc.md`）。🟡 = **待共享层裁定**，**不是**缺陷。
+
+**🔴 轴事实一：共享层那批 `@ConditionalOnWebApplication(SERVLET)` 的自动配置，在 rpc 域**首次生效**
+
+- 触发条件：本轮给 `hot-rpc` 补了 `spring-boot-starter-web`（Actuator 的 servlet 载体）⇒ ⇒ **rpc 进程首次成为 servlet web app** ⇒ ⇒ 共享层里带 servlet 条件的**自动配置**（`service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` 列的那几个）**第一次**会在 rpc 容器里装载。
+- 实测命中（`hot` 域）：`com.rag.common.http.GoStyleJsonContentTypeAdvice`（`@AutoConfiguration` ＋ `@ConditionalOnWebApplication(SERVLET)` ＋ `@RestControllerAdvice`）⇒ 它**只改 JSON 响应的 `Content-Type`**（`service/common/src/main/java/com/rag/common/http/GoStyleJsonContentTypeAdvice.java:187-206`）⇒ ⇒ `/actuator/prometheus` 是 **text/plain** ⇒ **不受影响** ⇒ 实测抓取 **HTTP 200** ＋ 指标族正常；⇒ 但 `/actuator/health`（JSON）会拿到 `application/json;charset=utf-8`。
+- ⇒ ⇒ 这条**正是**共享层正在裁的那个议题（「rpc 域观测端口要不要挂 Go 的 rest 中间件」）的**落点** ⇒ ⇒ **归 G4 裁定**，域侧**只登记、不自决**。
+
+**🔴 轴事实二：`rag.side` 这个属性共享层**当前还没有消费点**
+
+- 域侧本轮已在三份 rpc 的生产 yml 里写 `rag.side: rpc`（`hot` 域的落点是 `service/hot/hot-rpc/src/main/resources/application.yml`）⇒ 那是**为 G4 正在扩的那道门预留的对侧**（门若写成 `matchIfMissing=true` ⇒ **不写 = 默认 api 侧** ⇒ rpc 域会挂上 api 侧的 web Bean）。
+- ⚠️ **如实标注**：**2026-10-30 实测** `grep -rn "rag.side" service/common/src/main/java/` **零命中** ⇒ ⇒ 共享层**当前还没有**消费这个属性的条件 ⇒ ⇒ 域侧这三行**现在还没有消费点** ⇒ ⇒ 门落地前**不生效**、落地后**必须已在位**。
+- ⇒ ⇒ 域侧**运行期**断言已就位（`hotRpcSharedLayerWebBeanGateTest`，3 例：属性在位 ＋ **正向对照**（证明 servlet 前提成立 ⇒ 断言非空转）＋ api 侧那 5 个 web Bean **不在**容器里）⇒ ⇒ 它现在证明的是「那 5 个 `@Component` 中间件因为 rpc **不扫** `com.rag.common` 而不在容器里」⇒ ⇒ 等 G4 把门扩到全部 api 侧中间件后，**自动升级**为「`rag.side` 真的挡住了门」的运行期证据。
+
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
 > 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
@@ -616,4 +696,4 @@ python3 tools/difftest/check-ddl-static.py --domain hot --print-rag-sql
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
 |---|---|---|---|---|---|
 | G4-19 | D（差异已消失 ⇒ 无待实现内容） | P2 | 否 | Go `service/hot/api/internal/handler/routes.go:16-25`（该脚本要比对的 Go 原件：`AddRoutes` ⇒ `GET /articles` ＋ `rest.WithPrefix("/hot/v1")` ⇒ Go 侧 HTTP 端点 = 1）vs RAG `tools/difftest/check-surface-parity.py:110`（`from go_repo import resolve_go_repo as _shared_resolve_go_repo` ⇒ **已改用共享实现**，本脚本不再自带解析逻辑）＋ `:118-124`（`_resolve_go_repo()` ⇒ 直接委托共享实现）＋ `tools/difftest/go_repo.py:99-134`（**判据三条**：环境变量 `GO_REPO` 优先且**必须校验**（`:115-122`）→ 否则**逐级向上搜索**（`:124-126` ＋ `:71-96`）→ 都找不到 ⇒ **抛 FileNotFoundError**（`:128-134`）⇒ 绝不退化成「Go 侧 0 个端点」）⇒ **差异已消失**：台账记的「默认路径 = `dirname(REPO)/Sea-RideTheWind_golang` ⇒ 工作树里恒指错 ⇒ hot 域直接 EXIT=1」是**过期快照**（2026-10-29 G4 已把它落成**共享解析函数**，并明确「就地修 = 下一个新脚本还会重犯」）⇒ ⇒ **无待实现内容，不阻断阶段一** | 2026-10-30 |
-| H-4 | D（差异已消失 ⇒ 无待实现内容） | P3 | 否 | Go `service/hot/rpc/etc/hot.yaml:2`（`ListenOn: 0.0.0.0:8083` ⇒ Go 侧 hot-rpc 的 gRPC 端口 = 8083；`hot2.yaml:2` = 8084、`hot3.yaml:2` = 8085 ⇒ 三副本）＋ `service/hot/rpc/internal/config/config.go:10-11`（`type Config struct { zrpc.RpcServerConf ... }` ⇒ yaml 的 `ListenOn` 绑定到 `zrpc.RpcServerConf`）vs RAG `Infrastructure.md:99`（§3「Java 版业务进程端口分配」表里 `hot-rpc` 行 = **8083** · gRPC · ✅ 实装 ⇒ **端口已预占**；该 §3 起于 `Infrastructure.md:78`）＋ `service/hot/hot-rpc/src/main/resources/application.yml:152`（`port: ${HOT_RPC_GRPC_PORT:8083}`）⇒ **差异已消失**：台账记的「`hot-rpc` 的 gRPC 端口未在 `Infrastructure.md §3` 预占」是**过期快照**（§3 已于 2026-10-29 按实测现状订正并给出 8083）⇒ ⇒ **无待实现内容，不阻断阶段一**。⚠️ **残留 = 一处过期注释（零行为变更）**：`service/hot/hot-rpc/src/main/resources/application.yml:150` 仍写「Infrastructure.md §3 目前只给 hot 预占了 18897(HTTP)，**gRPC 端口未分配**」⇒ 与 §3 现值矛盾 | 2026-10-30 |
+| H-4 | D（差异已消失 ⇒ 无待实现内容） | P3 | 否 | Go `service/hot/rpc/etc/hot.yaml:2`（`ListenOn: 0.0.0.0:8083` ⇒ Go 侧 hot-rpc 的 gRPC 端口 = 8083；`hot2.yaml:2` = 8084、`hot3.yaml:2` = 8085 ⇒ 三副本）＋ `service/hot/rpc/internal/config/config.go:10-11`（`type Config struct { zrpc.RpcServerConf ... }` ⇒ yaml 的 `ListenOn` 绑定到 `zrpc.RpcServerConf`）vs RAG `Infrastructure.md:99`（§3「Java 版业务进程端口分配」表里 `hot-rpc` 行 = **8083** · gRPC · ✅ 实装 ⇒ **端口已预占**；该 §3 起于 `Infrastructure.md:78`）＋ `service/hot/hot-rpc/src/main/resources/application.yml:220`（`port: ${HOT_RPC_GRPC_PORT:8083}`）⇒ **差异已消失**：台账记的「`hot-rpc` 的 gRPC 端口未在 `Infrastructure.md §3` 预占」是**过期快照**（§3 已于 2026-10-29 按实测现状订正并给出 8083）⇒ ⇒ **无待实现内容，不阻断阶段一**。⚠️ **残留 = 一处过期注释（零行为变更）**：`service/hot/hot-rpc/src/main/resources/application.yml:218` 仍写「Infrastructure.md §3 目前只给 hot 预占了 18897(HTTP)，**gRPC 端口未分配**」⇒ 与 §3 现值矛盾 | 2026-10-30 |

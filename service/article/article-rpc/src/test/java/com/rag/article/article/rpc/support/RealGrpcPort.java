@@ -120,6 +120,40 @@ public final class RealGrpcPort {
     }
 
     /**
+     * 挑一个<b>确实可绑</b>的端口，且<b>排除</b>指定的那个。
+     *
+     * <p>🔴 <b>为什么需要这个重载</b>（2026-10-30 · 补 Actuator 载体时新增）：
+     * 补上载体后，rpc 进程<b>同时</b>要占<b>两个</b>口 ——
+     * <ul>
+     *   <li><b>业务面</b>：gRPC server 端口（{@code grpc.server.port}）；</li>
+     *   <li><b>观测面</b>：Actuator 的 servlet 容器端口（{@code server.port}）
+     *       ⇒ 默认值 = Go 的观测端口（article 9092 / favorite 16062 / hot 19091），
+     *       探针并行起时用 env 覆盖成别的口。</li>
+     * </ul>
+     * ⇒ 两个面<b>必须占不同的口</b>（Go 侧本来就是两个独立端口）
+     * ⇒ ⇒ 挑第二个时必须把第一个<b>排除掉</b>
+     * ⇒ ⇒ 否则两次 {@code pick()} 可能挑到<b>同一个</b>空口 ⇒ 第二个 bind 必
+     * {@code EADDRINUSE} ⇒ 表现为「真启动守门<b>偶发红</b>」。
+     *
+     * <p>⚠️ 本类原名带「Grpc」，但本域的<b>观测面</b>端口也走本段 ——
+     * 这是<b>刻意</b>的：两个面共用同一段 ⇒ 天然互不跨域，也不会与别的域抢口。
+     *
+     * @param forbidden 不许挑中的端口（通常是已经挑给另一个面的那个）
+     * @return 端口号（一定在 {@link #FIRST}–{@link #LAST} 内，且 ≠ {@code forbidden}）
+     * @throws IllegalStateException 整段都被占满时
+     */
+    public static int pick(int forbidden) {
+        for (int port = FIRST; port <= LAST; port++) {
+            if (port != forbidden && isFree(port)) {
+                return port;
+            }
+        }
+        throw new IllegalStateException(
+                "真进程测试端口段 " + FIRST + "-" + LAST + " 已被占满"
+                        + "（本机并行会话太多？）⇒ 换一段端口再试");
+    }
+
+    /**
      * 该端口能不能<b>同时</b>满足两件事：
      * <ol>
      *   <li><b>{@code 0.0.0.0:P} 可绑</b> —— gRPC server 将来要绑的就是通配地址

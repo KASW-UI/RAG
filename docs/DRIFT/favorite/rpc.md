@@ -3078,7 +3078,7 @@ M2（改名不推进 `update_time`）里 **L1 差异 = 0**，只有 **write_cols
 | | 是什么 | 决定谁 |
 |---|---|---|
 | `favorite-api` 的 `FavoriteRpcClient.capByClientTimeout`（`favorite-api/.../client/FavoriteRpcClient.java:156-168`） | **api → rpc** 那次 gRPC 调用的**客户端** deadline = `min(ctx 剩余, 2s)` | **客户端超时语义** ⇒ **不决定** rpc 内部 SQL 的 R |
-| `favorite-rpc` 的 `RpcInterceptor`（`service/common/.../RpcInterceptor.java:170-172`） | **服务端每次调用自己新绑** `deadlineEpochMs = now + timeout`（`rpc-timeout: 2s` ⇒ `favorite-rpc/src/main/resources/application.yml:252`）⇒ 再由 `:281` 的 `DeadlineState.bindToCurrent(deadlineEpochMs)` 交给 SQL 注入器 | **SQL 预算 R** ✅ |
+| `favorite-rpc` 的 `RpcInterceptor`（`service/common/.../RpcInterceptor.java:170-172`） | **服务端每次调用自己新绑** `deadlineEpochMs = now + timeout`（`rpc-timeout: 2s` ⇒ `favorite-rpc/src/main/resources/application.yml:339`）⇒ 再由 `:281` 的 `DeadlineState.bindToCurrent(deadlineEpochMs)` 交给 SQL 注入器 | **SQL 预算 R** ✅ |
 
 ⇒ ⇒ **本分支上正确的依据**：
 **R = 服务端每次调用新绑的整预算 − δ**（业务面 2s / 权威读面 3s）
@@ -4166,6 +4166,48 @@ EXIT=0
 - 本节**只追加**，**不改写**任何历史结论。
 - `U7`（环境受限）在 §26/§27 的历史口径里仍按原文读；**本节的实测**把「rpc 层双侧活体」这一项从未验变成已验 ⇒ **以本节为准**。
 - `docs/PhaseGoal-judge.md:189` 里 `favorite-rpc` 的 **R4 / E4** 与「`U7`（环境受限）」那一栏 ⇒ **该栏已被本节实测推翻**（R 档「可复算」的**复算命令**现在有了）⇒ ⚠️ **`docs/PhaseGoal-judge.md` 不在本 lane 写权内**（收口执行者改）。
+
+## 📌 追加 · 🟢 **rpc 域「指标抓取载体」落地 + U9 销账（2026-10-30 · G3 第三轮）**
+
+**落码清单（域内文件）**
+
+- `service/favorite/favorite-rpc/pom.xml` —— 新增 `spring-boot-starter-web`；订正 pom 里那句因果反了的旧注释。
+- `service/favorite/favorite-rpc/src/main/resources/application.yml` —— **删除** `spring.main.web-application-type: none`（那是「真 jar 起不来」的**缓解手段**，补上 starter 后根因已消，留着会把刚补的载体**再关掉**）；新增顶层 `server.port: ${FAVORITE_RPC_MANAGEMENT_PORT:16062}`（= Go `DevServer.Port`，**一字不差**）；`management.endpoint.prometheus.enabled: true`；`spring.cloud.nacos.discovery.register-enabled: false`；新增顶层 `rag.side: rpc`；口令占位符改为**裸** `${POSTGRES_PASSWORD}`。
+- `service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteRpcProductionStartupTest.java` —— **断言反转**（AGENTS.md §3.3 ③：先改/删错误断言，再改实现）：原先断言「生产 yaml **必须**有 `web-application-type: none`」⇒ 现在断言「**不得**再有」＋「`server.port` 默认值必须 = 16062」＋「观测端口与 gRPC 8082 严格分离」＋ `target/classes` 交叉核对。
+- `service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteRpcPrometheusCarrierGateTest.java` —— **真 fat jar ＋ 真 PG 容器** ⇒ 真打 `/actuator/prometheus`。
+- `service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteRpcSharedLayerWebBeanGateTest.java` —— 装配层断言「api 侧 web Bean 不在 rpc 容器里」＋正向对照。
+- `support/RealGrpcPort.java` —— 新增 `pick(int forbidden)`；`support/RealContainerHostPort.java` —— 登记册新增 `22918`（载体门）与 `22919`（分边门）。
+- `tools/prod-startup-probe/favorite/run.sh` —— **case C 的语义换掉了**（见下）。
+
+**真启动证据（进程级 · 2026-10-30 实跑）**
+
+- `GET http://127.0.0.1:16062/actuator/prometheus` ⇒ **HTTP 200**、**62 个指标族**、含 `application="favorite-rpc"`。
+- **同一时刻** gRPC 端口 **8082** 与观测端口 **16062** **同时 LISTEN**。
+- ⚠️ 本机 `8082` 被用户自有的 `python -m http.server 8082`（已运行 37 天）占用 ⇒ 验收时改用空闲口 **21300** ⇒ 注册端口仍 = **gRPC 端口**（不是观测端口）⇒ 端口一致性这条结论不受影响。
+
+**🟢 U9 的 rpc 侧已销账（本轮）**
+
+- U9 原文（本文件 §26.8）：「Go 生产形态有 16062 那个 HTTP 面，RAG 侧没有 ⇒ 要么 RAG 侧也开（部署形态变更），要么签字接受 ⇒ **待拍板**」。
+- 本轮 Jason 批准走「**RAG 侧也开**」那条路 ⇒ 已落码 ⇒ **rpc 侧已闭**。
+- 残留差异**只有载体与路径**：Go = go-zero **devserver** 的 `/metrics` ＋ `/healthz` ＋ `/debug/pprof/*`；RAG = Tomcat 上的 Actuator `/actuator/prometheus` ⇒ **端口一字不差、路径不同** ⇒ 属 `twoStage.md` §10「暴露形态差异」⇒ 按 follow-rpc 已登记的口径处理，**不新造偏离登记**。
+- ⚠️ **U9 的 api 侧（16063）不在本轮闭环内** —— Go 侧 favorite-**api** 的 DevServer 在 `service/favorite/api/etc/favorite.yaml:25-32`（**端口 16063**，注意文件名是 `favorite.yaml` 不是 `favorite-api.yaml`）⇒ 消费点 = `service/favorite/api/favorite.go:29` `rest.MustNewServer(c.RestConf)` ⇒ `go-zero@v1.10.2/rest/server.go:49` `c.SetUp()` ⇒ `core/service/serviceconf.go:77` `devserver.StartAgent(sc.DevServer)` ⇒ ⇒ **Go 的 api 侧确实起 16063 那个面** ⇒ ⇒ **RAG 的 favorite-api 缺它 = 一条真实漂移** ⇒ 已按 C 类登记在 `docs/DRIFT/favorite/vs-common.md` ⇒ **下一轮**补 ⇒ 按 AGENTS.md §5.3c 登记完就躺着，**不推拍板**。
+
+**探针 case C 的语义换掉了（2026-10-30）**
+
+- 旧 C：把 `spring.main.web-application-type` 覆盖成 `servlet` ⇒ 期望**启动即炸**（Boot 判定成 SERVLET 但没有 servlet 容器）。
+- **旧语义已随载体落地而失效**：补了 starter ⇒ **容器有了** ⇒ 覆盖成 `servlet` **不再炸**（它就是当前默认形态）⇒ 旧 C 恒判「不成立」⇒ **探针假红**。
+- 新 C：覆盖成 `none` ⇒ 期望进程**照样起来**（web 类型**不影响** gRPC 业务面）⇒ **但**观测端口上**抓不到** `/actuator/prometheus` ⇒ ⇒ 它证明的是「B 里那个载体**确实由 servlet 容器承载**」（而不是别的东西顺带提供的）。
+- 实跑：`bash tools/prod-startup-probe/favorite/run.sh` ⇒ **EXIT=0**（A 炸(uri) · B 起来且载体在 · C 起来但载体不在）；分类器自检 **9/9**（新增载体维度）。
+- ⚠️ **顺带把端口段归位**：本脚本原先用 `21300–21399`，而段表（`docs/DRIFT/global/vs-common.md` §4.10.19.2）里那是 **favorite-api 真容器测试**的段 ⇒ **既有重叠** ⇒ 本轮迁到 favorite 探针段 `21400–21599` 里的空闲部分 **21501–21599**（避开 favorite-rpc 的 `21400–21499` 与 comment-rpc 的 `21500`）。
+
+**Nacos 单实例验收（2026-10-30 实跑 · 真 Nacos standalone）**
+
+- `favorite-rpc` 在 Nacos 里**实例数 = 1**，实例端口 = **gRPC 端口**（实测 `port=21300`，即当次使用的 gRPC 口），**不是**观测端口 16062；**自动注册痕迹 = 0 条**。
+
+**口令兜底取消（2026-10-30 · 合并收口执行者派工）**
+
+- Go `service/favorite/rpc/etc/favorite.yaml:13` = `Password: "${POSTGRES_PASSWORD}"`（**裸**）⇒ `core/conf/config.go:63` 的 `os.ExpandEnv` **不认** `${VAR:default}` ⇒ 缺变量 ⇒ 空口令 ⇒ fail-fast ⇒ ⇒ RAG 侧原先的 `${POSTGRES_PASSWORD:password}` 属「比 Go 松」⇒ 本轮取消。
+- ⚠️ **残余差异（失败时刻不同）**：Go = 启动成功、连库时失败；RAG = 启动即失败 ⇒ 属「RAG 更严」的一侧 ⇒ 由**合并收口执行者**在合并窗口统一登记。
 
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 

@@ -174,6 +174,48 @@
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
+        <!--
+            🔴 spring-boot-starter-web：**只为给 Actuator 一个 servlet 载体**
+            ⇒ 让 `management.endpoints.web.exposure.include: prometheus` 真正有出口。
+
+            【Go 出处（真源 · 消费点）】
+              service/article/rpc/etc/article.yaml:21-24
+                  Prometheus: {Host: 0.0.0.0, Port: 9092, Path: /metrics}
+              ⇒ go-zero 的 zrpc.RpcServerConf **内嵌** service.ServiceConf
+                 （go-zero@v1.10.2/zrpc/config.go:39）
+              ⇒ ServiceConf.Prometheus 字段（go-zero@v1.10.2/core/service/serviceconf.go:38）
+              ⇒ ⇒ 消费点 zrpc/server.go:63 `c.SetUp()`
+                 ⇒ ⇒ core/service/serviceconf.go:62 `prometheus.StartAgent(sc.Prometheus)`
+                 ⇒ ⇒ core/prometheus/agent.go:31（Host 为空 ⇒ 直接 return，不启动）
+                 ⇒ ⇒ core/prometheus/agent.go:38 `http.Handle(c.Path, promhttp.Handler())`
+                 ⇒ ⇒ core/prometheus/agent.go:39-41 **独立端口** `http.ListenAndServe(addr, nil)`
+              ⇒ ⇒ Go 侧 article-rpc **真的**在 0.0.0.0:9092 起了一个 HTTP 服务，路径 /metrics。
+
+            【为什么以前「有 actuator 却抓不到」】—— AGENTS.md §3.3 的典型形态：
+              `spring-boot-starter-actuator` 只提供 **endpoint + 自动配置**，
+              **不提供 servlet 容器** ⇒ `management.endpoints.web.*` 这一族配置
+              **没有任何载体** ⇒ **配了也不生效**（不是报错，是那一族自动配置根本不加载）。
+              ⇒ 本模块的 yml 早就写了 exposure.include，但它一直是**死配置**。
+
+            【Boot 4 拆模块纪律（AGENTS.md §3.3 · 先确认能力还在不在，再决定补哪个模块）】
+              - `WebEndpointAutoConfiguration`（actuator 的 servlet web endpoint 映射）
+                **仍在** `spring-boot-actuator-autoconfigure` ✔（已在 classpath 上）
+              - `PrometheusScrapeEndpoint` + `PrometheusMetricsExportAutoConfiguration`
+                在 **`spring-boot-micrometer-metrics`**（`spring-boot-starter-actuator` 传递引入）✔
+              ⇒ **唯一缺的就是 servlet 容器 + Spring MVC**
+              ⇒ 补 `spring-boot-starter-web`（Boot 4 里它 = starter-tomcat + webmvc + http-converter）
+                 **版本由 spring-boot-dependencies BOM 管 ⇒ 不写 `<version>`**。
+
+            【⚠️ 进程形态变了 —— 这是「暴露形态差异」，按 twoStage.md §10 登记】
+              Go 侧是 `http.ListenAndServe` 的**小 server**（无 servlet、无业务路由）；
+              RAG 侧是 **Tomcat**（有 servlet 容器，但**没有任何业务 HTTP 路由**）。
+              ⇒ 两者的**对外可观测面**（独立端口 + Prometheus 文本）一致，载体不同
+              ⇒ 登记为暴露形态差异项（与 follow 域 DRIFT-FOLLOW-006 同款）。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
 
         <!-- ============== 8. OpenTelemetry OTLP exporter ============== -->
         <dependency>
