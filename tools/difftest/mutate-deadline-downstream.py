@@ -73,18 +73,36 @@ MUTATIONS = [
     #       （若有人日后把绑定删了/改坏了 ⇒ 立刻被抓）。
     #    ⇒ ⇒ **教训**：锚点会随生产代码演进而失效 ⇒ 变异点必须**每次重定基**，
     #    且**「锚点命中 0 处」与「判据被证伪」是两件事**（必须分开报）。
+    # ⚠️ **期望红键集已于 2026-10-30 重算**（探针改造 ⇒ 语义变了）：
+    #   · `outgoing_carrier`：载体没了 ⇒ RAG = `absent` ≠ Go = `present_expired` ⇒ **红**
+    #   · `failed_fast`：载体没了 ⇒ 拦截器**无从取预算** ⇒ 只剩调用点的安全上界（1500ms）
+    #   ⇒ ⇒ 不会立刻失败 ⇒ RAG = `false` ≠ Go = `true` ⇒ **红**
+    #   · `code`：安全上界到期也是 **DEADLINE_EXCEEDED(4)** ⇒ RAG = 4 = Go ⇒ **不红**
+    #   · `sql_carrier`：SQL 路径的载体**没被动** ⇒ 仍 `present_expired` ⇒ **不红**
     ('M1 生产代码：拆掉已落地的出向载体绑定（onHalfClose 的 GoStyleRequestDeadline ⇒ Scope.NOOP）',
      RPC_INTERCEPTOR,
      '? GoStyleRequestDeadline.bindAbsoluteNanos(absoluteDeadlineNanos)',
      '? GoStyleRequestDeadline.Scope.NOOP',
-     {'outgoing_carrier'}),
+     {'failed_fast', 'outgoing_carrier'}),
 
-    ('M2 探针自身：给 RAG 半边的下游调用加 deadline（证明行为键不是恒定值）',
+    # ⚠️ **M2 已于 2026-10-30 重锚**（探针改造 ⇒ 旧锚点的语义整体翻转）：
+    #   旧 M2 = 「给探针的下游调用加一个 100ms deadline」⇒ 证明「行为键不是恒定值」。
+    #   ⇒ ⇒ **探针改造后这条变异已失效**：探针现在**必须**靠 devh 装配拿 deadline，
+    #   ⇒ ⇒ 而调用点自带一个 deadline 会与载体**取 min**（共享层拦截器语义）
+    #   ⇒ ⇒ 载体已过期（剩余 0）⇒ ⇒ min 仍是 0 ⇒ ⇒ **变异不再有任何效果**
+    #   ⇒ ⇒ 「加 deadline」这个方向在 min 语义下**天然无效** ⇒ 必须换成正交的方向。
+    # ⇒ ⇒ 新 M2 = **绕开 devh 装配**（把正式观测换成裸 channel）
+    #   ⇒ ⇒ 载体**在**（同一个 handler 线程）⇒ ⇒ 但没有拦截器 ⇒ ⇒
+    #   ⇒ ⇒ 只有调用点自己的安全上界（1500ms）生效 ⇒ ⇒ 不会立刻失败
+    #   ⇒ ⇒ ⇒ `failed_fast` 变 false ⇒ ⇒ 与 Go 的 true 不等 ⇒ ⇒ 红
+    #   ⇒ ⇒ ⇒ `code` 仍是 4（安全上界到期也是 DEADLINE_EXCEEDED）⇒ ⇒ 与 Go 相等 ⇒ **不红**
+    #   ⇒ ⇒ ⇒ 两个载体键在 handler 线程上测 ⇒ ⇒ 不变 ⇒ ⇒ **不红**
+    #   ⇒ ⇒ ⇒ **唯一变量 = 「有没有 devh 装配」** ⇒ ⇒ 证明行为键真的在观测装配面。
+    ('M2 探针自身：把正式观测换成**裸 channel**（绕开 devh 装配 ⇒ 出向调用拿不到载体预算）',
      PROBE_JAVA,
-     '                ClientCalls.blockingUnaryCall(downstreamChannel, HANG_METHOD, CallOptions.DEFAULT, new byte[0]);',
-     '                ClientCalls.blockingUnaryCall(downstreamChannel, HANG_METHOD,\n'
-     '                        CallOptions.DEFAULT.withDeadlineAfter(100, TimeUnit.MILLISECONDS), new byte[0]);',
-     {'failed_fast', 'code'}),
+     'outcome.set(measureDownstream(downstreamChannel));',
+     'outcome.set(measureDownstream(bareChannel));',
+     {'failed_fast'}),
 ]
 
 
