@@ -37,9 +37,9 @@ import com.rag.common.protection.GoStyleProtectionConfiguration;
 @SpringBootApplication // 等价于 @SpringBootConfiguration、@EnableAutoConfiguration、@ComponentScan 三者的组合
                         // @ComponentScan：启用组件扫描，默认扫描启动类所在包及其所有子包（本模块自己的 bean）。
                         //                      注意：**不能**把 com.rag.common 加进 scanBasePackages —— 那个包下有
-                        //                      HttpMiddlewareFilter（jakarta.servlet.Filter），而 user-rpc 是纯 gRPC
-                        //                      进程、故意不引 web 依赖，全包扫描会把 servlet 类拖进来直接启动失败。
-                        //                      只需要的 bean 用 @Import 精确引入，见下。
+                        //                      HttpMiddlewareFilter（jakarta.servlet.Filter），而本模块是 rpc 侧进程、Go 侧零 rest 中间件；
+                        //                      全包扫描会把 api 侧中间件拖进来 ⇒ 与 Go 不同形（原故障：jakarta/servlet/Filter.class 打不开）；
+                        //                      ⚠️ 2026-10-30 补载体后本模块已有 web 容器 ⇒ 「不扫 com.rag.common」更要守住（兜底 = @ConditionalOnApiSide）。
                         // @EnableAutoConfiguration：启用 Spring Boot 的自动配置机制，根据 classpath 上的依赖自动装配 Bean（比如引入 grpc-spring-boot-starter 后自动配置 gRPC server）。
 @EnableConfigurationProperties(UserRpcProperties.class) // 让 Spring 识别并注册那些标了 @ConfigurationProperties 的类，把它们变成容器里的 Bean
 @EnableDiscoveryClient // Spring Cloud 提供的通用注解，用来启用服务发现客户端的能力。

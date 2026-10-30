@@ -44,10 +44,10 @@ import com.rag.common.protection.GoStyleProtectionConfiguration;
  * <p>包扫描范围：只扫 {@code com.rag.users.admin.rpc} 本模块。
  */
 @SpringBootApplication // 只扫本模块。com.rag.common 不能进 scanBasePackages：
-//   那个包下有 HttpMiddlewareFilter（jakarta.servlet.Filter），而 admin-rpc 是纯 gRPC 进程、
-//   pom 里刻意不引 servlet 依赖，全包扫描会把 servlet 类拖进来直接启动失败：
-//     java.io.FileNotFoundException: class path resource [jakarta/servlet/Filter.class] cannot be opened
-//   本模块对 service/common 的业务调用主要用静态工具 com.rag.common.snowflake.Snowflake；
+//   那个包下有 HttpMiddlewareFilter（jakarta.servlet.Filter），而本模块是 rpc 侧进程、Go 侧零 rest 中间件；
+//   全包扫描会把 api 侧中间件拖进来 ⇒ 与 Go 不同形（原故障：jakarta/servlet/Filter.class 打不开）；
+//   ⚠️ 2026-10-30 补载体后本模块已有 web 容器 ⇒ 「不扫 com.rag.common」更要守住（兜底 = @ConditionalOnApiSide）；
+//   本模块对 service/common 的业务调用主要用静态工具 com.rag.common.snowflake.Snowflake。
 //   AdminSeederBootstrap 例外地<b>注入</b>了 SnowflakeBean（DRIFT-010 修法）——
 //   目的是用 Spring 的 bean 创建顺序保证「workerId 已按配置设定」发生在 seeder 生成 uid 之前，
 //   否则 @PostConstruct 阶段会用静态兜底 workerId 产出与后续不同 workerId 的 ID，存在撞号风险。

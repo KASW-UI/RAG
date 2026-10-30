@@ -96,6 +96,27 @@ spring:
         group: ${NACOS_GROUP:USER_GROUP}
         username: ${NACOS_USERNAME:}
         password: ${NACOS_PASSWORD:}
+        # 🔴 **必须显式关掉自动注册**（2026-10-30 · G1 lane · 补载体后新增的必做项）。
+        #
+        # 【为什么】`NacosAutoServiceRegistration` 继承
+        #   `AbstractAutoServiceRegistration`，而后者
+        #   `implements ApplicationListener<WebServerInitializedEvent>`
+        #   （spring-cloud-commons `AbstractAutoServiceRegistration.java:49`）
+        #   ⇒ ⇒ **一旦本模块有了 web 容器**（本次补 `spring-boot-starter-web`），
+        #   ⇒ ⇒ 它就会发 `WebServerInitializedEvent` ⇒ ⇒ 自动注册被触发。
+        #   而 `NacosAutoServiceRegistration.getRegistration()`
+        #   （`NacosAutoServiceRegistration.java:59-64`）取的是
+        #   **web server 的端口**（= 观测口 9097），**不是 gRPC 业务口 8081**。
+        #   ⇒ ⇒ Nacos 里会出现「admin-rpc → 9097」这条**错端口实例**
+        #   ⇒ ⇒ admin-api 按 Nacos 给的地址连过来 ⇒ 连到一个只提供 /actuator/** 的 HTTP 口
+        #   ⇒ ⇒ **gRPC 链路直接断**（业务码塌 1015）。
+        #
+        # 【本模块的注册是手写的】`bootstrap/NacosRegistration.java:89` 用
+        #   `GrpcServerProperties.getPort()`（= gRPC 端口）注册
+        #   ⇒ 与 Go 侧 `zrpc.MustNewServer` 注册 ListenOn 的语义一致
+        #   ⇒ ⇒ 自动注册必须关掉，否则**同一服务名下会有两个端口的实例**。
+        # （follow-rpc 早已有同一行：`service/follow/follow-rpc/src/main/resources/application.yml:123`。）
+        register-enabled: false
 
 # ===== 5. gRPC server（对齐 Go 端 ListenOn: 0.0.0.0:8081）=====
 # 选项 C：admin-rpc 严格保持纯 gRPC，不加 spring-boot-starter-web，
@@ -165,40 +186,101 @@ admin-rpc:
 #   与 `GoStyleMaxConnsFilter`（连接数超限）⇒ ⇒ 抓取请求可能被自己域的中间件挡掉。
 #   ⚠️ **`matchIfMissing=true` ⇒ 默认就是 api 侧** ⇒ ⇒ rpc 域**必须显式写这一行**。
 #
-# 【本模块当前状态】下面的 `management.server.port: -1` ⇒ **本模块没有 servlet 容器**
-#   ⇒ ⇒ 这一行当前是**防御性的**（没有载体 ⇒ 就没有 web 上下文）。
-#   ⚠️ 但**一旦按 `S1-FOLLOW-001` 的裁定给本模块加观测载体**，这一行就是**必做项**：
-#   ⇒ 载体 = servlet 上下文 ⇒ ⇒ 若不写这一行 ⇒ ⇒ 那 13 个 Bean 会挂到观测口上
-#   ⇒ ⇒ 其中 `GoStyleCpuSheddingFilter` 在 CPU 高负载时**拒掉抓取请求**
+# 【本模块当前状态】**载体已加**（2026-10-30 · G1 lane · 指标抓取出口补载体）
+#   ⇒ 本模块**现在有 servlet 容器**了（`spring-boot-starter-web`，见 pom 第 7 段）
+#   ⇒ ⇒ 上面这段「13 个 api 侧 Bean 会挂到观测口上」的前提**已经成立**
+#   ⇒ ⇒ 这一行 `rag.side: rpc` **不再是防御性的**，而是**必做且已在生效**
+#   ⇒ ⇒ 其中 `GoStyleCpuSheddingFilter`（CPU 高负载）与 `GoStyleMaxConnsFilter`
+#        （连接数超限）**会拒请求** ⇒ ⇒ 抓取请求可能被自己域的中间件挡掉
 #   ⇒ ⇒ 而 Go 侧 rpc 域一个中间件都没挂 ⇒ ⇒ **与 Go 不同形**。
 #
-# ✅ **现状（2026-10-30 · 合并主干后订正）**：共享层的 `ConditionalOnApiSide` **已落库**（`53bc05ec`）
-#   ⇒ ⇒ **这一行现在真的被读了**（原写「本分支基线上尚未落库 ⇒ 死配置」是**分支相对**的说法 ⇒ 叠到主干后已不成立 ⇒ 原值保留备查）
-#   ⇒ ⇒ **本行是必做项**：该注解默认值是 api（`matchIfMissing=true`）⇒ ⇒ rpc 域**必须显式写这一行**
-#   ⇒ ⇒ 本模块**目前 `management.server.port: -1`（无 servlet 容器）⇒ 此刻是防御性的**
-#   ⇒ ⇒ 但一旦按 `S1-FOLLOW-001` 的裁定加了观测载体 ⇒ ⇒ 不写它 ⇒ ⇒ 那 13 个 api 侧 web 类就挂到观测口上
-#        （其中 `GoStyleCpuSheddingFilter` 在 CPU 高负载时会**拒掉抓取请求** ⇒ 而 Go 侧 rpc 域一个中间件都没挂 ⇒ ⇒ 与 Go 不同形）。
+# ⚠️ **本行的真实状态（2026-10-30 订正）**：共享层的 `ConditionalOnApiSide`
+#   **已落库**（进主干的提交 = `53bc05ec`，即 M-6 原子那笔）
+#   ⇒ ⇒ **本行现在真的生效**（不是死配置）⇒ ⇒ 那 13 个 api 侧 Bean
+#   **不会**挂到本域的观测口上 ⇒ ⇒ 抓取请求不会被自己域的中间件挡掉。
+#   ⚠️ **但本行仍是「必做项」，不是「可选项」** —— 因为
+#   `@ConditionalOnProperty(name="rag.side", havingValue="api", matchIfMissing=true)`
+#   的 **默认值就是 api 侧** ⇒ ⇒ rpc 域**必须显式写这一行** ⇒ ⇒ 删掉它 = 13 个
+#   api 侧中间件全部复活 ⇒ ⇒ 与 Go 的 `zrpc.MustNewServer`（零 rest 中间件）不同形。
+#   ⇒ ⇒ 结论 = **保留这一行**（它是域侧约定，不是共享层能兜住的那部分）。
+#   【原值备查】本段原写「共享层的 `ConditionalOnApiSide` **在本分支基线上尚未落库**
+#   ⇒ ⇒ **本行在共享层那笔进来之前是死配置**（没有类读它）」⇒ ⇒ **分支相对**的说法
+#   ⇒ ⇒ 叠到主干后已不成立 ⇒ 原值保留备查。
 rag:
   side: rpc
 
-# ===== 7. Spring Boot Actuator：禁掉 HTTP 端点，admin-rpc 保持纯 gRPC =====
-# Go 端 admin-rpc 没有 HTTP endpoint，Java 侧必须 align。
-# metrics 仍注册到 Micrometer（Metrics.java 显式 Counter.builder），只是无法通过 /actuator/prometheus 抓取。
+# =============================================================================
+# HTTP 观测端口（Actuator 载体）
+# =============================================================================
+# 🔴 **本模块唯一的 HTTP 监听**（2026-10-30 · G1 lane · 指标抓取出口补载体）。
+#
+# 【Go 出处（真源 · 消费点）】
+#   service/user/admin/rpc/etc/admin.yaml:31-38  DevServer.Port: 9097
+#   ⇒ go-zero@v1.10.2/core/service/serviceconf.go:77  devserver.StartAgent(sc.DevServer)
+#   ⇒ go-zero@v1.10.2/internal/devserver/server.go:67-75 独立端口 http.ListenAndServe
+# ⇒ ⇒ **Go 的观测端口是 9097** ⇒ RAG 侧取同一个端口，
+#      抓取配置只需改**路径**（Go `/metrics` → RAG `/actuator/prometheus`），
+#      **端口一字不差**。
+#
+# ⚠️ **与 gRPC 业务端口严格分离**：本端口只承载 Actuator（无任何业务路由），
+#    gRPC 仍是 `grpc.server.port`（8081 / ${ADMIN_RPC_PORT}）。
+#    ⇒ 探针/部署可用 ADMIN_RPC_MANAGEMENT_PORT 覆盖（探针会自动挑空闲端口）。
+server:
+  port: ${ADMIN_RPC_MANAGEMENT_PORT:9097}
+
+# ===== 7. Spring Boot Actuator：admin-rpc 补 HTTP 抓取口 =====
+# ⚠️ **为什么以前「配了却抓不到」**（AGENTS.md §3.3 的典型形态）：
+#   `spring-boot-starter-actuator` 只给 **endpoint + 自动配置**，
+#   **不给 servlet 容器** ⇒ classpath 上没有 jakarta.servlet.Servlet
+#   ⇒ `WebApplicationType` 推导出 NONE ⇒ 没有 web server
+#   ⇒ `management.endpoints.web.*` 这一族配置**一直是死配置**（不报错，是静默无效）。
+#   ⇒ 2026-10-30 补 `spring-boot-starter-web`（pom 第 7 段）后才有载体。
+#
+# ⚠️ **`management.server.port: -1` 这一行必须删掉**（不是改值，是删）：
+#   Boot 4 真源 `ManagementPortType.get()`（spring-boot-actuator-autoconfigure
+#   `.../web/server/ManagementPortType.java:57-62`）⇒
+#     management.server.port 为**负数** ⇒ 返回 **DISABLED** ⇒ **端点彻底不上线**；
+#     该键**不设** ⇒ 返回 **SAME** ⇒ 端点挂**主 web 端口**（= 上面的 9097）。
+#   ⇒ ⇒ 删掉它 ⇒ 端点回主端口 ⇒ 与 Go 的 DevServer「独立于 gRPC 主端口」同形。
+#
+# ⚠️ **与 Go 的暴露面差异**（twoStage.md §10 定级 · 已登记）：
+#   Go  : DevServer 的 `MetricsPath: /metrics` + `HealthPath: /healthz`
+#         （admin.yaml:35-36）
+#   RAG : `/actuator/prometheus` + `/actuator/health`（Actuator 的固定前缀）
+#   ⇒ **路径不同、端口相同（都是 9097）** ⇒ 抓取配置要改路径，不是改端口。
 management:
-  server:
-    port: -1
   endpoints:
-    enabled-by-default: false
+    enabled-by-default: true       # 打开 endpoint（原来 false ⇒ 配了 include 也不生效）
+    web:
+      exposure:
+        # ⚠️ **这一族是「暴露名单」，与上面的 `enabled-by-default` 是两件事**：
+        #    `enabled-by-default` 决定「endpoint 本身有没有」；
+        #    `web.exposure.include` 决定「哪些 endpoint 走 HTTP 暴露出去」。
+        #    ⚠️ **实测踩过**（2026-10-30 · user-rpc 载体守门首跑 404）：
+        #    只写 `enabled-by-default: true` + `endpoint.prometheus.enabled: true`
+        #    ⇒ `/actuator/prometheus` **404** ⇒ 端点存在但**没被暴露**。
+        #    ⇒ ⇒ **两个都要写**，缺一个就是 404。
+        include: health,info,prometheus,metrics
   endpoint:
     health:
-      enabled: false
+      enabled: true
     prometheus:
-      enabled: false
+      enabled: true                # 显式开 prometheus HTTP endpoint
   metrics:
     enable:
-      prometheus: true
-    tags:
-      application: ${spring.application.name}
+      prometheus: true             # Counter 注册流程保留（Micrometer 内存里仍可读到）
+    export:
+      prometheus:
+        enabled: true              # Prometheus registry 导出开关（跟 endpoint 是两个开关）
+    # ⚠️ **刻意不加 `tags.application`**（与 follow-rpc 同口径 · 见下）。
+    #   Go 侧 `admin_rpc` 子系统的两个指标
+    #   （`service/user/admin/rpc/internal/metrics/metrics.go:9-21`）
+    #   用 `Namespace:""` + `Subsystem:"admin_rpc"` ⇒ **指标名自带前缀**，
+    #   **标签集只有 `{result}` / `{action,result}`** ⇒ **Go 侧不存在 `application` 这个标签**。
+    #   RAG 侧的 meter 名同样已带 `admin_rpc_` 前缀（`AdminRpcMetrics.java:108-160`）
+    #   ⇒ 再挂 `application="admin-rpc"` 就是**多一个标签**，
+    #   ⇒ 同一份 PromQL 在两侧会得到**不同的聚合结果**。
+    #   ⇒ 与 Go 逐字节同形 ⇒ 不加这一行。
 
 # ===== 8. OpenTelemetry OTLP exporter（对齐 Go 端 Telemetry.*）=====
 # Go: Endpoint=jaeger:4317, Batcher=otlpgrpc, Sampler=1.0, Name=admin-rpc
