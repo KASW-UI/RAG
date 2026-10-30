@@ -456,3 +456,61 @@ Go 真源 `rpc.go:38` 的 `context.WithTimeout(ctx, timeout)` 里 **`ctx` 携带
 这个数**曾在一次临时 module 里跑出来**（N=20000 ⇒ 1015=19995 / 5001=5），但**源码没落仓**（只在当时的 `/tmp`）
 ⇒ ⇒ 「跑某条命令会得到 N」变成**不可复算**的口径 ⇒ ⇒ 谁都没法复核、前提变没变也没法判断。
 ⇒ ⇒ **纪律**：凡台账里写「跑某条命令会得到 N」，**必须把那条命令 / 那个探针落仓**。
+
+---
+
+# 第三个探针：`redis-deadline/`（Go ↔ RAG 的 **Redis 期限「写面」**活体对拍）
+
+> 位置：`tools/semantic-probe/redis-deadline/` · 跑法：`bash tools/semantic-probe/redis-deadline/run-redis-deadline-parity.sh`
+> ⇒ ⇒ 退出码：`0` = 两侧逐键相等 ＋ 形态与 Go 真源已登记基线一致 · `1` = 对拍破或形态变了 · `2` = 环境不满足
+
+## 它补的是哪一格（E66 的**证据缺口**）
+
+E66（Redis 写不绑 deadline）原先是**两侧没有同一个观测量**：
+
+| 半边 | 原状 |
+|---|---|
+| **Go 侧** | 「靠**读源码**」⇒ `c.rdb.Get(ctx, …)` 吃 ctx ⇒ go-redis 的 `internal/pool.waitTurn(ctx)` 先查 `ctx.Done()` ⇒ 命令不下发 |
+| **RAG 侧** | 「靠 **JUnit 守门**」（`GoStyleRedisDeadlineLiveRedisWriteFaceTest`）⇒ 证 RAG 单侧「预算耗尽 ⇒ 不写」 |
+
+⇒ ⇒ **两边各自有证据，却没有一份能逐键对拍的活体证据** ⇒ ⇒ 「同形」只是推演。
+⇒ ⇒ 本探针把两侧**拉齐到同一个观测量** ⇒ ⇒ 才是活体同形证据。
+
+## 观测量 = **读回来还是基线值**（不是靠异常类型推断）
+
+1. 活着的 ctx ⇒ 写基线值 `baseline`；
+2. **已耗尽**的 ctx ⇒ 再写一次 `overwritten`；
+3. **另一条不带预算的独立通道**读回 ⇒ ⇒ **必须还是 `baseline`**
+   ⇒ ⇒ 「命令真的没落到 Redis 里」是**读出来的**，不是推断的。
+
+⇒ ⇒ 两侧**同一个观测量** ⇒ ⇒ PROBE 行才可比。
+
+| 文件 | 角色 |
+|---|---|
+| `redis-deadline/go/main.go` | **Go 半边**：go-redis/v9（版本从**冻结仓 go.mod 钉死**）· 调用形态 = 真源那一行（`rdb.Get(ctx,…)` / `rdb.Set(ctx,…)`）· ⚠️ **不 import 真源的 `internal` 包**（internal ⇒ 外部模块 import 不到 ⇒ ⇒ 复刻**一行形态**、跑**同一套依赖**） |
+| `redis-deadline/java/RedisDeadlineProbe.java` | **RAG 半边**：**生产类** `GoStyleRedisDeadlineConnectionFactory` ＋ `GoStyleRequestDeadline` ＋ 真 Lettuce（**不是** mock） |
+| `redis-deadline/run-redis-deadline-parity.sh` | 起真 Redis（docker `redis:7-alpine`）⇒ 离线构建 Go 半边（用**冻结仓的 `go.sum`**）⇒ 编译 RAG 半边（`service/common` 生产类 + 依赖 classpath）⇒ 跑两侧 ⇒ **逐键对拍** + 校验形态基线 |
+
+## Go 出处（期望值必须有台账出处）
+
+- `service/comment/rpc/internal/cache/comment_subject_cache.go:76` / `:84`（`c.rdb.Get(ctx, …)`）/ `:103`（`SetSubjectCache(ctx, …)`）
+- `service/comment/rpc/internal/cache/comment_invalidation_cache.go:10` / `:37` / `:56`
+- ⇒ **每次缓存读写都吃 ctx** ⇒ ⇒ **「预算耗尽 ⇒ 不写」就是 Go 的形态**
+
+## 三条纪律
+
+① **只提交 `go/main.go`**；`go.mod` 运行时生成（用**冻结仓的 `go.sum`** 校验依赖）⇒ 仓库里不出现机器相关的绝对路径。
+② **`CGO_ENABLED=0`**（本机没有 Xcode 头文件）· **`GOPROXY=off`**（离线构建）。
+③ **两侧产出不足 ⇒ 退出码 2**（那是「没跑」，不是「形态变了」）⇒ ⇒ 不许拿「退出码 0」当「跑过了」。
+
+## ⚠️ 诚实边界
+
+- **RAG 半边是直接构造生产类**（不是走 Spring 容器）⇒ ⇒ 「**BPP 在真实容器里确实包上了**」这一格是**静态核实**（`StringRedisTemplate` ⇒ `RedisTemplate` 子类 ⇒ BPP 自动包装；且**全仓生产码零 `RedisConnectionFactory` 直接注入**）⇒ ⇒ **不是**活体。
+- **观测量只覆盖「写面」** ⇒ 「读面」与「连接已建立后再耗尽」是另外两格（各由 `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` 的另外两例覆盖）。
+
+## ✅ 已做变异测试（否则就是再造一个恒绿假绿）
+
+把生产类 `GoStyleRedisDeadline.assertNotExhausted` 的闸门拆掉（`if (remaining >= 0L && remaining <= 0L)` ⇒ `if (false)`）
+⇒ ⇒ RAG 侧立刻翻成 `write_applied=true` / `value_after=overwritten`，Go 侧不变
+⇒ ⇒ 对拍**精确红在 `exhausted.write_applied`** ⇒ ⇒ **该探针有牙**
+⇒ ⇒ 还原后 **sha256 一致** + 复跑绿。

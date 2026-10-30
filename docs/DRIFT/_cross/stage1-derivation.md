@@ -512,8 +512,8 @@
 | 档 | 含义 | 条目数 |
 |---|---|---|
 | **A 活体** | 段内点名了**已在活体台账实跑过**的探针（**带探针的真实退出码**） | 0 |
-| **B 静态** | 有可复算的 `文件:行号` 指针，但无活体探针 | 826 |
-| **C 无指针** | 两样都没有 ⇒ 结论今天不可复算 | 335 |
+| **B 静态** | 有可复算的 `文件:行号` 指针，但无活体探针 | 827 |
+| **C 无指针** | 两样都没有 ⇒ 结论今天不可复算 | 334 |
 
 ### 5.1 A 档内部再分（**「有活体证据」≠「结论被证实」**）
 
@@ -540,7 +540,7 @@
 
 ### 5.2 证据边界声明（**C 档 = 今天不可复算**）
 
-> **本节是「效力边界」的正式声明** —— 用户 2026-10-30 拍板：**C 档条目（335 条）本轮不做活体取证，接受其静态证据**。声明如下：
+> **本节是「效力边界」的正式声明** —— 用户 2026-10-30 拍板：**C 档条目（334 条）本轮不做活体取证，接受其静态证据**。声明如下：
 >
 > 1. **C 档条目的状态 = 台账自述**，不是本轮可复算的结论。
 >    ⇒ 任何引用 C 档条目作为**前提**的结论，必须标注「前提未回源」。
@@ -601,7 +601,7 @@
 | `S1-FOLLOW-011` | DRIF | users | **G1** | ✅ 已一致 | A 活体 · 红(1) | P3 | B | 否 | 间接 · 阶段 1 闭合后才有阶段 2 | 未排期 | 已定性 · 未排期 | `DRIFT/users/stage1-admission.md:528` | — |
 | `S1-USERS-003` | DRIF | users | **G1** | ✅ 已一致 | B 静态 | P3 | B | 否 | 台账已写 · ① `.gitignore` 加 `.env`（+ `.env.*` 但放行 `.env.example`）；② 提交  | P5-T02 | — | `DRIFT/users/stage1-admission.md:141` | — |
 | `S1-USERS-005` | DRIF | users | **G1** | ✅ 已一致 | B 静态 | P3 | B | 否 | 台账已写 · 域内 1 行改完（`${FOLLOW_RPC_PORT:8082}`）⇒ 本轮即做（T3）；阶段 2 可把 6 个组件的 | 未排期 | 已定性 · 未排期 | `DRIFT/users/stage1-admission.md:175;DRIFT/users/stage1-admission.md:519` | — |
-| `E66` | DRIF | comment | **G3+G4** | 🔴 未闭合 | C 无指针 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | P2-T01,P2-T02,P2-T06 ｜ DEC-05 ｜ ⚠️已关闭指针:ENV-07 | 静态取证 · 缺活体对拍 | `DRIFT/comment/rpc.md:290;DRIFT/global/_README.md:431;DRIFT/global/vs-common.md:31` | Go `service/comment/rpc/internal/cache/comment_subject_cache.go:76`（`GetSubjectCache(ctx context.Context, subjectID string)` ⇒ 带 ctx）＋ `:84`（`c.rdb.Ge… |
+| `E66` | DRIF | comment | **G3+G4** | 🔴 未闭合 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | P2-T01,P2-T02,P2-T06 ｜ DEC-05 ｜ ⚠️已关闭指针:ENV-07 | 静态取证 · 缺活体对拍 | `DRIFT/comment/rpc.md:290;DRIFT/global/_README.md:431;DRIFT/global/vs-common.md:31` | Go `service/comment/rpc/internal/cache/comment_subject_cache.go:76`（`GetSubjectCache(ctx context.Context, subjectID string)` ⇒ 带 ctx）＋ `:84`（`c.rdb.Ge… |
 | `G4-16` | DRIF | comment | **G3** | 🔴 未闭合 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/comment/vs-common.md:96` | Go `service/comment/rpc/internal/cache/comment_subject_cache.go:84`（`c.rdb.Get(ctx, …)` ⇒ Go 侧缓存读写吃 ctx ⇒ deadline 到点即止）＋ `service/comment/rpc/interna… |
 | `SD-2026-10-24-CAND-03` | Inte | comment | **G3** | ⏳ 未签字 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 已定性 · 未排期 | `Intentional_Deviations/comment/rpc.md:229` | Go `service/comment/rpc/cmd/fact-authority/main.go:23`（`func main() { os.Exit(execute()) }` ⇒ **独立进程**）＋ `:52`（`listen := os.Getenv("COMMENT_FACT_AUTH… |
 | `DRIFT-CF-001` | DRIF | common | **G4** | 🔴 未闭合 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/common/alignment-2026-10-23.md:375;DRIFT/common/alignment-2026-10-23.md:834` | — |

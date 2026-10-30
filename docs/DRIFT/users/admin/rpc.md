@@ -4665,7 +4665,7 @@ if (connectTimeout != null) {                                     // :16
 - `service/users/admin/admin-rpc/.../AdminDomainService.java` —— **29 处**「两侧都是 1015」措辞改为集合读法 ⇒ **行数 1373 → 1373 不变**（该文件有跨文件行号指针 ⇒ 必须行数中性）
 
 **五、M-6 合批三要素（现状）**
-① 共享层代理的预算检查已在 `delegate.getConnection()` **之前**（G4 `e8cb769a`）② Go 侧集合 = {1015, 5001}（`1c6bcda6`）③ **域侧删掉抢先 `checkDeadline()`**（本域已落码）⇒ ⇒ **那一个原子 commit 的三要素齐了** ⇒ ⇒ 交合并收口执行者做。
+① 共享层代理的预算检查已在 `delegate.getConnection()` **之前**（**内容坐标** = `service/common/.../redis/GoStyleRedisDeadlineConnectionFactory.java:58` 的 `assertNotExhausted("getConnection")` ⇒ 早于 `:60` 的 `delegate.getConnection()`；⚠️ **【2026-10-31 订正】** 原引 G4 的 `e8cb769a` **已作废** —— 该 hash **不在主干**（只在 `align/g4-service-common`）⇒ ⇒ **悬空引用** ⇒ ⇒ 改指内容坐标）② Go 侧集合 = {1015, 5001}（`1c6bcda6`）③ **域侧删掉抢先 `checkDeadline()`**（本域已落码）⇒ ⇒ **那一个原子 commit 的三要素齐了** ⇒ ⇒ 交合并收口执行者做。
 
 ---
 
@@ -4802,5 +4802,14 @@ if (connectTimeout != null) {                                     // :16
 
 - **三域业务启动类在真 PG/Redis 下真起了一遍**：user-rpc **Tomcat 22290** · admin-rpc **Tomcat 22295** · follow-rpc **Tomcat 22360** ⇒ ⇒ 三个口都落在**域内固定段**（222xx / 223xx）⇒ ⇒ 本轮只证「**在真 PG/Redis 下起得来**」
 - 本轮**真容器启动 35 次**（`postgres:16-alpine` / `redis:7-alpine`）⇒ ⇒ 三域含容器的用例**本轮真跑且全绿**（此前是「Docker 停 ⇒ 类级 error ⇒ 折叠」）
-- ⚠️ **仍未覆盖（不得写成已闭环）**：① 域侧「logout 走的是共享层那个 Redis 期限代理」的**装配接线**（域侧 `AdminLogoutDeadlineHandoffTest` 用 **Mockito 替换数据层** ⇒ ⇒ **只证控制流，不证代理接线**）② 真 Redis 上「**预算耗尽 ⇒ 写不发生**」的**活体**行为（共享层的 `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` 本轮 **3 条全 skipped** ⇒ ⇒ 需要外部 Redis 地址）③ **RAG↔Go 双侧活体对拍**
+- ⚠️ **仍未覆盖（不得写成已闭环）**：① 域侧「logout 走的是共享层那个 Redis 期限代理」的**装配接线**（域侧 `AdminLogoutDeadlineHandoffTest` 用 **Mockito 替换数据层** ⇒ ⇒ **只证控制流，不证代理接线**）② **RAG↔Go 双侧活体对拍** ⚠️ **【2026-10-31 订正】** 原列的 ②「真 Redis 上『**预算耗尽 ⇒ 写不发生**』的**活体**行为（共享层的 `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` 本轮 **3 条全 skipped** ⇒ ⇒ 需要外部 Redis 地址）」**已过期** —— 该守门在主干 **2026-10-31 03:23 真跑通过**（surefire `TEST-com.rag.common.redis.GoStyleRedisDeadlineLiveRedisWriteFaceGateTest.xml` ⇒ `tests=3 · failures=0 · errors=0 · skipped=0` ⇒ **不是 SKIP**）⇒ ⇒ 且它正是「**独立通道读回仍是基线值** ⇒ 命令真的没落进 Redis」那一格 ⇒ ⇒ **这一件已达成** ⇒ ⇒ **残余从三件收敛到两件**（① 装配接线 · ② 双侧活体对拍）
 - ⇒ ⇒ 故 **E66 那格（admin 域）仍是「机制已落 · 活体验证未做」** ⇒ ⇒ **不改**
+
+---
+
+## 跨域同步：user 侧 logout 已与 admin 侧同款（2026-10-31 · G1 lane）
+
+- admin 侧的 logout 期限感知（入口不设闸门 + `AdminLogoutDeadlineHandoffTest` 3 条）**已于 2026-10-30 落地**（本域台账「logout 的期限感知归属与闭合登记」一节）
+- **user 侧本轮补齐同款**：Go 侧 `service/user/user/rpc/internal/logic/logoutlogic.go`（**全文 44 行** · 逐行读过 · **无 ctx 预检** ⇒ `:37 SetexCtx(l.ctx,…)` ⇒ `:38-40 codes.Internal`）与 admin 侧 `logoutlogic.go`（全文 46 行）**同构** ⇒ ⇒ 故 user 侧也**不设域内抢先闸门** ⇒ ⇒ handler 级码 = `INTERNAL`(5001) = Go
+- 新增 `UserLogoutDeadlineHandoffTest`（3 条，对齐 `AdminLogoutDeadlineHandoffTest`）；变异实测（把闸门加回）⇒ **精确 1 条转红** ⇒ ⇒ 有牙
+- ⚠️ **本域那一格的证据边界不变**：域侧测试用 Mockito 替换数据层 ⇒ **只证控制流与异常映射，不证共享层代理的装配接线** ⇒ ⇒ E66 那格**维持「机制已落 · 活体验证未做」**

@@ -886,17 +886,17 @@ public class UserDomainService {
     // ============== 9. LogoutLogic → logout() ==============
 
     /**
-     * 对应 Go 端 internal/logic/logoutlogic.go。
-     *
+     * 对应 Go 端 internal/logic/logoutlogic.go（**全文 44 行** · 2026-10-31 逐行读过）。
+     * **Go 侧无 ctx 预检**：:37 `SetexCtx(l.ctx,…)` 把 ctx 写绑进 Redis ⇒ ctx 过期 ⇒ 命令不下发（不写）
+     *   ⇒ 写失败落 :38-40 ⇒ `codes.Internal`「注销失败,Redis写入异常」⇒ **handler 级码 = 5001**（与 admin 侧同构）。
      * Works：
-     *   W1 校验 token 非空
-     *   W2 Redis Setex("user:jwt_blacklist:%s", "banned", AccessExpire)
+     *   W1 校验 token 非空（Go :31-34 ⇒ `codes.InvalidArgument`「Token不能为空」）
+     *   W2 Redis Setex("user:jwt_blacklist:%s", "banned", AccessExpire)（Go :35-37 ⇒ key 拼法 + TTL）
      *
-     * D-006：Redis key 必须是字面量 "user:jwt_blacklist:%s"（HTTP 中间件用同一格式去查）
-     * D-007：TTL 必须等于 JWT 过期秒数（UserAuth.AccessExpire=2592000），不能写死 24h
+     * D-006：Redis key 必须是字面量 "user:jwt_blacklist:%s"（HTTP 中间件用同一格式去查）；D-007：TTL 必须等于 JWT 过期秒数（UserAuth.AccessExpire=2592000），不能写死 24h
      */
     public LogoutResp logout(LogoutReq req) {
-        checkDeadline();
+        // ⚠️ 2026-10-31（G1 · 与 admin 侧同款）：入口**不设** deadline 闸门 —— Go logoutlogic.go 亦无 ctx 预检 ⇒ 是「让写去失败」不是「入口拒」⇒ 期限由共享层 Redis 期限代理感知 ⇒ handler 级码 = 5001（与 Go 同形）
         // W1
         if (req.getToken().isEmpty()) {
             throw Status.INVALID_ARGUMENT.withDescription("Token不能为空").asRuntimeException();
@@ -908,13 +908,13 @@ public class UserDomainService {
         try {
             bizRedis.opsForValue().set(key, "banned", Duration.ofSeconds(ttlSeconds));
         } catch (StatusRuntimeException e) {
-            // B-1：checkDeadline 与 SQL 取消翻译出的 DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-                //       ⚠️「对齐 Go 的 1015」指的是**客户端可见值**（E-4 双栈活体实测：两侧同为 {"code":1015,"msg":"服务繁忙"}），
-                //       **不是** Go 的 logic 层会返回 1015 —— Go 的 logic 把 DB 错误一律糊成 codes.Internal
-                //       （service/user/user/rpc/internal/logic/ 共 10 处出口），那一层**被外层 interceptor 掩盖**：
-                //       Go 的 service/common/observability/rpc.go:68-71 在超时分支直接回 codes.DeadlineExceeded。
-                //       ⇒ **不得改回 Go 的 INTERNAL**（那会让 RAG 渲染 5001，离 Go 更远）。
-                //       ⇒ 完整证据与 Go 侧 10 处出口清单 ⇒ docs/DRIFT/users/user/rpc.md §7 DRIFT-USERRPC-V-013。
+            // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
+                //       （客户端可见码**集合** = {1015, 5001}（Go 侧探针活体实测 200000 轮）
+                //       ⇒ 本域删掉抢先 checkDeadline() 后 RAG 同集合 ⇒ 同形；⚠️ RAG 侧为机制推导，尚未做双侧活体对拍）
+                // ⚠️ 2026-10-31：本 catch **只**拦 grpc 的 StatusRuntimeException；共享层 Redis 期限代理抛的是
+                //   **org.springframework.dao.QueryTimeoutException**（Spring 的，不是 grpc 的）⇒ 它**不**被本分支拦
+                //   ⇒ 落进下面的 catch (Exception) ⇒ INTERNAL「注销失败,Redis写入异常」⇒ 与 Go 的 codes.Internal 逐字同形
+                //   ⇒ Go 侧 logic 的 10 处出口清单 + DRIFT-USERRPC-V-013 ⇒ docs/DRIFT/users/user/rpc.md §7。
             throw e;
         } catch (Exception e) {
             // 🔴 DRIFT-USERRPC-V-012（2026-10-27 · G1 lane · 域侧自修）：原始异常必须进日志。
