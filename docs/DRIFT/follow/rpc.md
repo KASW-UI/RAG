@@ -269,7 +269,7 @@ curl: (1) Received HTTP/0.9 when not allowed                 ← 那不是 HTTP
 | | `spring-boot-starter-web` | 进程形态 | `/actuator/prometheus` 实际出口 |
 |---|---|---|---|
 | **8 个 api 模块** | **8/8 有** | servlet 应用 | ✅ **全部走 B**（actuator 挂主端口）—— B 是 api 层的**既定形态** |
-| **10 个 rpc 模块** | **3/10 有**（`follow-rpc` ＋ **2026-10-30 载体落地新增的 `user-user-rpc` / `user-admin-rpc`**；其余 7 个只有 `spring-boot-web-server` 抽象，供 nacos-discovery 反射引用） | 纯 gRPC 进程 | ❌ **7/10 无 actuator web 端点载体**（⚠️ **2026-10-30 16:6x 实测更新**：原写「8 个 rpc 模块 0/8」—— 当时范围只有 8 个 rpc ⇒ 现范围 10 个（新增 `user-user-rpc` / `user-admin-rpc`）⇒ ⇒ 口径 = **9/10 无 web 载体**；⚠️ 判据要点：**载体判据 = 依赖树实测**（`mvn -o -B dependency:list` 逐模块查 `spring-boot-starter-web` / `tomcat-embed-core`），**不是 grep pom** —— `service/common/pom.xml:361` 的 web starter 是 **`test` scope ⇒ 不传递** ⇒ 但父子继承下「grep 不到」≠「没有」⇒ ⇒ 必须查依赖树；⚠️ **本表是「载体层」口径；另有一层「配置层」**（`management:` 段三重关闭 = `admin-rpc` / `user-rpc` / `hot-rpc` 3 个）⇒ ⇒ **两个层都要看，只看配置层会得出「7 个有出口」的假结论**（`exposure.include` 写了但没有载体 ⇒ 抓取方连不上 HTTP）⇒ ⇒ **完整论证见 `docs/DRIFT/follow/vs-common.md` 末尾的对应小节**；⚠️ 边界：**10/10 都有 actuator 依赖**，且 10/10 都**未配 `management.endpoints.jmx.exposure`** ⇒ ⇒ JMX 侧走默认暴露 ⇒ ⇒ 本行的「零出口」严格指 **actuator 的 web endpoint 无载体**，不是「进程完全没有可观测出口」） |
+| **10 个 rpc 模块** | ⚠️ **【2026-10-31 订正 · 合并收口执行者】原写「**3/10 有**（`follow-rpc` ＋ `user-user-rpc` / `user-admin-rpc`；其余 7 个只有 `spring-boot-web-server` 抽象）」= **已作废** ⇒ ⇒ **8/10 有**（article / favorite / follow / hot / like / message / `user-user-rpc` / `user-admin-rpc`）· **2/10 无**（`comment-rpc` / `task-rpc`）⇒ ⇒ ⚠️ **判据已升级**（不再是「依赖树里有 tomcat」）⇒ ⇒ **载体面 = 部署 classpath 能让 `WebApplicationType.deduceFromClasspath()` 推出 SERVLET ＋ 未被 `web-application-type: none` 关掉 ＋ 真有容器实现** ⇒ ⇒ 逐格见 `docs/DRIFT/global/vs-common.md` §4.19.23 | 纯 gRPC 进程（⚠️ 那 8 个已带 servlet 载体） | ❌ **2/10 无 actuator web 端点载体**（⚠️ **2026-10-31 再订正**：原写「8 个 rpc 模块 0/8」→ 后写「9/10 无 web 载体」→ 现 **2/10 无 web 载体**；⚠️ 判据要点：**载体判据 = 部署产物级**（`dependency:list` ＋ `WebApplicationType` 指示类 ＋ 产物 `BOOT-INF/lib`），**不是 grep pom** —— `service/common/pom.xml:361` 的 web starter 是 **`test` scope ⇒ 不传递** ⇒ 但父子继承下「grep 不到」≠「没有」⇒ ⇒ 必须查依赖树；⚠️ **本表是「载体层」口径；另有一层「配置层」**（⚠️ **2026-10-31 订正**：`management:` 段的三重关闭**已全部修好** ⇒ ⇒ **配置面 = 10/10**，不是「3 个被关」）⇒ ⇒ **两个层都要看，只看配置层会得出「10 个有出口」的假结论**（`exposure.include` 写了但没有载体 ⇒ 抓取方连不上 HTTP）⇒ ⇒ **完整论证见 `docs/DRIFT/follow/vs-common.md` 末尾的对应小节**；⚠️ 边界：**10/10 都有 actuator 依赖**，且 10/10 都**未配 `management.endpoints.jmx.exposure`** ⇒ ⇒ JMX 侧走默认暴露 ⇒ ⇒ 本行的「零出口」严格指 **actuator 的 web endpoint 无载体**，不是「进程完全没有可观测出口」） |
 
 - ⚠️ **全仓无 Pushgateway** ⇒ **C 不是既有形态**，无需考虑。
 - `hot-rpc` 写得最直白：`management.server.port: -1` + `management.endpoints.prometheus.enabled: false`，
@@ -504,7 +504,7 @@ Go  : 0.005 0.01 0.025 0.05 0.1 0.25 0.5 1   2.5 5   10  +Inf
 上表 §「全仓调查结论」列的另外 5 个 rpc 组件
 （`favorite-rpc` 16062 / `message-rpc` 16067 / `like-rpc` 9098 /
 `user-user-rpc` 9094 / `user-admin-rpc` 9097）
-**仍是「Go 有 DevServer、RAG 零出口」** ⇒ 本轮**只落 follow 域**（⚠️ **2026-10-30 订正**：`user-user-rpc` / `user-admin-rpc` 的这一格已由 G1 lane 的载体落地闭合 ⇒ ⇒ 现为 **3/10 有载体**）
+**仍是「Go 有 DevServer、RAG 零出口」** ⇒ 本轮**只落 follow 域**（⚠️ **2026-10-30 订正**：`user-user-rpc` / `user-admin-rpc` 的这一格已由 G1 lane 的载体落地闭合 ⇒ ⇒ ⚠️ **【2026-10-31 订正 · 合并收口执行者】现为 **8/10 有载体**（原写「3/10」已作废；逐格见 `docs/DRIFT/global/vs-common.md` §4.19.23））
 ⇒ 跨域派单**保持原样**（本工作树不得改域外文件）。
 
 > **🧾 第二轮复核（2026-10-24 · 最全性）**：补录「逐文件对照索引」——

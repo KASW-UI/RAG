@@ -158,9 +158,16 @@ MUTATIONS = [
      '  STALE_PIDS="$(pgrep -f "$RUN_DIR/bin/" 2>/dev/null || true)"',
      '  STALE_PIDS=""',
      {'E48-37'}),
+    # ⚠️ **【2026-10-31 订正 · 合并收口执行者】锚点已重定基**：原锚点
+    #   `DEADLINE_VERDICT_THRESHOLD_MS:-150` 在探针里**命中 2 处**（一行是 echo 的
+    #   「阈值 = … ms」提示、一行是真正生效的 `--threshold-ms` 实参）
+    #   ⇒ ⇒ 旧锚点**不满足变异脚本自身的前置条件**（`count(old)==1`）
+    #   ⇒ ⇒ 该条变异**跑不起来** ⇒ 「变异转红」这个证据拿不到
+    #   ⇒ ⇒ 改成**带上下文**的那一行（只命中 1 处 ⇒ 且**更精确**：只改实参、不碰 echo）
     ('M19 探针：默认阈值退回 1000（探针显式传阈值 ⇒ 真正生效的是它）',
      PROBE,
-     'DEADLINE_VERDICT_THRESHOLD_MS:-150', 'DEADLINE_VERDICT_THRESHOLD_MS:-1000',
+     '  --threshold-ms   "${DEADLINE_VERDICT_THRESHOLD_MS:-150}"',
+     '  --threshold-ms   "${DEADLINE_VERDICT_THRESHOLD_MS:-1000}"',
      {'E48-36'}),
 
     ('M17 闸门：Δ 证据的匹配串写错（永远匹配不到）',

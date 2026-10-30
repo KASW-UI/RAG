@@ -161,3 +161,46 @@ Go `getlikestatelogic.go:57-63` 的 `status.FromError` 对非 status 错误返�
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
 |---|---|---|---|---|---|
 | DRIFT-003 | D（差异已消失 ⇒ 无待实现内容） | P2 | 否 | Go `service/like/api/likecenter.go:37`（`server := rest.MustNewServer(c.RestConf)` ⇒ Go 的四层保护是 go-zero `rest.Server` 的**内建行为**，不是 like 域自己的代码）＋ `go-zero@v1.10.2/rest/engine.go:105`（`buildChainWithNativeMiddlewares`）＋ `:108`（**之后**才 `appendAuthHandler` ⇒ 鉴权排在链尾）＋ `:164`（`handler.MaxBytesHandler(...)`）＋ `go-zero@v1.10.2/rest/chain/chain.go:38-45`（`Append` 的语义 = 「加在请求流的**最后**」⇒ MaxBytes 在鉴权**之外**）＋ `go-zero@v1.10.2/rest/handler/maxbyteshandler.go:19-22`（`r.ContentLength > n` ⇒ 裸 `w.WriteHeader(413)`、无 body）＋ `service/like/api/internal/handler/routes.go:49`（`rest.WithJwt(...)` ⇒ 6 条路由全部受保护）＋ `service/like/api/internal/logic/like/getlikestatelogic.go:57-63`（`status.FromError(err)` 的 `ok=false` 分支 ⇒ `errmsg.NewErrCode(errmsg.ErrorServerCommon)`）＋ `service/like/common/errmsg/errmsg.go:41`（`ErrorServerCommon = 5001`）vs RAG `service/like/like-api/src/main/java/com/rag/like/like/api/LikeApiApplication.java:75-78`（`scanBasePackages` 含 `com.rag.common` ⇒ 保护层**自动生效、零装配代码**）＋ `service/common/src/main/java/com/rag/common/protection/GoStyleMaxBytesFilter.java:81-83`（`@ConditionalOnWebApplication(SERVLET)` ＋ `@Component`）＋ `:108-113`（`getContentLengthLong() > maxBytes` ⇒ 裸 413、无 body、只 `setStatus`）＋ `service/common/src/main/java/com/rag/common/protection/GoStyleProtectionConfiguration.java:78-79`（`@Configuration` ＋ `@EnableConfigurationProperties` ⇒ properties Bean 必被注册）＋ `service/like/like-api/src/main/resources/application.yml:151-163`（四层阈值 = Go 的 tag 默认 10000／1048576／900／enabled）＋ `service/like/like-api/src/main/java/com/rag/like/like/api/service/LikeApiSupport.java:177-186`（`rpcError`：`extractStatus` 为 null ⇒ 5001）＋ `:198-206`（`extractStatus` 只认 `StatusException`／`StatusRuntimeException`）＋ `service/common/src/main/java/com/rag/common/protection/GoStyleGrpcClientBreakerInterceptor.java:302-303`（抛 `GoStyleCircuitOpenException` ⇒ 非 status ⇒ 落 5001 分支）＋ `service/common/src/main/java/com/rag/common/protection/GoStyleCircuitOpenException.java:30`（`extends RuntimeException`）＋ `service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiProtectionMvcTest.java:99-102`（四个保护 Filter Bean 在位）＋ `:111`（超限 ⇒ 413 且压过鉴权）⇒ ⇒ **差异已消失**：本轮实跑 `mvn -o -pl service/like/like-api test -Dtest=LikeApiProtectionMvcTest` ⇒ `Tests run: 4, Failures: 0, Errors: 0, Skipped: 0`（真 Spring 上下文 ＋ 真实 MVC 管线）⇒ 「保护层在 like-api 上自动生效」这个**零装配前提**当场成立；like 域台账 `docs/DRIFT/like/api.md:384-386` 对 `DRIFT-LIKEAPI-003`（请求保护层四层全缺）／`-004`（超限请求优先级 413 而非 401）／`-005`（gRPC client 熔断缺失）记的「✅ 已关（2026-10-22）· **本轮未复审**」本轮**补上复审** ⇒ 三条均已闭合 ⇒ 台账记的「like-api 缺保护层 ⇒ 401 压过 413 ／ 无 client 熔断」这条已不存在 ⇒ 归 D（无待实现内容）；⚠️ **编号撞车**：同一个 `DRIFT-003` 在仓内另有两处 —— `DRIFT/message/api.md:79`（message 域 `,omitempty` vs `,optional` 根因段，本轮核过：Go `service/message/api/internal/types/types.go:18` = `json:"extra,optional"` vs RAG `service/message/message-api/src/main/java/com/rag/message/message/api/dto/AdminSendNotificationReq.java:127`「刻意不对 extra 做显式 null 校验」⇒ 该段已一致）与 `DRIFT/users/user/api.md:35`（「编号说明」段，无待办）⇒ 本行结论按派生层主落点 `DRIFT/common/protection.md:89` 给出 | 2026-10-30 |
+
+### 客户端硬上界的共享层那半（2026-10-31 · 经授权落码）
+
+**结论先行**：共享层的「客户端硬上界」**唯一实现本来就存在** ⇒ ⇒ **域侧只需配一个参数，零代码改动**
+⇒ ⇒ 但此前**缺一条运行期证据**（只有属性默认值的断言）⇒ ⇒ 本轮补上，并把「不得再造私有副本」钉成守门。
+
+**一 · 唯一实现（已在本仓，非本轮新增）**
+- `service/common/src/main/java/com/rag/common/protection/GoStyleOutboundDeadlineInterceptor.java`
+  —— 带 devh 的 `@GrpcGlobalClientInterceptor` ⇒ ⇒ 进全局客户端拦截器 registry ⇒ ⇒ 装在**每个**
+  出向 devh 调用上 ⇒ ⇒ 与 Go 的 `zrpc/client.go:70-71`
+  （`if c.Timeout > 0 { opts = append(opts, WithTimeout(...)) }`）**同形** ⇒ ⇒ 域侧**零代码改动**。
+- 封顶语义 = `min(入向剩余纳秒, 客户端硬上界, 调用点自带 deadline)`（`:196` / `:200-201` / `:208`）
+  ⇒ ⇒ 取更早者（Go 的 `context.WithTimeout`）⇒ ⇒ **不是覆盖**。
+- 开关 = `rag.protection.outbound-deadline.cap-millis`，**默认 0 = 不启用**
+  （`GoStyleProtectionProperties.java:286`）⇒ ⇒ 理由见同文件 `:261`（Go 的 2000ms 是**默认值**且
+  各域可覆盖 —— article api 侧 = 70000 ⇒ 写成全局默认会让 article **比 Go 严 35 倍**）
+  ⇒ ⇒ **必须逐域配**。
+
+**二 · 本轮新增的两条守门（共享层）**
+- `GoStyleOutboundDeadlineClientCapGateTest`（3 形态）—— ① `cap-millis=2000` 且**无入向预算**
+  ⇒ 出向调用在 **2000ms** 处 `DEADLINE_EXCEEDED`；② **负控**：`cap-millis=0` ⇒ **挂满**下游 5s
+  （⇒ 形态①的绿来自 cap，不是「in-process 自己会超时」）；③ `cap-millis=2000` ＋ 入向预算 300ms
+  ⇒ 在 **300ms** 处失败（⇒ 钉的是 **min** 语义，不是覆盖）。
+- `GoStyleClientCallTimeoutSingleSourceGateTest`（3 断言）—— ① 域侧**不得**出现第三份
+  `GoStyleClientCallTimeout` 私有副本（**棘轮例外集** = 已知的 2 份：comment-rpc / favorite-rpc
+  ⇒ 域侧删掉后自动收紧）；② 共享层唯一实现必须在位；③ 它必须是**全局客户端拦截器**且真的读
+  `capMillis`（**只认代码行，不认 javadoc** —— 见「三」）。
+
+**三 · 本轮踩到并已修掉的一个「弱判据」（值得记）**
+守门②③ 最初写成 `src.contains("@GrpcGlobalClientInterceptor")` ⇒ ⇒ **该类的 javadoc 里也出现过
+这个字符串** ⇒ ⇒ 拿掉注解后**判据仍然绿** ⇒ ⇒ 是**变异实测**把它抓出来的（第一次跑 M4 时「没红」）
+⇒ ⇒ 改成「**只取代码行**（去注释）再断言」⇒ ⇒ M4 随即转红 ⇒ ⇒ **弱兜底判据会把真缺陷洗成 0**
+（AGENTS.md §3.3 的同族教训）。
+
+**四 · 诚实边界（本轮**没有**证明的）**
+- **各域的 yml 一个都还没配** ⇒ ⇒ 「域侧只配参数」这条**尚未被任何域真正使用** ⇒ ⇒ 残余面 =
+  派工面里那条「零 deadline 类补硬上界」的任务**本体**（域侧 yml ＋ 各域断言）。
+- **api 侧另有内联形态的封顶**（`like-api` / `favorite-api` 在 client 类里直接算 min）⇒ ⇒ 它们不声明
+  那个类名 ⇒ ⇒ **不在这条守门的检测面** ⇒ ⇒ 属**另一条轴**（api 侧的传播/上界任务）⇒ ⇒ 本轮
+  **不假装覆盖**它。
+- 守门按**类名**识别副本 ⇒ ⇒ 一份**改了名**的同款实现不在它的视野内 ⇒ ⇒ 那类靠 review 纪律互补。
+- 本轮用 devh 的 **in-process** channel factory（与生产同一 `createChannel` 实现）⇒ ⇒ 上游 hop 的
+  传输层与生产不同 ⇒ ⇒ 测的是「deadline 到点 ⇒ 立即失败」这个语义，**不依赖传输层**。
