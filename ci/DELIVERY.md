@@ -69,7 +69,7 @@ worker 的可用环境变量里也没有任何"挂宿主路径"的开关
 
 ---
 
-## 二、文件清单（27 个文件 + 本文档）
+## 二、文件清单（28 个文件 + 本文档）
 
 | 路径 | 职责 | 真源？ |
 |---|---|---|
@@ -83,6 +83,7 @@ worker 的可用环境变量里也没有任何"挂宿主路径"的开关
 | `ci/scripts/testcontainers-env.sh` | Docker 可达性前置断言 + host override + Ryuk 关闭 | ✅ |
 | `ci/scripts/dind-run.sh` | DinD 外壳：起内层 dockerd → 跑嵌套构建容器 | ✅ |
 | `ci/scripts/run-static-gates.sh` | 按序跑静态守门并汇总 | ✅ |
+| `ci/scripts/check-pom-parent-relativepath.py` | **第 9 道门**：每个 pom 的 `<parent>` 能否被本地 `relativePath` 正确解析（见 §六.2） | ✅ |
 | `ci/scripts/collect-surefire.sh` | 读 `TEST-*.xml` 汇总用例数与失败清单 | ✅ |
 | `ci/generate-pipelines.py` | 从 pom 依赖图生成 11 条 pipeline；`--check` 校验漂移 | ✅ |
 | `ci/deploy.sh` | 校验 + `set-pipeline`（注入两个 var）+ `unpause-pipeline`（幂等） | ✅ |
@@ -277,6 +278,86 @@ canonical 流水线指向 `https://github.com/KASW-UI/RAG.git` 的 `do-my-own-gh
 
 ⇒ 它**同时**能抓住原始缺陷和"修错"的修复 ⇒ 值这道门。
 住 `ci/scripts/` 而不是 `tools/difftest/` ⇒ 不写别人 lane 的共享面。
+
+### 6.3 端口探测判据**只在 macOS/BSD 成立** ⇒ Linux CI 上恒判「端口段被占满」
+
+**现象**（CI 内，article 域 test 阶段）：
+
+```
+java.lang.IllegalStateException: 真进程测试端口段 22400-22479 已被占满（本机并行会话太多？）
+    ⇒ 换一段端口再试
+```
+
+⇒ 抛出点是 `RealGrpcPort.pick()`；它遍历 22400–22479 逐个 `isFree(port)`，
+   80 个全判「不可用」⇒ 整段被弃用 ⇒ 报「已被占满」。
+
+**根因**（`RealGrpcPort.isFree()` 的实现）：
+
+```java
+try (ServerSocket wildcard = new ServerSocket();      // ①
+     ServerSocket specific = new ServerSocket()) {
+    wildcard.setReuseAddress(true);
+    wildcard.bind(new InetSocketAddress(port), 1);      // ② 绑 0.0.0.0:P
+    specific.setReuseAddress(true);
+    specific.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 1);  // ③ 绑 127.0.0.1:P
+    return true;
+}
+```
+
+② 与 ③ **同时持有**（两个 socket 都在 try 里）。
+「两个地址都要探」这个**意图是对的**（注释也写明了：通配地址被别人占着 ⇒ 真进程起不来），
+但「同时持有两个 socket」这个**实现只在 BSD/macOS 成立**：
+
+| 平台 | ② 绑完再 ③ 绑 127.0.0.1:P | 结果 |
+|---|---|---|
+| macOS / BSD | 允许（`SO_REUSEADDR` + 更具体地址覆盖通配地址） | ✅ 判「可用」 |
+| **Linux** | `EADDRINUSE`（通配地址已覆盖该端口，Linux 不允许再绑更具体地址） | ❌ **恒判「不可用」** |
+
+**实测证据**（同一份探针代码，两个平台）：
+
+```
+$ docker run --rm -v /tmp/IsFreeProbe.java:/p.java --entrypoint java \
+      maven:3.9.11-eclipse-temurin-21 /p.java
+  首个异常: java.net.BindException: Address already in use
+  os=Linux  段内可绑端口数 = 0 / 80        ← Linux：80 个端口全部判"被占"
+
+$ java /tmp/IsFreeProbe.java
+  os=Mac OS X  段内可绑端口数 = 80 / 80   ← macOS：全段可用
+```
+
+⇒ **开发机（macOS）永远看不见这个缺陷** ⇒ 这类缺陷只有真 CI 才抓得到。
+
+**波及范围**（全仓实测扫描，`wildcard.bind` + `specific.bind` 同款序列）：
+**21 个文件、覆盖 9 个域** —— article / comment / favorite / follow / hot / like / message / task / users(admin+user)，
+每个域的 `RealGrpcPort.java` 与 `RealTomcatPort.java` 都是同款。
+⇒ 凡是依赖"真进程占固定端口"的守门类测试，在 Linux CI 上**必然红**。
+
+（另有 16 个文件用的是**安全形态** —— 只做单次 bind 探测、探完即关，
+ 例如 message/like/task 的 `GrpcTestPort.java` ⇒ 那些域不受影响。）
+
+**建议修法（⚠️ 本 PR 未改 —— 属各域 lane 的测试代码写权，不在 CI lane 范围内）**：
+把两个探针**改成先后进行**（探完即关），而不是同时持有：
+
+```java
+static boolean isFree(int port) {
+    if (!bindOk(port, false)) { return false; }   // ① 0.0.0.0:P 能不能绑
+    if (!bindOk(port, true))  { return false; }   // ② 127.0.0.1:P 能不能绑
+    return true;
+}
+```
+
+- 语义**不变**：仍然要求「通配地址」与「回环地址」都没被第三方持有；
+- 两个平台都成立（Linux 上 ① 的 socket 已关闭，② 自然能绑）；
+- 代价：两次探测之间有一个极小的竞态窗口（第三方可能在窗口内抢口）——
+  相比"Linux 上整段不可用"是**严格改善**。
+
+**为什么 CI 不自己绕过**
+- 绕过的三种做法（改端口段 / 跳过这些测试类 / 在 CI 里打补丁）**都是把缺陷藏起来**：
+  ① 改端口段 ⇒ 绕开的是**判据本身坏了**这件事；
+  ② 跳过测试类 ⇒ 那些守门从此**没人跑**，且"绿"是假的；
+  ③ 在 CI 侧打补丁 ⇒ 改的是别人 lane 的文件 ⇒ 越权，且两份实现必然漂移。
+- ⇒ **正确姿势是：让 CI 如实报红，把缺陷交回它的主人（各域 lane）**。
+  本仓的规矩也是"测试要如实报告项目的坏，不得因为跑不通就去改被测对象"。
 
 ---
 

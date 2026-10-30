@@ -127,7 +127,7 @@ get repo (trigger: true)   ← git 资源，paths 过滤 ⇒ 只在相关改动�
   │
   ├─ step 1  maven-build     privileged   mvn -pl <本域模块> -am -DskipTests package
   ├─ step 2  maven-test      privileged   mvn -pl <本域模块> -am test
-  ├─ step 3  static-gates                8 个静态守门 + 产物级 jar 可执行性检查
+  ├─ step 3  static-gates                9 个静态守门 + 产物级 jar 可执行性检查
   └─ step 4  report                      汇总 surefire 报告（读 TEST-*.xml）
 ```
 
@@ -140,7 +140,7 @@ get repo (trigger: true)   ← git 资源，paths 过滤 ⇒ 只在相关改动�
 | 环境准备 | DinD：任务容器（privileged）里起内层 `dockerd` ⇒ 再在内层 daemon 上跑嵌套构建容器 | 本仓 128 个测试文件直接起 Testcontainers 容器，任务容器里必须有 Docker；而 Concourse 8 的 task 配置**没有**挂载声明项 ⇒ wormhole 走不通 ⇒ 只能用 DinD |
 | 构建 | `mvn -pl <本域模块> -am -DskipTests package` | `-am` **必须带**：跨模块依赖是 reactor 内 SNAPSHOT，不带 `-am` 会拿到 `~/.m2` 里的**陈旧** jar（本仓 `*SharedLayerArtifactFreshnessGateTest` 就在守这条） |
 | 测试 | `mvn -pl <本域模块> -am test` | 同上；`-am` 会连带跑依赖模块的测试 —— 已知代价，理由见 `ci/scripts/test.sh` |
-| 静态守门 | 8 个纯静态脚本 + `check-jar-executable.sh`（按域传模块目录） | 复用本仓已有资产，不新造检查 |
+| 静态守门 | 8 个复用本仓已有资产（`tools/difftest/`）+ 1 个 CI 自带（`ci/scripts/check-pom-parent-relativepath.py`）+ `check-jar-executable.sh`（按域传模块目录） | 前 8 个不新造检查；第 9 个是 CI 实战抓出缺陷后补的（见 `ci/DELIVERY.md` §六.2） |
 | 结果输出 | 逐模块用例数 / 失败数 / 错误数 / 跳过数 + 失败用例清单 + 本次 commit | 一律读 surefire 的 `TEST-*.xml`（权威），**不读** `*.txt` 摘要（实测二者会不一致） |
 
 ---
@@ -159,6 +159,7 @@ get repo (trigger: true)   ← git 资源，paths 过滤 ⇒ 只在相关改动�
 | `ci/scripts/testcontainers-env.sh` | Testcontainers 环境：Docker 前置断言 + host override + Ryuk 关闭 |
 | `ci/scripts/dind-run.sh` | DinD 外壳：起内层 `dockerd` → 在其上跑嵌套构建容器 |
 | `ci/scripts/run-static-gates.sh` | 按序跑静态守门，汇总通过/失败 |
+| `ci/scripts/check-pom-parent-relativepath.py` | **第 9 道门**：每个 pom 的 `<parent>` 能否被本地 `relativePath` 正确解析（离线；见 `ci/DELIVERY.md` §六.2） |
 | `ci/scripts/collect-surefire.sh` | 读 `TEST-*.xml` 汇总用例数与失败清单 |
 | `ci/generate-pipelines.py` | 从 pom 依赖图生成 11 条 pipeline；`--check` 校验漂移 |
 | `ci/deploy.sh` | 校验 + `set-pipeline`（注入 `registry` 变量）+ `unpause-pipeline`（幂等） |
@@ -247,8 +248,14 @@ python3 ci/generate-pipelines.py --check  # 校验（CI 也跑这一条）
 | 2 | **DinD 内层网段与外层同段** | 内层拉镜像 `dial tcp 172.17.0.1:5010: connection refused` | 内层 dockerd 默认 `172.17.0.0/16` 与外层 docker0 同段 ⇒ 抢走路由 | 显式 `--bip 10.250.0.1/16 --default-address-pool base=10.250.0.0/16,size=24` |
 | 3 | **嵌套容器里脚本路径缺 `repo/` 前缀** | `cannot open ci/scripts/build.sh` | `build.sh` / `test.sh` 内部是 `cd repo`，即站在 `repo` 的父目录执行 | 改为 `sh repo/ci/scripts/<stage>.sh` |
 
-⚠️ 另有一个**仓内**缺陷（`service/users/admin/admin-api/pom.xml` 的父 POM `relativePath`）
-**不在 `ci/` 范围内，未擅自修改** ⇒ 详见 `ci/DELIVERY.md` §六。
+| 4 | **探针用了嵌套镜像里没有的 docker CLI** | test 阶段报「Docker daemon 不可达」，但 daemon 明明是好的 | 探针用 `docker info`，而嵌套构建容器是 `maven:3.9.11-eclipse-temurin-21`（Debian）⇒ **镜像里没有 docker 客户端**（`command -v docker` → MISSING）⇒ 探针必然失败 ⇒ 报了个误导性的错 | 探针改成 `curl --unix-socket <sock> http://localhost/_ping`（**与 Testcontainers 走的同一条路**）；网关自发现改读 `/proc/net/route`；错误信息区分三种情形 |
+
+⚠️ 另有两个**仓内**缺陷，**不属 `ci/` 范围**，处理方式见 `ci/DELIVERY.md` §六：
+
+| 仓内缺陷 | 影响面 | 本 PR 的处置 |
+|---|---|---|
+| `service/users/admin/admin-api/pom.xml` 的父 POM `relativePath` 指向坐标不符的那份 pom | **所有域**的构建（根聚合 pom 被完整解析 ⇒ 一处坏、全域红） | ✅ **已修**（1 行，坐标与继承内容不变 ⇒ 语义等价）⇒ 不修则 CI 全红 |
+| `RealGrpcPort.isFree()` 的「同时持有通配 + 回环两个 socket」**只在 macOS/BSD 成立** | **21 个文件 / 9 个域**的「真进程占固定端口」类守门测试，在 **Linux CI 上必然红**（实测 Linux 0/80 可用、macOS 80/80） | 🟡 **未改**（属各域 lane 的**测试代码**写权）⇒ 建议修法见 `ci/DELIVERY.md` §六.3 |
 
 ---
 
