@@ -59,7 +59,7 @@ import java.util.Map;
  * <p><b>🔴 B-1 放行分支：为什么 {@code catch (StatusRuntimeException e) { throw e; }} 必须排在宽 catch 之前
  * —— 完整论证（2026-10-26 订正<b>理由</b>，<b>行为零改动</b>）</b>
  *
- * <p><b>① 结论（不变）</b>：客户端可见的 HTTP 业务码，<b>两侧都是 1015</b>。
+ * <p><b>① 结论（2026-10-31 订正）</b>：客户端可见的 HTTP 业务码<b>按集合读</b> —— Go 侧集合 = {1015, 5001}（`tools/semantic-probe/client-visible-code/` 活体实测 200000 轮）⇒ ⇒ <b>不再读成「两侧都是 1015」</b>。
  *
  * <p><b>② 但「Go 的 logic 返回 1015」这个理由是错的</b>（2026-10-26 之前各站点注释里写的说法，已订正）：
  * <ul>
@@ -212,7 +212,7 @@ public class AdminDomainService {
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getLoginDbError().increment();
@@ -290,7 +290,7 @@ public class AdminDomainService {
             stringRedisTemplate.opsForValue().set(key, "banned", Duration.ofSeconds(ttlSeconds));
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码**集合** = {1015, 5001}（Go 侧探针活体实测 200000 轮）；本域删掉抢先 checkDeadline() 后 RAG 同集合 ⇒ 同形；⚠️ RAG 侧为机制推导，尚未做双侧活体对拍）
             // ⚠️ 2026-10-30：本 catch **只**拦 grpc 的 StatusRuntimeException（PG 57014 走
             //   SqlTimeoutStatusTranslator 翻成 DEADLINE_EXCEEDED 的那条路）；共享层 Redis 期限代理
             //   抛的是 **org.springframework.dao.QueryTimeoutException**（Spring 的，不是 grpc 的）
@@ -324,7 +324,7 @@ public class AdminDomainService {
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin getSelf DB error, uid={}", uid, e);
@@ -360,7 +360,7 @@ public class AdminDomainService {
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin updateSelf findOneAdminByUid DB error, uid={}", uid, e);
@@ -378,7 +378,7 @@ public class AdminDomainService {
                 // 未被占用，名字可用
             } catch (StatusRuntimeException e) {
                 // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-                //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+                //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
                 throw e;
             } catch (Exception e) {
                 log.error("admin updateSelf findOneAdminByUsername DB error", e);
@@ -397,7 +397,7 @@ public class AdminDomainService {
                 wrapper.set(AdminEntity::getPassword, PasswordUtil.encrypt(password));
             } catch (StatusRuntimeException e) {
                 // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-                //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+                //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
                 throw e;
             } catch (Exception e) {
                 log.error("admin updateSelf PasswordUtil.encrypt failed", e);
@@ -437,7 +437,7 @@ public class AdminDomainService {
             adminMapper.update(null, wrapper);
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin updateSelf update DB error, uid={}", uid, e);
@@ -452,7 +452,7 @@ public class AdminDomainService {
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin updateSelf re-findOneAdminByUid DB error, uid={}", uid, e);
@@ -537,7 +537,7 @@ public class AdminDomainService {
             uid = Snowflake.nextId();
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin createAdmin Snowflake.nextId failed", e);
@@ -558,7 +558,7 @@ public class AdminDomainService {
             throw Status.ALREADY_EXISTS.withDescription("用户名已存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             if (AdminExceptions.isUniqueViolation(e)) {
@@ -615,7 +615,7 @@ public class AdminDomainService {
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getCreateInviteDbError().increment();
@@ -638,7 +638,7 @@ public class AdminDomainService {
                 code = generateInviteCode();
             } catch (StatusRuntimeException e) {
                 // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-                //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+                //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
                 throw e;
             } catch (Exception e) {
                 metrics.getCreateInviteInternalError().increment();
@@ -655,7 +655,7 @@ public class AdminDomainService {
                 adminInviteMapper.insert(invite);
             } catch (StatusRuntimeException e) {
                 // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-                //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+                //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
                 throw e;
             } catch (Exception e) {
                 if (AdminExceptions.isUniqueViolation(e)) {
@@ -716,7 +716,7 @@ public class AdminDomainService {
             rows = userMapper.update(null, wrapper);
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getBanDbError().increment();
@@ -758,7 +758,7 @@ public class AdminDomainService {
             rows = userMapper.update(null, wrapper);
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getUnbanDbError().increment();
@@ -794,7 +794,7 @@ public class AdminDomainService {
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin getUser DB error, uid={}", uid, e);
@@ -872,7 +872,7 @@ public class AdminDomainService {
             total = totalLong == null ? 0L : totalLong;
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin getUserList count DB error", e);
@@ -896,7 +896,7 @@ public class AdminDomainService {
             if (rows == null) rows = Collections.emptyList();
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin getUserList DB error", e);
@@ -989,7 +989,7 @@ public class AdminDomainService {
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getUpdateUserDbError().increment();
@@ -1008,7 +1008,7 @@ public class AdminDomainService {
                 existing = null;
             } catch (StatusRuntimeException e) {
                 // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-                //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+                //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
                 throw e;
             } catch (Exception e) {
                 metrics.getUpdateUserDbError().increment();
@@ -1028,7 +1028,7 @@ public class AdminDomainService {
                 wrapper.set(UserEntity::getPassword, PasswordUtil.encrypt(password));
             } catch (StatusRuntimeException e) {
                 // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-                //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+                //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
                 throw e;
             } catch (Exception e) {
                 metrics.getUpdateUserInternalError().increment();
@@ -1068,7 +1068,7 @@ public class AdminDomainService {
             userMapper.update(null, wrapper);
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getUpdateUserDbError().increment();
@@ -1082,7 +1082,7 @@ public class AdminDomainService {
             newUser = findOneUserByUid(uid);
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getUpdateUserDbError().increment();
@@ -1116,7 +1116,7 @@ public class AdminDomainService {
             rows = userMapper.delete(new LambdaQueryWrapper<UserEntity>().eq(UserEntity::getUid, uid));
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getDeleteUserDbError().increment();
@@ -1166,7 +1166,7 @@ public class AdminDomainService {
             throw Status.NOT_FOUND.withDescription("用户不存在").asRuntimeException();
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getResetPasswordDbError().increment();
@@ -1203,7 +1203,7 @@ public class AdminDomainService {
             hash = PasswordUtil.encrypt(defaultPassword);
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getResetPasswordInternalError().increment();
@@ -1220,7 +1220,7 @@ public class AdminDomainService {
             userMapper.update(null, wrapper);
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             metrics.getResetPasswordDbError().increment();
@@ -1305,7 +1305,7 @@ public class AdminDomainService {
             return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(map);
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
-            //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            //       （客户端可见码按**集合**读：Go 侧集合含 1015 与 5001（窄窗口），本条**只主张集合里有 1015**；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
             throw e;
         } catch (Exception e) {
             log.error("admin extraInfo JSON serialize failed", e);

@@ -3124,7 +3124,7 @@ grpc-java 侧读了 `grpc-core-1.63.0` 的 `io/grpc/internal/ServerImpl.java` �
   ⇒ 并登记 **E58（有意偏离候选 🏷 建议签）** ⇒ **users/user 域**再复核 ⇒ 指出**「客户端可见」这一层不成立**
   ⇒ ⇒ **本条是本域对两侧的独立复核结论**（见 1.8.1 / 1.8.2），**顺带把 global 的 Go 侧清单数纠正了**。
 
-#### 1.8.1 客户端可见面：**两侧都是 1015**（⇒ 不是 wire 级漂移 ⇒ 不需要签字）
+#### 1.8.1 客户端可见面：**按集合读**（Go 侧集合 = {1015, 5001} ⇒ ⚠️ 2026-10-31 订正：不再是「两侧都是 1015」那个单点读法）
 
 | 层 | Go | RAG |
 |---|---|---|
@@ -4496,7 +4496,7 @@ if (connectTimeout != null) {                                     // :16
 **（2）为什么客户端两侧都是 1015（logic 层的 `INTERNAL` 到不了客户端）**
 
 - **Go 侧**：`logoutlogic.go:39-42` 返回 `status.Error(codes.Internal, "注销失败,Redis写入异常")` —— ⚠️ **这是 logic 层返回值**；`service/common/observability/rpc.go:59-72` 的 `select` 里 `case <-done:`（`:63-67`）**要先 `lock.Lock()`**（`:64`），而 `case <-timeoutCtx.Done():`（`:68-71`）**不需要拿锁** ⇒ ctx 已 Done 时**超时分支几乎必然先就绪** ⇒ ⇒ 客户端拿 **`DEADLINE_EXCEEDED`**（⇒ admin-api `GlobalExceptionHandler.java:90` 落 default ⇒ **1015**）。
-- **RAG 侧**：`AdminDomainService.java:259` 的 `checkDeadline()` **在 Redis 写之前就抛** `DEADLINE_EXCEEDED` ⇒ 客户端同拿 **1015**。
+- **RAG 侧（保留守卫时的现状 · 该守卫已于 2026-10-30 删除）**：`AdminDomainService.java` 的 `checkDeadline()` **在 Redis 写之前就抛** `DEADLINE_EXCEEDED` ⇒ 客户端只拿 **1015** ⇒ ⇒ 客户端可见码**集合 = {1015}**（= Go 集合 {1015, 5001} 的**真子集** ⇒ 仍是一处窄但可观察的差异 ⇒ 需登记为有意偏离候选并签字）；⚠️ 原写 `:259` **已失效**（那处 `checkDeadline()` 已删 ⇒ 现行 `logout` 在 `:282-305`，Redis 写在 `:290`）
 - ⇒ ⇒ **两侧客户端可见码逐字一致 ⇒ 不是 wire 级漂移** ⇒ ⇒ 与 `DRIFT-ARPC-011` §1.8.1 同族（Go 侧那个 select 是**竞速** ⇒ 存在「handler 先返回 ⇒ 客户端拿到 5001」的**窄窗口** ⇒ ⚠️ 不声称 Go 侧 100% 是 1015）。
 - **RAG 侧 interceptor 侧**：`service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:314-320`（客户端 deadline 已过期 ⇒ `effective=0` ⇒ 调度器**立即** fire）＋ `:337-338`（`close(Status.DEADLINE_EXCEEDED)` ⇒ **首次 close 定客户端 status**）⇒ ⇒ 与 Go 的 select 分支**同款**。
 
@@ -4641,3 +4641,28 @@ if (connectTimeout != null) {                                     // :16
 - 本轮给 `application.yml` 加了内容 ⇒ ⇒ **该文件行号整体下移** ⇒ ⇒ 指向它的硬指针（`docs/DRIFT/_cross/grading/W5.md` 与 `W10.md`、本文件 `:4474` 那一行）**本轮未重锚**；其中本文件 `:4474` 里那处 `application.yml:156` 的引用**已就地改指**到新位置（`:260`）
 - ⇒ ⇒ 理由：**端口号还要再改一次**（统一分配）⇒ ⇒ **重锚应在端口定稿后做一次**
 - ⇒ ⇒ 已就地核对：本轮**只改注释**的 4 个 java 文件**行数与 HEAD 完全一致** ⇒ ⇒ 代码行指针未漂移
+
+## 客户端可见码按集合读（2026-10-31 · G1 lane）
+
+> ⚠️ **本小节标题刻意不含任何编号 token** ⇒ 派生层不把它当条目候选 ⇒ 也不劫持任何既有编号的 `domain` / `wave` / `basis`。
+> ⚠️ **本小节不重登记** ⇒ 本体仍是本文件既有的 `DRIFT-ARPC-010`（= `E66`）⇒ ⇒ **销账时不要当新条目**。
+> ⚠️ **正本在 `docs/DRIFT/users/vs-common.md` 的同名小节**（探针数据 ＋ 机制逐行 ＋ 边界 ＋ 待复核清单全在那边）⇒ ⇒ 本小节只记**本文件这一侧**的就地订正。
+
+**一、本文件这一侧的口径订正（一句话）**
+> 客户端可见码**按集合读**：Go 侧集合 = {1015, 5001}（探针活体实测 200000 轮，`tools/semantic-probe/client-visible-code/`，主干 `1c6bcda6`）⇒ ⇒ **「两侧都是 1015」那个单点读法是错的**。
+
+**二、本文件这一侧的两条形态**
+- **保留**域侧抢先 `checkDeadline()` ⇒ RAG 集合 = **{1015}** ⇒ Go 集合的**真子集** ⇒ ⇒ 需登记为有意偏离候选并签字
+- **删掉**域侧抢先检查（**本域已于 2026-10-30 删除**，`logout` 现行在 `AdminDomainService.java:282-305`）⇒ RAG 集合 = **{1015, 5001}** ⇒ ⇒ **与 Go 同集合 ⇒ 同形**
+
+**三、⚠️ 边界（不越）**
+探针跑的是 **Go 半边**（直调真源拦截器 ＋ 真 ctx）⇒ ⇒ **Go 侧集合是活体实测**，**RAG 侧仍是读出来的** ⇒ ⇒ **双侧活体对拍仍未做** ⇒ ⇒ 「同集合」只能读作「两侧**机制**同形」，**不能写成「两侧活体一致」**。
+⚠️ 本次只覆盖 `logout` 的 Redis 写这条链 ⇒ ⇒ **不外推**到本文件其它 DB 路径的同类表述（那些地方已改措辞为「按集合读、本条只主张集合里有 1015」，**集合值未复核**）。
+
+**四、本轮就地订正（零行位移）**
+- `:3127` —— 小节标题「客户端可见面：**两侧都是 1015**」→ 改为「**按集合读**（Go 侧集合 = {1015, 5001}）」
+- `:4499` —— `AdminDomainService.java:259` 的 `checkDeadline()` **已删** → 改为「**保留守卫时的现状**」＋ 集合口径 + 现行 `logout` 在 `:282-305`
+- `service/users/admin/admin-rpc/.../AdminDomainService.java` —— **29 处**「两侧都是 1015」措辞改为集合读法 ⇒ **行数 1373 → 1373 不变**（该文件有跨文件行号指针 ⇒ 必须行数中性）
+
+**五、M-6 合批三要素（现状）**
+① 共享层代理的预算检查已在 `delegate.getConnection()` **之前**（G4 `e8cb769a`）② Go 侧集合 = {1015, 5001}（`1c6bcda6`）③ **域侧删掉抢先 `checkDeadline()`**（本域已落码）⇒ ⇒ **那一个原子 commit 的三要素齐了** ⇒ ⇒ 交合并收口执行者做。
