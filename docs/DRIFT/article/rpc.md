@@ -2641,3 +2641,88 @@ bash tools/api-full-parity-probe/article/mutate-parity.sh          # ⇒ EXIT=0 
 | **§七 RPC 型 5 条** | **5/5 满足**（③ ④ 两格由本轮**补齐**，其余三格既有） |
 | **仍开放（不阻断 R3）** | ① `U-9b`（Go 侧 handler 并发模型**未活体对拍**）② 双侧活体的**成功路径完整字段语义**（`user.rpc` 两侧都不可达 ⇒ 现钉的是**降级路径**）③ `O-4` / `O-6` 仍只有静态取证 |
 | **⚠️ 不许越界读** | **本组件不是「零差异」** —— §12.4.2 的模型差异、`O-4`/`O-6` 的静态取证、双侧活体只覆盖降级路径 ⇒ 都**不等于**「两侧行为逐字节一致」 |
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/article/run.sh` ⇒ **EXIT=0**（2026-10-30 03:21:39 · 34s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：== 2/8 构建 Go 侧二进制（真源**只读** ⇒ 产物落临时目录） == ⏐ == 8/8 请求矩阵（Go vs RAG vs expected.txt ⇒ 逐字节） == ⏐ ✅ list_articles  Go == RAG == expected.txt（逐字节） ⏐ ✅ get_article_exists  Go == RAG == expected.txt（逐字节） ⏐ ✅ get_article_missing 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
+
+## 📌 追加 · 🟢 **rpc 域「指标抓取载体」落地 + 真启动证据（2026-10-30 · G3 第三轮）**
+
+**落码清单（域内文件）**
+
+- `service/article/article-rpc/pom.xml` —— 新增 `spring-boot-starter-web`（Actuator 只给 endpoint 与自动配置，**不给 servlet 容器** ⇒ 载体必须有容器才成立）。
+- `service/article/article-rpc/src/main/resources/application.yml` —— 新增顶层 `server.port: ${ARTICLE_RPC_MANAGEMENT_PORT:9092}`（= Go 观测端口，**一字不差**）；`management.endpoint.prometheus.enabled: true`；`spring.cloud.nacos.discovery.register-enabled: false`；新增顶层 `rag.side: rpc`；口令占位符改为**裸** `${POSTGRES_PASSWORD}`。
+- `service/article/article-rpc/src/test/java/com/rag/article/article/rpc/ArticleRpcPrometheusCarrierGateTest.java` —— **真 fat jar ＋ 真 PG 容器** ⇒ 真打 `/actuator/prometheus` ⇒ 6 例（含「产物 jar 里的默认值 = Go 端口」那条**产物层**断言）。
+- `service/article/article-rpc/src/test/java/com/rag/article/article/rpc/ArticleRpcSharedLayerWebBeanGateTest.java` —— 装配层断言「api 侧 web Bean **不在** rpc 容器里」＋**正向对照**（证明 servlet 前提成立 ⇒ 断言非空转）。
+- `support/RealGrpcPort.java` —— 新增 `pick(int forbidden)` 重载 ⇒ 观测面与业务面**必须占不同的口**（否则两次 `pick()` 可能挑到同一个空口 ⇒ `EADDRINUSE` 偶发红）。
+- `support/RealContainerHostPort.java` —— 宿主口登记册新增 `22861`（载体门）与 `22862`（分边门）。
+
+**真启动证据（进程级 · 2026-10-30 实跑 · 生产 yaml 原样）**
+
+- `GET http://127.0.0.1:9092/actuator/prometheus` ⇒ **HTTP 200**、**163 个指标族**、响应体含公共标签 `application="article-rpc"`。
+- **同一时刻** gRPC 端口 **19001** 与观测端口 **9092** **同时 LISTEN**（`lsof` 实测）⇒ 业务面没有被载体挤掉。
+- 日志实测含 `Tomcat started on port 9092` ＋ `gRPC Server started, listening on address: 0.0.0.0, port: 19001` ＋ `Started ArticleRpcApplication in 6.683 seconds`。
+
+**🔴 一条「差点被当成产品缺陷」的偶发失败 —— 真因已坐实（不是缺陷）**
+
+- 现象：首轮真启动出现过一次 `Application run failed` ＋ `ErrCode:-400, ErrMsg:Shutdown in progress`。
+- 真因 = **测试脚本在进程启动途中发了 SIGTERM** ⇒ JVM 进入关闭期 ⇒ `java.base/java/lang/ApplicationShutdownHooks.java:41-56` 的静态块里 `Shutdown.add(1, false, …)` 抛 `IllegalStateException` ⇒ `hooks` 被置 `null` ⇒ 之后 nacos-client 首次 `Runtime.addShutdownHook` 必然抛 `Shutdown in progress`（同文件 `:66-67`）⇒ 该异常是 `RuntimeException`，而 `bootstrap/NacosRegistration.java:104` 只 `catch (NacosException e)` ⇒ **catch 不住** ⇒ 冒泡出 `@EventListener` ⇒ 打印 `Application run failed`。
+- **A/B 实证**：对照组（跑完整再停）签名 **clean**；实验组（启动途中 SIGTERM）签名 **hit**（同一串 `Shutdown in progress`）⇒ 产品无缺陷，是探针写法缺陷（进程必须活到验完为止）。
+
+**载体副作用（本轮实测撞到并已修）**
+
+- 补上 `spring-boot-starter-web` ⇒ classpath 上有了 servlet ⇒ Spring Cloud Alibaba 的**自动注册**（`NacosAutoServiceRegistration` 监听 `WebServerInitializedEvent`）被激活 ⇒ 它注册的是 **web 容器端口**（= 观测端口 9092，**不是** gRPC 端口 9001）⇒ Nacos 里会出现「article-rpc → 9092」这条错端口实例 ⇒ api 连过去只拿到 `/actuator/**` ⇒ **gRPC 链路断**；Nacos 不可达时更狠：`failFast=true` ⇒ **直接把启动打断**（`Failed to start bean 'webServerStartStop'`）—— hot 域首轮真启动即撞此条。
+- 修法 = 三域显式 `spring.cloud.nacos.discovery.register-enabled: false`。本模块的注册是**手写**的（`bootstrap/NacosRegistration.java:88` 用 `GrpcServerProperties.getPort()` ⇒ 注册的**就是** gRPC 端口）⇒ 与 Go 侧 `zrpc.MustNewServer` 注册 `ListenOn` 的语义一致。
+
+**Nacos 单实例验收（2026-10-30 实跑 · 真 Nacos standalone）**
+
+- `article-rpc` 在 Nacos 里**实例数 = 1**，实例端口 = **gRPC 端口**（实测 `port=19001`），**不是**观测端口 9092。
+- 日志里的**手写**注册行 = `NacosRegistration registered: service=article-rpc group=DEFAULT_GROUP ip=… port=19001`；**自动注册痕迹 = 0 条**。
+
+**🟢 本轮第一次拿到的「正向结论」：指标名轴两侧一致（6/6）**
+
+- Go `service/article/rpc/metrics/metrics.go:6` 的 `Namespace = "article_service"`，6 个指标（`:11` / `:21` / `:31` / `:41` / `:52` / `:62`）与 RAG `metrics/ArticleRpcMetrics.java:59`（Namespace）＋ `:88` / `:101` / `:110` / `:149` / `:161` / `:178` 的 6 个 meter **逐条一致**（Micrometer 的自动后缀规则 Counter→`_total`、Timer→`_seconds` 与 Go 的命名对齐）。
+- ⚠️ 两侧的 `CounterVec` **空 vec 在 scrape 中不出现**（首次观测才出 series）⇒ RAG 侧 lazy 注册**行为同构** ⇒ 不改。
+- ⇒ 这条结论**只有在载体落地后才拿得到**（此前 RAG 侧虽有 meter，但**没有端点** ⇒ 抓不到 ⇒ 比不了）。
+
+**🔴 顺带推翻本域台账旧的一句错断言（「Go 无 metrics 包」）**
+
+- 旧断言写的是「Go 侧 `service/article/rpc/internal/` 下**无 metrics 包** ⇒ Go 没有自定义 counter ⇒ RAG 侧 `article_service_*` 是 RAG 自有 ⇒ 比 Go 宽」。
+- **该断言错了**：**枚举漏了一层** —— Go 的 metrics 包在 `service/article/rpc/metrics/`（**不在 `internal/` 下**）⇒ 真源路径 `service/article/rpc/metrics/metrics.go:1-6` ⇒ **Go 侧有** metrics 包 ⇒ ⇒ 「RAG 自有 ⇒ 比 Go 宽」这个推论**不成立** ⇒ 已在 RAG 侧 `application.yml` 的注释里据实订正（改写为 Go 的 **Namespace** `article_service` + 真源路径）。
+- ⇒ **教训（可复用）**：**否定结论必须换一种枚举方式交叉扫** —— 路径深度不一致（`internal/` vs 包根）会**直接漏掉整个包**。
+
+**口令兜底取消（2026-10-30 · 合并收口执行者派工 · 与 Go 逐字同形）**
+
+- Go `service/article/rpc/etc/article.yaml:13` = `Password: "${POSTGRES_PASSWORD}"`（**裸**）⇒ go-zero 的加载 = `core/conf/config.go:63` `loader([]byte(os.ExpandEnv(string(content))), v)` ⇒ `os.ExpandEnv` **不认** `${VAR:default}` ⇒ 缺变量 ⇒ **空口令** ⇒ 连库失败 = fail-fast。
+- ⇒ RAG 侧原先的 `${POSTGRES_PASSWORD:password}`（走 Spring 的 `:default`）⇒ 缺变量时会用默认值连上去 ⇒ **RAG 比 Go 松** ⇒ 属**真漂移**，**不是**「更严的有意偏离」⇒ ⇒ 本轮**取消兜底**（本文件两处：数据源那段与 `article-rpc.postgres` 那段）。
+- ⚠️ **残余差异（失败时刻不同）**：Go = **启动成功、连库时**失败；RAG = **启动即失败**（Spring 解析不到占位符 ⇒ DataSource bean 创建失败）⇒ ⇒ 属「RAG 更严」的一侧 ⇒ 由**合并收口执行者**在合并窗口统一登记。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W4
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| FIX-06 | D | P3 | 否 | Go `service/article/rpc/internal/mqs/article_sync_result_consumer.go:147`（`notifyAuthor, notifyTitle = article.AuthorID, article.Title` ⇒ 通知标题取**当前行** `article.Title`，而 revision 取**冻结 payload** 的 `approved.Title`（同文件 `:120`））vs RAG `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/service/ArticleAtomicService.java:417`（`? new PublishOutcome(article.getAuthorId(), article.getTitle(), true)` ⇒ 通知标题取**当前行** `article.getTitle()`，与 Go `:147` 同源）⇒ **差异已消失**（台账 `DRIFT/article/rpc.md:1161` 记的 `DRIFT-ARTICLE-RPC-009` 已修：原先用 `approved.title` ⇒ 已改为 `article.getTitle()`）⇒ **经分析确认不需要再实现** ⇒ 无落码动作 | 2026-10-30 |
+| FIX-08 | D | P3 | 否 | Go `service/article/rpc/metrics/metrics.go:46`（`Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1}` ⇒ **8 个**桶边界 + 固有 `+Inf` = 9）vs RAG `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/metrics/ArticleRpcMetrics.java:62`（`private static final double[] MINIO_BUCKETS = {0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1};` ⇒ **同一组 8 个数值**）＋ `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/metrics/ArticleRpcMetrics.java:127`（javadoc「**绝不能**加 `publishPercentileHistogram()`」⇒ 该行已从 Timer 构造里去掉 ⇒ Micrometer 不再并入默认百分位桶）⇒ **差异已消失**（真 scrape 实测 9 个边界，与 Go 逐条一致；台账 `DRIFT/article/rpc.md:1345` 的 FIX-08 已修，`DRIFT-ARTICLE-RPC-010` 已闭）⇒ **经分析确认不需要再实现** ⇒ 无落码动作 | 2026-10-30 |
+| FIX-17 | D | P3 | 否 | Go `service/article/rpc/internal/logic/create_article_logic.go:94`（`SecondaryTags: model.StringArray(in.SecondaryTags)` ⇒ **直接类型转换**（非 `append`）⇒ 不带二级标签时 = nil slice ⇒ `StringArray.Value()` = `json.Marshal(nil)` = `"null"` ⇒ Go 建的行落库就是 `jsonb 'null'`）vs RAG `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/service/ArticleDomainService.java:349`（`if (a.getSecondaryTags() != null) { builder.addAllSecondaryTags(a.getSecondaryTags()); }` ⇒ **null 不写**）＋ `:353`（`if (a.getExtInfo() != null && !a.getExtInfo().isEmpty()) { builder.putAllExtInfo(a.getExtInfo()); }` ⇒ **null / 空不写**）⇒ **差异已消失**（Go 侧 proto3 `repeated`/`map` **无 presence** ⇒ nil ⇒ 字段不存在；RAG 侧 null ⇒ 不写 ⇒ 字段不存在 ⇒ **wire 字节逐字节相同**，台账 `DRIFT/article/rpc.md:1875` 的 P-U-2 已闭）⇒ **经分析确认不需要再实现** ⇒ 无落码动作 | 2026-10-30 |
+| O-5 | D | P3 | 否 | Go `service/article/rpc/internal/model/db.go:55`（`if err := db.AutoMigrate(&Article{}, &ArticleSyncOutboxEvent{}); err != nil {` ⇒ Go 侧**用 GORM AutoMigrate 建表**，全程**没有 Flyway 账本**这个概念）vs RAG `service/article/article-rpc/src/main/resources/application.yml:67`（flyway 段：`enabled: true` / `baseline-on-migrate: true` / `locations` / `schemas` ⇒ **不配 `table:` ⇒ 用默认表名 `flyway_schema_history`**）＋ `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/bootstrap/ArticleSchemaGate.java:139`（错误文案「… ⇒ Flyway migrations did not run. Check spring.flyway.enabled, locations=classpath:db/migration, and that the pom includes org.springframework.boot:spring-boot-flyway (required since Boot 4).」⇒ 本域**确实靠 Flyway 建表** ⇒ Go 侧 `AutoMigrate` 的 RAG 对应物 = Flyway 迁移 + 这道 schema gate）⇒ **差异已消失**：O-5 指控的那条是「`article-rpc`/`like-rpc`/`message-rpc` **共用一本** `flyway_schema_history`」⇒ 经回源复核**该差异从未成立** —— 实测 6 个 rpc 各有独立账本（`service/like/like-rpc/src/main/resources/application.yml:81` = `flyway_schema_history_like` · `service/message/message-rpc/src/main/resources/application.yml:105` = `flyway_schema_history_message` · `service/comment/comment-rpc/src/main/resources/application.yml:126` = `flyway_schema_history_comment` · `service/favorite/favorite-rpc/src/main/resources/application.yml:129` = `flyway_schema_history_favorite` · `service/follow/follow-rpc/src/main/resources/application.yml:79` = `flyway_schema_history_follow` · `service/task/task-rpc/src/main/resources/application.yml:79` = `flyway_schema_history_task`），**只有 `article-rpc` 用默认表名**（`service/article/article-rpc/src/main/resources/application.yml:67`）⇒ 按 AGENTS.md §6.3 问题 4 的既定分配「默认表名归 `article-rpc` 独占」⇒ 与其余 6 本独立账本**互不冲突** ⇒ 台账 `DRIFT/article/rpc.md:119`/`:342` 的「❌ 维持『证伪』」经回源复核**成立**（`DRIFT/article/rpc.md:129` §「O-5 证伪（上一版 grep 被 `head -30` 截断导致的误报）」）⇒ 另：Go 侧 `AutoMigrate` vs RAG 侧 Flyway 本身属**表达层**迁移，不是缺陷 ⇒ **经分析确认不需要再实现** ⇒ 无落码动作 ⇒ **经分析确认不需要再实现** ⇒ 无落码动作 | 2026-10-30 |
+| S-3 | C | P2 | 否 | Go `go-queue@v1.2.2/kq/config.go:24`（`ForceCommit bool \`json:",default=true"\`` ⇒ **声明点**）＋ `go-queue@v1.2.2/kq/queue.go:230-242`（**消费点**：`if err := q.consumeOne(...); err != nil { if q.errorHandler != nil { q.errorHandler(ctx, msg, err) }; if !q.c.ForceCommit { continue } }; if err := q.consumer.CommitMessages(ctx, msg); err != nil {` ⇒ ForceCommit=true ⇒ **不 continue ⇒ 失败也提交位点**）＋ Go 真源 `service/article/rpc/etc/article.yaml`（`KqConsumerConf` 段**未配** ForceCommit ⇒ 生效值 = true）vs RAG `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/ArticleRpcApplication.java:241`（`handler.setSeekAfterError(true);`）＋ `:231`（`DefaultErrorHandler handler = new DefaultErrorHandler(` … 零次重试 BackOff）⇒ **差异仍成立（承重项不同，但可观察面已收敛）**：Go 的承重项是 `ForceCommit` tag 的**消费点**；RAG 侧实测（`service/article/article-rpc/src/test/java/com/rag/article/article/rpc/mq/ArticleKafkaForceCommitGateTest.java:138`「`setSeekAfterError(true)` **不是承重项**」）**承重项是零次重试 BackOff** ⇒ 二者**共同的可观察效果**（失败消息只投递 1 次、位点照样提交）**已对齐** ⇒ 台账 `DRIFT/article/rpc.md:332` 记的「🔴 原依据修正」+ `U-3`/`U-4` 未在真 Kafka 上证明已被 `docs/DRIFT/article/rpc.md:2442` §12.3（真 Kafka 实测）闭合 ⇒ 残留 = **机制层归属不同**（表达层可接受）与**真 Kafka 下失败消息的精确 ack 语义**尚未逐条对拍 ⇒ 归 **C**（阶段二用真 Kafka 双侧对拍钉死） | 2026-10-30 |
+| S-5 | D | P3 | 否 | Go `service/article/rpc/internal/mqs/article_consumer.go:154-155`（`if l.svcCtx.SecurityRpc == nil { return fmt.Errorf("content security client not initialized") }` ⇒ Go 自己在 security 不可用时**也要求审核失败** ⇒ 文章卡在 REVIEWING）＋ `service/article/rpc/internal/svc/service_context.go:60`（`securityClient := zrpc.MustNewClient(c.SecurityConf)`）vs RAG `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/client/UnavailableContentSecurityClient.java:69`（`private static final String NOT_INITIALIZED = "content security client not initialized";` ⇒ **文案逐字相同**）＋ `:76`（`throw new SecurityAuditException(NOT_INITIALIZED);`）⇒ **差异已消失**（两侧可观察行为一致 = 都把文章留在 REVIEWING）⇒ 且 security 域按 `AGENTS.md` §1 **范围外 ⇒ 不是待办**（用户决策，`docs/DRIFT/article/rpc.md:2400` §12.1 已改判「范围外 ⇒ 不计入本组件必相对齐项」）⇒ **经分析确认不需要再实现** ⇒ 无落码动作 | 2026-10-30 |
+
+### lane W9
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-ARTICLE-RPC-007 | D（已签字偏离 ⇒ 决策不是缺陷） | P3 | 否 | Go `go-queue@v1.2.2/kq/config.go:12`（`Brokers []string` ⇒ 逐通道独立声明）＋ `go-queue@v1.2.2/kq/pusher.go:44-47`（`NewPusher` ⇒ `kafka.Writer{Addr: kafka.TCP(addrs...)}` ⇒ **生产**消费点）＋ `go-queue@v1.2.2/kq/queue.go:120-121`（`kafka.ReaderConfig{Brokers: c.Brokers}` ⇒ **消费**消费点）vs RAG `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/config/ArticleKafkaChannelValidator.java:121`（**全仓唯一的生产侧 `getBrokers()` 读点** ⇒ 只**校验**、不**连接**；`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/config/ArticleRpcProperties.java:280` 只是 getter 定义）＋ `:65`（类注释自记「四个键**声明了但没有任何消费点**」）⇒ **差异仍成立**（RAG 侧 Spring Kafka 客户端是全局单例 ⇒ 不能逐通道切 broker；Go 侧可以）⇒ 但**已签字**：`docs/Intentional_Deviations/article/rpc.md:164`（`SD-2026-10-24-02` · 状态 ✅ 仍成立 · 2026-10-24 用户 Jason 签字）⇒ **是决策不是缺陷** ⇒ 归 D；⚠️ 处置面已把「静默忽略」改成「启动即失败」（校验器 `@PostConstruct` 抛异常 ⇒ 启动失败）⇒ 无待实现内容 | 2026-10-30 |
+| U-9 | D（差异已消失 ⇒ `U-9a` 半两侧同构、已闭合） | P3 | 否 | Go `go-queue@v1.2.2/kq/queue.go:240`（`if err := q.consumer.CommitMessages(ctx, msg); err != nil {` ⇒ 提交的是**这条消息自己的位点**）＋ `kafka-go@v0.4.47/reader.go:171-185`（`offsetStash.merge` ⇒ `offsetsByPartition[c.partition]` **只在 `c.offset` 更大时**才被覆盖 ⇒ 同一分区多次提交取 **max** ⇒ 已提交位点单调不回退）vs RAG `service/article/article-rpc/src/test/java/com/rag/article/article/rpc/mq/ArticleKafkaForceCommitGateTest.java:354`（`committedOffsetPerPartitionIsMaxDeliveredPlusOneAndNeverRegresses` ⇒ 真 Kafka 读消费组已提交位点 + 逐条投递记录）＋ `:352`（`@DisplayName` 写明「Go kq/queue.go:240 + kafka-go reader.go:171-185 取 max ⇒ 两侧同构」）⇒ **差异已消失**（`U-9a` 半：两侧都是「每分区单调、提交 = 该消息自己的 offset+1、已提交的消息被跳过」）⇒ ⚠️ 本条**剩余的一半 = 处理器并发模型**，另立编号 **`U-9b`** 单独定级（见下）⇒ 本条主体已无待实现内容 ⇒ 归 D | 2026-10-30 |
+| U-9b | C（阶段 2 最终工程建设项 · 取证缺口；「还没查」不构成 D） | P3 | 否 | Go `go-queue@v1.2.2/kq/queue.go:248-259`（`startProducers`：`q.c.Consumers` 个 goroutine 调 `FetchMessage` ⇒ 拉取者）＋ `:219-246`（`startConsumers`：`q.c.Processors` 个 goroutine 读**同一个** `q.channel` ⇒ 8 个 handler 抢同一个 channel ⇒ 同一分区消息**可能**被并发处理、handler 级副作用顺序**不保证**）＋ `go-queue@v1.2.2/kq/config.go:19`（`Processors int json:",default=8"` ⇒ 未配即 8）＋ `service/article/rpc/etc/article.yaml:51` ／ `:67`（两个消费者都只配 `Consumers: 1` ⇒ 拉取者只有 1 个）vs RAG `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/ArticleRpcApplication.java:270`（`factory.setConcurrency(PROCESSOR_CONCURRENCY)`）＋ `:109`（`static final int PROCESSOR_CONCURRENCY = 8;`）＋ `:271-272`（`setAckMode(… AckMode.RECORD)`）⇒ **差异仍成立**（Go 可能同分区并发处理 · RAG 的 8 个 consumer 各占自己的分区 ⇒ 同分区**严格串行** ⇒ **RAG 侧更严**）⇒ 🔴 **不许写「已对齐」**：Go 侧**无活体对拍**（本仓从未跑过 Go `kq` 探针 —— `tools/` 下无该探针）⇒ 解除条件二选一：① 登记有意偏离并签字（落点 `docs/Intentional_Deviations/article/rpc.md`，**不在本 lane 写权面**）② 补 Go 侧活体探针（真 Kafka ＋ 真 `kq` ＋ 同分区多条消息）⇒ 「还没查」**不构成 D** ⇒ 归 C；⚠️ 按基线口径**不计入**阶段一判定（`docs/PhaseGoal-judge.md` §1.1 ⑥ 第 4 条 · `docs/PhaseGoal/g3.md:24` 亦记「**不降 R** ⇒ 按 §1.1 ⑥ 第 4 条不计入」）⇒ 不阻断阶段一 | 2026-10-30 |

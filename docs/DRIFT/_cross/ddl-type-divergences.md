@@ -143,7 +143,7 @@
 | like-rpc 丢失 CHECK / 触发器 / 索引 | ✅ **已修**（2026-10-23 第三轮）—— `V6__align_like_domain_fact_outbox_with_go.sql` 补 6 项（2 个 CHECK + 2 个部分索引 + 1 个触发器 + 版本范围 CHECK），**不改 V4** ⇒ `DRIFT-LIKE-017` 已结案 | `service/like/like-rpc/src/main/resources/db/migration/V6__align_like_domain_fact_outbox_with_go.sql` |
 | message-rpc `V2` 迁移无 `IF NOT EXISTS` | ✅ **前提不成立** —— V2 的 `ADD CONSTRAINT uk_conversation_pair` 在 **GORM 建过表的库上本来就能跑**（GORM 建的是**索引**，不是同名**约束**）⇒ 原文担心的失败场景不存在。`V4` 已把该约束降回索引 | [`docs/DRIFT/message/rpc.md`](../message/rpc.md) §`UNRESOLVED-MSG-005` |
 
-**⇒ AGENTS.md §〇 item 2 的「仍未修」应改为**：**`users_user.status` 可空性 1 处 + DEFAULT 残留 **22 处**（users 8 + message 6 + comment 8）⇒ ⚠️ **其中 14 处机器可复算（users 8 + message 6）、comment 的 8 处需人工闭合**（工具在已签字的 `report_record` 列集合差异处提前中止）+ users 域缺 Go 的 3 条索引**。⚠️ **2026-10-29 订正**：原文写 **14** ⇒ **旧 2 域口径**；而 `AGENTS.md` §〇 item 2 现写「**16 处**」⇒ 那是 **users 域全部残留数**（可空性 1 + DEFAULT 8 + 索引 7）被误当成 DEFAULT 数 ⇒ ⇒ **同一个指标三处三个数（16 / 14 / 22）⇒ 权威 = 22**<br>⚠️ **2026-10-29 二次订正（comment 域可复算性 · 与本档 §十 :175 / §十一 :220 自相矛盾）**：上面「comment 的 8 处**需人工闭合**」**已过时** ⇒ ⇒ **comment 域现为「默认口径不可复算 · 补跑口径可复算」** —— ① **默认口径** `check-ddl-static.py --domain comment` = **`EXIT=2`**（RAG 独有的 `report_record` 整表使列集合不一致 ⇒ **提前中止**，产出**不含**另 6 张表的对照）；② **补跑口径** = `--rag-db` 指向**同源副本库**（`TEMPLATE rag_comment_db` 再 `DROP TABLE report_record`）⇒ ⇒ **可跑完** ⇒ **实测 21 处**（可空性 8 ＋ `DEFAULT` **8** ＋ 索引 2 ＋ `CHECK` 2 ＋ 触发器 1；**机器报出 23 处**，其中 2 处是 IDENTITY-vs-serial 的 DEFAULT 假阳性 ⇒ **实质 21**）⇒ ⇒ **comment 的 8 处 DEFAULT 现在是机器可复算的**（不再是人工闭合）⇒ ⇒ **本行「14 处机器可复算」应读作「22 处全部机器可复算（14 处默认口径 + 8 处补跑口径）」** ⇒ **权威数仍是 22，不变** · 核对日期 2026-10-29
+**⇒ AGENTS.md §〇 item 2 的「仍未修」应改为**：**`users_user.status` 可空性 1 处 + DEFAULT 残留 **22 处**（users 8 + message 6 + comment 8）⇒ ⚠️ **其中 14 处机器可复算（users 8 + message 6）、comment 的 8 处需人工闭合**（工具在已签字的 `report_record` 列集合差异处提前中止）+ users 域缺 Go 的 3 条索引**。⚠️ **2026-10-29 订正**：原文写 **14** ⇒ **旧 2 域口径**；而 `AGENTS.md` §〇 item 2 现写「**16 处**」⇒ 那是 **users 域全部残留数**（可空性 1 + DEFAULT 8 + 索引 7）被误当成 DEFAULT 数 ⇒ ⇒ **同一个指标三处三个数（16 / 14 / 22）⇒ 权威 = 22**<br>⚠️ **2026-10-29 二次订正（comment 域可复算性 · 与本档 §十 :175 / §十一 :220 自相矛盾）**：上面「comment 的 8 处**需人工闭合**」**已过时** ⇒ ⇒ **comment 域现为「默认口径不可复算 · 补跑口径可复算」** —— ① **默认口径** `check-ddl-static.py --domain comment` = **`EXIT=2`**（RAG 独有的 `report_record` 整表使列集合不一致 ⇒ **提前中止**，产出**不含**另 6 张表的对照）；② **补跑口径** = `--rag-db` 指向**同源副本库**（`TEMPLATE rag_comment_db` 再 `DROP TABLE report_record`）⇒ ⇒ **可跑完** ⇒ **实测 21 处**（可空性 8 ＋ `DEFAULT` **8** ＋ 索引 2 ＋ `CHECK` 2 ＋ 触发器 1；**机器报出 23 处**，其中 2 处是 IDENTITY-vs-serial 的 DEFAULT 假阳性 ⇒ **实质 21**）⇒ ⇒ **comment 的 8 处 DEFAULT 现在是机器可复算的**（不再是人工闭合）⇒ ⇒ **本行「14 处机器可复算」应读作「22 处全部机器可复算（14 处默认口径 + 8 处补跑口径）」** ⇒ **权威数仍是 22，不变** · 核对日期 2026-10-29<br>⚠️ **2026-10-30 三次订正（用户 2026-10-30 拍板「给 check-ddl-static.py 加『跳过已签字表』豁免」后 · 原判保留不改）**：上面「默认口径 `EXIT=2` ⇒ 须补跑口径」**再次过期** ⇒ ⇒ **现在 comment 域的**默认口径**就直接是 `EXIT=1`（21 处）** —— ① `tools/difftest/check-ddl-static.py` 新增**「已签字的表级偏离」豁免**，签字清单来自**显式数据文件** `tools/difftest/ddl-signed-exempt.txt`（**不解析** `docs/Intentional_Deviations/**.md` ⇒ 散文漂移不会误豁免/误报）；② 遇到「列集合不一致且**全部**差异都落在**已签字的那张表**」⇒ **不中止** ⇒ 跳过该表、**继续比其余 5 张表**，并单列 **「⚪ 已签字豁免 · 未核对」**；③ **实测**：`--domain comment --indexes` ⇒ **EXIT=1** · 类型/长度 **0 处** · 52 列逐字相同 · 可空性 **8** · DEFAULT **10**（含 2 处 IDENTITY-vs-serial 已知假阳性 ⇒ **真差 8**）⇒ **机器报 23 = 实质 21** ⇒ **与原补跑口径逐条一致** ⇒ ⇒ **「22 处 DEFAULT 残留」现在「全部由默认口径一条命令产出」**（users 8 + message 6 + comment 8）⇒ **「人工闭合」「补跑口径」两处措辞均作废** · 核对日期 2026-10-30
 
 ### 表名映射（§三 提到的「两侧表名本来就不同」）
 
@@ -172,7 +172,7 @@ Go → RAG（来自 AGENTS.md §3.4.1，非本文件自定）：
 | `like` | 8 维度实测完成 | **5**（索引 2 ＋ `CHECK` 2 ＋ 触发器 1） | L4 |
 | `task` | 8 维度实测完成 | **0** | L4 |
 | `article` | 8 维度实测完成 | **0**（56 列逐字） | L4 |
-| `comment` | 默认口径 **EXIT=2** ⇒ **补跑口径**完成 | **21**（可空性 8 ＋ `DEFAULT` 8 ＋ 索引 2 ＋ `CHECK` 2 ＋ 触发器 1） | L4 ＋ 人工闭合 |
+| `comment` | 默认口径 **EXIT=2** ⇒ **补跑口径**完成 | **21**（可空性 8 ＋ `DEFAULT` 8 ＋ 索引 2 ＋ `CHECK` 2 ＋ 触发器 1） | L4 ＋ 人工闭合 ⚠️ **2026-10-30 订正（用户拍板后）**：默认口径现为 **EXIT=1**（已签字表豁免生效 ⇒ **不再提前中止**）⇒ **同一条命令**直接产出 **23 处（机器报出）= 21 处实质**（与补跑口径**逐条一致**）⇒ 原「补跑口径」**不再必需** ⇒ 证据强度仍 **L4**，但「人工闭合」标签作废 ⇒ 核对日期 2026-10-30 |
 | `favorite` | 8 维度实测完成 | **2**（额外 `CHECK`） | L4 |
 | `hot` | ⚪ **N/A** | **N/A** | — |
 | **合计** | **类型/长度 9 域 0 差异** | **51 处**（§十 定级 = **C 类 23 / D 类 28 / A 类 0**） | — |
@@ -213,9 +213,29 @@ for d in users follow message like task article comment favorite hot; do
 done
 #   ⇒ 预期：users=1(16) follow=0 message=1(7) like=1(5) task=0 article=0
 #           comment=2(默认口径·report_record 整表致提前退出 ⇒ 需补跑口径) favorite=1(2) hot=3(N/A)
+#   ⚠️ **2026-10-30 订正（用户拍板加豁免后）**：comment 现为 **1(21)** ——
+#      「已签字的表级偏离」豁免生效（清单 `tools/difftest/ddl-signed-exempt.txt`）
+#      ⇒ 默认口径**不再提前中止** ⇒ 同一命令直接产出 21 处（机器报 23，扣 2 处 IDENTITY 假阳性）
+#      ⇒ 「需补跑口径」**已不必要**。其余 8 域的预期值**不变**。
 ```
 
 ⚠️ **`EXIT=1` 在 users/message/like/favorite 域是预期值**（差异已分类登记，不是「门禁坏了」）。
 ⚠️ **users 域跑前须先起 difftest 栈**：`bash tools/difftest/run.sh --no-build --keep --serve-only`。
 ⚠️ **`comment` 域默认口径 = `EXIT=2`**（RAG 独有的 `report_record` 整表使列集合不一致 ⇒ **提前退出**）⇒ ⇒ **默认口径的产出不含另 6 张表的对照** ⇒ 须用 `--rag-db` 指向**同源副本库**（`TEMPLATE rag_comment_db` 再 `DROP TABLE report_record`）**补跑**，否则会漏掉 21 处残留 ⇒ 逐条见 [`docs/DRIFT/comment/vs-common.md`](../comment/vs-common.md) §9。
 ⚠️ **`hot` 域 = `EXIT=3`（N/A）** ⇒ **不是「0 差异」**。
+
+> ⚠️ **2026-10-30 订正（用户 2026-10-30 拍板「加豁免」后 · 原判保留不改）**：
+> 上面两条关于 `comment` 域默认口径 = `EXIT=2`、以及必须用 `--rag-db` 补跑口径的说明 **已过期**。
+> **变更**：`tools/difftest/check-ddl-static.py` 新增**「已签字的表级偏离」豁免**
+> —— 签字清单来自**显式数据文件** `tools/difftest/ddl-signed-exempt.txt`
+> （**不解析** `docs/Intentional_Deviations/**.md` ⇒ 散文漂移不会误豁免/误报）。
+> **现在的行为**：列集合不一致且**全部**差异都落在**已签字的那张表**（comment 域 = `report_record`，
+> 签字条目 `SD-2026-10-24-CAND-02`）⇒ **不中止** ⇒ 跳过该表、**继续比其余 5 张表**，
+> 并单列 **「⚪ 已签字豁免 · 未核对」**（⇒ 该表今后新增的真差异**本工具抓不到** ⇒ 需人工巡检）。
+> **实测（2026-10-30 05:2x）**：`--domain comment --indexes` ⇒ **EXIT=1**，
+> **类型/长度 0 处 · 52 列逐字相同 · 可空性 8 处 · DEFAULT 10 处（其中 2 处是 IDENTITY-vs-serial 的已知假阳性 ⇒ 真差 8 处）**
+> ⇒ **实质差异合计 23 处（机器报出）= 21 处实质** ⇒ **与原补跑口径逐条一致**。
+> ⇒ ⇒ **权威数 22 处 DEFAULT 残留（users 8 + message 6 + comment 8）现在「全部机器可复算」**，
+> 且 **comment 的 8 处**由**默认口径**直接产出 ⇒ 台账里「人工闭合」「补跑口径」两处措辞作废。
+> **其余 8 域行为未变**（实测 users=1(16) · message=1(7) · follow=0 · like=1(5) · task=0 · article=0 · favorite=1(2) · hot=3）。
+> 核对日期 2026-10-30。

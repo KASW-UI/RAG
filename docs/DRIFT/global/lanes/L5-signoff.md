@@ -321,3 +321,25 @@
 |---|---|
 | 2026-10-25 | 🆕 **第二十六轮（L5 lane `align/global-signoff` · 基线 `d7a126a`）** —— **纯文档**，**生产代码零改动**<br>① **A 组**：🆕 登记 **4 条待签字候选**（全部「**🏷 候选，建议签**」，**登记完就躺着，不升级为拍板**）—— `SD-2026-10-25-CAND-14`（C2 · T-7 状态行 reason phrase · **框架限制**）· `SD-2026-10-25-CAND-15`（T-12 · **出口层级差异**）· `SD-2026-10-25-CAND-16`（C3 · users 域 8 处 DEFAULT · **刻意保留**）· `SD-2026-10-25-CAND-17`（C4 · `users_user.status` 可空性 · **RAG 更严**）；⛔ **C1 不重复登记**（已存在于 `hot/api.md:332` ⇒ §5.3b 硬边界 2）⇒ 只产出「**补 Go 出处**」补丁<br>② **B 组定性**：**T-11 = ✅ 已修，不是误报**（Go `core/trace/agent.go:126-127` + `:123` 确实装全局 provider 与 batcher ⇒ Go 确实导出 ⇒ 曾是真漂移 ⇒ **登记不撤销**；活体对拍证据 = `tools/semantic-probe/trace/` 11 用例 8 一致 0 漂移）· **T-12 = ✅ 定性成立**（Go `rest/engine.go:113-115` 的**注册点** + `patrouter.go:59-83` 三条出口 ⇒ 405 绕过 `TraceHandler` ⇒ **出口层级差异** ⇒ **共享层改不动** ⇒ 签字候选）<br>③ **C 组**：产出 **A6 / B6 订正补丁**（like 档 `SD-2026-10-24-10` 的「性质」字段 + `docs/DRIFT/common/alignment-2026-10-23.md:575/:600` 的**编号记错**）—— **目标文件不在白名单 ⇒ 只出补丁文本**<br>④ **D 组**：产出 `_README.md` §七之二 的**快照补丁**（C3 先例指针订正 + 补 C6/C7 两行）+ `hot/api.md` 补 Go 出处 + `common-tails.md` §一·T-11 改状态 + `open-items.md` / `ddl-type-divergences.md` 更新<br>⑤ 🆕 **2 条 Pitfall**：`PIT-GLOBAL-022`（抄来的先例指针也要复核）· `PIT-GLOBAL-023`（「出口层级」的结论要落到注册点）<br>⑥ **需拍板清单：0 条**（用户既定偏好：登记类事项登记完就躺着）<br>⑦ 🔴 **顺手修掉 5 处坏相对链接**（本 lane 拥有写权的两个文件内）：`docs/Intentional_Deviations/global/common-tails.md` 的 `../../../Pitfalls/...`（**2 处是本文件原有的**）+ `docs/DRIFT/global/lanes/L5-signoff.md` 的 `../../Pitfalls/...` ⇒ 路径少/多一级 ⇒ **点不开** ⇒ 已改正 ⇒ 本轮全量链接自检 **MISSING_LINKS = 0** |
 
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W3
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| `PIT-GLOBAL-022` | D | P2 | 否 | Go `service/message/rpc/internal/model/data_model.go:41`（`CreatedAt time.Time` 仅 `autoCreateTime` ⇒ **Go 侧无 `DEFAULT CURRENT_TIMESTAMP`**）vs RAG `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/domain/NotificationEntity.java:109`（`createdAt` 落库 ⇒ 对应 DDL 带 `DEFAULT CURRENT_TIMESTAMP`，见 `V1__create_message_notification.sql:18`）⇒ **差异仍成立**（**坑仍生效**：台账里的「同形态先例」指针是**抄来的**、本身是一条待核对的断言；2026-10-30 复核当场复现 —— `docs/Intentional_Deviations/message/rpc.md:80` 落在 `SD-2026-10-24-03`（讲 `bizCodeFromError`）上，与 `DEFAULT CURRENT_TIMESTAMP` 毫无关系，真正位置是 `:96`）⇒ 归 B（阶段一验证闭环：台账指针必须逐条回源，否则错指针比空指针更贵） ⇒ **归 D（阶段归属不适用）**：本条是**元教训**（坑位）而非待修问题 ⇒ §10 的 A-D 不适用 ⇒ 取 D 类「**可不实现或不适用**」；它指向的行为差异（`DEFAULT CURRENT_TIMESTAMP` 多出来）在 **DRIFT 侧**定级（`SD-2026-10-25-CAND-16` / `SD-2026-10-24-04`）⇒ 本条只承担「防」的角色 | 2026-10-30 |
+| `PIT-GLOBAL-023` | D | P2 | 否 | Go `go-zero@v1.10.2/rest/engine.go:113-115`（**注册点**：`handle := chn.ThenFunc(route.Handler)` ⇒ `router.Handle(route.Method, route.Path, handle)`）＋ `go-zero@v1.10.2/rest/engine.go:134-138`（`chn` 的第一个就是 `handler.TraceHandler(...)` ⇒ 但这条链是被**注册进 router** 的 ⇒ router 自产的 405 不经它）vs RAG `service/common/src/main/java/com/rag/common/http/GoStyleTraceparentFilter.java:282`（RAG 的注入点在 filter 链 ⇒ DispatcherServlet 内的「方法不匹配」出口已带上 `Traceparent`）⇒ **差异仍成立**（**纪律仍生效**：「这个出口在 XX 层 ⇒ 不经过 X」是推断；T-12 的判定只有落到**注册点**才立得住 —— 只读 `patrouter.go:59-83` 的出口分支无法区分 TraceHandler 挂在 router 外面还是每条路由里面）⇒ 归 B（阶段一验证闭环：凡写「层」必落注册点） ⇒ **归 D（阶段归属不适用）**：本条是**元教训**（坑位）而非待修问题 ⇒ §10 的 A-D 不适用 ⇒ 取 D 类「**可不实现或不适用**」；它指向的行为差异在 **DRIFT 侧**定级（`T-12` ⇒ `SD-2026-10-25-CAND-15`，见本表）⇒ 本条只承担「防」的角色 | 2026-10-30 |
+| `SD-2026-10-23-09` | D | P2 | 否 | Go `go-zero@v1.10.2/rest/handler/maxconnshandler.go:12-36`（容量拒绝 ⇒ **裸 503**，触发条件是 `MaxConns`，`go-zero@v1.10.2/rest/config.go:52` 默认 10000；Go **无 worker 池** ⇒ 「worker 池饱和」这个事件在 Go 侧不存在）vs RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:154`（`MAX_HTTP_WORKERS = 512`）＋ `:369`（`catch (RejectedExecutionException saturated)` ⇒ 裸 503，无 body 无 Content-Type）＋ `:193`（源码注释自陈同一形态）⇒ **差异仍成立**（RAG 多出「worker 池饱和 ⇒ 裸 503」这一事件；Go 侧没有对应物 ⇒ 属 RAG 独有的保守实现，不是对 Go 的误解）⇒ 已登记为有意偏离候选（性质 = 有意偏离）⇒ 决策不是缺陷 ⇒ 归 D；⚠️ 代价仍在：高并发 + 下游卡死时 RAG 会出现 Go 不会出现的裸 503 | 2026-10-30 |
+| `SD-2026-10-25-CAND-10` | D | P3 | 否 | Go 标准库 `net/http/server.go:2049-2050`（`const publicErr = "431 Request Header Fields Too Large"` ＋ `fmt.Fprintf(c.rwc, "HTTP/1.1 "+publicErr+errorHeaders+publicErr)` ⇒ 431 ＋ `text/plain; charset=utf-8`，`errorHeaders` 在 `:2040`）＋ `net/http/server.go:931`／`:941`（阈值 = 1MiB ＋ 4096 bufio slop = 1052536 字节）vs RAG `service/hot/hot-api/src/main/java/com/rag/hot/hot/api/HotApiApplication.java:69`（`@SpringBootApplication` ⇒ 容器层 `server.max-http-request-header-size: 1028KB`（hot-api `application.yml:50`）已对齐阈值，但超限时由 Tomcat **连接器层**拒 ⇒ 请求没进 Servlet ⇒ 400 ＋ `text/html`）⇒ **差异仍成立**（**阈值两侧同点、差 0**；差异只在拒绝时的状态码 ＋ Content-Type ＋ body 形态）⇒ 容器层不可配 ⇒ 框架限制 ⇒ 签字认账，不实现 | 2026-10-30 |

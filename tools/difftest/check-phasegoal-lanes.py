@@ -74,109 +74,85 @@ def baseline_version() -> str:
 # ── P0 九条归属（主责唯一；collab = 协作方）──
 # owner ∈ {G1..G4, 收口}
 P0_MAP = {
-    1: ("G2", ["G1", "G3", "G4"],
-        "核心业务链路**真实运行**",
-        "`like` 域事实投递链路（`DRIFT-LIKE-003`）仍 `UNRESOLVED`；`like` / `follow` / `users-common` "
-        "的**双侧活体探针不在版本控制内**（G-1/G-2/G-4）⇒ 该链路「真实运行 + 行为等价」**未取证**；"
-        "`article` 域双侧活体 **0 条**（G-3，Go 侧需 `etcd:2379` 宿主端口映射）",
-        "`bash tools/semantic-probe/run-parity.sh`（message）· `bash tools/difftest/comment/run_diff.sh`"
-        "（comment）· `bash tools/difftest/run-task-http-parity.sh`（task）· `bash tools/difftest/run-hot.sh`（hot）"
-        " · `bash tools/difftest/run.sh`（users）· `bash tools/api-envelope-probe/favorite/run.sh`（favorite）"
-        " · `python3 tools/difftest/check-surface-parity.py`（契约面）"),
-    2: ("G1", ["G2", "G3"],
-        "参数校验 / 业务规则 / 认证 / 权限**四项**有效",
-        "「每端点 ≥1 条失败路径测试」**只能证明存在失败路径处理**，推不出四项都有效；"
-        "且失败路径矩阵**域覆盖不全**（`article`/`follow`/`task`/`hot` **无独立失败路径矩阵**）",
-        "`bash tools/difftest/matrix.py`（users 字段级笛卡尔）· `bash tools/semantic-probe/run-parity.sh`"
-        "（message 23 例）· `bash tools/json-body-probe/run-parity.sh`（hot 20 例）"
-        " · `bash tools/difftest/comment/run_diff.sh`（comment 23 步）· 各域台账条目级状态"),
-    3: ("G1", ["G2", "G3"],
-        "持久化 / 事务边界 / 无数据丢失重复状态错误",
-        "`check-ddl-static.py` **默认不开 `--indexes`** ⇒ **索引 / 唯一约束 / 触发器全部未查**"
-        "⇒ 基线 §3.1 对照清单的最后两项至今**没有机器核过**；且它比的是**活库**不是仓库 `.sql`",
-        "`python3 tools/difftest/check-ddl-static.py --domain <域> --indexes`"
-        " · `bash tools/difftest/run-message-ddl-parity.sh`"),
-    4: ("G3", ["G1", "G2"],
-        "核心失败路径有明确行为，不无声吞异常 / 返回误导性成功",
-        "失败路径探针**只覆盖 5 个域**（article / message / hot / shared-layer / favorite）；"
-        "**`article` 域（失败路径最密集：下载/上传/审核/`S-5`）没有失败路径探针**",
-        "`bash tools/semantic-probe/run-parity.sh`（含 known-dev 白名单）"
-        " · `bash tools/json-body-probe/run-parity.sh`（**无白名单**，任何不一致即真漂移）"),
-    5: ("收口", [], "按实际项目说明完成构建 / 配置 / 启动",
-        "README **21 字节**、无 `.env.example`、`docs/FileTree/Infrastructure.md` 描述的是**旧架构**",
-        "人工 + `docker compose config`"),
-    6: ("G1", ["G2", "G3"], "核心业务有可执行自动化测试，且断言真实业务结果",
-        "全量回归 **2860 条 / 0F / 0E / 4S**（52 模块，42:41 min）；⚠️ **必须带 `clean`**"
-        "（否则 stale 产物同时伪造「红」与「条数」）",
-        "`mvn -o -B -DargLine=-Xmx2g clean test` + surefire `TEST-*.xml` 逐 `testsuite` 求和"),
-    7: ("收口", [], "模块职责清晰，能追踪核心调用链",
-        "基线 A-1 的「Go 原件 ↔ RAG 实现」两列已给；各域各有一份 `vs-common.md`（A1~A9 机制面轴）",
-        "`docs/DRIFT/_cross/component-coverage-matrix.md`"),
-    8: ("G1", ["G2", "G3", "收口"], "关键配置与敏感信息无明显不安全处理",
-        "**E4 实测**：`docker compose config` ⇒ 渲染 `USER_JWT_SECRET: \"\"`；"
-        "Spring `PropertyPlaceholderHelper` 实测「属性存在但为空串 ⇒ 解析为空串，**不走默认值**」"
-        "⇒ **不设变量起栈 ⇒ 空签名密钥 ⇒ token 可伪造**；10 处 yaml 带明文默认值（含 `like-api:62` 裸字面量）；"
-        "根级 `docker-compose.yml` `:146`/`:193` 缺 `:?`（**根级属收口**）",
-        "`docker compose config` + 空变量起栈实测"),
-    9: ("收口", [], "已知严重缺陷 / 无法验证的关键能力 / 运行前提有明确记录",
-        "38 份组件台账 + `docs/Intentional_Deviations/`（**48 条已签字 + 18 条未签字候选**）"
-        "+ 基线 §九 / §十一；⚠️ 共享索引对 `favorite` 域仍写「零台账」已被实测推翻（G-11，**SHARED 面**）",
-        "`python3 tools/check-ledger-tables.py` ⇒ EXIT=0"),
+    # ⚠️ **「现状/缺口」列已从本表移除**（2026-10-30 收口轮）
+    #    ⇒ 一律**从 judge 基线自动取**（`judge_p0_cells()` / `judge_x_cells()`）
+    #    ⇒ **不再人工同步** ⇒ judge 一改 ⇒ 重跑 `--write` 即同步 ⇒ 门禁（内容分叉）当场变红。
+    #    原写死的 9 条「现状」整层过期 —— e.g. P0 #4「article 域没有失败路径探针」与 judge §七 P0 #4
+    #    归属（owner / collab）**仍是写死的人工判断**（每条 P0/X 有且仅有一个主责 lane）；
+    #    「判定命令」= **基线命令 + 人工补充（去重）**（见 `merge_cmd()`）。
+    1: ('G2', ['G1', 'G3', 'G4'],
+        '核心业务链路**真实运行**',
+        '`bash tools/semantic-probe/run-parity.sh`（message）· `bash tools/difftest/comment/run_diff.sh`（comment）· `bash tools/difftest/run-task-http-parity.sh`（task）· `bash tools/difftest/run-hot.sh`（hot） · `bash tools/difftest/run.sh`（users）· `bash tools/api-envelope-probe/favorite/run.sh`（favorite） · `python3 tools/difftest/check-surface-parity.py`（契约面）'),
+    2: ('G1', ['G2', 'G3'],
+        '参数校验 / 业务规则 / 认证 / 权限**四项**有效',
+        '`bash tools/difftest/matrix.py`（users 字段级笛卡尔）· `bash tools/semantic-probe/run-parity.sh`（message 23 例）· `bash tools/json-body-probe/run-parity.sh`（hot 20 例） · `bash tools/difftest/comment/run_diff.sh`（comment 23 步）· 各域台账条目级状态'),
+    3: ('G1', ['G2', 'G3'],
+        '持久化 / 事务边界 / 无数据丢失重复状态错误',
+        '`python3 tools/difftest/check-ddl-static.py --domain <域> --indexes` · `bash tools/difftest/run-message-ddl-parity.sh`'),
+    4: ('G3', ['G1', 'G2'],
+        '核心失败路径有明确行为，不无声吞异常 / 返回误导性成功',
+        '`bash tools/semantic-probe/run-parity.sh`（含 known-dev 白名单） · `bash tools/json-body-probe/run-parity.sh`（**无白名单**，任何不一致即真漂移）'),
+    5: ('收口', [],
+        '按实际项目说明完成构建 / 配置 / 启动',
+        '人工 + `docker compose config`'),
+    6: ('G1', ['G2', 'G3'],
+        '核心业务有可执行自动化测试，且断言真实业务结果',
+        '`mvn -o -B -DargLine=-Xmx2g clean test` + surefire `TEST-*.xml` 逐 `testsuite` 求和'),
+    7: ('收口', [],
+        '模块职责清晰，能追踪核心调用链',
+        '`docs/DRIFT/_cross/component-coverage-matrix.md`'),
+    8: ('G1', ['G2', 'G3', '收口'],
+        '关键配置与敏感信息无明显不安全处理',
+        '`docker compose config` + 空变量起栈实测'),
+    9: ('收口', [],
+        '已知严重缺陷 / 无法验证的关键能力 / 运行前提有明确记录',
+        '`python3 tools/check-ledger-tables.py` ⇒ EXIT=0'),
 }
 
 # ── 矩阵 C 12 条归属 ──
 X_MAP = {
-    1: ("G1", ["G2", "G3"], "共享 Flyway 账本隔离",
-        "7 个 rpc 模块各自独立账本表；**同库三进程并发**不撞号；"
-        "⚠️ `favorite-rpc` 缺 `baseline-version: 0` ⇒ 只记账",
-        "`python3 tools/difftest/check-flyway-ledger.py`（**仅静态 yaml**）"
-        " · `bash tools/difftest/check-flyway-concurrent.sh`（**真并发**，本轮未跑）"),
-    2: ("G1", ["G2", "G3"], "DDL 双侧活体逐列",
-        "类型/长度 **9 域 0 差异**；可空性 / DEFAULT / 索引 / 唯一约束 / 触发器逐项一致或**已签字保留**；"
-        "⚠️ **默认不开 `--indexes` ⇒ 索引/约束/触发器全部未查**；`hot` = **N/A** ⇒ 不许写成「已对齐」",
-        "`python3 tools/difftest/check-ddl-static.py --domain <域> --indexes`"),
-    3: ("G1", ["G2", "G3"], "gRPC 拦截器真接线",
-        "每个 rpc 模块的拦截器**真挂上 server**（**纯静态 grep，不启动服务**）",
-        "`python3 tools/difftest/check-grpc-interceptor-wiring.py` ⇒ EXIT=0"),
-    4: ("G1", ["G2", "G3"], "api 容器上限三旋钮",
-        "三个旋钮的**配置值**与 Go 目标值一致（**只读 `application.yml`，不验证运行时**）；"
-        "运行时由 `HotApiRealTomcatGateTest` 3 条真 Tomcat 断言覆盖",
-        "`python3 tools/difftest/check-tomcat-limits.py` ⇒ EXIT=0"),
-    5: ("G1", ["G2", "G3"], "产物可执行性",
-        "每个 fat jar **可执行**（含 `Main-Class`）；⚠️ 本轮实跑**只覆盖 5/20 模块**"
-        "（15 个「未构建」被 `continue` 跳过且**不计失败**）⇒ 需先 `mvn package` 再跑",
-        "`bash tools/difftest/check-jar-executable.sh` ⇒ EXIT=0"),
-    6: ("G1", ["G2", "G3", "G4"], "deadline 分层预算与传播",
-        "下游 deadline = `min(客户端 deadline, 服务端 timeout)`；SQL 取消时刻 == deadline 时刻",
-        "`python3 tools/difftest/check-deadline-verdict.py`（**门禁自身有效性**）"
-        " · `python3 tools/difftest/check-deadline-downstream.py`（**真双侧活体**）"
-        " · `bash tools/breaker-probe/run-parity.sh`（共享层）"),
-    7: ("G1", ["G2", "G3", "G4"], "错误码契约（跨域）",
-        "码值 + 文案 + 未知码回落**逐字节一致**；业务码经 gRPC 可还原；"
-        "⚠️ **只覆盖 2/9 域**的双侧逐字节对拍（article + favorite），其余 7 域只有**域内契约测试**",
-        "`bash tools/errmsg-probe/run-parity.sh`（article）· `bash tools/errmsg-probe/favorite/run-parity.sh`"
-        " · 各域 `*ErrorCodeContractTest`"),
-    8: ("G1", ["G2", "G3"], "HTTP 路径 / 方法契约",
-        "(method, path) 归一化后**集合相等**；⚠️ **JWT 保护面未自动比对**"
-        "（RAG 侧写在拦截器内部名单，非 `addPathPatterns`）；`users`/`admin` = **已签字偏离**",
-        "`python3 tools/difftest/check-surface-parity.py --domain <域>` ⇒ **HTTP 端点 Go 72 ≡ RAG 72**"),
-    9: ("G1", ["G2", "G3"], "gRPC 方法覆盖",
-        "Go proto `rpc` 集合 ≡ RAG `*ImplBase` 覆写集合（大小写归一）",
-        "`python3 tools/difftest/check-surface-parity.py` ⇒ **gRPC 方法 Go 71 ≡ RAG 71**"),
-    10: ("G1", ["G2", "G3"], "proto 契约 + 消费方式",
-         "行为层零差异 + `optional` presence + 无字段号硬编码 + 消费点一致 + wire 字节；"
-         "⚠️ **落仓静态守门只覆盖 4/10**（user/admin/task/comment）⇒ `follow`/`like`/`hot` **连静态守门都没有**；"
-         "**消费方式**在 10 个 proto 上全部未取证（G-19）",
-         "`bash tools/difftest/check-proto-static.sh` · `python3 tools/difftest/comment/check-proto-parity.py`"
-         " · `bash tools/proto-wire-probe/favorite/run.sh`"),
-    11: ("G1", ["G2", "G3", "收口"], "敏感配置链",
-         "密钥**无明文默认值**；缺变量 ⇒ **启动失败**；🔴 10 处 yaml 带明文默认值"
-         "（含 `like-api:62` 裸字面量）+ 根级 compose `:146`/`:193` 缺 `:?` ⇒ **空签名密钥可起栈**（E4 实测）",
-         "`docker compose config` + 空变量起栈实测"),
-    12: ("收口", [], "构建 / 配置 / 启动说明",
-         "README ≥ 1 屏且能照着构建启动；`.env.example` 存在；compose fail-closed；"
-         "🔴 README **21 字节**、无 `.env.example`、`docs/FileTree/Infrastructure.md` 描述**旧架构**",
-         "人工 + `docker compose config`"),
+    # ⚠️ **「现状/缺口」列已从本表移除**（2026-10-30 收口轮）
+    #    ⇒ 一律**从 judge 基线自动取**（`judge_p0_cells()` / `judge_x_cells()`）
+    #    ⇒ **不再人工同步** ⇒ judge 一改 ⇒ 重跑 `--write` 即同步 ⇒ 门禁（内容分叉）当场变红。
+    #    原写死的 12 条「现状」整层过期 —— e.g. X-2「默认不开 --indexes ⇒ 索引/约束/触发器全部未查」与 judge §五 X-2
+    #    归属（owner / collab）**仍是写死的人工判断**（每条 P0/X 有且仅有一个主责 lane）；
+    #    「判定命令」= **基线命令 + 人工补充（去重）**（见 `merge_cmd()`）。
+    1: ('G1', ['G2', 'G3'],
+        '共享 Flyway 账本隔离',
+        '`python3 tools/difftest/check-flyway-ledger.py`（**仅静态 yaml**） · `bash tools/difftest/check-flyway-concurrent.sh`（**真并发**，本轮未跑）'),
+    2: ('G1', ['G2', 'G3'],
+        'DDL 双侧活体逐列',
+        '`python3 tools/difftest/check-ddl-static.py --domain <域> --indexes`'),
+    3: ('G1', ['G2', 'G3'],
+        'gRPC 拦截器真接线',
+        '`python3 tools/difftest/check-grpc-interceptor-wiring.py` ⇒ EXIT=0'),
+    4: ('G1', ['G2', 'G3'],
+        'api 容器上限三旋钮',
+        '`python3 tools/difftest/check-tomcat-limits.py` ⇒ EXIT=0'),
+    5: ('G1', ['G2', 'G3'],
+        '产物可执行性',
+        '`bash tools/difftest/check-jar-executable.sh` ⇒ EXIT=0'),
+    6: ('G1', ['G2', 'G3', 'G4'],
+        'deadline 分层预算与传播',
+        '`python3 tools/difftest/check-deadline-verdict.py`（**门禁自身有效性**） · `python3 tools/difftest/check-deadline-downstream.py`（**真双侧活体**） · `bash tools/breaker-probe/run-parity.sh`（共享层）'),
+    7: ('G1', ['G2', 'G3', 'G4'],
+        '错误码契约（跨域）',
+        '`bash tools/errmsg-probe/run-parity.sh`（article）· `bash tools/errmsg-probe/favorite/run-parity.sh` · 各域 `*ErrorCodeContractTest`'),
+    8: ('G1', ['G2', 'G3'],
+        'HTTP 路径 / 方法契约',
+        '`python3 tools/difftest/check-surface-parity.py --domain <域>` ⇒ **HTTP 端点 Go 72 ≡ RAG 72**'),
+    9: ('G1', ['G2', 'G3'],
+        'gRPC 方法覆盖',
+        '`python3 tools/difftest/check-surface-parity.py` ⇒ **gRPC 方法 Go 71 ≡ RAG 71**'),
+    10: ('G1', ['G2', 'G3'],
+        'proto 契约 + 消费方式',
+        '`bash tools/difftest/check-proto-static.sh` · `python3 tools/difftest/comment/check-proto-parity.py` · `bash tools/proto-wire-probe/favorite/run.sh`'),
+    11: ('G1', ['G2', 'G3', '收口'],
+        '敏感配置链',
+        '`docker compose config` + 空变量起栈实测'),
+    12: ('收口', [],
+        '构建 / 配置 / 启动说明',
+        '人工 + `docker compose config`'),
 }
 
 # ── per-lane 收口验收命令（路径必须真实存在）──
@@ -323,6 +299,94 @@ def read_baseline_rows():
     return rows
 
 
+# ── 基线派生层（2026-10-30 收口轮）────────────────────────────────────────
+#   ⚠️ **为什么改成从基线取**：本表原先把「现状/缺口」**整层写死**，而 judge 基线已多次上修
+#   ⇒ 写死的那层**静默过期**（守门全绿、数字漂亮、内容全错 —— 本仓反复治理的同一类病）。
+#   ⇒ 现在：**现状/缺口 + 判定命令 一律从 judge 取** ⇒ judge 一改 ⇒ 重跑 `--write` 即同步
+#   ⇒ 而「内容分叉」检查（只读模式）**当场变红** ⇒ **人工同步不再是纪律，而是机器强制**。
+def _section_lines(start_marker: str) -> list:
+    lines = BASE.read_text(encoding="utf-8").split("\n")
+    lo = None
+    for i, l in enumerate(lines):
+        if l.startswith(start_marker):
+            lo = i
+            continue
+        if lo is not None and l.startswith("## "):
+            return lines[lo:i]
+    return lines[lo:] if lo is not None else []
+
+
+def judge_p0_cells() -> dict:
+    """judge §七「P0 九条复核」每行 → {n: {criterion, cmd, gap}}。
+
+    ⚠️ **解析不到就返回空缺**（由 `main()` fail-closed 判红）⇒ **不许静默回落成写死的旧文本**
+    —— 那正是本轮修掉的那个病。
+    """
+    out = {}
+    for l in _section_lines("## 七、P0 九条复核"):
+        if not l.startswith("|"):
+            continue
+        c = split_row(l)
+        if len(c) < 5:
+            continue
+        m = re.match(r"\*\*(\d+)\*\*$", c[0].strip())
+        if not m:
+            continue
+        out[int(m.group(1))] = dict(criterion=c[1].strip(), cmd=c[3].strip(), gap=c[4].strip())
+    return out
+
+
+def judge_x_cells() -> dict:
+    """judge §五「矩阵 C（跨组件不变量）」每行 → {n: {criterion, cmd, gap}}。
+
+    列位：# | 不变量 | 涉及组件 | 必达终点指标 | 判定命令 | 状态 ⇒
+    **「现状/缺口」= 状态列**（§五 明写「下表只写指标 + 判定命令 + 引用」）。
+    """
+    out = {}
+    for l in _section_lines("## 五、矩阵 C"):
+        if not l.startswith("|"):
+            continue
+        c = split_row(l)
+        if len(c) < 6:
+            continue
+        m = re.match(r"\*\*X-(\d+)\*\*$", c[0].strip())
+        if not m:
+            continue
+        out[int(m.group(1))] = dict(criterion=c[3].strip(), cmd=c[4].strip(), gap=c[5].strip())
+    return out
+
+
+def _cmd_paths(part: str) -> frozenset:
+    """一条命令里引用的**仓内工具路径**（用于去重）—— 空集 = 无法按路径判重（如「各域台账条目级状态」）。"""
+    paths = frozenset(re.findall(r"tools/[A-Za-z0-9_\-./]+", part))
+    if "mvn" in part:
+        paths = paths | {"mvn"}
+    return paths
+
+
+def merge_cmd(curated: str, baseline: str) -> str:
+    """判定命令 = **基线命令**（judge 权威）＋ **本 lane 补充**（人工整理，按工具路径去重）。
+
+    ⚠️ **为什么两段而不是揉成一段**：judge 的命令是「**全仓**该怎么判」，本 lane 的补充是
+    「**在我这棵树上**还该跑哪些」—— 两者用途不同 ⇒ 揉在一起会既重复又读不懂。
+    ⇒ 基线新增命令自动进来；本 lane 补充里**路径已在基线出现的自动剔除**（避免同一脚本写两遍）。
+    """
+    base = " ＋ ".join(x.strip() for x in re.split(r"\s*[·＋+]\s*", baseline) if x.strip())
+    seen = _cmd_paths(baseline)
+    extra = []
+    for part in (x.strip() for x in re.split(r"\s*[·＋+]\s*", curated)):
+        if not part:
+            continue
+        k = _cmd_paths(part)
+        if k and k <= seen:
+            continue
+        extra.append(part)
+        seen |= k
+    if not extra:
+        return base
+    return f"{base} ＋ **本 lane 补充**：" + " · ".join(extra)
+
+
 def lane_of(row) -> str:
     if row["comp"] in SHARED_COMPONENTS:
         return "G4"
@@ -427,8 +491,12 @@ def render(lane: str, rows) -> str:
     A("")
     A("| P0 | 内容 | 本 lane 的责任 | 待补 / 现状 | 判定命令 |")
     A("|---|---|---|---|---|")
+    p0cells = judge_p0_cells()
     for n in sorted(P0_MAP):
-        owner, collab, title, gap, cmd = P0_MAP[n]
+        owner, collab, title, cmd_curated = P0_MAP[n]
+        cell = p0cells.get(n)
+        gap = cell["gap"] if cell else "**（judge 基线 §七 缺该 P0 行 ⇒ 门禁应红）**"
+        cmd = merge_cmd(cmd_curated, cell["cmd"] if cell else "")
         if owner == lane:
             A(f"| **{n}** | {title} | **主责** | {gap} | {cmd} |")
         elif lane in collab:
@@ -445,8 +513,12 @@ def render(lane: str, rows) -> str:
     A("")
     A("| X | 不变量 | 本 lane 的责任 | 现状 / 缺口 | 判定命令 |")
     A("|---|---|---|---|---|")
+    xcells = judge_x_cells()
     for n in sorted(X_MAP):
-        owner, collab, title, gap, cmd = X_MAP[n]
+        owner, collab, title, cmd_curated = X_MAP[n]
+        cell = xcells.get(n)
+        gap = cell["gap"] if cell else "**（judge 基线 §五 缺该 X 行 ⇒ 门禁应红）**"
+        cmd = merge_cmd(cmd_curated, cell["cmd"] if cell else "")
         if owner == lane:
             A(f"| **{n}** | {title} | **主责** | {gap} | {cmd} |")
         elif lane in collab:
@@ -512,6 +584,20 @@ def main() -> int:
         got = len(per_lane[lane])
         if got != n:
             fail("lane 组件数", f"{lane} 期望 {n} 个组件，实际 {got} 个")
+
+    # 基线派生层必须**取得到**（fail-closed）—— 不许回落成写死的旧文本
+    p0cells = judge_p0_cells()
+    xcells = judge_x_cells()
+    for n in sorted(P0_MAP):
+        if n not in p0cells:
+            fail("基线派生", f"judge §七 解析不到 P0 #{n} 的行 ⇒ 「现状/缺口」无从派生")
+        elif not p0cells[n]["gap"]:
+            fail("基线派生", f"judge §七 的 P0 #{n} 结论列为空 ⇒ 「现状/缺口」无从派生")
+    for n in sorted(X_MAP):
+        if n not in xcells:
+            fail("基线派生", f"judge §五 解析不到 X-{n} 的行 ⇒ 「现状/缺口」无从派生")
+        elif not xcells[n]["gap"]:
+            fail("基线派生", f"judge §五 的 X-{n} 状态列为空 ⇒ 「现状/缺口」无从派生")
 
     # 归属表覆盖性：每条 P0 / X 有且仅有一个主责
     for n, (owner, collab, *_rest) in P0_MAP.items():

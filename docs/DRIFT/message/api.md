@@ -46,7 +46,7 @@
 | # | 输入 | Go 实测 | 修复前 RAG | 性质 | 状态 |
 |---|---|---|---|---|---|
 | **DRIFT-MSGAPI-001** | `{"conversation_id":123}`（JSON **数字**） | **接受 → 123** | **拒绝 → 5001** | SEMANTIC MISMATCH / HIGH-RISK | ✅ 已修<br>⚠️ **2026-10-30 真实性复核（message+like lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（**不改判**）。**本条段内原无可复算指针，本轮补齐**：RAG `service/message/message-api/src/main/java/com/rag/message/message/api/dto/ConversationMessagesReq.java:64-66`（`@JsonProperty("conversation_id")` + `setConversationId(Object raw)` → `GoStyleStringInt64.parse(raw, "conversation_id")` ⇒ **接受** JSON 数字）· RAG `service/message/message-api/src/main/java/com/rag/message/message/api/dto/GoStyleStringInt64.java:74`（`public static Long parse(Object raw, String fieldName)`）· Go `go-zero@v1.10.2/core/mapping/unmarshaler.go:1113-1125`（`case json.Number:` → `setValueFromString(baseType.Kind(), value, v.String())` ⇒ Go 的 `,string` 入参方向**宽松**，接受数字）· Go `go-zero@v1.10.2/core/jsonx/json.go:74-77`（`decoder.UseNumber()` ⇒ 解出来是 `json.Number`，不是 `float64`/`int`）· 核对日期 2026-10-30。 |
-| **DRIFT-MSGAPI-002** | `{"offset":"10"}`（**无** `,string`，JSON 字符串） | **拒绝 → 5001** | **接受 → 10** | SEMANTIC MISMATCH / HIGH-RISK | ✅ 已修 |
+| **DRIFT-MSGAPI-002** | `{"offset":"10"}`（**无** `,string`，JSON 字符串） | **拒绝 → 5001** | **接受 → 10** | SEMANTIC MISMATCH / HIGH-RISK | ✅ 已修 <br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/semantic-probe/run-parity.sh` ⇒ **EXIT=0**（2026-10-30 03:16:43 · 4s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：（未抓到结论行）。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。|
 | **DRIFT-MSGAPI-003** 🆕 | `{"extra":null}`（字段 tag 是 **`optional`**） | **接受** | **拒绝 → 5001** | SEMANTIC MISMATCH | ✅ 已修 |
 
 ⚠️ 前两条是**方向相反**的 —— 一条该收不收、一条不该收却收，所以「粗看都能跑通」，
@@ -1050,6 +1050,8 @@ RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFie
   ⇒ 教训：**问题归属要按「问题」分，不能按「组件」分**。
 - ⚠️ **2026-10-30 真实性复核（message+like lane）**：原判 **✅ 已关闭（2026-10-24 第十轮）** ⇒ **现行态 = ✅ 已关闭**（**不改判**；短确认）。依据：RAG `service/message/message-common/src/main/java/com/rag/message/message/common/errmsg/MessageGrpcError.java:255`（`mapStatusCodeToBizCode(Status.Code)`）· RAG `service/message/message-common/src/main/java/com/rag/message/message/common/errmsg/MessageGrpcError.java:244`（反查未命中 ⇒ 走 code class 映射）· RAG `service/message/message-common/src/main/java/com/rag/message/message/common/errmsg/MessageGrpcError.java:247`（兜底 `CODE_SERVER_BUSY`）· Go `service/message/common/errmsg.go:117-132`（同一张 switch：`InvalidArgument` / `Unauthenticated` / `PermissionDenied` / `AlreadyExists` / `NotFound` / `Internal` + `default`）· Go `service/message/common/errmsg.go:31`（`CodeServerBusy = 1015`）· 核对日期 2026-10-30。
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/exp-difftest-grpc-errors-message.sh` ⇒ **EXIT=0**（2026-10-30 04:27:11 · 4s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [1/3] 生成 proto 桩 + 计算 classpath ⏐ ==> [2/3] 编译 GrpcMessageDualPortRunner ⏐ ==> [3/3] 跑对拍。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
+
 ### UNRESOLVED-002 ✅ **已关闭（2026-10-24 第九轮）**
 - ~~**Question**：RAG 侧 `MessageGoStyleCoercion` 的规则**是否真的作用在 Spring MVC 实际使用的那个 mapper 上**？~~
 - **✅ 关闭依据**：新增 `MessageApiGoStyleCoercionWiringTest`（**6 例，全部走真实 MVC 管线**，不是「同构但不同实例」的探针）：
@@ -1070,6 +1072,8 @@ RAG 半边：真实 DTO + 真实 `MessageGoStyleCoercion` + `assertGoRequiredFie
   原始响应头产物在 `/tmp/difftest-msg-headers/`。
 - **⇒ 取证结论见第八轮第 2 节的对照表**（3 处真实差异 + 1 处框架限制）。
 - ⚠️ **2026-10-30 真实性复核（message+like lane）**：原判 **✅ 已关闭（2026-10-24 第八轮）** ⇒ **现行态 = ✅ 已关闭**（**不改判**）。**本条段内原无可复算指针，本轮补齐**：工具 RAG `tools/difftest/exp-http-headers-message.sh`（在位，8007 字节，可执行位 `-rwxr-xr-x`）· Go `go-zero@v1.10.2/rest/handler/tracehandler.go:61`（`propagator.Inject(spanCtx, propagation.HeaderCarrier(w.Header()))` ⇒ Go 侧响应头注入点）· RAG `service/common/src/main/java/com/rag/common/http/GoStyleTraceparentFilter.java:188-190`（`@Component` + `@Order(Ordered.HIGHEST_PRECEDENCE + 3)`）· RAG `service/common/src/main/java/com/rag/common/http/GoStyleTraceparentFilter.java:261-285`（`Extract` → `Start` → `Inject` 三步）· 核对日期 2026-10-30。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/exp-http-headers-message.sh` ⇒ **EXIT=0**（2026-10-30 04:13:26 · 5s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：（未抓到结论行）；<br>`tools/difftest/exp-http-headers-message.sh` ⇒ **EXIT=0**（2026-10-30 04:13:26 · 5s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：（未抓到结论行）。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
 
 ### UNRESOLVED-004 ✅ **已关闭（2026-10-24 第八轮）**
 - ~~**Question**：3s 超时触发时，RAG 是否真的写出 `503 + text/plain; charset=utf-8 + "Request Timeout\n"`？~~
@@ -1335,6 +1339,8 @@ Jackson 3 的 `FAIL_ON_NULL_FOR_PRIMITIVES` **默认 true** ⇒ `{"offset":null}
 
 | 编号 | 状态 | 依据 |
 |---|---|---|
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/semantic-probe/run-parity.sh` ⇒ **EXIT=0**（2026-10-30 03:16:43 · 4s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：（未抓到结论行）。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
 | `UNRESOLVED-002` | ✅ **关闭** | 新增 `MessageApiGoStyleCoercionWiringTest`（**6 例，全部走真实 MVC 管线**：2 例 `,optional` 显式 null 放行并落零值、1 例 admin `kind:null`、1 例 `extra` 元素收数字并断言下游 proto 里的**字面量**、1 例 `extra` 元素 null → 5001 **且零次下游调用**、1 例必填 `title:null` 仍 5001）。它证明的是「规则真挂在 Spring MVC 用的那个 mapper 上」——探针只证明「规则是什么」 |
 
 ### 八、本轮实测数据
@@ -1844,3 +1850,35 @@ mvn -o -B -pl service/message/message-api -am -DargLine=-Xmx2g \
 # ③ 域内全量
 mvn -o -B -pl service/message/message-api -am -DargLine=-Xmx2g test
 ```
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W10
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-MSGAPI-012 | D（经分析确认不可修 · 容器层框架限制 ⇒ 无待实现内容） | P2 | 否 | Go `go-zero@v1.10.2/rest/httpx/responses.go:155`（`http.Error(w, err.Error(), http.StatusBadRequest)`）＋ `:153`（gRPC 错误码路径同样走 `http.Error`）＋ Go 标准库 `net/http/server.go:2337`（`func Error(w ResponseWriter, error string, code int)`）＋ `:2351`（`h.Set("Content-Type", "text/plain; charset=utf-8")` ⇒ **分号后有空格**）vs RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:718`（`resp.setContentType("text/plain; charset=utf-8")` ⇒ 应用层**写的是带空格的原串**）＋ `:723-727`（同文件注释自记「Tomcat 序列化吃掉空格 ⇒ 归框架限制」）＋ `service/message/message-api/src/test/java/com/rag/message/message/api/MessageApiTimeoutRealTomcatTest.java:169-173`（真 Tomcat 断言只保「type 对 ＋ charset 在」，**不为那一个空格判红**）⇒ ⇒ **差异仍成立**（线上真发 `text/plain;charset=utf-8` ／ Go 真发 `text/plain; charset=utf-8` ⇒ **wire 字节级不同**）⇒ 但**经分析确认不可修**（2026-10-30 本机 `javap` 实测 `tomcat-embed-core` **11.0.24** —— 本项目 `spring-boot-dependencies-4.0.8.pom:209` 的 `tomcat.version`）：`org.apache.catalina.connector.Response.setContentType(String)` 走 `MEDIA_TYPE_CACHE.parse` ⇒ **只把 media type 本体交给 `setContentTypeNoCharset`**、charset 单独走 `CharsetHolder` ⇒ 重新序列化时**必然无空格**；`Response.setHeader` ／ `Response.addHeader` 遇到 `"Content-Type"` 都**转手调 `setContentType`**（`checkSpecialHeader`）⇒ ⇒ **Servlet API 的三条写法（`setContentType` ／ `setHeader` ／ `addHeader`）全部产出同一个被规范化后的值** ⇒ 应用层**无路可走** ⇒ 落点不在 `service/common` ⇒ 影响面 = 全部 api 的 `text/plain` 响应（**展示面，非功能面**）⇒ ⇒ 归 D · **不阻断阶段一** | 2026-10-30 |
+
+### lane W31
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| `UNRESOLVED-005` | C（阶段二工程建设项 · 剩余实现面 = 字节级 body 对拍 ＋ 「是否排序」的工程决策） | P3 | 否 | Go `service/message/api/internal/types/types.go:92`（`Extra map[string]string`（tag `json:"extra"`）⇒ 响应 DTO 的 extra 是 Go map ⇒ 走 `encoding/json` 的 map 编码器）＋ Go 标准库 `encoding/json/encode.go:793`（「Extract and sort the keys.」）＋ `:805-806`（`slices.SortFunc(sv, func(i, j reflectWithString) int { return strings.Compare(i.ks, j.ks) })` ⇒ **按键排序输出**）vs RAG `service/message/message-api/src/main/java/com/rag/message/message/api/service/MessageApiSupport.java:237`（`new java.util.LinkedHashMap<>(item.getExtraMap())` ⇒ 键序 = proto map 迭代序）＋ `service/message/message-api/src/main/java/com/rag/message/message/api/dto/NotificationItem.java:66`（`private Map<String, String> extra;` ⇒ 交 Jackson）＋ `service/message/message-api/src/main/java/com/rag/message/message/api/controller/MessageController.java:114-117`（`@PostMapping("/notifications/list")` 返回该 DTO ⇒ 它就是响应体）＋ `service/message/message-proto/src/main/proto/message.proto:45`（`map<string, string> extra = 10;` ⇒ proto 侧为 map 字段）⇒ ⇒ **差异仍成立**（**字节级**：Go = 排序且确定；RAG = proto map 插入序、**不保证有序** —— 本轮 `javap` 实测 `protobuf-java-3.25.5` 的 `MapField` 用 `java/util/LinkedHashMap`、`MapFieldLite extends LinkedHashMap` ⇒ 插入序；且全仓**代码** grep `ORDER_MAP_ENTRIES_BY_KEYS` / `SORT_PROPERTIES_ALPHABETICALLY` **命中 0** ⇒ Jackson 按迭代序输出）⇒ 但 **JSON 语义等价**（键值集合相同；JSON 对象键序无语义）⇒ ⇒ 剩余实现面 = ① message 域补**字节级 body 对拍**（本仓既有 `tools/api-full-parity-probe/favorite/run.sh:538` 即以 `fg.get("body") != fr.get("body")` 做**字节级**比对，而 `tools/api-full-parity-probe/` 下**无 message** 目录）② 若决定对齐字节 ⇒ 在序列化点排序（`LinkedHashMap` 改有序 map，或开 `ORDER_MAP_ENTRIES_BY_KEYS`）⇒ ⇒ 台账那条「键序是否影响客户端」**仍是待决**（字节级对拍未做、是否排序未拍板）⇒ 按 §4.1「还没查/还没定」不构成 D ⇒ 归 C；P3（仅字节级 · 语义等价 · 不构成当前验收阻断条件）· **不阻断阶段一**（不命中 PhasedGoal P0 九条；客户端按 JSON 解析 ⇒ 无语义差异） | 2026-10-30 |
+
+### lane W6
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-MSGAPI-009 | D（已签字偏离 ⇒ 决策不是缺陷） | P1 | 否（不阻断阶段一） | Go `service/message/api/internal/types/types.go:22`（`Affected int64 \`json:"affected"\`` ⇒ **无 `,string`** ⇒ `encoding/json` 输出 JSON **数字** `{"affected":3}`）vs RAG `service/message/message-api/src/main/java/com/rag/message/message/api/dto/AdminSendNotificationResp.java:43`（`@JsonFormat(shape = JsonFormat.Shape.STRING)`）＋ `:44`（`private long affected;` ⇒ 序列化为 JSON **字符串** `{"affected":"3"}`）⇒ ⇒ **差异仍成立**（wire 契约的 JSON 类型确实不同）；但该条**已于 2026-10-23 签字**（`SD-2026-10-23-03` · 用户逐条拍板「保留 RAG 的字符串形态，不改 wire 契约」· 登记见 `docs/Intentional_Deviations/_cross/signed-deviations.md:71` · 状态 ✅ 仍成立）⇒ 按 `docs/DRIFT/_cross/grading/_README.md` 纪律 5「已签字偏离 ⇒ 是决策不是缺陷」⇒ 归 D；⚠️ 探针把 `X1`/`X2` 放进 `known-dev` 白名单 ⇒ 对拍时恒红但不计失败 ⇒ 不作为待办、不阻断阶段一 | 2026-10-30 |
+| DRIFT-MSGAPI-011 | D（经分析确认不可修 · 容器层框架限制 ⇒ 无待实现内容） | P2 | 否（不阻断阶段一） | Go `go-zero@v1.10.2/rest/httpx/responses.go:183`（`w.WriteHeader(code)` ⇒ reason phrase 由 Go 标准库 `net/http` 补 ⇒ 状态行 = `HTTP/1.1 200 OK` / `401 Unauthorized` / `404 Not Found`）vs RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:943`（`public void setStatus(int sc)` ⇒ 应用层只写码不带 reason）＋ `:956`（`resp.setStatus(sc)`）⇒ ⇒ **差异仍成立**（两侧状态行确实不同：RAG = `HTTP/1.1 200` / `401`）；但**经分析确认不可修**：Tomcat 的 `Response` 在 11.x **已移除 `setStatus(int, String)`**（实测 `javap`：`tomcat-embed-core` 9.0.63 有 `setStatus(int)` ＋ `setStatus(int,String)`；10.1.52 与 11.0.24 **只剩 `setStatus(int)`**；本项目 Boot 4.0.8 ⇒ `tomcat.version=11.0.24`）⇒ 应用层**没有任何写法**能补出 reason phrase ⇒ 落点不在 `service/common`（共享层够不着）⇒ 已在 `docs/Intentional_Deviations/global/common-tails.md` 登记 `SD-2026-10-25-CAND-14`（🏷 待签字候选 · 框架限制）⇒ 影响面 = 全部 10 个 api 的**展示面**（非功能面）⇒ 经分析确认对本项目不适用 ⇒ 归 D、不阻断阶段一 | 2026-10-30 |

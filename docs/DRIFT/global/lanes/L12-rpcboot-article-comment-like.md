@@ -354,3 +354,22 @@ $ git diff --stat -- service/favorite/ docs/DRIFT/favorite/ docs/Pitfalls/favori
 **只记日志不中断启动** —— 与 Go 侧 etcd 注册失败只打日志同向。）
 
 > 📌 **端到端对照实证**（真 fat jar 修前/修后 A/B）⇒ 见 [`cross-domain.md`](../cross-domain.md) §二·十六。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W3
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| `PIT-GLOBAL-018` | D | P1 | 否 | Go `service/common/observability/http.go:53`（`ctx, cancel := context.WithTimeout(r.Context(), timeout)` ⇒ 被对拍/被变异的那条 Go 侧 deadline 语义）＋ `service/common/observability/rpc.go:38`（`timeoutCtx, cancel := context.WithTimeout(ctx, timeout)`）vs RAG `service/common/src/main/java/com/rag/common/persistence/DeadlineQueryTimeoutInjector.java:165`（`DeadlineState.remainingMillis()` ⇒ **变异目标**）⇒ **差异仍成立**（**坑仍生效**：变异脚本若写成编译不过的表达式 ⇒ maven 压根没跑测试 ⇒ surefire 里留着上一轮 XML ⇒ 报成假绿）；三道闸在仓内确有实现且可复算 —— `tools/difftest/mutate-deadline-precision.py:105-109`（跑前删旧 XML）＋ `:116-118`（`COMPILATION ERROR` ⇒ 直接判本次无效）＋ `tools/difftest/mutate-deadline-verdict.py:186`（`p.returncode` 退出码）⇒ 纪律仍生效 ⇒ **新写任何变异脚本都必须照抄这三道闸**（阶段一验证闭环补强，不阻断准入） ⇒ **归 D（阶段归属不适用）**：本条是**元教训**（坑位）而非待修问题 ⇒ §10 的 A-D 不适用 ⇒ 取 D 类「**可不实现或不适用**」；它指向的行为差异在 **DRIFT 侧**定级（`DRIFT-018` 见本表）⇒ 本条只承担「防」的角色 | 2026-10-30 |

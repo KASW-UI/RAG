@@ -252,6 +252,12 @@ $ diff -q /tmp/fg-a.txt /tmp/fg-b.txt && echo "完全一致"
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 03:20:49 · 48s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ follow_self_relation  Go == RAG == expected.txt（HTTP 200 · 124 字节） ⏐ ✅ follow_target_not_found  Go == RAG == expected.txt（HTTP 200 · 96 字节） ⏐ ✅ follow_new_relation  Go == RAG == expected.txt（HTTP 200 · 94 字节） ⏐ ✅ unfol。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 03:20:49 · 48s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ follow_self_relation  Go == RAG == expected.txt（HTTP 200 · 124 字节） ⏐ ✅ follow_target_not_found  Go == RAG == expected.txt（HTTP 200 · 96 字节） ⏐ ✅ follow_new_relation  Go == RAG == expected.txt（HTTP 200 · 94 字节） ⏐ ✅ unfol。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 03:20:49 · 48s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ follow_self_relation  Go == RAG == expected.txt（HTTP 200 · 124 字节） ⏐ ✅ follow_target_not_found  Go == RAG == expected.txt（HTTP 200 · 96 字节） ⏐ ✅ follow_new_relation  Go == RAG == expected.txt（HTTP 200 · 94 字节） ⏐ ✅ unfol。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
 ## PIT-FOLLOW-011 · 【仍生效】 故障模拟器**不完成 HTTP/2 握手** ⇒ 测的是「连不上」，不是「挂住」
 
 > **旧号**：`PITFALL-FOLLOW-011` ⇒ **新号**：`PIT-FOLLOW-011`
@@ -295,6 +301,8 @@ $ diff -q /tmp/fg-a.txt /tmp/fg-b.txt && echo "完全一致"
    ⇒ **探针形态选错 ⇒ 结论直接反转**（本轮就是这么反转的）。
 
 ---
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 03:20:49 · 48s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ follow_self_relation  Go == RAG == expected.txt（HTTP 200 · 124 字节） ⏐ ✅ follow_target_not_found  Go == RAG == expected.txt（HTTP 200 · 96 字节） ⏐ ✅ follow_new_relation  Go == RAG == expected.txt（HTTP 200 · 94 字节） ⏐ ✅ unfol。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
 
 ## PIT-FOLLOW-012 · 【仍生效】 go-zero 的 etcd 键是「**前缀 + `/`**」⇒ 裸键解析到**零地址**
 

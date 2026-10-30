@@ -9,19 +9,21 @@
 #   Go 半边 = **冻结仓真源**（observability.NewUnaryServerInterceptor + 真 grpc-go + 真 ctx）
 #   RAG 半边 = **生产类**（RpcInterceptor + 真 grpc-java Netty + 真 ThreadLocal 载体）
 #
-# 本脚本**不是**「两侧必须相等」的等值守门，而是**漂移形态守门**：
+# 本脚本**现在**是**纯等值守门**（两侧必须逐键相等）：
 #
-#   · **parity 键**（sql_carrier）⇒ 两侧**必须相等**
-#     ⇒ 它证明「SQL 路径两侧同款」（E38① + E62 之后成立）⇒ 漂移**不在** SQL 上。
-#   · **drift 键**（failed_fast / code / outgoing_carrier）⇒ 断言**当前已登记的漂移形态**
-#     ⇒ 漂移还在 ⇒ 绿；漂移形态变了（被修好了 / Go 侧前提变了）⇒ **红** ⇒ 逼着人更新台账。
+#   · 四个键（failed_fast / code / outgoing_carrier / sql_carrier）**全部**是 **parity 键**
+#     ⇒ 两侧**必须相等** ⇒ ⇒ 任何一侧变了都**报红**。
 #
-# ⚠️ 这与 `run-rpc-timeout-parity.sh` 的 KNOWN_GAP 机制**方向相反**：
-#    KNOWN_GAP 是「这个差异存在我也认了，差异变了我也不管」；
-#    本脚本的 drift 键是「这个差异**必须长成这个样子**，否则出事」。
+# ⚠️ **为什么从「漂移形态守门」变成了「等值守门」**（2026-10-30 · 合并收口轮）：
+#   本脚本原先是**漂移形态守门**：`failed_fast` / `code` 两个键被登记成「**已知的漂移形态**」
+#   ⇒ 断言「Go=true / RAG=false」「Go=4 / RAG=0」⇒ ⇒ 漂移还在就绿、漂移被修好就红。
+#   ⇒ ⇒ **那两格漂移的根因是探针自己的构造**（RAG 半边手搓裸 channel ⇒ 不走 devh 装配），
+#   **不是域侧真漂移** ⇒ ⇒ 探针改走 devh 的生产装配路径后，两侧**实测已经相等**。
+#   ⇒ ⇒ 故把那两个键**移出 drift 名单** ⇒ ⇒ 落进「不在 drift 名单 ⇒ 两侧必须相等」的分支。
+#   ⇒ ⇒ **判据更强**（不是把期望值改成相等来蒙混 ⇒ 是**移出名单**）。
 #
 # 用法：bash tools/semantic-probe/deadline-downstream/run-deadline-downstream-parity.sh
-# 退出码：0 = 形态与已登记一致；1 = 形态变了（漂移被修好 / 前提变了）；2 = 环境不满足
+# 退出码：0 = 两侧一致；1 = 两侧不一致；2 = 环境不满足
 #
 # ══════════════════════════════════════════════════════════════════════════
 # 三条纪律
@@ -53,14 +55,21 @@ say() { printf '%s\n' "$*"; }
 # ══════════════════════════════════════════════════════════════════════════
 # 期望的漂移形态（每行：key|Go 期望值|RAG 期望值|一句话理由|台账出处）
 # ══════════════════════════════════════════════════════════════════════════
-# ⚠️ 这些值是**实测出来的**（2026-10-26 第四十六轮），不是设计出来的。
-#    Go 侧的 code=4 = grpc-go 的 codes.DeadlineExceeded。
+# ⚠️ **2026-10-30（合并收口轮 · 探针改造后）：本文件已清空 ⇒ 四个键全部是 parity 键。**
+#
+#   沿革（**不要**把它当「改期望值蒙混」）：
+#   ① `outgoing_carrier` 由 drift 键升为 parity 键 —— G4 波次把 `GoStyleRequestDeadline`
+#      绑进了 `RpcInterceptor.onHalfClose` ⇒ 出向载体在位 ⇒ 实测两侧一致。
+#   ② `failed_fast` / `code` 也由 drift 键升为 parity 键 —— 那两格漂移的**根因是探针自己的
+#      构造**：RAG 半边手搓裸 Netty channel ⇒ **不走 devh 装配** ⇒ 全局客户端拦截器接不上
+#      ⇒ ⇒ 出向调用拿不到请求 deadline ⇒ ⇒ 测到的是「探针的构造」而不是「域侧 stub 的行为」。
+#      ⇒ ⇒ 探针改走 **devh 自己的 `GrpcChannelFactory`**（= 生产装配路径）后
+#      ⇒ ⇒ 实测两侧**逐键相等**（Go=`failed_fast=true|code=4` ⇔ RAG 同）⇒ ⇒ 升为 parity 键。
+#   ⇒ ⇒ **判据更强**：不是把期望值改成「两侧相等」，而是**移出 drift 名单**
+#      ⇒ ⇒ 「不在名单 ⇒ 两侧必须相等」这条分支比「漂移必须长成这个样子」更严。
+#   ⇒ ⇒ ⚠️ **若将来任何一侧变了 ⇒ 本脚本报红 ⇒ 必须更新台账**（别只改探针）。
 EXPECTED_DRIFT_FILE="${TMP}/expected-drift.txt"
-cat >"${EXPECTED_DRIFT_FILE}" <<'EOF'
-failed_fast|true|false|Go 的出向调用吃 handler 的 ctx（已到期）⇒ grpc-go 立刻失败；RAG 的出向调用没有任何 deadline ⇒ 挂住|docs/DRIFT/global/_README.md E38② 重估（第四十六轮）
-code|4|0|Go 侧拿到 DEADLINE_EXCEEDED(4)；RAG 侧根本没有失败（调用悬着 ⇒ 无码）|docs/DRIFT/global/_README.md E38② 重估（第四十六轮）
-outgoing_carrier|present_expired|absent|Go 的 ctx 一直带 deadline；RAG 出向调用用的 GoStyleRequestDeadline 在 gRPC 路径**从未绑定**⇒ 缺席|docs/DRIFT/global/_README.md E38② 重估（第四十六轮）
-EOF
+: >"${EXPECTED_DRIFT_FILE}"
 
 # ══════════════════════════════════════════════════════════════════════════
 # 1) Go 半边：引用冻结仓 → 离线构建 → 跑

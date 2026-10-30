@@ -48,7 +48,7 @@ Go 侧通读 36 个文件、RAG 侧通读 71 个文件。
 |---|---|---|
 | **DRIFT-MSG-V-011** | `#{item.isRead}` 取不到属性（实体字段叫 `read`） | **`SendNotification` 100% 失败** ⇒ admin 定向通知与广播**从未成功过一次** ｜⚠️ **2026-10-30 真实性复核（主线 · 逐条回源）**：原判 **🔴 P0（#{item.isRead} ⇒ SendNotification 100% 失败）** ⇒ **现行态 = ✅ 已修（维持）**（维持）。逐条依据见 §2026-10-30 复核表 |
 | **DRIFT-MSG-V-012** | `listByParticipant` 的 `limit` / `offset` **实参传反** | SQL 变成 `LIMIT 0` ⇒ **`ListConversations` 永远返回空列表**，且无任何错误日志 ｜⚠️ **2026-10-30 真实性复核（主线 · 逐条回源）**：原判 **🔴 P0（limit/offset 传反 ⇒ LIMIT 0 ⇒ 会话列表永远空）** ⇒ **现行态 = ✅ 已修（维持）**（维持）。逐条依据见 §2026-10-30 复核表 |
-| **DRIFT-MSG-V-013** | MP 的 `JacksonTypeHandler` 用 `setString` 绑定，**jsonb 列拒收**；且缺 `autoResultMap` | 通知写入再次失败；**读**方向同样失效 ｜⚠️ **2026-10-30 真实性复核（主线 · 逐条回源）**：原判 **🔴 P0（JacksonTypeHandler 用 setString ⇒ jsonb 拒收；且缺 autoResultMap）** ⇒ **现行态 = ✅ 已修（维持）**（维持）。逐条依据见 §2026-10-30 复核表 |
+| **DRIFT-MSG-V-013** | MP 的 `JacksonTypeHandler` 用 `setString` 绑定，**jsonb 列拒收**；且缺 `autoResultMap` | 通知写入再次失败；**读**方向同样失效 ｜⚠️ **2026-10-30 真实性复核（主线 · 逐条回源）**：原判 **🔴 P0（JacksonTypeHandler 用 setString ⇒ jsonb 拒收；且缺 autoResultMap）** ⇒ **现行态 = ✅ 已修（维持）**（维持）。逐条依据见 §2026-10-30 复核表 <br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-message-ddl-parity.sh` ⇒ **EXIT=1**（2026-10-30 03:34:17 · 6s）—— 🔴 **探针判定为「不一致」**；覆盖断言：⚠️ 两侧**没有可成对比对的触发器** ⇒ 本维度**什么都没比**（不是「已对齐」） ⏐ ⚠️ 两侧**没有可成对比对的触发器函数** ⇒ 本维度**什么都没比**（不是「已对齐」） ⏐ == 实质差异合计 7 处 ⇒ 退出码 1 ==。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](live-parity-2026-10-30.md)。<br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-message-ddl-parity.sh` ⇒ **EXIT=1**（2026-10-30 03:34:17 · 6s）—— 🔴 **探针判定为「不一致」**；覆盖断言：⚠️ 两侧**没有可成对比对的触发器** ⇒ 本维度**什么都没比**（不是「已对齐」） ⏐ ⚠️ 两侧**没有可成对比对的触发器函数** ⇒ 本维度**什么都没比**（不是「已对齐」） ⏐ == 实质差异合计 7 处 ⇒ 退出码 1 ==；<br>`tools/semantic-probe/run-parity.sh` ⇒ **EXIT=0**（2026-10-30 03:16:43 · 4s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：（未抓到结论行）。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](live-parity-2026-10-30.md)。|
 
 > **这三条 P0 的共同形态**：都是「一条从未被任何测试执行过的写/查路径」。
 > 与 §6.6.4 的 DRIFT-MSG-004/005/006（模块起不来）同源 ——
@@ -212,7 +212,7 @@ Postgres 协议单条 SQL 绑定参数上限 **65535** ⇒ `floor(65535/12) = 54
 | 编号 | 问题 | 为何无法判定 | 需要什么 |
 |---|---|---|---|
 | ~~UNRESOLVED-MSG-V-000~~ | ~~JVM 实际时区 ⇒ V-007 是否真的发作~~ | — | ✅ **2026-10-22 用户已确认：部署时区 = Asia/Shanghai** ⇒ 该漂移**真实发作**。见 §6.7.10 |
-| **UNRESOLVED-MSG-V-001** | Nacos namespace/group 不一致 | `message-rpc` 用 `public`/`DEFAULT_GROUP`，user/admin 用 `sea-rtw`/`USER_GROUP`（`message-api/application.yml:14-19` 自述） | 两侧对齐后才能做活体对拍（**跨域**：user/admin 域） ｜⚠️ **2026-10-30 真实性复核（主线 · 逐条回源）**：原判 **🟡 UNRESOLVED（Nacos namespace/group 不一致 ⇒ 活体对拍不可做）** ⇒ **现行态 = 🟡 仍开着（跨域）**（维持）。逐条依据见 §2026-10-30 复核表 |
+| **UNRESOLVED-MSG-V-001** | Nacos namespace/group 不一致 | `message-rpc` 用 `public`/`DEFAULT_GROUP`，user/admin 用 `sea-rtw`/`USER_GROUP`（`message-api/application.yml:14-19` 自述） | 两侧对齐后才能做活体对拍（**跨域**：user/admin 域） ｜⚠️ **2026-10-30 真实性复核（主线 · 逐条回源）**：原判 **🟡 UNRESOLVED（Nacos namespace/group 不一致 ⇒ 活体对拍不可做）** ⇒ **现行态 = 🟡 仍开着（跨域）**（维持）。逐条依据见 §2026-10-30 复核表 <br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-message-ddl-parity.sh` ⇒ **EXIT=1**（2026-10-30 03:34:17 · 6s）—— 🔴 **探针判定为「不一致」**；覆盖断言：⚠️ 两侧**没有可成对比对的触发器** ⇒ 本维度**什么都没比**（不是「已对齐」） ⏐ ⚠️ 两侧**没有可成对比对的触发器函数** ⇒ 本维度**什么都没比**（不是「已对齐」） ⏐ == 实质差异合计 7 处 ⇒ 退出码 1 ==。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](live-parity-2026-10-30.md)。|
 | **UNRESOLVED-MSG-V-002** ✅ **已关闭（2026-10-24 第十轮）** | ~~`insertBatch` 参数上限的确切触发点~~ | —— | ✅ **关闭依据**：真 PG 守门 `notificationBatchInsertMustSurviveTheParameterLimit` **真造了 6000 条** recipient（> 5461 阈值）并断言全部落库 ⇒ 阈值已被活体覆盖；且 `DRIFT-MSG-V-002` 的修法本身（按 200 分片）**已把参数上限变成不可达** ⇒ 原问法已**过时** |
 | **UNRESOLVED-MSG-V-003** ✅ **已关闭（2026-10-24 第十轮）** | ~~DDL 的索引 / 唯一约束 / NOT NULL / DEFAULT~~ | —— | ✅ **关闭依据**：**双侧活体 DDL 对拍**（Go 侧跑真源自己的 `AutoMigrate`、RAG 侧按序执行 V1~V5，逐条 dump `pg_indexes` / `pg_constraint` / `information_schema.columns`）⇒ 索引 12 个、约束 3 个、37 列的可空性与 DEFAULT **全部核过**。<br>⚠️ **关闭的是「未核过」这个状态，不是「DDL 完全一致」** —— 实测差异：索引 3 处（V-021 ×2 名字 + V-022 ×1 列数）+ **DEFAULT 6 处**（⇒ 新登记 `DRIFT-MSG-V-031`）。<br>⇒ 复现：`bash tools/difftest/run-message-ddl-parity.sh` |
 
@@ -502,3 +502,22 @@ Go 侧这条同时命中信息泄露与错误归因两条，已属缺陷而非�
 
 ⚠️ **姊妹坑**（本轮同款）：**核守门存在性时我用 `find -name <方法名>.java` 去找测试方法** ⇒ 5 个守门被判「不存在」⇒
 实际上它们是**测试类里的方法**（`grep -rl "void <方法名>"` **6/6 全部在仓**）⇒ ⇒ **「按文件名找测试」是错的判据**（方法名 ≠ 文件名）。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W10
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| UNRESOLVED-MSG-V-001 | C（阶段 2 最终工程建设项 · 跨域部署配置面） | P2 | 否 | Go `service/message/rpc/message.go:37`（`s := zrpc.MustNewServer(c.RpcServerConf, …)` ⇒ 注册到服务发现）＋ `go-zero@v1.10.2/zrpc/server.go:43`（`server, err = internal.NewRpcPubServer(c.Etcd, c.ListenOn, serverOptions...)` ⇒ **只有 Etcd（Hosts＋Key）**）＋ `go-zero@v1.10.2/zrpc/config.go:113`（`return resolver.BuildDiscovTarget(cc.Etcd.Hosts, cc.Etcd.Key), nil` ⇒ **扁平 key，无 namespace／group 分层**；全仓 grep `nacos` **0 命中**）vs RAG `service/message/message-rpc/src/main/resources/application.yml:112`（`namespace: ${NACOS_NAMESPACE:public}`）＋ `:114`（`group: ${NACOS_GROUP:DEFAULT_GROUP}`）＋ `service/message/message-api/src/main/resources/application.yml:24-25`（同值）＋ `service/users/user/user-rpc/src/main/resources/application.yaml:89-90`（`${NACOS_NAMESPACE:sea-rtw}` ／ `${NACOS_GROUP:USER_GROUP}`）＋ `service/users/admin/admin-rpc/src/main/resources/application.yml:92-93`（同值）＋ `service/users/admin/admin-api/src/main/resources/application.yml:55-56`（同值）＋ `service/users/user/user-api/src/main/resources/application.yml:52-53`（同值）＋ `service/message/message-rpc/src/main/resources/application.yml:164`（`address: discovery:///user-rpc`）＋ `:171`（`address: discovery:///admin-rpc`）⇒ ⇒ **差异仍成立**（在 **yml 默认值层**两组分属：message／comment／like／follow／favorite = `public`／`DEFAULT_GROUP` vs users 域 4 个模块 = `sea-rtw`／`USER_GROUP` ⇒ **不注入 env** 时 message-rpc 的 `discovery:///user-rpc` ／ `discovery:///admin-rpc` 解析不到 users 域实例 ⇒ 跨域链路断）⇒ ⚠️ **compose 形态下不发作**：`docker-compose.yaml:166-167` 与 `:217-218` 给 user-rpc／user-api 注入了 `NACOS_NAMESPACE` ／ `NACOS_GROUP`（**env 覆盖 yml 默认**）⇒ 取 `.env:101-102`（`public` ／ `DEFAULT_GROUP`）⇒ 两侧一致 ⇒ ⇒ **剩余那部分 = 统一 yml 默认值**（Go 侧无 namespace／group ⇒ 对齐 Go 的唯一口径 = 取消分层或全仓收敛到一组），落点跨 message／users 两棵域树 ⇒ **阶段二**由收口执行者拍板收敛 ⇒ 归 C · **不阻断阶段一**（`docs/PhaseGoal/g2.md:28` 判 message-rpc = ✅ R4／E4，本项列在「仍开放项 · 跨域」栏） | 2026-10-30 |

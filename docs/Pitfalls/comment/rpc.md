@@ -421,6 +421,8 @@ Kafka 4.x 的组协调在 JoinGroup 阶段拿不到 topic 元数据 ⇒ **指数
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/comment/run_diff.sh` ⇒ **EXIT=1**（2026-10-30 03:34:23 · 2s）—— 🔴 **探针判定为「不一致」**；覆盖断言：❌ 缺前置产物：bin/go-comment-rpc（见同目录 README.md「怎么跑」）。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
 ## PIT-COMMENT-RPC-09 🔴 · Boot 4 的三连坑：**编译通过 ≠ 能启动**，且**报错点离病根很远** ｜ **状态（核对日期 2026-10-29）：仍生效**
 
 > **旧号**：`PIT-COMMENT-RPC-09` ⇒ **新号**：`PIT-COMMENT-12`
@@ -627,6 +629,8 @@ def to_int(v):                            # PG 存的是有符号 int32
 无（**不是**漂移，是 harness 坑）。已在 [`../../DRIFT/comment/rpc.md`](../../DRIFT/comment/rpc.md) §4.6.5 记录。
 
 ---
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/comment/run_diff.sh` ⇒ **EXIT=1**（2026-10-30 03:34:23 · 2s）—— 🔴 **探针判定为「不一致」**；覆盖断言：❌ 缺前置产物：bin/go-comment-rpc（见同目录 README.md「怎么跑」）。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
 
 ## PIT-COMMENT-RPC-13 🔴 · 「某域把异常改写了」这类登记，**必须逐条核 Go 侧** —— 否则会让**本来正确的代码去改本来正确的代码** ｜ **状态（核对日期 2026-10-29）：仍生效**
 

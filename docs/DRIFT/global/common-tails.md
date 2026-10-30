@@ -703,3 +703,30 @@ RAG 用**服务名**。⇒ breaker 名会出现在日志/统计里 ⇒ **字面�
 | 2026-10-25 | **第三轮（A1 / A2 / A3 / A4 四项落地）**。① **T-1 残余 ① 已修** —— 包一层 `SanitizedJsonContentTypeInputMessage` ⇒ 畸形头不再抛 + `charset=gbk` 回归 UTF-8；守门扩到 8 条 + 变异双向转红 ② **T-9 已修** —— 熔断键补 target 前缀（身份源 = `Channel.authority()`，因 grpc-java 1.63 的 `ManagedChannel` 无 `getTarget()`）；守门 6 条 + 变异转红（第一版守门有洞 ⇒ 已改为只调 `interceptCall` 再看 `trackedMethods()`）③ **T-4 观测面已修** —— 499 判据从「worker 内写失败」改成「**filter 写 socket 失败**」；配真 Tomcat 守门 3 条 + M1/M2/M3 三组变异全转红；⚠️ 顺带修掉「提前 flush 把 `Content-Length` 退化成 chunked」这个**新引入的 wire 差异**；🔴 残留「在飞 gRPC 不被提前取消」⇒ **框架限制** ⇒ `SD-2026-10-25-CAND-12`（待签字）④ **CYCLE-002 普查** —— `service/common` 的 `@Deprecated` 归零、无反向 import 业务域、无跨域 `{@link}` ⇒ **0 命中** ⇒ 落成可重跑守门 `tools/difftest/check-cross-domain-holds.py` |
 | 2026-10-25 | **第二轮（T-1 修复）**。T-1 改为**取原始头值**（`getFirst(CONTENT_TYPE)`）⇒ 大小写敏感判定与 Go 对齐；配真 `HttpHeaders` 守门测试 6 条 + 变异测试（转红）。⚠️ 登记 **T-1 残余 ①**（解析层仍走 MediaType ⇒ 畸形头仍抛，Go 不会）。🔴 新增 **CD-9**（3 份生产复制品）⇒ [`cross-domain.md`](cross-domain.md)。T-2 / T-5 **用户签字** ⇒ 转 `SD-2026-10-25-01` 并移出本档 |
 | 2026-10-25 | **首版**。`align/global` @ `58e8314` 产出。收录 T-1~T-10 逐条复核结论；纠正「Go 出处在项目树里」的方法论错误（真源分 L1 项目层 / L2 go-zero 框架层）；确认 T-1 / T-2 / T-5 / T-9 为真漂移；发现 T-2/T-5 档位错置、T-9 的 §3.2 缺陷；T-10 转 [`cycle-deps.md`](cycle-deps.md) |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W14
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| T-16 | D（已闭合 ⇒ 无待实现内容） | P1 | 否（不阻断阶段一） | Go `service/common/observability/rpc.go:38` = `timeoutCtx, cancel := context.WithTimeout(ctx, timeout)`（⇒ ctx 带客户端 deadline ⇒ **有效期限 = min(客户端 deadline, 服务端预算)**）＋ `:55` = `handler(timeoutCtx, req)`（handler 吃的是会被 cancel 的 ctx）＋ `:47-57` ＝ handler 跑**独立 goroutine**、`:68` 超时分支返回后 **goroutine 继续跑**（⇒ Go 也不杀 goroutine）vs RAG `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:293` = `effectiveTimeoutNanos = Math.min(serverBudgetNanos, clientDeadlineRemainingNanos())`（⇒ **第 ① 层确已落地**）＋ `:319`（超时调度器延时用它）＋ `:475` = `DeadlineState.bindRemainingNanos(effectiveTimeoutNanos)`（⇒ 线程上的期限 = 同一个有效期限）＋ `service/common/src/main/java/com/rag/common/persistence/DeadlineQueryTimeoutInjector.java:165` = `DeadlineState.remainingMillis()` ＋ `:172` = `applyMillisecondTimeout`（E62：先剥 HikariCP 代理再调毫秒级 `setQueryTimeoutMs`）⇒ **差异已消失**：台账正文所述的残留「第 ② 层 = 在途查询随客户端放弃而取消」**已由 E62 达成**（客户端 deadline 早于服务端预算时，PG 查询在**客户端那一档**被取消）⇒ 且「handler 在 deadline 后继续跑」这一面**两侧同款**（Go 的 goroutine 同样继续跑）⇒ 原文所提的「挪受控 executor ＋ 超时 interrupt」修法已在 2026-10-26 第四十六轮**被否决**（照做会比 Go 更严 ⇒ 新造漂移）⇒ 剩余的真实漂移已窄化为 **E65 / E66 / E67** 三个独立编号（`docs/DRIFT/global/_README.md:520-522`），不属本条范围 ⇒ 本条无剩余待实现项 | 2026-10-30 |
+
+### lane W3
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| `SD-2026-10-24-10` | D | P3 | 否 | Go `go-zero@v1.10.2/zrpc/config.go:31`（`Timeout int64 json:",default=2000"`）＋ `go-zero@v1.10.2/zrpc/client.go:70-71`（每次调用装 2000ms 上界）＋ `go-zero@v1.10.2/rest/config.go:55`（HTTP 侧 3000ms）⇒ Go 有效值 = min(2000ms, 3000ms − 已耗时)，ctx 为**纳秒**；vs RAG `service/like/like-api/src/main/java/com/rag/like/like/api/client/LikeRpcClient.java:154`（`GoStyleRequestDeadline.remainingMillis()` ⇒ 毫秒）＋ `service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java:95`（`TimeUnit.NANOSECONDS.toMillis` ⇒ 向下取整）与 `:119`（`applyTo` 虽是纳秒但**无「上界」概念** ⇒ 表达不了 min(上限, 剩余)）⇒ **差异仍成立**（只读 API 毫秒粒度 ⇒ 有效 deadline 最多差 <1ms ⇒ **不可观察**）⇒ **不是新漂移**，是既有签字候选的措辞；台账 `common-tails.md` §附 要求的「性质」字段已订正，但 `Intentional_Deviations/like/api.md:110-116` 的「为什么不修」段仍是旧理由（未订正）⇒ 差异 <1ms 不可观察 ⇒ 不实现，签字认账 | 2026-10-30 |
+| `T-12` | D | P3 | 否 | Go `go-zero@v1.10.2/rest/router/patrouter.go:77-82`（405 出口在 **router 层** ⇒ 不经 TraceHandler）＋ `go-zero@v1.10.2/rest/engine.go:113-115`（**注册点**：`handle := chn.ThenFunc(route.Handler)` ⇒ `router.Handle(route.Method, route.Path, handle)` ⇒ 被注册的是已包过 TraceHandler 的 handler ⇒ router 自产的 405 不经它）＋ `go-zero@v1.10.2/rest/engine.go:134-138`（TraceHandler 是 native 链第一个）vs RAG `service/common/src/main/java/com/rag/common/http/GoStyleTraceparentFilter.java:282`（`PROPAGATOR.inject` 在 `chain.doFilter` **之前** ⇒ filter 链早于 DispatcherServlet 完成）＋ `service/article/article-api/src/main/java/com/rag/article/article/api/advice/GlobalExceptionHandler.java:338-342`（405 在 DispatcherServlet **内**处理 ⇒ 头已注入）⇒ **差异仍成立**（RAG 多带一个 `Traceparent`；**只**影响「方法不匹配」这一个出口，404 与正常响应两侧都带）⇒ 已登记待签字候选 `SD-2026-10-25-CAND-15` ⇒ 出口层级差异、共享层改不动 ⇒ 归 D（签字认账，不实现） | 2026-10-30 |
+| `T-13` | D | P3 | 否 | Go `service/common/observability/http.go:138-145` ＋ `:158-174`（`observabilityResponseWriter` 是**纯 buffer**：`WriteHeader`/`Write` 从不碰底层 `http.ResponseWriter` ⇒ socket 永远只有一个写者；唯一落盘点是 `:194-208` 的 `flushTo(dst)`）＋ `service/common/observability/http.go:80-88`（超时分支走 `http.Error(w, ...)` 写原始 w）vs RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:889`（`ObservabilityResponseWriter` 定义）＋ `:1153-1164`（`flushBuffer()` 已覆写 ⇒ 超时/断连后 worker 不再提交响应）⇒ **差异已消失**（第二十二轮已修 ⇒ 「响应撕裂 / 状态码被抢」不再复现；守门 `GoStyleTimeoutResponseRaceGateTest` 在位） | 2026-10-30 |

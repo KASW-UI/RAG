@@ -30,6 +30,13 @@
 #   ./exp-difftest-concurrent-schema.sh              # 全流程
 #   ./exp-difftest-concurrent-schema.sh --no-build   # 复用已有 jar
 set -euo pipefail
+# 🔴 RAG 侧 **fail-closed 密钥**（P0 #8）：占位符解析不出来 ⇒ 进程起不来
+#    ⇒ 探针「起 RAG 侧」这一步必挂 ⇒ 看起来像产品缺陷，其实是探针自己没给密钥。
+#    （2026-10-30 活体对拍轮实测 · 12 个探针全中招 ⇒ 收敛到这一个共享件）
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/rag-secrets.sh"
+# 共享件：PG 容器 + 建库（**建库失败必须响** ⇒ setup 阶段不许 fail-open）
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/rag-pg.sh"
+
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -108,33 +115,21 @@ ensure_container() {  # name image host_port container_port [docker run 额外�
   fi
 }
 
-wait_pg() {
-  for _ in $(seq 1 60); do
-    docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d postgres -c 'select 1' >/dev/null 2>&1 && return 0
-    sleep 1
-  done
-  echo "  FAIL ${PG_CONTAINER} 超时不可连" >&2; return 1
-}
-
 psql_q() {  # db, sql
   docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$1" -At -c "$2"
 }
 
 echo "==> [1/6] 准备自己的容器与两个空库（**不碰共享的 go_db / rag_db**）"
-ensure_container "$PG_CONTAINER" postgres:16-alpine "$PG_PORT" 5432 \
-  -e POSTGRES_USER="$PG_USER" -e POSTGRES_PASSWORD="$PG_PASSWORD" -e POSTGRES_DB=postgres
+ensure_pg_container "$PG_CONTAINER" "$PG_PORT" "$PG_USER" "$PG_PASSWORD"
 ensure_container "$REDIS_CONTAINER" redis:7-alpine "$REDIS_PORT" 6379
-wait_pg
-for db in "$GO_DB" "$RAG_DB"; do
-  # ⚠️ 必须用 WITH (FORCE)：上一轮的服务进程可能还连着这个库，
-  #    普通 DROP 会报 "database is being accessed by other users" —— 而它被 `|| true` 吞掉，
-  #    随后 CREATE DATABASE 才失败 ⇒ 报出来的错**指向错误的行**（本轮实测踩到，2026-10-24）。
-  #    WITH (FORCE) 直接踢掉现有连接（PG 13+）。
-  docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d postgres \
-    -c "DROP DATABASE IF EXISTS $db WITH (FORCE)" >/dev/null 2>&1 || true
-  docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d postgres \
-    -c "CREATE DATABASE $db" >/dev/null
-done
+wait_pg_ready "$PG_CONTAINER" "$PG_USER" || exit 2
+# ⚠️ 必须 WITH (FORCE)：上一轮的服务进程可能还连着这个库，
+#    普通 DROP 会报 "database is being accessed by other users" —— 而它被 `|| true` 吞掉，
+#    随后 CREATE DATABASE 才失败 ⇒ 报出来的错**指向错误的行**（本轮实测踩到，2026-10-24）。
+#    WITH (FORCE) 直接踢掉现有连接（PG 13+）。
+# ⚠️ **建库失败必须响**（2026-10-30 活体对拍轮）：原来 CREATE 失败仍打印「✓ 已重建」
+#    ⇒ setup 阶段 fail-open ⇒ 后面以「连不上库」的形式炸在别处 ⇒ 误导性结论。
+reset_pg_dbs "$PG_CONTAINER" "$PG_USER" "$GO_DB" "$RAG_DB" || exit 2
 echo "  ✓ ${GO_DB} / ${RAG_DB} 已重建（**空库**）"
 
 echo "==> [2/6] 生成 Go 运行配置副本（两份：user-rpc / admin-rpc）"

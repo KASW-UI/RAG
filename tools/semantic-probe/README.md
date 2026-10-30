@@ -413,3 +413,46 @@ Go 真源 `rpc.go:38` 的 `context.WithTimeout(ctx, timeout)` 里 **`ctx` 携带
   ⇒ 探针**不比对方法名**。
 - **grpc-java 的 `fullMethodName` 不带前导斜杠**，grpc-go 用 `"/service/method"`
   ⇒ 两侧探针各写各的，**不要**互相「对齐」成同一个字符串。
+
+---
+
+# 第四个探针：`client-visible-code/`（Go 侧「客户端可见码**集合**」活体探针）
+
+> 位置：`tools/semantic-probe/client-visible-code/` · 跑法：`bash tools/semantic-probe/client-visible-code/run-client-visible-code.sh`
+> 退出码：`0` = 形态与已登记一致（集合含 4 与 13）· `1` = **形态变了**（集合不含 13 ⇒ 前提要回源头重核）· `2` = 环境不满足
+
+## 为什么要有它
+
+它回答的是一个**决定 logout 修法**的问题：**Go 侧在「请求 deadline 已过期」时，客户端到底能看到哪些码。**
+
+- 判据不是「Go 的 handler 级码是什么」（那是 `codes.Internal` = 业务码 5001），
+  而是「**客户端能看到什么**」⇒ 因为只有**客户端可见面**才是漂移判定对象。
+- 真源 `service/common/observability/rpc.go:38` ⇒ `timeoutCtx` 一创建就是到期的（父 ctx 已过期）
+  ⇒ `:59-72` 的 `select` 里 **`done` 与 `timeoutCtx.Done()` 可能同时就绪**
+  ⇒ ⇒ **Go 的 `select` 在多个就绪分支间随机选** ⇒ ⇒ 走 `done` 分支（`:63-67`）就**返回 handler 的 err**（5001）。
+- ⇒ ⇒ **实测集合 = {4, 13}** ⇒ ⇒ 「handler 级差异不可观察 ⇒ 不构成漂移」**不成立**
+  ⇒ ⇒ RAG 保留域内 `checkDeadline()` ⇒ 集合 = {4} = **Go 集合的真子集** ⇒ ⇒ **删掉守卫才同集合**。
+
+## 文件
+
+| 文件 | 角色 |
+|---|---|
+| `client-visible-code/go/main.go` | **Go 半边**：直调真源 `observability.NewUnaryServerInterceptor`（经 `replace` 引用冻结仓）＋ 真 ctx（已过期）⇒ 统计它返回的码 |
+| `client-visible-code/run-client-visible-code.sh` | 生成 `go.mod` → 离线构建 → 跑 → **判形状**（集合里有没有 13）→ 形态变了就 exit 1 |
+
+## 三条纪律
+
+① **只提交 `go/main.go`**；`go.mod` 运行时生成 ⇒ 仓库里不出现机器相关的绝对路径。
+② **`CGO_ENABLED=0`**（本机没有 Xcode 头文件）。
+③ **期望值必须有台账出处** ⇒ 出处：[`docs/DRIFT/_cross/client-visible-code-set.md`](../../docs/DRIFT/_cross/client-visible-code-set.md)。
+
+## 它是**形状**守门，不是**数值**守门
+
+断言的是「**集合里有没有那个码**」，**不是**精确比例 ⇒ ⇒ 命中比例受调度竞争影响（机器/负载相关）⇒ 不进期望值
+⇒ ⇒ **形态变了就红** ⇒ ⇒ 逼人**回源头重核**，而不是把期望值改成新的数。
+
+## ⚠️ 为什么这条证据必须落仓
+
+这个数**曾在一次临时 module 里跑出来**（N=20000 ⇒ 1015=19995 / 5001=5），但**源码没落仓**（只在当时的 `/tmp`）
+⇒ ⇒ 「跑某条命令会得到 N」变成**不可复算**的口径 ⇒ ⇒ 谁都没法复核、前提变没变也没法判断。
+⇒ ⇒ **纪律**：凡台账里写「跑某条命令会得到 N」，**必须把那条命令 / 那个探针落仓**。

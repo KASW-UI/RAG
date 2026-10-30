@@ -119,6 +119,7 @@ RAG 那 4 份 `db/*.sql` 是照着**旧 JPA @Column** 写的,不是照着 Go 的
 """
 import argparse
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -926,6 +927,37 @@ def compare_indexes(go_idx, rag_idx, allow):
     return diffs, waived, equiv
 
 
+def load_signed_exempt(domain):
+    """已签字的**表级**偏离豁免清单 ⇒ {表名: (签字条目号, 理由)}
+
+    ⚠️ **清单是显式数据文件**（`ddl-signed-exempt.txt`，与本脚本同目录）
+      —— **不解析** `docs/Intentional_Deviations/**.md`：
+      散文形态会随人手编辑漂移 ⇒ 解析器一脆，要么**误豁免**（真差异被洗成绿），
+      要么**误报**（已签字的被报成新漂移）⇒ **弱兜底判据会把真缺陷洗成 0**。
+    ⚠️ 清单**缺失** ⇒ 返回空 ⇒ 行为与本特性引入前**完全一致**（安全降级）。
+    """
+    f = pathlib.Path(__file__).with_name("ddl-signed-exempt.txt")
+    out = {}
+    if not f.exists():
+        return out
+    for ln, raw in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+        s = raw.strip()
+        if not s or s.startswith("#"):
+            continue
+        parts = [p.strip() for p in raw.split("\t")]
+        if len(parts) < 3:
+            print(f"⚠️ {f.name}:{ln} 格式不对（要 4 列、**制表符**分隔）⇒ 已忽略该行")
+            continue
+        dom, tbl, sid = parts[0], parts[1], parts[2]
+        reason = parts[3] if len(parts) > 3 else ""
+        if dom != domain:
+            continue
+        if tbl in out:
+            print(f"⚠️ {f.name}:{ln} 表 {tbl} 重复登记（前一条 {out[tbl][0]}）⇒ 以本条为准")
+        out[tbl] = (sid, reason)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description="Go 真源 ↔ RAG 的 DDL 列级 + 约束级对比")
     ap.add_argument("--domain", default="users", choices=sorted(DOMAINS),
@@ -1042,13 +1074,59 @@ def main():
     only_go = sorted(set(go) - set(rag))
     only_rag = sorted(set(rag) - set(go))
     if only_go or only_rag:
-        print("列集合不一致 —— 三种可能，**别默认当成漂移**："
-              "① 表名映射写错 ② 某一侧 schema 没初始化 ③ 某一侧**真的多/少一张表**（真漂移）")
-        for k in only_go:
-            print(f"  仅 Go 有:  {k}")
-        for k in only_rag:
-            print(f"  仅 RAG 有:  {k}")
-        return 1 if source_diffs else 2
+        # ── 🔴 已签字的**表级**豁免（2026-10-30 用户拍板）────────────────
+        # 情形：两侧列集合不一致，且**全部**差异都落在**已签字的那张表**里
+        #   （如 comment 域的 `report_record` —— Go 侧 AutoMigrate 漏建，已签字）
+        # ⇒ **不中止** ⇒ 跳过那张表，**继续比其余所有表**
+        #   （原先在此硬中止 ⇒ comment 域默认口径 EXIT=2 ⇒ 类型/可空/DEFAULT
+        #     **一个都比不了** ⇒ 那 8 处 DEFAULT 真差**不可机器复算**）
+        # ⚠️ **跳过 ≠ 已核对** ⇒ 输出单列「已签字豁免 · 未核对」
+        #   ⇒ 这张表今后新增的真差异**本工具抓不到** ⇒ 需人工巡检
+        # ⚠️ **只豁免「这张表」**：其余任何表不一致 ⇒ 仍按原样中止
+        signed = load_signed_exempt(args.domain)
+        mism = {k.split(".", 1)[0] for k in (only_go + only_rag)}
+        if signed and mism and mism <= set(signed):
+            print("列集合不一致 —— 但**全部落在已签字的表**里 ⇒ 跳过该表，继续比其余表：")
+            for t in sorted(mism):
+                sid, reason = signed[t]
+                print(f"  ⚪ 已签字豁免 · 未核对: {t}  [{sid}] {reason}")
+                print(f"     ⇒ 该表**本工具不再核对** ⇒ 其新增差异需人工巡检")
+            # 从各维度里剔除该表
+            # ⚠️ **两类键形态**：列级 = `表.列`（字符串）；约束/触发器 = `(表名, 名)`（**元组**）
+            #    索引 = `索引名` → 值里第 0 位是表名
+            def _drop_col(d, tbl):
+                return {k: v for k, v in d.items() if k.split(".", 1)[0] != tbl}
+            def _drop_tup(d, tbl):
+                return {k: v for k, v in d.items() if k[0] != tbl}
+            def _drop_idx(d, tbl):
+                return {k: v for k, v in d.items() if v[0] != tbl}
+            for t in mism:
+                go, rag = _drop_col(go, t), _drop_col(rag, t)
+                go_c, rag_c = _drop_tup(go_c, t), _drop_tup(rag_c, t)
+                go_i, rag_i = _drop_idx(go_i, t), _drop_idx(rag_i, t)
+                go_k, rag_k = _drop_tup(go_k, t), _drop_tup(rag_k, t)
+                go_t, rag_t = _drop_tup(go_t, t), _drop_tup(rag_t, t)
+                go_tf, rag_tf = _drop_tup(go_tf, t), _drop_tup(rag_tf, t)
+            only_go = sorted(set(go) - set(rag))
+            only_rag = sorted(set(rag) - set(go))
+            if only_go or only_rag:
+                print("  ❌ 跳过已签字表后**仍有**列集合不一致 ⇒ 不在豁免范围内 ⇒ 按原样处理")
+                for k in only_go:
+                    print(f"  仅 Go 有:  {k}")
+                for k in only_rag:
+                    print(f"  仅 RAG 有:  {k}")
+                return 1 if source_diffs else 2
+        else:
+            print("列集合不一致 —— 三种可能，**别默认当成漂移**："
+                  "① 表名映射写错 ② 某一侧 schema 没初始化 ③ 某一侧**真的多/少一张表**（真漂移）")
+            for k in only_go:
+                print(f"  仅 Go 有:  {k}")
+            for k in only_rag:
+                print(f"  仅 RAG 有:  {k}")
+            if signed:
+                print(f"  （本域已签字豁免的表：{', '.join(sorted(signed))} ⇒ "
+                      f"若差异不只落在这些表上，则**不适用**豁免）")
+            return 1 if source_diffs else 2
 
     diffs = [(k, go[k], rag[k]) for k in sorted(go) if go[k] != rag[k]]
 

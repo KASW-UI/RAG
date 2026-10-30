@@ -3651,3 +3651,101 @@ RAG 侧的完整机制链（**消费点**）：
 - **段来源**：共享层已预分配给本域的段（`docs/DRIFT/global/vs-common.md` §4.10.19.3）⇒ **共享层台账零改动**（写权归 G4）。
 - **守门**：域级 `BlindPortGateTest`（落在 **user-rpc**，`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/BlindPortGateTest.java`）**5 条** ⇒ 一并覆盖本组件 ⇒ **本组件不单独建守门**（避免两份规则漂移）。
 - **边界**：**本组件生产代码零改动**（全部落在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项**（Go 侧无对应物 ⇒ 无对照义务）。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W11
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-USERAPI-013 | C（剩余 ③ 是共享层生产工程项） | P2 | 否 | Go `go-zero@v1.10.2/rest/engine.go:149`（`chn = chn.Append(handler.BreakerHandler(route.Method, route.Path, metrics))` ⇒ 键 = **注册期路由模板**，每条路由各建一个 breaker ⇒ 键空间恒有界）＋ `go-zero@v1.10.2/rest/handler/breakerhandler.go:15`（`breakerSeparator = "://"`）＋ `:19`（`breaker.NewBreaker(...strings.Join([]string{method, path}, breakerSeparator))`）＋ `go-zero@v1.10.2/rest/engine.go:244`（`notFoundHandler` 的链只有 Trace + Log ⇒ **404 链里没有 breaker**）vs RAG `service/common/src/main/java/com/rag/common/protection/GoStyleBreakerFilter.java:136`（`return request.getMethod() + "://" + resolution.template();` ⇒ **键已改为注册期模板**）＋ `:176`（`if (resolution.kind() == GoStyleRouteResolution.Kind.NOT_MATCHED) {` ⇒ **未命中路由不进 breaker、不建 key**）＋ `:138`（`return request.getMethod() + "://" + request.getRequestURI();` ⇒ **`UNKNOWN` 时回落 raw URI ⇒ 键空间仍可无界**）＋ `:82`（javadoc 仍写「基数等于路由数（**本模块 13 条**…），无界增长的现实风险为零」⇒ **该安全保证不成立**）＋ `service/common/src/main/java/com/rag/common/protection/GoStyleRouteTemplateResolver.java:153`（解析抛异常 ⇒ 返回 `UNKNOWN` ⇒ 触发 `:138` 回落）＋ `:170`（匹配上但拿不到模板 ⇒ `UNKNOWN` ⇒ 同上）＋ `service/common/src/main/java/com/rag/common/protection/GoStyleBreakerRouteTemplateAutoConfiguration.java:31`（`@ConditionalOnClass(RequestMappingHandlerMapping.class)`）＋ `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java:102`（`private final Semaphore latch;`）＋ `:106`（`new Semaphore(maxConns)` ⇒ **全进程一个**）⇒ **拆半后的三段现状**：**①** MaxConns 闸门粒度 = **已签字偏离**（`docs/Intentional_Deviations/global/common-tails.md:11` 的 `SD-2026-10-25-01`，签字决定 = 保留 RAG 全局闸门 ⇒ **决策不是缺陷**）· **②** breaker 键空间 = **已修**（模板键 ＋ 未命中不进 breaker）· **③** = **差异仍成立**：剩下的只有「javadoc 写了错误的安全保证」＋「`UNKNOWN` 回落仍是无界口」⇒ 落点 `service/common`（**共享层 · G4 写权**）⇒ 归 **C**；⚠️ 「本模块 13 条」实测是 **admin-api 的 13 条**（user-api 9 / message-api 14 / hot-api 1）⇒ 该类在 `service/common` 供 **10 个 api 组件**共用 ⇒ 基数断言在共享层语境下不成立；**P2**（只影响 javadoc 正确性 ＋ 一条窄路径的无界 map 增长，无业务正确性/数据完整性影响 ⇒ 不命中阶段一 P0 九条 ⇒ **不阻断阶段一**） | 2026-10-30 |
+
+### lane W5
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| D-015 | D | P3 | 否 | Go `service/user/user/api/internal/middleware/checkblacklistmiddleware.go:35`（`exists, err := m.Redis.ExistsCtx(r.Context(), blackListKey)`）＋ `checkblacklistmiddleware.go:36`（`if err == nil && exists` ⇒ Redis 故障 ⇒ **fail-open 放行**）vs RAG `service/users/user/user-api/src/main/java/com/rag/users/user/api/interceptor/JwtAuthInterceptor.java:180`（`exists = redisTemplate.hasKey(blacklistKey);`）＋ `JwtAuthInterceptor.java:181`（`catch (Throwable t)` ⇒ **fail-open**）＋ `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java:131`（`builder.disconnectedBehavior(ClientOptions.DisconnectedBehavior.REJECT_COMMANDS)`）⇒ **差异已消失**（台账记的「主机名解析失败 ⇒ 200/503 摇摆」在 2026-10-26 **复现不出来** —— dns 形态 24 次两侧都 200、blackhole 形态 4 次两侧都 503 ⇒ 两侧同形；对应条目 `DRIFT-USERAPI-015` 已于 2026-10-27 正式关闭，本行 D-015 是**未同步的镜像行**）⇒ 两侧当前都 fail-open ⇒ 无落码动作（保留重开触发条件） | 2026-10-30 |
+| DRIFT-USERAPI-017 | D | P3 | 否 | Go `service/user/user/api/internal/handler/routes.go:15`（生产侧等价面；Go 全仓 `forPort(0)` ／ `new ServerSocket(0)` ／ `RANDOM_PORT` 三个模式串 **0 命中** ⇒ Go 侧无对应物 ⇒ 不构成 Go 对照项）vs RAG `service/users/user/user-api/src/test/java/com/rag/users/user/api/UserApiStartupFailFastTest.java:92`（`return RealGrpcPort.pick();`）＋ `UserApiStartupFailFastTest.java:258`（`NettyServerBuilder.forPort(RealGrpcPort.pick())`）＋ `UserApiGrpcNegotiationTest.java:101` ＋ `GoStyleGrpcClientBreakerE2ETest.java:123`（`r.add("server.port", RealTomcatPort::pick);`）⇒ **差异已消失**（本组件 4 处「OS 盲选口」已全部改走域内私有固定段端口 `22200–22219`）⇒ 且**生产代码零改动**（全在 `src/test/java`）⇒ 无落码动作 | 2026-10-30 |
+---
+
+> ⚠️ **以下内容原位于本文件中部 —— 2026-10-30（G1 lane）移到末尾**
+> 理由 = **零行位移**：`docs/RoundPlan/_unresolved.md` 与 `docs/DRIFT/_cross/grading/*` 里有指向本文件的
+> **硬编码 `文件:行号` 指针** ⇒ ⇒ 派生层按**纯行号算术**解析 ⇒ ⇒ 中部插一行 ⇒ 指针解析到别的条目
+> ⇒ ⇒ 「排期指针 / 证据缺口组」的成员被静默改写 ⇒ ⇒ **派工面被改掉**。
+> ⇒ ⇒ 纪律：**新增内容一律放文件末尾**；要改中部 ⇒ 用「**就地替换**」（行数不变）而不是「插入新行」。
+> ⇒ ⇒ 判据：`python3 tools/ledger-derive/check-pointer-consistency.py`（派生层输入完整性棘轮）。
+
+## ✅ `DRIFT-USERAPI-018` · 出向 user-rpc **缺 2s 客户端超时** ⇒ 失败只能由**服务端**兜底（2026-10-30 · G1 lane · 域侧自修 · 已落码）
+
+> **证据强度 = L3**（Go ↔ RAG 源码逐条对照 ＋ 本域**真跑**守门 ＋ **变异实测**）
+> ⚠️ **未做双侧活体对拍** ⇒ **不标 L4** ⇒ 「已修」读作「**在 L3 强度下一致**」，不是已闭环（AGENTS.md §〇）。
+
+### 一、现象
+
+Go 侧 `user-api → user-rpc` 的出向调用**恒带 2s 客户端超时**；RAG 侧 `devh` 注入的是**裸 stub**
+（**无 call deadline**）⇒ ⇒ **缺「客户端侧」收口**：失败只能由**服务端**拦截器或本进程 HTTP 预算兜底
+⇒ ⇒ 失败**归因**与**收口时刻**都可能与 Go 不同。
+
+### 二、Go 侧出处（逐条 · 本轮亲自读过）
+
+| # | 出处 | 事实 |
+|---|---|---|
+| G1 | `go-zero@v1.10.2/zrpc/config.go:31` | `RpcClientConf.Timeout int64 `json:",default=2000"` ` ⇒ **默认 2000ms** |
+| G2 | `go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25` | `ctx, cancel := context.WithTimeout(ctx, t)` ⇒ **取更早者** ⇒ 出向 deadline = min(入站 ctx 剩余, 2s) |
+| G3 | `service/user/user/api/etc/usercenter.yaml:37-41` | `UserRpc:` 段**只有 `Etcd`**、**无 `Timeout`** ⇒ ⇒ 走 G1 默认值 |
+| G4 | `service/user/user/api/internal/logic/user/loginlogic.go:44` | `l.svcCtx.UserRpc.Login(l.ctx, rpcReq)` ⇒ 出向调用**继承 handler 的 ctx** |
+| G5 | `service/user/user/api/internal/logic/user/loginlogic.go:49-55` | `st, _ := status.FromError(err)` ⇒ `switch st.Code()`：**`codes.Internal` → `ErrorServerCommon`(5001)**；**`default` → `CodeServerBusy`(1015)** ⇒ `DeadlineExceeded` 落 **default → 1015** |
+| G6 | `service/user/common/errmsg/errmsg.go:6` / `:41` | `CodeServerBusy = 1015` ／ 文案 `服务繁忙` |
+| G7 | `service/user/user/api/internal/handler/user/loginhandler.go:27-31` | `httpx.OkJson(w, &response.Response{Code: code, ...})` ⇒ **HTTP 200** ＋ 业务码在 body 里 |
+| G8 | `service/user/user/api/usercenter.go:35-37` ＋ `service/common/observability/http.go:30-34` ＋ `:53-56` | `DisableNativeRestTimeout(&c.RestConf)` ⇒ 读 `conf.Timeout`（go-zero `rest/config.go:55` = `Timeout int64 json:",default=3000"` ⇒ **3000ms**）并把 `conf.Middlewares.Timeout = false`（关掉 go-zero 原生超时）⇒ 随后 `NewHTTPMiddleware(name, httpTimeout, …)` 在 `http.go:53-56` 做 `ctx, cancel := context.WithTimeout(r.Context(), timeout)` ＋ `req := r.WithContext(ctx)` ⇒ ⇒ **Go 侧 api 的 3s 预算被传进业务 ctx** ⇒ ⇒ **Go 的出向 deadline = min(剩余 3s ctx, 2s 客户端超时)** ⇒ ⇒ 与 RAG 的 `capByClientTimeout(applyTo(stub))` **逐字同形** |
+| G9 | `service/common/observability/http.go:80-88` ＋ `:22` | 3s 预算耗尽 ⇒ `statusCode = http.StatusServiceUnavailable`（**503**）＋ `http.Error(w, httpTimeoutBody, statusCode)`，`httpTimeoutBody = "Request Timeout"` ⇒ ⇒ **这正是 RAG 修前形态②的对外形状**（RAG 侧同款在 `service/common/.../observability/HttpMiddleware.java:116`） |
+
+### 三、⚠️ 差异的准确边界（不要读宽）
+
+RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
+（`service/users/user/user-rpc/src/main/resources/application.yaml:209` = `rpc-timeout: 2s`；
+接线在位由 `python3 tools/difftest/check-grpc-interceptor-wiring.py` = **EXIT=0** 实测确认）⇒ ⇒
+
+| 形态 | Go（真源） | RAG **修前** | RAG **修后** |
+|---|---|---|---|
+| **① 请求到达下游、业务挂死** | 客户端 2s 收口 ⇒ G5 的 default ⇒ **`HTTP 200` + `1015`** | **服务端** 2s 收口 ⇒ `DEADLINE_EXCEEDED` ⇒ 本域映射（`UserLoginService.java:99-107` ＋ `GlobalExceptionHandler.java:162` 的 default）⇒ **1015** ＋ `:95` `HttpStatus.OK` ⇒ **`HTTP 200` + `1015`** | 同左 ⇒ **与 Go 同形** |
+| **② 请求没到达下游**（进程不可达 / 网络黑洞 / 连接建好但无响应） | 出向 deadline = **min(剩余 3s ctx, 2s 客户端) = 2s** ⇒ 客户端侧收口 ⇒ **`HTTP 200` + `1015`** | **无任何客户端收口** ⇒ 只能等本进程 HTTP 预算（`service/users/user/user-api/src/main/resources/application.yml:216` = `http-timeout: 3s`）⇒ ⇒ **`HTTP 503` + `Request Timeout`** | 出向 deadline = **min(剩余 3s ctx, 2s 客户端) = 2s** ⇒ **`HTTP 200` + `1015`** ⇒ **与 Go 同形** |
+
+⇒ ⇒ **本条要修的是形态②**（状态码 + 响应体 + 时刻三者都不同），**不是**形态①。
+
+### 四、RAG 侧修前 / 修后
+
+| | 修前 | 修后（2026-10-30 · G1 lane） |
+|---|---|---|
+| 出向 stub | `@GrpcClient("user-rpc")` 注入的裸 stub；`userRpc()` 直接返回它 ⇒ **本组件 9 处出向调用点全是裸 stub**（8 个 Service ＋ `UserGetService.java:54` 的 `IdentityResolver.resolveUser(httpRequest, userRpcClient.userRpc())`） | `capByClientTimeout(applyTo(stub))` ⇒ **min(入站剩余, 2s)** ⇒ **一次落码覆盖 9 处** |
+| 落码 | — | `service/users/user/user-api/src/main/java/com/rag/users/user/api/client/UserRpcClient.java`（新增 `CLIENT_TIMEOUT_MILLIS = 2000L` ＋ `userRpc()` ＋ 包可见 `capByClientTimeout`） |
+
+### 五、守门网 ＋ 变异实测（AGENTS.md §3.3.3）
+
+- **守门**：`service/users/user/user-api/src/test/java/com/rag/users/user/api/client/UserRpcClientDeadlineCapTest.java`（**5 条**）
+  - **真**构造 `UserServiceBlockingStub` ＋ **真**读回 `CallOptions.getDeadline()`（**不是**「代码里写了 `withDeadlineAfter`」的文本级断言）
+  - **真**走 `GoStyleRequestDeadline.begin(long)` 设预算 ⇒ 验 min 语义四支（无预算 / 入站 < 2s / 入站 > 2s / 预算已耗尽）
+  - **真**验对外 accessor（`userRpc()`）交出的 stub 已带 deadline
+- **变异实测**：
+  - **M1**（accessor 去掉 `capByClientTimeout`）⇒ 红在 `accessorReturnsCappedStub`（「必须带 call deadline ⇒ expected: not <null>」）
+  - **M3**（cap 常量 2000 → 30000 ⇒ 放宽化）⇒ 红在 `withoutInboundBudget_capIsTwoSeconds`（「不得超过 2000ms，实际 = 29999ms」）＋ `inboundBudgetLongerThanCap_stillCapsAtTwoSeconds`
+  - ⇒ **两档各红各的**、**还原后复绿** ⇒ **不是假绿**
+- ⚠️ **判据自身的坑（已修）**：首版断言把「入站预算 500ms」写成固定下界 ⇒ 实测**只读到 72ms**（首次 mock 生成 + 类加载吃掉 ~400ms）⇒ **假红** ⇒ 已改为「**期望值 − 实测耗时 − slack**」⇒ 既不放过「比 Go 更严」，也不被环境抖动误伤（AGENTS.md §3.3.3 ③：修漂移先改/删错误断言，再改实现）。
+
+### 六、边界（诚实声明）
+
+- ⚠️ **未做双侧活体对拍** ⇒ 本条**不是 L4**。
+- ⚠️ 守门**不**起真实 user-rpc、**不**发真实请求 ⇒ 证的是「**出向调用的 deadline 口径**」；**不**证「下游挂死时端到端真的回 1015」。
+- ⚠️ **共享层那半边不在本条**：要让 rpc 进程也拿到「入站预算」，`GoStyleRequestDeadline` 需要**作用域化 API** ⇒ 落点 `service/common` ⇒ **G4 写权** ⇒ 已随 `E65` 反馈单转派。
+

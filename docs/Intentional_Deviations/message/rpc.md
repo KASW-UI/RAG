@@ -116,6 +116,8 @@
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-message-ddl-parity.sh` ⇒ **EXIT=1**（2026-10-30 03:34:17 · 6s）—— 🔴 **探针判定为「不一致」**；覆盖断言：⚠️ 两侧**没有可成对比对的触发器** ⇒ 本维度**什么都没比**（不是「已对齐」） ⏐ ⚠️ 两侧**没有可成对比对的触发器函数** ⇒ 本维度**什么都没比**（不是「已对齐」） ⏐ == 实质差异合计 7 处 ⇒ 退出码 1 ==。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
 ### SD-2026-10-23-08 · CPU 采样读不到时 **fail-open**（不降载） ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**
 
 > **唯一别名**：`SD-2026-10-23-08@message`（🔴 **撞号事实**：同一编号在 [`docs/Intentional_Deviations/like/api.md`](../like/api.md)（响应 Content-Type）与 [`docs/Intentional_Deviations/users/admin/api.md`](../users/admin/api.md)（黑名单 401 业务码）指向**三条完全不同**的偏离 ⇒ 跨域撞号 ⇒ 本条以 **`SD-2026-10-23-08@message`** 为准）

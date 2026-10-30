@@ -2,16 +2,16 @@
 #
 # comment 域错误码契约：Go ↔ Java 双侧逐字节对拍（AGENTS.md §3.3 要求的「两侧同时跑的探针」）。
 #
-# 真源：Sea-RideTheWind_golang/service/comment/common/errmsg/errmsg.go（package common，133 行，**只读**）
-# 被测：RAG/service/comment/comment-common/src/main/java/com/rag/follow/follow/common/errmsg/
-#       {FollowErrorCode,FollowErrorMessages,FollowCodeError,FollowGrpcError}.java
+# 真源：Sea-RideTheWind_golang/service/comment/common/errmsg/errmsg.go（package errmsg，103 行，**只读**）
+# 被测：RAG/service/comment/comment-common/src/main/java/com/rag/comment/comment/common/errmsg/
+#       {CommentErrorCode,CommentErrorMessages,CommentCodeError,CommentGrpcError}.java
 #
-# 定位是【回归守门】：任何人改了 follow 的码值 / 文案 / 未知码回落语义 / wire 形态 /
+# 定位是【回归守门】：任何人改了 comment 的码值 / 文案 / 未知码回落语义 / wire 形态 /
 # 业务码反查语义，本脚本立刻 exit 1。
 #
 # 用法：
-#   bash tools/errmsg-probe/follow/run-parity.sh
-#   GO_REPO=/path/to/Sea-RideTheWind_golang bash tools/errmsg-probe/follow/run-parity.sh
+#   bash tools/errmsg-probe/comment/run-parity.sh
+#   GO_REPO=/path/to/Sea-RideTheWind_golang bash tools/errmsg-probe/comment/run-parity.sh
 #
 # 退出码：0 = 双侧逐字节一致；1 = 有真漂移；2 = 环境问题（输入不可见 / 探针跑不起来）。
 #

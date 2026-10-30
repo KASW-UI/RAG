@@ -199,3 +199,23 @@ Go 的 gorm tag **没有 `default`** ⇒ GORM `AutoMigrate` **不给**时间列 
 |---|---|
 | 2026-10-25 | 🆕 **首版（第二十六轮 · L5 lane `align/global-signoff`）** —— 收录 **2 条待签字候选**（**均未签字，登记完就躺着，不升级为拍板**）⇒ ① **`SD-2026-10-25-CAND-16`**：users 域 **8 处**时间列 `DEFAULT CURRENT_TIMESTAMP`（Go 侧**无**默认）—— 性质 = **刻意保留**；Go 出处 = `service/user/user/rpc/internal/model/data_model.go:14/15/30/31` + `service/user/admin/rpc/internal/model/data_model.go:12/13/27/28`（tag 里**没有** `default`）⇒ RAG 出处 = `users-common/src/main/resources/db/{01,02,03,04}_*.sql` 的 8 处 ⇒ **真 PG 活体对照**（DEFAULT 恰好 8 处差异）② **`SD-2026-10-25-CAND-17`**：`users_user.status` 可空性（Go 可空 / RAG `NOT NULL`）—— 性质 = **RAG 更严**；Go 出处 = `service/user/user/rpc/internal/model/data_model.go:11`（`default:0` 但**无** `not null`）⇒ RAG 出处 = `01_create_user.sql:39` ⇒ ⚠️ **与 `admin-rpc` 的 `status = 0L` 耦合**（ADJ-01）⇒ 本条**不关闭**该缺陷 ⚠️ **本档是 global 代收的临时落点**（users 域档 `docs/Intentional_Deviations/users/_shared.md` 当前 0 字节，且**不在 L5 白名单内**）⇒ **整合者可把两条 fold 进该文件后删除本档** |
 | **2026-10-29** | 🆕 **台账对齐轮重核（只加不改）** —— ① 两条候选（`SD-2026-10-25-CAND-16@users` / `SD-2026-10-25-CAND-17@users`）逐条**回 Go 真源 + 回 RAG 源码两侧复核**：**被描述的行为均仍存在** ⇒ **两条不失效**，仍为 🏷 **未签字候选**（不进「已签字」计数）；② 加**域内唯一别名 `@users`**，并写明**同域撞号检查结论**（两条编号在本域各只出现于本文件 ⇒ **无撞号**）；③ 追加**逐行证据**（Go `data_model.go` 的 tag 行号 + RAG DDL 行号，2026-10-29 逐条核对一致）。⚠️ **上表 2026-10-25 那行末尾的「users 域档当前 0 字节」是当时的快照** ⇒ **该文件自 2026-10-25 起已有内容**（两条候选已 fold 至此），原句保留不删。 |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W5
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| SD-2026-10-25-CAND-16 | D | P3 | 否 | Go `service/user/user/rpc/internal/model/data_model.go:14`（`CreateTime time.Time gorm:"column:create_time;autoCreateTime"` ⇒ tag 里**无** `default`）＋ `data_model.go:15` ＋ `service/user/admin/rpc/internal/model/data_model.go:12` ／ `:13` ／ `:27` ／ `:28`（同款共 8 处）vs RAG `service/users/users-common/src/main/resources/db/01_create_user.sql:42` ／ `:43`（`create_time/update_time TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP`）＋ `service/users/users-common/src/main/java/com/rag/users/common/ddl/SchemaInitializer.java:64`（`"db/01_create_user.sql"` ⇒ DDL 清单的消费点）＋ `SchemaInitializer.java:121`（`ScriptUtils.executeSqlScript(connection, new ClassPathResource(script))` ⇒ 幂等重放）⇒ **差异仍成立**（8 处 DEFAULT 差异）⇒ 归 D（经分析确认**刻意保留**：两侧写路径都显式绑定该列 ⇒ 当前不可观察；删掉 + 保留 NOT NULL ⇒ 漏传时直接插入失败（比 Go 的落 NULL 更早暴露）；`CURRENT_TIMESTAMP` 是事务开始时刻、以 `timestamptz` 存储 ⇒ 不引入时区偏移；`expires_at`／`used_at` 是比较型字段、不在本条范围）⇒ 无落码动作；残留 = ① 本条尚未签字 ② **无专门守门钉 DEFAULT 表达式** ⇒ 改回 Go 前必须先补真 PG 逐列 dump 守门） | 2026-10-30 |
+| SD-2026-10-25-CAND-17 | D | P3 | 否 | Go `service/user/user/rpc/internal/model/data_model.go:11`（`Status int64 gorm:"column:status;default:0"` ⇒ 有 `default:0`、无 `not null` ⇒ GORM 建出可空列）＋ `service/user/admin/rpc/internal/model/data_model.go:41`（admin 半边同构）vs RAG `service/users/users-common/src/main/resources/db/01_create_user.sql:39`（`status BIGINT NOT NULL DEFAULT 0`）＋ `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/domain/UserEntity.java:136`（`private Long status = 0L;`）⇒ **差异仍成立**（可空性 Go `is_nullable=YES` ／ RAG `NO`）**但行为层零差异** ⇒ 归 D（经分析确认**保持 RAG NOT NULL**（RAG 更严的一侧）；⚠️ 本条仍是 🏷 **未签字**候选 ⇒ 不进「已签字」计数，也不构成「已签字 ⇒ 不许质疑」；唯一残留落点 = 合并收口执行者签字） | 2026-10-30 |

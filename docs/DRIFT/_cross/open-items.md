@@ -131,3 +131,22 @@ users 占 V1-V4」，**该注释两处失真**：
 `article-api` / `article-rpc` **已完整实现**，AGENTS.md §0「article 域整体仍未完成」计数过期
 （36 文件 / 4,275 行 与 36 文件 / 7,029 行，骨架 0 与 2；最新写入 10-22 23:56）。
 详见 [`../article/api.md`](../article/api.md) 与 [`../article/rpc.md`](../article/rpc.md)。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W3
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| `DRIFT-INFRA-001` | D | P3 | 否 | Go `service/message/rpc/internal/model/db.go:42`（`db.AutoMigrate(&Notification{}, &Conversation{}, &ConversationMessage{})` ⇒ Go 侧**无版本账本 / 无 baseline / 无 schema 级账本表**）vs RAG `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/MessageRpcApplication.java:64`（`@SpringBootApplication` ⇒ 上下文启动即触发 Flyway 自动配置 ⇒ 修前 message/like/article 三模块共用同一本 `flyway_schema_history` 账本）⇒ **差异已消失**：现各 rpc 模块各自 `spring.flyway.table`（message `application.yml:105` / like `:81` / comment `:112` / follow `:79` / favorite `:111` / task / article 独占默认名）且 favorite 已补 `baseline-version: 0`（favorite `application.yml:108`）⇒ 台账写的「V1~V3 版本号撞车」形态已不复存在（运行时同库共存已由真 PG 三进程并发实测闭环）⇒ **残留「新增模块忘配 table」已由 L4-02 单列**，不并入本条 | 2026-10-30 |

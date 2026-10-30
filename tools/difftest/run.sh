@@ -40,6 +40,20 @@ LOGS="$RUN_DIR/logs"
 BUILD=1
 KEEP=0
 SERVE_ONLY=0
+
+# 🔴 **2026-10-30 活体对拍轮补**：**fail-closed 的密钥 env 必须给**，否则本探针
+#   在「起 RAG 栈」那一步就挂 ⇒ **一条 case 都没跑**（实测 EXIT=1）。
+#   根因：`service/users/user/user-rpc/src/main/resources/application.yaml:148`
+#   `access-secret: ${USER_JWT_SECRET}`（**故意没有默认值** ⇒ P0 #8 的 fail-closed 守卫）
+#   ⇒ 不给 env ⇒ 占位符原样留下 ⇒ 守卫抛
+#   `IllegalStateException: user-rpc.user-auth.access-secret 仍是未解析的占位符`
+#   ⇒ **进程起不来**。
+#   同款需求：`user-api`（`USER_JWT_SECRET`）· `admin-rpc` / `admin-api`
+#   （`ADMIN_JWT_SECRET`）· `message-api`（**两个都要**）。
+#   ⇒ 用**随机值**（不落仓 · 不复用生产密钥）⇒ 与 `api-full-parity-probe/users` 同款做法。
+#   ⇒ **2026-10-30 收敛**：这层逻辑已抽到 `tools/difftest/lib/rag-secrets.sh`
+#      （**12 个探针共用同一处定义** ⇒ 以后新增探针照抄一行即可）。
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/rag-secrets.sh"
 for a in "$@"; do
   case "$a" in
     --no-build) BUILD=0 ;;
@@ -249,7 +263,16 @@ wait_http() {  # url, name, tries
 assert_started() {  # logfile, name
   local name=$2
   if grep -qE 'APPLICATION FAILED TO START|was already in use|BeanCreationException' "$1" 2>/dev/null; then
-    echo "  FAIL ${name} 启动失败："; grep -E 'Description:|Port .* was already in use|APPLICATION FAILED' -A 2 "$1" | head -8 | sed 's/^/      /'
+    echo "  FAIL ${name} 启动失败："
+    # ⚠️ **2026-10-30 活体对拍轮修**：原来「打印原因」的那条 grep 只认三种模式
+    #   （`Description:` / `Port … was already in use` / `APPLICATION FAILED`）
+    #   ⇒ 而 P0 #8 的 fail-closed 失败打的是 **`IllegalStateException`**（根因行）
+    #   ⇒ **命中判定**靠 `BeanCreationException` 那一行（命中了 ⇒ 报「启动失败」），
+    #   **但打印原因**的那条 grep 命不中 ⇒ 报「启动失败：」+ **空原因**
+    #   ⇒ **用错误的姿势失败**（看不出是哪一类失败）。
+    # ⇒ 现在把**最深的根因行**（最后一条 `Caused by:`）也打出来。
+    grep -E 'Description:|Port .* was already in use|APPLICATION FAILED' -A 2 "$1" | head -8 | sed 's/^/      /'
+    grep -E '^[[:space:]]*Caused by:' "$1" | tail -2 | sed 's/^/      /'
     return 1
   fi
 }

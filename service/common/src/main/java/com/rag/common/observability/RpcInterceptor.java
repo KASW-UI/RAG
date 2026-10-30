@@ -2,6 +2,7 @@ package com.rag.common.observability;
 
 import io.grpc.ForwardingServerCall;
 import io.grpc.ForwardingServerCallListener;
+import io.grpc.Grpc;
 import io.grpc.Metadata;
 import io.grpc.ServerCall;
 import io.grpc.ServerCallHandler;
@@ -113,6 +114,16 @@ public final class RpcInterceptor {
             return t;
         });
     }
+
+    /**
+     * 共享层的日志出口（go-zero 的 {@code logx.WithContext(ctx)} 的等价物）。
+     *
+     * <p>⚠️ RAG 侧**不**把 ctx 注入日志（共享层的 {@code com.rag.common.logger.Logger}
+     * 才是那一层）⇒ 本类只打「结构化的一行」⇒ ⇒ 详见
+     * {@link #logSlowCall} 的「刻意只落 slowcall 分支」说明。
+     */
+    private static final org.slf4j.Logger log =
+            org.slf4j.LoggerFactory.getLogger(RpcInterceptor.class);
 
     /**
      * 取当前的超时调度器；<b>若上一轮 {@link #shutdown()} 已把它终止 ⇒ 按需重建一份新的</b>。
@@ -291,6 +302,19 @@ public final class RpcInterceptor {
                 long serverBudgetNanos = (timeout != null && timeout.compareTo(Duration.ZERO) > 0)
                         ? toNanosSaturated(timeout) : Long.MAX_VALUE;
                 long effectiveTimeoutNanos = Math.min(serverBudgetNanos, clientDeadlineRemainingNanos());
+                // 🔴 E65：**绝对时刻只在这里算一次**（Go 的 ctx deadline 是在**拦截器入口**定下的）。
+                //   ① 两个载体（{@link DeadlineState} / {@link GoStyleRequestDeadline}）共用它
+                //      ⇒ 二者指向**同一时刻** ⇒ 不会出现「SQL 已过期但出向还活着」；
+                //   ② 若等到 onHalfClose 才加 ⇒ 会比 Go 宽「入口→onHalfClose」那一小段 ⇒ 漂移。
+                //   ⚠️ 时基统一取 {@link DeadlineState#monotonicNanos}（生产 = {@code System::nanoTime}）
+                //   ⇒ DeadlineState 内部的到期判定与本时刻**同源**（不会一个用假时钟一个用真时钟）。
+                long absoluteDeadlineNanos = saturatingAddNanos(
+                        DeadlineState.monotonicNanos.getAsLong(), effectiveTimeoutNanos);
+                // 「**无预算**」= 服务端没配 timeout（timeout<=0）**且**客户端没带 deadline
+                // ⇒ Go 侧 ctx 此时**没有 deadline**（服务端不加 WithTimeout ⇒ 父 ctx 也没有）
+                // ⇒ ⇒ 出向载体**不能绑**（绑了就会凭空给出一个 292 年的 deadline）
+                // ⇒ ⇒ 详见 {@link GoStyleRequestDeadline.Scope#NOOP}。
+                boolean hasDeadlineBudget = effectiveTimeoutNanos != Long.MAX_VALUE;
                 AtomicReference<Throwable> timeoutErrRef = new AtomicReference<>();
                 AtomicReference<Boolean> timedOutRef = new AtomicReference<>(Boolean.FALSE);
                 // M6 修复：close() 可能被调用两次 —— 超时调度线程先 close(DEADLINE_EXCEEDED)，
@@ -356,6 +380,9 @@ public final class RpcInterceptor {
                             return;
                         }
                         Duration duration = Duration.between(start, Instant.now());
+                        // 🔴 G1 反馈单 3/3 的共享层半边：go-zero 框架级 Stat 层的「慢调用日志」
+                        //   ⇒ 只落**慢**的那一支（Go 的另一支 = 每个请求都打全量 body 到 Info，本层**刻意不落**）
+                        logSlowCall(method, duration, finalSlow, remoteAddrOf(call));
                         Map<String, Object> attrs = rpcAttrs(method, status.getCode());
                         if (span.isRecording()) {
                             span.setAttribute(AttributeKey.stringKey("rpc.system"), "grpc");
@@ -472,8 +499,25 @@ public final class RpcInterceptor {
                                 super.onHalfClose();
                                 return;
                             }
+                            // 🔴 E65（出向 gRPC 不继承请求 deadline）——
+                            //   把**同一个绝对时刻**（入口处算好的）同时绑给**两个载体**：
+                            //   ① {@code DeadlineState}（本类）= 服务端 SQL 超时用
+                            //   ② {@link GoStyleRequestDeadline} = 出向 gRPC 载体（Go 的 ctx 传播）
+                            //   ⇒ 二者必须指向**同一时刻**（算一次、两个共用 ⇒ 不会各算各的 now）
+                            //   ⇒ 绑定点必须在**跑 handler 的线程**上（本方法即 handler 入口）
+                            //   ⚠️ 「无预算」时**不绑出向载体**（Go 侧此时 ctx 无 deadline ⇒ 出向也不该有）
+                            //   ⚠️⚠️ **诚实边界**：上方「{@code effectiveTimeoutNanos == Long.MAX_VALUE}」的**早退
+                            //      已经覆盖了「无预算」这条路径** ⇒ ⇒ 本行的三元分支在当前代码路径上
+                            //      **不可达** ⇒ 它只是**冗余防护**（那道早退若被删，本分支仍保证「不绑」）。
+                            //      ⇒ ⇒ 守门 {@code noBudgetMeansNoOutboundCarrierIsBound} 的**变异对象
+                            //      是「两道守卫同时失效」**：实测**单点变异不转红**（删早退 / 三元改无条件绑
+                            //      各自都仍被另一道守卫挡住），**双点变异才转红** ⇒ 判据活着，但别写成
+                            //      「删掉早退就会红」。
                             try (DeadlineState.Scope ignoredScope =
-                                         DeadlineState.bindRemainingNanos(effectiveTimeoutNanos)) {
+                                         DeadlineState.bindAbsoluteNanos(absoluteDeadlineNanos);
+                                 GoStyleRequestDeadline.Scope ignoredCarrier = hasDeadlineBudget
+                                         ? GoStyleRequestDeadline.bindAbsoluteNanos(absoluteDeadlineNanos)
+                                         : GoStyleRequestDeadline.Scope.NOOP) {
                                 super.onHalfClose();
                             }
                         }
@@ -718,6 +762,109 @@ public final class RpcInterceptor {
             return remaining > 0 ? remaining : 0L;
         } catch (RuntimeException e) {
             return Long.MAX_VALUE;
+        }
+    }
+
+    /**
+     * 饱和加法：{@code base + delta} 溢出 ⇒ 返回 {@link Long#MAX_VALUE}（「几乎无限」）。
+     *
+     * <p>⚠️ <b>为什么不用 {@code base + delta}</b>：溢出后会变成<b>负数</b>
+     * ⇒ 会被读成「已过期」⇒ 请求会被立刻判死（与 {@code DeadlineState} 里
+     * {@code bindRemainingNanos} 的同款饱和处理一致）。
+     */
+    private static long saturatingAddNanos(long base, long delta) {
+        try {
+            return Math.addExact(base, delta);
+        } catch (ArithmeticException overflow) {
+            return Long.MAX_VALUE;
+        }
+    }
+
+    /**
+     * <b>go-zero 框架级 Stat 层的「慢调用日志」（G1 反馈单 3/3 的共享层半边 · 2026-10-30 · G4 lane）。</b>
+     *
+     * <h2>Go 出处（逐行读过）</h2>
+     * <pre>
+     * // go-zero@v1.10.2/zrpc/internal/serverinterceptors/statinterceptor.go:74-97
+     * func logDuration(ctx, method, req, duration, ignoreMethods, durationThreshold) {
+     *     addr := peer.FromContext(ctx).Addr.String()            // :77-80  客户端地址
+     *     logger := logx.WithContext(ctx).WithDuration(duration) // :82
+     *     if !shouldLogContent(method, ignoreMethods) {         // :83  方法在 ignore 名单里
+     *         if isSlow(duration, durationThreshold) {
+     *             logger.Slowf("[RPC] slowcall - %s - %s", addr, method)          // :85
+     *         }
+     *     } else {                                              // :87  **默认走这一支**
+     *         content, err := json.Marshal(req)                 // :88
+     *         if err != nil { … }                               // :89-90
+     *         else if isSlow(duration, durationThreshold) {
+     *             logger.Slowf("[RPC] slowcall - %s - %s - %s", addr, method, content) // :92
+     *         } else {
+     *             logger.Infof("%s - %s - %s", addr, method, content)                // :94
+     *         }
+     *     }
+     * }
+     *
+     * // 阈值：:28 StatConf.SlowThreshold `json:",default=500ms"`；:19 defaultSlowThreshold = 500ms
+     * // :65-72 isSlow：durationThreshold>0 用它，否则用全局兜底 slowThreshold（真源 yaml 无 Middlewares 块 ⇒ 走兜底 500ms）
+     * </pre>
+     *
+     * <h2>本方法**只落 slowcall 那一支**（有意的不完整对齐）</h2>
+     * <ul>
+     *   <li>Go 的 <b>Info 分支</b>（`:94`）会把<b>每个请求的完整 JSON body</b>打进 Info 日志
+     *       ⇒ <b>本层刻意不落</b>：① 体量（每请求一行全量 body）；② 内容面（body 含业务数据）
+     *       ⇒ ⇒ 这是一处**有意的部分对齐**，已在台账登记（`docs/DRIFT/global/vs-common.md` §4.19.4 ⑥ 二）。</li>
+     *   <li>Go 的 <b>慢调用分支</b>（`:85`/`:92`）⇒ <b>本方法落它</b>
+     *       ⇒ 文案对齐 Go 的 {@code "[RPC] slowcall - <addr> - <method>"}，
+     *       并<b>额外</b>带一个 duration（Go 侧 duration 在日志<b>元数据</b>里，不在文本里）。</li>
+     * </ul>
+     *
+     * <h2>阈值从哪来（两侧同数）</h2>
+     * <p>本类的 {@code slowThreshold} 参数最终来自
+     * {@code RpcServerInterceptorFactory} → {@code ObservabilityProperties#getSlowThreshold()}
+     * → 兜底 {@link ObservabilityConstants#DEFAULT_SLOW_THRESHOLD}（= <b>500ms</b>，与 Go 的
+     * {@code defaultSlowThreshold} 同数）⇒ ⇒ <b>不需要新增任何配置</b>。
+     *
+     * <h2>⚠️ 归属链差异（诚实边界，不可外推）</h2>
+     * <p>Go 的 Stat 层挂在 <b>Recover 之后 / Breaker 之前</b>（{@code zrpc/server.go:151-153}）
+     * ⇒ 它量到的 duration <b>包含</b> breaker / shedding 引入的耗时；
+     * 而本类（{@code RpcInterceptor}）是<b>最内层</b>的业务拦截器
+     * ⇒ 它量到的 duration <b>不含</b> breaker / shedding 的开销
+     * ⇒ ⇒ <b>同一笔慢调用，RAG 可能判成「不慢」而 Go 判成「慢」</b>
+     * ⇒ ⇒ 这是<b>链层位置</b>带来的差异（不是阈值差异）⇒ 已登记。
+     *
+     * @param method        gRPC 全方法名（Go 侧的 {@code info.FullMethod}）
+     * @param duration      本次调用的耗时
+     * @param slowThreshold 慢调用阈值（≤0 ⇒ 不判慢）
+     * @param remoteAddr    客户端地址（Go 侧的 {@code addr}；取不到时为 {@code "-"}）
+     */
+    private static void logSlowCall(String method, Duration duration, Duration slowThreshold, String remoteAddr) {
+        if (slowThreshold == null || slowThreshold.compareTo(Duration.ZERO) <= 0) {
+            return;
+        }
+        if (duration == null || duration.compareTo(slowThreshold) <= 0) {
+            // Go 的 isSlow（:65-72）是严格大于 ⇒ 等于阈值不算慢 ⇒ 本层同款
+            return;
+        }
+        log.warn("[RPC] slowcall - {} - {} - duration {}ms", remoteAddr, method, duration.toMillis());
+    }
+
+    /**
+     * 取客户端地址（Go 侧 {@code peer.FromContext(ctx).Addr.String()} 的等价物）。
+     *
+     * <p>⚠️ <b>取不到时返回 {@code "-"} 而不是抛异常</b> —— 日志路径**绝不能**影响主流程
+     * （Go 侧 {@code peer.FromContext} 取不到时 {@code addr} 就是空串 ⇒ 同样不报错）。
+     */
+    private static String remoteAddrOf(ServerCall<?, ?> call) {
+        try {
+            Object attr = call.getAttributes().get(Grpc.TRANSPORT_ATTR_REMOTE_ADDR);
+            if (attr instanceof java.net.InetSocketAddress inet) {
+                return inet.getAddress() != null
+                        ? inet.getAddress().getHostAddress()
+                        : inet.getHostString();
+            }
+            return "-";
+        } catch (RuntimeException e) {
+            return "-";
         }
     }
 
@@ -993,6 +1140,22 @@ public final class RpcInterceptor {
                     (remainingNanos == Long.MAX_VALUE || remainingNanos > Long.MAX_VALUE - now)
                             ? Long.MAX_VALUE
                             : now + remainingNanos);
+            return () -> DEADLINE_NANOS.remove();
+        }
+
+        /**
+         * 绑定一个<b>绝对</b>到期时刻（单调钟纳秒）—— <b>与出向载体绑同一个时刻时用这个</b>。
+         *
+         * <p>🔴 <b>为什么需要它</b>：服务端有<b>两个</b> deadline 载体
+         * （本类 = SQL 超时用；{@link GoStyleRequestDeadline} = 出向 gRPC 用）
+         * ⇒ 它们必须指向<b>同一个绝对时刻</b>，否则两者会差出「各算各的 now」的那点纳秒
+         * ⇒ ⇒ 调用方<b>算一次绝对时刻</b>、两个载体共用。
+         *
+         * <p>⚠️ 时基必须与本类的 {@link #monotonicNanos} 一致（= {@code System::nanoTime}）
+         * ⇒ 调用方用 {@code System.nanoTime()} 计算即可。
+         */
+        public static Scope bindAbsoluteNanos(long absoluteNanos) {
+            DEADLINE_NANOS.set(absoluteNanos);
             return () -> DEADLINE_NANOS.remove();
         }
 

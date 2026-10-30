@@ -88,7 +88,7 @@ echo $?   # 0 = 两侧一致；1 = 有差异；2 = 环境问题 / 真源漂移
 | **解析** | p01–p07 | 非法 JSON / 缺必填 / 类型不对 / 缺 form 参数 / 非数字 / **有 body 但没有 JSON Content-Type** / DELETE 缺 id |
 | **业务** | b01–b07 | 穿过 **gRPC 往返**：下游缺席 5001 / 不存在 5201·5301 / 无权限 5005 |
 | **只读成功** | s01–s04 | 收藏夹列表 / 条目列表 / 空集合 / 另一个用户的列表（**int64 以字符串出参**、时间戳逐字节） |
-| **响应头面** | h01 | 完整响应头 key 集合（**OBS**） |
+| **响应头面** | h01 | 完整响应头 key 集合（🔴 **2026-10-30 由 `OBS` 改档为 `SAME`** ⇒ 差异已闭合 ⇒ 变成**守住闭合态**的等值断言） |
 | **写入** | w01–w03 | 改名 / 删条目（5304 收藏暂不可撤回）/ 删收藏夹 |
 | **写入生效验证** | z01 | 写完之后再读一次 ⇒ 验证副作用真的一致 |
 
@@ -101,11 +101,11 @@ echo $?   # 0 = 两侧一致；1 = 有差异；2 = 环境问题 / 真源漂移
 
 | 档 | 断言 | 用在哪 |
 |---|---|---|
-| **SAME** | status + Content-Type + body **全等** | 24 条（解析组 / 业务组 / 只读组 / 写入组 / 404 / 小写 bearer） |
+| **SAME** | status + Content-Type + body **全等** | 25 条（解析组 / 业务组 / 只读组 / 写入组 / 404 / 小写 bearer / **h01 响应头面**） |
 | **SAME_CODE** | status 全等 **且** 业务码全等 | a06（黑名单命中）⇒ 两侧业务码都是 5004，body 形态不同（**已签字** DEV-FAV-API-001） |
 | **SAME_BODY** | status 全等 **且** body 全等（**Content-Type 允许不同**） | r02 / r03（405）⇒ **新发现的跨域漂移**，见下 |
 | **SAME_STATUS** | **只**要求 status 全等 | a01–a04（Go 的 401 是**空 body** ⇒ 取不到业务码；形态差异**已签字** DEV-FAV-API-001） |
-| **OBS** | 两侧**必须不同** | h01（Go 多一个 W3C `traceparent` 响应头） |
+| **OBS** | 两侧**必须不同** | ⚫ **当前 0 条** —— h01 原为「Go 多一个 W3C `traceparent`」⇒ 🔴 **2026-10-30 活体对拍实测两侧已相同**（共享层 T-8 已于 2026-10-25 落地）⇒ **改档 `SAME`** ⇒ ⚠️ 改档前这个用例会把「RAG 少发 `traceparent`」的回归**静默放过** |
 
 冻结的列是 **Go 侧**的完整渲染值 ⇒ 真源行为一变，探针立刻 exit 1（是「Go 变了」，不是 RAG 回归）。
 
@@ -133,10 +133,18 @@ favorite-rpc / favorite-api **从未被验证能以真实进程启动** ⇒ 一 
 
 ⇒ 落点在 **共享面** ⇒ 本域**只登记不修**，收口在 `global`。
 
-### ③ 一个**观测层差异**（Go 响应多 `traceparent`）
+### ③ 一个~~观测层差异~~（Go 响应多 `traceparent`）—— 🔴 **2026-10-30：该差异已闭合**
 
-go-zero 的 otelhttp 会在**响应**里回显 W3C `traceparent`；RAG 侧没有
+go-zero 的 otelhttp 会在**响应**里回显 W3C `traceparent`；**RAG 侧当时没有**
 ⇒ 框架/可观测层差异 ⇒ 单开一个 OBS 用例量化。
+
+> 🔴 **2026-10-30 活体对拍轮订正**：**「RAG 侧没有」已经陈旧** ——
+> 根因是**共享层 T-8 已于 2026-10-25 第十九轮落地**（`service/common` 新增
+> `GoStyleTraceparentFilter` ⇒ 10 个 api 全生效）⇒ **两侧现在都有 `traceparent`**。
+> ⇒ 活体实测（`bash tools/api-full-parity-probe/favorite/run.sh`）报
+> 「**OBS 段期望两侧不同，但变成一样了 ⇒ 请重评台账**」⇒ **该差异已闭合**。
+> ⇒ 本用例档位已由 `OBS` 改为 `SAME`（见 §五）⇒ 现在**守住闭合态**。
+> ⇒ 台账侧同步订正：`docs/DRIFT/favorite/rpc.md` / `docs/DRIFT/favorite/api.md`。
 
 ---
 
@@ -148,7 +156,7 @@ go-zero 的 otelhttp 会在**响应**里回显 W3C `traceparent`；RAG 侧没有
 | **Redis 故障 / 变慢** | 🔴 未验 | 本探针的 Redis 是健康的 ⇒ 黑名单查询不会失败 ⇒ fail-open 那条分支未测（users 域的 `exp-difftest-redis-blacklist.sh` 覆盖过同款语义） |
 | **真源 user-rpc / article-rpc 在场** | 🔴 未验 | 同上，两侧都故意缺席 ⇒ 只验「下游不可用」这条分支 |
 | **Nacos 注册** | ⬜ 不适用 | 服务发现不在本域 scope（AGENTS.md §3.3 框架层） |
-| **响应头** | ✅ 已量化 | 只比 `status + Content-Type + body`；完整头 key 集合另开 OBS 用例（`Date` 每次都变 ⇒ 不比） |
+| **响应头** | ✅ 已量化 | 只比 `status + Content-Type + body`；完整头 key 集合另有 h01 用例（`Date` 每次都变 ⇒ 不比）<br>🔴 **2026-10-30 订正**：h01 原为 **OBS**（要求两侧不同）⇒ 实测两侧已相同 ⇒ **改档 `SAME`** |
 
 ---
 

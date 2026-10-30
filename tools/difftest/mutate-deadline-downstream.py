@@ -23,10 +23,10 @@
   · 跑前确认探针**真的跑过**（两侧都产出 PROBE 行）—— PIT-GLOBAL「退出码 0 ≠ 真跑过」；
   · 还原后 **sha256 一致 + 重新 touch**（PIT-GLOBAL-037）。
 
-【变异清单（第四十六轮 · 2 条）】
-  M1 **生产代码**：在 `RpcInterceptor.onHalfClose` 里绑定 `GoStyleRequestDeadline`
-     （= 候选修法的第一半：让出向调用拿得到预算）
-     ⇒ 必须红在 `outgoing_carrier`（absent → present_expired）
+【变异清单（第四十七轮 · 2 条 · 2026-10-30 合并收口轮重定基）】
+  M1 **生产代码**：**拆掉**已落地的出向载体绑定（`RpcInterceptor.onHalfClose` 里
+     `GoStyleRequestDeadline` 的绑定改成 `Scope.NOOP`）
+     ⇒ 必须红在 `outgoing_carrier`（present_expired → absent ⇒ parity 破）
      ⇒ ⇒ **证明这条键真的在观测「载体有没有绑定」**，不是写死的
   M2 **探针自身**：给 RAG 半边的下游调用加一个 deadline
      ⇒ 必须红在 `failed_fast` + `code`
@@ -51,20 +51,58 @@ PROBE_JAVA = 'tools/semantic-probe/deadline-downstream/java/DeadlineDownstreamPr
 
 # ── 变异清单：(ID, 说明, 文件, 旧串, 新串, 期望红的键集合) ─────────────────
 MUTATIONS = [
-    ('M1 生产代码：在 gRPC 路径绑定 GoStyleRequestDeadline（候选修法的第一半）',
+    # ⚠️ 锚点历史（三轮 · 每轮都是「变异空转 ⇒ 判据失去判别力」）：
+    #    ① 原锚点串 `DeadlineState.bindToCurrent(deadlineEpochMs)` ⇒ 生产代码在
+    #       `1f62a245`（DRIFT-COMMON-005 结案）里已改成 `bindRemainingNanos(...)`
+    #       ⇒ 锚点命中 **0 处** ⇒ **M1 变成空转**（变异没发生 ⇒ 判据失去判别力）。
+    #    ② 第一版改到 `RpcInterceptor.handle` 的 worker 绑定点（`:568`）⇒ 锚点命中了，
+    #       **但探针仍绿** ⇒ 根因 = **观测点与绑定点不在同一条路径**：
+    #       探针的 handler 是 `ServerCalls.asyncUnaryCall` 起的 ⇒ 它跑在
+    #       **`onHalfClose` 这条路径**上（`RpcInterceptor.java:466-480`）
+    #       ⇒ 而 `handle(...)` 那个 worker 池路径**探针根本没走**
+    #       ⇒ ⇒ 变异必须落在 `onHalfClose` 的绑定点。
+    #    ③ **第二轮（2026-10-30 合并收口轮）**：G4 波次把 `onHalfClose` 的绑定从
+    #       `DeadlineState.bindRemainingNanos(effectiveTimeoutNanos)` 改成
+    #       `DeadlineState.bindAbsoluteNanos(absoluteDeadlineNanos)` **＋ 并列绑上
+    #       `GoStyleRequestDeadline.bindAbsoluteNanos(absoluteDeadlineNanos)`**
+    #       ⇒ ⇒ **第二轮的锚点再次命中 0 处** ⇒ ⇒ **M1 第三次空转**
+    #       ⇒ ⇒ 且**变异语义整体翻转**：那一版是「**加**绑定」（候选修法的第一半），
+    #       而现在**绑定已经在生产代码里** ⇒ ⇒ 「再加一次」是同义反复 ⇒ 变异必须改成
+    #       「**拆掉**已落地的绑定」⇒ 让 `outgoing_carrier` 从 `present_expired` 退回
+    #       `absent` ⇒ parity 破 ⇒ 守门红 ⇒ **证明这条键仍在观测「载体有没有绑定」**
+    #       （若有人日后把绑定删了/改坏了 ⇒ 立刻被抓）。
+    #    ⇒ ⇒ **教训**：锚点会随生产代码演进而失效 ⇒ 变异点必须**每次重定基**，
+    #    且**「锚点命中 0 处」与「判据被证伪」是两件事**（必须分开报）。
+    # ⚠️ **期望红键集已于 2026-10-30 重算**（探针改造 ⇒ 语义变了）：
+    #   · `outgoing_carrier`：载体没了 ⇒ RAG = `absent` ≠ Go = `present_expired` ⇒ **红**
+    #   · `failed_fast`：载体没了 ⇒ 拦截器**无从取预算** ⇒ 只剩调用点的安全上界（1500ms）
+    #   ⇒ ⇒ 不会立刻失败 ⇒ RAG = `false` ≠ Go = `true` ⇒ **红**
+    #   · `code`：安全上界到期也是 **DEADLINE_EXCEEDED(4)** ⇒ RAG = 4 = Go ⇒ **不红**
+    #   · `sql_carrier`：SQL 路径的载体**没被动** ⇒ 仍 `present_expired` ⇒ **不红**
+    ('M1 生产代码：拆掉已落地的出向载体绑定（onHalfClose 的 GoStyleRequestDeadline ⇒ Scope.NOOP）',
      RPC_INTERCEPTOR,
-     '                        try (DeadlineState.Scope ignoredScope = DeadlineState.bindToCurrent(deadlineEpochMs)) {',
-     '                        GoStyleRequestDeadline.begin(System.nanoTime()\n'
-     '                                + Math.max(0L, deadlineEpochMs - System.currentTimeMillis()) * 1_000_000L);\n'
-     '                        try (DeadlineState.Scope ignoredScope = DeadlineState.bindToCurrent(deadlineEpochMs)) {',
-     {'outgoing_carrier'}),
+     '? GoStyleRequestDeadline.bindAbsoluteNanos(absoluteDeadlineNanos)',
+     '? GoStyleRequestDeadline.Scope.NOOP',
+     {'failed_fast', 'outgoing_carrier'}),
 
-    ('M2 探针自身：给 RAG 半边的下游调用加 deadline（证明行为键不是恒定值）',
+    # ⚠️ **M2 已于 2026-10-30 重锚**（探针改造 ⇒ 旧锚点的语义整体翻转）：
+    #   旧 M2 = 「给探针的下游调用加一个 100ms deadline」⇒ 证明「行为键不是恒定值」。
+    #   ⇒ ⇒ **探针改造后这条变异已失效**：探针现在**必须**靠 devh 装配拿 deadline，
+    #   ⇒ ⇒ 而调用点自带一个 deadline 会与载体**取 min**（共享层拦截器语义）
+    #   ⇒ ⇒ 载体已过期（剩余 0）⇒ ⇒ min 仍是 0 ⇒ ⇒ **变异不再有任何效果**
+    #   ⇒ ⇒ 「加 deadline」这个方向在 min 语义下**天然无效** ⇒ 必须换成正交的方向。
+    # ⇒ ⇒ 新 M2 = **绕开 devh 装配**（把正式观测换成裸 channel）
+    #   ⇒ ⇒ 载体**在**（同一个 handler 线程）⇒ ⇒ 但没有拦截器 ⇒ ⇒
+    #   ⇒ ⇒ 只有调用点自己的安全上界（1500ms）生效 ⇒ ⇒ 不会立刻失败
+    #   ⇒ ⇒ ⇒ `failed_fast` 变 false ⇒ ⇒ 与 Go 的 true 不等 ⇒ ⇒ 红
+    #   ⇒ ⇒ ⇒ `code` 仍是 4（安全上界到期也是 DEADLINE_EXCEEDED）⇒ ⇒ 与 Go 相等 ⇒ **不红**
+    #   ⇒ ⇒ ⇒ 两个载体键在 handler 线程上测 ⇒ ⇒ 不变 ⇒ ⇒ **不红**
+    #   ⇒ ⇒ ⇒ **唯一变量 = 「有没有 devh 装配」** ⇒ ⇒ 证明行为键真的在观测装配面。
+    ('M2 探针自身：把正式观测换成**裸 channel**（绕开 devh 装配 ⇒ 出向调用拿不到载体预算）',
      PROBE_JAVA,
-     '                ClientCalls.blockingUnaryCall(downstreamChannel, HANG_METHOD, CallOptions.DEFAULT, new byte[0]);',
-     '                ClientCalls.blockingUnaryCall(downstreamChannel, HANG_METHOD,\n'
-     '                        CallOptions.DEFAULT.withDeadlineAfter(100, TimeUnit.MILLISECONDS), new byte[0]);',
-     {'failed_fast', 'code'}),
+     'outcome.set(measureDownstream(downstreamChannel));',
+     'outcome.set(measureDownstream(bareChannel));',
+     {'failed_fast'}),
 ]
 
 

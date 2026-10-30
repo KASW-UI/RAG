@@ -1741,3 +1741,117 @@ sed -n '80,84p' "$GOMOD/github.com/redis/go-redis/v9@v9.20.0/push/processor.go"
 ```
 
 ⚠️ **连带记录（同一轮）**：本轮（2026-10-29 开工轮）全量回归里，本域 `TaskRedisDisconnectFastRejectGateTest` ③ **B 组对照组** **第二次复现**已登记瞬态（`actual 0L / expected ≥ 2000L`）⇒ 隔离复跑 **2/2 绿** ＋ 再跑一轮全量 **BUILD SUCCESS · 730 / 0F / 0E / 0S** ⇒ ⇒ **处置口径不变：只登记、不改断言**（改断言让它绿 ＝ 掩盖现象）⇒ 完整机制与证据 ⇒ `docs/DRIFT/like/rpc.md` §13.4。
+
+---
+
+## 2026-10-30 · G2 收工轮（第三轮）· ✅ 指标抓取载体**本域不补**（Go 侧同样没有 ⇒ **两侧同形** ⇒ 补了才是偏离）
+
+> **归属**：`align/g2-message-like-task` 工作树产出 · **核对日期** 2026-10-30
+> **派工面**：同波给 `message-rpc` / `like-rpc` 补「指标抓取载体」，**`task-rpc` 不补**（派工明示）⇒ 本节记录**「不补」的依据**（不是「没来得及」）
+> ⚠️ **本节不新增任何编号条目** —— 「不补」是**结论**（两侧同形 ⇒ 不是漂移），**不是一条待办** ⇒ ⇒ 派生层不应因本节多出一条条目
+
+### 一句话结论
+
+Go 侧 `service/task/rpc/etc/task.yaml` **没有 `DevServer` 段** ⇒ go-zero 的 `ServiceConf.DevServer`
+（外层带 `json:",optional"` ⇒ **整段缺失即保持零值** ⇒ `Enabled=false`）⇒
+`devserver.StartAgent` **第一行就 return** ⇒ **Go 的 task-rpc 根本没有观测口**
+⇒ ⇒ RAG 侧**同样没有** ⇒ **两侧同形 ⇒ 不是漂移 ⇒ 不补**（补了反而是**新增可观测面** ⇒ 那才是偏离）。
+
+### 真源探针实测（**不靠推理** · 用**真的** go-zero 配置加载器）
+
+> ⚠️ **为什么必须跑探针**：go-zero 的默认值语义**极易读反** ——
+> `ServiceConf.DevServer` 的**外层** tag 是 `json:",optional"`（整段可缺省），
+> 而 `devserver.Config.Enabled` 的**内层** tag 是 `json:",default=true"`（**只有该字段存在时**才生效）
+> ⇒ ⇒ **「缺整段 ⇒ Enabled 仍是 true」是错的**（内层 default 不作用于缺省的整段）
+> ⇒ ⇒ 只读 yaml + 读 struct tag **推不出结论**，必须让**真的** `conf.LoadFromYamlBytes` 加载**真的** yaml。
+
+**探针做法**（复刻真源形状：`service.ServiceConf` 内嵌，与 `zrpc.RpcServerConf` 同款内嵌 ⇒ 用**真的** `zrpc` 内嵌路径同款）：
+
+```go
+type Config struct {
+	service.ServiceConf
+	ListenOn string
+}
+var c Config
+conf.LoadFromYamlBytes(<真源 yaml 字节>, &c)
+// ⇒ c.DevServer.Enabled / .Port / .MetricsPath
+```
+
+**实测输出（2026-10-30 · go-zero `v1.10.2` · Go 1.25.11 · macOS/arm64）**：
+
+```
+…/service/message/rpc/etc/message.yaml ⇒ DevServer.Enabled=true  Host="0.0.0.0" Port=16067 MetricsPath="/metrics" HealthPath="/healthz"
+            ⇒ StartAgent 会【起】独立端口观测口（16067）
+…/service/like/rpc/etc/like.yaml     ⇒ DevServer.Enabled=true  Host="0.0.0.0" Port=9098  MetricsPath="/metrics" HealthPath="/healthz"
+            ⇒ StartAgent 会【起】独立端口观测口（9098）
+…/service/task/rpc/etc/task.yaml     ⇒ DevServer.Enabled=false Host=""         Port=0     MetricsPath=""          HealthPath=""
+            ⇒ StartAgent 会【不起】⇒ Go 侧没有观测口 ⇒ RAG 侧同样没有 = 同形 ⇒ 不是漂移
+```
+
+⇒ **一条探针同时坐实了三件事**：message / like 的缺口**是真的**（Go 侧确实起）· task 的「不补」**是对的**（Go 侧确实不起）。
+
+### 真源消费点（**读的是消费点，不是声明点**）
+
+| 环节 | 出处 | 事实 |
+|---|---|---|
+| 声明点 | `go-zero@v1.10.2/core/service/serviceconf.go:40` | `DevServer DevServerConfig \`json:",optional"\`` ⇒ **整段可缺省** ⇒ 缺省即零值 ⇒ `Enabled=false` |
+| 内层默认值 | `go-zero@v1.10.2/internal/devserver/config.go:5` | `Enabled bool \`json:",default=true"\`` ⇒ **只在该字段存在时**生效（**不作用于缺省的整段**）⇒ ⇒ 本条**不能**按「内层 default=true ⇒ 会起」来推 |
+| 内嵌点 | `go-zero@v1.10.2/zrpc/config.go:39` | `RpcServerConf struct { service.ServiceConf ... }` ⇒ **rpc 侧也内嵌** ⇒ 三个 rpc 域**同款**适用 |
+| **消费点** | `go-zero@v1.10.2/zrpc/server.go:63` | `if err = c.SetUp(); err != nil {` ⇒ `ServiceConf.SetUp()` 被调 |
+| **消费点** | `go-zero@v1.10.2/core/service/serviceconf.go:77` | `devserver.StartAgent(sc.DevServer)` ⇒ 真正决定起不起来的**那一行** |
+| 判定点 | `go-zero@v1.10.2/internal/devserver/server.go:79-81` | `StartAgent` ⇒ `if !c.Enabled { return }` ⇒ **`Enabled=false` ⇒ 直接返回，端口一个都不绑** |
+
+### 为什么不补（**三条理由，逐条可核**）
+
+| # | 理由 | 依据 |
+|---|---|---|
+| 1 | **Go 侧 task-rpc 没有观测口** ⇒ RAG 侧没有 = **两侧同形** | 探针实测（上一节）＋ `internal/devserver/server.go:79-81` 的 `if !c.Enabled { return }` |
+| 2 | **补了就是「新增可观测面」** ⇒ 那才是**偏离**（不是对齐） | follow 域台账已把这条口径写死：`docs/DRIFT/follow/rpc.md:293` —— 「`article/rpc`、`comment/rpc`、`hot/rpc`、`task/rpc` | **无 `DevServer` 段** | — | ❌ 零出口 | ⚠️ **不是漂移**（Go 侧同样抓不到）」；同文件 `:342-344` 明确要求「若统一方案选择『所有 rpc 都给出口』，这 4 个属于**新增可观测面**，**应单独拍板**，不要和『补齐 Go 已有出口』混为一谈」⇒ ⇒ **本波是「补齐 Go 已有出口」** ⇒ **task-rpc 不在内** |
+| 3 | **本域侧「有数据无出口」不是本轮授权范围** | RAG 的 `task-rpc` **确实**在 Micrometer 里注册了 meter（⇒ 有数据、无出口）⇒ 但那是**指标定义面**的议题，**不属于「补载体」** ⇒ ⇒ **不与本波混做**（避免把「新增可观测面」偷偷带进来） |
+
+### 本域侧的边界（**本节不声称什么**）
+
+- ❌ **不声称**「task-rpc 的指标与 Go 一致」—— 本节**只**回答「**要不要补观测载体**」这一个问题。
+- ❌ **不声称** task-rpc 的 Micrometer meter 集合与 Go 侧一致（Go 侧 task-rpc 的 `InitMetrics()` 同样**无调用点**，而 RAG 侧**有** meter ⇒ **RAG 比 Go 多暴露** ⇒ 与 like 域同轴 ⇒ 见 `docs/DRIFT/like/rpc.md` 本轮新增小节的「④ 残余差异登记」第 5 条 ⇒ **同轴先例 = `SD-2026-10-24-11`**）⇒ ⇒ **不在本节另立一条签字项**。
+- ❌ **不声称**「task-rpc 将来不需要观测口」—— 若阶段 2 决定给**所有** rpc 统一出口（那会**新增** Go 侧没有的面）⇒ **须单独拍板**，不在本轮。
+
+## 2026-10-30 · G2 收工轮（第四轮）· ✅ datasource 口令兜底取消（**与 Go 逐字同形** · 合并收口执行者派工）
+
+### ✅ `DRIFT-TASK-RPC-009` ✅ **已修（2026-10-30 · G2 落码）**：datasource 口令带默认值 ⇒ 缺变量时用默认口令连上去 ⇒ **RAG 比 Go 松** ⇒ 已取消兜底（与 Go 逐字同形）
+
+**阶段归属**（`docs/twoStage.md` §10）：**D 类**（差异已消失 ⇒ 无待实现内容）。
+
+**Go 出处**：`service/task/rpc/etc/task.yaml:50`
+⇒ `Dsn: "host=${POSTGRES_ADDR} user=${POSTGRES_USER} password=${POSTGRES_PASSWORD} dbname=${POSTGRES_DB} port=${POSTGRES_PORT} sslmode=disable TimeZone=Asia/Shanghai"`
+⇒ ⇒ 口令是**裸**占位符 `${POSTGRES_PASSWORD}`，**无默认值**。
+
+**Go 侧加载语义**：`go-zero@v1.10.2/core/conf/config.go:63`
+⇒ `return loader([]byte(os.ExpandEnv(string(content))), v)`
+⇒ ⇒ `os.ExpandEnv` **不认** `${VAR:default}` 语法（它把 `POSTGRES_PASSWORD:password`
+**整串**当成变量名去查）⇒ ⇒ 缺变量 ⇒ **空串** ⇒ Go = **空口令** = 连库失败。
+
+**RAG 改前**：`service/task/task-rpc/src/main/resources/application.yml:16`
+= `${POSTGRES_PASSWORD:password}` ⇒ Spring 的 `:default` 语义
+⇒ 缺变量时**用默认口令连上去** ⇒ ⇒ **RAG 比 Go 松** ⇒ **真漂移**（不是「更严的有意偏离」）
+⇒ ⇒ **不需要为「保留兜底」签字**。
+
+**落码**：改成裸 `${POSTGRES_PASSWORD}` ＋ 注释（Go 出处 / 为什么取消 / 残余差异 / 装置侧不受影响）。
+
+**✅ 残余差异 = 无（**两侧同形**）⇒ ⇒ 那条「有意偏离候选」**不成立，本域不登记****：
+Go 侧 `gorm.Open(postgres.Open(dsn))` 是 **eager Ping**
+（`gorm.io/gorm@v1.31.1/gorm.go:236-239`，`DisableAutomaticPing` 默认 false）
+⇒ 失败 ⇒ `log.Fatalf` ⇒ **启动阶段退出**；
+RAG 侧**实测**（2026-10-30 20:07 · 真 fat jar ＋ 不设 `POSTGRES_PASSWORD`）：
+`FATAL: password authentication failed for user "admin"`（SQLState **28P01**）⇒ `Application run failed`
+⇒ ⇒ **两侧都是「启动阶段连库失败 ⇒ 进程退出」** ⇒ ⇒ 派单时写的
+「Go = 启动成功、连库时失败；RAG = 启动即失败」**前提不成立** ⇒ ⇒ **不登记**（登记了就是假差异）
+⇒ ⇒ **已回执合并收口执行者撤销该登记项**。
+
+**⚠️ 本域**不需要** `rag.side: rpc`**（与 message / like 两域不同款，理由逐条）：
+本模块**没有 servlet 容器**（上一节已用真源探针坐实 Go 侧同样没有观测口 ⇒ 两侧同形 ⇒ 不补载体）
+⇒ ⇒ 共享层那些 api 侧 web 组件（`@ConditionalOnWebApplication(SERVLET)`）在**没有 servlet 容器**时
+**不可能**激活 ⇒ ⇒ **无可挂 ⇒ 无需形态开关** ⇒ ⇒ 加 `rag.side` 只会是**无消费方的死配置**。
+
+**⚠️ 装置侧不需要改**：`tools/difftest/run.sh:196` 显式 `export POSTGRES_PASSWORD`
+＋ 根级 `docker-compose.yaml:15` 强制要求该变量 ＋ `manage.sh` 硬校验 `.env`
+⇒ ⇒ 取消兜底**不影响任何对拍装置**（⚠️ 台账里「要连带改装置」那个前提是**错的**，G1 已订正）。

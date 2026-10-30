@@ -30,7 +30,9 @@ ETCD_PORT="${ETCD_PORT:-49319}"       # Sea-etcd    49319→2379
 ETCD_CTL_ENDPOINT="${ETCD_CTL_ENDPOINT:-http://127.0.0.1:2379}"   # etcdctl 在容器里跑 ⇒ 用容器内端口
 NACOS_PORT="${NACOS_PORT:-49848}"     # Sea-nacos   49848→8848
 REDIS_PORT="${REDIS_PORT:-49380}"     # Sea-redis   49380→6379（Go user-rpc 的 BizRedis）
-JAEGER_PORT="${JAEGER_PORT:-49250}"   # Sea-jaeger  49250→4317（OTLP gRPC）
+# ⚠️ **2026-10-30 活体对拍轮订正**：本行原先写死 `49250` ⇒ **实测陈旧**
+#    （本机 `Sea-jaeger` 的宿主映射是 **49317**；其余探针也都是 49317）
+JAEGER_PORT="${JAEGER_PORT:-49317}"   # Sea-jaeger  49317→4317（OTLP gRPC）
 
 # ── 端口段（**本 lane 专用段 18171-18180**）─────────────────────────────────
 # ⚠️ 探针**自动挑空闲端口**（不硬编码撞车）：先 bind 试占用，再 lsof 复查，

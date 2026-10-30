@@ -422,3 +422,22 @@
 | **证据强度** | **L4**（真容器装配 ⇒ 起不来/起得来）＋ **变异测试**（去掉占位符判据 ⇒ **4 条精确转红**，还原后 `git status` 干净） |
 | **实测** | `mvn -o -B -pl service/comment/comment-api -am -DargLine=-Xmx2g test` ⇒ **BUILD SUCCESS**（EXIT=0）· 模块内 **62 tests / 0 failures / 0 errors** · 守卫 **10/10 绿** |
 | **实际异常输出** | `comment-api.user-auth.access-secret 未配置（绑到了未解析的占位符字面量 ${USER_JWT_SECRET}）：请设置环境变量 USER_JWT_SECRET（与签发方 user-api 一致）—— 本模块只验签、不签发，占位符原文是公开可知的「密钥」⇒ 任何人都能伪造 JWT` |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W6
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| MISMATCH-API-01 | D（差异已消失 ⇒ 无待实现内容） | P1 | 否（不阻断阶段一） | Go `service/comment/common/errmsg/errmsg.go:33`（`NewGrpcErr` ⇒ `status.Error(codes.Code(code), msg)` ⇒ 业务码原样进 grpc-status）＋ `service/comment/api/internal/logic/comment/createcommentlogic.go:52`（`st, ok := status.FromError(err)`）＋ `:54`（`errmsg.NewErrCodeMsg(int(st.Code()), st.Message())` ⇒ 6 个 logic 同款 ⇒ 客户端拿到 1012/5003/1013/1008/2001）vs RAG `service/comment/comment-api/src/main/java/com/rag/comment/comment/api/service/CommentApiSupport.java:210`（`int bizCode = CommentGrpcError.bizCodeFromError(err)`）＋ `:212`（msg 取 `status.getDescription()`）＋ `service/comment/comment-common/src/main/java/com/rag/comment/comment/common/errmsg/CommentGrpcError.java:139`（`grpcError` 把业务码写进自定义 trailer `rag-comment-biz-code`）＋ `:225`（`bizCodeFromError` 回读 trailer ⇒ 返回标准码原值）⇒ **差异已消失**：2026-10-24 已修（此前 api 侧只读 `status.getCode().value()` ⇒ 客户端只拿到 2/3）⇒ 守门 `CommentApiGrpcErrorWireTest` 5 例（真 in-process gRPC server + 真 channel，非 mock）＋ 变异实测回退后 2/5 精确变红 ⇒ 不是假绿 | 2026-10-30 |

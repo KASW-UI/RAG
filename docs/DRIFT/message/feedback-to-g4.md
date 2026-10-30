@@ -93,3 +93,28 @@
 | `message-api` 组件判定 | ✅ **R4 / E4**（不受这 4 条影响 —— 它们是**响应头/状态行**层，**不是**本域的行为语义） |
 | `-010`/`-011`/`-012`/`-013` 的**归属** | 登记在 [`api.md`](api.md)（本域台账）⇒ 状态 = **OPEN 但本波不做**（用户 2026-10-24 拍板） |
 | ⇒ **结论** | **本单不产生 G2 的任何未闭合项**；G2 阶段一组件判定不受影响 |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W10
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| FB-G2-04 | D（经分析确认不可修 · Tomcat 序列化行为 ⇒ 无待实现内容） | P2 | 否 | Go `go-zero@v1.10.2/rest/httpx/responses.go:155`（`http.Error(w, err.Error(), http.StatusBadRequest)` ⇒ 响应头写出侧）＋ Go 标准库 `net/http/server.go:2351`（`h.Set("Content-Type", "text/plain; charset=utf-8")` ⇒ **分号后有空格**）vs RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:718`（`resp.setContentType("text/plain; charset=utf-8")`）＋ `service/message/message-api/src/test/java/com/rag/message/message/api/MessageApiTimeoutRealTomcatTest.java:168`（真 Tomcat 取 `content-type` 头的断言入口）⇒ ⇒ **差异仍成立**（本反馈单 ① 现象描述的差异两侧都还在：Go `text/plain; charset=utf-8` ／ RAG 实发 `text/plain;charset=utf-8`）⇒ **经分析确认不可修**：`javap` 实测 `tomcat-embed-core` **11.0.24** ⇒ `org.apache.catalina.connector.Response.setContentType(String)` 把 Content-Type **解析成 MediaType 再序列化**（`MEDIA_TYPE_CACHE.parse` ⇒ media type 本体交 `setContentTypeNoCharset` ／ charset 走 `CharsetHolder` ⇒ **空格必丢**）；`setHeader` ／ `addHeader` 对 `"Content-Type"` **转手调 `setContentType`** ⇒ ⇒ **三条 Servlet 写法全部被规范化** ⇒ 应用层无路可走 ⇒ 建议修法 = **无**（性质 = 框架限制）⇒ ⇒ **不转派 G4**（转派也是空转）⇒ 影响面 = 全部 api 的 `text/plain` 响应 ⇒ ⇒ 归 D · **不阻断阶段一** | 2026-10-30 |
+
+### lane W6
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| FB-G2-03 | D（经分析确认不可修 · 容器层框架限制 ⇒ 无待实现内容） | P2 | 否（不阻断阶段一） | Go `go-zero@v1.10.2/rest/httpx/responses.go:183`（`w.WriteHeader(code)` ⇒ 状态行带 `StatusText` reason phrase）vs RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:943`（`public void setStatus(int sc)` ⇒ 只写码）＋ `:956`（`resp.setStatus(sc)` ⇒ 无 reason 可写）⇒ ⇒ **差异仍成立**（本反馈单 ① 现象描述的状态行差异两侧都还在）；本反馈单自身的定性成立且已逐条复核：**落点在容器层而非应用层** —— Tomcat 的 `Response` 在 11.x 已无 `setStatus(int, String)`（实测 `javap` 三个版本：9.0.63 有、10.1.52 与 11.0.24 无；本项目 Boot 4.0.8 ⇒ `tomcat.version=11.0.24`）⇒ 应用层无法补 reason phrase ⇒ 共享层 `service/common` 也够不着 ⇒ 性质 = 框架限制（容器层）⇒ **经分析确认不可修** ⇒ 已登记 `SD-2026-10-25-CAND-14`（🏷 待签字候选）⇒ 影响面 = 全部 10 个 api 的展示面（不是功能面）⇒ 归 D、不阻断阶段一 | 2026-10-30 |

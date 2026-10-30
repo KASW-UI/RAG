@@ -1,5 +1,6 @@
 package com.rag.common.http;
 
+import com.rag.common.web.ConditionalOnApiSide;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.converter.HttpMessageConverter;
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
@@ -24,8 +25,12 @@ import java.util.List;
  *
  * <p>它是本转换器未覆盖路径的兜底（本转换器只覆写读侧、写侧完全委托给父类）。
  * 删掉它会让「响应序列化」少一层保护。
+ * <p>⚠️ <b>2026-10-30 · G4 lane：本类属 api 侧 rest 中间件 ⇒ 已挂 {@link com.rag.common.web.ConditionalOnApiSide}</b>
+ * ⇒ ⇒ 此前「rpc 域不注册本类」的依据是<b>域侧不扫 {@code com.rag.common} 这道约定</b>（不是本类的条件）
+ * ⇒ ⇒ 现由共享层自己兜住 ⇒ ⇒ Go 出处与语义等价论证见该注解。
  */
 @Configuration(proxyBeanMethods = false)
+@ConditionalOnApiSide
 public class GoStyleJsonBodyConverterConfig implements WebMvcConfigurer {
 
     private final JsonMapper jsonMapper;

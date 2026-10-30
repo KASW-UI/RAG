@@ -10,14 +10,18 @@
 
    ① **两侧都真的跑过** ⇒ 各产出 1 条 `PROBE|` 行
       （PIT-GLOBAL「退出码 0 ≠ 脚本真跑过」⇒ 必须自证）
-   ② **parity 键**（sql_carrier）两侧**相等**
-      ⇒ 它证明「SQL 路径两侧同款」⇒ 漂移**不在** SQL 上
-   ③ **drift 键**（failed_fast / code / outgoing_carrier）是**已登记的漂移形态**
-      ⇒ 漂移还在 ⇒ 绿；形态变了（被修好 / 前提变了）⇒ **红**
+   ② **parity 键**（failed_fast · code · outgoing_carrier · sql_carrier）两侧**相等**
+      ⇒ 它证明「SQL 路径两侧同款」＋「**出向载体在位**」＋「**出向调用继承请求 deadline**」
+      ⇒ ⇒ 漂移**不在**这四键上
 
-【为什么要有第 ③ 层】
-  这个探针**不是**等值守门（两侧现在**确实**不一致）⇒ 不能用「相等」当判据
-  ⇒ 只能钉「漂移必须长成这个样子」⇒ **谁把漂移修好了，门禁就红 ⇒ 逼着人更新台账**。
+【为什么现在是等值守门（2026-10-30 探针改造后）】
+  这个探针原先是**漂移形态守门**：`failed_fast` / `code` 被登记成「**已知的漂移形态**」
+  ⇒ 断言「Go=true / RAG=false」「Go=4 / RAG=0」。
+  ⇒ ⇒ **那两格漂移的根因是探针自己的构造**（RAG 半边手搓裸 channel ⇒ 不走 devh 装配
+  ⇒ ⇒ 全局客户端拦截器接不上 ⇒ ⇒ 出向调用拿不到请求 deadline）
+  ⇒ ⇒ **不是域侧真漂移** ⇒ ⇒ 探针改走 **devh 自己的 `GrpcChannelFactory`**（生产装配路径）后
+  ⇒ ⇒ 实测两侧**逐键相等** ⇒ ⇒ 两个键**移出 drift 名单** ⇒ ⇒ 全部落进「必须相等」的分支。
+  ⇒ ⇒ **判据更强**（不是把期望值改成相等来蒙混 ⇒ 是**移出名单**）。
 
 【与既有门禁的关系】
   · `check-deadline-verdict.py`   ⇒ 守 E48（探针 harness 自身）
@@ -39,13 +43,15 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 PROBE = 'tools/semantic-probe/deadline-downstream/run-deadline-downstream-parity.sh'
 
 # ── 已登记的漂移形态（与探针脚本里的 EXPECTED_DRIFT 同源）──────────────────
-EXPECTED_DRIFT = {
-    'failed_fast': ('true', 'false'),
-    'code': ('4', '0'),
-    'outgoing_carrier': ('present_expired', 'absent'),
-}
+# ⚠️ **2026-10-30（探针改造后）= 空**：四个键**全部**是 parity 键（两侧必须相等）。
+#    沿革：① `outgoing_carrier` 由 drift 键升为 parity 键（G4 波次把出向载体绑进
+#    `RpcInterceptor.onHalfClose`）② `failed_fast` / `code` 也由 drift 键升为 parity 键
+#    —— 那两格漂移的**根因是探针自己的构造**（手搓裸 channel ⇒ 不走 devh 装配），
+#    探针改走 devh 的生产装配路径后实测两侧逐键相等。
+#    ⚠️ **不要**把这里改成「登记一条两侧相等的 drift」来蒙混 ⇒ 那样仍被当 drift 键判。
+EXPECTED_DRIFT = {}
 # ── 必须两侧相等的键 ─────────────────────────────────────────────────────
-PARITY_KEYS = ('sql_carrier',)
+PARITY_KEYS = ('sql_carrier', 'outgoing_carrier', 'failed_fast', 'code')
 
 
 def parse_side(out, label):

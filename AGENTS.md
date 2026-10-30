@@ -23,10 +23,11 @@
 
 1. **已签字的有意偏离**（另 **12 条未签字候选**）—— 是决策不是缺陷，但两侧确实不一致 ⇒ [`docs/Intentional_Deviations/`](docs/Intentional_Deviations/_INDEX.md)
    ⚠️ **共性**：多数是「**RAG 做了更严/更安全的那一侧**」或「proto `package` 归一（表达层）」⇒ 对拍看到它们变红，**先确认是不是签字项，不要当新回归去「修」**。
-2. **DDL 差异**（2026-10-25 双侧活体对拍 · **9 域**）：**类型/长度 0 差异**。**仍未修**：`users_user.status` 可空性 · `DEFAULT CURRENT_TIMESTAMP` 残留 **22 处**（**22 处可复算**）· users 域缺 3 条非唯一索引（**性能非行为**）。`hot` = **N/A** ⇒ 不许写成「已对齐」。⇒ [`ddl-type-divergences.md`](docs/DRIFT/_cross/ddl-type-divergences.md)
+2. **DDL 差异**（2026-10-25 双侧活体对拍 · **9 域**）：**类型/长度 0 差异**。**仍未修**：`users_user.status` 可空性 · `DEFAULT CURRENT_TIMESTAMP` 残留 **22 处**（可复算）· users 域缺 3 条非唯一索引（**性能非行为**）。`hot` = **N/A** ⇒ 不许写成「已对齐」。⇒ [`ddl-type-divergences.md`](docs/DRIFT/_cross/ddl-type-divergences.md)
 3. **跨组件不变量仍无法单侧闭环**（§3.5 表）⇒ **收口域 = `global`**。
    ⇒ **每个模块接手的第一件事仍是「先让它真的启动一次」**（2026-10-23 修复轮**之前**实测 `hot-rpc`/`like-rpc` **根本起不来，而测试全绿**）⇒ **「跑绿」不是「对」**。
 > 历轮修复记录 ⇒ [`docs/DRIFT/_cross/fix-round-2026-10-23.md`](docs/DRIFT/_cross/fix-round-2026-10-23.md) · 教训 ⇒ [`fix-round-lessons.md`](docs/Pitfalls/_cross/fix-round-lessons.md)
+4. 🆕 **阶段一施工单 = 派生层**（2026-10-30 · 见 §7.2 表「stage1-derivation」行）—— 三目录台账 → 施工单的**唯一索引**；⚠️ **只读台账、不读产品代码** ⇒ 是台账的**投影**而非代码的事实（§3.3 仍适用）⇒ 派工时「已闭合」仍须按 §3.3 确认。
 
 ## 一、项目身份与双轨策略
 
@@ -102,33 +103,30 @@ Go 侧默认值**藏在 struct tag 里**、Java 侧行为**藏在框架里** ⇒
 **不得凭注解名称断定机制已启用**（`@Transactional` AOP 代理 / `@ResponseBodyAdvice` / `mybatis-plus` typeHandler 全是运行期动态装配 ⇒ 出错**不报错**）。
 **凡引入新的框架机制，必须配一条能真正触发该机制的测试**；纯 Mockito mock 数据层的单测**不算**（不执行 SQL、不装配 Spring 上下文 ⇒ 天然测不到本节三类问题）。
 
-**规则**（四条，各有实证）：① 「一个注入/开关有没有真生效」**不能看启动日志**（echo 照打、jar 照起、零告警，效果却是零）⇒ 唯一可靠判据是**运行时证据**（本例：PG 侧 `57014 query_canceled`）；② **断言「Bean 存在」≠ 断言「机制生效」**（H2 假绿）；③ **「脚本批量改 N 处」必须配覆盖全部 N 处的守恒断言**（非逐点行为测试）；④ **「代码里写了」与「客户端收到」之间隔着一次 commit**（E-1：text/plain 400 丢 Content-Type）⇒ **绿测试可能是「错误答案的守卫」**（message-api 的 `,string` 漂移）。
+**规则**（四条，各有实证 ⇒ 案例与出处见 `docs/Pitfalls/_cross/testing-pitfalls.md`）：① 「一个注入/开关有没有真生效」**不能看启动日志** ⇒ 唯一可靠判据是**运行时证据**；② **断言「Bean 存在」≠ 断言「机制生效」**（H2 假绿）；③ **「脚本批量改 N 处」必须配覆盖全部 N 处的守恒断言**；④ **「代码里写了」与「客户端收到」之间隔着一次 commit** ⇒ **绿测试可能是「错误答案的守卫」**。
 
 **强制三条**：① 每个 Go 事实必须带 `文件:行号`（不许只写结论）；② 凡写「与 Go 一致」必须有**两侧同时跑的探针**（非只跑 RAG）——Go 侧直调真源解析包、RAG 侧用项目**真实的** mapper；③ 修漂移**先改/删错误断言，再改实现**（否则会先撞「测试红了」而误判自己改错）。
 （案例与完整经过 ⇒ `docs/Pitfalls/_cross/testing-pitfalls.md`）
 
 ⚠️ **「只跑 RAG 的探针」同样不算数**（只证「代码写成了这样」，证不了「Go 是这样」）⇒ [`message/rpc.md`](docs/DRIFT/message/rpc.md) 的**变异测试**是另一半：能证明测试**不是假绿**，但**不能证明期望值是对的** ⇒ 两者缺一不可。
 
-**规则（2026-10-22 晚补 · `hot-rpc` 的 Boot 4 模块化迁移推出）**：**「注解存在」≠「机制生效」** ⇒ **强制**：① 凡用 `@KafkaListener` 必须有**装配层**测试断言 listener **真进了容器的 registry**（非「方法存在」）且覆盖「缺 `spring-boot-kafka` 会怎样」；② 引入任何 `spring-*-starter` 前先确认该能力在 **Boot 4 下仍在 `spring-boot-autoconfigure` 里**，已被拆走的显式补对应模块（版本由 BOM 管，不写 `<version>`）；③ **不得**把「编译通过 / 上下文能启动」当作「注解已生效」的证据。
-⚠️ **Boot 4 拆模块缺口 = 硬启动失败，不是静默失效**（2026-10-23 实测：`like-rpc`/`hot-rpc` 缺 `spring-boot-kafka` ⇒ `NoSuchBeanDefinitionException: KafkaTemplate` ⇒ 起不来）⇒ **判定时先实测启动，再决定风险等级** ⇒ [`like/rpc.md`](docs/DRIFT/like/rpc.md) · [`hot/rpc.md`](docs/DRIFT/hot/rpc.md)
+**规则（2026-10-22 晚补）**：**「注解存在」≠「机制生效」** ⇒ **强制**：① 凡用 `@KafkaListener` 必须有**装配层**测试断言 listener **真进了容器的 registry**（非「方法存在」）；② 引入任何 `spring-*-starter` 前先确认该能力在 **Boot 4 下仍在 `spring-boot-autoconfigure` 里**，已被拆走的显式补对应模块（版本由 BOM 管，不写 `<version>`）；③ **不得**把「编译通过 / 上下文能启动」当作「注解已生效」的证据。
+⚠️ **Boot 4 拆模块缺口 = 硬启动失败，不是静默失效** ⇒ **判定时先实测启动，再决定风险等级** ⇒ [`like/rpc.md`](docs/DRIFT/like/rpc.md) · [`hot/rpc.md`](docs/DRIFT/hot/rpc.md)
 
 ### 3.4 proto 是**复制粘贴**，不是翻译（2026-10-23 实测）
 
 RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格限定在 option 块与空白层面**（删 `option go_package` / 加 `java_package` + `java_multiple_files=true` / 缩进与首尾空行统一 —— 10/10 表达层，Go 专用项 Java 不消费）；`user.proto` 改名 `users.proto` + 加注释（仅 user）。**message 名 / 字段名 / 字段号 / 类型 / 枚举值 10/10 逐条一致 = 行为层**。
 ⚠️ **12:25 补齐的 4 个 `*-proto` 此前只有 `pom.xml`**（空 jar）⇒ 已**接上 protoc 插件段**（§3.3）⇒ 实测 **88 java + 4 `*Grpc`** ⇒ [`proto-verification.md`](docs/DRIFT/_cross/proto-verification.md)
 ⇒ ⚠️ **10 个 proto 中 8 个无回归网**（复制忠实 ≠ 有网可证）。
-⚠️ **效力边界（三条，越界即失效）**：① **复制忠实 ≠ 消费方式已验**（只证 `.proto` **文件本身**一致，不证 RAG 侧消费生成代码的方式与 Go 一致：`optional` presence / 字段号硬编码 / Jackson 差异）；② **不外推到 api / rpc 组件**（proto 一致 **推不出** wire 层一致；§0 组件状态一律以各域台账为准）；③ **不覆盖范围外的 3 个 proto**（`knowledge`/`points`/`security`）——**不是待办**。
+⚠️ **效力边界（三条，越界即失效）**：① **复制忠实 ≠ 消费方式已验**（只证 `.proto` **文件本身**一致，不证 RAG 侧消费方式：`optional` presence / 字段号硬编码 / Jackson 差异）；② **不外推到 api / rpc 组件**（proto 一致 **推不出** wire 层一致）；③ **不覆盖范围外的 3 个 proto**（`knowledge`/`points`/`security`）——**不是待办**。
 
 ### 3.5 组件级审查范围（2026-10-23 用户定 · 12:25 扩到 38 个组件）
 
-**审查粒度 = 组件级**，不是微服务级、也不是 api/rpc 二分。**common / proto 不是「可选项」**（同域对照的默认公理：
-共享 DTO、错误码契约、wire 契约）—— 少审它们 = **拿一面没人校过的镜子照自己**，与 §3.1 禁止的
-「拿现有 RAG 代码当对照基准」同源。
+**审查粒度 = 组件级**，不是微服务级、也不是 api/rpc 二分。**common / proto 不是「可选项」**（共享 DTO / 错误码契约 / wire 契约 —— 少审它们 = **拿一面没人校过的镜子照自己**）。
 
-**范围内组件清单（权威）** —— 10 微服务 / **38 个组件**：`article`/`hot`/`like`/`message`/`comment`/`favorite`/`follow` 各 4 · `users` 7（user+admin 两套）· `task` 3（**无 `-common`**，Go 侧同样没有）。
+**范围内组件清单（权威）** —— 10 微服务 / **38 个组件**：`article`/`hot`/`like`/`message`/`comment`/`favorite`/`follow` 各 4 · `users` 7 · `task` 3（**无 `-common`**）。
 
-⚠️ **落地 ≠ 已对照** ⇒ 逐组件状态见 [`docs/DRIFT/_INDEX.md` 覆盖矩阵](docs/DRIFT/_INDEX.md)。
-**为什么不能退到微服务粒度**：域粒度下 `hot` 与 `article` 都会被打成 ✅ —— **那是假绿灯**。
+⚠️ **落地 ≠ 已对照** ⇒ 逐组件状态见 [`docs/DRIFT/_INDEX.md` 覆盖矩阵](docs/DRIFT/_INDEX.md)。**不能退到微服务粒度**：域粒度下 `hot` 与 `article` 都会被打成 ✅ —— **那是假绿灯**。
 
 **跨组件不变量（不属于任何单个组件）** —— **收口域 = `global`**（2026-10-25 用户定）：**`global` 不是第 11 个微服务域，是「收口域」** —— 修法落在共享层、或影响多域的搁置漂移全部归它，按**议题**分档（`common-tails` · `cross-domain`（3+ 域不变量）· `cycle-deps`（同一次提交走完））⇒ **台账** [`docs/DRIFT/global/`](docs/DRIFT/global/_README.md)。⚠️ **边界**：`common` 域问「common 自己对不对」，`global` 问「**别人**因 common 而对不对」；**共享层修法 ⇒ G4 常设执行者 + 写权唯一**（§5.3e·§5.3f）。
 
@@ -140,7 +138,7 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 | 建表责任交叉 · client 契约 | `user-rpc`↔`admin-rpc` · api↔rpc proto | ✅ **已审完**（第九轮：交叉但无冲突 · client 契约 10 域零漂移） |
 | 事实投递链路 | `like` 的 api ↔ rpc ↔ 第三个仓库 | ✅ **已落地**（第二十轮 A5′ · 守门 22 条） |
 | `DRIFT-HOTAPI-030`（Tomcat 数「总参数个数」vs Go 数「非空值个数」） | hot + **全部 10 个 api** | 🟡 **主轴闭合 · 残留 1 段**（共享层修法 · favorite 零触碰） |
-| 🔴 **rpc 真进程可启动性** | **7 个 rpc 组件** | ✅ **已修** —— `discovery://<name>` 两斜杠 ⇒ fat jar 起不来 ⇒ 已改三斜杠 · `hot-rpc`/`task-rpc` 补 `Main-Class` ⇒ 🟢 **两守门缺口同批闭合**（**20/20 全绿**） |
+| 🔴 **rpc 真进程可启动性** | **7 个 rpc 组件** | ✅ **已修**（`discovery://` 改三斜杠 · `hot-rpc`/`task-rpc` 补 `Main-Class`）⇒ 🟢 **两守门缺口同批闭合**（**20/20 全绿**） |
 | DDL 双侧活体逐列对照 | 其余 5 域（favorite 只建库） | ✅ **已做**（L3 ⇒ **9 域**）⇒ 逐项见 §0 第 2 条 |
 
 **排序约束**：**rpc 必须先于 api**（Go 侧边界是 api→rpc；rpc 没验对就先验 api ⇒ 产出「RAG api 行为正确」的假结论 —— `message-rpc` 曾有 21 条全绿测试却一次没起过）。
@@ -171,24 +169,14 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 3b. **四档台账：每域必读 + 必写**（2026-10-23 用户定）—— 开工前**必读** `docs/DRIFT/` + `docs/Intentional_Deviations/` +
    `docs/PhaseGoal/` + `docs/Pitfalls/` 的**本域子目录 + `_cross/`**；产出**必写回**同名的**本域子目录**。⚠️ **只写自己域，三个 `_INDEX.md` 合并后统一更新**。⇒ 细则 ⇒ [`docs/Worktree.md`](docs/Worktree.md) §二·五·**三·1d**
 3b-0. 🔴 **开工前置四步（四棵 lane 强制 · 2026-10-29 用户定）** —— ① **先定自己的任务** ② **读完上列四档** ③ **回执「读完了」** ④ **经用户批准才开工**（未批准 ⇒ 除 ③ 回执外不得写代码/台账；**调度员不得代批准**）。⇒ 细则 ⇒ [`docs/Worktree.md`](docs/Worktree.md) §二·五
-3c. **`global` 收口域（2026-10-25 用户定）** —— 跨微服务 + 共享层影响的搁置漂移**全部归它**
-   （§3.5）。⇒ **共享层只有 `align/g4-service-common` 能写**；
-   修法同时涉及共享层与别的域代码时**必须同一次提交**（否则留下半截）。
-   ⇒ **lane 并行须按模块零重叠**（同模块两个 lane 会互踩 `target/`）⇒ 协议 ⇒ [`_PROTOCOL.md`](docs/DRIFT/global/lanes/_PROTOCOL.md)
-3d. 🆕 **波次工作树 G1~G4（2026-10-27 用户定）** —— **4 棵**，均从 `do-my-own-gh` 切：**G1** `align/g1-users-follow`（`users` **不含 `users-common`** + `follow`）· **G2** `align/g2-message-like-task` · **G3** `align/g3-article-comment-favorite-hot` · **G4** `align/g4-service-common`（**共享层**）。
-   ⇒ **域波顺序 G1→G2→G3**（契约 DAG 定序 = **合并收口序**；**G1/G2/G3 三棵并行跑**，非串行）；**G4 不在域波顺序里**（§5.3e）。**旧 10 条 `<域>-common` lane 工作树已撤**（方法与台账仍有效，改在 G1~G3 里做）。
-   ⇒ **写权**：🔴 **`service/common/**` + `service/users/users-common/**` 只有 G4 能写**，G1~G3 **只读**；**域侧能自修的域侧修**，**共享层缺陷一律转派 G4**（反馈单 7 项，§5.3e）。
-   ⇒ **台账**：各域一份 `docs/DRIFT/<域>/vs-common.md`（**只写自己域** ⇒ 跨树零冲突）；共享面合并后统一更新。**交付物** = 9 条机制面轴（A1~A9）本域侧逐轴结论（✅/🔴/🟡 + **证据强度** + **核对日期**）+ **两侧同时跑**的探针（§3.3）。**机器守门** = `check-wave-lane-ownership.py`。
-   ⇒ 总纲 ⇒ [`domain-common-lanes.md`](docs/DRIFT/_cross/domain-common-lanes.md) · 波次表 ⇒ [`cross-domain-coupling.md`](docs/DRIFT/_cross/cross-domain-coupling.md)
-3e. 🆕 **G4 = 共享层常设执行者（2026-10-27 用户定）** —— `service/common` + `users-common` ⇒ **写权唯一**（`align/g4-service-common`）：**随时接收** G1/G2/G3 反馈单（7 项：现象 / Go 侧 `文件:行号` / RAG 侧现状 / 证据强度 / 建议修法 / 影响面 / 是否阻塞本波）⇒ **执行落码** ⇒ **全量回归** ⇒ **回执**；**先于 G1 就位 standby**、**落码窗口常开**（G1~G3 只读、只登记）。
-   ⇒ G4 **并行、不阻塞** ⇒ ✅ **撤销「基线不可变 / 结论作废」**（**收口回归在波末跑** ⇒ 窗口 = 收口回归后～合并前 ⇒ 变了就**重跑一次收口回归**）；**例外升级**：某波「不改共享层就过不了」⇒ **就地升级为全量回归波**，等 **G4 落码后**再重跑。
-   ⇒ **G4 可开子会话并行加速，上限 10 个**（共享层落码按文件切 ⇒ 零重叠；细则 ⇒ `docs/Worktree.md` §三·1d）。
-   ⇒ 规则表 **C1~C7** · 依赖 DAG · 逐类归属 ⇒ [`cross-domain-coupling.md`](docs/DRIFT/_cross/cross-domain-coupling.md)（守门 `check-wave-coupling.py` ＋ `check-wave-role-model.py`）
-3f. ⚠️ **共享判据 = 依赖度数，不是目录位置**（2026-10-27 实测）：`service/common`（20 模块）与 `service/users/users-common`（**10** 模块 / **6 外域 api**）**都是共享层**（⇒ 写权归 G4）；其余 7 个 `<域>-common` 只被**本域**引用（pom / import / 扫描面 **三层实测**）⇒ **真私有**（⇒ 归各自域）⇒ `users-common` 是**混合体** ⇒ **按类判定**（8 个跨域类归 G4 / 3 个 users 专用类留 users 域），**不按模块一刀切**、**不搬目录**。
-3g. 🆕 **四棵工作树的当前目标（2026-10-28 用户定）** —— **两份标准文件 = 唯一目标**：
-   **阶段 1 准入线** ⇒ [`docs/PhasedGoal.md`](docs/PhasedGoal.md)（P0 九条 / P1 机制 / P2 不阻塞 —— 与 `twoStage.md` §2.1 **逐字相同**）；
-   **两阶段全流程 + 阶段归属 A/B/C/D + §9 故障矩阵** ⇒ [`docs/twoStage.md`](docs/twoStage.md)（**权威全文**）。
-   ⇒ **lane 只做阶段 1、只做本域**：必读 = PhasedGoal.md 全文 + **twoStage.md 的** §5.3 / §5.4 / §10；**不碰** **twoStage.md 的** §1.3 / §2.2 / §6 / §7（阶段 2 ⇒ 收口执行者）；**§4（阶段 0 事实基线）必读**。
+3c. **`global` 收口域（2026-10-25 用户定）** —— 跨微服务 + 共享层影响的搁置漂移**全部归它**（§3.5）⇒ **共享层只有 `align/g4-service-common` 能写**；修法同时涉及共享层与别的域代码时**必须同一次提交**（否则留下半截）；**lane 并行须按模块零重叠**（同模块两个 lane 会互踩 `target/`）⇒ 细则 ⇒ [`docs/Worktree.md`](docs/Worktree.md) §三·1b·1c + [`_PROTOCOL.md`](docs/DRIFT/global/lanes/_PROTOCOL.md)
+3d. 🆕 **波次工作树 G1~G4（2026-10-27 用户定）** —— **4 棵**，均从 `do-my-own-gh` 切：**G1** `align/g1-users-follow`（`users` **不含 `users-common`** + `follow`）· **G2** `align/g2-message-like-task` · **G3** `align/g3-article-comment-favorite-hot` · **G4** `align/g4-service-common`（**共享层**）⇒ **域波顺序 G1→G2→G3**（契约 DAG 定序 = **合并收口序**；**G1/G2/G3 三棵并行跑**）；**G4 不在域波顺序里**（§5.3e）；**旧 10 条 `<域>-common` lane 工作树已撤**（方法与台账仍有效，改在 G1~G3 里做）。
+   ⇒ **写权**：🔴 **`service/common/**` + `service/users/users-common/**` 只有 G4 能写**，G1~G3 **只读**；**域侧能自修的域侧修**，**共享层缺陷一律转派 G4**。
+   ⇒ **台账**：各域一份 `docs/DRIFT/<域>/vs-common.md`（**只写自己域** ⇒ 跨树零冲突）；**交付物** = 9 条机制面轴（A1~A9）本域侧逐轴结论 + **两侧同时跑**的探针（§3.3）；**机器守门** = `check-wave-lane-ownership.py` ⇒ 细则 ⇒ [`docs/Worktree.md`](docs/Worktree.md) §三·1d · 总纲 ⇒ [`domain-common-lanes.md`](docs/DRIFT/_cross/domain-common-lanes.md) · 波次表 ⇒ [`cross-domain-coupling.md`](docs/DRIFT/_cross/cross-domain-coupling.md)
+3e. 🆕 **G4 = 共享层常设执行者（2026-10-27 用户定）** —— `service/common` + `users-common` ⇒ **写权唯一**：**随时接收** G1/G2/G3 反馈单（7 项：现象 / Go 侧 `文件:行号` / RAG 侧现状 / 证据强度 / 建议修法 / 影响面 / 是否阻塞本波）⇒ **执行落码** ⇒ **全量回归** ⇒ **回执**；**先于 G1 就位 standby**、**落码窗口常开**（G1~G3 只读、只登记）⇒ G4 **并行、不阻塞** ⇒ ✅ **撤销「基线不可变 / 结论作废」**；**例外升级**：某波「不改共享层就过不了」⇒ **就地升级为全量回归波**，等 **G4 落码后**再重跑；**G4 可开子会话并行加速，上限 10 个** ⇒ 细则 ⇒ [`docs/Worktree.md`](docs/Worktree.md) §三·1d · 规则表 **C1~C7** ⇒ [`cross-domain-coupling.md`](docs/DRIFT/_cross/cross-domain-coupling.md)
+3f. ⚠️ **共享判据 = 依赖度数，不是目录位置**（2026-10-27 实测）：`service/common` 与 `service/users/users-common` **都是共享层**（⇒ 写权归 G4）；其余 7 个 `<域>-common` 只被**本域**引用（pom / import / 扫描面 **三层实测**）⇒ **真私有**（⇒ 归各自域）⇒ `users-common` 是**混合体** ⇒ **按类判定**（8 个跨域类归 G4 / 3 个 users 专用类留 users 域），**不按模块一刀切**、**不搬目录**。
+3g. 🆕 **四棵工作树的当前目标（2026-10-28 用户定）** —— **两份标准文件 = 唯一目标**：**阶段 1 准入线** ⇒ [`docs/PhasedGoal.md`](docs/PhasedGoal.md)（P0 九条 / P1 机制 / P2 不阻塞）；**两阶段全流程 + 阶段归属 A/B/C/D + §9 故障矩阵** ⇒ [`docs/twoStage.md`](docs/twoStage.md)（**权威全文**）⇒ **lane 只做阶段 1、只做本域**：必读 = PhasedGoal.md 全文 + twoStage.md 的 §5.3 / §5.4 / §10；**不碰** §1.3 / §2.2 / §6 / §7（阶段 2 ⇒ 收口执行者）；**§4（阶段 0 事实基线）必读**。
+   ⇒ **派工清单 = 派生层施工单**（§0 第 4 条）：[`stage1-derivation.md`](docs/DRIFT/_cross/stage1-derivation.md) **§四 = 可开工清单**（§4.0 = 波次分布 · §4.1 = 阶段一范围内）⇒ lane 按 **`wave`** 列（`G1`~`G4` · 派工面，权威表 = `docs/Worktree.md` §二）取**自己那棵** + **自己域**的条目。
 4. **作用范围**：仅限 RAG 仓库（Go 真源已冻结只读，见 §一）。
 5. **Go 是真理之源**（2026-10-20 第三次切换，全子模块适用）：proto 字段号、错误码、JWT claims、表结构、HTTP path、
    Kafka topic 等语义细节一律以 Go 对应子模块为准；差异**只允许出现在表达层**，出现行为差异时默认判 **RAG 错**。
@@ -212,9 +200,9 @@ RAG 侧 10 个 `*.proto` **全部从 Go 侧复制**，非翻译。改动**严格
 **唯一根因**：`flyway_schema_history` 是 **schema 级**账本，一个 schema 只能有一本账 ⇒ 该根因在 `message-rpc`/`like-rpc`/`article-rpc` 原封不动成立（同库 `first_db`、同 schema `public`）⇒ 任一方先启动，另一方的表永远建不出来。
 **定案**：每模块独立账本表名 `spring.flyway.table: flyway_schema_history_<模块>` —— 不动迁移文件名，各模块从 V1 各自重来也互不干扰，**直接消除病根**（否决「排全局唯一号段」：不解决根因）。
 
-> **实施状态（2026-10-25 实测）**：**7 个模块各有独立账本表**（`message`/`like`/`comment`/`favorite`/`follow`/`task` + `article` 独占默认表名），**未改任何迁移文件名**；`check-flyway-ledger.py` ⇒ **`EXIT=0`**；✅ **「多模块同库共存」已闭环**（真 PG 三进程并发实测）⇒ 详见 §3.5 表「共享 Flyway 账本」行 + [`L4-flyway.md`](docs/DRIFT/global/lanes/L4-flyway.md) §8.4。
-> ⚠️ **残留风险**：新增模块忘加 `table` ⇒ 撞默认表名的 article；忘加 `baseline-version: 0` ⇒ 「起得来、首次查库才炸」。
-> ⚠️ **文档缺陷**：多处声称由 `FlywayLedgerIsolationTest` 负责，**该测试类全仓不存在** ⇒ 实际由 `check-flyway-concurrent.sh` + 各域 `*FlywaySharedSchemaGateTest` 承担 ⇒ `docs/Pitfalls/_cross/flyway-ledger-collision.md`
+> **实施状态（2026-10-25 实测）**：**7 个模块各有独立账本表**（`article` 独占默认表名）· **未改任何迁移文件名**；`check-flyway-ledger.py` ⇒ `EXIT=0`；✅ **「多模块同库共存」已闭环**（真 PG 三进程并发）⇒ §3.5 表 + [`L4-flyway.md`](docs/DRIFT/global/lanes/L4-flyway.md) §8.4。
+> ⚠️ **残留风险**：新增模块忘加 `table` ⇒ 撞 `article` 的默认表名；忘加 `baseline-version: 0` ⇒ 「起得来、首次查库才炸」。
+> ⚠️ **文档缺陷**：声称由 `FlywayLedgerIsolationTest` 负责者**该类全仓不存在** ⇒ 实为 `check-flyway-concurrent.sh` + 各域 `*FlywaySharedSchemaGateTest` ⇒ `docs/Pitfalls/_cross/flyway-ledger-collision.md`
 
 ### 6.4 其他子模块
 
@@ -243,6 +231,7 @@ RAG 不是从 Go「推测」行为，而是**逐字对照 Go 源码**（§3.1）
 | [`docs/Intentional_Deviations/`](docs/Intentional_Deviations/_INDEX.md) | **有意偏离档**：「明知与 Go 不同、**经签字批准**」。⚠️ **是决策不是缺陷：不重复质疑** | 判断某条差异「要不要修」时 |
 | [`docs/PhasedGoal.md`](docs/PhasedGoal.md) · [`docs/twoStage.md`](docs/twoStage.md) | **阶段 1 准入线**（P0/P1/P2）· **两阶段全流程**（阶段 0/1/2 + §5.1~§5.7 流程义务 + §9 故障矩阵 + §10 阶段归属 A/B/C/D）⇒ **四棵工作树的目标**（§5.3g） | 开工前 / 判准入时 |
 | [`docs/PhaseGoal-judge.md`](docs/PhaseGoal-judge.md) · [`docs/RoundPlan/`](docs/RoundPlan/_INDEX.md) | **阶段 1 终点指标**（38 组件矩阵 + 12 条跨组件不变量）· **推进轮次 R0~R5** | 判「复刻到什么程度」时 |
+| [`docs/DRIFT/_cross/stage1-derivation.md`](docs/DRIFT/_cross/stage1-derivation.md) ＋ `.tsv` | **阶段一施工单派生层**：台账 → 施工单的**唯一索引**（§四 = **可开工清单** · §4.0 = 波次分布 · §4.1 = 阶段一范围内 · `.tsv` = 机器层 17 列，含 **`wave`** 派工面 G1~G4）⇒ 生成器/守门 = `tools/ledger-derive/derive-stage1.py`（`--check` 漂移检测）＋ 指针漂移棘轮 `check-pointer-consistency.py` | 派工前 / 查「这条去哪做」 |
 | [`docs/FileTree/`](docs/FileTree/README.MD) · [`docs/HUMAN_ONLY/`](docs/HUMAN_ONLY/simple.md) · [`docs/MappingTable/`](docs/MappingTable/README.MD) · [`docs/Worktree.md`](docs/Worktree.md) | 理论文件树（15 份，⚠️ **迁移期脚手架**）· 阅读指南 · 名字映射 · **并发工作流**（§5.3） | 规划结构 / 开并发对齐前 |
 | [`_cross/domain-common-lanes.md`](docs/DRIFT/_cross/domain-common-lanes.md) · [`_cross/cross-domain-coupling.md`](docs/DRIFT/_cross/cross-domain-coupling.md) | **`<域>-common` 对账总纲**（9 条机制面轴 A1~A9 · 写权边界 · 执行协议）· **跨域耦合矩阵与分波方案**（依赖 DAG · G1~G4 波次表 · 共享层写权规则） | 开工作树前 / 排波次前 |
 
@@ -257,9 +246,8 @@ RAG 不是从 Go「推测」行为，而是**逐字对照 Go 源码**（§3.1）
 | `tools/errmsg-probe/` | 错误码契约逐字节对拍（**9 域**） | `bash tools/errmsg-probe/<域>/run-parity.sh` |
 | `tools/difftest/` | 双端运行时对拍（两套栈 + 请求矩阵） | `bash tools/difftest/run.sh` |
 | `tools/difftest/check-ddl-static.py` | **DDL 列级对照**（类型/可空性/DEFAULT/索引/触发器）· **9 域** · **源码↔活库** | `python3 … [--domain <域>] [--indexes] [--check-source]` |
-| `tools/difftest/check-{proto-static.sh,plaintext400-headers.sh,jar-executable.sh}` | proto 契约 · **真 Tomcat** 400 头（MockMvc 测不到）· **产物可执行性**（漏配 `Main-Class` ⇒ 行为分叉） | `bash …` |
-| `tools/difftest/check-flyway-ledger.py` | Flyway 账本隔离（按库+schema）⇒ `EXIT=0`；运行时同库共存 ⇒ `check-flyway-concurrent.sh`（§6.3 问题 4） | `python3 …` |
-| `tools/difftest/check-grpc-runtime-classpath.py` | devh client 运行时 classpath + 服务发现地址门禁（baseline 机制） | `python3 …` |
+| `tools/difftest/check-{proto-static.sh,plaintext400-headers.sh,jar-executable.sh}` | proto 契约 · **真 Tomcat** 400 头（MockMvc 测不到）· **产物可执行性**（漏配 `Main-Class` ⇒ 行为分叉）· 🆕 rpc 模块**口令占位符形态**（不得带默认值 ⇒ Go 侧 `os.ExpandEnv` 不认该语法） | `bash …` |
+| `tools/difftest/check-{flyway-ledger.py,grpc-runtime-classpath.py}` | Flyway 账本隔离（按库+schema）⇒ `EXIT=0`；运行时同库共存 ⇒ `check-flyway-concurrent.sh`（§6.3 问题 4）· devh client 运行时 classpath + 服务发现地址门禁（baseline 机制） | `python3 …` |
 | `tools/difftest/check-{grpc-interceptor-wiring,tomcat-limits,global-lane-ownership,wave-coupling,wave-lane-ownership,wave-role-model,surface-parity,phasegoal-consistency,phasegoal-lanes}.py` | 九个装配/写权/基线守门：rpc 拦截器接线 · api 容器上限 · `global` 历史 lane 写权 · **跨域耦合漂移** · **G1~G4 波次写权** · **G4 角色措辞** · **对外契约面** · **阶段一基线自检** · **per-lane 矩阵**（⇒ `EXIT=0`） | `python3 tools/difftest/check-*.py`|
 | `tools/difftest/{check,mutate}-deadline-*.py` | **deadline 家族**：E48 harness 守门+变异 · E62 守门变异 · **E38② 漂移形态守门**（漂移被修好就红） | `python3 tools/difftest/check-deadline-*.py` |
 | `tools/drift-move.py` | AGENTS.md ↔ docs/ 搬移（幂等）· 台账 `docs/DRIFT/_MANIFEST.json` | `python3 … verify` |

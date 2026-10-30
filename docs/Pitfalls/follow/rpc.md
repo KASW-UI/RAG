@@ -230,6 +230,10 @@ $ N=12; echo "${N}，x"
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 03:20:49 · 48s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ follow_self_relation  Go == RAG == expected.txt（HTTP 200 · 124 字节） ⏐ ✅ follow_target_not_found  Go == RAG == expected.txt（HTTP 200 · 96 字节） ⏐ ✅ follow_new_relation  Go == RAG == expected.txt（HTTP 200 · 94 字节） ⏐ ✅ unfol。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 03:20:49 · 48s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ follow_self_relation  Go == RAG == expected.txt（HTTP 200 · 124 字节） ⏐ ✅ follow_target_not_found  Go == RAG == expected.txt（HTTP 200 · 96 字节） ⏐ ✅ follow_new_relation  Go == RAG == expected.txt（HTTP 200 · 94 字节） ⏐ ✅ unfol。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
 ## PIT-FOLLOW-014 · 【仍生效】 真源自身就有竞态：**检查黑名单**与**写入关注**不在同一事务
 
 > **旧号**：`PITFALL-FOLLOW-014` ⇒ **新号**：`PIT-FOLLOW-014`
@@ -277,6 +281,8 @@ RAG : 破窗（block 与 follow 并存）32/40
 
 | 编号 | 状态（本轮核后） | 依据（核对日期 2026-10-29） | 改判 |
 |---|---|---|---|
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 03:20:49 · 48s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ follow_self_relation  Go == RAG == expected.txt（HTTP 200 · 124 字节） ⏐ ✅ follow_target_not_found  Go == RAG == expected.txt（HTTP 200 · 96 字节） ⏐ ✅ follow_new_relation  Go == RAG == expected.txt（HTTP 200 · 94 字节） ⏐ ✅ unfol。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
 | `PIT-FOLLOW-001` | 已闭环（不变） | RAG `service/follow/follow-rpc/src/main/resources/application.yml:163` = `address: discovery:///user-rpc`（**生产地址是三斜杠**）＋ 守门 `…/FollowRpcProductionAddressTest.java:87-95` 存在 ⇒ 「测试把生产地址覆盖成 `static://`」的形态已由**读生产 yml 的守门**堵住<br>⚠️ **2026-10-30 复核（follow+task lane · 短确认）**：RAG `service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/FollowRpcProductionAddressTest.java:87` = `@DisplayName("生产 application.yml 的 grpc client 地址必须是 discovery:///user-rpc（三斜杠）")` ＋ `:91-92` = `assertEquals(EXPECTED_ADDRESS, address, …)` ⇒ **守门读的是生产 yml** ⇒ **现行态 = 已闭环（不变）**；核对日期 2026-10-30 | 否 |
 | `PIT-FOLLOW-002` | 已闭环（不变） | RAG `service/follow/follow-rpc/pom.xml:256-260` = `io.grpc:grpc-inprocess` **无 `<scope>test</scope>`**（compile 默认）⇒ 运行期 classpath 有该类<br>⚠️ **2026-10-30 复核（follow+task lane · 短确认）**：RAG `service/follow/follow-rpc/pom.xml:256-260` 逐行重核 ⇒ **`<scope>test</scope>` 仍不在** ⇒ **现行态 = 已闭环（不变）**；⚠️ **跨域子结论本轮复核属实**：逐模块 `grep -A4 grpc-inprocess` ⇒ `article-rpc` / `like-rpc` / `task-rpc` = **无 `<scope>`**、`favorite-rpc` = `<scope>runtime</scope>`（**不是 `test`**）⇒ **全仓已无 `test` scope**；核对日期 2026-10-30 | 否（**跨域子结论已订正**：域外 4 个模块的 `test` scope 现已不存在） |
 | `PIT-FOLLOW-003` | 已闭环（不变） | 同上 `application.yml:163` = `discovery:///user-rpc`（**三斜杠**）<br>⚠️ **2026-10-30 复核（follow+task lane · 短确认 + 补全路径）**：RAG `service/follow/follow-rpc/src/main/resources/application.yml:163` = `address: discovery:///user-rpc`（**本轮重核该行**）⇒ **现行态 = 已闭环（不变）**；核对日期 2026-10-30 | 否 |

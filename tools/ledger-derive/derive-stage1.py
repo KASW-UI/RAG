@@ -1,0 +1,2794 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""derive-stage1.py —— 三目录台账 → **阶段一施工单派生层**（生成器 + 守门）
+
+═══════════════════════════════════════════════════════════════════════
+它回答什么问题
+═══════════════════════════════════════════════════════════════════════
+
+「`docs/DRIFT` + `docs/Intentional_Deviations` + `docs/Pitfalls` 这三本台账
+（1183+ 条目 / 上千个编号），能不能直接当**阶段一施工单**用？」
+
+**结论（本工具的立场）**：三目录是**事实与证据层**，**不是**施工单 ——
+`docs/twoStage.md` §10 要求的 11 个字段里，三目录只自带其中一部分。
+⇒ 本工具在**不改三目录一个字**的前提下，**派生**出一层：
+`ID → 优先级 P0-P3 × 阶段归属 A-D × 是否阻断阶段一 → 对最终工程目标的影响
+→ 排期指针 → 证据缺口`。
+
+⚠️ **派生层不是「第二本台账」** —— 它**只投影**，不重新裁定：
+每个派生值都带**规则号**（`rules` 列），每条都能回到**源文件:行号**（`source` 列）。
+派生不出 ⇒ 写 `—`（待人工定级），**绝不猜**。
+
+═══════════════════════════════════════════════════════════════════════
+口径（全部写死在代码里 ⇒ 机器可复算）
+═══════════════════════════════════════════════════════════════════════
+
+**U1 · 条目（问题项）识别**
+    位置候选 = 二~五级标题（去装饰符后**首个 token**）· 表格**首列**
+    编号形态 = 宽正则 `^[A-Z][A-Za-z0-9]{0,14}(-[A-Za-z0-9]{1,24})*-\\d{1,4}[A-Za-z]?$`
+    ⚠️ **不依赖前缀白名单** —— 前缀白名单会让整族条目隐形
+       （实测旧 `ledger-claim-audit.py` 的 `ID_RE` 认不出 `MISMATCH-API-01` /
+       `OP-04` / `T-6` / `N-1` / `CD-3` / `ADJ-01` … 共 **数百个唯一编号**）。
+    排除 = `excluded-id-prefixes.txt`（**显式数据文件**，逐条带理由）
+    必须 = 自身带**状态标记**（取值域按目录不同，见 U2）
+
+**U2 · 状态归一**（取值域**按目录**限定，取值域外一律不认）
+    DRIFT                  : ✅ 已一致 · 🟡 部分闭合 · 🔴 未闭合 · ⚫ 已签字偏离
+    Pitfalls               : 仍生效 · 已闭环 · 已撤销 · 待核实 · 已失效
+    Intentional_Deviations : ✅ 仍成立 · ⛔ 已失效 · ⏳ 未签字 · 待核实
+    查找顺序 = **标题行优先** → 其次条目段
+
+**U3 · 证据强度**（A/B/C 三档，**机器推导**，不采信自称）
+    A 活体   = 条目段内点名了**已在活体台账实跑过**的探针
+    B 静态   = 无活体探针，但有 `文件:行号` 指针（可复算的静态证据）
+    C 无指针 = 两样都没有 ⇒ 该条结论**今天不可复算**
+
+**U4 · 优先级 P0-P3**（`twoStage.md` §10 的严重程度）
+    A 类阻断 ⇒ P0 ；🔴 / 仍生效 / ⏳ 未签字 ⇒ P1 ；🟡 / 待核实 ⇒ P2 ；其余 ⇒ P3
+
+**U5 · 阶段归属 A-D**（`twoStage.md` §10）
+    先取**权威定级表**（Stage1/05 §一·§三 · alignment §十三·一）
+    → 再取**施工单章节**（_task-universe.md §一~§四）
+    → 再取**已签字偏离**（IntDev ⇒ D，决策不是缺陷）
+    → 都拿不到 ⇒ `—`（**待人工定级**，不猜）
+
+**U6 · 是否阻断阶段一**：权威表的「阻断」列优先；否则 A⇒是 / 其它⇒否
+
+**U7 · 对最终工程目标的影响**：C⇒影响（阶段 2 必须恢复）· D⇒不影响 ·
+    A/B⇒间接 · `—`⇒未判定
+
+**U8 · 排期指针**：
+    ① `_task-universe.md` 的任务（**强链**：任务块里直接写了本条目编号，
+       或任务块里的 `docs/DRIFT|Pitfalls|Intentional_Deviations/**` 指针**落在本条目段内**）
+    ② `_unresolved.md` 的 BLK-xx / GAP-xx / ENV-xx / DEC-xx（同法反查）
+    ③ 都没有 ⇒ **未排期**
+
+**U9 · 证据缺口**：C⇒无可复算指针 · B+🔴⇒静态取证·缺活体 ·
+    未定级⇒未定级⇒未排期 · 未排期⇒未排期 · 否则 —
+
+═══════════════════════════════════════════════════════════════════════
+产物
+═══════════════════════════════════════════════════════════════════════
+
+    docs/DRIFT/_cross/stage1-derivation.tsv   机器层：全量问题项 × 派生字段
+    docs/DRIFT/_cross/stage1-derivation.md    人读层：口径 + 规则 + 全量表 +
+                                               施工单视图 + 真缺口清单
+
+═══════════════════════════════════════════════════════════════════════
+用法
+═══════════════════════════════════════════════════════════════════════
+
+    python3 tools/ledger-derive/derive-stage1.py            # 重新生成产物
+    python3 tools/ledger-derive/derive-stage1.py --check    # 守门：产物过期 ⇒ EXIT=1
+    python3 tools/ledger-derive/derive-stage1.py --report   # 只打印统计，不写文件
+
+**退出码**：0 = 通过（`--check` 下 = 产物与源台账同步）；1 = 漂移 / 缺口；2 = 环境问题。
+"""
+
+from __future__ import annotations
+
+import argparse
+import collections
+import json
+import pathlib
+import re
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+TOOL_DIR = pathlib.Path(__file__).resolve().parent
+OUT_DIR = ROOT / "docs/DRIFT/_cross"
+TSV_PATH = OUT_DIR / "stage1-derivation.tsv"
+MD_PATH = OUT_DIR / "stage1-derivation.md"
+EXCLUDE_FILE = TOOL_DIR / "excluded-id-prefixes.txt"
+
+LEDGER_DIRS = ("DRIFT", "Pitfalls", "Intentional_Deviations")
+
+# ⚠️ **自噬防护**：派生层自己的产物**不得**被当作输入扫描。
+#   实测（未防护时）：`docs/DRIFT/_cross/stage1-derivation.md` 被当成普通台账扫进去
+#   ⇒ **凭空多出 1262 条「条目」** ⇒ 计数虚高、且 `--check` 模式会**自我否定**
+#   （产物一改 ⇒ 源也变了 ⇒ 永远不同步 ⇒ 守门恒红）。
+#   ⇒ 产物路径必须**显式排除**，且这个排除要**写在代码里**（不是靠「生成后再过滤」）。
+SELF_ARTIFACTS = ("docs/DRIFT/_cross/stage1-derivation.md",)
+
+# ⚠️ **2026-10-30 新增 · 索引文件自噬防护** ——
+#   `docs/<台账目录>/_INDEX.md` 是**索引/导航文档**，不是台账条目本体。
+#   ⇒ 它**引用**真实条目（表格里列编号 + 状态）⇒ 被 `scan_ledgers` 扫进去
+#      ⇒ **同一个编号在真域已登记、又以伪域 `_INDEX.md` 登记一次**
+#      ⇒ 因为合并键是 **(编号, 域)** ⇒ 两行的域不同 ⇒ **不会合并** ⇒ **幽灵行**。
+#   ⇒ 实测（HEAD 状态）：`docs/DRIFT/_INDEX.md` 贡献 **8 条幽灵行**
+#      （`SD-2026-10-23-01/04/05/06/07/08` + `SD-2026-10-24-01/02`）
+#      —— 这 8 个编号在 `docs/Intentional_Deviations/<域>/` 下**本来就有真登记**
+#      ⇒ 排除后**不丢条目**，只**去掉重复面**。
+#   ⇒ **触发场景（本轮实测踩到）**：在 `_INDEX.md` 里写一张「逐条判定表」
+#      （首格 = 编号 + 带 🔴/🟡 状态）⇒ **8 行全部被扫成新条目**
+#      ⇒ 域名竟成了 `_INDEX.md` ⇒ **虚增 3 条 A/B 真缺口 + 1 条「未定级且开放」**。
+#      ⇒ ⇒ **在共享索引里写台账式表格 ⇒ 会污染施工单**（索引是**汇总面**，不是条目面）。
+#   ⇒ ⚠️ 域目录的 `_README.md`（如 `docs/DRIFT/global/_README.md`）**是真台账** ⇒ **不排除**。
+SELF_ARTIFACT_INDEX_FILES = tuple(f"docs/{d}/_INDEX.md" for d in LEDGER_DIRS)
+
+# ⚠️ **2026-10-30 扩展** —— 「显式定级叠加层」目录也必须挡：
+#   `docs/DRIFT/_cross/grading/*.md` 是**本轮人工定级**的落地处（U5-O 的输入），
+#   它**长得像台账**（Markdown 表格、编号列）⇒ 若被 `scan_ledgers` 扫进去
+#   ⇒ 凭空多出「条目」⇒ 计数虚高；被 `scan_grading_tables` 扫进去
+#   ⇒ 会把自己的定级当成「台账已写的定级」⇒ **自证循环**。
+#   ⇒ 两个扫描器**都要挡**（同族教训：自噬防护漏一个扫描器就等于没防护）。
+SELF_ARTIFACT_DIRS = ("docs/DRIFT/_cross/grading/",)
+
+# ── U5-O · 显式定级叠加层（人工本轮定级的落地处） ──────────────────────────
+GRADING_DIR = ROOT / "docs/DRIFT/_cross/grading"
+
+# ⚠️ **U5-O 域适配的显式覆盖表**（2026-10-30 · 用户拍板「条目身份 = 编号 + 所属域目录」）
+#   格式：`编号<TAB>域1,域2`（`*` = 全部域）
+#   用途：自动推导（依据里的 `service/<域>/` 路径 ∩ 登记域）判不准时，在此**显式**定死。
+#   ⚠️ **不建 `check-*.py`**（会动 judge §六 6.3 的 27 计数口径）⇒ 用纯数据文件。
+SCOPE_FILE = TOOL_DIR / "overlay-scope.txt"
+
+# ⚠️ **同源组（identity group）** —— 2026-10-30 用户拍板「条目身份 = 编号 + 所属域目录」
+#   之后的**必要配套**：台账里有一批编号是**「同一件事跨域登记」**（不是撞号）——
+#   典型 = ① 签字编号 `SD-*`（一个签字决定的是一件事，必然跨域）
+#   ② `T-*`（common 尾巴清单：`common/alignment` 与 `global/_README` 是**同一份清单的两个副本**，
+#   **文件自己就这么写着**）③ `UNRESOLVED-*`（跨域取证缺口）。
+#   ⇒ 若一律按「编号 + 域」拆开 ⇒ **同一件事会在两个域各判一次**
+#   ⇒ 其中一份读到旧快照（🔴）⇒ **虚增一条假缺口**。
+#   ⇒ 故：**同源组内的域仍合并成一条**；组外**一律拆开**。
+#   ⚠️ **组是显式数据，不是猜的** —— 每组都要能说出「凭什么它们是同一件事」。
+IDENTITY_GROUP_FILE = TOOL_DIR / "identity-groups.txt"
+
+# ⚠️ **波次映射（wave）** —— 2026-10-30 加：派生层要能直接回答「这条归哪棵工作树（G1~G4）做」。
+#   权威出处 = `docs/Worktree.md` §二「波次版：G1~G4」表（AGENTS.md §5.3d 只留结论 + 指针）。
+#   ⚠️ **显式数据文件，不藏在代码里**（与 `excluded-id-prefixes.txt` / `overlay-scope.txt` 同口径）⇒ 可复核、可改。
+#   ⚠️ **给的是「派工面」，不是「类级写权」** —— `users-common` 是混合体（AGENTS.md §5.3f 按类判定），
+#   本层只把**整份 users-common 专属台账**归 G4；`users/vs-common.md` 归 G1（该文件头部自记「归属 G1 波次工作树」）。
+WAVE_MAP_FILE = TOOL_DIR / "wave-map.txt"
+
+# ⚠️ **U5-O 保护字段** —— 这些字段一旦有「显式定级」，就**不许**被无定级的登记覆盖。
+#   依据见 `derive()` 合并段的注释：同一编号在**汇总文件**与**主文件**两处登记时，
+#   汇总文件那条日期更新就会把主文件的 U5-O 定级**静默覆盖**掉。
+OV_FIELDS = ("stage", "blocking", "prio", "gap", "_stage_src", "_closed", "basis")
+
+# ── 域（domain）的提取与归属 ─────────────────────────────────────────────────
+# ⚠️ **为什么需要域这一维**（2026-10-30 用户拍板）：
+#   台账用**裸编号**（`E1` / `E2` / `L-4` / `T-6` …，**没有域前缀**），
+#   而台账分散在 10 个域的几十个文件里 ⇒ **同一个编号在不同文件里指的不是同一件事**。
+#   实测：166 个编号状态不一致 ⇒ 102 个是「同一件事的多个版本」（台账保留历史快照，
+#   本该如此）· 64 个是「不同的事共用一个编号」（**真问题**）。
+#   ⇒ 派生层的条目身份必须是 **（编号, 所属域目录）**，否则两件事的状态/优先级会互相串味
+#   ⇒ 已实证代价：4 条**假缺口**（派单会派到不存在的事上）+ 1 条 **A 类被降级成 B 类**。
+#
+# ⚠️ **域的定义** = 台账文件在 `docs/<台账目录>/` 下的**第一层目录**
+#   （`DRIFT/article/x.md` ⇒ `article` · `DRIFT/users/user/api.md` ⇒ `users`
+#   · `DRIFT/global/lanes/x.md` ⇒ `global` · `DRIFT/_cross/x.md` ⇒ `_cross`）。
+#   ⚠️ `users` 域含 `user/` 与 `admin/` 两个子域 ⇒ 同属一个域（项目口径如此）。
+SERVICE_PATH_RE = re.compile(r"(?:^|[\s`/])service/([A-Za-z0-9_\-]+)/")
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 表格行切分（**转义感知**）
+# ────────────────────────────────────────────────────────────────────────────
+# ⚠️ **为什么不能用 `line.split("|")`**（2026-10-30 · 第三次实测）——
+#   GFM 表格里，单元格内的竖线要写成 `\|` ⇒ ⇒ **裸 `split("|")` 会把一个单元格
+#   切成多个** ⇒ ⇒ 列数算错 ⇒ ⇒ 「表格结构异常」误报 ⇒ ⇒ 更糟的是
+#   **关闭判定会取错列**（`load_unresolved` 用 `cells[3]` 当「当前状态列」）
+#   ⇒ ⇒ 那个未解决项的「已关闭 / 已处置」判定**静默失效** ⇒ ⇒ 指向它的指针
+#   **被算成排期** ⇒ ⇒ 派工面上多出一条「真缺口」。
+#   ⇒ 实测样本：`docs/RoundPlan/_unresolved.md` 的 `BLK-02` 行内含探针读数
+#   `failed_fast=true\|code=4\|...` ⇒ 裸 split 得 11 段（表头是 8）⇒ 误判 malformed。
+#
+#   ⇒ 与 `tools/difftest/check-phasegoal-consistency.py` 的 `split_row`
+#     **同一口径**（`re.split(r"(?<!\\)\|")`）⇒ ⇒ 两张表的两个解析器不再打架。
+#
+#   ⚠️ `keep_ends=True` 保留**首尾两个空串**（`l.split("|")` 的原语义）⇒
+#     ⇒ 用于 `load_unresolved` 那处（它按固定下标取「当前状态列」）。
+def split_cells(line: str, keep_ends: bool = False) -> list[str]:
+    s = line.strip()
+    if not s.startswith("|"):
+        return []
+    body = s if keep_ends else s.strip("|")
+    return [c.strip() for c in re.split(r"(?<!\\)\|", body)]
+
+
+def domains_from_paths(text: str) -> set[str]:
+    """从一段文本里提取它提到的**服务目录**所属的域。
+
+    ⚠️ **只认 `service/<域>/`** —— 因为这是 RAG/Go 两仓**共同的顶层布局**
+    （`service/<域>/<组件>/...`）⇒ 域前缀是**仓自身的命名**，不是本层的猜测。
+    ⚠️ **不含 `service/common/`**（共享层）—— 它是**跨域**的，不指向任何单一域。
+    """
+    out = set()
+    for m in SERVICE_PATH_RE.finditer(text or ""):
+        d = m.group(1)
+        if d != "common":
+            out.add(d)
+    return out
+
+
+def domain_of_rel(rel: str) -> str:
+    """台账文件相对 `docs/` 的路径 ⇒ 所属域（第一层目录）。"""
+    parts = pathlib.PurePosixPath(rel).parts
+    return parts[1] if len(parts) > 1 else "_root"
+
+
+def load_scope_overrides() -> set[tuple[str, str]]:
+    """读 `overlay-scope.txt` ⇒ **{(编号, 域)}**（**节点级**）。
+
+    ⚠️ **为什么显式文件而不把规则藏进代码**：域适配的判据（「这个定级到底在说哪个域的条目」）
+    本质上是**语义判断** ⇒ 机器只能给出初值 ⇒ 必须留一个人工可改、可复核的落点。
+    ⇒ 规则在代码里（可复算），**例外在这份文件里**（可订正）。
+    ⚠️ **节点级**（2026-10-30）：同一个编号**可能在两个域各有一条**（实测 `G4-4`
+    = article + favorite ⇒ 第 3 轮判定为「不同的事」⇒ 归一后各判各的）
+    ⇒ 按编号聚成域集合会让**一个域的定级套到另一个域** ⇒ 串味。
+    """
+    out: set[tuple[str, str]] = set()
+    if not SCOPE_FILE.exists():
+        return out
+    for line in SCOPE_FILE.read_text(encoding="utf-8").split("\n"):
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        parts = s.split("\t")
+        ident = parts[0].strip().strip("*` ")
+        if not ident:
+            continue
+        if len(parts) < 2 or not parts[1].strip():
+            continue
+        for d in parts[1].split(","):
+            d = d.strip()
+            if d:
+                out.add((ident, d))
+    return out
+
+
+def load_identity_groups() -> dict[tuple[str, str], tuple[str, str]]:
+    """读 `identity-groups.txt` ⇒ `{(编号, 域): (组代表编号, 组域集合串)}`。
+
+    ⚠️ **为什么需要这张表**（2026-10-30 用户拍板「条目身份 = 编号 + 所属域目录」）：
+      台账用**裸编号**（`E1` / `E2` / `L-4` / `T-6`…，**没有域前缀**）⇒ 同一个编号在不同域
+      **通常**指的不是同一件事 ⇒ 派生层默认**按域拆开**（消除「一个域的定级被继承到另一个域」
+      的串味）⇒ 实测代价：4 条假缺口（`GAP-10`）+ 1 条 A 类被降级成 B 类。
+      ⇒ **但**有一批条目是**「同一件事的跨域登记 / 跨域别名登记」** ⇒ 拆开后同一件事会被
+      **派两次单**、或**一份读到旧快照（🔴）** ⇒ **虚增一条假缺口**。
+      ⇒ 这批条目登记进**同源组** ⇒ **仍合并成一条**。
+
+    ⚠️ **格式（2026-10-30 升级为「节点级关系表」）**：
+      `<编号A>\t<域A>\t<编号B>\t<域B>\t<关系说明>`（每行 = 「这两个节点是同一件事」）
+      ⇒ 节点 = **(编号, 所属域)** ⇒ 用**并查集**把互相连通的节点归到同一组。
+      ⇒ 两类关系**统一处理**（不必分类）：
+        ① **同编号跨域**（`E65`@favorite ≡ `E65`@global）
+        ② **不同编号别名**（`DRIFT-CF-001`@common ≡ `CF-001`@common —— 长/短编号）
+      ⇒ **「不同的事」不进本表**（派生层不猜 ⇒ 保持拆开 ⇒ 在派生层 §4.6 对照表里露出）。
+
+    ⚠️ **为什么用「节点」而不是「编号」做键**：
+      同一个编号在**组内**的域与**组外**的域**必须分开** —— 例如 `CF-001` 与 `DRIFT-CF-001`
+      在 `common` 域是同一件事（合并），但 `CF-001` 在别的域可能是**撞号**（不合并）。
+      ⇒ 键必须是 `(编号, 域)`，不能是裸编号。
+    """
+    out: dict[tuple[str, str], tuple[str, str]] = {}
+    if not IDENTITY_GROUP_FILE.exists():
+        return out
+    parent: dict[tuple[str, str], tuple[str, str]] = {}
+
+    def find(x: tuple[str, str]) -> tuple[str, str]:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: tuple[str, str], b: tuple[str, str]) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[max(ra, rb)] = min(ra, rb)   # 代表 = 字典序最小 ⇒ 稳定可复算
+
+    for line in IDENTITY_GROUP_FILE.read_text(encoding="utf-8").split("\n"):
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        parts = s.split("\t")
+        if len(parts) < 4:
+            continue
+        na = (parts[0].strip().strip("*` "), parts[1].strip())
+        nb = (parts[2].strip().strip("*` "), parts[3].strip())
+        if not na[0] or not nb[0]:
+            continue
+        union(na, nb)
+
+    # 组 → (代表编号, 组内域集合串)
+    groups: dict[tuple[str, str], tuple[str, str]] = {}
+    members: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for node in parent:
+        members.setdefault(find(node), []).append(node)
+    for root, mem in members.items():
+        doms = ",".join(sorted({d for _, d in mem}))
+        for node in mem:
+            groups[node] = (root[0], doms)
+    out.update(groups)
+    return out
+
+
+
+def load_samesrc_judgements() -> dict[tuple[str, str], str]:
+    """读 `docs/DRIFT/_cross/grading/_samesrc-*.md` ⇒ `{(编号, 域): 判定}`。
+
+    ⚠️ **三档**：`同一件事` / `不同的事` / `无法判定`（2026-10-30 第 3 轮人工逐条判定）。
+    ⚠️ **键 = (编号, 域)** ⇒ 与派生层的**节点**身份一致 ⇒ 可直接并排呈现。
+    ⚠️ **派生层不猜** —— `无法判定` 的条目**保持拆开**并在 §4.6 露出。
+    """
+    out: dict[tuple[str, str], str] = {}
+    gdir = ROOT / "docs/DRIFT/_cross/grading"
+    if not gdir.exists():
+        return out
+    for p in sorted(gdir.glob("_samesrc-*.md")):
+        for line in p.read_text(encoding="utf-8").split("\n"):
+            s = line.strip()
+            if not s.startswith("|"):
+                continue
+            cells = split_cells(s)
+            if len(cells) < 3:
+                continue
+            ident = cells[0].strip().strip("*` ")
+            dom = cells[1].strip().strip("*` ")
+            verdict = cells[2].strip().strip("*` ")
+            if not ident or ident == "编号" or set(ident) <= set("-: "):
+                continue
+            if verdict not in ("同一件事", "不同的事", "无法判定"):
+                continue
+            out[(ident, dom)] = verdict
+    return out
+
+
+# ── U2 状态取值域（**按目录**限定） ───────────────────────────────────────
+STATUS_SETS = {
+    "DRIFT": {
+        "✅": "✅ 已一致",
+        "🟡": "🟡 部分闭合",
+        "🔴": "🔴 未闭合",
+        "⚫": "⚫ 已签字偏离",
+    },
+    "Pitfalls": {
+        "仍生效": "仍生效",
+        "已闭环": "已闭环",
+        "已撤销": "已撤销",
+        "已失效": "已失效",
+        "待核实": "待核实",
+    },
+    "Intentional_Deviations": {
+        "仍成立": "✅ 仍成立",
+        "已失效": "⛔ 已失效",
+        "已撤销": "⛔ 已撤销",
+        "未签字": "⏳ 未签字",
+        "待核实": "待核实",
+    },
+}
+# 优先级映射（U4）：状态 → 优先级
+PRIO_BY_STATUS = {
+    "🔴 未闭合": "P1",
+    "仍生效": "P1",
+    "⏳ 未签字": "P1",
+    "🟡 部分闭合": "P2",
+    "待核实": "P2",
+    "✅ 已一致": "P3",
+    "⚫ 已签字偏离": "P3",
+    "✅ 仍成立": "P3",
+    "已闭环": "P3",
+    "已撤销": "P3",
+    "⛔ 已失效": "P3",
+    "⛔ 已撤销": "P3",
+}
+
+# ── U1 编号形态（宽口径，不依赖前缀白名单） ────────────────────────────────
+# U1 条目编号形态（**两种形态**）
+#   ① 连字符形态 `DRIFT-MSG-001` / `MISMATCH-API-01` / `CD-3`
+#   ② **字母+数字**形态 `E60` / `E65`（无连字符；旧 `ID_RE` 对它隐形）
+ID_RE = re.compile(
+    r"^(?:[A-Z][A-Za-z0-9]{0,14}(?:-[A-Za-z0-9]{1,24})*-\d{1,4}[A-Za-z]?"
+    r"|E\d{1,3}[A-Za-z]?)$"
+)
+# 段内任意位置的编号 token（用于「任务块里写了本条目编号」与「标题里编号不在首位」）
+# ⚠️ **两种形态都要收**：
+#    ① 连字符形态 `DRIFT-MSG-001` / `S1-FOLLOW-001` / `MISMATCH-API-01` / `CD-3`
+#    ② **字母+数字**形态 `E60` / `E65` / `E66`（无连字符！）
+#    ⇒ 仓内既有的 `ledger-claim-audit.py` 的 `ID_RE` **只认 ①** ⇒ **`E60`/`E65`/`E66`
+#      对它隐形**（而 `E65` 正是共享层那条 **A 类硬阻塞**）⇒ 同族的「盲区」问题。
+ID_TOKEN_RE = re.compile(
+    r"\b((?:[A-Z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*-\d+[A-Za-z]?)"
+    r"|(?:E\d{1,3}[A-Za-z]?)(?![-\w]))\b"
+)
+# 证据指针 `路径:行号`（U3 的 B 档判据）
+PTR_RE = re.compile(
+    r"(?:[A-Za-z0-9_./\-*@]+(?:\.java|\.go|\.py|\.sh|\.md|\.yml|\.yaml|\.sql|\.xml|\.json|\.txt)):"
+    r"(\d+(?:\s*[-–,]\s*\d+)*)"
+)
+# 工具引用（U3 的 A 档判据）
+TOOLREF_RE = re.compile(r"tools/[A-Za-z0-9_./-]+\.(?:sh|py)")
+
+DECOR = "🔴🟡🟢✅⚫❌⛔⏳🏷⚪⬜🟥⚠️❗️ "
+
+# ���─ U5 权威定级来源 ───────────────────────────────────────────────────────
+STAGE1_05 = ROOT / "docs/Stage1/05-差异与暂缓项清单.md"
+ALIGNMENT = ROOT / "docs/DRIFT/common/alignment-2026-10-23.md"
+TASK_UNIVERSE = ROOT / "docs/RoundPlan/_task-universe.md"
+UNRESOLVED = ROOT / "docs/RoundPlan/_unresolved.md"
+LIVE_LEDGER = ROOT / "docs/DRIFT/_cross/live-parity-2026-10-30.md"
+
+
+def clean_heading(text: str) -> str:
+    t = text.strip().lstrip("*`~ ")
+    while t and t[0] in DECOR:
+        t = t[1:].lstrip()
+    return t.strip()
+
+
+def first_token(text: str) -> str | None:
+    t = clean_heading(text)
+    m = re.match(r"^([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*)", t)
+    return m.group(1) if m else None
+
+
+# ⚠️ **编号不得跨越「分隔符」被切出来**（2026-10-30 实测 bug）
+#   台账里大量写成 **`R3·T-3.1`**（轮次·任务号）这种**复合编号** ⇒ `\b` 在 `·` 之前成立
+#   ⇒ `ID_TOKEN_RE` 把它**后半段** `T-3` 当成了独立编号
+#   ⇒ **凭空造出「`T-3` 在 11 个域有登记」**（实测 `article/vs-common.md:608` 等
+#      11 处其实都是 `## 10. 🟢 DDL 逐域机器核 … R3·T-3.1` 的**章节标题**）
+#   ⇒ ⇒ 「同编号冲突」被**虚增**、「跨域同源」被**误判」。
+#   ⇒ 修法：token **前面**若是分隔符 ⇒ 它是复合编号的一部分 ⇒ **不作为条目编号**。
+SEP_CHARS = "·・•‧∙,，;；、/｜|"
+
+
+def _token_is_split_off(text: str, start: int) -> bool:
+    """token 在 `text` 里的起点 `start` 是否**紧跟分隔符**（⇒ 被复合编号切开）。"""
+    i = start - 1
+    while i >= 0 and text[i] in " \t":
+        i -= 1
+    return i >= 0 and text[i] in SEP_CHARS
+
+
+def _token_is_truncated(text: str, end: int) -> bool:
+    """token 在 `text` 里的终点 `end` 之后是否紧跟「.数字」。
+
+    ⚠️ **实测 bug（2026-10-30）**：`T-2.7` / `T-3.1` 这类**带小数点**的编号
+       ⇒ `ID_RE` 的字符集不含 `.` ⇒ 匹配停在 `T-2` ⇒ **小数部分被丢掉**
+       ⇒ 派生层把 `## 9. 🟢 新立 \`T-2.7\`：…`（article 域）记成了 **`T-2`** 条目
+       ⇒ 凭空多出一条登记 ⇒ **「同编号冲突」被虚增**、**跨域同源被误判**。
+    """
+    j = end
+    while j < len(text) and text[j] in " \t":
+        j += 1
+    return j < len(text) and text[j] == "." and j + 1 < len(text) and text[j + 1].isdigit()
+
+
+def find_id_token(text: str) -> str | None:
+    """在一段文本里找**第一个完整的**编号 token（**不切开复合编号**）。"""
+    for m in ID_TOKEN_RE.finditer(text):
+        if _token_is_split_off(text, m.start(1)):
+            continue
+        if _token_is_truncated(text, m.end(1)):
+            continue
+        return m.group(1)
+    return None
+
+
+def all_id_tokens(text: str) -> list[str]:
+    """在一段文本里取**全部**编号 token（**不切开复合编号**）。
+
+    ⚠️ **为什么所有地方都要用这个而不是裸 `ID_TOKEN_RE.findall`**：
+    `R3·T-3.1` 这类**复合编号**（轮次·任务号）⇒ 裸正则会把后半段 `T-3` 当成独立编号
+    ⇒ ① 台账扫描 ⇒ **凭空多出条目**（「T-3」在 11 个域）
+    ⇒ ② 任务块 / 未解决清单 / 定级表 ⇒ **凭空多出「任务 ↔ 条目」的关联**
+    ⇒ ③ 两者都会让「同编号冲突」被**虚增**、「已排期」被**误判**。
+    """
+    out = []
+    for m in ID_TOKEN_RE.finditer(text):
+        if _token_is_split_off(text, m.start(1)):
+            continue
+        if _token_is_truncated(text, m.end(1)):
+            continue
+        out.append(m.group(1))
+    return out
+
+
+def load_exclusions() -> dict[str, str]:
+    """U1 排除清单（**显式数据文件** ⇒ 可复核、可改、不藏在代码里）。"""
+    out: dict[str, str] = {}
+    if not EXCLUDE_FILE.exists():
+        return out
+    for line in EXCLUDE_FILE.read_text(encoding="utf-8").split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        out[parts[0].strip()] = parts[1].strip()
+    return out
+
+
+def load_wave_map() -> tuple[dict[str, str], dict[str, str]]:
+    """U11 波次映射 ⇒ **({文件路径: 波次}, {域名: 波次})**。
+
+    ⚠️ **为什么要有这一列**（2026-10-30）：派生层能回答「这条属哪个域、该谁修」，
+    但**回答不了「这条归哪棵工作树（G1~G4）」** ⇒ lane 要自己按域反推 ⇒ 容易派错树。
+    ⇒ `wave` 列 = **派工面**（该条归哪棵树做），**机械派生**（域级 + 文件级例外）。
+
+    ⚠️ **匹配顺序**：**先 file 后 domain**；同组内**行序优先** ⇒ 先命中先生效。
+    ⚠️ **未命中 ⇒ `—`**（派生层**不猜** ⇒ 待人工）。
+    ⚠️ **判据依赖外部输入时失败必须硬失败**（§5.3 纪律）—— 映射文件缺失 ⇒ `EXIT=2`，
+    **不许**静默降级成「全部 `—`」（那会让整列变成零信号）。
+    """
+    if not WAVE_MAP_FILE.exists():
+        print(f"🔴 波次映射文件缺失：{WAVE_MAP_FILE} ⇒ 无法给派生层 wave 列", file=sys.stderr)
+        sys.exit(2)
+    by_file: dict[str, str] = {}
+    by_dom: dict[str, str] = {}
+    for line in WAVE_MAP_FILE.read_text(encoding="utf-8").split("\n"):
+        line = line.rstrip()
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 2:
+            print(f"🔴 波次映射行格式错（需 `<键>\\t<波次>[\\t<理由>]`）：{line}", file=sys.stderr)
+            sys.exit(2)
+        key, wave = parts[0].strip(), parts[1].strip()
+        if wave not in ("G1", "G2", "G3", "G4"):
+            print(f"🔴 波次取值非法（只允许 G1/G2/G3/G4）：{line}", file=sys.stderr)
+            sys.exit(2)
+        if key.startswith("file:"):
+            by_file[key[5:].strip()] = wave
+        elif key.startswith("domain:"):
+            by_dom[key[7:].strip()] = wave
+        else:
+            print(f"🔴 波次映射键非法（须 `file:` 或 `domain:` 前缀）：{line}", file=sys.stderr)
+            sys.exit(2)
+    if not by_dom:
+        print("🔴 波次映射文件里没有任何 domain 规则 ⇒ 整列零信号", file=sys.stderr)
+        sys.exit(2)
+    return by_file, by_dom
+
+
+def wave_of(rel_path: str, domain: str, by_file: dict[str, str], by_dom: dict[str, str]) -> str:
+    """**文件级优先** → 域级 → `—`（未命中 ⇒ 待人工，不猜）。"""
+    if rel_path in by_file:
+        return by_file[rel_path]
+    return by_dom.get(domain, "—")
+
+
+# ════════════════════════════════════════════════════════════════════════
+# U1 · 条目扫描
+# ════════════════════════════════════════════════════════════════════════
+
+KEEP_OUT_RE = re.compile(r"阶段归属定级附录")
+
+
+def compute_keepouts(lines: list[str]) -> list[tuple[int, int]]:
+    """**派生层维护的小节**（回写附录）⇒ 其内容**不参与**条目识别与分段。
+
+    ⚠️ **为什么需要**（2026-10-30 定级回写时暴露）：台账末尾要追加一节
+    「阶段归属定级附录」，把 U5-O 的定级结论**同步回本域台账**（AGENTS.md §5.3b
+    「产出必写回同名的本域子目录」）。但那一节**长得像台账**（编号 + 表格）⇒
+      ① 其表格行会被当成**新条目** ⇒ 凭空多出条目（自噬）；
+      ② 其内容会落进**前一个候选的段落**（段尾延伸到文件末尾）
+         ⇒ `entry_stage_decl` 会从附录里读到**别的编号**的类
+         ⇒ 把那一条的归属**改错**（比自噬更危险：它污染的是真实结论）。
+    ⇒ 处置 = **保留区（keepout）**：该小节既不产生候选，也**截断前一段**。
+
+    ⚠️ **标题必须带「附录」二字** —— 台账里本来就有「阶段归属」小节，
+       那是**要被读的**（U5-f 的来源）⇒ 不能一刀切屏蔽。
+    """
+    heads = []
+    for i, l in enumerate(lines):
+        m = re.match(r"^\s{0,3}(#{2,5})\s+(.+?)\s*$", l)
+        if m:
+            heads.append((i, len(m.group(1)), m.group(2)))
+    out: list[tuple[int, int]] = []
+    for idx, (i, lvl, txt) in enumerate(heads):
+        if not KEEP_OUT_RE.search(txt):
+            continue
+        end = len(lines)
+        for j, lvl2, _ in heads[idx + 1:]:
+            if lvl2 <= lvl:
+                end = j
+                break
+        out.append((i, end))
+    return out
+
+
+def _in_keepout(line_no: int, keepouts: list[tuple[int, int]]) -> bool:
+    return any(a <= line_no < b for a, b in keepouts)
+
+
+def scan_ledgers(exclusions: dict[str, str]):
+    """返回 (entries, line_index)。line_index: 仓内相对路径 -> [(start, end, id)]"""
+    entries = []
+    line_index: dict[str, list[tuple[int, int, str]]] = collections.defaultdict(list)
+    docs = ROOT / "docs"
+    for p in sorted(docs.rglob("*.md")):
+        rel = p.relative_to(docs)
+        if rel.parts[0] not in LEDGER_DIRS:
+            continue
+        if f"docs/{rel}" in SELF_ARTIFACTS:
+            continue          # ⚠️ 自噬防护（见 SELF_ARTIFACTS 注释）
+        if f"docs/{rel}" in SELF_ARTIFACT_INDEX_FILES:
+            continue          # ⚠️ 自噬防护 · 索引文件（`_INDEX.md` = 汇总面，非条目面）
+        if any(f"docs/{rel}".startswith(d) for d in SELF_ARTIFACT_DIRS):
+            continue          # ⚠️ 自噬防护 · 目录级（U5-O 叠加层）
+        dom = rel.parts[1] if len(rel.parts) > 1 else "_root"
+        lines = p.read_text(encoding="utf-8", errors="ignore").split("\n")
+        keepouts = compute_keepouts(lines)
+        # 候选起点
+        cands: list[tuple[int, str, str]] = []   # (行号0基, id, unit)
+        heading_lines: list[int] = []
+        heading_lvls: list[int] = []
+        for i, l in enumerate(lines):
+            if _in_keepout(i, keepouts):
+                continue          # ⚠️ 保留区（派生层维护的小节）⇒ 不产生候选
+            m = re.match(r"^\s{0,3}(#{2,5})\s+(.+?)\s*$", l)
+            if m:
+                heading_lines.append(i)
+                heading_lvls.append(len(m.group(1)))
+                t = first_token(m.group(2))
+                if not (t and ID_RE.match(t)):
+                    # ⚠️ **标题里的编号不一定在首位** —— 台账大量写成
+                    #    `## 2026-10-29 · G2 收工轮 · 🔴→✅ **E59 已修**：…`
+                    #    ⇒ 首个 token 是日期（不是编号）⇒ 只认首 token 会**整条漏掉**。
+                    # ⇒ 退化：扫标题全文取**第一个编号 token**。
+                    # ⚠️ **但不得切开复合编号**（2026-10-30）—— `R3·T-3.1` 里的 `T-3`
+                    #    **不是**独立编号（那会凭空造出「T-3 在 11 个域」的假登记）
+                    #    ⇒ 用 `find_id_token`（跳过紧跟分隔符的 token）。
+                    ht = find_id_token(m.group(2))
+                    if ht and ID_RE.match(ht):
+                        t = ht
+                if t and ID_RE.match(t):
+                    cands.append((i, t, "heading"))
+                continue
+            mm = re.match(r"^\s*\|\s*\*{0,2}`?([A-Za-z][A-Za-z0-9_.\-]*)`?\*{0,2}\s*\|", l)
+            if mm:
+                t = first_token(mm.group(1))
+                if t and ID_RE.match(t):
+                    cands.append((i, t, "tablerow"))
+        # ── 表格分组：找出「首格是编号列」的表格，把数据行的首格编号记成**精确行索引** ──
+        # ⚠️ **为什么需要**（2026-10-30）：`resolve_pointer` 只按「条目段」反查
+        #   ⇒ 指向**表格行**的指针会落到**段首那个编号**上（实测
+        #   `docs/DRIFT/users/stage1-admission.md:530` = `S1-FOLLOW-013` 那行，
+        #   却反查成 `S1-FOLLOW-011` ⇒ **同源组建错边** ⇒ 合并了不相干的两条）。
+        # ⇒ 判据：**表头首格**写着「编号/条目/ID」⇒ 该表的首格才是**编号列**
+        #   ⇒ 数据行首格剥掉装饰后若是合法编号 ⇒ 记入精确索引（`start == end`）。
+        # ⚠️ **不靠猜表头**：表头首格是「落点」的表（如 `task/_README.md` 的落点表）
+        #   ⇒ 首格是**引用**不是**条目** ⇒ 不纳入。
+        tbl_groups: list[tuple[int, int]] = []
+        _i = 0
+        while _i < len(lines):
+            if lines[_i].lstrip().startswith("|"):
+                _j = _i
+                while _j < len(lines) and lines[_j].lstrip().startswith("|"):
+                    _j += 1
+                tbl_groups.append((_i, _j))
+                _i = _j
+            else:
+                _i += 1
+        for (_a, _b) in tbl_groups:
+            if _b - _a < 3:
+                continue                     # 不足「表头 + 分隔 + ≥1 数据行」⇒ 不认
+            hdr = _cells(lines[_a])
+            sep = _cells(lines[_a + 1])
+            if not hdr or not sep or not all(set(c) <= set("-: ") and c for c in sep):
+                continue                     # 第二行不是分隔行 ⇒ 不是标准表
+            h0 = hdr[0].strip()
+            if not re.search(r"编号|条目|\bID\b|item|key", h0, re.IGNORECASE):
+                continue                     # 首格不是「编号列」⇒ 不纳入
+            for _k in range(_a + 2, _b):
+                _c = _cells(lines[_k])
+                if not _c:
+                    continue
+                _id = _tablerow_id(_c[0])
+                if not _id or not ID_RE.match(_id):
+                    continue
+                if next((why for pre, why in exclusions.items() if _id.startswith(pre)), None):
+                    continue               # 排除前缀（如 `CASE-`）⇒ 与条目候选同口径
+                if _in_keepout(_k, keepouts):
+                    continue               # 保留区 ⇒ 不产生候选
+                # ⚠️ `start == end` ⇒ **精确行**标记 ⇒ `resolve_pointer` 优先命中它
+                line_index[str(rel)].append((_k + 1, _k + 1, _id))
+
+        # 分段：**互不重叠**（每个候选的段到**下一个候选**为止）
+        #    ⇒ 条目数与状态分布被**重复计数**放大（实测会把 DRIFT 的 🔴 数虚增一倍）。
+        #    ⇒ 代价 = 标题的正文本若夹着表格行会被截断 ⇒ 状态查找改为「**标题行优先**」。
+        # ⚠️ **段的边界 = 下一个候选 **或 下一个任意标题**（2026-10-30 修）
+        #   实测反例：`DRIFT/article/api.md:2590` 的「补记」章节后面**没有编号型标题** ⇒
+        #   段一路延伸到 102 行之后 ⇒ 把**别的章节**（`P0 #8` 明文密钥 / `P0 #4` 失败路径探针 /
+        #   `DRIFT-007` 非 BMP 测试）当成了本条的段 ⇒
+        #   ⇒ **继承了别人的 🔴 状态** + **别人的「A 类」归属声明**
+        #   ⇒ 一条**已关闭**的条目被报成 **A/P0 阶段一阻断项**（假缺口）。
+        #   ⇒ 段**不得跨章节**。
+        for k, (i, ident, unit) in enumerate(cands):
+            nxtc = [c[0] for c in cands if c[0] > i]
+            # ⚠️ **同级或更高级的标题**才是章节边界 —— `####` 子标题**仍在本条之内**
+            #   （台账常写成「### 条目标题 / #### 现象 / 🔴 仍成立」⇒ 子标题下的状态必须读得到）
+            _lv = heading_lvls[heading_lines.index(i)] if i in heading_lines else 99
+            nxt_h = [h for h, hl in zip(heading_lines, heading_lvls) if h > i and hl <= _lv]
+            end = min([x for x in (nxtc[0] if nxtc else len(lines),
+                                   nxt_h[0] if nxt_h else len(lines))], default=len(lines))
+            # ⚠️ **保留区截断** —— 派生层维护的小节（回写附录）既不产生候选，
+            #    也**不许落进前一个条目的段落** ⇒ 否则 `entry_stage_decl` 会从附录里
+            #    读到**别的编号**的类 ⇒ 把那一条的归属改错（比自噬更危险）。
+            for a, _b in keepouts:
+                if i < a < end:
+                    end = a
+                    break
+            seg = "\n".join(lines[i:end])
+            title = lines[i].strip()
+            if unit == "tablerow":
+                # ⚠️ **表格行的段 = 该行本身** —— 不能跨到下一候选。
+                #   实测反例：`comment/vs-common.md:226` 的 `C-9` 行本身**没有状态标记**
+                #   （「真源侧缺陷 · 记录，不修 RAG」），但它后面 20 行散文里有 🔴
+                #   ⇒ 段跨过去 ⇒ 一条**已修**的条目被读成 🔴 未闭合 ⇒ **虚增真缺口**。
+                seg = title
+            line_index[str(rel)].append((i + 1, end, ident))
+            excl = next((why for pre, why in exclusions.items() if ident.startswith(pre)), None)
+            # ⚠️ **条目自己的「标题/首格」里也可能写着它的定级** ——
+            #   实测（2026-10-30）：`### \`S1-FOLLOW-004\` 🟡 **B 类** · …`
+            #   ⇒ 定级在**标题行**里 ⇒ 段内「阶段归属/定级」关键词扫不到
+            #   ⇒ 域侧台账**已经写好的 B 类定级被派生层读成「未定级」**
+            #   ⇒ 报成「真缺口」⇒ **假的**。
+            #   ⇒ 读法：**标题型**读标题行；**表格行型**读**第 2 格**（表型各异，
+            #     整行扫会把「引用别的条目/任务的类」误读成本条的类）。
+            if unit == "heading":
+                head_class = extract_class(title)
+            else:
+                _c = _cells(title)
+                head_class = class_from_cell(_c[1]) if len(_c) > 1 else ""
+            entries.append({
+                "id": ident, "dir": rel.parts[0], "domain": dom,
+                "file": str(rel), "line": i + 1, "unit": unit,
+                "title": title[:200], "seg": seg, "excluded": excl,
+                "head_class": head_class,
+            })
+    return entries, line_index
+
+
+# ════════════════════════════════════════════════════════════════════════
+# U3 · 活体探针台账
+# ════════════════════════════════════════════════════════════════════════
+
+def load_judge_closed() -> set[str]:
+    """U2-2 · `docs/PhaseGoal-judge.md` 里**已闭合 / 已解除 / 已销案**的编号集合。
+
+    ⚠️ **为什么 judge 优先**：`PhaseGoal-judge.md` §1.5 写明「**四层状态只认一个来源**」，
+    它是阶段一终点的**唯一权威**。而域台账里**历史章节的标题仍带旧状态标记** ——
+    实测 `docs/DRIFT/article/api.md:2692` 的历史小节标题仍写
+    「🔴 **真正没闭的那一条**：双侧活体失败路径对拍 = 0 条（基线 §九 G-3）」
+    而 judge §九 的 `G-3` **已于 2026-10-29 闭合** ⇒ 只读台账会把它读成未闭合
+    ⇒ **虚增一条 A 类真缺口**。
+    ⇒ 判据 = judge 的行文本里出现「已闭合 / 已解除 / 已销案」。
+    """
+    out: set[str] = set()
+    judge = ROOT / "docs/PhaseGoal-judge.md"
+    if not judge.exists():
+        return out
+    for line in judge.read_text(encoding="utf-8").split("\n"):
+        if not line.lstrip().startswith("|"):
+            continue
+        cs = _cells(line)
+        if not cs:
+            continue
+        row = " | ".join(cs)
+        if not any(w in row for w in ("已闭合", "已解除", "已销案")):
+            continue
+        for tok in all_id_tokens(cs[0]):
+            out.add(tok)
+    return out
+
+
+def load_live_probes() -> dict[str, str]:
+    """解析 `live-parity-2026-10-30.md` §二 的探针运行台账 ⇒ {探针路径: 退出码}"""
+    out: dict[str, str] = {}
+    if not LIVE_LEDGER.exists():
+        return out
+    in_sec = False
+    for line in LIVE_LEDGER.read_text(encoding="utf-8").split("\n"):
+        if line.startswith("## "):
+            in_sec = line.startswith("## 二、")
+            continue
+        if not in_sec:
+            continue
+        m = re.match(r"^\|\s*`([^`]+)`\s*\|\s*\*{0,2}(\d+)\*{0,2}\s*\|", line)
+        if m:
+            out[m.group(1)] = m.group(2)
+    return out
+
+
+# ════════════════════════════════════════════════════════════════════════
+# U5/U8 · 施工单 + 未解决清单
+# ════════════════════════════════════════════════════════════════════════
+
+# 台账指针 `路径:行号` ⇒ 落在哪个条目段内
+# ⚠️ **2026-10-30 修复一个「恒空」bug**（零命中是假信号同族）：
+#   原正则要求 `docs/` 前缀，而 `line_index` 的键是**相对 `docs/` 的路径**
+#   （`DRIFT/users/...`）⇒ 键永远对不上 ⇒ **实测全仓 817 条指针命中 0 条**
+#   ⇒ 「任务块 / 未决项 ↔ 条目」的**指针关联静默全失效**（数字看着正常，内容全错）。
+# ⇒ 修法：`docs/` 前缀**可有可无**（正文两种都写）⇒ 两者都归一到 `line_index` 的键形。
+# ⚠️ **多写法纪律**：路径**必须带目录** —— 仓内同名 basename 多处存在（裸名不可寻址）。
+DOC_PTR_RE = re.compile(
+    r"(?:docs/)?((?:DRIFT|Pitfalls|Intentional_Deviations)/[A-Za-z0-9_./\-]+\.md):(\d+)"
+)
+
+
+def _tablerow_id(cell: str) -> str | None:
+    """表格行**首格** ⇒ 编号（剥掉 emoji / `*` / `` ` `` / `~` 等装饰）。
+
+    ⚠️ **只接受「首格整体就是编号」** —— 首格里还带说明文字的（如
+    ``**`DRIFT-COMMON-004`**：`hot-rpc` 缺 …``）⇒ **不是条目行**（那是清单/引用行）
+    ⇒ 返回 `None`。
+    ⚠️ **删除线 `~~` ⇒ 非活跃条目** ⇒ 返回 `None`。
+    ⚠️ **首格列名必须由表头声明**（见 `scan_ledgers` 的表格分组）⇒ 本函数**只管剥装饰**。
+    """
+    s = (cell or "").strip()
+    if not s or "~~" in s:
+        return None
+    s = re.sub(r"^[^\x00-\x7F]+", "", s)     # 前导 emoji（✅/🆕/⚠️…）
+    s = re.sub(r"^[\s*_`~>]+", "", s)         # 前导装饰
+    s = re.sub(r"[\s*_`~>]+$", "", s)         # 尾部装饰
+    s = s.strip("`*").strip()
+    return s or None
+
+
+def resolve_pointer(line_index, rel: str, line_no: int) -> tuple[str, str] | None:
+    """`相对 docs/ 的路径:行号` ⇒ 落在哪个条目段 ⇒ `(编号, 所属域)`；不在条目段 ⇒ `None`。
+
+    ⚠️ **多根 + 多写法**：
+      ① `docs/` 前缀可有可无；
+      ② 路径必须带目录（裸 basename 在仓内多处重名 ⇒ 不可寻址）。
+    ⚠️ **精确行优先**（2026-10-30）：指向**表格行**的指针必须解析成**该行自己的编号**，
+      而不是「该行所在段的首个编号」（实测 `users/stage1-admission.md:530`
+      = `S1-FOLLOW-013` 那行，却会解析成 `S1-FOLLOW-011` ⇒ **同源组建错边**）。
+    ⚠️ **返回 `None` ≠ 指针无效** —— 也可能是指到**非条目段**（如章节正文）。
+      ⇒ 调用方**不得**把 `None` 当成「不存在」，须单列一档。
+    """
+    for cand in (rel, f"docs/{rel}"):
+        items = line_index.get(cand, [])
+        # ① 精确行（`start == end`）优先
+        for start, end, ident in items:
+            if start == end == line_no:
+                return ident, domain_of_rel(cand)
+        # ② 回落：条目段
+        for start, end, ident in items:
+            if start <= line_no <= end:
+                return ident, domain_of_rel(cand)
+    return None
+
+
+def _link_ids_by_pointer(text: str, line_index) -> set[str]:
+    """任务块里的台账指针 ⇒ 落在哪个条目段内（编号集合）。"""
+    ids: set[str] = set()
+    for m in DOC_PTR_RE.finditer(text):
+        hit = resolve_pointer(line_index, m.group(1), int(m.group(2)))
+        if hit:
+            ids.add(hit[0])
+    return ids
+
+
+def load_tasks(line_index) -> dict[str, dict]:
+    """`_task-universe.md` ⇒ {任务ID: {class, ids, title}}
+
+    ⚠️ **任务类必须读「阶段一影响」字段，不能读章节标题** ——
+    §一 的标题写「**A 类 · 阻断阶段一（2 条）**」但**节内实放 11 条**任务
+    （`P1-T01`~`P1-T05` ＋ `P2-T01`~`P2-T06`）⇒ 按章节归类会把
+    **`P2-T02` / `P2-T06`（② 缺验收证据）**误判成 **A 类** ⇒
+    **虚增阶段一阻断项**（⇒ 直接影响「阶段一能不能过」的结论）。
+    ⇒ 逐条块读 `| **阶段一影响** | … |`；宽表读**同名列**。
+    """
+    text = TASK_UNIVERSE.read_text(encoding="utf-8")
+    lines = text.split("\n")
+    tasks: dict[str, dict] = {}
+    # ── 逐条块（### P1-T01 · 标题） ──
+    cur = None
+    blocks: list[tuple[str, str, int, int]] = []
+    for i, l in enumerate(lines):
+        hm = re.match(r"^###\s+(P\d-T\d+)\s*·\s*(.+)$", l)
+        if hm:
+            if cur:
+                blocks.append((cur[0], cur[1], cur[2], i))
+            cur = (hm.group(1), hm.group(2), i)
+            continue
+        wm = re.match(r"^\|\s*\*{0,2}`?(P\d-T\d+)`?\*{0,2}\s*\|", l)
+        if wm:
+            if cur:
+                blocks.append((cur[0], cur[1], cur[2], i))
+                cur = None
+            blocks.append((wm.group(1), "", i, i + 1))
+    if cur:
+        blocks.append((cur[0], cur[1], cur[2], len(lines)))
+
+    for tid, title, s, e in blocks:
+        seg = "\n".join(lines[s:e])
+        cls = ""
+        if title:
+            im = re.search(r"\|\s*\*\*阶段一影响\*\*\s*\|\s*(.*?)\s*\|", seg)
+            if im:
+                cls = impact_to_class(im.group(1))
+        ids = set(all_id_tokens(seg))
+        ids |= _link_ids_by_pointer(seg, line_index)
+        tasks[tid] = {"id": tid, "title": title[:120], "class": cls,
+                      "ids": ids, "seg": seg}
+
+    # ── 宽表（§二~§五）：找表头里的「阶段一影响」列 ──
+    hdr_idx = -1
+    for i, l in enumerate(lines):
+        cs = _cells(l)
+        if cs and cs[0].strip().strip("*` ") == "计划 ID":
+            for k, c in enumerate(cs):
+                if "阶段一影响" in c:
+                    hdr_idx = k
+            break
+    if hdr_idx >= 0:
+        i = 0
+        while i < len(lines):
+            cs = _cells(lines[i])
+            if cs and re.match(r"^P\d-T\d+$", cs[0].strip().strip("*` ")):
+                tid = cs[0].strip().strip("*` ")
+                if hdr_idx < len(cs):
+                    c = impact_to_class(cs[hdr_idx])
+                    if tid in tasks:
+                        if not tasks[tid]["class"]:
+                            tasks[tid]["class"] = c
+                        tasks[tid]["seg"] += "\n" + lines[i]
+                        tasks[tid]["ids"] |= set(all_id_tokens(lines[i]))
+            i += 1
+    return tasks
+
+
+# 「阶段一影响」取值 ⇒ 阶段归属（`twoStage.md` §10）
+def impact_to_class(text: str) -> str:
+    """`_task-universe.md` 的「阶段一影响」⇒ A/B/C/D。
+
+    口径（§〇 表里写明的 6 档）⇒ 映射：
+      ① 阻断阶段一      ⇒ **A**（阶段 1 准入阻断项）
+      ② 缺验收证据      ⇒ **B**（阶段 1 竞争力补强项）
+      ③ 环境受阻        ⇒ **—**（不是缺陷，是环境）
+      ④ 允许暂缓        ⇒ **C**（阶段 2 最终工程建设项）
+      ⑤ 仅为执行约束    ⇒ **B**
+      ⑥ 不属于阶段一    ⇒ **D**
+    """
+    t = text.strip()
+    for mark, cls in (("①", "A"), ("②", "B"), ("③", "—"), ("④", "C"), ("⑤", "B"), ("⑥", "D")):
+        if t.startswith(mark):
+            return cls
+    if "阻断阶段一" in t or "阻断阶段一" in t:
+        return "A"
+    if "缺验收证据" in t:
+        return "B"
+    if "环境受阻" in t:
+        return "—"
+    if "允许暂缓" in t:
+        return "C"
+    if "执行约束" in t:
+        return "B"
+    if "不属于阶段一" in t:
+        return "D"
+    return ""
+
+
+def load_unresolved(line_index) -> dict[str, dict]:
+    """`_unresolved.md` ⇒ {项ID: {class, ids}}"""
+    text = UNRESOLVED.read_text(encoding="utf-8")
+    lines = text.split("\n")
+    cls = ""
+    out: dict[str, dict] = {}
+    cur = None
+    sec_map = {"1. 阶段一阻断项": "A", "2. 证据缺口": "B", "3. 环境或权限受阻项": "—", "4. 等待用户裁定的事项": "—"}
+    for i, l in enumerate(lines):
+        if l.startswith("## "):
+            cls = ""
+            for k, v in sec_map.items():
+                if k in l:
+                    cls = v
+        m = re.match(r"^\|\s*\*{0,2}`?(BLK-\d+|GAP-\d+|ENV-\d+|DEC-\d+)`?\*{0,2}\s*\|", l)
+        if m:
+            # ⚠️ **关闭判定（2026-10-30 第 4 轮修 · 指针时效性）** ——
+            #   该未解决项**已了结** ⇒ 指向它的指针**不再算排期**。
+            #   实测全表只有 `GAP-10`（已处置）与 `GAP-12`（已关闭）命中 ⇒ 判定无歧义。
+            #
+            # ⚠️ **为什么是「列作用域」而不是「整行子串」（2026-10-30 第 4 轮复盘 · 自造判据反测）** ——
+            #   整行子串 ⇒ **新增行会自触发**：新登记行里只要叙述一句「`GAP-10` 已处置 ⇒ 指针失效」，
+            #   本行就被判 closed ⇒ **刚补上的排期指针立刻失效** ⇒ **自我抵消**（补了等于没补）。
+            #   ⇒ 关闭是**状态字段**的语义，不是叙述里随便哪个词 ⇒ 只认**当前状态列（第 3 列）**。
+            #   ⇒ 配套：`GAP-10` 行原来把「已处置」写在第 6 列 ⇒ 已把标记**前移到第 3 列**（原值逐字保留为子串）。
+            cells = split_cells(l, keep_ends=True)
+            # 表头固定 6 列 ⇒ `| a | b | c | d | e | f |` ⇒ split 出 8 段（首尾各一空串）
+            #   ⇒ cells[3] = 当前状态列。
+            malformed = len(cells) != 8
+            status_cell = "" if malformed else cells[3]
+            closed = ("已关闭" in status_cell) or ("已处置" in status_cell)
+            out[m.group(1)] = {"id": m.group(1), "class": cls, "seg": l,
+                               "closed": closed, "status_cell": status_cell.strip(),
+                               "malformed": malformed}
+    for k, v in out.items():
+        v["ids"] = set(all_id_tokens(v["seg"]))
+        v["ids"] |= _link_ids_by_pointer(v["seg"], line_index)
+    return out
+
+
+# ════════════════════════════════════════════════════════════════════════
+# U5 · 权威定级表
+# ════════════════════════════════════════════════════════════════════════
+
+def load_shared_grading() -> dict[str, dict]:
+    """`alignment-2026-10-23.md` §十三·一 的 25 行定级表 ⇒ {编号: {stage, blocking, evidence}}"""
+    out: dict[str, dict] = {}
+    if not ALIGNMENT.exists():
+        return out
+    lines = ALIGNMENT.read_text(encoding="utf-8").split("\n")
+    in_sec = False
+    for l in lines:
+        if l.startswith("### 十三·一"):
+            in_sec = True
+            continue
+        if in_sec and l.startswith("### ") and not l.startswith("### 十三·一"):
+            in_sec = False
+        if not in_sec:
+            continue
+        if not l.startswith("|"):
+            continue
+        cells = split_cells(l)
+        if len(cells) < 11:
+            continue
+        ident = cells[0].strip("*` ")
+        if not re.match(r"^(CF|LOG|SF)-\d+$", ident):
+            continue
+        blocking = cells[7].strip()
+        stage = cells[8].strip()
+        evidence = cells[10].strip()
+        st = ""
+        m = re.match(r"^\*{0,2}([ABCD])\*{0,2}", stage)
+        if m:
+            st = m.group(1)
+        blk = "是" if blocking.startswith("**是") or blocking.startswith("是") else "否"
+        out[ident] = {"stage": st, "blocking": blk, "evidence": evidence[:40],
+                      "src": "docs/DRIFT/common/alignment-2026-10-23.md §十三·一"}
+    return out
+
+
+def load_lane_domains() -> dict[tuple[str, str], str]:
+    """派工清单 `_lanes.json` ⇒ **{(lane, 编号): 域}**。
+
+    ⚠️ **派工清单是「哪条台账条目派给哪个 lane」的权威记录**
+      ⇒ **(lane, 编号) → 域** = 那条台账条目所属的域（第一层目录）⇒ **机械可定，零猜测**。
+    ⚠️ **为什么按 (lane, 编号) 而不是只按编号**：同一个编号**可能在两个域各有一条**
+      （实测 `G4-4` = article + favorite）⇒ 两条分属**不同的 lane 文件** ⇒
+      ⇒ 定级必须按 (lane, 编号) 区分，否则**一个域的定级会套到另一个域**（串味）。
+    """
+    out: dict[tuple[str, str], str] = {}
+    p = GRADING_DIR / "_lanes.json"
+    # ⚠️ **不许静默降级**（2026-10-30 实测踩坑）：原先这里写的是
+    #   `except Exception: return out` ⇒ 派生层**漏了 `import json`** ⇒
+    #   `json.loads` 抛 `NameError` ⇒ 被**静默吞掉** ⇒ 返回空 ⇒
+    #   **派工域全部丢失** ⇒ 节点级改造**根本没生效** ⇒ 数字却「看着正常」。
+    #   ⇒ 判据依赖外部输入时，失败必须**硬失败**，不许降级成「这条不可核验」。
+    if not p.exists():
+        raise SystemExit(f"🔴 派工清单缺失：{p} ⇒ 无法推出 U5-O 的适用域 ⇒ 退出")
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as exc:                      # ⚠️ 硬失败，不静默
+        raise SystemExit(f"🔴 派工清单解析失败：{p} ⇒ {exc!r} ⇒ 退出")
+    for lane in sorted(data):
+        for it in data[lane].get("条目", []):
+            rel = it.get("source", "").split(";")[0].rsplit(":", 1)[0]
+            parts = rel.split("/")
+            dom = parts[1] if len(parts) > 1 else "_root"
+            out.setdefault((lane, it["id"]), dom)
+    # ⚠️ **自检**：派工清单的 lane 数必须 == `W*.md` 定级文件数（否则某个 lane 的定级会丢）
+    _wfiles = {p.stem for p in GRADING_DIR.glob("W*.md")}
+    _missing = _wfiles - set(data)
+    if _missing:
+        raise SystemExit(f"🔴 派工清单缺少 lane：{sorted(_missing)} ⇒ 其定级会落空 ⇒ 退出")
+    return out
+
+
+def load_grading_overlay() -> dict[tuple[str, str], dict]:
+    """U5-O · **显式定级叠加层** ⇒ **{(lane, 编号): {stage, prio, blocking, basis, date, src, domain}}**
+
+    ⚠️ **为什么需要这一层（而不是把定级写回各域台账）**：
+      台账里绝大多数条目是**表格行型**（实测 129 条待定级里 **71 条是表格行**），
+      而表格行的「段」在扫描器里 = **该行本身**（见 `scan_ledgers` 注释）⇒
+      想给它挂定级，只有三条路：
+        ① 把定级**塞进单元格** ⇒ 但表格通常**已有「阶段归属」列** ⇒
+           U5-0（表格定级）**优先于** U5-f（条目正文声明）⇒ **塞了也不生效**；
+        ② 改**表格结构**（加一列）⇒ 破坏原台账、且各域表型不一 ⇒ 不可取；
+        ③ **另立叠加层** ⇒ 不动原表、零破坏、可逐条回源。⇒ **选 ③**。
+    ⚠️ **叠加层的效力 = 人工本轮显式定级** ⇒ 优先级**最高**（高于 U5-0 的台账表格），
+      理由：台账里的「阶段归属」列是**历史**判定；本轮是**逐条与 Go 源码对照**后的重判
+      （用户 2026-10-30 拍板：「逐个和 golang 版本的对比」）⇒ 新的应压过旧的。
+    ⚠️ **格式**：Markdown 表格，列 = 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期。
+      「依据」列必须写 **Go 侧 `文件:行号` + RAG 侧 `文件:行号` + 结论**
+      ⇒ 没有双侧行号的行**视为无效**（否则「定级」又变成无出处的断言）。
+    ⚠️ **键 = (lane, 编号) 而不是只按编号**（2026-10-30 派第 4 轮时暴露）：
+      同一个编号**可能在两个域各有一条**（`G4-4` = article + favorite ⇒ 各判各的）
+      ⇒ 一个编号只能存一条定级就会**丢掉一半**，或**串味到别的域**。
+      ⇒ lane 从**文件名**取（`W25.md` ⇒ `W25`）⇒ 与派工清单对齐 ⇒ 域**机械可定**。
+    """
+    out: dict[tuple[str, str], dict] = {}
+    if not GRADING_DIR.exists():
+        return out
+    lane_dom = load_lane_domains()
+    for p in sorted(GRADING_DIR.glob("*.md")):
+        if p.name.startswith("_"):
+            continue          # ⚠️ `_` 前缀 = 说明文件（格式规范/示例）⇒ **不是数据**
+        lane = p.stem
+        rel = p.relative_to(ROOT)
+        for ln, line in enumerate(p.read_text(encoding="utf-8").split("\n"), 1):
+            if not line.lstrip().startswith("|"):
+                continue
+            cs = _cells(line)
+            if len(cs) < 5:
+                continue
+            ident = cs[0].strip().strip("*` ").strip()
+            if not ident or ident in ("编号", "---"):
+                continue
+            if ident.startswith("-"):        # 分隔行
+                continue
+            stage = class_from_cell(cs[1])
+            if stage not in ("A", "B", "C", "D"):
+                continue                      # ⚠️ 无效归属 ⇒ 整行丢弃（不猜）
+            prio = cs[2].strip().strip("*` ").split()[0] if cs[2].strip() else ""
+            if prio not in ("P0", "P1", "P2", "P3"):
+                prio = ""
+            blk = cs[3].strip().strip("*` ")
+            if blk.startswith("不") or "不阻断" in blk:
+                blocking = "否"
+            elif blk.startswith("否"):
+                # ⚠️ **裸「否」也要显式解析** —— 否则 `blocking` 落空 ⇒ 靠
+                #   「A 类 ⇒ 是 / 其余 ⇒ 否」的回落规则才得出同样的值
+                #   ⇒ **正确结果来自兜底而非判据**（脆弱：回落规则一改就变）。
+                blocking = "否"
+            elif blk.startswith("是"):
+                blocking = "是"
+            else:
+                blocking = ""
+            basis = cs[4].strip()
+            date = cs[5].strip() if len(cs) > 5 else ""
+            # ⚠️ **依据必须含双侧 `文件:行号`** —— 否则「定级」是无出处的断言
+            #   ⚠️ **Go 侧必须是 `.go`；RAG 侧不限扩展名** ——
+            #      实测（2026-10-30 W4 轮）：RAG 侧指针常指向
+            #      `application.yml:53` / `AutoConfiguration.imports:4` /
+            #      `docker-compose.yaml:15` / `README.md:89` ⇒ 若限定 `.java`
+            #      ⇒ **6 条定级被整行丢弃**（数字看着正常，内容全错）。
+            #      ⇒ RAG 侧用「任意扩展名」正则，但**必须排除 `.go`**
+            #      （否则 Go 侧行号会被误当成 RAG 侧 ⇒ 两侧实际只写了一边）。
+            has_go = re.search(r"[\w./\-]+\.go:\d+", basis)
+            has_rag = re.search(r"[\w./\-]+\.(?!go\b)[A-Za-z]{1,10}:\d+", basis)
+            if not (has_go and has_rag):
+                continue
+            # ⚠️ **结论三态单独抽字段** —— **不许靠全文搜**。
+            #   实测坑（2026-10-30）：依据列原被截断到 400 字符，而结论词在**末尾**
+            #   ⇒ 71 条定级里只有 9 条被判成「差异已消失」⇒ **静默漏判 22+ 条**。
+            #   ⇒ 判据 = 依据里的**唯一**三态词（实测 71/71 条都恰好命中一个）。
+            verdict = ""
+            _hits = [(t, basis.rfind(t)) for t in ("差异仍成立", "差异已消失", "无法证实")
+                     if t in basis]
+            if _hits:
+                verdict = max(_hits, key=lambda x: x[1])[0]
+            rec = {"stage": stage, "prio": prio, "blocking": blocking,
+                   "basis": basis[:2000], "verdict": verdict, "date": date,
+                   # ⚠️ **依据里提到的服务目录** ⇒ 该定级「说的是哪个域的条目」的初值
+                   #   （用户 2026-10-30 拍板：条目身份 = 编号 + 所属域目录）
+                   "dep_domains": domains_from_paths(basis),
+                   # ⚠️ **派工域 = 该条定级针对的那条台账条目所属的域**（机械可定）
+                   "domain": lane_dom.get((lane, ident), ""),
+                   "src": f"{rel}:{ln}"}
+            key = (lane, ident)
+            old = out.get(key)
+            if old is None or (rec["date"], rec["src"]) > (old["date"], old["src"]):
+                out[key] = rec
+    return out
+
+
+def load_stage1_05() -> dict[str, dict]:
+    """`Stage1/05` §一（域级）与 §三（本轮新增）⇒ {编号: {stage, blocking}}"""
+    out: dict[str, dict] = {}
+    if not STAGE1_05.exists():
+        return out
+    lines = STAGE1_05.read_text(encoding="utf-8").split("\n")
+    i = 0
+    while i < len(lines):
+        l = lines[i]
+        m = re.match(r"^#{3,4}\s+`?([A-Z][A-Za-z0-9-]*-\d+)`?\s*(.*)$", l)
+        if m:
+            ident = m.group(1)
+            rest = m.group(2)
+            stage = ""
+            sm = re.search(r"([ABCD])\s*类", rest)
+            if sm:
+                stage = sm.group(1)
+            blocking = ""
+            # 往后找字段 8
+            for j in range(i, min(i + 40, len(lines))):
+                bm = re.match(r"^\|\s*8\s*\|\s*(.*)$", lines[j])
+                if bm:
+                    blocking = "是" if bm.group(1).strip().startswith("**是") or bm.group(1).strip().startswith("是") else "否"
+                    break
+            if ident not in out:
+                out[ident] = {"stage": stage, "blocking": blocking,
+                              "src": f"docs/Stage1/05-差异与暂缓项清单.md:{i+1}"}
+        i += 1
+    return out
+
+
+# ════════════════════════════════════════════════════════════════════════
+# U10 · **台账里已经存在的「施工单行」** —— §10 十一项表 + 「阶段归属」列表
+# ════════════════════════════════════════════════════════════════════════
+#
+# 为什么这是**最高价值**的一路抽取：
+#   `twoStage.md` §10 要求的 11 个字段，**台账里已经有一批条目用规范格式写满了**
+#   （`| 1 | 唯一编号 |` … `| 11 | 当前处理状态 |`）⇒ 那**就是**施工单行，只是
+#   **散落在各域台账里、没有索引** ⇒ 本派生层把它们**抽出来、编上号、指到源位置**。
+#   ⇒ 它同时解决了两件事：
+#     ① 「阶段归属 A-D」的覆盖率（从 10% 量级提到实际水平）
+#     ② 「阶段 2 恢复方案 / 阶段 2 测试场景」这两个此前**只有 2% 覆盖**的字段
+#
+# 两种形态：
+#   **Q1 · 十一项表** = 行首是序号 1~11、第二格是规范字段名的表
+#   **Q2 · 阶段归属列表** = 表头含「阶段归属」列（或独立的「归属」列）的表
+
+# §10 的 11 个字段名（`twoStage.md:941-975`）—— **归一化后按前缀匹配**
+F10N = ["唯一编号", "问题类型和优先级", "阶段归属", "涉及文件与实际证据", "触发场景",
+        "当前行为与预期行为", "对简历展示准入的影响", "对最终工程目标的影响",
+        "修复方向", "验收条件和测试方案", "当前处理状态"]
+# §5.3 的 11 个字段名（`twoStage.md:359-379`）
+F53N = ["唯一编号", "原始项目中的文件", "原始行为", "阶段1当前行为", "具体差异",
+        "暂缓", "对业务正确性", "是否阻断阶段1", "阶段2的恢复或替换方案",
+        "阶段2的测试场景", "当前证据及剩余证据缺口"]
+
+CLASS_RE = re.compile(r"([ABCD])\s*类")
+PRIO_RE = re.compile(r"\b(P[0-3])\b")
+NEG_WORDS = ("不是", "非", "不属于", "没有", "无需", "无")
+
+
+def norm_field(name: str) -> str:
+    return re.sub(r"[\s*/、，,·:：]+", "", name.strip().strip("*` ").replace("**", ""))
+
+
+def field_kind(name: str) -> str:
+    """字段名 → 属于 §10 表（F10）还是 §5.3 表（F53）；不认识的返回 ""。
+
+    ⚠️ **必须按「归一化后的前缀」判**，不能精确等值 —— 台账里同一字段名有多种写法
+    （`原始项目中的文件、方法或业务契约` vs `原始项目中的文件 / 方法 / 业务契约`）。
+    """
+    n = norm_field(name)
+    for pref, kind in _FIELD_TABLE:
+        if n.startswith(pref):
+            return kind
+    return ""
+
+
+# (归一化前缀, 表型) —— **顺序敏感**（长前缀在前）
+_FIELD_TABLE = [
+    ("原始项目中的文件", "F53"), ("阶段1当前行为", "F53"), ("阶段2的恢复或替换方案", "F53"),
+    ("阶段2的测试场景", "F53"), ("当前证据及剩余证据缺口", "F53"), ("是否阻断阶段1", "F53"),
+    ("对业务正确性", "F53"), ("暂缓", "F53"), ("原始行为", "F53"), ("具体差异", "F53"),
+    ("阻断阶段一", "F53"),
+    ("问题类型和优先级", "F10"), ("阶段归属", "F10"), ("涉及文件与实际证据", "F10"),
+    ("触发场景", "F10"), ("当前行为与预期行为", "F10"), ("对简历展示准入的影响", "F10"),
+    ("对最终工程目标的影响", "F10"), ("修复方向", "F10"), ("验收条件和测试方案", "F10"),
+    ("当前处理状态", "F10"), ("唯一编号", "F10"),
+]
+
+
+def extract_class(text: str) -> str:
+    """从一段文本里取**归属类**（A/B/C/D）—— **排除否定式**（「不是 A 类」）。
+
+    ⚠️ **否定式必须排除**：台账里大量写「… ⇒ **不是 A 类** ⇒ … ⇒ **D 类**」，
+    若按「第一个出现的类」取，会把一条 **D 类**读成 **A 类** ⇒ **直接导致阶段一误判**。
+    ⇒ 取**第一个没有被否定词修饰**的类。
+    """
+    best = None
+    for m in CLASS_RE.finditer(text):
+        pre = text[max(0, m.start() - 6):m.start()]
+        if any(w in pre for w in NEG_WORDS):
+            continue
+        if best is None or m.start() < best[0]:
+            best = (m.start(), m.group(1))
+    return best[1] if best else ""
+
+
+def class_from_cell(cell: str) -> str:
+    """「归属」列的取值 ⇒ A/B/C/D。
+
+    ⚠️ **列里的写法常常不带「类」字** —— 如 `**A**（阶段一准入阻断项 ⇒ 已处理）`
+    ⇒ 只按 `X 类` 匹配会**整行漏掉**（实测 `SF-001` / `LOG-003` / `DRIFT-CF-004`
+    三条都因此没进定级表 ⇒ **它们的状态也就没被定级表覆盖**）。
+    ⇒ 列内**先按「首字符是 A/B/C/D」取**（带否定词保护），再退回 `extract_class`。
+    """
+    c = cell.strip().lstrip("*` ")
+    m = re.match(r"^([ABCD])(?![A-Za-z0-9])", c)
+    if m:
+        pre = cell.strip().lstrip("*` ")[:max(0, m.start() - 6)]
+        if not any(w in pre for w in NEG_WORDS):
+            return m.group(1)
+    return extract_class(cell)
+
+
+def _cells(line: str) -> list[str]:
+    return split_cells(line)
+
+
+def scan_grading_tables():
+    """扫全仓台账 ⇒ {编号: {stage, prio, final_goal, blocking, evidence, source, kind}}
+
+    **两种表形态**：
+      **Q1 · 十一项表** —— 行首序号 1~11、第二格是 §10 或 §5.3 的规范字段名
+      **Q2 · 阶段归属列表** —— 表头含「阶段归属」列（或独立的「归属」列）
+    ⚠️ **§10 与 §5.3 的字段位置不同**：
+      §10 ⇒ 字段 3 = 阶段归属 · 字段 8 = 对最终工程目标的影响
+      §5.3 ⇒ 字段 8 = 是否阻断阶段 1 · 字段 9/10 = 阶段 2 恢复方案 / 测试场景
+      ⇒ **不能拿同一套字段号去读两张表**（否则把「是否阻断」读成「对最终目标的影响」）。
+    """
+    out: dict[str, dict] = {}
+    docs = ROOT / "docs"
+    roots = ["DRIFT", "Pitfalls", "Intentional_Deviations", "Stage1"]
+    for p in sorted(docs.rglob("*.md")):
+        rel = p.relative_to(docs)
+        if rel.parts[0] not in roots:
+            continue
+        if f"docs/{rel}" in SELF_ARTIFACTS:
+            continue          # ⚠️ 自噬防护（**两个扫描器都要挡** —— 见 SELF_ARTIFACTS 注释）
+        if any(f"docs/{rel}".startswith(d) for d in SELF_ARTIFACT_DIRS):
+            continue          # ⚠️ 自噬防护 · 目录级（**两个扫描器都要挡**）
+        lines = p.read_text(encoding="utf-8", errors="ignore").split("\n")
+        keepouts = compute_keepouts(lines)
+        heading = ""
+        i = 0
+        while i < len(lines):
+            if _in_keepout(i, keepouts):
+                i += 1
+                continue          # ⚠️ 保留区（派生层维护的小节）⇒ 不读它的表格
+            hm = re.match(r"^\s{0,3}#{2,5}\s+(.+?)\s*$", lines[i])
+            if hm:
+                heading = hm.group(1)
+                i += 1
+                continue
+            if lines[i].lstrip().startswith("|"):
+                j = i
+                tbl = []
+                while j < len(lines) and lines[j].lstrip().startswith("|"):
+                    tbl.append((j + 1, lines[j]))
+                    j += 1
+                _consume_q1(tbl, rel, heading, out)
+                _consume_q2(tbl, rel, heading, out)
+                i = j
+                continue
+            i += 1
+    return out
+
+
+def _consume_q1(tbl, rel, heading, out):
+    """Q1 · 十一项表
+
+    ⚠️ **按「字段名」判，不按「表型」判** —— 台账里存在**混型表**：
+    字段 1~4 用 §10 的名字、字段 8~11 用 §5.3 的名字（各域台账自己拼的）。
+    ⇒ 若按「整张表是 §10 还是 §5.3」二选一 ⇒ 会把「是否阻断阶段 1」读成
+       「对最终工程目标的影响」⇒ **字段语义错位**。
+    ⇒ 每个字段**各自**按名字归位。
+    """
+    fields: dict[int, tuple[int, str, str]] = {}
+    for ln, line in tbl:
+        cs = _cells(line)
+        if len(cs) < 3:
+            continue
+        m = re.match(r"^(\d{1,2})$", cs[0].strip().strip("*` "))
+        if not m:
+            continue
+        n = int(m.group(1))
+        fk = field_kind(cs[1])
+        if not fk:
+            continue
+        if n not in fields:
+            fields[n] = (ln, cs[2], fk)
+    if len(fields) < 4 or 1 not in fields:
+        return
+    idln, idtext, _ = fields[1]
+    ids = all_id_tokens(idtext)
+    if not ids:
+        return
+    ident = ids[0]
+    stage = ""
+    prio = ""
+    final_goal = ""
+    blocking = ""
+    evidence = ""
+    status_hint = ""
+    s2_restore = ""
+    s2_test = ""
+    for n, (_ln, val, _k) in fields.items():
+        if n == 2:
+            pm = PRIO_RE.search(val)
+            if pm:
+                prio = pm.group(1)
+        elif n == 3 and not stage:
+            stage = extract_class(val)
+        elif n == 4 and not evidence:
+            evidence = val[:120]
+        elif n == 8:
+            if "最终工程目标" in val or "最终工程" in val:
+                final_goal = val[:120]
+            else:
+                blocking = "是" if (val.strip().startswith("**是") or val.strip().startswith("是")) else "否"
+                if "已修" in val or "已闭合" in val or "已关闭" in val:
+                    status_hint = "已修"
+                elif "未修" in val or "仍开放" in val:
+                    status_hint = "未修"
+        elif n == 9:
+            s2_restore = val[:110]
+        elif n == 10:
+            s2_test = val[:110]
+        elif n == 11 and not evidence:
+            evidence = val[:120]
+    if not final_goal and (s2_restore or s2_test):
+        final_goal = (s2_restore + " ｜ " + s2_test).strip(" ｜")
+    if not stage:
+        stage = extract_class(heading)
+    prev = out.get(ident)
+    rec = {"stage": stage, "prio": prio, "final_goal": final_goal,
+           "blocking": blocking, "evidence": evidence, "status_hint": status_hint,
+           "source": f"{rel}:{idln}", "kind": "十一项表"}
+    if prev is None:
+        out[ident] = rec
+    else:
+        for k in rec:
+            if not prev.get(k) and rec[k]:
+                prev[k] = rec[k]
+        prev["source"] = prev["source"] + " ｜ " + rec["source"]
+
+
+def _consume_q2(tbl, rel, heading, out):
+    """Q2 · 「阶段归属」列表：表头含该列"""
+    header = None
+    for ln, line in tbl:
+        cs = _cells(line)
+        if not cs:
+            continue
+        joined = " ".join(cs)
+        if "阶段归属" in joined or any(c.strip().strip("*` ") in ("归属", "阻断阶段一", "是否阻断") for c in cs):
+            header = (ln, cs)
+            break
+    if not header:
+        return
+    hcells = header[1]
+    idx_stage = idx_blk = idx_prio = -1
+    for i, c in enumerate(hcells):
+        cc = c.strip().strip("*` ").replace("**", "").strip()
+        if cc in ("阶段归属", "归属"):
+            idx_stage = i
+        elif cc.startswith("阻断阶段一") or cc.startswith("是否阻断") or cc == "阻断":
+            idx_blk = i
+        elif cc in ("优先级", "严重度"):
+            idx_prio = i
+    if idx_stage < 0:
+        return
+    for ln, line in tbl:
+        if ln <= header[0]:
+            continue
+        cs = _cells(line)
+        if len(cs) <= idx_stage:
+            continue
+        row = " | ".join(cs)
+        if set("".join(cs).strip()) <= set("-: "):
+            continue
+        ids = all_id_tokens(row)
+        if not ids:
+            continue
+        ident = ids[0]
+        stage = class_from_cell(cs[idx_stage])
+        if not stage:
+            continue
+        prio = ""
+        if idx_prio >= 0 and idx_prio < len(cs):
+            pm = PRIO_RE.search(cs[idx_prio])
+            prio = pm.group(1) if pm else ""
+        blocking = ""
+        status_hint = ""
+        if idx_blk >= 0 and idx_blk < len(cs):
+            v = cs[idx_blk].strip()
+            blocking = "否" if (v.startswith("否") or v.startswith("❌") or "不阻断" in v) else "是"
+            if "已修" in v or "已闭合" in v or "已关闭" in v:
+                status_hint = "已修"
+            elif "未修" in v or "仍开放" in v:
+                status_hint = "未修"
+        prev = out.get(ident)
+        rec = {"stage": stage, "prio": prio, "final_goal": "", "blocking": blocking,
+               "evidence": "", "status_hint": status_hint, "source": f"{rel}:{ln}", "kind": "阶段归属列表"}
+        if prev is None:
+            out[ident] = rec
+        elif not prev.get("stage") or (prev.get("kind") == "阶段归属列表" and not prev.get("blocking")):
+            prev.update({k: v for k, v in rec.items() if v or not prev.get(k)})
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 派生
+# ════════════════════════════════════════════════════════════════════════
+
+DATE_RE = re.compile(r"(20\d{2})[-/年](\d{1,2})[-/月](\d{1,2})")
+# 「现行态 = X」—— 2026-10-30 真实性复核轮**逐条追加**的显式现行态声明
+CURRENT_RE = re.compile(r"现行态\s*=\s*[*`]*\s*([^，。；、（()]{1,12})")
+# 迁移记号：`🔴→✅` / `🟡 → ✅` / `🔴->✅` ⇒ 终态取**右边**
+TRANSIT_RE = re.compile(r"(✅|🟡|🔴|⚫)\s*(?:→|->|➔|=>)\s*(✅|🟡|🔴|⚫)")
+
+
+def normalize_status_token(tok: str, dirname: str) -> str:
+    """把「现行态 = X」的 X 归一到本目录的状态取值域。"""
+    t = tok.strip().strip("*` ")
+    if not t or t.startswith("上列"):
+        return ""
+    if t.startswith("✅"):
+        return "✅ 仍成立" if dirname == "Intentional_Deviations" else "✅ 已一致"
+    if t.startswith("🟡"):
+        return "🟡 部分闭合"
+    if t.startswith("🔴"):
+        return "🔴 未闭合"
+    if t.startswith("⚫"):
+        return "⚫ 已签字偏离"
+    if t.startswith("仍未修") or t.startswith("未修") or t.startswith("仍开放"):
+        return "🔴 未闭合"
+    if t.startswith("仍成立"):
+        return "✅ 仍成立" if dirname == "Intentional_Deviations" else "✅ 已一致"
+    if t.startswith("仍生效"):
+        return "仍生效"
+    if t.startswith("已闭环") or t.startswith("已关闭") or t.startswith("已修"):
+        return "已闭环"
+    if t.startswith("已撤销"):
+        return "已撤销"
+    if t.startswith("已失效"):
+        return "已失效"
+    if t.startswith("未签字"):
+        return "⏳ 未签字"
+    if t.startswith("待核实"):
+        return "待核实"
+    return ""
+
+
+def entry_date(entry) -> str:
+    """U2-b · 条目的**最新核对日期**（ISO）—— 同一编号多态时用它选「最新状态」。
+
+    ⚠️ **必须按日期取最新，不能按严重度取最严重**（`PhaseGoal-judge.md` §1.5 L0）。
+    找不到日期 ⇒ 返回空串（⇒ 退化为「文件顺序取最后一条」）。
+    """
+    best = ""
+    for m in DATE_RE.finditer(entry["seg"]):
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if not (1 <= mo <= 12 and 1 <= d <= 31):
+            continue
+        iso = f"{y:04d}-{mo:02d}-{d:02d}"
+        if iso > best:
+            best = iso
+    return best
+
+
+def detect_status(entry) -> str | None:
+    """U2 · 状态归一 —— **按「现行态」显式声明优先**，其次**按出现位置取最早**的标记。
+
+    ⚠️ **为什么「现行态 = X」优先**：2026-10-30 真实性复核轮在**每条**后面追加了
+    「⚠️ 2026-10-30 真实性复核：原判 X ⇒ **现行态 = Y**」——
+    而**行内的状态列常常是更早的快照** ⇒ 只看状态列会把「已改判」的条目读成旧状态。
+    ⇒ 实测反例：`SF-001` 的定级行里写着「🔴 **修复前**：`Snowflake.java:242` …」
+      ⇒ 按标记扫会读成 🔴 未闭合，而它**早已修好**（阻断列自己写着「是 ⇒ 已修」）。
+
+    ⚠️ **为什么按位置**：标题形如 `DRIFT-X-001 —— 修前 🔴，修后 ✅` 时，
+    「按取值域字典序取第一个」会命中 ✅ ⇒ **把一条已修的条目读成已一致**。
+    ⇒ 取**出现位置最早**的标记；同位置时取更长的键（`已失效` vs `已闭环`）。
+    """
+    marks = STATUS_SETS[entry["dir"]]
+
+    # ⓪ **迁移记号** `🔴→✅` / `🟡 → ✅` —— 终态是**右边**那个
+    #    ⚠️ 台账里极常见：`🔴→✅ **销案**`（E60 · 2026-10-29）
+    #    ⇒ 若按「取最早出现的标记」会取到 🔴 ⇒ **把已销案的条目读成未闭合**
+    #      ⇒ **虚增真缺口**。⇒ 必须先看迁移记号的**终态**。
+    for text in (entry["title"], entry["seg"][:400]):
+        m = TRANSIT_RE.search(text)
+        if m:
+            st = normalize_status_token(m.group(2), entry["dir"])
+            if st:
+                return st
+
+    # ① 显式「现行态 = X」
+    for m in CURRENT_RE.finditer(entry["seg"]):
+        st = normalize_status_token(m.group(1), entry["dir"])
+        if st:
+            return st
+
+    def earliest(text: str):
+        best = None
+        for k in marks:
+            pos = text.find(k)
+            if pos < 0:
+                continue
+            if best is None or pos < best[0] or (pos == best[0] and len(k) > len(best[1])):
+                best = (pos, k)
+        return best[1] if best else None
+
+    k = earliest(entry["title"])
+    if k:
+        return marks[k]
+    k = earliest(entry["seg"])
+    if k:
+        return marks[k]
+    return None
+
+
+PRIO_DECL_RE = re.compile(r"优先级\s*\**\s*(P[0-3])")
+
+
+def entry_prio_decl(entry) -> str:
+    """U4-1 · 条目自己正文里的优先级声明（如「优先级 **P2**」）⇒ P0-P3"""
+    m = PRIO_DECL_RE.search(entry["seg"][:1200])
+    return m.group(1) if m else ""
+
+
+def entry_stage_decl(entry) -> tuple[str, str]:
+    """U5-f · 条目**自己段落里**的归属声明 ⇒ (stage, 依据)
+
+    ⚠️ **为什么必须读条目自己的段落**：台账里大量条目在**自己的**正文里写着
+    「**阶段归属（`twoStage.md` §10）**：**A 类**（P0 #8）…」
+    「**定级**：**C 类（阶段 2 最终工程建设项）** —— 理由：…」
+    ⇒ 那才是**这一条**的归属。
+    ⚠️ **为什么不能用「任务类」代替**：施工单任务 `P1-T01`（A 类 · 全服务起栈）
+    在「关联项」里提到 `DRIFT-HOTAPI-030` ⇒ **任务类 ≠ 条目归属**
+    ⇒ 拿任务类去填条目归属 = **范畴错误** ⇒ 会把一条 C 类差异虚报成「A 类阻断」。
+    ⇒ 只在**含「阶段归属 / 定级」关键词**的行里取类（避开「A 类 backlog」这类随口提及）。
+    """
+    for line in entry["seg"].split("\n"):
+        if "阶段归属" not in line and "定级" not in line:
+            continue
+        st = extract_class(line)
+        if st:
+            return st, line.strip()[:90]
+    # ⚠️ **兜底：条目自己的标题 / 表格首格**（域侧台账常把定级直接写在标题里）
+    st = entry.get("head_class", "")
+    if st:
+        return st, entry["title"][:90]
+    return "", ""
+
+
+def entry_blocking_decl(entry) -> str:
+    """U5-g · 条目自己正文里的「阻断阶段 1」声明 ⇒ 是 / 否
+
+    ⚠️ **先把 `*` 与空格剥掉再判** —— 台账里常写成 `**不阻断**阶段一`
+    （粗体只包住「不阻断」三个字）⇒ 直接子串匹配会**漏判** ⇒ 阻断标志回落到
+    「A 类 ⇒ 是」⇒ **把一条明确不阻断的条目报成阻断**。
+    """
+    seg = re.sub(r"[*`\s]", "", entry["seg"])
+    if ("不阻断阶段1" in seg or "不阻断阶段一" in seg or "不计入阶段一" in seg
+            or "不阻断阶段1准入" in seg):
+        return "否"
+    if ("阻断阶段1" in seg or "阻断阶段一" in seg):
+        return "是"
+    return ""
+
+
+def status_authority(entry) -> int:
+    """U2-c · 该条登记的「状态权威度」—— 同日期时用它挑更权威的那条。
+
+    3 = 有「现行态 = X」显式声明（最权威）
+    2 = 有迁移记号 `🔴→✅`（**终态**才是当前状态）
+    1 = 只有状态列/标记
+    ⚠️ **为什么需要**：同一日期的两次登记里，**旧章节**可能仍写着 🔴、
+    **新章节**写着「🔴→✅ 销案」⇒ 只比日期会**取到旧那条** ⇒ 虚增真缺口。
+    """
+    if CURRENT_RE.search(entry["seg"]):
+        return 3
+    if TRANSIT_RE.search(entry["title"]) or TRANSIT_RE.search(entry["seg"][:400]):
+        return 2
+    return 1
+
+
+def detect_evidence(entry, live_probes: dict[str, str], all_tools: set[str]) -> tuple[str, str]:
+    """U3 ⇒ (档位, 依据)"""
+    refs = set()
+    for m in TOOLREF_RE.finditer(entry["seg"]):
+        ref = m.group(0).rstrip(".,;:`）)】]、")
+        if ref in all_tools:
+            refs.add(ref)
+    hit_live = sorted(r for r in refs if r in live_probes)
+    if hit_live:
+        # ⚠️ **A 档必须带上探针的真实退出码** —— 「有活体证据」≠「结论被证实」：
+        #    实测：A 档引用的探针里 **23 条指向 EXIT=2（环境问题 ⇒ 结论不可用）**
+        #    **12 + 11 条指向 EXIT=1（不一致）** ⇒ 只写「A 活体」会让人以为这条已被证实。
+        #    ⇒ 值形如 `A 活体 · 红(1)` / `A 活体 · 环境(2)` / `A 活体 · 绿(0)` / `A 活体 · 混(0/1/2)`。
+        codes = sorted({live_probes[r] for r in hit_live})
+        if len(codes) == 1:
+            verdict = {"0": "绿", "1": "红", "2": "环境", "4": "码4"}.get(codes[0], codes[0])
+            tag = f"{verdict}({codes[0]})"
+        else:
+            tag = "混(" + "/".join(codes) + ")"
+        return f"A 活体 · {tag}", "探针 " + ",".join(hit_live[:2]) + ("…" if len(hit_live) > 2 else "")
+    nptr = len(PTR_RE.findall(entry["seg"]))
+    if nptr:
+        return "B 静态", f"{nptr} 个可复算指针"
+    if refs:
+        return "B 静态", "工具引用 " + ",".join(sorted(refs)[:2])
+    return "C 无指针", "无可复算指针"
+
+
+def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, all_tools, grading,
+           judge_closed=frozenset(), overlay=None):
+    # ⚠️ **U11 波次映射** —— 派工面（该条归哪棵工作树 G1~G4 做）
+    wave_by_file, wave_by_dom = load_wave_map()
+    # 任务 → 条目 反查表
+    task_of: dict[str, list[str]] = collections.defaultdict(list)
+    for tid, t in tasks.items():
+        for ident in t["ids"]:
+            task_of[ident].append(tid)
+    unres_of: dict[str, list[str]] = collections.defaultdict(list)
+    # ⚠️ **2026-10-30 第 4 轮修 · 指针时效性** ——
+    #   指向**已关闭**的未解决项（`GAP-10` 已处置 / `GAP-12` 已关闭）⇒ **不算「已排期」**。
+    #   ⇒ 原判据只看「`schedule` 字段是不是『未排期』」⇒ **不看指针是否还有效**
+    #   ⇒ 实测后果：**真缺口 A/B 未排期 = 0 是假的** —— `E1`（→`GAP-10`）与 `F-1`（→`GAP-12`）
+    #      两条 A/B 类开放条目**只**指向已关闭项 ⇒ **实际漏排 2 条**。
+    unres_closed_of: dict[str, list[str]] = collections.defaultdict(list)
+    for uid, u in unresolved.items():
+        for ident in u["ids"]:
+            if u.get("closed"):
+                unres_closed_of[ident].append(uid)
+            else:
+                unres_of[ident].append(uid)
+
+    rows = []
+    # ⚠️ **域适配（2026-10-30 · 用户拍板「条目身份 = 编号 + 所属域目录」）**
+    #   台账用**裸编号** ⇒ 同一个编号在不同域指的不是同一件事 ⇒ 覆盖层（定级 / 状态覆盖）
+    #   必须**按域限定**，否则会把一个域的定级套到另一个域的条目上。
+    #   ⇒ `reg_domains[编号]` = 该编号在哪些域有登记（只算带状态标记的，即真正进表的）
+    reg_domains: dict[str, set[str]] = collections.defaultdict(set)
+    for e in entries:
+        if e["excluded"]:
+            continue
+        if detect_status(e):
+            reg_domains[e["id"]].add(e["domain"])
+    # ⇒ U5-O 叠加层的适用域 = **派工域**（该条定级针对的那条台账条目所属的域，机械可定）
+    #   ⇒ 同编号多域时**各判各的**（节点级）⇒ 不会串味
+    scope_over = load_scope_overrides()
+    ov_scope: dict[str, set[str] | None] = {}
+    ov_by_node: dict[tuple[str, str], dict] = {}
+    for (_lane, ident), rec in (overlay or {}).items():
+        dom = rec.get("domain") or ""
+        if dom:
+            doms = {dom}
+        else:
+            # ⚠️ **兜底**：派工清单里没有该 (lane, 编号) ⇒ 用「依据里提到的域 ∩ 登记域」
+            reg = reg_domains.get(ident, set())
+            dep = set(rec.get("dep_domains") or ())
+            inter = dep & reg
+            doms = inter if inter else (reg or set())
+        ov_scope[ident] = doms
+        for d in doms:
+            ov_by_node.setdefault((ident, d), rec)
+    # ⚠️ **手工订正**（`overlay-scope.txt` 节点级）⇒ **强制**加入指定节点
+    for (i, d) in scope_over:
+        for (_lane, ident), rec in (overlay or {}).items():
+            if ident == i:
+                ov_by_node.setdefault((i, d), rec)
+                break
+    # ⇒ U5-0（台账表格里的历史定级）的适用域 = **表格所在文件的域**
+    #   （来源文件就是它「在说哪个域的条目」的最直接证据 ⇒ 机械可定，零猜测）
+    def _grading_scope(rec) -> set[str] | None:
+        ds = set()
+        for s in (rec.get("source") or "").split(" ｜ "):
+            rel = s.rsplit(":", 1)[0]
+            if rel.split("/")[0] in LEDGER_DIRS:
+                ds.add(domain_of_rel(rel))
+        return ds or None
+
+    def _in_scope(scope, domain) -> bool:
+        """`scope is None` = 适用于全部域。"""
+        return scope is None or domain in scope
+
+    for e in entries:
+        ident = e["id"]
+        status = detect_status(e)
+        # ⚠️ **只派生「问题项」** —— 无状态标记的**明细子行**（分类明细 / 测试矩阵的补充列）
+        #    与**排除清单**命中的族（`CASE-*`）**都不进派生表**
+        #    ⇒ 否则「A 组/B 组」这类分类明细会冒充「问题项」，把施工单撑成 1000+ 行。
+        if e["excluded"]:
+            continue
+        # ⚠️ **U5-O 命中前置**（域校验要在「是否派生」之前做 —— 下面要用它补状态）
+        #   ⚠️ **节点级查找**（2026-10-30）—— 同编号在两个域各有一条时**各判各的**
+        _ov = ov_by_node.get((ident, e["domain"]))
+        if status is None:
+            # ⚠️ **「文字形态状态」兜底**（2026-10-30）
+            #   台账大量用**文字**写状态（`### F-3 —— DRIFT-ARTICLE-API-003 已修：…`）⇒
+            #   段截短（不跨章节）后**读不到 emoji 状态标记** ⇒ 条目会**整条消失**。
+            #   ⇒ 用 **U5-O 的结论三态**补：`差异已消失` ⇒ 该条**已闭合** ⇒ 映射到本目录的
+            #   **已闭合**取值（DRIFT ⇒ ✅ 已一致 / IntDev ⇒ ✅ 仍成立 / Pitfalls ⇒ 已闭环）。
+            #   ⚠️ **只认「差异已消失」这一档** —— 「差异仍成立 / 无法证实」**不映射**
+            #   ⇒ 那些条目仍然**不派生**（派生层**不猜**）。
+            if not (_ov and _ov.get("verdict") == "差异已消失"):
+                continue
+            status = ("✅ 已一致" if e["dir"] == "DRIFT" else
+                      "✅ 仍成立" if e["dir"] == "Intentional_Deviations" else "已闭环")
+        evid, evid_src = detect_evidence(e, live_probes, all_tools)
+        rules = ["U1", "U2", "U3"]
+        # U2-2 · judge 判「已闭合」⇒ 覆盖台账历史章节的旧标记
+        if ident in judge_closed and status in ("🔴 未闭合", "🟡 部分闭合", "仍生效", "待核实"):
+            status = "✅ 已一致"
+            rules.append("U2-2")
+        _date = entry_date(e)
+        _auth = status_authority(e)
+        stage = ""
+        blocking = ""
+        stage_src = ""
+        explicit_prio = ""
+        explicit_final = ""
+        explicit_evidence = ""
+        # ⚠️ **U5-O · 显式定级叠加层 = 最高优先级**（人工本轮逐条 Go 对照后的重判）
+        #   ⇒ 压过 U5-0（台账表格里的历史「阶段归属」列）—— 台账那列是**历史**判定，
+        #     本轮是**回源核对**后的判定 ⇒ 新的应压过旧的。
+        #   ⇒ 但 **status 不改** —— 定级不改变事实状态（🔴 仍是 🔴，除非有人真的修）。
+        # ⚠️ **域校验**：这个定级**是不是在说本域这一条**？不是 ⇒ 不生效（否则串味）。
+        #   （`_ov` 已在上方算好并做过域校验 ⇒ 这里直接复用）
+        ov = _ov
+        ov_prio = ""
+        closed = False
+        if ov:
+            stage = ov["stage"]
+            blocking = ov["blocking"]
+            stage_src = f"{ov['src']}（U5-O 显式定级 · {ov['date'] or '无日期'}）"
+            ov_prio = ov["prio"]
+            rules.append("U5-O")
+            # ⚠️ **「差异已消失」= 已闭合 · 无待实现项** ⇒ 它**不属于任何阶段**。
+            #   实测（W1 轮）：16 条里 15 条是「台账还写 🔴 未闭合，但逐条回源后差异已不存在」。
+            #   ⇒ 若把它们按 D 类塞进「阶段 2 承接」清单 ⇒ **阶段二工作量被虚增**
+            #   ⇒ 那份清单会变成**假的待办**（同族教训：口径错位 ⇒ 数字最漂亮但内容是假的）。
+            if ov.get("verdict") == "差异已消失":
+                # ⚠️ **2026-10-30 第 4 轮修 · 三态缺档** ——
+                #   「**差异已消失**」**不等于「无待实现内容」**。
+                #   三态只有「差异仍成立 / 差异已消失 / 无法证实」⇒ **缺「行为已对齐但验证闭环未补」这一档**
+                #   ⇒ 实测后果：`F-1`@favorite 的 verdict = 差异已消失，但 lane 给的归属是 **B**
+                #      （其依据明写「⚠️ 残留只余 `favorite/rpc.md:4136`（下游 article-rpc 在场的 create
+                #      成功路径『未验』）与 `:4139`（NULL title／cover 显式排除）⇒ 归 B」）
+                #   ⇒ 若一律判「已闭合 ⇒ 无待实现项」⇒ **一条 B 类待办被吞掉**
+                #   ⇒ 且它的排期指针 `GAP-12` 本轮已关闭 ⇒ **既没排期、也没被算成缺口** ⇒ 双重蒸发。
+                # ⇒ 规则：**归属 = D**（经分析确认不实现）⇒ 才算已闭合；
+                #   归属 = A/B/C ⇒ lane 明说「还有残留」⇒ **不得判已闭合**。
+                closed = (ov.get("stage") == "D")
+                rules.append("U2-4" if closed else "U2-4*")
+        # U5-0：**台账里已经写好的施工单行**（十一项表 / 阶段归属列表）⇒ **最高优先级**
+        # ⚠️ **域校验**：台账表格的定级**只对那张表所在的域生效**
+        #   （实测：`E1` 在 `users/stage1-admission.md` 写 B 类、`global/_README.md` 另有一条同名
+        #   `E1` 讲的是完全另一件事 ⇒ 不校验就会把 B 类套到 global 那条上）。
+        g = grading.get(ident)
+        if g and not _in_scope(_grading_scope(g), e["domain"]):
+            g = None
+        if g and not stage:
+            stage = g.get("stage", "")
+            blocking = g.get("blocking", "")
+            hint = g.get("status_hint", "")
+            if hint:
+                hs = ("已闭环" if e["dir"] == "Pitfalls" else
+                      "✅ 仍成立" if e["dir"] == "Intentional_Deviations" else "✅ 已一致") if hint == "已修" else \
+                     ("仍生效" if e["dir"] == "Pitfalls" else
+                      "⏳ 未签字" if e["dir"] == "Intentional_Deviations" else "🔴 未闭合")
+                status = hs
+                rules.append("U2-0")
+            explicit_prio = g.get("prio", "")
+            explicit_final = g.get("final_goal", "")
+            explicit_evidence = g.get("evidence", "")
+            stage_src = f"{g['source']}（{g['kind']}）"
+            rules.append("U5-0")
+        # U5：权威定级表优先（**U5-O 已经定级 ⇒ 后面几路都不覆盖**）
+        if not stage and ident in shared_grading:
+            g = shared_grading[ident]
+            stage = g["stage"]; blocking = g["blocking"]; stage_src = g["src"]
+            rules.append("U5a")
+        elif not stage and ident in stage1_05:
+            g = stage1_05[ident]
+            stage = g["stage"]; blocking = g["blocking"]; stage_src = g["src"]
+            rules.append("U5b")
+        elif not stage and e["dir"] == "Intentional_Deviations" and status in ("✅ 仍成立", "⛔ 已失效", "⛔ 已撤销"):
+            stage = "D"
+            stage_src = "docs/Intentional_Deviations/（已签字偏离 ⇒ 决策不是缺陷）"
+            rules.append("U5d")
+        if not stage:
+            st, why = entry_stage_decl(e)
+            if st:
+                stage = st
+                stage_src = why
+                rules.append("U5f")
+        if not stage and e["dir"] == "Pitfalls":
+            # ⚠️ **U5-P · Pitfalls 条目 = 元教训 ⇒ 阶段归属「不适用」**
+            #   理由：§10 的 A-D 是给「**问题**」分的（缺陷 / 风险 / 待恢复语义 / 确认不实现），
+            #   而坑位是「**教训**」——「测试全绿也起不来」不是一条待修的问题，
+            #   而是「下次怎么防」。⇒ 给它硬分 A-D 是**范畴错误**。
+            #   ⇒ 若某条坑位**指向**一个具体行为差异 ⇒ 那个差异在 **DRIFT 侧**定级，
+            #     坑位本身只承担「防」的角色（可由派生链回指）。
+            stage = "N/A（不适用）"
+            stage_src = "docs/Pitfalls/**（元教训 ⇒ 不是「问题」，不参与 A-D 定级）"
+            rules.append("U5P")
+        if not stage:
+            stage = "—"
+            stage_src = "（未派生 · 待人工定级）"
+            rules.append("U5e")
+        # U6
+        if not blocking:
+            decl = entry_blocking_decl(e)
+            if decl:
+                blocking = decl
+                rules.append("U6g")
+            else:
+                blocking = "是" if stage == "A" else "否"
+                rules.append("U6a")
+        else:
+            rules.append("U6b")
+        # U4
+        if ov_prio:
+            prio = ov_prio
+            rules.append("U4-O")
+        elif explicit_prio:
+            prio = explicit_prio
+            rules.append("U4-0")
+        elif entry_prio_decl(e):
+            prio = entry_prio_decl(e)
+            rules.append("U4-1")
+        elif stage == "A":
+            prio = "P0"
+            rules.append("U4a")
+        elif status in PRIO_BY_STATUS:
+            prio = PRIO_BY_STATUS[status]
+            rules.append("U4b")
+        else:
+            prio = "P3"
+            rules.append("U4c")
+        # U7
+        if explicit_final:
+            final_goal = "台账已写 · " + explicit_final[:60]
+            rules.append("U7-0")
+        elif stage == "C":
+            final_goal = "影响 · 阶段 2 必须恢复"
+        elif stage == "D":
+            final_goal = "不影响 · 经分析确认不实现"
+        elif stage in ("A", "B"):
+            final_goal = "间接 · 阶段 1 闭合后才有阶段 2"
+        else:
+            final_goal = "未判定"
+        rules.append("U7")
+        # U8
+        tids = sorted(task_of.get(ident, []))
+        uids = sorted(unres_of.get(ident, []))
+        closed_uids = sorted(unres_closed_of.get(ident, []))
+        if tids and uids:
+            schedule = ",".join(tids) + " ｜ " + ",".join(uids)
+            rules.append("U8a")
+        elif tids:
+            schedule = ",".join(tids)
+            rules.append("U8a")
+        elif uids:
+            schedule = ",".join(uids)
+            rules.append("U8b")
+        else:
+            schedule = "未排期"
+            rules.append("U8c")
+        # ⚠️ **指针时效性**（2026-10-30 第 4 轮修）—— 指向**已关闭**的未解决项 ⇒ 不算「已排期」
+        if closed_uids:
+            schedule = (schedule + " ｜ ⚠️已关闭指针:" + ",".join(closed_uids)
+                        if schedule != "未排期" else "未排期")
+            rules.append("U8d")
+        # U9
+        if closed:
+            gap = "已闭合 · 差异已消失 ⇒ 无待实现项"
+        elif evid.startswith("C"):
+            gap = "无可复算指针 · 结论不可复算"
+        elif evid.startswith("B") and status == "🔴 未闭合":
+            gap = "静态取证 · 缺活体对拍"
+        elif stage == "—":
+            gap = "未定级 ⇒ 未排期"
+        elif schedule == "未排期":
+            gap = "已定性 · 未排期"
+        else:
+            gap = "—"
+        rules.append("U9")
+        rows.append({
+            "id": ident, "dir": e["dir"], "domain": e["domain"],
+            # ⚠️ **U11 波次（派工面）** —— 该条归哪棵工作树（G1~G4）做
+            "wave": wave_of(e["file"], e["domain"], wave_by_file, wave_by_dom),
+            "source": f"{e['file']}:{e['line']}", "unit": e["unit"],
+            "status": status or "（无状态标记）",
+            "evidence": evid, "prio": prio, "stage": stage,
+            "blocking": blocking, "final_goal": final_goal,
+            "schedule": schedule, "gap": gap,
+            "rules": ",".join(sorted(set(rules))),
+            "title": e["title"].replace("\t", " ")[:160],
+            "_closed": closed,
+            "_ov": "U5-O" in rules,
+            "basis": (_ov or {}).get("basis", ""),
+            "_excluded": e["excluded"] or "",
+            "_date": _date,
+            "_auth": _auth,
+            "_stage_src": stage_src,
+            "_evidence_src": evid_src,
+        })
+    # 同一 ID 多处登记 ⇒ 合并成一行（源位置全列）
+    # ⚠️ **2026-10-30 · 合并键从「裸编号」改为「（编号, 所属域目录）」** —— 用户拍板。
+    #   原因：台账用**裸编号**（`E1`/`E2`/`L-4`/`T-6`…，无域前缀）⇒ **同一个编号在不同域
+    #   指的不是同一件事** ⇒ 按裸编号合并会把一个域的状态/优先级/阶段归属
+    #   **继承**到另一个域的条目上 ⇒ **派单会派到不存在的事上**。
+    #   实测代价：4 条假缺口（`GAP-10`）+ 1 条 A 类被降级成 B 类。
+    #   ⇒ 合并只在**同一域内**发生（「同一件事的多个版本」照旧按日期/权威度归一）。
+    #   ⇒ **例外** = 同源组（`identity-groups.txt`）：那批编号是**同一件事跨域登记**
+    #   （签字族 / `T-*` 清单的两个副本 / `UNRESOLVED-*`）⇒ 组内仍合并。
+    groups = load_identity_groups()
+
+    def _merge_key(r) -> tuple[str, str]:
+        ident, dom = r["id"], r["domain"]
+        g = groups.get((ident, dom))
+        if g is None:
+            return (ident, dom)
+        # ⚠️ 组内**仍合并成一条** ⇒ 键 = (组代表编号, 组域集合)
+        #   ⇒ 组外同编号的**别的域**不受影响（键不同）⇒ 「撞号」仍拆开 ✓
+        return (g[0], "GRP:" + g[1])
+
+    merged: dict[tuple[str, str], dict] = {}
+    for r in rows:
+        k = _merge_key(r)
+        if k not in merged:
+            merged[k] = dict(r)
+            merged[k]["_sources"] = [r["source"]]
+            merged[k]["_date"] = r["_date"]
+            merged[k]["_statuses"] = [r["status"]]
+            merged[k]["_reg"] = 1
+            merged[k]["_waves"] = [r["wave"]]
+        else:
+            merged[k]["_sources"].append(r["source"])
+            merged[k]["_statuses"].append(r["status"])
+            merged[k]["_reg"] += 1
+            merged[k]["_waves"].append(r["wave"])
+            # ⚠️ **取「最新核对日期」的那一条，不是取「最严重」的那一条**。
+            #   依据：`docs/PhaseGoal-judge.md` §1.5 L0「状态判据 = 以**条目级最新状态**为准
+            #   （旧快照不覆盖后续证据）」。
+            #   ⇒ 反例（实测）：`DRIFT-HOTAPI-030` 有 7 处登记，早期是 🔴、最新是 🟡 部分闭合
+            #      ⇒ 「取最严重」会把它读成 🔴 未闭合 ⇒ **阶段一结论被拉偏**。
+            # ⚠️ **已签字偏离优先于「🔴 未闭合」** ——
+            #    同一编号常在 DRIFT（差异本体）与 IntDev（签字档）两处登记；
+            #    若取 DRIFT 的 🔴 ⇒ 一条**已签字的决策**会进「真缺口」清单
+            #    ⇒ **与「签字偏离不是缺陷」的纪律冲突**（AGENTS.md §0）。
+            if (r["dir"] == "Intentional_Deviations"
+                    and r["status"] in ("✅ 仍成立", "⛔ 已失效", "⛔ 已撤销")
+                    and merged[k]["status"] in ("🔴 未闭合", "⏳ 未签字")):
+                merged[k]["status"] = r["status"]
+                merged[k]["rules"] = ",".join(sorted(set(merged[k]["rules"].split(",")) | {"U2-1"}))
+            if r["_date"] == merged[k]["_date"] and r["_auth"] > merged[k]["_auth"]:
+                for f in ("status", "evidence", "prio", "stage", "blocking",
+                          "final_goal", "schedule", "gap", "_stage_src",
+                          "_evidence_src", "rules"):
+                    # ⚠️ **U5-O 保护（2026-10-30）** —— **显式定级不被无定级的登记覆盖**。
+                    #   实测成因：同一编号常在**汇总文件**（如 `DRIFT/global/_README.md`）
+                    #   与**条目的主文件**两处登记；U5-O 只写在主文件那条 ⇒
+                    #   若汇总文件那条的核对日期更新 ⇒ 合并会把它覆盖回去
+                    #   ⇒ **人工定级静默失效**（数字变好看，内容全错）。
+                    if f in OV_FIELDS and merged[k].get("_ov") and not r.get("_ov"):
+                        continue
+                    merged[k][f] = r[f]
+                merged[k]["_ov"] = merged[k].get("_ov", False) or r.get("_ov", False)
+            if r["_date"] > merged[k]["_date"]:
+                for f in ("status", "evidence", "prio", "stage", "blocking",
+                          "final_goal", "schedule", "gap", "_stage_src",
+                          "_evidence_src", "_date", "rules", "_auth", "_closed"):
+                    # ⚠️ 同上：U5-O 保护 —— 日期更新的**无定级**登记不得覆盖显式定级
+                    if f in OV_FIELDS and merged[k].get("_ov") and not r.get("_ov"):
+                        continue
+                    merged[k][f] = r[f]
+                merged[k]["_ov"] = merged[k].get("_ov", False) or r.get("_ov", False)
+            elif r["_date"] == merged[k]["_date"] and merged[k]["stage"] == "—" and r["stage"] != "—":
+                merged[k]["stage"] = r["stage"]
+                merged[k]["blocking"] = r["blocking"]
+                merged[k]["_stage_src"] = r["_stage_src"]
+                merged[k]["final_goal"] = r["final_goal"]
+                merged[k]["rules"] = r["rules"]
+    out = list(merged.values())
+    # ⚠️ **U5-O 第二阶段合并（2026-10-30）** —— **显式定级独立于「日期 / 权威度」生效**。
+    #   实测成因：同一编号常在**汇总文件**与**主文件**两处登记，**两条的核对日期不同**
+    #   ⇒ 第一阶段（取最新日期）会把**带 U5-O 的那一条整个挤掉**
+    #   ⇒ **人工定级静默失效**（实测：W1/W3/W5/W7 合计 71 条定级，
+    #      第一阶段之后只剩少数几条命中 ⇒ 「已闭合」数从应有的 ~30 掉到 9）。
+    #   ⇒ U5-O 是**本轮显式裁定**，日期必然最新 ⇒ 它**必须**独立于日期胜出。
+    #   ⇒ 若同编号有多条 U5-O ⇒ 取「日期最新 + 权威度最高」的那条。
+    ov_best: dict[tuple[str, str], dict] = {}
+    for r in rows:
+        if not r.get("_ov"):
+            continue
+        k = _merge_key(r)          # ⚠️ 与第一阶段**同一个键**（含同源组）
+        cur = ov_best.get(k)
+        if cur is None or (r["_date"], r["_auth"]) > (cur["_date"], cur["_auth"]):
+            ov_best[k] = r
+    for k, r in ov_best.items():
+        if k not in merged:
+            continue
+        for f in ("stage", "prio", "blocking", "gap", "_stage_src", "_closed", "final_goal", "basis"):
+            merged[k][f] = r[f]
+        merged[k]["rules"] = ",".join(sorted(set(merged[k]["rules"].split(","))
+                                            | set(r["rules"].split(","))))
+        merged[k]["_ov"] = True
+    for k, r in merged.items():
+        r["_mkey"] = k
+    for r in out:
+        r["source"] = ";".join(r.pop("_sources")[:3])
+        r.pop("_date", None)
+        sts = r.pop("_statuses", [])
+        reg = r.pop("_reg", 1)
+        uniq = sorted(set(sts))
+        r["_reg"] = reg
+        r["_conflict"] = len(uniq)
+        r["_uniq_status"] = uniq
+        # ⚠️ **波次并集（2026-10-30）** —— 同一件事在**同域不同台账文件**登记时，
+        #   两个文件可能落在**不同的派工面**（实测：`DRIFT/users/common.md` ⇒ G4 · `DRIFT/users/user/**` ⇒ G1；
+        #   `DRIFT/_cross/message-domain-wide.md` ⇒ G2 · `DRIFT/_cross/open-items.md` ⇒ G4）
+        #   ⇒ 取**并集**（`G1+G4` / `G2+G4`）⇒ **不隐藏任何一面** ⇒ lane 看到并集 ⇒ 按 §5.3e 转派 G4。
+        #   ⚠️ **不能只取第一条** —— 那取决于扫描顺序 ⇒ **同一份输入会给出两个不同的答案**（不可复算）。
+        ws = [w for w in dict.fromkeys(r.pop("_waves", [])) if w and w != "—"]
+        r["wave"] = "+".join(sorted(ws, key=lambda w: ("G1", "G2", "G3", "G4").index(w)
+                                     if w in ("G1", "G2", "G3", "G4") else 9)) or "—"
+        # ⚠️ **合并方式**（2026-10-30）—— 用来区分两类「状态不一致」：
+        #   ① `同域多版本`（同一件事的历史快照 + 后续订正）⇒ 取最新核对日期 ⇒ **不是缺陷**
+        #   ② `同源组`（同一件事跨域登记）⇒ 合并后状态仍不一致 ⇒ **是真缺陷**（台账没同步）
+        r["_merge_kind"] = "同源组" if str(r.get("_mkey", ("", ""))[1]).startswith("GRP:") else "同域多版本"
+    return out, task_of, unres_of
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 输出
+# ════════════════════════════════════════════════════════════════════════
+
+TSV_COLS = ["id", "dir", "domain", "wave", "source", "unit", "status", "evidence",
+            "prio", "stage", "blocking", "final_goal", "schedule", "gap",
+            "rules", "title", "basis"]
+
+STAGE_ORDER = {"A": 0, "B": 1, "C": 2, "D": 3, "—": 4, "N/A（不适用）": 5}
+PRIO_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
+
+
+def sort_rows(rows):
+    return sorted(rows, key=lambda r: (STAGE_ORDER.get(r["stage"], 9),
+                                       PRIO_ORDER.get(r["prio"], 9),
+                                       r["domain"], r["id"]))
+
+
+def render_tsv(rows) -> str:
+    lines = ["\t".join(TSV_COLS)]
+    for r in sort_rows(rows):
+        lines.append("\t".join(str(r.get(c, "")).replace("\t", " ") for c in TSV_COLS))
+    return "\n".join(lines) + "\n"
+
+
+def render_md(rows, entries, tasks, unresolved, stats) -> str:
+    L: list[str] = []
+    a = L.append
+    idx = {r["id"]: r for r in rows}
+    # ⚠️ **2026-10-30 口径修正 · 🟡 部分闭合 计入「开放」** ——
+    #   原口径只认 🔴/仍生效/⏳ ⇒ **🟡「部分闭合」被排除在「开放」之外**
+    #   ⇒ 实测后果：**55 条 🟡 条目（其中 50 条未排期）**被统计成「未定级且状态开放 = 0」
+    #   ⇒ **掩盖了 50 条仍有剩余工作量的条目**（数字漂亮、内容是假的）。
+    #   ⇒ 判据依据：🟡 = 「修了一部分，**还剩一部分**」⇒ **仍有待实现项** ⇒ 属开放。
+    #   ⇒ 仍不计入开放的：✅ 已一致 / ⚫ 已签字偏离（决策不是缺陷）/ N/A 元教训。
+    open_states = ("🔴 未闭合", "🟡 部分闭合", "仍生效", "⏳ 未签字")
+
+    a("# 阶段一施工单派生层 · 三目录台账 → 施工单（2026-10-30）")
+    a("")
+    a("> **本文件是「派生层」** —— 每个值都**从** `docs/DRIFT` / `docs/Intentional_Deviations` /")
+    a("> `docs/Pitfalls` **投影**而来，**不重新裁定任何结论**（每个派生值都带 `rules` 规则号）。")
+    a("> **机器层** = [`stage1-derivation.tsv`](stage1-derivation.tsv)（全量问题项 × 17 列）")
+    a("> **生成器 + 守门** = [`tools/ledger-derive/derive-stage1.py`](../../../tools/ledger-derive/derive-stage1.py)")
+    a("> （`--check` 模式：源台账改了而本层没重生成 ⇒ **EXIT=1**）")
+    a("> **规范来源** = [`docs/twoStage.md`](../../twoStage.md) §10（11 字段 · P0-P3 × A-D）＋ §5.3（暂缓项 11 字段）")
+    a("")
+    a("---")
+    a("")
+    a("## 一、口径（机器可复算）")
+    a("")
+    a("### 1.1 一句话结论")
+    a("")
+    a(f"> **三目录**有 **{stats['n_problem_ids']}** 个带状态的问题项"
+      f"（**{stats['n_absorbed_ids']}** 个被同源组合并吸收 ⇒ 派生表实收 **{stats['n_rows_ids']}** 个编号），")
+    a(f"> 其中 **{stats['n_staged']}** 个（**{stats['n_staged_pct']}%**）**已定级**（带阶段归属），")
+    a(f"> 剩下 **{stats['n_unstaged']}** 个**未定级** —— 其中**开放状态**（🔴 未闭合 / 🟡 部分闭合 / 仍生效 / ⏳ 未签字）"
+      f"又**没有阶段归属**的只有 **{stats['n_unstaged_open']}** 条。")
+    a("> ⇒ **「发现了却没进施工单」已经清零**；这正是「台账能不能当施工单」的量化答案。")
+    a(f"> 证据面上：有活体证据的 **{stats['n_a_total']}** 条里，**只有 "
+      f"{stats['a_sub'].get('A 活体 · 绿(0)', 0)} 条**的活体证据是**绿**（支持当前结论），")
+    a(f"> 其余 **{stats['n_a_total'] - stats['a_sub'].get('A 活体 · 绿(0)', 0)}** 条的证据本身是"
+      f"**红 / 环境问题 / 混合** ⇒ **「有活体证据」≠「结论被证实」**。")
+    a("> 本派生层把这几条数字**变成可复算的断言**，并把它们排成**可开工的清单**（§四）。")
+    a("")
+    a("### 1.2 覆盖面（旧口径的盲区）")
+    a("")
+    a("| 事实 | 数字 | 依据 |")
+    a("|---|---|---|")
+    a(f"| 三目录条目（**宽口径**扫描） | **{stats['n_entries']}** 条 / **{stats['n_ids']}** 个唯一编号 | U1 |")
+    a(f"| 其中**问题项**（自身带状态标记） | **{stats['n_problems']}** 条 / **{stats['n_problem_ids']}** 个唯一编号 | U1 + U2 |")
+    a(f"| 旧口径（`ledger-claim-audit.py` 的 `ID_RE` 前缀白名单）能认出 | **{stats['n_old_recognized']}** / {stats['n_problem_ids']} | ⚠️ **漏 {stats['n_old_missed']} 个唯一编号** |")
+    a(f"| 施工单任务（`_task-universe.md`） | {stats['n_tasks']} 条 | §〇 口径 |")
+    a(f"| 施工单 ↔ 台账条目**强链** | **{stats['n_linked_ids']}** 个条目被回指 | U8 |")
+    a("")
+    a("> ⚠️ **上一轮报给用户的「1183 条目 / 707 唯一 ID」是**旧口径**（前缀白名单）**的数字**")
+    a(f"> ⇒ 本派生层用**宽口径**重扫 ⇒ **{stats['n_problems']} 条问题项 / {stats['n_problem_ids']} 个唯一编号**。")
+    a("> **差额不是「多算了」** —— 是旧口径**认不出**整族编号（`MISMATCH-API-*` / `OP-*` / `T-*` / `N-*` /")
+    a("> `CD-*` / `ADJ-*` / `A-*` / `B-*` / `C-*` / **`E60` 这类「字母+数字」形态** …）。")
+    a("> ⇒ **「落空 0」这类结论的覆盖面小于表面**（同族：弱判据把真缺陷洗成 0）。")
+    a("")
+    a("### 1.3 U1 · 条目（问题项）识别")
+    a("")
+    a("> ⚠️ **条目身份 = （编号, 所属域目录）**（2026-10-30 用户拍板）——")
+    a("> 台账用**裸编号**（`E1` / `E2` / `L-4` / `T-6`…，**没有域前缀**）⇒ 同一个编号在不同域")
+    a("> **通常**指的不是同一件事 ⇒ 按裸编号合并会把一个域的状态/优先级/阶段归属**继承**")
+    a("> 到另一个域 ⇒ **派单会派到不存在的事上**（实测：4 条假缺口 + 1 条 A 类被降级成 B 类）。")
+    a("> ⇒ **判定按域拆开**，**指标按编号级聚合**（见 U10），**同源组是例外**（`identity-groups.txt`）。")
+    a("")
+    a("```")
+    a("位置候选 = 二~五级标题（首个 token；**不在首位时扫全文取第一个编号**）· 表格首列")
+    a("编号形态 = ^[A-Z][A-Za-z0-9]{0,14}(-[A-Za-z0-9]{1,24})*-\\d{1,4}[A-Za-z]?$  |  ^E\\d{1,3}$")
+    a("排除     = tools/ledger-derive/excluded-id-prefixes.txt（显式数据文件，逐条带理由）")
+    a("必须     = 自身带状态标记（取值域按目录限定，见 U2）")
+    a("分段     = 互不重叠（每个候选的段到下一个候选为止）—— 否则同一个 🔴 会被数两次")
+    a("```")
+    a("")
+    a("### 1.4 派生规则表（R1~R8，每条都能复核）")
+    a("")
+    a("| 规则 | 派生什么 | 判据 | 依据 |")
+    a("|---|---|---|---|")
+    a("| **U2 状态** | 处理状态 | ①「现行态 = X」显式声明优先 ②标题行 ③条目段；取值域**按目录**限定 | 三目录各自的取值域约定 + `PhaseGoal-judge.md` §1.5 L0 |")
+    a("| **U3 证据强度** | A 活体 / B 静态 / C 无指针 | 段内点名**已在活体台账实跑过**的探针 ⇒ A；否则有 `文件:行号` ⇒ B；否则 C | `live-parity-2026-10-30.md` §二 |")
+    a("| **U4 优先级** | P0-P3 | 台账已写 ⇒ 用台账的；否则 A 类⇒P0 · 🔴/仍生效/⏳未签字⇒P1 · 🟡/待核实⇒P2 · 其余⇒P3 | `twoStage.md` §10 |")
+    a("| **U5 阶段归属** | A-D | ①台账里的**十一项表** ②共享层定级表 ③`Stage1/05` ④已签字偏离⇒D ⑤条目**自己正文**的归属声明 | `twoStage.md` §10 |")
+    a("| **U5-O 显式定级叠加层** | A-D | `docs/DRIFT/_cross/grading/*.md` 里**逐条与 Go 源码对照后**的人工定级 ⇒ **优先级最高**（压过 U5-0 的历史表格判定）· **依据列必须含 Go + RAG 双侧 `文件:行号`**，否则整行丢弃 | `docs/DRIFT/_cross/grading/` |")
+    a("| **U6 是否阻断** | 是/否 | ①权威表的「阻断」列 ②条目正文自己的「不阻断阶段 1」声明 ③A⇒是 | `Stage1/05` 字段 8 |")
+    a("| **U7 最终目标影响** | 影响/不影响/间接/未判定 | 台账已写 ⇒ 用台账的；否则 C⇒影响 · D⇒不影响 · A/B⇒间接 | `twoStage.md` §10 |")
+    a("| **U8 排期指针** | 任务 ID ｜ BLK/GAP/ENV/DEC-xx | 任务块里**直接写了本条目编号**，或任务块的**台账指针落在本条目段内** | `_task-universe.md` + `_unresolved.md` |")
+    a("| **U9 证据缺口** | 缺口描述 | C⇒无可复算指针 · B+🔴⇒静态取证·缺活体 · 未定级⇒未定级⇒未排期 · 未排期⇒未排期 | — |")
+    a("| **U10 条目身份** | **（编号, 所属域目录）** | ①**域** = 台账文件在 `docs/<台账目录>/` 下的**第一层目录** ②**默认按域拆开**（同编号跨域 ⇒ 各判各的）③**例外** = 同源组（`identity-groups.txt`）⇒ 组内仍合并 ④**覆盖层按域限定**：U5-O 用 `overlay-scope.txt`、U5-0 用**表格所在文件的域** | 用户 2026-10-30 拍板（「只改派生层口径：条目身份 = 编号 + 所属域目录」）· `docs/DRIFT/_cross/grading/_lanes.json` |")
+    a("| **U11 波次（派工面）** | `G1`/`G2`/`G3`/`G4`（**并集**形如 `G1+G4`） | **文件级规则优先** → **域级规则** → 未命中 ⇒ `—`（**不猜**）；映射 = [`wave-map.txt`](../../../tools/ledger-derive/wave-map.txt)（**显式数据文件**）⇒ 权威出处 = `docs/Worktree.md` §二「波次版：G1~G4」表。⚠️ **给的是「派工面」不是「类级写权」**（`users-common` 是混合体 ⇒ AGENTS.md §5.3f 按类判定）⇒ 整份 users-common 专属台账 ⇒ G4；`users/vs-common.md` ⇒ G1（该文件头部自记「归属 G1 波次工作树」） |")
+    a("")
+    a("### 1.5 排除清单（`excluded-id-prefixes.txt`）")
+    a("")
+    a("| 前缀 | 理由 |")
+    a("|---|---|")
+    for pre, why in sorted(load_exclusions().items()):
+        a(f"| `{pre}` | {why} |")
+    a("")
+    a("---")
+    a("")
+    a("## 二、施工单总表（**能直接开工的部分**）")
+    a("")
+    a("> 本节把三处已有的施工单**并成一张表**：")
+    a("> ① `_task-universe.md` 的 **37 条任务**（计划任务 ID）· ② `_unresolved.md` 的 **14 条未解决项**")
+    a("> ③ 派生层里**已定级但未排期**的台账条目 ⇒ **凡要动手的，这里都能查到去向**。")
+    a("")
+    a("### 2.1 计划任务（`_task-universe.md`）→ 覆盖的台账条目")
+    a("")
+    a("| 计划 ID | 标题 | 阶段类 | 阶段一影响 | 覆盖的台账条目（派生链） |")
+    a("|---|---|---|---|---|")
+    for tid in sorted(tasks, key=lambda t: (t[0], t)):
+        t = tasks[tid]
+        linked = sorted(x for x in t["ids"] if x in idx)
+        imp = ""
+        m = re.search(r"\|\s*\*\*阶段一影响\*\*\s*\|\s*(.*?)\s*\|", t["seg"])
+        if m:
+            imp = m.group(1)[:46]
+        elif t["seg"]:
+            im = re.search(r"\|\s*阶段一影响\s*\|\s*([^|]{0,46})", t["seg"])
+            imp = im.group(1).strip() if im else ""
+        a(f"| `{tid}` | {t['title'][:44]} | **{t['class'] or '—'}** | {imp} | "
+          f"{(' · '.join('`' + x + '`' for x in linked)) if linked else '（未回指台账条目）'} |")
+    a("")
+    a("### 2.2 未解决项（`_unresolved.md`）")
+    a("")
+    a("| 编号 | 阶段类 | 影响的台账条目 |")
+    a("|---|---|---|")
+    for uid in sorted(unresolved):
+        u = unresolved[uid]
+        linked = sorted(x for x in u["ids"] if x in idx)
+        a(f"| `{uid}` | {u['class'] or '—'} | {(' · '.join('`' + x + '`' for x in linked)) if linked else '（未回指台账条目）'} |")
+    a("")
+    a("---")
+    a("")
+    a("## 三、阶段归属分布")
+    a("")
+    a("| 归属 | 条目数 | 含义 |")
+    a("|---|---|---|")
+    for st, mean in (("A", "阶段 1 准入阻断项（不处理就无法通过简历项目验收）"),
+                     ("B", "阶段 1 竞争力补强项（技术亮点与验证闭环）"),
+                     ("C", "阶段 2 最终工程建设项（业务语义恢复 / 生产工程机制）"),
+                     ("D", "经分析确认可不实现或不适用（须有明确理由）"),
+                     ("—", "**未派生 —— 待人工定级**（不是「不重要」，是「还没定级」）")):
+        a(f"| **{st}** | {stats['stage_counts'].get(st, 0)} | {mean} |")
+    a("")
+    a("| 优先级 | 条目数 |")
+    a("|---|---|")
+    for pr in ("P0", "P1", "P2", "P3"):
+        a(f"| {pr} | {stats['prio_counts'].get(pr, 0)} |")
+    a("")
+    a("---")
+    a("")
+    a("## 四、真缺口（**可开工清单**）")
+    a("")
+    a("> 判据 = **状态开放**（🔴 未闭合 / 仍生效 / ⏳ 未签字）**且** `排期指针 = 未排期`")
+    a("> ⇒ **不是「没发现」，是「发现了但没进施工单」** —— 旧口径下它们**不可见**。")
+    a("")
+    g_open = [r for r in rows if r["status"] in open_states and r["schedule"] == "未排期"]
+    g_closed = [r for r in g_open if r.get("_closed")]
+    g_open_nc = [r for r in g_open if not r.get("_closed")]
+    # ⚠️ **2026-10-30 · 指标按「编号级」聚合** —— 条目**判定**按 (编号, 域)，
+    #   但**指标**必须按**编号**算 ⇒ 否则「同一个编号在 3 个域各有一行、只有 1 行被定级」
+    #   ⇒ 另外 2 行被算成「未定级」⇒ **虚增**（实测 75 条里绝大多数是这个形态：
+    #   别的域**引用**了一个已定级的条目 ⇒ 拆开后它自己那行没有定级）。
+    #   ⇒ 口径：**一个编号只要任一行已定级 ⇒ 该编号「已定级」**；
+    #     **任一行满足「A/B + 开放 + 未排期」⇒ 该编号是真缺口（只计一次）**。
+    def _id_level(rows_in, pred):
+        """按编号去重：满足 `pred` 的行里，每编号只保留**最严重**的那一行。"""
+        best: dict[str, dict] = {}
+        for r in rows_in:
+            if not pred(r):
+                continue
+            k = r["id"]
+            cur = best.get(k)
+            if cur is None or (PRIO_ORDER.get(r["prio"], 9), r["stage"]) < \
+                              (PRIO_ORDER.get(cur["prio"], 9), cur["stage"]):
+                best[k] = r
+        return list(best.values())
+
+    g_closed = _id_level(g_closed, lambda r: True)
+    g_open_nc = [r for r in g_open_nc if not r.get("_closed")]
+    g_ab = _id_level(g_open_nc, lambda r: r["stage"] in ("A", "B"))
+    g_cd = _id_level(g_open_nc, lambda r: r["stage"] in ("C", "D"))
+    # ⚠️ **「未定级」= 该编号在**所有域**都没定级** —— 不是「有一行没定级」
+    #   （别的域**引用**了一个已定级条目 ⇒ 那行自己没定级，但它**不是**未定级条目）
+    _staged_ids = {r["id"] for r in rows if r["stage"] != "—"}
+    g_unstaged = _id_level(g_open_nc,
+                           lambda r: r["stage"] == "—" and r["id"] not in _staged_ids)
+    # ⚠️ **波次分布（U11 · 派工面）** —— 放在「合计」之前 ⇒ lane 一进来就知道自己那棵有多少活
+    a("### 4.0 🆕 波次分布（**派工面 = 该条归哪棵工作树 G1~G4 做**）")
+    a("")
+    a("> 权威出处 = [`docs/Worktree.md`](../../Worktree.md) §二「波次版：G1~G4」表；"
+      "映射数据 = [`wave-map.txt`](../../../tools/ledger-derive/wave-map.txt)（**显式数据文件**）。")
+    a("> ⚠️ **G4 不在域波顺序里**（域波顺序 = G1→G2→G3）—— G4 = **共享层常设执行者**，"
+      "**先于 G1 就位 standby**、**落码窗口常开**。")
+    a("> ⚠️ **并集**（`G1+G4`）= 该条目**同源组跨域登记** ⇒ 跨两个派工面 ⇒ "
+      "**域波先做，涉及共享层的部分转 G4 反馈单**（AGENTS.md §5.3e）。")
+    a("")
+    _wc: dict[str, list] = {}
+    for r in rows:
+        _wc.setdefault(r["wave"], []).append(r)
+    a("| 波次 | 条目（行） | **状态开放**（仍要干的） | 其中 A/B 类（阶段一范围） | 覆盖范围 |")
+    a("|---|---|---|---|---|")
+    _wdesc = {
+        "G1": "`users`（**不含 users-common**）+ `follow`",
+        "G2": "`message` + `like` + `task`",
+        "G3": "`article` + `comment` + `favorite` + `hot`",
+        "G4": "**共享层** `service/common` + `service/users/users-common` + 收口域 `global`（**常设执行者 · 不在域波顺序里**）",
+    }
+    for w in sorted(_wc, key=lambda x: (len(x), x)):
+        _rs = _wc[w]
+        _op = len(_id_level(_rs, lambda r: r["status"] in open_states))
+        _ab = len(_id_level(_rs, lambda r: r["status"] in open_states and r["schedule"] == "未排期"
+                            and r["stage"] in ("A", "B") and not r.get("_closed")))
+        a(f"| **{w}** | {len(_rs)} | **{_op}** | {_ab} | {_wdesc.get(w, '**跨派工面并集**（同源组跨域登记）')} |")
+    a("")
+    a("> ⇒ **「状态开放」= 该条仍有待实现项**（🔴 未闭合 / 🟡 部分闭合 / 仍生效 / ⏳ 未签字）；"
+      "**A/B 类（阶段一范围）**那一列全是 0 ⇒ **每棵树的活都已有排期指针** ⇒ 没有「漏排」需要补派。")
+    a(f"**合计 {len(g_open)} 行 / {len({r['id'] for r in g_open})} 个编号** —— "
+      f"① **A/B 类**（阶段 1 范围内）**{len(g_ab)}** 个编号")
+    a(f"· ② C/D 类（**阶段 2 承接**，§5.3 暂缓项清单已登记）**{len(g_cd)}** 条")
+    a(f"· ③ 未定级 **{len(g_unstaged)}** 条")
+    a(f"· ④ **已闭合**（逐条 Go 对照后「**差异已消失**」⇒ **无待实现项**）**{len(g_closed)}** 条")
+    a("")
+    a("> ⚠️ **第 ④ 档必须与 C/D 分开** —— 实测（W1/W5 轮）：台账里大量条目仍写 🔴 未闭合，")
+    a("> 但逐条回源后**差异早已不存在**（只是台账没销账）⇒ 它们**不是**「阶段 2 承接」，")
+    a("> 而是**已闭合、无待实现项** ⇒ 混进阶段二工作量清单会把那份清单变成**假待办**。")
+    a("> ⇒ 本档的处置 = **回写台账销账**（状态订正），**不进任何阶段的工作量**。")
+    a("")
+    a("### 4.1 ① A/B 类 · 开放且未排期（**真缺口 —— 阶段 1 范围内的漏排**）")
+    a("")
+    a("> **A 类 = 阶段 1 准入阻断项**（不处理就无法通过简历项目验收）·")
+    a("> **B 类 = 阶段 1 竞争力补强项**。")
+    a("> 两条都**不在** `_task-universe.md` 的 37 条任务里 ⇒ **施工单漏了它们**。")
+    a("")
+    a("| 归属 | 优先级 | ID | 域 | **波次** | 状态 | 证据 | 证据缺口 | 源位置 |")
+    a("|---|---|---|---|---|---|---|---|---|")
+    for r in sort_rows(g_ab):
+        a(f"| {r['stage']} | {r['prio']} | `{r['id']}` | {r['domain']} | **{r['wave']}** | {r['status']} | "
+          f"{r['evidence']} | {r['gap']} | `{r['source']}` |")
+    a("")
+    a(f"> C/D 类 **{len(g_cd)}** 条另有去向（阶段 2 恢复方案已在各条台账的 §5.3 十一项表里）")
+    a("> ⇒ **不计入阶段一判定**（`PhaseGoal-judge.md` §1.1 ⑥ 第 4 条）⇒ 不列。")
+    a("")
+    a(f"### 4.4 ④ 已闭合（**逐条 Go 对照后差异已消失 · 无待实现项**）")
+    a("")
+    a("> **不是「阶段 2 承接」** —— 是台账**没销账**。处置 = **回写台账订正状态**。")
+    a("")
+    a("| 归属 | ID | 域 | 台账状态 | 源位置 |")
+    a("|---|---|---|---|---|")
+    for r in sort_rows(g_closed):
+        a(f"| {r['stage']} | `{r['id']}` | {r['domain']} | {r['status']} | `{r['source']}` |")
+    a("")
+    a("### 4.2 ③ 未定级（**需人工定级才能进施工单**）")
+    a("")
+    a("> 派生层**不猜**归属 ⇒ 这一档必须人工定级。")
+    a("> 排序 = **优先级 × 证据强度**（P1 且证据 C = 既危险又不可复算 ⇒ 排最前）。")
+    a("")
+    a("| 优先级 | 证据 | ID | 域 | 状态 | 源位置 |")
+    a("|---|---|---|---|---|---|")
+    for r in sort_rows(g_unstaged):
+        a(f"| {r['prio']} | {r['evidence']} | `{r['id']}` | {r['domain']} | {r['status']} | `{r['source']}` |")
+    a("")
+    a("### 4.5 同编号多态（**同一编号在多处登记、状态不一致**）")
+    a("")
+    a("> 这是派生层**刻意不替人做决定**的地方：同一编号在多个文件登记，状态可能不同。")
+    a("> ⚠️ **2026-10-30 · 条目身份已改为「编号 + 所属域目录」**（用户拍板）⇒")
+    a("> **跨域的同编号**默认**拆开**（不同域的条目各判各的）⇒ 下表分两档：")
+    a("> **① 同域多版本**（同一件事的历史快照 + 后续订正）⇒ 取**最新核对日期**那条 ⇒ **不是缺陷**；")
+    a("> **② 同源组**（人工判定为「同一件事」的跨域登记）⇒ 合并后状态仍不一致 ⇒ **是真缺陷**")
+    a("> （台账两边没同步）⇒ **优先看这一档**。")
+    a("")
+    a("| ID | 域 | 合并方式 | 登记处数 | 出现过的状态 | 采纳的状态 | 源位置 |")
+    a("|---|---|---|---|---|---|---|")
+    conflicts = [r for r in rows if r["_conflict"] > 1]
+    conflicts.sort(key=lambda r: (r["_merge_kind"] != "同源组", -r["_conflict"], r["id"]))
+    for r in conflicts[:60]:
+        a(f"| `{r['id']}` | {r['domain']} | {r['_merge_kind']} | {r['_reg']} | "
+          f"{' / '.join(r['_uniq_status'])} | {r['status']} | `{r['source']}` |")
+    a("")
+    _n_grp = sum(1 for r in conflicts if r["_merge_kind"] == "同源组")
+    _n_dom = len(conflicts) - _n_grp
+    a(f"> 共 **{len(conflicts)}** 个合并组内状态冲突：**同源组 {_n_grp}**（真缺陷，优先）"
+      f" ＋ **同域多版本 {_n_dom}**（历史快照，非缺陷）（此处列前 60）。")
+    a(">")
+    a("> ⚠️ **第三类来源（2026-10-30 G1 lane 实测）＝「误修饰」** —— `detect_status` 取**条目所在段的前 400 字符**"
+      " ⇒ ⇒ **同一行里修饰「别的东西」的状态 emoji，也会被抽成这个条目的状态**"
+      "（典型形态：`🟡 **2026-10-29 复核：状态不变（仍 🔴 OPEN）**` ⇒ 🟡 修饰的是**复核标注**、不是状态"
+      " ⇒ 与同组的 🔴 撞 ⇒ `_conflict > 1`）")
+    a("> ⇒ ⇒ **本次实测的 " + str(len(conflicts)) + " 个冲突组里，除「同源组 " + str(_n_grp) + "」外的 "
+      + str(_n_dom) + " 个，多数属此类** ⇒ ⇒ **收口时不应逐条当缺陷修**；")
+    a("> ⇒ **正确处置 = 各域自行把那几处「误修饰」就地归一**（把状态标记改成**无标记写法**、语义留在文字里）"
+      " ⇒ **行数不变 ⇒ 不破行号锚点** ⇒ ⇒ 该域的 `_conflict` 随之下降、派工面 `status` 与基线同值（**是修正，不是新增缺口**）。")
+    a(">")
+    a("> ⚠️ **口径变化说明（2026-10-30）**：归一前该指标按**裸编号**统计 ⇒ **131**；")
+    a("> 归一后按**合并组**统计 ⇒ 同源组把跨域登记合到一行 ⇒ 状态多样性**必然上升**")
+    a("> ⇒ **两个数字不可直接比较**（口径不同，非回归）。")
+    a("")
+    a("### 4.6 🆕 跨域同编号登记（**不猜是不是同一件事 —— 只把事实并排摆出来**）")
+    a("")
+    a("> ⚠️ **台账用裸编号**（`E1` / `E2` / `L-4` / `T-6`…，**没有域前缀**）⇒")
+    a("> **同一个编号在不同域可能指完全不同的两件事** ⇒ 派生层按「编号 + 域目录」拆开。")
+    a("> ⇒ **但「拆开」不等于「它们不是同一件事」** —— 绝大多数是**别的域引用了同一个条目**")
+    a("> （汇总表 / `vs-common.md` / 准入表 / 「域内部分已修」的补记章节）。")
+    a("> ⇒ 本表把**同一编号在各域的状态并排列出** + **人工判定结果** ⇒ 派生层**不替人决定**。")
+    a(">")
+    a("> **判别结果落在** [`docs/DRIFT/_cross/grading/_samesrc-*.md`](grading/)（逐条人工判定）")
+    a("> ⇒ 判定为「同一件事」的节点 ⇒ 登记进 `tools/ledger-derive/identity-groups.txt` ⇒ **仍合并成一条**。")
+    a("> ⇒ 「**未判定**」= 该 (编号, 域) 不在第 3 轮判定范围内（已在别的轮次定级 / 无第二处登记）")
+    a("> ⇒ **不代表「不同的事」** —— 只表示**没有依据**下判断。")
+    a("")
+    _jd = load_samesrc_judgements()
+    _xd = collections.defaultdict(list)
+    for r in rows:
+        _xd[r["id"]].append(r)
+    _cross = {k: v for k, v in _xd.items() if len({x["domain"] for x in v}) > 1}
+    a("| ID | 各域状态（域 = 状态） | 域数 | 人工判定 |")
+    a("|---|---|---|---|")
+    for k in sorted(_cross, key=lambda k: (-len(_cross[k]), k))[:80]:
+        parts = sorted({f"{x['domain']} = {x['status']}" for x in _cross[k]})
+        doms = sorted({x["domain"] for x in _cross[k]})
+        # ⚠️ **判定按 (编号, 域)** 逐域取 ⇒ 同一编号在不同域的判定**可以不同**
+        #   （实测：favorite 的 `G4-1` = 「同一件事」，comment 的 `G4-1` = 「不同的事」）
+        verdicts = sorted({_jd.get((k, d), "未判定") for d in doms})
+        a(f"| `{k}` | {' ／ '.join(parts)} | {len(doms)} | {' ／ '.join(verdicts)} |")
+    a("")
+    a(f"> 共 **{len(_cross)}** 个编号出现在**多个域**（此处列前 80）。")
+    a("> ⇒ **其中「不同的事」（编号撞号）是本轮要修的串味来源**；")
+    a("> **「同一件事」则登记进同源组，避免同一件事被派两次单。**")
+    a("")
+    a("---")
+    a("")
+    a("## 五、证据强度分层（**「已改」≠「已验证」**）")
+    a("")
+    a("| 档 | 含义 | 条目数 |")
+    a("|---|---|---|")
+    for k, v in (("A 活体", "段内点名了**已在活体台账实跑过**的探针（**带探针的真实退出码**）"),
+                 ("B 静态", "有可复算的 `文件:行号` 指针，但无活体探针"),
+                 ("C 无指针", "两样都没有 ⇒ 结论今天不可复算")):
+        a(f"| **{k}** | {v} | {stats['evid_counts'].get(k, 0)} |")
+    a("")
+    a("### 5.1 A 档内部再分（**「有活体证据」≠「结论被证实」**）")
+    a("")
+    a("> ⚠️ **A 档带的是探针的真实退出码** —— 因为实测发现：**A 档引用的探针里**")
+    a("> 有指向 **EXIT=2（环境问题 ⇒ 结论不可用）**的，也有指向 **EXIT=1（不一致）**的。")
+    a("> ⇒ **只写「A 活体」会让人以为这条已被证实** ⇒ 必须把退出码带出来。")
+    a("> ⚠️ 且「**红**」**≠ 有缺陷** —— 红分三种（已签字偏离 / 已登记残留 / 真问题），")
+    a("> 逐条定性见 [`live-parity-2026-10-30.md`](live-parity-2026-10-30.md) §0 与 §四。")
+    a("")
+    a("| A 档细分 | 含义 | 条目数 |")
+    a("|---|---|---|")
+    for k, v in sorted(stats["a_sub"].items()):
+        mean = {
+            "A 活体 · 绿(0)": "探针断言**全部成立** ⇒ 这条的活体证据**支持**当前结论",
+            "A 活体 · 红(1)": "探针判定**不一致** ⇒ 当前结论**未被证实**（红 ≠ 有缺陷）",
+            "A 活体 · 环境(2)": "探针判定「**环境问题**」⇒ 结论**不可用**",
+            "A 活体 · 混(0/1)": "多个探针退出码**不一致**（有的绿有的红）⇒ 需逐条看",
+            "A 活体 · 混(0/1/2)": "同上（还有退出码 2）⇒ 需逐条看",
+            "A 活体 · 混(0/2)": "同上（绿 + 环境问题）⇒ 需逐条看",
+            "A 活体 · 混(0/4)": "同上（绿 + 退出码 4）⇒ 需逐条看",
+        }.get(k, "")
+        a(f"| **{k}** | {mean} | {v} |")
+    a("")
+    a(f"> ⇒ **真正「活体坐实」（绿）的只有 "
+      f"{stats['a_sub'].get('A 活体 · 绿(0)', 0)} 条**（"
+      f"{stats['a_sub'].get('A 活体 · 绿(0)', 0) * 100 // max(len(rows), 1)}%）；")
+    a(f"> 其余 **{stats['n_a_total'] - stats['a_sub'].get('A 活体 · 绿(0)', 0)}** 条 A 档的证据本身是"
+      f"**红 / 环境问题 / 混合** ⇒ **不可当成「已坐实」**。")
+    a("")
+    a("---")
+    a("")
+    a("### 5.2 证据边界声明（**C 档 = 今天不可复算**）")
+    a("")
+    a(f"> **本节是「效力边界」的正式声明** —— 用户 2026-10-30 拍板：**C 档条目"
+      f"（{stats['evid_counts'].get('C 无指针', 0)} 条）本轮不做活体取证，"
+      f"接受其静态证据**。声明如下：")
+    a(">")
+    a("> 1. **C 档条目的状态 = 台账自述**，不是本轮可复算的结论。")
+    a(">    ⇒ 任何引用 C 档条目作为**前提**的结论，必须标注「前提未回源」。")
+    a("> 2. **C 档条目不得单独构成「已证实」** —— 它只是「被登记过」，不是「被核对过」。")
+    a(">    ⇒ 与 AGENTS.md §3.3.3 第 ② 条同源：**指针能解析 ≠ 结论为真**。")
+    a("> 3. **C 档条目的阶段归属（本轮 U5-O 定级）只解决「排不排期」，不解决「对不对」。**")
+    a(">    ⇒ 定为 A/B 只表示「阶段一要处理」，**不表示已证明它成立**。")
+    a("> 4. **本声明不等于「C 档条目已被否定」** —— 它们仍是**待回源**状态，")
+    a(">    且**回源是逐条与 Go 源码对照**（Q1 拍板口径），不是抽样。")
+    a("> 5. **已签字偏离（`Intentional_Deviations`）不受本声明影响** —— 它们的效力来自**签字**，")
+    a(">    不来自「今天能不能复算」（AGENTS.md §0 第 1 条）。")
+    a(">")
+    a("> ⇒ **可复算性分级见 §五 表**；本声明只界定**效力**，不改任何条目的状态。")
+    a("")
+    a("---")
+    a("")
+    a(f"## 六、全量派生表（{len(rows)} 条问题项）")
+    a("")
+    a("> 机读请用 [`stage1-derivation.tsv`](stage1-derivation.tsv)（同一次生成，17 列）。")
+    a("")
+    a("| ID | 目录 | 域 | **波次** | 状态 | 证据 | 优先级 | 归属 | 阻断 | 最终目标 | 排期 | 缺口 | 源位置 | 依据（Go ↔ RAG） |")
+    a("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    for r in sort_rows(rows):
+        _b = (r.get("basis") or "").replace("|", "／").replace("\n", " ")
+        _b = (_b[:150] + "…") if len(_b) > 151 else _b
+        a(f"| `{r['id']}` | {r['dir'][:4]} | {r['domain']} | **{r['wave']}** | {r['status']} | {r['evidence']} | "
+          f"{r['prio']} | {r['stage']} | {r['blocking']} | {r['final_goal']} | {r['schedule']} | "
+          f"{r['gap']} | `{r['source']}` | {_b or '—'} |")
+    a("")
+    a("---")
+    a("")
+    a("## 七、已知盲区（**这一层的效力边界**）")
+    a("")
+    a("1. **派生层不重新裁定任何结论** —— 台账说「已修」就是「已修」（在该证据强度下）。")
+    a("   **「跑绿 ≠ 对」** 在这一层同样成立：U3 的 A 档只证明**那条探针的断言**成立，")
+    a("   **不证明本条目结论的全量成立**。")
+    a("2. **U5 拿不到定级 ⇒ 写 `—`** —— 不是「不重要」，是**还没定级**。")
+    a(f"   本轮有 **{stats['n_unstaged']}** 个编号属这一档（派生表 {stats['n_rows_ids']} 个编号里的其余部分）")
+    a(f"   ⇒ 它们**不进施工单**，除非先定级；其中**开放状态**的只有 **{stats['n_unstaged_open']}** 条。")
+    a("3. **U8 的强链只认「指针落在条目段内」或「任务块里直接写了编号」** ——")
+    a("   **既没写编号也没给指针**的语义关联 ⇒ **不可见**（这是本层的固有上限）。")
+    a("4. **`CASE-*` 被排除** ⇒ 它们是**测试场景矩阵行**（证据层），不是差异条目；")
+    a("   差异条目会引用 `CASE-*` 作为自己的证据。")
+    a("5. **「阶段归属」与「优先级」不可互推** —— `twoStage.md` §10 明写「两者不能互相替代」。")
+    a("   本层用 U4/U5 两条**独立**规则算，交叉不符时**两个都保留**，不强行对齐。")
+    a("6. **「未排期」≠「不重要」** —— 它只说明**当前没有任何任务/未解决项指向它**。")
+    a("7. **本层**不读**产品代码** ⇒ 它是**台账的投影**，不是代码的事实；")
+    a("   「指针能解析」也不等于「结论为真」（同 AGENTS.md §3.3.3 第 ② 条）。")
+    a("8. 🆕 **U8 认不出「表行编号」** —— 实测（U5-O 轮）：`global/vs-common.md` 里的表行编号")
+    a("   （`B-10` / `B-11` / `G4-A4-05` / `G4-A4-07`）**与任务的「原始编号」不是一一对应**")
+    a("   （`_task-universe.md` 的 `P2-T01` 写的是 `E65` / `X-6` / `P0 #4`，不含 `B-10`）")
+    a("   ⇒ 派生层会判它们「**未排期**」⇒ **报进真缺口清单**。")
+    a("   ⚠️ **这不等于它们没排期** —— 它们可能是某个任务的**改造面内条目**")
+    a("   ⇒ **本层不猜**（不按语义关联去连任务）⇒ 处置 = **在 `_unresolved.md` 登记歧义 + 人工确认**。")
+    a("   ⇒ 与第 3 条同源：**「不可见」≠「不存在」**。")
+    a("9. 🆕 **「已闭合」档 ≠ 台账已销账** —— §4.4 的条目在台账里**仍写 🔴 未闭合**，")
+    a("   只是逐条回源后**差异早已不存在**。本层**不改状态**（投影不裁定）")
+    a("   ⇒ 状态订正由**回写台账**完成（追加「阶段归属定级附录」，保留区机制不产生自噬）。")
+    a("")
+    a("---")
+    a("")
+    a("## 八、复现")
+    a("")
+    a("```bash")
+    a("cd \"$(git rev-parse --show-toplevel)\"")
+    a("python3 tools/ledger-derive/derive-stage1.py            # 重新生成")
+    a("python3 tools/ledger-derive/derive-stage1.py --check    # 守门：产物过期 ⇒ EXIT=1")
+    a("python3 tools/ledger-derive/derive-stage1.py --report   # 只打印统计")
+    a("```")
+    a("")
+    return "\n".join(L) + "\n"
+
+
+# ════════════════════════════════════════════════════════════════════════
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--check", action="store_true", help="守门模式：产物与源台账不同步 ⇒ EXIT=1")
+    ap.add_argument("--report", action="store_true", help="只打印统计，不写文件")
+    args = ap.parse_args()
+
+    exclusions = load_exclusions()
+    entries, line_index = scan_ledgers(exclusions)
+    live = load_live_probes()
+    tasks = load_tasks(line_index)
+    unresolved = load_unresolved(line_index)
+    shared = load_shared_grading()
+    s105 = load_stage1_05()
+    grading = scan_grading_tables()
+    judge_closed = load_judge_closed()
+    overlay = load_grading_overlay()
+    all_tools = {str(p.relative_to(ROOT)) for p in (ROOT / "tools").rglob("*")
+                 if p.is_file() and p.suffix in (".sh", ".py")}
+
+    problems = [e for e in entries if detect_status(e) and not e["excluded"]]
+    rows, task_of, unres_of = derive(entries, live, tasks, unresolved, shared, s105, all_tools,
+                                    grading, judge_closed, overlay)
+
+    evid_counts = collections.Counter(r["evidence"] for r in rows)
+    stats = {
+        "n_entries": len(entries),
+        "n_ids": len({e["id"] for e in entries}),
+        "n_problems": len(problems),
+        "n_problem_ids": len({e["id"] for e in problems}),
+        "n_detail": len(entries) - len(problems),
+        "n_tasks": len(tasks),
+        "n_linked_ids": len(task_of),
+        "evid_counts": evid_counts,
+    }
+    # 旧口径能认出多少
+    old = re.compile(
+        r"^(?:DRIFT-[A-Z0-9]+|SD|DEV|PIT|PF|UNRESOLVED|S1|SHOT|CYCLE|E)(?:[-_][A-Za-z0-9]+)*-\d+[A-Za-z]?$")
+    pids = {e["id"] for e in problems}
+    stats["n_old_recognized"] = len({i for i in pids if old.match(i)})
+    stats["n_old_missed"] = stats["n_problem_ids"] - stats["n_old_recognized"]
+    stats["a_sub"] = collections.Counter(r["evidence"] for r in rows if r["evidence"].startswith("A"))
+    stats["n_a_total"] = sum(v for k, v in stats["a_sub"].items())
+    stats["stage_counts"] = collections.Counter(r["stage"] for r in rows)
+    stats["prio_counts"] = collections.Counter(r["prio"] for r in rows)
+    # ⚠️ **2026-10-30 · 修正**：这两个指标原先在**下面**（编号级）才算，但那一段的
+    #   公式把「已定级」与「未定级」**装反了** ⇒ 打印出来的「已定级 X（Y%）」其实是
+    #   **未定级**的数。**指标曾整体反号**（第 1~4 轮报告的「已定级 38%」实为未定级 38%）。
+    #   ⇒ 此处**不再**算这两个指标（避免再次被下面覆盖 ⇒ 两处口径打架）。
+    open_states = ("🔴 未闭合", "🟡 部分闭合", "仍生效", "⏳ 未签字")
+    # ⚠️ **指标一律按「编号级」聚合**（2026-10-30）——
+    #   条目**判定**按 (编号, 域)（消除跨域串味）⇒ 同一编号会有**多行**；
+    #   若指标按行算 ⇒ 「同一个编号在 N 个域各一行」会被**数成 N 条**
+    #   ⇒ 「未定级」「真缺口」「已闭合」全部**虚增**（实测 75 / 3 / 95 三处都虚高）。
+    #   ⇒ 口径：每编号**只算一次**，取它**最严重**的那一行。
+    _by_id: dict[str, list[dict]] = collections.defaultdict(list)
+    for r in rows:
+        _by_id[r["id"]].append(r)
+
+    def _id_rows(pred):
+        best = {}
+        for k, rs in _by_id.items():
+            cand = [r for r in rs if pred(r)]
+            if not cand:
+                continue
+            best[k] = min(cand, key=lambda r: (PRIO_ORDER.get(r["prio"], 9),
+                                                STAGE_ORDER.get(r["stage"], 9)))
+        return list(best.values())
+
+    stats["n_unstaged_open"] = len(_id_rows(
+        lambda r: r["stage"] == "—" and r["status"] in open_states
+        and r["id"] not in {x["id"] for x in rows if x["stage"] != "—"}))
+    stats["n_to_grade"] = stats["n_unstaged_open"]
+    stats["n_conflict"] = sum(1 for r in rows if r.get("_conflict", 1) > 1)
+    stats["n_conflict_group"] = sum(
+        1 for r in rows if r.get("_conflict", 1) > 1 and r.get("_merge_kind") == "同源组")
+    _op = ("🔴 未闭合", "🟡 部分闭合", "仍生效", "⏳ 未签字")
+    stats["n_gap_ab"] = len(_id_rows(
+        lambda r: r["status"] in _op and r["schedule"] == "未排期"
+        and r["stage"] in ("A", "B") and not r.get("_closed")))
+    stats["n_gap_cd"] = len(_id_rows(
+        lambda r: r["status"] in _op and r["schedule"] == "未排期"
+        and r["stage"] in ("C", "D") and not r.get("_closed")))
+    stats["n_closed"] = len(_id_rows(lambda r: r.get("_closed")))
+    stats["n_overlay"] = len(overlay)
+    stats["n_overlay_used"] = len({r["id"] for r in rows if "U5-O" in r["rules"]})
+    # ⇒ 「已定级」按编号级：该编号**任一行**有阶段归属 ⇒ 算已定级
+    _staged_ids = {r["id"] for r in rows if r["stage"] != "—"}
+    # ⇒ 「元教训（N/A）」按编号级：**只有** N/A 的才算元教训（与已定级互斥）
+    _meta_ids = {r["id"] for r in rows if r["stage"] == "N/A（不适用）"} - _staged_ids
+    # ⚠️ **2026-10-30 · 修正（指标装反 + 分子分母不同源）**
+    #   ① **装反**：原式 `n_staged = n_problem_ids − |已定级编号| − |元教训编号|`
+    #      算出来的是**未定级**的数，却当成「已定级」打印 ⇒ 方向反了。
+    #      （实测症状：第 4 轮定级 17 条后，「已定级」反而从 447 掉到 431。）
+    #   ② **不同源**：`n_problem_ids`（1171）来自**合并前**的 `problems` 扫描；
+    #      而 `rows` 是**合并后**的（同编号同域 ⇒ 合并成一行；同源组 ⇒ 合并到组代表）
+    #      ⇒ 派生表实收 **1152** 个编号，另有 **19** 个编号被**同源组合并吸收**
+    #      （成员编号的行被并进组代表行 ⇒ 成员编号在派生表里**不再独立出现**）。
+    #      ⇒ 分子分母必须**同源** ⇒ 一律以 `rows` 的编号集为准。
+    _row_ids = {r["id"] for r in rows}
+    stats["n_rows_ids"] = len(_row_ids)
+    stats["n_absorbed_ids"] = stats["n_problem_ids"] - len(_row_ids)
+    stats["n_staged"] = len(_staged_ids)
+    stats["n_staged_pct"] = (stats["n_staged"] * 100 // max(len(_row_ids), 1))
+    stats["n_unstaged"] = len(_row_ids) - stats["n_staged"] - len(_meta_ids)
+    stats["n_meta"] = len(_meta_ids)
+
+    print("── 派生层统计 ──")
+    print(f"  条目（宽口径扫描）      {stats['n_entries']:5d}   唯一 {stats['n_ids']:5d}")
+    print(f"  问题项（带状态标记）    {stats['n_problems']:5d}   唯一 {stats['n_problem_ids']:5d}")
+    print(f"  旧口径认得出            {stats['n_old_recognized']:5d}   漏 {stats['n_old_missed']:5d}")
+    print(f"  施工单任务              {stats['n_tasks']:5d}")
+    print(f"  任务↔条目强链条目数    {stats['n_linked_ids']:5d}")
+    print(f"  证据强度                " + " · ".join(f"{k} {v}" for k, v in sorted(evid_counts.items())))
+    stc = collections.Counter(r["stage"] for r in rows)
+    print(f"  阶段归属                " + " · ".join(f"{k} {v}" for k, v in sorted(stc.items())))
+    unc = sum(1 for r in rows if r["schedule"] == "未排期")
+    print(f"  未排期                  {unc:5d}")
+    print(f"  已定级                  {stats['n_staged']:5d} / {stats['n_rows_ids']} ({stats['n_staged_pct']}%)"
+          f"   ← 分母 = 派生表编号数（另有 {stats['n_absorbed_ids']} 个编号被同源组合并吸收）")
+    print(f"  未定级                  {stats['n_unstaged']:5d} / {stats['n_rows_ids']}"
+          f"   ← 其中**开放状态**的 {stats['n_unstaged_open']} 条 = 「发现了但没进施工单」")
+    print(f"  状态冲突（合并组内）      {stats['n_conflict']:5d}"
+          f"   ← 其中「同源组」{stats.get('n_conflict_group', 0)} 条 = 真缺陷（台账两边没同步）")
+    print(f"  真缺口 A/B 类未排期     {stats['n_gap_ab']:5d}   ← 阶段一范围内的漏排")
+    print(f"  真缺口 C/D 类未排期     {stats['n_gap_cd']:5d}   （阶段 2 承接，不计阶段一）")
+    print(f"  已闭合（差异已消失）     {stats['n_closed']:5d}   ← 台账没销账 · 无待实现项")
+    print(f"  U5-O 显式定级叠加层      {stats['n_overlay']:5d} 条登记 · "
+          f"{stats['n_overlay_used']:5d} 条命中派生表")
+    # ⚠️ **关闭判定集合可审计**（2026-10-30 第 4 轮）——
+    #   「哪些未解决项被判 closed」必须**打出来**，否则「真缺口 A/B 未排期 = 0」无法证伪。
+    closed_ids = sorted(k for k, v in unresolved.items() if v.get("closed"))
+    malformed_ids = sorted(k for k, v in unresolved.items() if v.get("malformed"))
+    print(f"  指针时效性 · 已了结项     {len(closed_ids):5d}   "
+          f"← {' · '.join(closed_ids) if closed_ids else '（无）'}"
+          f"   · 指向它们的指针**不算排期**")
+    if malformed_ids:
+        print(f"  ⚠️ **未解决项表格结构异常** {len(malformed_ids)} 行（列数 ≠ 6）"
+              f"：{' · '.join(malformed_ids)} ⇒ 关闭判定对该行**失效** ⇒ 须人工核")
+
+    if args.report:
+        return 0
+
+    tsv = render_tsv(rows)
+    md = render_md(rows, entries, tasks, unresolved, stats)
+    if args.check:
+        problems_found = []
+        if not TSV_PATH.exists():
+            problems_found.append(f"产物缺失：{TSV_PATH.relative_to(ROOT)}")
+        elif TSV_PATH.read_text(encoding="utf-8") != tsv:
+            problems_found.append(f"产物过期：{TSV_PATH.relative_to(ROOT)} 与源台账不同步")
+        if not MD_PATH.exists():
+            problems_found.append(f"产物缺失：{MD_PATH.relative_to(ROOT)}")
+        elif MD_PATH.read_text(encoding="utf-8") != md:
+            problems_found.append(f"产物过期：{MD_PATH.relative_to(ROOT)} 与源台账不同步")
+        if problems_found:
+            print("\n🔴 派生层守门 FAIL")
+            for p in problems_found:
+                print(f"   - {p}")
+            print("   ⇒ 修法：python3 tools/ledger-derive/derive-stage1.py")
+            return 1
+        print("\n✅ 派生层守门 PASS（产物与源台账同步）")
+        return 0
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    TSV_PATH.write_text(tsv, encoding="utf-8")
+    MD_PATH.write_text(md, encoding="utf-8")
+    print(f"\n✅ 已生成：\n   {TSV_PATH.relative_to(ROOT)}  ({len(tsv.encode('utf-8')):,} B)\n"
+          f"   {MD_PATH.relative_to(ROOT)}  ({len(md.encode('utf-8')):,} B)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

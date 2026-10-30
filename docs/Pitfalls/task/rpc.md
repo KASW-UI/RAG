@@ -234,6 +234,12 @@ req = urllib.request.Request(url, data=b'{"id":1001}', method="POST")
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/parity-task.py` ⇒ **EXIT=1**（2026-10-30 03:42:51 · 2s）—— 🔴 **探针判定为「不一致」**；覆盖断言：（未抓到结论行）。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/parity-task.py` ⇒ **EXIT=1**（2026-10-30 03:42:51 · 2s）—— 🔴 **探针判定为「不一致」**；覆盖断言：（未抓到结论行）。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/parity-task.py` ⇒ **EXIT=1**（2026-10-30 03:42:51 · 2s）—— 🔴 **探针判定为「不一致」**；覆盖断言：（未抓到结论行）。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
 ## PIT-TASK-05 · 【仍生效】 对拍「红了 42/43」可能全是 header 格式，别淹没真正的差异
 
 > **旧号**：`PITFALL-TASK-RPC-05` ⇒ **新号**：`PIT-TASK-05`
@@ -658,6 +664,12 @@ Go 读出 `completionProgress` = 2 / -7 / 99，RAG **一律 0**。
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-task-http-parity.sh` ⇒ **EXIT=0**（2026-10-30 03:34:25 · 46s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==== 2. 编 RAG 侧（③ 不是 fat jar ⇒ classes + 依赖 classpath） ==== ⏐ [MATCH] cache-status-with-pipe             status 含 '|' ⇒ 4 段 ⇒ 回落 0 ⏐ ⇒ 归 DRIFT-TASK-API-004：Go `httpx.WriteJsonCtx` 写 `application/json; charset=utf-8`， ⏐ 按；<br>`tools/difftest/run-task-kafka-e2e.sh` ⇒ **EXIT=0**（2026-10-30 03:38:06 · 85s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==== 2. 编 RAG 侧（⑤ 不是 fat jar ⇒ classes + 依赖 classpath） ==== ⏐ ✓ Kafka 容器已重建（⇒ 无 topic、无已提交位点、无 consumer group） ⏐ 批次：user 5001 × 5（恰好达到 target=5 ⇒ 完成分支）、user 5002 × 2（doing 分支） ⏐ ✅ Kafka 端到端最终态：Go 与 RAG 完全一致。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-task-http-parity.sh` ⇒ **EXIT=0**（2026-10-30 03:34:25 · 46s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==== 2. 编 RAG 侧（③ 不是 fat jar ⇒ classes + 依赖 classpath） ==== ⏐ [MATCH] cache-status-with-pipe             status 含 '|' ⇒ 4 段 ⇒ 回落 0 ⏐ ⇒ 归 DRIFT-TASK-API-004：Go `httpx.WriteJsonCtx` 写 `application/json; charset=utf-8`， ⏐ 按；<br>`tools/difftest/run-task-kafka-e2e.sh` ⇒ **EXIT=0**（2026-10-30 03:38:06 · 85s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==== 2. 编 RAG 侧（⑤ 不是 fat jar ⇒ classes + 依赖 classpath） ==== ⏐ ✓ Kafka 容器已重建（⇒ 无 topic、无已提交位点、无 consumer group） ⏐ 批次：user 5001 × 5（恰好达到 target=5 ⇒ 完成分支）、user 5002 × 2（doing 分支） ⏐ ✅ Kafka 端到端最终态：Go 与 RAG 完全一致。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-task-http-parity.sh` ⇒ **EXIT=0**（2026-10-30 03:34:25 · 46s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==== 2. 编 RAG 侧（③ 不是 fat jar ⇒ classes + 依赖 classpath） ==== ⏐ [MATCH] cache-status-with-pipe             status 含 '|' ⇒ 4 段 ⇒ 回落 0 ⏐ ⇒ 归 DRIFT-TASK-API-004：Go `httpx.WriteJsonCtx` 写 `application/json; charset=utf-8`， ⏐ 按；<br>`tools/difftest/run-task-kafka-e2e.sh` ⇒ **EXIT=0**（2026-10-30 03:38:06 · 85s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==== 2. 编 RAG 侧（⑤ 不是 fat jar ⇒ classes + 依赖 classpath） ==== ⏐ ✓ Kafka 容器已重建（⇒ 无 topic、无已提交位点、无 consumer group） ⏐ 批次：user 5001 × 5（恰好达到 target=5 ⇒ 完成分支）、user 5002 × 2（doing 分支） ⏐ ✅ Kafka 端到端最终态：Go 与 RAG 完全一致。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
 ## PIT-TASK-15 · 【仍生效】 bash 里 `$var` 紧跟**多字节字符**，变量名会被吃掉首字节
 
 > **旧号**：`PITFALL-TASK-RPC-15` ⇒ **新号**：`PIT-TASK-15`
@@ -741,6 +753,12 @@ Caused by: java.net.BindException: Address already in use
    的注释与函数里（`wait_port_free` / `wait_port_listen`）。
 
 ---
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-task-http-parity.sh` ⇒ **EXIT=0**（2026-10-30 03:34:25 · 46s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==== 2. 编 RAG 侧（③ 不是 fat jar ⇒ classes + 依赖 classpath） ==== ⏐ [MATCH] cache-status-with-pipe             status 含 '|' ⇒ 4 段 ⇒ 回落 0 ⏐ ⇒ 归 DRIFT-TASK-API-004：Go `httpx.WriteJsonCtx` 写 `application/json; charset=utf-8`， ⏐ 按。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-task-http-parity.sh` ⇒ **EXIT=0**（2026-10-30 03:34:25 · 46s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==== 2. 编 RAG 侧（③ 不是 fat jar ⇒ classes + 依赖 classpath） ==== ⏐ [MATCH] cache-status-with-pipe             status 含 '|' ⇒ 4 段 ⇒ 回落 0 ⏐ ⇒ 归 DRIFT-TASK-API-004：Go `httpx.WriteJsonCtx` 写 `application/json; charset=utf-8`， ⏐ 按。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-task-http-parity.sh` ⇒ **EXIT=0**（2026-10-30 03:34:25 · 46s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==== 2. 编 RAG 侧（③ 不是 fat jar ⇒ classes + 依赖 classpath） ==== ⏐ [MATCH] cache-status-with-pipe             status 含 '|' ⇒ 4 段 ⇒ 回落 0 ⏐ ⇒ 归 DRIFT-TASK-API-004：Go `httpx.WriteJsonCtx` 写 `application/json; charset=utf-8`， ⏐ 按。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
 
 ## PIT-TASK-34 · 【仍生效】 bash 的 `$var` 紧跟多字节字符：**实测规则**（本轮又踩了一次）
 
@@ -831,6 +849,12 @@ Nacos **2.x 的客户端用 gRPC 注册**（nacos-client 3.x 的 `NamingGrpcClie
 
 
 ---
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-task-nacos-discovery.sh` ⇒ **EXIT=0**（2026-10-30 03:37:46 · 20s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 实例已注册到真注册中心            = yes ⏐ ==== 5. 停进程 ⇒ 实例应从注册表消失（不留幽灵） ==== ⏐ ✅ 实例已从注册表消失（无幽灵）   = yes。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-task-nacos-discovery.sh` ⇒ **EXIT=0**（2026-10-30 03:37:46 · 20s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 实例已注册到真注册中心            = yes ⏐ ==== 5. 停进程 ⇒ 实例应从注册表消失（不留幽灵） ==== ⏐ ✅ 实例已从注册表消失（无幽灵）   = yes。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-task-nacos-discovery.sh` ⇒ **EXIT=0**（2026-10-30 03:37:46 · 20s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 实例已注册到真注册中心            = yes ⏐ ==== 5. 停进程 ⇒ 实例应从注册表消失（不留幽灵） ==== ⏐ ✅ 实例已从注册表消失（无幽灵）   = yes。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
 
 ## PIT-TASK-18 · 【已闭环】 `@KafkaListener(properties=…)` **不走 Boot 松散绑定** ⇒ 连字符写法被 Kafka 静默忽略 ⇒ 「earliest 从未生效」而 326 条测试全绿
 
@@ -956,6 +980,10 @@ AbstractConfig : These configurations '[auto-offset-reset]' were supplied but ar
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-task-offset-oldest.sh` ⇒ **EXIT=0**（2026-10-30 03:35:13 · 153s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✓ PASS  [A5] 阴性对照：kq(latest) 两侧 like:total:7777 均不存在 ⇒ 实测=Go=<absent> RAG=<absent> ⏐ ✓ PASS  [A8] 阳性对照：kq(latest) 路本身正常 —— 两侧 like:total:8888 = 42 ⇒ 实测=Go=42 RAG=42 ⏐ ✓ PASS  [A6] 端到端 like:total:5001 = 10（预灌 5 + 后灌 5 ⇒ 预。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-task-offset-oldest.sh` ⇒ **EXIT=0**（2026-10-30 03:35:13 · 153s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✓ PASS  [A5] 阴性对照：kq(latest) 两侧 like:total:7777 均不存在 ⇒ 实测=Go=<absent> RAG=<absent> ⏐ ✓ PASS  [A8] 阳性对照：kq(latest) 路本身正常 —— 两侧 like:total:8888 = 42 ⇒ 实测=Go=42 RAG=42 ⏐ ✓ PASS  [A6] 端到端 like:total:5001 = 10（预灌 5 + 后灌 5 ⇒ 预。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
 ## PIT-TASK-20 · 【已闭环】 compose 的**项目名从目录名推导** ⇒ 同目录的两个 compose 文件撞成同一个 project ⇒ `up -d` 会**删掉别的域的容器**
 
 > **旧号**：`PITFALL-TASK-RPC-20` ⇒ **新号**：`PIT-TASK-20`
@@ -1066,6 +1094,8 @@ bash 的变量名解析会把**非 ASCII 字节**也算进名字 ⇒ `$off，` �
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run.sh` ⇒ **EXIT=0**（2026-10-30 03:29:45 · 137s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [3b/3] 判定器（🔴 E48 · 第三十九轮：判定从「注释里的承诺」变成「可执行的代码」） ⏐ PASS —— 未复现差异（两侧 Δ_end 一致 ⇒ RAG 侧继承了客户端 deadline） ⏐ ⇒ E38① 的运行期结论成立 ⏐ ⇒ 退出码 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ⇒ 判定退出码 = 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ==> 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
 ## PIT-TASK-22 · 【已闭环】 「先起消费者、后灌消息」的对拍**测不出** `earliest` / `latest` 的差别 ⇒ 全绿是假绿
 
 > **旧号**：`PITFALL-TASK-RPC-22` ⇒ **新号**：`PIT-TASK-22`
@@ -1097,6 +1127,12 @@ bash 的变量名解析会把**非 ASCII 字节**也算进名字 ⇒ `$off，` �
    与**阳性对照**（启动后投递的消息必须被消费）⇒ 探针**有区分力**。
 
 ---
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-task-offset-oldest.sh` ⇒ **EXIT=0**（2026-10-30 03:35:13 · 153s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✓ PASS  [A5] 阴性对照：kq(latest) 两侧 like:total:7777 均不存在 ⇒ 实测=Go=<absent> RAG=<absent> ⏐ ✓ PASS  [A8] 阳性对照：kq(latest) 路本身正常 —— 两侧 like:total:8888 = 42 ⇒ 实测=Go=42 RAG=42 ⏐ ✓ PASS  [A6] 端到端 like:total:5001 = 10（预灌 5 + 后灌 5 ⇒ 预。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-task-offset-oldest.sh` ⇒ **EXIT=0**（2026-10-30 03:35:13 · 153s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✓ PASS  [A5] 阴性对照：kq(latest) 两侧 like:total:7777 均不存在 ⇒ 实测=Go=<absent> RAG=<absent> ⏐ ✓ PASS  [A8] 阳性对照：kq(latest) 路本身正常 —— 两侧 like:total:8888 = 42 ⇒ 实测=Go=42 RAG=42 ⏐ ✓ PASS  [A6] 端到端 like:total:5001 = 10（预灌 5 + 后灌 5 ⇒ 预。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-task-offset-oldest.sh` ⇒ **EXIT=0**（2026-10-30 03:35:13 · 153s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✓ PASS  [A5] 阴性对照：kq(latest) 两侧 like:total:7777 均不存在 ⇒ 实测=Go=<absent> RAG=<absent> ⏐ ✓ PASS  [A8] 阳性对照：kq(latest) 路本身正常 —— 两侧 like:total:8888 = 42 ⇒ 实测=Go=42 RAG=42 ⏐ ✓ PASS  [A6] 端到端 like:total:5001 = 10（预灌 5 + 后灌 5 ⇒ 预。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../DRIFT/_cross/live-parity-2026-10-30.md)。
 
 ## PIT-TASK-23 · 【已闭环】 「按段前缀匹配元数据」会让配置键扫描器**形同虚设**
 

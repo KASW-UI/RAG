@@ -379,3 +379,22 @@ python3 tools/check-ledger-selfcheck.py --domain task --go-root /path/to/Sea-Rid
 | `DRIFT-TASK-RPC-007` / `-008` 的**活体读数**（池等待 4.005s / 桶边界 12） | 需**真 Redis 容器 + 真 Go 客户端** ⇒ 本轮**未重跑** | 已核**配置层**（`timeout` / `connect-timeout` / `lettuce.pool` 五项 / `commons-pool2` 依赖）+ **jar 内源码行**（`RedisURI.java:221`、`LettuceConnectionFactory.java:132`） |
 | `SD-2026-10-23-TASK-01` / `SD-2026-10-24-TASK-01` 的**活体复现**（30ns 真的生效 / processor 失败真的进程退出） | 需**真 PG + 真 Kafka** ⇒ 本轮**未重跑** | 已核**Go 源码行**（`service_context.go:45` / `initGoKa.go:138-145`）+ **RAG 配置行** ⇒ **签字仍成立**（本轮未独立改判） |
 | `PIT-TASK-01`~`PIT-TASK-34` 中标「仍生效」的**条目** | 「仍生效」= 「该坑的触发条件仍可能重现」⇒ 需按条重跑才能证伪 ⇒ 本轮**未逐条复现** | 机械核对了「所引仓内文件是否存在」（**零缺失**）＋ 抽核 `PIT-TASK-06` / `-07` / `-18` ⇒ **状态沿用 2026-10-29 结论**，本轮**未独立改判**（明细见 [`docs/Pitfalls/task/rpc.md`](../../Pitfalls/task/rpc.md) 的 2026-10-30 回执） |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W13
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-TASK-API-004 | D（经分析确认不实现 · 容器层渲染 ⇒ 应用层无实现路径） | P2 | 否 | Go `go-zero@v1.10.2/rest/internal/header/headers.go:17`（`ContentTypeJson = "application/json; charset=utf-8"` ⇒ **分号后有空格**）＋ `go-zero@v1.10.2/rest/httpx/responses.go:182`（`w.Header().Set(ContentType, header.ContentTypeJson)` ⇒ Go 的 JSON 响应头带 charset）＋ Go 标准库 `net/http/server.go:2351`（`h.Set("Content-Type", "text/plain; charset=utf-8")` ⇒ 错误响应同样带空格）vs RAG `service/common/src/main/java/com/rag/common/http/GoStyleJsonContentTypeAdvice.java:127`（`GO_JSON_CONTENT_TYPE = "application/json;charset=utf-8"` ⇒ **charset 已在**，只差一个 OWS）＋ `:151`（写入点）＋ `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:2`（⇒ 共享层注册 ⇒ **10 个 api 全生效**）＋ `service/task/task-api/pom.xml:61`（task-api 依赖 `common` ⇒ 对本域生效）＋ `service/task/task-api/src/main/java/com/rag/task/task/api/advice/GlobalExceptionHandler.java:71`（`TEXT_PLAIN_UTF8 = "text/plain; charset=utf-8"` ⇒ **应用层写的本来就是 Go 的带空格原串**）＋ `:308`（写入点）⇒ ⇒ **台账记的「RAG `application/json`（无 charset）」这一半已过期**：共享层 2026-10-25 落地 `GoStyleJsonContentTypeAdvice` 后，JSON 响应头已是 `application/json;charset=utf-8`（**带 charset**）⇒ 本轮实跑 `mvn -o -pl service/common test -Dtest=GoStyleJsonContentTypeCharsetTomcatTest` ⇒ `Tests run: 4, Failures: 0, Errors: 0, Skipped: 0`（**真 Tomcat ＋ 裸 socket** ⇒ 字节级读数 = `application/json;charset=utf-8`，期望值常量在 `service/common/src/test/java/com/rag/common/http/GoStyleJsonContentTypeCharsetTomcatTest.java:101`、断言在 `:120`）⇒ ⇒ **仍成立的那一半 = `text/plain` 的 OWS**：本轮实跑 `mvn -o -pl service/task/task-api test -Dtest=TaskApiFailurePathMatrixTest` ⇒ `Tests run: 33, Failures: 0, Errors: 0, Skipped: 0`（**真 Tomcat ＋ 原始字节**）⇒ `service/task/task-api/src/test/java/com/rag/task/task/api/TaskApiFailurePathMatrixTest.java:178`（实测读数常量 `text/plain;charset=utf-8` ⇒ **无空格**）＋ `:259`（断言点）vs Go 的 `text/plain; charset=utf-8` ⇒ ⇒ **差异仍成立**（字节级只差一个 OWS；且**经分析确认不可修**：`tomcat-embed-core 11.0.24` 的 `org/apache/coyote/http11/Http11OutputBuffer.java:370-376`（容器重渲染 ⇒ `;` 后无空格）＋ Servlet API 的 `setContentType`／`setHeader`／`addHeader` 三条路都汇到 `Response.setContentType` ⇒ **应用层无路可走** ⇒ 落点不在 `service/common` ⇒ 与 like／message 等域同款共性）⇒ ⇒ 归 D · **不阻断阶段一**；P2（展示面 · 字节级；影响面 = 全部 api 的 JSON 与 `text/plain` 响应头 ⇒ 但按 RFC 9110 OWS 不显著 ⇒ **语义等价**，不命中 P0 九条） | 2026-10-30 |

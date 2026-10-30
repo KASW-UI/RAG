@@ -25,7 +25,7 @@
 |---|---|---|---|---|
 | ✅ `DRIFT-FOLLOW-008` | **MaxConns 闸门**：Go **每路由一个**（`go-zero@v1.10.2/rest/handler/maxconnshandler.go:12` 按 `route.Path` 建闸）vs RAG **全局一个** | `service/common`（`GoStyleMaxConnsFilter`） | ✅ **已签字偏离 ⇒ 不修**（`SD-2026-10-25-01`，2026-10-25 用户拍板）· ⚠️ **2026-10-29 订正**：原记「🔴 未修 ⇒ 派单」**是陈旧的** ⇒ **不是缺陷、撤出派单表** | [`api.md`](api.md) · 签字档 [`Intentional_Deviations/global/common-tails.md`](../../Intentional_Deviations/global/common-tails.md) |
 | `DRIFT-FOLLOW-002` | 运行时 classpath 缺 `grpc-inprocess` ⇒ `NoClassDefFoundError` ⇒ 启动失败 | `service/common`（pom 作用域） | ✅ **已修**<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针）**：RAG `service/follow/follow-rpc/pom.xml:256-260` = `io.grpc:grpc-inprocess` **无 `<scope>test</scope>`**（compile 默认）⇒ **现行态 = ✅ 已修（不变）**；核对日期 2026-10-30 | [`rpc.md`](rpc.md) |
-| `DRIFT-HOTAPI-030` | Tomcat 参数个数口径 | `service/common`（CD-6） | ✅ **已落地**<br>⚠️ **2026-10-30 真实性复核（follow+task lane）**：短确认 —— 共享层 **6 个类仍在位**（`service/common/src/main/java/com/rag/common/http/GoStyleTomcatParameterLimitCustomizer.java:170` = `public static final int MAX_PARAMETER_COUNT = 10001;` ＋ `GoStyleFormLimitMode.java` · `GoStyleFormLimitWebMvcConfig.java` · `GoStyleFormValueLimitInterceptor.java` · `GoStyleFormValues.java` · `GoStyleFormLimitExceededException.java`）· 本域消费点 RAG `service/follow/follow-api/src/main/resources/application.yml:219` = `mode: envelope`（Go `service/follow/api/followcenter.go:53` 注册了 `httpx.SetErrorHandler` ⇒ **两侧同向**）⇒ **现行态 = ✅ 已落地（不变）**；⚠️ **「后续格（段数轴）」仍 🔴 在 `global`/G4** ⇒ **本行只确认主轴**。核对日期 2026-10-30。 | [`api.md`](api.md) |
+| `DRIFT-HOTAPI-030` | Tomcat 参数个数口径 | `service/common`（CD-6） | ✅ **已落地**<br>⚠️ **2026-10-30 真实性复核（follow+task lane）**：短确认 —— 共享层 **6 个类仍在位**（`service/common/src/main/java/com/rag/common/http/GoStyleTomcatParameterLimitCustomizer.java:170` = `public static final int MAX_PARAMETER_COUNT = 10001;` ＋ `GoStyleFormLimitMode.java` · `GoStyleFormLimitWebMvcConfig.java` · `GoStyleFormValueLimitInterceptor.java` · `GoStyleFormValues.java` · `GoStyleFormLimitExceededException.java`）· 本域消费点 RAG `service/follow/follow-api/src/main/resources/application.yml:219` = `mode: envelope`（Go `service/follow/api/followcenter.go:53` 注册了 `httpx.SetErrorHandler` ⇒ **两侧同向**）⇒ **现行态 = ✅ 已落地（不变）**；⚠️ **「后续格（段数轴）」仍 🔴 在 `global`/G4** ⇒ **本行只确认主轴**。核对日期 2026-10-30。 | [`api.md`](api.md) <br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/semantic-probe/rpc-timeout/run-rpc-timeout-parity.sh` ⇒ **EXIT=0**（2026-10-30 03:48:23 · 8s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ client_deadline_ctx                      一致 ⏐ ⚠️  timeout_telemetry                        预期差异（不计入失败） ⏐ 理由：RAG 的 code 段用 grpc-java 的 Code.name()（DEADLINE_EXCEEDED），Go 用 grpc-go 的 codes.Code.String()（DeadlineExceeded）⇒。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。<br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 03:20:49 · 48s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ follow_self_relation  Go == RAG == expected.txt（HTTP 200 · 124 字节） ⏐ ✅ follow_target_not_found  Go == RAG == expected.txt（HTTP 200 · 96 字节） ⏐ ✅ follow_new_relation  Go == RAG == expected.txt（HTTP 200 · 94 字节） ⏐ ✅ unfol；<br>`tools/semantic-probe/rpc-timeout/run-rpc-timeout-parity.sh` ⇒ **EXIT=0**（2026-10-30 03:48:23 · 8s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ client_deadline_ctx                      一致 ⏐ ⚠️  timeout_telemetry                        预期差异（不计入失败） ⏐ 理由：RAG 的 code 段用 grpc-java 的 Code.name()（DEADLINE_EXCEEDED），Go 用 grpc-go 的 codes.Code.String()（DeadlineExceeded）⇒；<br>`tools/semantic-probe/run-parity.sh` ⇒ **EXIT=0**（2026-10-30 03:16:43 · 4s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：（未抓到结论行）。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。|
 
 > ⚠️ **写死数字/状态的纪律**（AGENTS.md §6）：本表是**抽取快照**；每条**逐条证据**以「域台账」列指向的正文为准，
 > **状态必须带核对日期** ⇒ lane 复核后请就地更新本表并写入核对日期。
@@ -820,7 +820,7 @@ G4 那张「逐组件实测表」是**在 G4 自己的树上解析 YAML** 得出
 |---|---|---|---|
 | `S1-FOLLOW-010` | `service/common/src/main/java/com/rag/common/http/GoStyleRouterErrorResponses.java:83`<br>⚠️ **2026-10-30 复核**：现行指针 = **`:80`**（`:83` 现指向「订正说明」那一行） | javadoc 写「全长 **`20`** 字节」⇒ 实测 **19** ⇒ ⚠️ **常量本身是对的**（真容器实测 `Content-Length: 19`）⇒ 只是**注释**错<br>⚠️ **2026-10-30 真实性复核（follow+task lane）**：原判「🔴 注释错 ⇒ 派 G4」⇒ **现行态 = ✅ 已闭环（2026-10-29 已由 G4 落码订正）** —— RAG `service/common/src/main/java/com/rag/common/http/GoStyleRouterErrorResponses.java:80` 现写「…**带一个尾随换行**，全长 {@code 19} 字节」＋ `:83` = 「🔴 **2026-10-29（R3 轮）订正**：本 javadoc 原写「全长 {@code 20} 字节」⇒ **错**」⇒ ⇒ **所报缺陷已不存在** ⇒ **不再派 G4**；⚠️ **指针订正**：原 `:83` → 现行 **`:80`**。核对日期 2026-10-30 | **G4**（`service/common/**`）· **2026-10-30 ⇒ 已闭环，不再派 G4**|
 | `S1-FOLLOW-011` | `service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiRouterErrorRealTomcatTest.java:46` 与 `:187`<br>⚠️ **2026-10-30 复核**：`:187` 已位移（现为空行）⇒ 现行指针 = **`:46`** ＋ **`:190`**（`@DisplayName` 那行） | javadoc 与 `@DisplayName` 都写「20」⇒ ⚠️ **断言本身是对的**（按实际长度比）⇒ **一直绿** ⇒ 只有注释与显示名错<br>⚠️ **2026-10-30 真实性复核（follow+task lane）**：原判「🔴 注释/显示名错 ⇒ 派 G2」⇒ **现行态 = ✅ 已闭环（2026-10-29 已由 G2 落码订正）** —— RAG `service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiRouterErrorRealTomcatTest.java:46` 现写「…全长 **19** 字节」＋ `:48` = 「⚠️ 2026-10-29 订正：原写「20 字节」是**错的**」＋ `:190` 的 `@DisplayName` 现写「…= **19** 字节」⇒ ⇒ **所报缺陷已不存在** ⇒ **不再派 G2**；⚠️ **指针订正**：原 `:187` → 现行 **`:46` / `:190`**。核对日期 2026-10-30 | **G2**（`service/like/**`）· **2026-10-30 ⇒ 已闭环，不再派 G2**|
-| `S1-FOLLOW-013` | `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiFailurePathMatrixTest.java:417` | **本轮新增文件自己的断言消息也写了「全长 20 字节」**（**G1 自己写的**）⇒ **断言本身是对的**（比 body 字面量）⇒ **错数只在文案里** ⇒ ⚠️ 且它**躲过了 G1 的第一轮自查**（**模式选错** ＋ **`head -40` 截断**，两个漏洞叠加 ⇒ 详见 users 档 §68.2bis）⇒ **已二次订正** | **G1 自修**（`service/follow/**`）|
+| `S1-FOLLOW-013` | `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiFailurePathMatrixTest.java:417` | **本轮新增文件自己的断言消息也写了「全长 20 字节」**（**G1 自己写的**）⇒ **断言本身是对的**（比 body 字面量）⇒ **错数只在文案里** ⇒ ⚠️ 且它**躲过了 G1 的第一轮自查**（**模式选错** ＋ **`head -40` 截断**，两个漏洞叠加 ⇒ 详见 users 档 §68.2bis）⇒ **已二次订正** | **G1 自修**（`service/follow/**`）<br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/ddl-parity.sh` ⇒ **EXIT=2**（2026-10-30 03:34:15 · 2s）—— 🟡 **探针判定为「环境问题」**（结论不可用）；覆盖断言：（未抓到结论行）；<br>`tools/metrics-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 04:32:14 · 32s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 故障[follow_relation] Follow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[follow_relation] Unfollow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[block_relation] Block 两；<br>`tools/difftest/ddl-parity.sh` ⇒ **EXIT=2**（2026-10-30 03:34:15 · 2s）—— 🟡 **探针判定为「环境问题」**（结论不可用）；覆盖断言：（未抓到结论行）；<br>`tools/metrics-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 04:32:14 · 32s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 故障[follow_relation] Follow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[follow_relation] Unfollow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[block_relation] Block 两。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。|
 
 ⇒ ⇒ **判据**：① 本域**不复述**那个错数（改按实际长度比）；② **不擅自改**别家写权面的文件 ⇒ 只登记 + 上报。
 
@@ -1203,7 +1203,7 @@ git diff --stat -- service/ # ⇒ 0 行
 | `DRIFT-FOLLOW-002` | ✅ 已修 | ✅ 已修（不变）**＋ 跨域子结论订正** | RAG `service/follow/follow-rpc/pom.xml:256-260` = grpc-inprocess **无** `<scope>test</scope>` ⇒ 域侧成立；但「域外 4 个模块仍是 `test` scope」**已陈旧**（见 `rpc.md` 订正段） | **子结论订正**（核对日期 2026-10-29）｜⚠️ **2026-10-30 真实性复核（复核面）**：本行即本轮逐条复核记录（原状态 → 现行态 · 两侧依据见本行）· 核对日期 2026-10-30 |
 | `DRIFT-FOLLOW-003` | ✅ 已修 | ✅ 已修（不变） | RAG `service/follow/follow-rpc/src/main/resources/application.yml:163` = `address: discovery:///user-rpc`（**三斜杠**） | 否（核对日期 2026-10-29）｜⚠️ **2026-10-30 真实性复核（复核面）**：本行即本轮逐条复核记录（原状态 → 现行态 · 两侧依据见本行）· 核对日期 2026-10-30 |
 | `DRIFT-FOLLOW-004` | ✅ 已修 | ✅ 已修（不变） | RAG `service/follow/follow-api/…/application.yml:58` ＋ `service/follow/follow-rpc/…/application.yml:95` = **同一套** `${NACOS_ADDR:nacos}:${NACOS_PORT:8848}` ⇒ 两端必指同一台 Nacos | 否（核对日期 2026-10-29）｜⚠️ **2026-10-30 真实性复核（复核面）**：本行即本轮逐条复核记录（原状态 → 现行态 · 两侧依据见本行）· 核对日期 2026-10-30 |
-| `DRIFT-FOLLOW-006` | ✅ 已落地（🔴→✅ 2026-10-29） | ✅ 已落地（不变） | RAG `service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web` ＋ `…/application.yml:131` = `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}`（Go `service/follow/rpc/etc/follow.yaml:23` = `Port: 16065`）＋ `:112` = `register-enabled: false` ＋ 探针 `tools/metrics-probe/follow/run.sh` 存在（`:355` 就绪判据 = 真抓到 `/actuator/prometheus`） | 否｜⚠️ **2026-10-30 真实性复核（复核面）**：本行即本轮逐条复核记录（原状态 → 现行态 · 两侧依据见本行）· 核对日期 2026-10-30 |
+| `DRIFT-FOLLOW-006` | ✅ 已落地（🔴→✅ 2026-10-29） | ✅ 已落地（不变） | RAG `service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web` ＋ `…/application.yml:131` = `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}`（Go `service/follow/rpc/etc/follow.yaml:23` = `Port: 16065`）＋ `:112` = `register-enabled: false` ＋ 探针 `tools/metrics-probe/follow/run.sh` 存在（`:355` 就绪判据 = 真抓到 `/actuator/prometheus`） | 否｜⚠️ **2026-10-30 真实性复核（复核面）**：本行即本轮逐条复核记录（原状态 → 现行态 · 两侧依据见本行）· 核对日期 2026-10-30 <br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/metrics-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 04:32:14 · 32s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 故障[follow_relation] Follow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[follow_relation] Unfollow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[block_relation] Block 两；<br>`tools/metrics-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 04:32:14 · 32s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 故障[follow_relation] Follow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[follow_relation] Unfollow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[block_relation] Block 两；<br>`tools/metrics-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 04:32:14 · 32s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 故障[follow_relation] Follow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[follow_relation] Unfollow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[block_relation] Block 两。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。|
 | `S1-FOLLOW-001` | 🟡 B 类（跨域方案待定） | **✅ 已落地** | 见 `docs/DRIFT/follow/stage1-admission.md` 的订正段<br>⚠️ **2026-10-30 复核补指针（follow+task lane）**：RAG `service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web` ＋ `service/follow/follow-rpc/src/main/resources/application.yml:131` = `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}` ＋ `:112` = `register-enabled: false` · Go `service/follow/rpc/etc/follow.yaml:23` = `Port: 16065` ⇒ **端口一字不差** ⇒ **现行态 = ✅ 已落地（不变）**；核对日期 2026-10-30 | **是** |
 | `S1-FOLLOW-002` | ✅ 已签字偏离 ⇒ 不修 | ✅ 仍成立（不变） | 签字档 `docs/Intentional_Deviations/global/common-tails.md` §`SD-2026-10-25-01` 存在、「对应的 DRIFT 条目」栏明写 = T-2 = `DRIFT-FOLLOW-008` ⇒ 与本条一致<br>⚠️ **2026-10-30 复核补指针（follow+task lane）**：`docs/Intentional_Deviations/global/common-tails.md:11` = `## SD-2026-10-25-01：… ｜ **状态（核对日期 2026-10-29）：✅ 仍成立**` ＋ `:18`（「对应的 DRIFT 条目」栏 = **T-2** = `follow` 域 `DRIFT-FOLLOW-008`）· RAG `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java:67` = 「⚠️ 本条是经签字批准的『有意偏离』」· Go `go-zero@v1.10.2/rest/handler/maxconnshandler.go:20` = `latch := syncx.NewLimit(n)`（**每路由一个**）⇒ **差异仍在两侧 ⇒ 现行态 = ✅ 仍成立（不变）**；核对日期 2026-10-30 | 否 |
 | `S1-FOLLOW-003` | 🔴 共享层待办 | **✅ 已修** | 见 `stage1-admission.md` 订正段（共享层 `HttpPoolLifecycle` 已落码 + follow-rpc 已补 servlet 容器）<br>⚠️ **2026-10-30 复核补指针（follow+task lane）**：RAG `service/common/src/main/java/com/rag/common/spring/HttpPoolLifecycle.java:53-54` = `@ConditionalOnWebApplication(type = …Type.SERVLET)` ＋ `service/common/src/main/java/com/rag/common/spring/ObservabilityLifecycle.java:85` = 「本方法**只碰** `RpcInterceptor`」＋ `:94` = 「HTTP 池改由 `HttpPoolLifecycle` 关 ⇒ **不在本方法里**」⇒ ⇒ **纯 gRPC 进程的关闭路径不再触及 web 类型**；＋ RAG `service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web` ⇒ **本域侧前提亦不成立** ⇒ **现行态 = ✅ 已修（不变）**；核对日期 2026-10-30 | **是** |
@@ -1211,7 +1211,7 @@ git diff --stat -- service/ # ⇒ 0 行
 | `S1-FOLLOW-005` | ✅ 已修 | ✅ 已修（不变） | RAG `service/follow/follow-rpc/src/main/resources/application.yml:143` = `port: ${FOLLOW_RPC_PORT:8082}` | 否（核对日期 2026-10-29）｜⚠️ **2026-10-30 真实性复核（复核面）**：本行即本轮逐条复核记录（原状态 → 现行态 · 两侧依据见本行）· 核对日期 2026-10-30 |
 | `S1-FOLLOW-006` | 🟢 正面范例 | 🟢 仍成立（不变） | RAG `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/service/FollowBlockTransactionService.java:43` = 独立 bean ＋ `:70` = `@Transactional(rollbackFor = Exception.class)` ＋ `:24` = AOP 自调用陷阱注释 | 否（核对日期 2026-10-29）｜⚠️ **2026-10-30 真实性复核（复核面）**：本行即本轮逐条复核记录（原状态 → 现行态 · 两侧依据见本行）· 核对日期 2026-10-30 |
 | `DRIFT-G1-001` | 🔴 | **✅ 已修** | 见本文件 §7.1 订正段（`NacosRegistration.java:104` 读配置） | **是**（核对日期 2026-10-29）｜⚠️ **2026-10-30 真实性复核（复核面）**：本行即本轮逐条复核记录（原状态 → 现行态 · 两侧依据见本行）· 核对日期 2026-10-30 |
-| `DRIFT-G1-002` | 🔴 | **✅ 已修** | 见本文件 §7.2 订正段（`application.yml:129` = `immediate-connect-timeout: 3s`） | **是**（核对日期 2026-10-29）｜⚠️ **2026-10-30 真实性复核（复核面）**：本行即本轮逐条复核记录（原状态 → 现行态 · 两侧依据见本行）· 核对日期 2026-10-30 |
+| `DRIFT-G1-002` | 🔴 | **✅ 已修** | 见本文件 §7.2 订正段（`application.yml:129` = `immediate-connect-timeout: 3s`） | **是**（核对日期 2026-10-29）｜⚠️ **2026-10-30 真实性复核（复核面）**：本行即本轮逐条复核记录（原状态 → 现行态 · 两侧依据见本行）· 核对日期 2026-10-30 <br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/metrics-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 04:32:14 · 32s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 故障[follow_relation] Follow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[follow_relation] Unfollow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[block_relation] Block 两；<br>`tools/metrics-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 04:32:14 · 32s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 故障[follow_relation] Follow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[follow_relation] Unfollow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[block_relation] Block 两；<br>`tools/metrics-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 04:32:14 · 32s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 故障[follow_relation] Follow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[follow_relation] Unfollow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[block_relation] Block 两。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。|
 | `PITFALL-FOLLOW-005` | 🔴 未修 ⇒ 派 G4 | **✅ 已闭环** | 见本文件 §9.2 订正段 | **是**（核对日期 2026-10-29）｜⚠️ **2026-10-30 真实性复核（复核面）**：本行即本轮逐条复核记录（原状态 → 现行态 · 两侧依据见本行）· 核对日期 2026-10-30 |
 
 ### 18.2 仍未核到（**待核实**，不默认「仍生效」也不默认「已闭环」）
@@ -1288,3 +1288,280 @@ git diff --stat -- service/ # ⇒ 0 行
 | `DRIFT-FOLLOW-006` / `S1-FOLLOW-001` 的**双侧 series 逐条一致** | 需**真 Go + 真 RAG 进程同时跑** ⇒ 本轮未起 | 已核**配置层**（端口 / `register-enabled` / starter-web / 探针就绪判据 `tools/metrics-probe/follow/run.sh:355,361`）⇒ 未独立改判 |
 | `S1-FOLLOW-004`（compose 编排） | 根级 `docker-compose.yaml` **不在本 lane 写权面** | 已核**现状**（7 个 service ⇒ 无 follow 入口）⇒ 未独立改判 |
 | `DRIFT-G1-002` 的**真启动 fail-fast 实测**（进程退出） | 需真 Nacos + 真进程 ⇒ 本轮未起 | 已核**配置层**（`application.yml:129` = `immediate-connect-timeout: 3s`）⇒ 未独立改判 |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W28
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| `S1-FOLLOW-013` | D（差异已消失 ⇒ 本条无待实现内容） | P3 | 否 | Go `go-zero@v1.10.2/rest/router/patrouter.go:71-74`（路径未命中且方法不匹配 ⇒ `pr.handleNotFound(w, r)`）＋ `go-zero@v1.10.2/rest/router/patrouter.go:93-99`（`handleNotFound` ⇒ `pr.notFound` 或 `http.NotFound(w, r)`）＋ `go-zero@v1.10.2/rest/engine.go:261`（`chn.Then(http.NotFoundHandler())` ⇒ 标准库 NotFoundHandler）＋ Go 标准库 `net/http/server.go:2358`（`NotFound` ⇒ `Error(w, "404 page not found", 404)`）＋ `net/http/server.go:2337`／`:2351-2354`（`Error` 写 `Content-Type: text/plain; charset=utf-8` ＋ `X-Content-Type-Options: nosniff` ＋ `fmt.Fprintln` ⇒ body = `"404 page not found\n"` = 18 ＋ 1 = **19 字节**）＋ 真源 `service/follow/api/internal/handler/routes.go:16-63`（8 条 `/follow/v1` 路由注册 ⇒ 未命中路径落到上面的 404 出口）vs RAG `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiFailurePathMatrixTest.java:417`（断言消息现写「…body 带尾随换行、全长 **19** 字节」⇒ **错数 20 已不存在**）＋ `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiFailurePathMatrixTest.java:427-434`（注释自述 2026-10-29 二次订正 ＋ 为何躲过第一轮自查）＋ 域内复扫 `grep -rnE "[0-9]+ ?字节" service/follow --include=*.java`（无 head ／ 无分页）⇒ 7 行命中，其中「20 字节」只剩 `:428` 那句**订正说明**（描述旧版本）⇒ 域内零残留 ⇒ 差异已消失（该错数 2026-10-29 已二次订正）⇒ 且断言本身一直按 body 字面量比（`:416`）＋ Content-Length 按实际字节数比（`:427`／`:440`）⇒ **从未影响测试判据**，只是**文案面** ⇒ 本条无待实现内容 | 2026-10-30 |
+
+### lane W7
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| PITFALL-FOLLOW-005 | D | P3 | 否 | Go `service/common/observability/http.go:36`（`NewHTTPMiddleware` —— 只被 **api 侧** `service/follow/api/followcenter.go:42` 等 7 个 api main 引用；**rpc 侧零引用** ⇒ Go 的纯 gRPC 进程**根本不存在**「关闭路径触及 web 类型」这回事）。RAG `service/common/src/main/java/com/rag/common/spring/HttpPoolLifecycle.java:52-54`（`@Component` + `@ConditionalOnWebApplication(type = SERVLET)` ⇒ **只有 servlet 进程才注册这个 Bean** ⇒ 纯 gRPC 进程里 HTTP 池的关闭路径根本不存在）＋ `service/common/src/main/java/com/rag/common/spring/ObservabilityLifecycle.java:85`（「本方法**只碰** `RpcInterceptor`」）＋ `:94`（「HTTP 池改由 `HttpPoolLifecycle` 关 ⇒ **不在本方法里**」）＋ 域侧前提也已变：`service/follow/follow-rpc/pom.xml:216`（`spring-boot-starter-web` ⇒ classpath 上已有 servlet-api）⇒ ⇒ `NoClassDefFoundError: jakarta/servlet/Filter` 的前提**两侧都不成立** ⇒ **差异已消失** ⇒ **D**：本条无待实现项（原「派 G4」是 2026-10-27 落码前的陈旧快照） | 2026-10-30 |
+
+---
+
+## 🟢 2026-10-30 轮 · G1 lane 落账（派工面 `wave=G1` × A/B 回源后分流）
+
+> **落账口径**：本轮取件 = `docs/DRIFT/_cross/stage1-derivation.tsv` 的 **`wave` 列**（派工面）⇒ `wave` 含 `G1` × `stage ∈ {A,B}` = 19 条 ⇒ **状态仍开放 = 10 条** ⇒ 逐条按 `basis` **回源抽查**后分流（**不照抄标题** —— `docs/Worktree.md` §0-1 效力边界 ③）。
+> **基线**：`do-my-own-gh` @ `bdac3607` · 分支 `align/g1-users-follow` · 工作树 `../RAG.worktrees/g1-users-follow`。
+> **授权**：Jason 于 **2026-10-30 10:31** 在本 lane 会话内明示「**开始工作**」⇒ 范围见本文件 `## 开工前置回执` 的 **2026-10-30 轮 ⑤**。
+> ⚠️ **本节不含**：阶段二 · 共享面（`service/common/**` + `service/users/users-common/**` + `tools/**` + `docs/DRIFT/_cross/**` + `AGENTS.md` + 三个 `_INDEX.md` + `docs/PhaseGoal-judge.md` + `docs/PhaseGoal/**`）· 已签字偏离的重开。
+
+### 1. 本轮落码（**follow 域自身 = 0 条**）
+
+| 域 | 落码 | 理由 |
+|---|---|---|
+| **follow** | **0 条** | ① `DRIFT-FOLLOW-006` 已于 **2026-10-29** 落地并关闭（`S1-FOLLOW-001` ⇒ 观测口 **16065** = Go `DevServer.Port` **一字不差**）⇒ **不重复做**；② `S1-FOLLOW-001`（全仓 rpc 层指标出口统一方案）**用户 2026-10-24 已定交主会话拍板** ⇒ **不当新缺陷重提**；③ `S1-FOLLOW-004` / `S1-FOLLOW-007` / `S1-FOLLOW-008` / `S1-FOLLOW-009` **均落在他域 / 共享面 / 基线** ⇒ **只登记 + 上报**（§3）；④ `E7` 的残余（**32 条故障注入族**）**台账已定为阶段 2 建设项** ⇒ **不在阶段一范围** |
+| **users**（同一棵工作树内） | **1 条** | `S1-USERS-004` 的**防退化护栏**（新增测试 `AvatarTransactionEntryProxyGateTest` · **5 条断言** · **M1 / M2 变异实测变红**）⇒ 完整记录见 [`docs/DRIFT/users/vs-common.md`](../users/vs-common.md) §1 ⇒ **事务边界本身一行未动**（台账 §4 明写「阶段 1 不动」） |
+
+### 2. follow 域在 **共享层缺陷**里的落点（本域**只登记**，修法落 `service/common` ⇒ 转 G4）
+
+| 编号 | follow 域的落点 | 共享层根因 | 本轮动作 |
+|---|---|---|---|
+| 🔴 **`E65`**（**A 类**） | `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java:50` —— `userStub.getUser(...)`（注释明说「**没有**在此处设 deadline」）⇒ **裸 stub**<br>**Go 侧对应锚点（2026-10-30 实测订正）**：`service/follow/rpc/internal/logic/helper.go:82` = `resp, err := svcCtx.UserRpc.GetUser(ctx, &userservice.GetUserReq{Uid: userID})` ⇒ **直接透传 handler 的 ctx** ⇒ 继承父 deadline | `service/common/.../RpcInterceptor.java` 的 `onHalfClose` **只绑 `DeadlineState`**、**从不绑** `GoStyleRequestDeadline` ⇒ `GoStyleRequestDeadline.applyTo`（`:110`）在 gRPC 路径是 **no-op** | 📤 **转 G4 反馈单**（7 项格式见 [`users/vs-common.md`](../users/vs-common.md) §3.1）⇒ ⚠️ **修法同时涉及共享层与域内代码 ⇒ `AGENTS.md` §3c「必须同一次提交」⇒ G1 不能单独改 follow-rpc 的裸 stub（会留半截）** |
+| 🟡 **`E66`**（= `DRIFT-ARPC-010`） | follow 域的 Redis 调用点（与 comment / like / hot / task 同型） | 同上（`DeadlineState` / `GoStyleRequestDeadline` **都不覆盖 Redis**）⇒ **与 E65 同源** | 📤 **转 G4**（同上文件 §3.2）· **建议与 `E65` 一起立项** |
+| 🟡 **`DRIFT-ARPC-009` 残留** | follow-rpc 的拦截器链（`GoStyleRpcProtectionChain.build(...)` ⇒ 只装 recover + breaker + shedding） | `service/common/.../GoStyleRpcProtectionChain.java:126-131` 的 `compose()` **缺 Stat + Prometheus 两层** ⇒ Go zrpc 框架级**默认全装**（`zrpc/internal/config.go:20-25`） | 📤 **转 G4**（同上文件 §3.3）⇒ **落点必在共享层**（10 个 rpc 域共用）⇒ **域侧不可自修**<br>✅ **2026-10-30 14:4x · G4 已落共享层半边**（Jason 裁定「**只落 Stat 的慢调用日志**」⇒ `RpcInterceptor` 的 close 路径一行 ＋ 两个私有辅助方法，**零新依赖、不动 `Composition`** ＋ 守门 `GoStyleSlowCallLogGateTest` 真 in-process gRPC 捕获 ⇒ 变异精确转红）⇒ ⇒ **follow-rpc 一并受益（零改动）** ⇒ **Prometheus 那层按 Jason 裁定不做** ⇒ ⇒ 残留 = ① Go 的 **Info 分支**（每请求打全量 body）**刻意不落** ② Go 的 Stat 装在 **breaker/shedding 之外**、RAG 在**最内层** ⇒ **慢调用判定口径有差异** ⇒ 转派单 `G4-15b`/`G4-15c`<br>🔴 **两处前提偏差订正**：Stat **不走** Prometheus（`core/stat/metrics.go:3-18` 无 prometheus 依赖 ⇒ 进程内聚合器）＋ 慢阈值 500ms **不是** `StatConf.SlowThreshold`（真源所有 yaml 无 `Middlewares:` 块 ⇒ 恒零值 ⇒ 走全局兜底）⇒ **数值等价、机制不同** |
+
+### 3. 域外 / 他域 ⇒ **只登记 + 上报**（follow 域 6 条 · 本轮 0 行改动）
+
+| 编号 | 事项 | 落点 | 为何不在 G1 写权面 | 本轮动作 | 核对日期 |
+|---|---|---|---|---|---|
+| `S1-FOLLOW-001` | 全仓 rpc 层指标出口统一方案 | `service/common` 之外的**各 rpc 组件** + 部署形态 | **用户 2026-10-24 已定「交主会话拍板」** ⇒ 不是 G1 单方可定 | 📤 **登记**（follow 那一半已于 2026-10-29 落地；**users 那一半本轮只订正被推翻的前提** ⇒ 见 §4） | 2026-10-30 |
+| `S1-FOLLOW-004` | `follow` 域**无编排入口**（compose 只含 users 两个组件） | 根 `docker-compose.yaml` | 根文件**无人拥有**（G1/G2/G3/G4 白名单都不含）⇒ 归**合并收口执行者** | 📤 **登记上报** | 2026-10-30 |
+| `S1-FOLLOW-007` | 基线仍把**已签字偏离**记成开放缺陷 | `docs/PhaseGoal-judge.md` + `docs/PhaseGoal/g1.md` | **基线文件 + 机器生成物** ⇒ 归**合并收口执行者** | 📤 **登记**；⚠️ **风险实际已解除** —— `docs/PhaseGoal/g1.md:21` 的「开放项归属」列**已改为** `→ 非开放（已签字 · 不是缺陷）` ⇒ **派单指令已修正**（`DRIFT-FOLLOW-008` 已于 2026-10-25 经用户签字 ⇒ `SD-2026-10-25-01`）⇒ 只剩**台账侧登记未同步** | 2026-10-30 |
+| `S1-FOLLOW-008` | `check-surface-parity.py` 两个**静默假绿**口子 | `tools/difftest/` | `tools/**` **不在任何 lane 的白名单** ⇒ 归**合并收口执行者** | 📤 **登记上报** | 2026-10-30 |
+| `S1-FOLLOW-009` | 5 个 api 模块缺 `TESTCONTAINERS_RYUK_DISABLED` | article-api / comment-api / hot-api（**G3**）· like-api / task-api（**G2**） | **他域** ⇒ G1 只登记 | 📤 **登记上报 G2 / G3**（⚠️ 本域 `follow-api` **已自修**） | 2026-10-30 |
+| `E7` | follow 域双侧活体对拍**未复验** | 域内探针 `tools/api-full-parity-probe/follow/` | **域内探针目录 `tools/<kind>/<域>/` 归对应域 lane** ⇒ **本 lane 可写** | 📤 **只登记** ⇒ **HTTP 层 20 条已 L4**（2026-10-29 Round-2 T-2.5 · 探针已落仓 · EXIT=0 · 三方逐字节一致）⇒ **残余 = 32 条故障注入族** ⇒ ⚠️ **故障注入装置（`blackhole3.py` 等）原在 `/tmp` 且已消失** ⇒ **「52/52」今天不可复算** ⇒ **把故障注入装置从 `/tmp` 提升为仓库资产 = 阶段 2 建设项**（台账 §`S1-FOLLOW-007` 邻近行已定为 B 类）⇒ **本轮不预支** | 2026-10-30 |
+
+### 4. 本轮订正的一条**被推翻的前提**（零代码改动）
+
+| 对象 | 原判 | 现行态 | 依据 |
+|---|---|---|---|
+| `docs/DRIFT/users/user/rpc.md:280` 的「指标**可抓取性**」行 | **EQUIVALENT**（两侧生产都不可抓）· Go 侧依据写「`DevServer 仅 dev/test 起，生产无端点`」 | 🔴 **OBSERVABLE DIFFERENCE** —— **Go 侧前提被推翻**：`go-zero@v1.10.2/core/service/serviceconf.go:77` `devserver.StartAgent(sc.DevServer)` 在 `SetUp()` 里**无条件**调用 ⇒ `:83-89` `initMode()` **不门控** DevServer ⇒ `internal/devserver/server.go:79-82` 只判 `c.Enabled` ⇒ `internal/devserver/config.go:5` `Enabled` **default=true** ⇒ `zrpc/server.go:63` `c.SetUp()` 走同一条路 ⇒ ⇒ **Go 生产就有** `/metrics` + `/healthz`（`service/user/user/rpc/etc/user.yaml:23-30` ⇒ **9094**）⇒ 而 RAG `application.yaml:155-167` ⇒ **零出口** | ⚠️ **本轮只订正判定、只登记，不落码** —— 修法 = 引入 `spring-boot-starter-web`（**纯 gRPC 进程 → 带 Tomcat ⇒ 部署形态变更**）+ 关 Nacos 自动注册（否则注册的是 web 容器端口）⇒ **属「全仓 rpc 层指标出口统一方案」** ⇒ **用户 2026-10-24 已定交主会话拍板** ⇒ 且**不在 `stage1-derivation.tsv` 的 `wave=G1` 开放行内** ⇒ **不在本波派工面**。⚠️ 落点归属已由 `docs/DRIFT/follow/rpc.md:330-336` 明确划归 **users 域**（**9094 / 9097**）。核对日期 2026-10-30 |
+
+### 5. 本轮**不做**的 5 条（明确边界 · 逐条给了理由，避免下轮重开）
+
+① **阶段二**（`docs/twoStage.md` §1.3 / §2.2 / §6 / §7 —— 含 `E7` 的故障注入族装置提升）；② **共享面**的一切改动（`service/common/**` + `service/users/users-common/**` + `tools/difftest/**` + `docs/DRIFT/_cross/**` + `AGENTS.md` + 三个 `_INDEX.md` + `docs/PhaseGoal-judge.md` + `docs/PhaseGoal/**` + `docs/Worktree.md`）；③ **`S1-FOLLOW-001` 落码**（**用户 2026-10-24 已定交主会话**）；④ **已签字偏离的重开**（`DRIFT-FOLLOW-008` / `SD-2026-10-25-01`）；⑤ **派生层重生成**（`tools/ledger-derive/derive-stage1.py` 的输出落 `docs/DRIFT/_cross/**` = **共享面** ⇒ **G1 不写** ⇒ 交**合并收口执行者**在合并后统一重跑）。
+### 6. 🆕 **第二轮落码：follow-rpc 出向 user-rpc 的 2s 客户端超时**（2026-10-30 · G1 lane · 域侧自修）
+
+> **零共享面触碰**（`service/common/**` ＋ `users-common/**` ＋ `docs/DRIFT/_cross/**` ＋ 三个 `_INDEX.md` ＋ `AGENTS.md` 全部**只读**）。
+> **独立成立、不依赖 G4** ⇒ 与共享层那半边（rpc 进程的入站预算载体）**互不阻塞**。
+
+#### 6.1 落码清单（1 个模块 · 1 处出向调用点）
+
+| 模块 | 落码文件 | 改动 | 覆盖 |
+|---|---|---|---|
+| `follow-rpc` | `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java` | 新增 `CLIENT_TIMEOUT_MILLIS = 2000L` ＋ 包可见 `capByClientTimeout` ＋ `getUser` 改走它 ＋ **订正**旧注释 | **1 处**（`FollowUserExistenceService.java:73`） |
+
+⇒ **follow 域本轮从「0 行代码改动」变成「1 个主类 + 1 个守门类」**（这是 follow 域第一次因超时口径落码）。
+
+#### 6.2 Go 侧依据（本轮**亲自读过** · 逐条带行号）
+
+| # | 出处 | 事实 |
+|---|---|---|
+| ① | `go-zero@v1.10.2/zrpc/config.go:31` | `RpcClientConf.Timeout int64 `json:",default=2000"` ` ⇒ **默认 2000ms** |
+| ② | `go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25` | `context.WithTimeout(ctx, t)` ⇒ **取更早者** |
+| ③ | `service/follow/rpc/etc/follow.yaml:37-41` | `UserRpc:` 段**只有 `Etcd`、没有 `Timeout`** ⇒ ⇒ 走 ① 的默认值 |
+| ④ | `service/follow/rpc/internal/logic/helper.go:82` | `svcCtx.UserRpc.GetUser(ctx, &userservice.GetUserReq{Uid: userID})` ⇒ 出向调用**直接透传 handler 的 ctx**（**无 `depCtx`、无 otel 派生** ⇒ 该行曾被台账误描述，已订正并写入「订正记录 + 教训」段） |
+| ⑤ | `service/follow/rpc/internal/logic/helper.go:84-89` | `NotFound` → `GRPCError(codes.NotFound, ErrorUserNotFound)`；**其余一切（含 `DeadlineExceeded`）→ `GRPCError(codes.Internal, ErrorServerCommon)`** |
+| ⑥ | `service/follow/common/errmsg.go:38` / `:47` | `ErrorServerCommon = 5001` ／ `ErrorUserNotFound = 5101` |
+
+⇒ ⇒ **Go 的失败在客户端侧被观测 ⇒ 下游拿到的是 `INTERNAL` + 业务码 `5001`**。
+
+#### 6.3 ⚠️ 差异的准确边界（**不要读宽**）
+
+RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时（`service/users/user/user-rpc/src/main/resources/application.yaml:209` = `rpc-timeout: 2s`；接线在位由 `check-grpc-interceptor-wiring.py` = EXIT=0 实测确认）⇒ ⇒
+
+| 形态 | Go（真源） | RAG **修前** | RAG **修后** |
+|---|---|---|---|
+| **① 请求到达下游、业务挂死** | 客户端 2s 收口 ⇒ `helper.go:84-89` ⇒ **`INTERNAL` + 5001** | **服务端** 2s 收口 ⇒ `DEADLINE_EXCEEDED` ⇒ `FollowUserExistenceService.java:86-91` 分支② ⇒ **`INTERNAL` + 5001** | 同左 ⇒ **与 Go 同形** |
+| **② 请求没到达下游** | 客户端 2s 收口 ⇒ **`INTERNAL` + 5001** | **无任何客户端收口** ⇒ 只能由**服务端**兜底（`service/follow/follow-rpc/src/main/resources/application.yml:247` = `rpc-timeout: 2s`，管的是**入站**调用）⇒ ⇒ **形态②才是差异** | 客户端 2s 收口 ⇒ **`INTERNAL` + 5001** ⇒ **与 Go 同形** |
+
+⚠️ **rpc 进程没有入站 ctx 预算载体**：`GoStyleRequestDeadline.begin` 的**生产**调用点全仓**只有 1 处** = `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:324` ⇒ **只在 api 进程** ⇒ **rpc 进程恒 no-op** ⇒ ⇒ 这里**只有「2s 上界」这一维** ⇒ ⇒ 与 Go 的 min(服务端 2s, 客户端 2s) **同值**。
+
+#### 6.4 守门 ＋ 变异实测（AGENTS.md §3.3.3）
+
+- **守门**：`service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/client/UserRpcClientDeadlineCapTest.java`（**3 条**）
+  - `clientTimeoutConstantMatchesGoDefault` —— 常量 == 2000ms（对齐 ①）
+  - `capProducesRealTwoSecondDeadline` —— **真**构造 stub ＋ **真**读回 `CallOptions.getDeadline()`
+  - `downstreamHangs_clientTimesOutOnItsOwnDeadline` —— **真发一次调用**：起 **in-process 真实 gRPC server**，其 `GetUser` **故意不响应** ⇒ 客户端**真的阻塞** ⇒ 只能靠**自己套的 2s deadline** 收口 ⇒ 断言 **`DEADLINE_EXCEEDED`** ＋ 耗时 ≈2s（防「秒失败」被误判成「超时生效」）＋ `@Timeout(30s)`（防变异时挂死）
+- **变异 M4**：把 `getUser` 的 `capByClientTimeout(userStub)` 改成 `userStub` ⇒ **用例挂死 ⇒ `@Timeout(30s)` 触发 ⇒ 红** ⇒ ⇒ **证明 `DEADLINE_EXCEEDED` 确实是那 2s cap 造成的**（不是别的机制兜的底）⇒ 还原后**逐字节比对一致 ＋ 复绿**（**2.094s / 3 条全绿**）。
+- ⚠️ **域内先例**：follow-api 已有同款（`service/follow/follow-api/.../FollowRpcClient.java` 的 `capByClientTimeout(applyTo(stub))`，对应 `DRIFT-FOLLOW-009` 已落地）⇒ ⇒ **本轮是同款形状在 rpc 侧的补齐**，不另立形状。
+
+#### 6.5 本轮实跑记录
+
+| 命令 | EXIT | 说明 |
+|---|---|---|
+| `mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end -pl <G1 八模块> -am test` | **0** | **BUILD SUCCESS** · **17 模块** · **8:17** · G1 八模块 **907 条 / 0F / 0E / 0S** ⇒ 较上轮 **894** 增加 **13**（5 + 5 + 3）✅ |
+| `python3 tools/difftest/check-wave-lane-ownership.py` 等 **8 项**轻量守门 | **全 0** | |
+| `python3 tools/difftest/check-surface-parity.py --domain follow` | **0** | |
+| `python3 tools/difftest/check-grpc-interceptor-wiring.py` | **0** | 顺带复核下游服务端 2s 超时在位 |
+| `bash tools/difftest/check-proto-static.sh` | **0** | |
+| `python3 tools/difftest/check-ddl-static.py --domain follow --indexes` | **0** | |
+| `python3 tools/ledger-derive/derive-stage1.py --check` | **1** | ⚠️ **预期交接**（`_cross/**` = 共享面 ⇒ G1 不写） |
+#### 6.6 🆕 **与 G4 共享层的叠加（2026-10-30 15:0x · 已逐行独立核实）**
+
+> G4 已提交共享层半边：**commit `3d5b4924`**（`align/g4-service-common` · 未 push / 未开 PR）。
+
+- **叠加语义**：`GoStyleOutboundDeadlineInterceptor.java:151-154`（请求载体剩余 → min）＋ `:157-159`（`cap-millis` → min，**默认 0 = 不启用** ⇒ **follow 无需开 yaml**）＋ **`:162-166`（调用点自带 deadline → `Math.min`，不覆盖）** ⇒ ⇒ **本轮 follow-rpc 的 2s 不会被顶掉 ⇒ 域侧那层保留** ⇒ ⇒ 叠加后 = **min(请求剩余, 调用点自带, cap-millis)** ⇒ **与 Go 的 `context.WithTimeout`（取更早者）同形**。
+- **服务端侧**：`RpcInterceptor.java:302-303` ＋ **`:304`（min(服务端 2s, 客户端剩余)）** ⇒ 与 Go 服务端同形 ⇒ ⇒ **本域 §6.3「形态① 两侧同形」的结论被加强**。
+- ⚠️ **复跑口径**：**G1 不能在自己的工作树合入 `3d5b4924`**（`service/common/**` 不在 G1 写权面 ⇒ 会被 `check-wave-lane-ownership.py` 判越界）⇒ ⇒ **本域 3 条守门的复跑由合并收口执行者在主干上做** ⇒ 本轮**不预支「已复跑」**。
+### 🔴 订正小节：本域「Redis 写不绑 deadline」登记行的两处指针订正 + 命中面收窄（2026-10-30 15:5x · 调度员指出后 G1 自查）
+
+> ⚠️ **本小节标题刻意不含任何编号 token** ⇒ 派生层不把它当条目候选 ⇒ 也不劫持任何既有编号的 `domain` / `wave` / `basis`。
+> ⚠️ **本小节不新登记、不改编号** ⇒ E66 / `DRIFT-ARPC-010` 仍是那一条 ⇒ ⇒ **销账时不要当两条**。
+
+**（1）本域那行 E66 登记的「Go 侧」写的是「同上」⇒ 指的是上一行 E65 的 gRPC 出向锚点 ⇒ ⇒ 指错层（张冠李戴）**
+
+- 上一行 E65 的 Go 侧锚点是 `service/follow/rpc/internal/logic/helper.go:82`（`svcCtx.UserRpc.GetUser(ctx, …)` ⇒ **gRPC 出向**）⇒ ⇒ **它撑不了 Redis**（Redis 是另一条链路）⇒ ⇒ **本行不能靠「同上」继承它**。
+- ⇒ **本域 E66 的 Go 侧指针应为（Redis 侧）**：① `service/user/admin/rpc/internal/logic/logoutlogic.go:38`（`l.svcCtx.BizRedis.SetexCtx(l.ctx, blackListKey, "banned", int(expireTime))` ⇒ **写绑 ctx**）② `go-redis/v9@v9.20.0/internal/pool/pool.go:1099-1104`（`waitTurn` fast path **无条件先查 `ctx.Done()`** ⇒ **命令根本不下发**）③ 同文件 `:837`（`getConn` **必调** `p.waitTurn(ctx)` ⇒ **派发前就拦住**）⇒ ⇒ **「Redis 写不绑 deadline ⇒ E66 是真漂移」这个结论不依赖任何 gRPC 锚点**。
+- ⚠️ **为什么本轮不直接改那一行**：该行首格含编号 token ⇒ **它本身就是派生层的条目候选** ⇒ 改它的文字会连带改该候选的 `domain` / `wave` / `basis` ⇒ ⇒ **G1 不越界动派生层归属** ⇒ ⇒ **只在此登记订正内容**，由**收口执行者**在重生成时统一改（落点：`docs/DRIFT/_cross/**` = 共享面）。
+
+**（2）命中面收窄：本域命中的是 E66 的「读」这一半，不是「写」那一半**
+
+- E66 的本体是「Redis **写**不绑 deadline」（admin `logout` 的黑名单写入）⇒ ⇒ **本域没有 Redis 写调用点**（实测：`service/follow/**` 的 `main` 代码里 Redis 调用仅 3 处命中，**全在 `follow-api` 的 `FollowBlacklistInterceptor`** ⇒ 是**读**黑名单）。
+- ⇒ ⇒ 本域命中的是**读**这一面：`FollowBlacklistInterceptor` 的 `redisTemplate.hasKey(blacklistKey)`（`follow-api/src/main/java/com/rag/follow/follow/api/interceptor/FollowBlacklistInterceptor.java:154`）⇒ **不绑 ctx** ⇒ 与 Go 侧 `service/follow/api/internal/middleware/checkblacklistmiddleware.go:40` 的 `m.Redis.ExistsCtx(r.Context(), blacklistKey)`（**绑 HTTP ctx**）形成对照。
+- ⇒ ⚠️ **但读侧的后果与写侧不同**：Go 的判据是 `:41` 的 `if err == nil && exists` ⇒ **fail-open**（Redis 不可达 ⇒ 放行）⇒ RAG 侧同样 fail-open（`FollowBlacklistInterceptor.java:155-158` 刻意吞异常 ⇒ `exists = null` ⇒ 放行）⇒ ⇒ **fail-open 语义两侧同形**；读侧的差异（超时/慢）**归属 follow api 域自己的 Redis 条目**，**不在 E66 的「写」半边** ⇒ ⇒ **本域不因 E66 领新条目**。
+### 🟡 订正小节：rpc 层「指标抓取出口」必须**分两层**看 —— 配置层 vs 载体层（2026-10-30 16:7x · G1 实测）
+
+> ⚠️ **本小节标题刻意不含任何编号 token** ⇒ 派生层不把它当条目候选 ⇒ 也不劫持任何既有编号的 `domain` / `wave` / `basis`。
+
+**（1）为什么必须分两层**
+
+- **配置层** = `management:` 段里 actuator 的 endpoint 有没有开（`management.server.port` / `endpoints.enabled-by-default` / `endpoint.prometheus.enabled` / `endpoints.web.exposure.include`）。
+- **载体层** = **这个进程到底有没有 HTTP 容器**（`spring-boot-starter-web` ⇒ `tomcat-embed-core`）⇒ ⇒ **没有载体 ⇒ 配置写得再对，抓取方也连不上**。
+- ⚠️ **只报配置层 ⇒ 会得出「7 个 rpc 有出口」的假结论** ⇒ ⇒ **这是「配置里写了 ≠ 开得了」在指标出口这一面上的同族**。
+
+**（2）载体层实测（依赖树级证据，不是 grep pom）**
+
+- 判据命令（逐模块跑）：`mvn -o -B dependency:list -DincludeArtifactIds=spring-boot-starter-web,tomcat-embed-core,spring-boot-starter-webflux,spring-boot-starter-undertow,spring-boot-starter-actuator`。
+- ⚠️ **为什么不用 grep pom**：`service/common/pom.xml:361` 的 `spring-boot-starter-web` 是 **`test` scope ⇒ 不传递**；但在父子继承场景下「grep 不到子模块 pom」**不构成**「运行时没有」的等价 ⇒ ⇒ 必须查依赖树（AGENTS.md §3.3.1：配置/声明 ≠ 实际生效）。
+
+| 模块 | actuator 依赖 | web starter | tomcat | webflux | undertow | **HTTP 载体** |
+|---|---|---|---|---|---|---|
+| `article-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
+| `comment-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
+| `favorite-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
+| `hot-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
+| `like-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
+| `message-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
+| `task-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
+| `users/user/user-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
+| `users/admin/admin-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
+| `follow-rpc` | 有 | **有** | **有** | 无 | 无 | **有** |
+
+⇒ ⇒ **载体层 = 1/10 有、9/10 无** ⇒ ⇒ **「RAG 侧能被 Prometheus 抓到的 rpc」只有 `follow-rpc` 一个**。
+
+**（3）叠上配置层（G4 的三态划分）后的净结论**
+
+- **配置层三态**（G4 逐域读 `management:` 段给出，判据正确）：① **Go 有 / RAG 无** = `admin-rpc` · `user-rpc` · `hot-rpc`（三重关闭）；② **两侧都有但路径 + 端口都不同** = `article-rpc` · `favorite-rpc` · `follow-rpc` · `like-rpc` · `message-rpc`；③ **Go 无 / RAG 有（反向差异）** = `comment-rpc` · `task-rpc`。
+- ⚠️ **叠载体层后**：② 里除 `follow-rpc` 外的 4 个（`article-rpc` / `favorite-rpc` / `like-rpc` / `message-rpc`）虽在配置层「有 prometheus endpoint」，但**无载体 ⇒ 实际抓不到** ⇒ ⇒ **三态划分只覆盖配置层，不覆盖运行时可抓取性**。
+- ⇒ ⇒ **净结论**：Go 侧 = **6/10 有独立 DevServer 抓取端口**（据本文件 `rpc.md` 的 6 rpc 对照表：follow / favorite / message / like / user-user / user-admin；Go 侧走 `/metrics` @ DevServer 端口）⇒ RAG 侧 = **1/10 有载体**（且路径 `/actuator/prometheus` + 端口都不同）⇒ ⇒ **净差 = 5/10 个 rpc 域「RAG 侧抓不到」**。
+- ⚠️ **JMX 边界（别拿它当出口）**：actuator 无 web 载体时 JMX 端点仍可暴露（10/10 都**未配** `management.endpoints.jmx.exposure` ⇒ 走默认 health/info），但 **Prometheus 的抓取模型是 HTTP scrape endpoint** ⇒ ⇒ **JMX 不能替代** ⇒ ⇒ 「抓取出口」口径下仍记为无。
+
+**（4）对我域台账的两处影响（已同步）**
+
+- `docs/DRIFT/follow/rpc.md:273` 的「8 个 rpc / 0/8」⇒ 订正为「**10 个 rpc / 载体层 1/10 有 / 9/10 无**」＋ 补两层口径与判据来源。
+- `docs/DRIFT/follow/stage1-admission.md:79` 的「`favorite-rpc` / `message-rpc` / `like-rpc` / `user-user-rpc` **均已补上** ⇒ 出口已开」⇒ **被本轮实测证伪**（这 4 个模块的依赖树里都没有 web starter/tomcat）⇒ 已订正。
+- ✅ **users 域 `user/rpc.md:280` 的「指标可抓取性」改判（OBSERVABLE DIFFERENCE）成立且更强** —— 已补载体层证据（`user-rpc` 依赖树只有 actuator、无 tomcat）⇒ ⇒ **不是 users 域孤例，是 9/10 的通例** ⇒ ⇒ **该改判不撤**。
+
+### 🔴 订正小节：follow-rpc 的 `rag.side: rpc` —— 这不是防御性的一行，**它现在就是闸门**（2026-10-30 · G1 lane）
+
+> ⚠️ **本小节标题刻意不含任何编号 token** ⇒ 派生层不把它当条目候选 ⇒ 也不劫持任何既有编号的 `domain` / `wave` / `basis`。
+
+**一、为什么 follow 域这一行与另外两个 rpc 域不同（关键区别）**
+
+- `DRIFT-FOLLOW-006` 的载体 **2026-10-29 就落地了**（commit `573cf08f`）：`service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web`（给 Actuator 一个 servlet 载体）＋ `…/application.yml:141-142` = `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}`（与 Go 侧 `follow.yaml:23` = `DevServer.Port: 16065` **一字不差**）＋ `:123` = `register-enabled: false`（关掉 Nacos 自动注册 ⇒ 防「同一服务名下出现两个端口的实例」）。
+- ⇒ ⇒ **本模块的主上下文就是 servlet web 应用** ⇒ ⇒ 共享层那 13 个 api 侧 web Bean **会挂到 16065 的抓取口上**（主干上 `@ConditionalOnApiSide` 的 `matchIfMissing=true` ⇒ 没写 `rag.side` 就按 api 侧注册）。
+- ⇒ ⇒ 其中 **`GoStyleCpuSheddingFilter` 在 CPU 高负载时会拒掉抓取请求** ⇒ ⇒ 而 Go 的 rpc 域**一个 rest 中间件都没挂**（全部 `zrpc.MustNewServer`）⇒ ⇒ **与 Go 不同形** ⇒ ⇒ ⇒ 即：**载体的目的（抓得到 `/actuator/prometheus`）会被自己域的中间件挡掉**。
+
+**二、落码**
+
+- `service/follow/follow-rpc/src/main/resources/application.yml` ⇒ 加顶层 `rag:` / `side: rpc`。
+- **Go 出处**：Go 侧 rpc 进程零 rest 中间件 ⇒ ⇒ RAG 的 rpc 域不得挂 Go 侧没有的中间件。
+- **机制**：共享层 `@ConditionalOnApiSide`（`@ConditionalOnProperty(name="rag.side", havingValue="api", matchIfMissing=true)`）挡住 api 侧那 **13 个类**（11 个带 `@ConditionalOnWebApplication(SERVLET)` ＋ `HttpMiddlewareFilter`（无条件 `@Component`）＋ `GoStyleJsonBodyConverterConfig`（`@Configuration`）—— 清单见 users 域同款小节，两域共用同一份）⇒ ⇒ 其中**会「拒请求」的只有 `GoStyleCpuSheddingFilter`（CPU 高负载）与 `GoStyleMaxConnsFilter`（连接数超限）**⇒ ⇒ **默认 = api 侧** ⇒ ⇒ rpc 域必须显式写这一行。
+
+**三、诚实边界（本轮不写「已封住」）**
+
+- ✅ **现状（2026-10-30 · 合并主干后订正）**：共享层的 `ConditionalOnApiSide` **已落库**（`53bc05ec`）⇒ ⇒ **本行现在真的被读了**（原写「本分支基线上尚未落库 ⇒ 死配置」是**分支相对**的说法 ⇒ 叠到主干后已不成立 ⇒ 原值保留备查）⇒ ⇒ **本行是必做项**（注解默认值 = api · `matchIfMissing=true` ⇒ rpc 域**必须显式写这一行**）⇒ ⇒ 且本模块**已是 servlet 形态**（`management.server.port: 16065`）⇒ ⇒ 不写它 ⇒ ⇒ 那 13 个 api 侧 web 类就挂到抓取口上 ⇒ ⇒ **仍不写「已封住」**（按 AGENTS.md §0 读作「在该证据强度下一致」）。
+- ⚠️ **运行期守门仍未落**：收口执行者要求配一条**运行期**断言（起 rpc 形态的 context ＋ `rag.side=rpc` ⇒ ⇒ 断言那 13 个**带门的类**不在容器里）⇒ ⇒ **该门现已在主干 ⇒ ⇒ 这条断言此刻可写（不再是恒红）** ⇒ ⇒ **仍待域侧补**（该守门要断的 13 个类名 · 权威清单见本节「机制」行所指的 users 域同款小节）⇒ ⇒ 在它落之前 ⇒ ⇒ **不写「已封住」**（原写「本分支基线上必然红 · 写它只会得到一个恒红的守门」是**分支相对**的说法 ⇒ 叠到主干后已不成立 ⇒ 原值保留备查）。
+
+**四、与既有结论的关系**
+
+- 本节**不改** `DRIFT-FOLLOW-006` / `S1-FOLLOW-001` 的既有结论（载体已落地、端口与 Go 一字不差、双侧 series 集合逐条一致 —— 那是**指标面**的结论）。
+- 本节说的是**另一个面**：**载体上挂着的中间件集合** ⇒ ⇒ Go 的 rpc 域零中间件 ⇒ ⇒ RAG 的观测口上**曾经**会多出 13 个 ⇒ ⇒ 这一行就是用来对齐**这个面**的 ⇒ ⇒ **两条不矛盾，是两个面**。
+---
+
+> ⚠️ **以下内容原位于本文件中部 —— 2026-10-30（G1 lane）移到末尾**
+> 理由 = **零行位移**：`docs/RoundPlan/_unresolved.md` 与 `docs/DRIFT/_cross/grading/*` 里有指向本文件的
+> **硬编码 `文件:行号` 指针** ⇒ ⇒ 派生层按**纯行号算术**解析 ⇒ ⇒ 中部插一行 ⇒ 指针解析到别的条目
+> ⇒ ⇒ 「排期指针 / 证据缺口组」的成员被静默改写 ⇒ ⇒ **派工面被改掉**。
+> ⇒ ⇒ 纪律：**新增内容一律放文件末尾**；要改中部 ⇒ 用「**就地替换**」（行数不变）而不是「插入新行」。
+> ⇒ ⇒ 判据：`python3 tools/ledger-derive/check-pointer-consistency.py`（派生层输入完整性棘轮）。
+
+   > ⚠️ **2026-10-30 口径订正（G1 lane · `align/g1-users-follow`）** —— 上句的**两条落点断言均不成立**：「15 处全在 `service/users/**`（`user-rpc` 12 + `admin-rpc` 3）」与「5 处 `schema/field.go:1009` 全在 `user-rpc`」。实测：`grep -rn "gorm@v1\.31\.2" service/users/` ⇒ **0 命中**；`grep -rn "field\.go:1009" service/users/` ⇒ **0 命中** ⇒ **15 处的真实落点 = 12 处 users 域台账 + 2 处 follow 域台账 + 1 处 like 域代码**：
+   > - **真错引（消费点引用）= 8 处**，全在 **users 域台账**：`admin/rpc.md` × 3（`:423` / `:1089` / `:1316`）· `user/rpc.md` × 4（`:550` / `:580` / `:1384` / `:1433`）· `_shared.md` × 1（`:986`）⇒ ⇒ **本轮已逐条订正**（`gorm@v1.31.2` → **`gorm@v1.31.1`**；行号按 **v1.31.1 真源重锚**：`callbacks/update.go:243-259` → **`:238-254`**、`:279-281` → **`:274-276`**（两段 **md5 逐字相同**）· `scan.go:153` **两版同行** ✓ · `schema/field.go:616-622` 与 `:195-199` **两版同行** ✓）。
+   > - **不是错引、⛔ 不得改 = 6 处**：`docs/DRIFT/users/vs-common.md` × 2 · `docs/DRIFT/users/stage1-admission.md` × 2 · `docs/DRIFT/follow/vs-common.md` × 2 —— 这 6 处的 `gorm@v1.31.2` **就是「被引用的那个错版本」本身**（描述缺陷的句子）⇒ 改了就把缺陷描述改没了。
+   > - **他域 = 1 处**：`service/like/like-rpc/src/main/resources/db/migration/V6__align_like_domain_fact_outbox_with_go.sql:21` ⇒ **like 域 = G2 面** ⇒ 📤 **登记上报 G2**（不在 G1 写权面）。（附：该处所引 `schema/field.go:330-341` 在 **v1.31.1 与 v1.31.2 内容逐字相同** ⇒ **版本标签错、内容不错**。）
+   > ⇒ **5 处 `schema/field.go:1009` 越界 ⇒ 已核销**：代码侧**早已全部订正为 `v1.31.1`**（`UserDomainService.java:192` / `:447` · `UserEntity.java:66` · `UserDomainServiceTest.java:696` / `:699` · `UserRpcLoginNullStatusReadsAsZeroTest.java:46` / `:52`）⇒ ⇒ **本轮 0 行代码改动**，只把「仍待修」的台账登记改成「**已核销**」。核对日期 **2026-10-30**。
+### 【开工前置回执 · G1（`align/g1-users-follow`）· 2026-10-30 轮】
+
+> **本轮定位**：**派工面 = 派生层施工单**（`docs/DRIFT/_cross/stage1-derivation.tsv` 的 **`wave` 列**）⇒ 本轮**不是**照抄 2026-10-29 轮的候选清单，而是**按 `wave=G1` 重新取件 + 按 `basis` 逐条回源**。
+> ⚠️ **基线**：`do-my-own-gh` @ `bdac3607`（含 `wave` 列那次提交）· 分支 `align/g1-users-follow` · 工作树 `../RAG.worktrees/g1-users-follow`。
+
+**① 任务范围（本 lane 本轮做什么）**
+
+| 项 | 值 |
+|---|---|
+| 取件口径 | `wave` 含 `G1` × `stage ∈ {A,B}` = **19 条** ⇒ 其中**状态仍开放** = **10 条** |
+| 10 条开放项 | `E65` · `S1-FOLLOW-007` · `DRIFT-ARPC-009` · `E1` · `E7` · `S1-FOLLOW-004` · `S1-FOLLOW-008` · `S1-FOLLOW-009` · `S1-USERS-002` · `S1-USERS-004` |
+| 分流结果 | **域侧落码 1 条**（`S1-USERS-004` 的守门半边，落在 **users 域** `user-rpc`）· **转派 G4 反馈单 3 条**（`E65` / `DRIFT-ARPC-010`=E66 / `DRIFT-ARPC-009` 残留）· **域外或他域只登记 6 条** · **台账订正 3 组**（零行为变更） |
+| **follow 域本轮自身** | **0 条代码落码** —— `DRIFT-FOLLOW-006` 已于 2026-10-29 落地并关闭；`S1-FOLLOW-001` 属**用户保留给主会话**的拍板项（**不落码**）；`S1-FOLLOW-004/007/008/009` **均落在他域/共享面/基线** ⇒ **只登记 + 上报** |
+| 域内基线判定 | `docs/PhaseGoal/g1.md` §6 = **✅**（组件行 **10/10 ✅**）· §2.1「本 lane 自修」= **（无）** |
+
+**不做（明确边界）**
+① 阶段二（`docs/twoStage.md` §1.3 / §2.2 / §6 / §7）；
+② 共享面：`service/common/**` + `service/users/users-common/**` + `tools/**` + `docs/DRIFT/_cross/**` + `AGENTS.md` + 三个 `_INDEX.md` + `docs/PhaseGoal-judge.md` + `docs/PhaseGoal/**` + `docs/Worktree.md`；
+③ **`S1-FOLLOW-001`（follow-rpc 指标出口）** —— **已于 2026-10-29 落地**（`DRIFT-FOLLOW-006` 关闭）⇒ **本轮不重复做**；**users 域的 9094 / 9097 同款缺口不在派工面**（`stage1-derivation.tsv` 里 users 侧无对应开放行）⇒ **本轮只订正 `users/user/rpc.md:280` 被推翻的前提**，**不落码**；
+④ **不重开已签字偏离**（`DRIFT-FOLLOW-008` / `SD-2026-10-25-01` MaxConns 半边 / `docs/Intentional_Deviations/follow/*` 4 份**空占位** ≠「已签字」，见 `docs/Pitfalls/users/admin/rpc.md` **P-9**）；
+⑤ 🔴 **订正（2026-10-30 16:5x）** —— 原写「**不改** `S1-USERS-002` 的 datasource 口令 fallback（台账已裁定为**有意偏离 · 需签字**，非纯域侧自修）」⇒ ⇒ **那个前提是错的**：`docs/DRIFT/users/stage1-admission.md:477` 原句「Go 真源 yaml 是**字面量默认值**，恒能起栈」与 Go 源码不符 ⇒ ⇒ **Go 侧全部 rpc yaml 都是 `"${POSTGRES_PASSWORD}"`（无默认值）**（`service/follow/rpc/etc/follow.yaml:33` 实证）+ go-zero `core/conf/config.go:63` 用 `os.ExpandEnv`（**不认 `${VAR:default}`**）⇒ **缺变量即空串 ⇒ 连库失败 = fail-fast** ⇒ ⇒ **RAG 保留 `:password` 兜底 = 比 Go 松 = 真漂移** ⇒ ⇒ **本轮已落码：follow 域那 1 处也取消了**（`service/follow/follow-rpc/src/main/resources/application.yml:38` ⇒ `password: ${POSTGRES_PASSWORD}` · ⚠️ **行号因本轮加注释位移 +11**）⇒ ⇒ 残余 **7 处**在 G2/G3 面。⚠️ **取消后的残余差异（RAG 更严的一侧）**：Go = 启动成功、连库时失败；RAG = **启动即失败** ⇒ **失败时刻**不同 ⇒ 这一条残余才属有意偏离候选（同 JWT fail-closed 族）。
+
+**② 已读四档（本 lane 面的具体路径 → 读到的关键结论）**
+
+| 档 | 具体路径 | 关键结论（本轮真正改变了判断的 5 条 · follow 侧） |
+|---|---|---|
+| `docs/DRIFT/follow/` | `rpc.md`（§283-350 六 rpc 的 Go 有 DevServer / RAG 零出口对照表 · `:330-336` **跨域待办表** · `DRIFT-FOLLOW-006` 落地全记录 4 步）· `api.md` · `vs-common.md` | ① **`DRIFT-FOLLOW-006` 已关闭**（2026-10-29 · `573cf08f`）⇒ follow-rpc 观测口 **16065** = Go `DevServer.Port` **一字不差** ⇒ **同款缺口在 users 域的 9094 / 9097**（同文件 `:330-336` **已明确划归 users 域**）⇒ ⇒ **本轮不落码、只订正 users 侧台账前提**（理由：① ③ + 派工面无 users 侧开放行）· ② **follow 域的指标出口修法是「加 `spring-boot-starter-web` 给 Actuator 一个 servlet 载体 + `register-enabled: false` 防 Nacos 注册错端口」** ⇒ 属**部署形态变更** ⇒ **不在本轮授权面**（用户 2026-10-24 已把「全仓 rpc 层统一方案」交主会话） |
+| `docs/DRIFT/users/` | `stage1-admission.md`（§3 · §4 任务表）· `admin/rpc.md`（§1 `DRIFT-ARPC-009~012`）· `user/rpc.md`（`:280` 指标可抓取性判定）· `_shared.md`（`U-1`）· `vs-common.md` | ① **`S1-USERS-004` 的可做面只有「守门」**（台账 §4 任务表明写「阶段 1 不动事务边界」，§518 写「缺防退化」）⇒ ⇒ **本轮只加守门**（落在 users 域 `user-rpc`，零行为变更）· ② **`DRIFT-ARPC-009` 台账「合并后本条自动消失」实测不成立**（共享链已合进主干但只装 3 层 ⇒ 残留 = Stat + Prometheus ⇒ 落 `service/common` ⇒ **转 G4**）· ③ **`user/rpc.md:280` 的「两侧生产都不可抓 ⇒ EQUIVALENT」前提被推翻** |
+| `docs/DRIFT/_cross/` | `stage1-derivation.md` §四 · `stage1-derivation.tsv`（17 列 / `wave` 列）· `domain-common-lanes.md`（9 轴 A1~A9）· `cross-domain-coupling.md`（§二 波次表 + 规则 C1~C7）· `global/lanes/_PROTOCOL.md`（反馈单 7 项） | ① **派生层只是台账的投影**（「台账结论会过期 ⇒ 派工前**按 `basis` 抽查**」）⇒ 10 条开放项里 **4 条前提已变**（`S1-FOLLOW-007` / `E1` / `E7` / `S1-USERS-002`）· ② **反馈单 7 项**字段固定 ⇒ 本轮 3 条按此格式出单 · ③ **域内探针目录 `tools/<kind>/<域>/` 归对应域 lane** ⇒ `tools/api-full-parity-probe/follow/` 是 G1 面 |
+| `docs/Intentional_Deviations/` | `_INDEX.md`（**已签字 60 / 未签字候选 12 / 总数 93**）· `users/_shared.md`（`CAND-16` / `CAND-17`）· `follow/api.md` · `global/common-tails.md:11`（`SD-2026-10-25-01`） | **`DRIFT-FOLLOW-008` 已于 2026-10-25 签字** ⇒ ⇒ `S1-FOLLOW-007` 登记的「基线仍把已签字偏离记成开放缺陷」**风险实际已解除**（`docs/PhaseGoal/g1.md:21` 的「开放项归属」列**已改为** `→ 非开放（已签字 · 不是缺陷）`）⇒ **本轮只在本域台账登记订正**，基线文件交收口执行者 |
+| `docs/PhaseGoal/` | `g1.md`（机器生成投影 · §1 组件行 · §2 · §5 收口命令 · §6 lane 判定 · §7 交付物）· `judge.md`（A-2 follow 行） | G1 **lane 判定 = ✅** · **§2.1 自修清单 = （无）** ⇒ 本轮不新开行为修复 · `follow-rpc` 行已记 **`DRIFT-FOLLOW-006` 关闭** + **5 条残余差异全 P3 / D 类**（A/B/C 类 **0**） |
+| `docs/PhasedGoal.md` + `docs/twoStage.md` | `PhasedGoal.md:38-82` · `twoStage.md` §4 / §5.3 / §5.4 / §十 | **A 类 = 阶段 1 准入阻断** ⇒ G1 唯一的 A 类开放项经复核**前提已解除** ⇒ **G1 无 A 类阻断** |
+| `docs/Pitfalls/follow/` + `docs/Pitfalls/_cross/` | `follow/rpc.md`（PIT-FOLLOW-001~005 · 013/014）· `follow/api.md`（PITFALL-FOLLOW-006~012 · 015/016）· `_cross/testing-pitfalls.md` | ① **FOLLOW-005** = 共享 `service/common` 在**纯 gRPC 进程**里缺 servlet-api ⇒ 与本轮 `DRIFT-ARPC-009` 同族（**落点共享层 ⇒ 转 G4**）· ② **FOLLOW-016** = **对拍装置自身会骗人**（端口撞车 / 时钟跳变 / 启动时序）⇒ ⇒ `E7`（follow 双侧活体未复验）**不得照抄旧日期的结论** · ③ **`testing-pitfalls.md`** = 「绿测试可能是**错误答案的守卫**」⇒ 本轮新守门必须**真触发** |
+| `docs/Worktree.md` | §二·五（回执模板 + **核验命令** + 7 种不成立形态）· §三·1d · §三·1e | **核验命令 = `grep -c '^## 开工前置回执'` + `grep -cE '⑤ 批准记录：Jason · [0-9]{4}-'`** ⇒ 本轮**在既有小节内追加**（全仓 10 份 `vs-common.md` 均恰好 1 份 ⇒ 追加后仍是 1）· **「回执里自己写『已批准』不算批准」** ⇒ ⑤ 填的是 Jason 在本 lane 会话内的明示 |
+
+**③ 待批准项（需 Jason / 调度员拍板）**
+
+**本轮 = 0 条新增待拍板项。**
+⚠️ **1 条既有待拍板项仍在（不属本轮、也不重复提）**：**`S1-FOLLOW-001`** —— 全仓 rpc 层指标出口统一方案（用户 2026-10-24 已定「交主会话拍板」）⇒ **follow 域那一半已于 2026-10-29 落地**；**users 域那一半（9094 / 9097）本轮只订正前提、不落码** ⇒ **仍待主会话拍板**。
+
+**④ 等批准 ⇒ 批准后才开工**
+**回执落笔时**本轮只读 + 写本回执（未获批准前不写任何代码、不改任何台账，本小节除外）；⇒ **Jason 于 2026-10-30 10:31 在本 lane 会话内明示「开始工作」**⇒ **已获批开工**（⑤ 由调度员代填，见本节末尾）⇒ 本轮按 ① 所列范围执行。
+
+**⑤ 批准记录：Jason · 2026-10-30 10:31 · 批准范围：本 lane 回执 ① 所列任务范围（派工面 `wave=G1` × A/B 的开放条目逐条回源后分流 = 域侧落码 1 条〔落 users 域 `user-rpc` 守门〕+ 台账订正 3 组 + 转派 G4 反馈单 3 条 + 域外登记 6 条；**follow 域本轮自身 0 条代码落码**）** —— ⚠️ **不含**共享面、阶段二、`S1-FOLLOW-001` 落码、已签字偏离重开　← 由**调度员代填**（依据：Jason 于 2026-10-30 10:31 在**本 lane 会话内**明示「开始工作」；**回执人不得自批**· **代填 ≠ 代批准**）
+

@@ -97,6 +97,24 @@ public final class RealContainerHostPort {
     /** FavoriteAuthorityV2ResponseShapeTest 的 PG 宿主口。 */
     public static final int FAVORITE_AUTHORITY_V2_RESPONSE_SHAPE = 22917;
 
+    /**
+     * 🔴 <b>Actuator 载体真启动守门</b>（{@code FavoriteRpcPrometheusCarrierGateTest}）的 PG 宿主口。
+     *
+     * <p>🔴 <b>2026-10-30 补载体时新增</b>：该守门用<b>真 fat jar</b> 起一次进程，
+     * 真打 {@code /actuator/prometheus} ⇒ ⇒ 需要<b>真 PG</b>（生产 schema 由 Flyway 建）
+     * ⇒ ⇒ 与其它「起容器」的测试类同款 ⇒ ⇒ 必须钉宿主口。
+     */
+    public static final int PROMETHEUS_CARRIER_GATE = 22918;
+
+    /**
+     * 🔴 <b>共享层 web 能力分边守门</b>（{@code FavoriteRpcSharedLayerWebBeanGateTest}）的 PG 宿主口。
+     *
+     * <p>🔴 <b>2026-10-30 补载体时新增</b>：该守门起**真 rpc 形态的 Spring 上下文**
+     * ⇒ ⇒ 需要<b>真 PG</b>（生产 schema 由 Flyway 建）⇒ ⇒ 与其它「起容器」的测试类同款
+     * ⇒ ⇒ 必须钉宿主口。
+     */
+    public static final int SHARED_LAYER_WEB_BEAN_GATE = 22919;
+
     /** 守门自己起容器用的口（脚手架段第一口）⇒ <b>不与任何测试类复用</b>。 */
     public static final int GATE_LIVE = SCRATCH_FIRST;
 
@@ -119,6 +137,8 @@ public final class RealContainerHostPort {
         "FAVORITE_AUTHORITY_LIVE_PARITY",
         "FAVORITE_AUTHORITY_LOOKUP_TIMEOUT",
         "FAVORITE_AUTHORITY_V2_RESPONSE_SHAPE",
+        "PROMETHEUS_CARRIER_GATE",
+        "SHARED_LAYER_WEB_BEAN_GATE",
     };
 
     /**

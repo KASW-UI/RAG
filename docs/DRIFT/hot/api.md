@@ -907,6 +907,8 @@ SEMANTICALLY NOT EQUIVALENT
 > 
 | ID | 上一轮判定 | 本轮处置 | 证据 |
 |---|---|---|---|
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/probe-hot-disconnect.py` ⇒ **EXIT=0**（2026-10-30 03:43:31 · 12s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：⇒ 取消原因判定：**BY_DISCONNECT** ⏐ ⇒ 取消原因判定：**BY_DEADLINE** ⏐ ⇒ **两侧不等价，且方向与台账 D3 一致**： ⏐ · Go：客户端断连 ⇒ HTTP ctx 取消 ⇒ **在飞的 gRPC 立刻被取消** ⏐ · RAG：Servlet 断连**不**取消在飞的阻塞 gRPC ⇒ 只能等 2s 调用 deadline ⏐ ⇒ DRIFT-HOTAPI 的 **D3「客户端断连的取消不；<br>`tools/difftest/probe-hot-latency.py` ⇒ **EXIT=0**（2026-10-30 03:42:53 · 18s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> go  http://127.0.0.1:18903  并发 8 × 20 轮（mode=many-100） ⏐ ==> rag  http://127.0.0.1:58903  并发 8 × 20 轮（mode=many-100） ⏐ p99：Go 444.5ms  vs  RAG 416.8ms  ⇒ RAG/Go = 0.94× ⏐ p50：Go 353.0ms  vs  RAG 359.6ms  ⇒ RAG/Go = 1；<br>`tools/difftest/probe-hot-protection.py` ⇒ **EXIT=1**（2026-10-30 03:43:11 · 20s）—— 🔴 **探针判定为「不一致」**；覆盖断言：[FAIL] maxconns       rag  12 并发在途 ⇒ 裸 503（空 body）0 个 / 放行 12 个 / 传输错误 0 个，耗时 3.0s（期望：至少 1 个裸 503） ⏐ [FAIL] breaker        go   3 波 × 12 并发 ⇒ 熔断裸 503（空 body）共 0 个；超时 503（body=Request Timeout）共 0 个（期望：> 0 个空 body 的 503 ——；<br>`tools/difftest/run-hot-rpc-difftest.sh` ⇒ **EXIT=1**（2026-10-30 03:43:58 · 2s）—— 🔴 **探针判定为「不一致」**；覆盖断言：==> [1/7] 清场：停掉旧的 hot-rpc 进程 ⏐ ==> [2/7] 清空两个 Redis（**必须等旧进程死后**，否则它会把旧 sketch 写回来 ⇒ 分数翻倍） ⏐ ❌ hotrpcdifftest-redis-go:6379 DBSIZE=（应为 0）⇒ 有旧数据残留，停下；<br>`tools/difftest/run-hot.sh` ⇒ **EXIT=1**（2026-10-30 03:39:35 · 30s）—— 🔴 **探针判定为「不一致」**；覆盖断言：✓ CASE-18    畸形 JSON body ⇒ 5001 ⏐ ✓ CASE-19    不存在的路径 ⇒ 404 裸响应（text/plain + nosniff） ⏐ ✓ CASE-20    方法不匹配 ⇒ 405 裸状态码（无 body） ⏐ ✗ CASE-21    下游拖过 3s ⇒ 503 Request Timeout（校验 nosniff） ⏐ ↳ 已知漂移：503 响应缺 X-Content-Type-Opti。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
 | **DRIFT-HOTAPI-011** | 🔴 SEMANTIC MISMATCH | ✅ **已修** | Go 活体探针 + 真实 MVC 管线 4 例<br>⚠️ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（未改判）。依据：RAG `service/hot/hot-api/src/main/java/com/rag/hot/hot/api/form/GoFormValues.java:200-216`（`firstFormValue` 取首个非空值）· Go `rest/httpx/util.go:35` + `core/mapping/unmarshaler.go:835-846`（`val.Index(0)` 取首值）· 核对日期 2026-10-30。 |
 | **DRIFT-HOTAPI-015-B** | ⚠️ 证据缺口（测试永久无效） | ✅ **已补** | 新增 `HotApiGoWireOrderTest`（真实上下文 + 原始字节）｜⚠️ 2026-10-24 改号：原编为 012，与「2048 上限」撞车 |
 | **DRIFT-HOTAPI-013** | 🟠 OBSERVABLE DIFFERENCE | ✅ **已修** | Go 活体探针 + 真实 MVC 管线 2 例<br>⚠️ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（未改判）。依据：RAG `service/hot/hot-api/src/main/java/com/rag/hot/hot/api/form/GoFormValues.java:267-312`（`requireParsableJsonBody` ⇒ 畸形 / 非对象 body ⇒ 5001）· Go `rest/httpx/requests.go:66-68` + `rest/httpx/requests.go:153-155`（`ParseJsonBody` 无条件执行）· 核对日期 2026-10-30。 |
@@ -1335,6 +1337,8 @@ JSON 比对会放过字段顺序、`null` vs `[]`、uint32 溢出这类差异，
 
 ## 3. 🆕 本轮新查出的 4 条漂移
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/probe-hot-limits.py` ⇒ **EXIT=0**（2026-10-30 03:43:43 · 2s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：· RAG 侧：值个数阈值 2049（Tomcat maxParameterCount 配 2048 ⇒ 第 2049 个抛 InvalidParameterException ⇒ 被 catch-all 吞成 {code:5001}） ⏐ ⇒ 值个数阈值：Go 2049 / RAG 2049  ✅ 一致 ⏐ ⚠️ 不是 1MB：Go 的真实上限是 1 MiB **+ 4096**（net/http/server.go:941 'buf；<br>`tools/difftest/run-hot.sh` ⇒ **EXIT=1**（2026-10-30 03:39:35 · 30s）—— 🔴 **探针判定为「不一致」**；覆盖断言：✓ CASE-18    畸形 JSON body ⇒ 5001 ⏐ ✓ CASE-19    不存在的路径 ⇒ 404 裸响应（text/plain + nosniff） ⏐ ✓ CASE-20    方法不匹配 ⇒ 405 裸状态码（无 body） ⏐ ✗ CASE-21    下游拖过 3s ⇒ 503 Request Timeout（校验 nosniff） ⏐ ↳ 已知漂移：503 响应缺 X-Content-Type-Opti。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
+
 ### DRIFT-HOTAPI-021 —— Tomcat 请求目标字符校验拒绝 `?page[]=5` 🔴 SEMANTIC MISMATCH（跨域）
 > ✅ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **✅ 已修（第十三轮「Tomcat 三旋钮」轮 · 10/10 落地）** ⇒ **现行态 = ✅ 已修**（未改判）。
 > 依据：RAG `service/hot/hot-api/src/main/resources/application.yml:48`（`relaxed-query-chars: ["[", "]"]`）+ 守门 `service/hot/hot-api/src/test/java/com/rag/hot/hot/api/HotApiRealTomcatGateTest.java:284`（`bracketArrayNotationIsAcceptedLikeGo`，**真 Tomcat + 裸 socket**）+ 跨模块守门 `tools/difftest/check-tomcat-limits.py`（**本轮实跑 10/10 ✅ · EXIT=0**）· Go `service/hot/api/internal/types/types.go:22-25`（`page` / `page_size` 的 form tag）· 核对日期 2026-10-30。
@@ -1381,6 +1385,8 @@ java.lang.IllegalArgumentException: Invalid character found in the request targe
 （Boot 4 的该属性是 `List<Character>` ⇒ **必须按逗号分隔传**，传 `'[]'` 会报
 `String [[]] with length 2 cannot be converted to char type`）。
 该属性的描述限定「只有 `< > [ \ ] ^ ` { | }` 可加」⇒ `[` `]` 在允许集内。
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run-hot.sh` ⇒ **EXIT=1**（2026-10-30 03:39:35 · 30s）—— 🔴 **探针判定为「不一致」**；覆盖断言：✓ CASE-18    畸形 JSON body ⇒ 5001 ⏐ ✓ CASE-19    不存在的路径 ⇒ 404 裸响应（text/plain + nosniff） ⏐ ✓ CASE-20    方法不匹配 ⇒ 405 裸状态码（无 body） ⏐ ✗ CASE-21    下游拖过 3s ⇒ 503 Request Timeout（校验 nosniff） ⏐ ↳ 已知漂移：503 响应缺 X-Content-Type-Opti。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
 
 ### DRIFT-HOTAPI-022 —— form 参数个数上限：Go 2048 vs RAG 1000 🔴 OBSERVABLE DIFFERENCE（跨域）
 > ✅ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **✅ 已修（第十三轮「Tomcat 三旋钮」轮 · 10/10 落地）** ⇒ **现行态 = ✅ 已修**（未改判）。
@@ -1661,6 +1667,8 @@ hot 域只提供**活体复现脚本**（`tools/difftest/probe-hot-disconnect.py
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/probe-hot-disconnect.py` ⇒ **EXIT=0**（2026-10-30 03:43:31 · 12s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：⇒ 取消原因判定：**BY_DISCONNECT** ⏐ ⇒ 取消原因判定：**BY_DEADLINE** ⏐ ⇒ **两侧不等价，且方向与台账 D3 一致**： ⏐ · Go：客户端断连 ⇒ HTTP ctx 取消 ⇒ **在飞的 gRPC 立刻被取消** ⏐ · RAG：Servlet 断连**不**取消在飞的阻塞 gRPC ⇒ 只能等 2s 调用 deadline ⏐ ⇒ DRIFT-HOTAPI 的 **D3「客户端断连的取消不。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
+
 ## DRIFT-HOTAPI-026 —— MaxBytes 拒绝后 Go **重置连接（RST）**，RAG 干净关闭
 > ✅ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **「🆕 登记为已记录差异，不修」** ⇒ **现行态 = 🟡 差异仍在 · 已登记不修（容器/传输层 · 非缺陷）**（未改判）。
 > 依据：RAG `service/common/src/main/java/com/rag/common/protection/GoStyleMaxBytesFilter.java:108-112`（`getContentLengthLong() > maxBytes` ⇒ `setStatus(413)`，**不** `sendError`、**不**写 body ⇒ 与 Go 的裸 `w.WriteHeader(413)` 同形）+ `service/hot/hot-api/src/main/resources/application.yml:144`（`max-bytes: 1048576` = Go tag 默认）· Go `rest/handler/maxbyteshandler.go:19-22`（`r.ContentLength > n` ⇒ 裸 `w.WriteHeader(413)`）+ `rest/config.go:53`（`MaxBytes int64 json:",default=1048576"`）· 核对日期 2026-10-30。
@@ -1706,6 +1714,8 @@ RAG 侧 Tomcat 的 `maxSwallowSize`（默认 2MB）足够吞掉这 1MB ⇒ 不�
    「body 超限」这一条路径上断，其它路径不复刻）⇒ 反而制造新的不一致。
 
 ---
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/probe-hot-protection.py` ⇒ **EXIT=1**（2026-10-30 03:43:11 · 20s）—— 🔴 **探针判定为「不一致」**；覆盖断言：[FAIL] maxconns       rag  12 并发在途 ⇒ 裸 503（空 body）0 个 / 放行 12 个 / 传输错误 0 个，耗时 3.0s（期望：至少 1 个裸 503） ⏐ [FAIL] breaker        go   3 波 × 12 并发 ⇒ 熔断裸 503（空 body）共 0 个；超时 503（body=Request Timeout）共 0 个（期望：> 0 个空 body 的 503 ——。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
 
 ## DRIFT-HOTAPI-027 —— MaxConns 在 RAG 侧**默认阈值下结构性不可达**（且 Go 是 per-route、RAG 是 global）
 > 🔴 **2026-10-30 真实性复核（favorite+hot lane）**：原判 **「🔁 跨域登记，hot 域不可修（建议 common 域与运维一起决定）」** ⇒ **现行态 = 🏷 已签字为有意偏离（`SD-2026-10-25-01`，2026-10-25 用户拍板）· 不是待办**（**改判**）。
@@ -2077,6 +2087,8 @@ CPU 一忙（正是全量 `mvn -T1C test` 并行跑 29 个模块时的状态）�
 
 ---
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/probe-hot-latency.py` ⇒ **EXIT=0**（2026-10-30 03:42:53 · 18s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> go  http://127.0.0.1:18903  并发 8 × 20 轮（mode=many-100） ⏐ ==> rag  http://127.0.0.1:58903  并发 8 × 20 轮（mode=many-100） ⏐ p99：Go 444.5ms  vs  RAG 416.8ms  ⇒ RAG/Go = 0.94× ⏐ p50：Go 353.0ms  vs  RAG 359.6ms  ⇒ RAG/Go = 1；<br>`tools/difftest/run-hot-rpc-difftest.sh` ⇒ **EXIT=1**（2026-10-30 03:43:58 · 2s）—— 🔴 **探针判定为「不一致」**；覆盖断言：==> [1/7] 清场：停掉旧的 hot-rpc 进程 ⏐ ==> [2/7] 清空两个 Redis（**必须等旧进程死后**，否则它会把旧 sketch 写回来 ⇒ 分数翻倍） ⏐ ❌ hotrpcdifftest-redis-go:6379 DBSIZE=（应为 0）⇒ 有旧数据残留，停下；<br>`tools/difftest/run-hot.sh` ⇒ **EXIT=1**（2026-10-30 03:39:35 · 30s）—— 🔴 **探针判定为「不一致」**；覆盖断言：✓ CASE-18    畸形 JSON body ⇒ 5001 ⏐ ✓ CASE-19    不存在的路径 ⇒ 404 裸响应（text/plain + nosniff） ⏐ ✓ CASE-20    方法不匹配 ⇒ 405 裸状态码（无 body） ⏐ ✗ CASE-21    下游拖过 3s ⇒ 503 Request Timeout（校验 nosniff） ⏐ ↳ 已知漂移：503 响应缺 X-Content-Type-Opti。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
+
 ## DRIFT-HOTAPI-029 ✅ 已修 · SEMANTIC MISMATCH · MEDIUM
 > ✅ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（未改判）。
 > 依据：RAG `service/hot/hot-api/src/main/java/com/rag/hot/hot/api/service/HotArticleHydrator.java:261`（`remainingBudgetMs(long deadlineNanos)` ⇒ **绝对 deadline** 在**调用点**重算 `min(2s, deadline-now)`）+ `service/hot/hot-api/src/main/java/com/rag/hot/hot/api/service/HotArticleHydrator.java:159`（`buildHotArticleItem` 把绝对 deadline 传进每次调用）· Go `service/hot/api/internal/logic/hot/getHotArticlesLogic.go:93-110`（goroutine 共享 ctx 的**绝对** deadline）· 守门在仓：`service/hot/hot-api/src/test/java/com/rag/hot/hot/api/service/HotArticleHydratorTest.java` · 核对日期 2026-10-30。
@@ -2242,6 +2254,8 @@ go-zero 的 `maxFormParamCount` 数的是**非空值个数** ⇒ **两层语义�
 **彻底对齐的修法见 `DRIFT-HOTAPI-030` 的「修法」节**（跨域，需一次拍板）。
 
 ---
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/check-jar-executable.sh` ⇒ **EXIT=0**（2026-10-30 04:55:19 · 2s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅  service/task/task-api                       64M   Main-Class: org.springframework.boot.loader.launch.JarLauncher ⏐ ✅  service/task/task-rpc                       96M   Main-Class: org.springframework.boot.loader.launc。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
 
 ## DRIFT-HOTAPI-030 —— 🔴 OBSERVABLE DIFFERENCE：Tomcat 数「总参数个数」、Go 数「非空值个数」⇒ 中间一段区间两侧行为不一致（**跨域 · 待拍板**）
 
@@ -2416,3 +2430,30 @@ java.lang.IllegalArgumentException: Request header is too large
 ⇒ 属**框架限制**（不是「RAG 偷懒」）⇒ 建议登记为**签字偏离候选**
 （`SD-2026-10-25-CAND-10`，**未签字**，见 [`docs/Intentional_Deviations/_INDEX.md`](../../Intentional_Deviations/_INDEX.md)）。
 ⚠️ 触发条件是「请求行 > 1 MiB + 4 KiB」⇒ **病态输入**，正常客户端不会碰到。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W12
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-HOTAPI-025 | C（阶段二 · 残留是 hot-api 域内的「补全批次继承可取消 Context」工程项 ⇒ 域内可自修） | P2 | 否 | Go `service/common/observability/http.go:80-88`（`case <-ctx.Done():` ⇒ `statusCode := http.StatusServiceUnavailable`，`errors.Is(ctx.Err(), context.Canceled)` ⇒ **499**，`http.Error(w, httpTimeoutBody, statusCode)` ⇒ Go 的 499 由 **ctx 取消**驱动 ⇒ 客户端断连必产 499）vs RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:481-484`（探针判定「客户端已断连」⇒ `recordClientDisconnected(...)` ＋ `rec.writeTimeoutResponseQuietly(HTTP_CLIENT_CLOSED_REQUEST, httpReq)` ⇒ **真的写出 499**）＋ `:689`（`log.warn("[HTTP] {} - ...")` ⇒ 断连事件**在日志里可见**）⇒ **原标题断言的两个现象（「不产出 499」「完全不可见」）已不成立**；⚠️ **仍成立的残留 = 「断连后继续发下游调用」**：RAG `service/hot/hot-api/src/main/java/com/rag/hot/hot/api/service/HotArticleHydrator.java:74`（`private final Executor hydrationExecutor;`）＋ `:79`（`@Qualifier("hotHydrationExecutor")`）＋ `:124`（补全批次提交到**独立池** ⇒ **不继承** worker 线程上 attach 的可取消 `io.grpc.Context`，该 Context 在 `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:337-340` 才 attach）vs Go `service/hot/api/internal/logic/hot/getHotArticlesLogic.go:101-109`（`go func(){ ... l.buildHotArticleItem(hotItem) }()`）＋ `:132`（`l.svcCtx.ArticleRpc.GetArticle(l.ctx, ...)` ⇒ 补全 goroutine **显式带请求 ctx** ⇒ 断连即取消）⇒ ⇒ **差异仍成立**（形态 = 断连后 hot-api 仍继续发下游调用 ⇒ 属**时序差**，不是「499 不产出」）⇒ **不阻断阶段一** | 2026-10-30 |
+| DRIFT-HOTAPI-026 | D（经分析确认不实现 · 容器/传输层收尾策略差异 ⇒ 是决策不是缺陷） | P3 | 否 | Go `go-zero@v1.10.2/rest/handler/maxbyteshandler.go:19-22`（`if r.ContentLength > n` ⇒ 裸 `w.WriteHeader(http.StatusRequestEntityTooLarge)` ⇒ **413 ＋ 空 body ＋ 无 Content-Type**）＋ `go-zero@v1.10.2/rest/config.go:53`（`MaxBytes int64 json:",default=1048576"`）vs RAG `service/common/src/main/java/com/rag/common/protection/GoStyleMaxBytesFilter.java:108-113`（`getContentLengthLong() > maxBytes` ⇒ `response.setStatus(SC_REQUEST_ENTITY_TOO_LARGE)`，**不** `sendError`、**不**写 body ⇒ 与 Go 同形）＋ `service/hot/hot-api/src/main/resources/application.yml:144`（`max-bytes: 1048576` = Go tag 默认）⇒ **闸门行为两侧逐条等价**；**残留差异只在连接层**（Go：拒绝一个未读完的大 body ⇒ 内核发 RST；RAG：Tomcat `maxSwallowSize` 足够吞掉 ⇒ 干净关闭）⇒ ⇒ **差异仍成立**（仅连接层；响应状态码 / body / 关键响应头**逐字节相同**）⇒ **D（经分析确认不实现）**：理由 = ① wire 层无差异；② 差异是**容器收尾策略**（Go `net/http` vs Tomcat），不是业务语义；③ 真要「修」得让 RAG 对未读完的大 body 主动断连接 ⇒ 那是**新增 Go 侧不存在的断连行为**（Go 只在「body 超限」这一条路径上断）⇒ 反而制造新的不一致 ⇒ ⇒ **保留登记即可，不阻断阶段一** | 2026-10-30 |
+| DRIFT-HOTAPI-031 | C（阶段二 · 未签字候选 ⇒ 不得自动归 D ⇒ 需工程手段或走完签字流程） | P3 | 否 | Go `net/http/server.go:2049`（`const publicErr = "431 Request Header Fields Too Large"` ⇒ Go 自己产的 **431 ＋ `text/plain`**）＋ `service/hot/api/hotcenter.go:53`（`httpx.SetErrorHandler` ⇒ 业务错误走业务信封 ＋ HTTP 200，但连接器层的 431 由 `net/http` 自己写）vs RAG `service/hot/hot-api/src/main/resources/application.yml:50`（`max-http-request-header-size: 1028KB` ⇒ **阈值已与 Go 对齐**，但超限后的状态码与错误体由 Tomcat 连接器层决定 ⇒ 400 ＋ `text/html` 错误页）＋ `service/common/src/main/java/com/rag/common/http/GoStyleJsonContentTypeAdvice.java:96`（`ResponseBodyAdvice` ⇒ 只管**成功**响应的 `Content-Type`，**够不到**连接器层直接产出的错误页）⇒ **差异仍成立**：Go = 431 ＋ `text/plain`，RAG = 400 ＋ `text/html`；⚠️ 触发条件是「请求行 > 1 MiB ＋ 4 KiB」的**病态输入**（正常客户端碰不到）。⚠️ **不得自动归 D**：候选 `SD-2026-10-25-CAND-10` 在 `docs/Intentional_Deviations/hot/api.md:33` 与 `:421` 仍是 **⏳ 未签字** ⇒ 「未签字候选不因位于 IntDev 目录就归 D」⇒ ⇒ **剩余实现面 = 阶段二要么用工程手段让超长请求行也产出 Go 的 431 ＋ `text/plain`，要么走完签字流程** ⇒ **不阻断阶段一** | 2026-10-30 |
+
+### lane W7
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-HOTAPI-027 | D | P3 | 否 | Go `go-zero@v1.10.2/rest/engine.go:145-147`（**路由循环内** `chn.Append(handler.MaxConnsHandler(ng.conf.MaxConns))` ⇒ 每条路由各建一个）＋ `rest/handler/maxconnshandler.go:20`（`latch := syncx.NewLimit(n)` 在 handler 闭包**内部** ⇒ **per-route**）＋ `rest/config.go:52`（`MaxConns int json:",default=10000"`）。RAG `service/common/src/main/java/com/rag/common/protection/GoStyleMaxConnsFilter.java:102`（`private final Semaphore latch;`）＋ `:104-106`（**构造期建一次** ⇒ **全进程一个** = global）＋ `service/hot/hot-api/src/main/resources/application.yml:143`（`max-conns: 10000`）⇒ ⇒ 「Go per-route / RAG global」这个**行为差异仍成立**（且默认阈值 10000 下 RAG 侧结构性不可达：Tomcat `max-threads` 默认 200）。**D**：已由 `docs/Intentional_Deviations/global/common-tails.md` 的 **`SD-2026-10-25-01`**（✅ 仍成立，明写覆盖 T-2（follow `DRIFT-FOLLOW-008`）· T-5（hot `D27`）两条同一件事）**签字** ⇒ **决定 = 保留 RAG 的全局闸门，不改成 per-route** ⇒ 是决策不是缺陷 | 2026-10-30 |

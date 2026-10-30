@@ -315,3 +315,22 @@ handler 只能靠 `DeadlineState` **轮询**（`isExpired()` `:620-623` / `remai
    ⇒ 本轮**未**做多次重复采样取分位数（代价：单次跑 ~6 分钟 × N）。
 7. **未覆盖 `RpcInterceptor.handle(...)` 那条非 gRPC 入口**：问 1 的结论包含它「**有** interrupt」的事实
    （`:395` / `:406`），但本 lane **没有**为它补守门 ⇒ 它**仍**只有 `service/common` 自己的单测。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W3
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| `DRIFT-018` | D | P3 | 否 | Go `service/common/observability/http.go:80`（`case <-ctx.Done():` ⇒ Go 的 ctx 取消会传播到在途处理）＋ `service/common/observability/rpc.go:38`／`:68`（`timeoutCtx, cancel := context.WithTimeout(ctx, timeout)` ＋ `case <-timeoutCtx.Done():` ⇒ 到点即止）vs RAG `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:209-210`（javadoc 自陈：`ServerCall#close` 只能从外部「关闭 call」让客户端看到超时 ⇒ **不会**主动中断业务 handler 线程）⇒ **差异已消失**（本编号登记的两面都已闭合：① 24 处 `checkDeadline()` 曾是死代码 ⇒ 补 `@Bean GrpcServerConfigurer` 后已真正可达；② 「不能取消在途 IO」= **B-1**（`docs/Intentional_Deviations/common/_signed-deviations.md:43`）⇒ **已关闭（限 SQL 载体）**，用 `setQueryTimeout` 局部缓解，**grpc 出向载体另归 E65**（不是本编号））⇒ 本编号下已无待实现项 ⇒ 归 D | 2026-10-30 |

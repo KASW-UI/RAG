@@ -1,0 +1,128 @@
+# 同源组（identity groups）—— 派生层条目身份的**例外清单**
+#
+# ⚠️ **默认口径（2026-10-30 用户拍板）**：条目身份 = **编号 + 所属域目录**
+#    ⇒ 台账用**裸编号** ⇒ 同一个编号在不同域**通常**指的不是同一件事 ⇒ 一律**拆开**。
+#    ⇒ 本文件是**例外**：这些**节点**登记的是**同一件事** ⇒ **仍合并成一条**
+#    （否则同一件事被派两次单 / 一份读到旧快照 ⇒ **虚增假缺口**）。
+#
+# ⚠️ **本文件由 `tools/ledger-derive/gen-identity-groups.py` 从人工判定结果生成**
+#    ⇒ 判定依据 = [`docs/DRIFT/_cross/grading/_samesrc-W*.md`](../../../docs/DRIFT/_cross/grading/)
+#    ⇒ **「不同的事」「无法判定」不进本表**（派生层不猜 ⇒ 保持拆开 ⇒ 在派生层 §4.6 露出）。
+#
+# ⚠️ **节点 = （编号, 所属域）** —— 不是裸编号！
+#    ⇒ 同一个编号在**组内**的域与**组外**的域**必须分开**（例如 `CF-001` 与 `DRIFT-CF-001`
+#      在 `common` 域是同一件事 ⇒ 合并；但 `CF-001` 在别的域可能是**撞号** ⇒ 不合并）。
+#
+# ⚠️ **不得按「编号族」通配** —— 同一族里既有同源的也有撞号的
+#    （实测 `T-3` 曾因扫描器切开复合编号而在 11 个域出现假登记 ⇒ 已修）。
+#
+# 格式：`<编号A>	<域A>	<编号B>	<域B>	<关系>	<来源>`
+#      关系 ∈ `同编号跨域`（A 与 B 同号）/ `别名同源`（A 与 B 不同号，长/短编号别名）
+
+ADJ-01	users	V-002	users	别名同源	blindspot:_samesrc-blindspot.md:19 ← DRIFT/users/user/rpc.md:995
+C-3	global	C-3	comment	同编号跨域	W19:_samesrc-W19.md:16 ← DRIFT/comment/vs-common.md:59
+CF-001	common	DRIFT-CF-001	common	别名同源	W16:_samesrc-W16.md:20 ← DRIFT/common/alignment-2026-10-23.md:375
+CF-002	common	DRIFT-CF-002	common	别名同源	W16:_samesrc-W16.md:21 ← DRIFT/common/alignment-2026-10-23.md:376
+CF-005	common	DRIFT-CF-005	common	别名同源	W16:_samesrc-W16.md:22 ← DRIFT/common/alignment-2026-10-23.md:377
+CF-006	common	DRIFT-CF-006	common	别名同源	W16:_samesrc-W16.md:23 ← DRIFT/common/alignment-2026-10-23.md:378
+CF-008	common	DRIFT-CF-008	common	别名同源	W16:_samesrc-W16.md:24 ← DRIFT/common/alignment-2026-10-23.md:379
+CF-012	common	DRIFT-CF-012	common	别名同源	W16:_samesrc-W16.md:25 ← DRIFT/common/alignment-2026-10-23.md:388
+CF-013	common	DRIFT-CF-013	common	别名同源	W16:_samesrc-W16.md:26 ← DRIFT/common/alignment-2026-10-23.md:389
+CF-014	common	DRIFT-CF-014	common	别名同源	W16:_samesrc-W16.md:27 ← DRIFT/common/alignment-2026-10-23.md:390
+CF-015	common	DRIFT-CF-015	common	别名同源	W16:_samesrc-W16.md:28 ← DRIFT/common/alignment-2026-10-23.md:391
+CF-017	common	DRIFT-CF-017	common	别名同源	W16:_samesrc-W16.md:29 ← DRIFT/common/alignment-2026-10-23.md:392
+DRIFT-018	users	DRIFT-018	global	同编号跨域	W18:_samesrc-W18.md:16 ← DRIFT/global/lanes/L9-interrupt.md:260
+DRIFT-ARPC-008	users	ADJ-01	users	别名同源	blindspot:_samesrc-blindspot.md:17 ← DRIFT/users/_shared.md:965
+DRIFT-CF-001	common	CF-001	common	别名同源	W15:_samesrc-W15.md:26 ← DRIFT/common/alignment-2026-10-23.md:834
+DRIFT-CF-002	common	CF-002	common	别名同源	W15:_samesrc-W15.md:27 ← DRIFT/common/alignment-2026-10-23.md:835
+DRIFT-CF-003	common	CF-003	common	别名同源	W15:_samesrc-W15.md:28 ← DRIFT/common/alignment-2026-10-23.md:836
+DRIFT-CF-004	common	CF-004	common	别名同源	W15:_samesrc-W15.md:29 ← DRIFT/common/alignment-2026-10-23.md:837
+DRIFT-CF-005	common	CF-005	common	别名同源	W15:_samesrc-W15.md:30 ← DRIFT/common/alignment-2026-10-23.md:838
+DRIFT-CF-006	common	CF-006	common	别名同源	W15:_samesrc-W15.md:31 ← DRIFT/common/alignment-2026-10-23.md:839
+DRIFT-CF-008	common	CF-008	common	别名同源	W15:_samesrc-W15.md:32 ← DRIFT/common/alignment-2026-10-23.md:840
+DRIFT-CF-009	common	CF-009	common	别名同源	W16:_samesrc-W16.md:37 ← DRIFT/common/alignment-2026-10-23.md:841
+DRIFT-CF-011	common	CF-011	common	别名同源	W16:_samesrc-W16.md:38 ← DRIFT/common/alignment-2026-10-23.md:842
+DRIFT-CF-012	common	CF-012	common	别名同源	W15:_samesrc-W15.md:33 ← DRIFT/common/alignment-2026-10-23.md:843
+DRIFT-CF-013	common	CF-013	common	别名同源	W15:_samesrc-W15.md:34 ← DRIFT/common/alignment-2026-10-23.md:844
+DRIFT-CF-014	common	CF-014	common	别名同源	W15:_samesrc-W15.md:35 ← DRIFT/common/alignment-2026-10-23.md:845
+DRIFT-CF-015	common	CF-015	common	别名同源	W15:_samesrc-W15.md:36 ← DRIFT/common/alignment-2026-10-23.md:846
+DRIFT-CF-017	common	CF-017	common	别名同源	W15:_samesrc-W15.md:37 ← DRIFT/common/alignment-2026-10-23.md:847
+DRIFT-CF-018	global	DRIFT-CF-018	common	同编号跨域	W19:_samesrc-W19.md:17 ← DRIFT/common/alignment-2026-10-23.md:661
+DRIFT-G1-001	follow	DRIFT-G1-001	users	同编号跨域	W21:_samesrc-W21.md:9 ← DRIFT/users/vs-common.md:153
+DRIFT-G1-002	follow	DRIFT-G1-002	users	同编号跨域	W21:_samesrc-W21.md:10 ← DRIFT/users/vs-common.md:190
+DRIFT-HOTAPI-030	global	DRIFT-HOTAPI-030	article	同编号跨域	W19:_samesrc-W19.md:22 ← DRIFT/article/vs-common.md:26
+DRIFT-HOTAPI-030	global	DRIFT-HOTAPI-030	comment	同编号跨域	W19:_samesrc-W19.md:22 ← DRIFT/comment/vs-common.md:31
+DRIFT-HOTAPI-030	global	DRIFT-HOTAPI-030	follow	同编号跨域	W19:_samesrc-W19.md:22 ← DRIFT/follow/vs-common.md:28
+DRIFT-HOTAPI-030	global	DRIFT-HOTAPI-030	hot	同编号跨域	W19:_samesrc-W19.md:22 ← DRIFT/hot/api.md:2260
+DRIFT-LOG-001	common	LOG-001	common	别名同源	W15:_samesrc-W15.md:38 ← DRIFT/common/alignment-2026-10-23.md:854
+DRIFT-LOG-002	common	LOG-002	common	别名同源	W15:_samesrc-W15.md:39 ← DRIFT/common/alignment-2026-10-23.md:855
+DRIFT-LOG-003	common	LOG-003	common	别名同源	W15:_samesrc-W15.md:40 ← DRIFT/common/alignment-2026-10-23.md:856
+DRIFT-LOG-004	common	LOG-004	common	别名同源	W16:_samesrc-W16.md:39 ← DRIFT/common/alignment-2026-10-23.md:857
+DRIFT-LOG-005	common	LOG-005	common	别名同源	W15:_samesrc-W15.md:41 ← DRIFT/common/alignment-2026-10-23.md:858
+DRIFT-LOG-006	common	LOG-006	common	别名同源	W15:_samesrc-W15.md:42 ← DRIFT/common/alignment-2026-10-23.md:859
+DRIFT-LOG-007	common	LOG-007	common	别名同源	W15:_samesrc-W15.md:43 ← DRIFT/common/alignment-2026-10-23.md:860
+DRIFT-MSG-V-026	task	DRIFT-MSG-V-026	message	同编号跨域	W21:_samesrc-W21.md:14 ← DRIFT/message/rpc.md:1008
+DRIFT-MSG-V-030	article	DRIFT-MSG-V-030	message	同编号跨域	W22:_samesrc-W22.md:9 ← DRIFT/message/rpc.md:2734
+DRIFT-MSG-V-030	comment	DRIFT-MSG-V-030	message	同编号跨域	W22:_samesrc-W22.md:10 ← DRIFT/message/rpc.md:2734
+DRIFT-MSG-V-030	like	DRIFT-MSG-V-030	message	同编号跨域	W20:_samesrc-W20.md:5 ← DRIFT/message/rpc.md:2473
+DRIFT-SF-001	global	DRIFT-SF-001	common	同编号跨域	W19:_samesrc-W19.md:15 ← DRIFT/common/alignment-2026-10-23.md:420
+DRIFT-SF-002	common	SF-002	common	别名同源	W15:_samesrc-W15.md:44 ← DRIFT/common/alignment-2026-10-23.md:867
+DRIFT-SF-003	common	SF-003	common	别名同源	W15:_samesrc-W15.md:45 ← DRIFT/common/alignment-2026-10-23.md:868
+E21	global	E21	favorite	同编号跨域	W19:_samesrc-W19.md:6 ← DRIFT/favorite/vs-common.md:27
+E38	global	E38	users	同编号跨域	W19:_samesrc-W19.md:7 ← DRIFT/users/user/rpc.md:832
+E43	users	E43	global	同编号跨域	W18:_samesrc-W18.md:25 ← DRIFT/global/_README.md:423
+E47	users	E47	global	同编号跨域	W18:_samesrc-W18.md:19 ← DRIFT/global/_README.md:426
+E48	users	E48	global	同编号跨域	W18:_samesrc-W18.md:20 ← DRIFT/global/_README.md:427
+E58	users	E58	global	同编号跨域	W18:_samesrc-W18.md:23 ← DRIFT/global/_README.md:446
+E59	global	E59	like	同编号跨域	W19:_samesrc-W19.md:8 ← DRIFT/like/vs-common.md:1498
+E59	global	E59	message	同编号跨域	W19:_samesrc-W19.md:8 ← DRIFT/message/rpc.md:2770
+E60	global	E60	like	同编号跨域	W19:_samesrc-W19.md:13 ← DRIFT/like/rpc.md:1597
+E62	global	E62	favorite	同编号跨域	W19:_samesrc-W19.md:14 ← DRIFT/favorite/rpc.md:3111
+E62	users	E62	favorite	同编号跨域	W18:_samesrc-W18.md:21 ← DRIFT/favorite/rpc.md:3111
+E65	comment	E65	global	同编号跨域	W22:_samesrc-W22.md:11 ← DRIFT/global/vs-common.md:30
+E65	favorite	E65	global	同编号跨域	W17:_samesrc-W17.md:5 ← DRIFT/global/_README.md:430
+E65	global	E65	comment	同编号跨域	W19:_samesrc-W19.md:5 ← DRIFT/comment/rpc.md:257
+E65	global	E65	favorite	同编号跨域	W19:_samesrc-W19.md:5 ← DRIFT/favorite/rpc.md:3376
+E65	global	E65	users	同编号跨域	W19:_samesrc-W19.md:5 ← DRIFT/users/admin/rpc.md:3699
+E66	global	E66	comment	同编号跨域	W19:_samesrc-W19.md:9 ← DRIFT/comment/rpc.md:290
+E68	global	E68	favorite	同编号跨域	W19:_samesrc-W19.md:10 ← DRIFT/favorite/vs-common.md:30
+FB-01	like	FB-01	global	同编号跨域	W20:_samesrc-W20.md:14 ← DRIFT/global/vs-common.md:352
+FB-01	message	FB-01	global	同编号跨域	W20:_samesrc-W20.md:8 ← DRIFT/global/vs-common.md:352
+FB-02	task	FB-02	global	同编号跨域	W21:_samesrc-W21.md:15 ← DRIFT/global/vs-common.md:373
+FB-03	like	FB-03	global	同编号跨域	W20:_samesrc-W20.md:12 ← DRIFT/global/vs-common.md:402
+FB-03	task	FB-03	global	同编号跨域	W21:_samesrc-W21.md:12 ← DRIFT/global/vs-common.md:402
+FB-04	global	FB-04	like	同编号跨域	W19:_samesrc-W19.md:18 ← DRIFT/like/vs-common.md:179
+FB-04	global	FB-04	message	同编号跨域	W19:_samesrc-W19.md:18 ← DRIFT/message/vs-common.md:158
+FB-04	global	FB-04	task	同编号跨域	W19:_samesrc-W19.md:18 ← DRIFT/task/vs-common.md:228
+FB-04	message	FB-04	global	同编号跨域	W20:_samesrc-W20.md:6 ← DRIFT/global/vs-common.md:910
+FB-04	message	FB-04	like	同编号跨域	W20:_samesrc-W20.md:6 ← DRIFT/like/vs-common.md:94
+FB-04	task	FB-04	global	同编号跨域	W21:_samesrc-W21.md:13 ← DRIFT/global/vs-common.md:910
+FB-04	task	FB-04	like	同编号跨域	W21:_samesrc-W21.md:13 ← DRIFT/like/vs-common.md:94
+G4-1	favorite	E65	global	别名同源	W17:_samesrc-W17.md:11 ← DRIFT/global/_README.md:430
+G4-2	favorite	G4-2	article	同编号跨域	W17:_samesrc-W17.md:12 ← DRIFT/article/vs-common.md:275
+LOG-001	common	DRIFT-LOG-001	common	别名同源	W16:_samesrc-W16.md:30 ← DRIFT/common/alignment-2026-10-23.md:413
+LOG-002	common	DRIFT-LOG-002	common	别名同源	W16:_samesrc-W16.md:31 ← DRIFT/common/alignment-2026-10-23.md:414
+LOG-003	common	DRIFT-LOG-003	common	别名同源	W15:_samesrc-W15.md:46 ← DRIFT/common/alignment-2026-10-23.md:415
+LOG-005	common	DRIFT-LOG-005	common	别名同源	W16:_samesrc-W16.md:32 ← DRIFT/common/alignment-2026-10-23.md:417
+LOG-006	common	DRIFT-LOG-006	common	别名同源	W16:_samesrc-W16.md:33 ← DRIFT/common/alignment-2026-10-23.md:418
+LOG-007	common	DRIFT-LOG-007	common	别名同源	W16:_samesrc-W16.md:34 ← DRIFT/common/alignment-2026-10-23.md:419
+PIT-FAV-RPC-038	global	PIT-FAV-RPC-038	favorite	同编号跨域	W19:_samesrc-W19.md:19 ← Pitfalls/favorite/rpc.md:1908
+PITFALL-FOLLOW-005	global	PITFALL-FOLLOW-005	follow	同编号跨域	W19:_samesrc-W19.md:20 ← DRIFT/follow/vs-common.md:300
+PITFALL-FOLLOW-005	users	PITFALL-FOLLOW-005	follow	同编号跨域	W18:_samesrc-W18.md:24 ← DRIFT/follow/vs-common.md:300
+S1-FOLLOW-001	users	S1-FOLLOW-001	follow	同编号跨域	W18:_samesrc-W18.md:14 ← DRIFT/follow/stage1-admission.md:74
+S1-FOLLOW-004	users	S1-FOLLOW-004	follow	同编号跨域	W18:_samesrc-W18.md:6 ← DRIFT/follow/stage1-admission.md:145
+S1-FOLLOW-007	users	S1-FOLLOW-007	follow	同编号跨域	W18:_samesrc-W18.md:5 ← DRIFT/follow/stage1-admission.md:400
+S1-FOLLOW-008	users	S1-FOLLOW-008	follow	同编号跨域	W18:_samesrc-W18.md:7 ← DRIFT/follow/stage1-admission.md:401
+S1-FOLLOW-009	users	S1-FOLLOW-009	follow	同编号跨域	W18:_samesrc-W18.md:8 ← DRIFT/follow/stage1-admission.md:402
+S1-FOLLOW-013	follow	S1-FOLLOW-013	users	同编号跨域	W21:_samesrc-W21.md:11 ← DRIFT/users/stage1-admission.md:530
+SD-2026-10-24-10	like	SD-2026-10-24-10	global	同编号跨域	W24:_samesrc-W24.md:6 ← DRIFT/global/common-tails.md:547
+SD-2026-10-25-CAND-10	hot	SD-2026-10-25-CAND-10	global	同编号跨域	W23:_samesrc-W23.md:8 ← DRIFT/global/lanes/L5-signoff.md:245
+SD-2026-10-25-CAND-15	global	T-12	global	别名同源	blindspot:_samesrc-blindspot.md:20 ← DRIFT/global/common-tails.md:519
+SD-2026-10-25-CAND-17	users	ADJ-01	users	别名同源	blindspot:_samesrc-blindspot.md:18 ← DRIFT/users/_shared.md:965
+SD-HOT-API-006	global	SD-HOT-API-006	hot	同编号跨域	W19:_samesrc-W19.md:27 ← Intentional_Deviations/hot/api.md:189
+SF-002	common	DRIFT-SF-002	common	别名同源	W16:_samesrc-W16.md:35 ← DRIFT/common/alignment-2026-10-23.md:421
+SF-003	common	DRIFT-SF-003	common	别名同源	W16:_samesrc-W16.md:36 ← DRIFT/common/alignment-2026-10-23.md:422
+T-12	global	SD-2026-10-25-CAND-15	global	别名同源	blindspot:_samesrc-blindspot.md:21 ← Intentional_Deviations/global/common-tails.md:510
+T-6	global	T-6	common	同编号跨域	W19:_samesrc-W19.md:11 ← DRIFT/common/alignment-2026-10-23.md:693
+T-7	global	T-7	common	同编号跨域	W19:_samesrc-W19.md:12 ← DRIFT/common/alignment-2026-10-23.md:694
+V-002	users	ADJ-01	users	别名同源	blindspot:_samesrc-blindspot.md:16 ← DRIFT/users/_shared.md:965

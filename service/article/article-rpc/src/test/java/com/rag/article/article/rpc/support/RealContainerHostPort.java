@@ -110,6 +110,24 @@ public final class RealContainerHostPort {
     /** 🔴「创建文章写路径 + 死 broker」守门（{@code ArticleCreateArticleKafkaFailureBoundaryTest}）的 PG 宿主口。 */
     public static final int CREATE_ARTICLE_KAFKA_FAILURE = 22860;
 
+    /**
+     * 🔴 <b>Actuator 载体真启动守门</b>（{@code ArticleRpcPrometheusCarrierGateTest}）的 PG 宿主口。
+     *
+     * <p>🔴 <b>2026-10-30 补载体时新增</b>：该守门用<b>真 fat jar</b> 起一次进程，
+     * 真打 {@code /actuator/prometheus} ⇒ ⇒ 需要<b>真 PG</b>（生产 schema 由 Flyway 建）
+     * ⇒ ⇒ 与其它「起容器」的测试类同款 ⇒ ⇒ 必须钉宿主口。
+     */
+    public static final int PROMETHEUS_CARRIER_GATE = 22861;
+
+    /**
+     * 🔴 <b>共享层 web 能力分边守门</b>（{@code ArticleRpcSharedLayerWebBeanGateTest}）的 PG 宿主口。
+     *
+     * <p>🔴 <b>2026-10-30 补载体时新增</b>：该守门起**真 rpc 形态的 Spring 上下文**
+     * ⇒ ⇒ 需要<b>真 PG</b>（生产 schema 由 Flyway 建）⇒ ⇒ 与其它「起容器」的测试类同款
+     * ⇒ ⇒ 必须钉宿主口。
+     */
+    public static final int SHARED_LAYER_WEB_BEAN_GATE = 22862;
+
     /** 守门自己起容器用的口（脚手架段第一口）⇒ <b>不与任何测试类复用</b>。 */
     public static final int GATE_LIVE = SCRATCH_FIRST;
 
@@ -135,6 +153,8 @@ public final class RealContainerHostPort {
         "TRANSACTION_WIRING",
         "KAFKA_FORCE_COMMIT_GATE",
         "CREATE_ARTICLE_KAFKA_FAILURE",
+        "PROMETHEUS_CARRIER_GATE",
+        "SHARED_LAYER_WEB_BEAN_GATE",
     };
 
     /**

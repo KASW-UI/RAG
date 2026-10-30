@@ -662,10 +662,10 @@ favorite `FavoriteApiRedisTimeoutContractTest`）⇒ ⇒ **不是新缺陷 ⇒ �
 
 ### DRIFT-HOTRPC-003 🟠 OBSERVABLE DIFFERENCE · MEDIUM · 已取证（Boot 4 默认值）
 > ✅ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（未改判）。
-> 依据：RAG `service/hot/hot-rpc/src/main/resources/application.yml:142-144`（`spring.task.scheduling.pool.size: 2` **在位**）+ `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotRpcSpringContextWiringTest.java:191`（`taskSchedulerHasAtLeastTwoThreads` ⇒ 断言**调度器真实线程池大小**，消费点生效）· Go `service/hot/rpc/internal/mqs/hot_handler.go:76-77`（`go h.periodicSync(...)` + `go h.periodicMerge(...)` ⇒ 两条**独立** goroutine）· 核对日期 2026-10-30。
+> 依据：RAG `service/hot/hot-rpc/src/main/resources/application.yml:160-162`（`spring.task.scheduling.pool.size: 2` **在位**）+ `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotRpcSpringContextWiringTest.java:191`（`taskSchedulerHasAtLeastTwoThreads` ⇒ 断言**调度器真实线程池大小**，消费点生效）· Go `service/hot/rpc/internal/mqs/hot_handler.go:76-77`（`go h.periodicSync(...)` + `go h.periodicMerge(...)` ⇒ 两条**独立** goroutine）· 核对日期 2026-10-30。
 > ⚠️ **指针订正（行号漂移，原值保留）**：本条正文写的 RAG 侧 `HotRedisSnapshotStore.java:230` / `HotMergeScheduler.java:146` ⇒ 实测两处 `@Scheduled` 分别落在 `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotRedisSnapshotStore.java:241` 与 `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotMergeScheduler.java:148` ⇒ **语义不变**。
 
-> 📌 **2026-10-29 对齐（台账对齐 phase · W-E lane）**：本标题里的 **🟠 = 严重度**（按 D5 原样保留）⇒ ⇒ **当前状态 = ✅ 已修**（`service/hot/hot-rpc/src/main/resources/application.yml:142-144` `spring.task.scheduling.pool.size: 2` + 装配层断言真实线程池 ≥ 2；**2026-10-29 复核该配置仍在**）⇒ 权威条目见本文件下方 `## DRIFT-HOTRPC-003 ✅ 已修` 小节与「逐条处置」表。
+> 📌 **2026-10-29 对齐（台账对齐 phase · W-E lane）**：本标题里的 **🟠 = 严重度**（按 D5 原样保留）⇒ ⇒ **当前状态 = ✅ 已修**（`service/hot/hot-rpc/src/main/resources/application.yml:160-162` `spring.task.scheduling.pool.size: 2` + 装配层断言真实线程池 ≥ 2；**2026-10-29 复核该配置仍在**）⇒ 权威条目见本文件下方 `## DRIFT-HOTRPC-003 ✅ 已修` 小节与「逐条处置」表。
 
 - **Component**：定时任务调度
 - **Operation**：`periodicSync`（30s） / `periodicMerge`（10s）
@@ -985,7 +985,7 @@ hot 域台账多处说「剩余未闭合项全部落在域外（D14/D25/D27 + D2
 |---|---|---|---|
 | **DRIFT-HOTRPC-001** | 🔴 SEMANTIC MISMATCH | ✅ **已修** | 【双侧活体对拍】2025/2025 列号一致 + Top-100 集合与分数逐条一致；变异 **5/5 全红**<br>⚠️ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（未改判）。依据：RAG `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/domain/HeavyKeeper.java:289`（`Long.remainderUnsigned`）· Go `service/hot/heavykeeper/heavykeeper.go:189`（`uint64 % width`）· 核对日期 2026-10-30。 |
 | **DRIFT-HOTRPC-002** | 🔴 BLOCKING（起不来） | ✅ 上一轮修复轮已清（Jackson 2 Bean） | 本轮 `HotRpcSpringContextWiringTest` 6/6 仍绿<br>⚠️ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（未改判）。依据：RAG `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/config/Jackson2ObjectMapperConfiguration.java:1`（Bean 在位）+ `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotRpcSpringContextWiringTest.java:70`（守门）· 核对日期 2026-10-30。<br>⚠️ **计数订正（原值保留）**：「**6/6**」是**陈旧计数** ⇒ 实测该类现有 **8 个 `@Test`**（`jackson2ObjectMapperBeanExists` / `unknownFieldsAreIgnoredLikeGoEncodingJson` / `typeMismatchStillFails` / `kafkaListenerContainerFactoryExists` / `listenerIsActuallyRegisteredInRegistry` / `hotEventConsumerIsWiredWithThisMapper` / `grpcHealthStatusManagerBeanExists` / `taskSchedulerHasAtLeastTwoThreads`）⇒ **结论不变**（Bean 仍在 ⇒ 上下文起得来）。 |
-| **DRIFT-HOTRPC-003** | 🟠 OBSERVABLE DIFFERENCE | ✅ **已修** | `spring.task.scheduling.pool.size: 2` + 装配层断言真实线程池 ≥ 2<br>⚠️ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（未改判）。依据：RAG `service/hot/hot-rpc/src/main/resources/application.yml:142-144`（`pool.size: 2` 在位）+ `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotRpcSpringContextWiringTest.java:191`（断言真实线程池）· Go `service/hot/rpc/internal/mqs/hot_handler.go:76-77`（两条独立 goroutine）· 核对日期 2026-10-30。 |
+| **DRIFT-HOTRPC-003** | 🟠 OBSERVABLE DIFFERENCE | ✅ **已修** | `spring.task.scheduling.pool.size: 2` + 装配层断言真实线程池 ≥ 2<br>⚠️ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（未改判）。依据：RAG `service/hot/hot-rpc/src/main/resources/application.yml:160-162`（`pool.size: 2` 在位）+ `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotRpcSpringContextWiringTest.java:191`（断言真实线程池）· Go `service/hot/rpc/internal/mqs/hot_handler.go:76-77`（两条独立 goroutine）· 核对日期 2026-10-30。 |
 | **DRIFT-HOTRPC-004** | 🟠 OBSERVABLE DIFFERENCE | 📝 **已签字**（不复刻） | 新证据：**Lettuce 6.8.2 连 `io/lettuce/core/retry` 包都没有** ⇒ Spring 侧**无配置入口**<br>⚠️ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **📝 已签字（不复刻）** ⇒ **现行态 = 📝 已签字（不复刻）· 严重度 MEDIUM → LOW**（未改判）。依据：Go `service/hot/rpc/internal/svc/service_context.go:17-20`（只给 Addr+Password）+ go-redis v9.20.0 `options.go:393-397`（`case 0: opt.MaxRetries = 3`）· RAG `service/hot/hot-rpc/src/main/resources/application.yml:23-28`（Redis 段无重试配置 ⇒ 0 次）· 核对日期 2026-10-30。 |
 | **DRIFT-HOTRPC-005** | 🟡 OBSERVABLE DIFFERENCE | ⏸ **保持不修**（方向明确、幅度有界） | 上一轮结论不变<br>⚠️ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **⏸ 保持不修** ⇒ **现行态 = ⏸ 保持不修**（未改判）。依据：RAG `service/hot/hot-rpc/src/main/resources/application.yml:108`（`enable-auto-commit: false`）+ `service/hot/hot-rpc/src/main/resources/application.yml:121`（`ack-mode: record`）· Go `service/hot/rpc/hot.go:55-58` + `sarama@v1.50.2/config.go:588-589`（AutoCommit 默认 true / 1s）· 核对日期 2026-10-30。 |
 | **DRIFT-HOTRPC-006** | 🟠 OBSERVABLE DIFFERENCE | 📝 **已签字**（RAG 更稳的一侧） | 见 `docs/Intentional_Deviations/hot/rpc.md`<br>⚠️ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **📝 已签字（RAG 更稳的一侧）** ⇒ **现行态 = 📝 已签字（RAG 更稳的一侧）**（未改判）。依据：RAG `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotEventConsumer.java:118-123`（`catch (RuntimeException e) { return e; }` ⇒ 降级 drop）· Go `service/common/observability/mq.go:30`（裸 `err := fn(consumeCtx)`，无 recover ⇒ 崩进程）· 核对日期 2026-10-30。 |
@@ -1029,7 +1029,7 @@ hot 域台账多处说「剩余未闭合项全部落在域外（D14/D25/D27 + D2
 
 ## DRIFT-HOTRPC-003 ✅ 已修 · OBSERVABLE DIFFERENCE · MEDIUM
 > ✅ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **✅ 已修** ⇒ **现行态 = ✅ 已修**（未改判）。
-> 依据：RAG `service/hot/hot-rpc/src/main/resources/application.yml:142-144` + `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotRpcSpringContextWiringTest.java:191` · Go `service/hot/rpc/internal/mqs/hot_handler.go:76-77` · 核对日期 2026-10-30。
+> 依据：RAG `service/hot/hot-rpc/src/main/resources/application.yml:160-162` + `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotRpcSpringContextWiringTest.java:191` · Go `service/hot/rpc/internal/mqs/hot_handler.go:76-77` · 核对日期 2026-10-30。
 > ⚠️ **指针订正（行号漂移，原值保留）**：RAG 侧两处 `@Scheduled` 实测在 `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotRedisSnapshotStore.java:241` 与 `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotMergeScheduler.java:148`。
 
 - **Go 形态**：`hot_handler.go:76-77` 两条**独立 goroutine**（`go h.periodicSync(...)` + `go h.periodicMerge(...)`），各自的 ticker 互不影响。
@@ -1409,7 +1409,7 @@ Client.Pipeline()                      redis.go:1508-1514   exec = c.processPipe
 | 条目 | 影响 | 处置 |
 |---|---|---|
 | **DRIFT-HOTRPC-004** | 严重度 **MEDIUM → LOW**（**签字口径不变**：Lettuce 无重试入口仍是事实） | 已就地加复核批注<br>⚠️ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **MEDIUM → LOW** ⇒ **现行态 = LOW**（未改判；签字口径不变）。依据：Go `service/hot/rpc/internal/svc/service_context.go:17-20` + go-redis v9.20.0 `options.go:393-397`（`case 0: opt.MaxRetries = 3` ⇒ 默认 **3**）· RAG `service/hot/hot-rpc/src/main/resources/application.yml:23-28`（Redis 段无命令级重试配置 ⇒ **0 次**）· 核对日期 2026-10-30。 |
-| **SD-HOT-RPC-002** | 可观察影响清单**新增**一条（Go 的「实际成功却记 fail」） | 已就地加复核批注<br>⚠️ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **新增一条可观察影响** ⇒ **现行态 = 仍然成立（差异未变）**（未改判）。依据：Go `service/hot/rpc/internal/mqs/hot_handler.go:235-238`（`result, err := renameScript.Run(...).Int()`；`if err != nil || result == 0` ⇒ `redisSyncTotal.Inc("fail")`）—— **脚本首行 `EXISTS KEYS[1]==0 ⇒ return 0` 在 `service/hot/rpc/internal/mqs/hot_handler.go:228`** ⇒ Go 重试（3 次）时若首次 RENAME 已成功但**回复丢失**，重试再执行 ⇒ `EXISTS shadow == 0` ⇒ 返回 0 ⇒ **实际 RENAME 已成功却记 `fail`**（指标误计）⇒ RAG 侧 Lettuce **无重试** ⇒ 不产生该形态 ⇒ **该条可观察影响仍在**；另 `docs/Intentional_Deviations/hot/rpc.md` 的 `SD-HOT-RPC-002` 条目（`:98-106`）**确实带这条第五轮批注** ⇒ 「已就地加复核批注」这句**成立** · 核对日期 2026-10-30。 |
+| **SD-HOT-RPC-002** | 可观察影响清单**新增**一条（Go 的「实际成功却记 fail」） | 已就地加复核批注<br>⚠️ **2026-10-30 真实性复核（favorite+hot lane）**：原判 **新增一条可观察影响** ⇒ **现行态 = 仍然成立（差异未变）**（未改判）。依据：Go `service/hot/rpc/internal/mqs/hot_handler.go:235-238`（`result, err := renameScript.Run(...).Int()`；`if err != nil || result == 0` ⇒ `redisSyncTotal.Inc("fail")`）—— **脚本首行 `EXISTS KEYS[1]==0 ⇒ return 0` 在 `service/hot/rpc/internal/mqs/hot_handler.go:228`** ⇒ Go 重试（3 次）时若首次 RENAME 已成功但**回复丢失**，重试再执行 ⇒ `EXISTS shadow == 0` ⇒ 返回 0 ⇒ **实际 RENAME 已成功却记 `fail`**（指标误计）⇒ RAG 侧 Lettuce **无重试** ⇒ 不产生该形态 ⇒ **该条可观察影响仍在**；另 `docs/Intentional_Deviations/hot/rpc.md` 的 `SD-HOT-RPC-002` 条目（`:98-106`）**确实带这条第五轮批注** ⇒ 「已就地加复核批注」这句**成立** · 核对日期 2026-10-30。 <br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-envelope-probe/favorite/run.sh` ⇒ **EXIT=0**（2026-10-30 03:17:43 · 30s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✓ Go 侧输出与 expected.txt 逐字节一致（sha256=c5dc8761884acfa0…） ⏐ 2026-10-30T03:17:54.779+08:00  INFO 47811 --- [favorite-api] [.0-21300-exec-2] c.r.common.observability.HttpMiddleware  : [HTTP] 1xx 探针行数预算用尽（cap=4）⇒ 本请求不再写探针字节（客户。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。|
 | **UNR-1** | ✅ **闭合** | 本节 |
 
 **降级理由**：
@@ -2282,10 +2282,10 @@ Boot 4.0.8 的 `LettuceConnectionConfiguration` **没有** `getPoolConfig` 方�
 | 待办 | 卡在哪 | 谁能解 |
 |---|---|---|
 | article 域 gRPC 测试段号（预留池 `22200–22599` **仍未分配** ⇒ **本域不擅自占预留段**）| global 段表是 **G4 写权面** | **G4**（会话恢复后）|
-| 共享层 `MAX_PARAMETER_COUNT` `10001 → 10000`（差一格那一行）| `service/common/**` = **G4 唯一写者** | **G4** |
+| 共享层 `MAX_PARAMETER_COUNT` `10001 → 10000`（差一格那一行）| ⛔ **本行作废（2026-10-30 · G3 复核）** —— ① `docs/DRIFT/favorite/api.md` §21.3（2026-10-28 · G3 · L1）已判「改成 10000 ⇒ Tomcat 在第 10000 段就早于 Go 拒 ⇒ 400+HTML ⇒ **反而制造新漂移**」；② 本轮 hot 域**真 Tomcat 活体**（新增 `HotApiQuerySegmentLimitRealTomcatTest` 4/4 绿）实测「10001 段 ⇒ 200 + {code:5001}」＋「10000 段 ⇒ 200 + {code:200}」⇒ **两侧同在第 10001 段翻转 ⇒ 无「差一格」**；③ 共享层自己的设计文档 `GoStyleTomcatParameterLimitCustomizer.java:73-76` 写的也是「10001 = Go 段数上限 +1 ⇒ 10001 段 ⇒ Go 拒 ⇒ 我们也拒」⇒ ⇒ **不得派这张单给 G4**（会让人做一件已判作废的改动）| ⛔ **不需要**（已消解）|
 | 合并共享层后重跑全量（`15cf93a` 改了生产代码 ⇒ 本域基线失效）| 需要 G4 的共享层提交先落 | **G4** |
 | 合并后统一 `python3 tools/check-ledger-count.py --fix`（**315 → 330**）| `docs/Pitfalls/_INDEX.md` = **合并收口执行者写权面** | **合并收口执行者** |
-| comment C-5（tools 探针骨架）| `tools/**` = **G4 写权面**（本来就该它做）| **G4** |
+| comment C-5（tools 探针骨架）| ✅ **已完成（2026-10-30 · G3 实测）** —— `tools/errmsg-probe/comment/`（`run-parity.sh` + `mutate-parity.sh` + `go/` + `java/` + `README.md`）**已在版本控制内**（`git ls-files` 命中）⇒ 且本轮实跑 `bash tools/errmsg-probe/comment/run-parity.sh` ⇒ **EXIT=0**（Go 侧 137 行 sha256 `514e3a71…` == Java 侧同值 · OBS 段 3 条仍登记）⇒ ⇒ **不需要 G4 再做**（另按 AGENTS.md §5.3f「共享判据 = 依赖度数」，该目录只被 comment 域引用 ⇒ **真私有 ⇒ 本属 G3 写权面**）| ⛔ **不需要**（已消解）|
 
 ⇒ ⇒ **纪律（本轮新增，两条）**：
 1. 🔴 **「已送达」≠「对方会回」** ⇒ ⇒ 跨 lane 事项**不能只靠等** ⇒ ⇒ **能在域侧自修的先自修**
@@ -2680,3 +2680,61 @@ java.lang.AssertionError: 条件在 3000ms 内未成立
 ⇒ ⇒ **G2 报的「hot = 5 处」** vs **本树实测「6 处」**（`NacosRegistrationHealthGateTest` · `HotRpcSpringContextWiringTest` · `HotGrpcInterceptorWiringTest` · `HotRedisDisconnectFastRejectGateTest` · `HotRpcSlowThresholdGateTest` · `mq/HotKafkaConsumerGateTest`）
 ⇒ ⇒ ⇒ **两边数的是不同树**（G2 数的树里 hot 域没有 `HotKafkaConsumerGateTest` 那处 ⇒ 或该树尚未含最新改动）⇒ ⇒ **不是谁数错，是「比的不是同一份」** ⇒ ⇒ 迁移**前**应以**本树实测**为准，迁移**后**以「各形态 = 0」为准（口径见本节「源扫」）。
 ⇒ ⇒ ⛔ **本条只登记差异，不回退任何一方数字**（回退会掩盖「两棵树不同」这个事实本身）。
+
+## 📌 追加 · 🟢 **rpc 域「指标抓取载体」落地（2026-10-30 · G3 第三轮）**
+
+**落码清单（域内文件）**
+
+- `service/hot/hot-rpc/pom.xml` —— 新增 `spring-boot-starter-web`（注释明写「别被 `service/hot/rpc/internal/metrics/metrics.go`（死代码，硬编码 `:9091`）带偏」）。
+- `service/hot/hot-rpc/src/main/resources/application.yml` —— 新增顶层 `server.port: ${HOT_RPC_MANAGEMENT_PORT:19091}`（= Go `Prometheus.Port`，**一字不差**）；**反转三处**：`management.server.port: -1`（显式禁用 management HTTP server）**删掉**、`management.endpoints.enabled-by-default: false` **删掉**、`management.prometheus.enabled: false` **删掉**；加 `management.endpoints.web.exposure.include` ＋ `management.endpoint.prometheus.enabled: true` ＋ `management.prometheus.metrics.export.enabled: true`；`spring.cloud.nacos.discovery.register-enabled: false`；新增顶层 `rag.side: rpc`。
+- ⚠️ 旧注释里那句 `management.prometheus.enabled` **本来就不是 Boot 的属性名**（Boot 里是 `management.endpoint.prometheus.enabled` 与 `management.prometheus.metrics.export.enabled`）⇒ 它**从来没起过作用** ⇒ 本轮据实订正。
+- `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotRpcPrometheusCarrierGateTest.java` —— **真 fat jar**（本域**不需要 Docker**，观测面不依赖数据库）⇒ 真打 `/actuator/prometheus` ＋ 断言 gRPC 端口同时 LISTEN ＋ 断言产物 jar 里的默认值 = 19091。
+- `service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotRpcSharedLayerWebBeanGateTest.java` —— 装配层断言「api 侧 web Bean 不在 rpc 容器里」＋正向对照。
+- `support/RealGrpcPort.java` —— 新增 `pick(int forbidden)`。
+
+**真启动证据（进程级 · 2026-10-30 实跑）**
+
+- `GET http://127.0.0.1:19091/actuator/prometheus` ⇒ **HTTP 200**、**49 个指标族**、含 `application="hot-rpc"`。
+- **同一时刻** gRPC 端口 **18083** 与观测端口 **19091** **同时 LISTEN**；日志实测含 `Tomcat started on port 19091` ＋ `gRPC Server started, listening on address: 0.0.0.0, port: 18083` ＋ `Started HotRpcApplication in 3.121 seconds`。
+
+**🔴 载体副作用：本域首轮真启动即撞上（实测复现）**
+
+- 补上 `spring-boot-starter-web` ⇒ 自动 Nacos 注册被激活 ⇒ 它注册的是 **Tomcat 端口 19091**（**不是** gRPC 端口 8083）⇒ 且 `failFast=true` ⇒ Nacos 不可达时**直接把启动打断**（`Failed to start bean 'webServerStartStop'`）⇒ **进程起不来**。
+- 修法 = `spring.cloud.nacos.discovery.register-enabled: false`（本模块的注册是手写的 `bootstrap/NacosRegistration`，用 `GrpcServerProperties.getPort()` ⇒ 注册的**就是** gRPC 端口）。
+
+**Nacos 单实例验收（2026-10-30 实跑 · 真 Nacos standalone）**
+
+- `hot-rpc` 在 Nacos 里**实例数 = 1**，实例端口 = **gRPC 端口**（实测 `port=18083`），**不是**观测端口 19091；**自动注册痕迹 = 0 条**。
+
+**🟢 「段数轴」那条销账的自查结论（本轮补载体 ⇒ 必须重查）**
+
+- 顾虑：共享层的 `GoStyleTomcatParameterLimitCustomizer`（**容器级**，`@Component` ＋ `@ConditionalOnClass` ＋ `@ConditionalOnWebApplication(SERVLET)`）若在 rpc 域生效 ⇒ 会把 rpc 的 Tomcat `maxParameterCount` 抬到 10001 ⇒ ⇒ 「hot 域段数轴已销账」那条结论会从绿变红。
+- **实测结论：不成立（那条销账仍然有效）** —— 该类在 `service/common/src/main/java/com/rag/common/http/GoStyleTomcatParameterLimitCustomizer.java:158-162` 是 **`@Component`**，而 `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/HotRpcApplication.java:61` 的 `@SpringBootApplication` **没有 `scanBasePackages`** ⇒ ⇒ rpc 域**不扫 `com.rag.common`** ⇒ ⇒ 那类**不在** rpc 容器里 ⇒ ⇒ 容器级定制器**不会**生效。
+- ⇒ 且**这条边界现在有运行期守门钉住**：`HotRpcSharedLayerWebBeanGateTest` 的第 ③ 条断言「`GoStyleTomcatParameterLimitCustomizer` **不在**容器里」⇒ ⇒ 一旦有人给 rpc 模块加上 `scanBasePackages = "com.rag.common"` ⇒ **立刻转红** ⇒ ⇒ 不是靠「跑绿」在撑着。
+
+**口令兜底取消**：本域**无数据库** ⇒ 不涉及（本轮取消的是 article / comment / favorite 三域的 4 处）。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W12
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-HOTRPC-005 | D（经分析确认不实现 · 方向明确、幅度有界 ⇒ 是决策不是缺陷） | P3 | 否 | Go `service/hot/rpc/hot.go:55-58`（`saramaConf := sarama.NewConfig()` ⇒ 用**库默认值**）＋ `sarama@v1.50.2/config.go:588-589`（**消费点**：`Consumer.Offsets.AutoCommit.Enable = true` ＋ `Interval = 1 * time.Second` ⇒ 位点**每 1 秒批量提交一次**）vs RAG `service/hot/hot-rpc/src/main/resources/application.yml:108`（`enable-auto-commit: false`）＋ `:121`（`ack-mode: record` ⇒ **每条处理完立刻提交**）⇒ **差异仍成立**（崩溃窗口内「Go 重投最多 1 秒内已处理的消息、RAG 不重投」⇒ `hk.Add` 非幂等 ⇒ 崩溃前后热榜分数分布不同）⇒ **D（经分析确认不实现）**：理由 = ① 方向明确、幅度有界（窗口 = 1 秒）；② RAG 侧逐条提交**更接近 exactly-once** ⇒ 属「更严的一侧」；③ 强行复刻 Go 的批量提交 = 用更弱的语义换一致性，而改 Go 侧是**禁止**的（真源冻结）⇒ ⇒ **保留登记即可，不阻断阶段一**。⚠️ 该「不改」的决策**尚未进** `docs/Intentional_Deviations/` 签字档（实测该目录**零命中** HOTRPC-005）⇒ 建议收口时补登记，否则下一轮会被当成「未处理的开放项」 | 2026-10-30 |
+
+### lane W7
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| G-HOT-001 | D | P3 | 否 | Go `service/hot/rpc/internal/mqs/hot_handler.go:132`（`OnPartitionsRevoked` 内 `h.hkMu.Lock()`）→ `:136`（`h.syncToRedis(ctx, pid)`）→ `:196`（`syncToRedis` 内 `h.hkMu.RLock()`）⇒ Go `sync.RWMutex` **不可重入** ⇒ **必然自死锁**（`defer Unlock` 永不执行 ⇒ `delete` 从不执行 ⇒ 分片快照从未落盘）。RAG `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotEventConsumer.java:216-217`（`registry.detach(partitions)` 后**锁外** `detached.forEach(store::flush)`）＋ `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/mq/HotPartitionSketchRegistry.java:113-127`（写锁内原子摘引用并返回，**落盘由调用方在锁外完成**；`:136-149` 的 `detachWithinWriteLock` = 变异靶子）⇒ ⇒ 两侧行为**确实不同**（差异仍成立），但已由 `docs/Intentional_Deviations/hot/rpc.md` 的 **`SD-1`（✅ 仍成立，2026-10-22 签字）** 明写「照抄会复现 Go 的死锁；Java `ReentrantReadWriteLock` 允许降级 ⇒ 直译会把死锁悄悄变成能跑」⇒ **D**：**决策不是缺陷**，且 Go 侧该路径实际不可达 ⇒ 无客户端可见后果，只留痕 | 2026-10-30 |

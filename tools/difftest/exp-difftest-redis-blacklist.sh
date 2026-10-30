@@ -67,6 +67,16 @@
 # 【用法】
 #   ./exp-difftest-redis-blacklist.sh
 set -uo pipefail
+# 🔴 RAG 侧 **fail-closed 密钥**（P0 #8）：占位符解析不出来 ⇒ 进程起不来
+#    ⇒ 探针「起 RAG 侧」这一步必挂 ⇒ 看起来像产品缺陷，其实是探针自己没给密钥。
+#    （2026-10-30 活体对拍轮实测 · 12 个探针全中招 ⇒ 收敛到这一个共享件）
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/rag-secrets.sh"
+# 🔴 **PG 容器自给自足**（2026-10-30 活体对拍轮实测）：
+#    本脚本**不建** `uudifftest-postgres` ⇒ 隐式依赖别的探针的残留容器
+#    ⇒ 批跑器做「逐探针前置清理」时它被删掉 ⇒ 本脚本在 **setup 阶段**就挂
+#    ⇒ 假红（报出来像「RAG 起不来」，实际是编排缺陷）。
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/rag-pg.sh"
+
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
@@ -120,11 +130,9 @@ docker rm -f "$REDIS_CONTAINER" >/dev/null 2>&1
 docker run -d --name "$REDIS_CONTAINER" -p "127.0.0.1:${REDIS_PORT}:6379" redis:7-alpine >/dev/null
 docker exec "$REDIS_CONTAINER" redis-cli ping >/dev/null 2>&1 || { sleep 3; docker exec "$REDIS_CONTAINER" redis-cli ping >/dev/null; }
 echo "  ✓ 专用 Redis ${REDIS_CONTAINER} :${REDIS_PORT} 就绪"
-for db in "$GO_DB" "$RAG_DB"; do
-  docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d postgres -c "DROP DATABASE IF EXISTS $db WITH (FORCE)" >/dev/null 2>&1 || true
-  docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d postgres -c "CREATE DATABASE $db" >/dev/null
-done
-echo "  ✓ ${GO_DB} / ${RAG_DB} 已重建"
+ensure_pg_container "$PG_CONTAINER" "$PG_PORT" "$PG_USER" "$PG_PASSWORD"
+wait_pg_ready "$PG_CONTAINER" "$PG_USER" || exit 2
+reset_pg_dbs "$PG_CONTAINER" "$PG_USER" "$GO_DB" "$RAG_DB" || exit 2
 
 echo "==> [2/9] 生成配置副本"
 sed -e "s/0.0.0.0:19004/0.0.0.0:${GO_RPC_PORT}/" \

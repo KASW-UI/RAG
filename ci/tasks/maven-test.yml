@@ -1,0 +1,51 @@
+---
+# =============================================================================
+# ci/tasks/maven-test.yml —— 通用测试阶段（11 条流水线共用）
+#
+# 【与 maven-build 的关系】
+#   两个独立 step ⇒ Concourse 上"构建失败"与"测试失败"是两个不同状态，
+#   失败发生在哪个阶段一眼可见（提示词 §三.6 的明确要求）。
+#   代价是 test 阶段会重新编译一次（task 容器之间不共享 target/），
+#   实测约 10 秒量级，相对于分钟级的测试执行可以忽略。
+#
+# 【outputs 的作用】
+#   把带 target/ 的 repo 往下传 ⇒ 后续 static-gates 能读到**本次构建**的
+#   可执行 jar（check-jar-executable.sh 需要它），report 能读到本次的
+#   surefire 报告。
+#
+# 【Docker / Testcontainers】
+#   形态与 maven-build 相同：DinD（内层 dockerd + 嵌套构建容器）。
+#   环境的准备与前置断言在 ci/scripts/testcontainers-env.sh（被 test.sh source）。
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: ((registry))/library/docker
+    tag: 27-dind
+
+inputs:
+- name: repo
+
+outputs:
+- name: repo
+  path: repo
+
+caches:
+- path: .m2
+  key: m2-repo-v1
+
+params:
+  MODULES: ''
+  IMAGE: ((registry))/library/maven:3.9.11-eclipse-temurin-21
+  # 镜像源主机（host 或 host:port）。带端口 = 本地 registry ⇒ 内层 dockerd
+  # 会把它当 insecure mirror + mirror 源（见 ci/scripts/dind-run.sh）
+  REGISTRY: ((registry))
+  STAGE: test
+  # 可选的 Maven 镜像源（与 maven-build 同义，见 ci/tasks/maven-build.yml）
+  MAVEN_MIRROR_URL: ''
+
+run:
+  path: sh
+  args:
+  - repo/ci/scripts/dind-run.sh

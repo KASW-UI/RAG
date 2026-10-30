@@ -1127,3 +1127,22 @@ Caused by: java.net.UnknownHostException: postgres
 ⚠️ **favorite 的 2 处仍会起不来**（零写权 ⇒ 只记账）。
 > ⚠️ **本表里的 `X-n` 是本档的「旧号」**（2026-10-29 重编号为 `CD-1`~`CD-10`）⇒ ⇒ **对照列见 §〇 状态总表**；
 > ⚠️ **本表里的 `X-n` 与 `docs/PhaseGoal-judge.md` §五 的 `X-1`~`X-12` 不是同一套编号**（judge 的 X-6 = deadline 判据；本档的旧 X-6 = `DRIFT-HOTAPI-030`）⇒ ⇒ **引用必须带「文件 + 编号」**。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W8
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| CD-7 | D（差异已消失 ⇒ 无待实现内容） | P3 | 否 | Go `service/like/rpc/internal/model/db.go:15`（`db.AutoMigrate(&LikeRecord{}, &LikeConsumeInbox{}, &LikeOutboxEvent{}, &LikeDomainFactOutbox{}, &LikeFactStream{})` ⇒ Go 侧 schema 的唯一产出点）＋ `service/article/rpc/internal/model/db.go:55`（`db.AutoMigrate(&Article{}, &ArticleSyncOutboxEvent{})`）＋ `service/article/rpc/internal/model/db.go:70`（手写 `002_community_revision.sql`）＋ `service/follow/rpc/internal/model/db.go:42`（`db.AutoMigrate(&FollowRelation{}, &BlockRelation{})`）＋ `service/favorite/rpc/internal/model/db.go:33`（`db.AutoMigrate(&FavoriteFolder{}, &FavoriteItem{}, &FavoriteFactOutbox{})`）vs RAG `tools/difftest/check-ddl-static.py:261`（article 预设）＋ `:283`（like）＋ `:299`（hot）＋ `:318`（follow）＋ `:332`（favorite）＋ `tools/difftest/ddl-parity.sh:63`（`ALL_DOMAINS` 9 域）＋ `docs/DRIFT/global/lanes/L3-ddl.md:116`（§8.3 逐域差异分类表）⇒ **差异已消失**：CD-7 残留的 5 域已在第二十四轮 L3 用**真 PG 两侧各建真库**逐列对照闭合 —— article **0 差异**（56 列／16 索引／12 约束／1 触发器）· follow **0 差异**（10 列／8 索引／2 约束）· like 与 favorite 的 7 处差异**全部是「RAG 更严」**（多 CHECK／多触发器／多部分索引；根因 = Go 侧 `CREATE TABLE IF NOT EXISTS` 在 AutoMigrate 之后是**空操作**）· hot = **N/A**（Go 侧 `service/hot/` 全域无 gorm、RAG 侧 hot-rpc 无 `db/migration` ⇒ 本维度无对象可比，**不许写成「已对齐」**）⇒ `docs/DRIFT/global/cross-domain.md:47` 那格 🟡 是**过期快照**（同域 `docs/DRIFT/global/_README.md:135` 已写「✅ 已闭合（第二十四轮 L3）」）⇒ 审计方法与环境供给均已就绪 ⇒ 本条无待实现内容 | 2026-10-30 |

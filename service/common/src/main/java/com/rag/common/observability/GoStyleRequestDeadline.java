@@ -96,6 +96,88 @@ public final class GoStyleRequestDeadline {
     }
 
     /**
+     * 剩余<b>纳秒</b>数；无 deadline 时返回 -1；已耗尽时返回 0。
+     *
+     * <p>⚠️ <b>为什么要有纳秒版</b>：{@link #remainingMillis()} 会把亚毫秒部分截掉
+     * ⇒ 出向上界的计算若走毫秒版，会比 Go 侧（纳秒）<b>宽最多 1ms</b>
+     * ⇒ 而 Go 的 ctx deadline 是<b>纳秒精度</b>（grpc-go 走 wire 的 {@code grpc-timeout}）
+     * ⇒ ⇒ 对拍时会出现「差不到 1ms」的不可解释差异。
+     *
+     * <p>Go 出处：{@code go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25}
+     * （{@code context.WithTimeout(ctx, t)} ⇒ 纳秒精度 ⇒ min 语义）。
+     */
+    public static long remainingNanos() {
+        Long d = DEADLINE_NANOS.get();
+        if (d == null) {
+            return -1L;
+        }
+        return Math.max(0L, d - System.nanoTime());
+    }
+
+    /**
+     * 在<b>当前线程</b>绑定一个<b>绝对</b> deadline 时刻，返回<b>作用域</b>（try-with-resources）。
+     *
+     * <p>⚠️ <b>为什么必须是作用域而不是 {@link #begin(long)} + {@link #clear()}</b>：
+     * <ul>
+     *   <li>{@code begin/clear} 是<b>「设置 / 清空」</b>语义 ⇒ <b>嵌套时会互相踩</b>：
+     *       内层 {@code begin} 覆盖外层，外层 {@code clear} 把内层的也清了 ⇒
+     *       <b>请求之间</b>会串味（线程池复用 ⇒ 上一个请求的 deadline 漏到下一个）。</li>
+     *   <li>本方法保存<b>原值</b>并在 {@link Scope#close()} 时<b>原样还原</b>
+     *       ⇒ 嵌套安全 ⇒ 且「忘了 clear」不再可能（编译器保证配对）。</li>
+     * </ul>
+     *
+     * <p>⚠️ <b>与 {@link RpcInterceptor.DeadlineState} 的关系</b>：那是<b>另一个载体</b>
+     * （服务端 SQL 超时用），本类是<b>出向 gRPC</b> 用 ⇒ 两者必须绑<b>同一个绝对时刻</b>
+     * ⇒ 故本方法收<b>绝对</b>纳秒时刻（调用方算好一次、两个载体共用）。
+     *
+     * <p>Go 出处（ctx 传播 = 同一个 ctx 派生 ⇒ 同一个 deadline）：
+     * <pre>
+     *   go-zero@v1.10.2/zrpc/internal/serverinterceptors/timeoutinterceptor.go:34
+     *       ctx, cancel := context.WithTimeout(ctx, t)
+     *   go-zero@v1.10.2/zrpc/internal/serverinterceptors/timeoutinterceptor.go:53
+     *       resp, err = handler(ctx, req)      // ← handler 拿到的 ctx 已带 deadline
+     *   go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25
+     *       ctx, cancel := context.WithTimeout(ctx, t)   // ← 出向调用再 min 一次
+     * </pre>
+     */
+    public static Scope bindAbsoluteNanos(long absoluteNanos) {
+        Long previous = DEADLINE_NANOS.get();
+        DEADLINE_NANOS.set(absoluteNanos);
+        return () -> {
+            if (previous == null) {
+                DEADLINE_NANOS.remove();
+            } else {
+                DEADLINE_NANOS.set(previous);
+            }
+        };
+    }
+
+    /**
+     * 作用域（try-with-resources 析构接口）。
+     *
+     * <p>⚠️ {@link AutoCloseable#close()} 的受检异常被<b>收窄</b>掉 ⇒
+     * 用在 try-with-resources 里<b>不会</b>被迫写 catch。
+     */
+    @FunctionalInterface
+    public interface Scope extends AutoCloseable {
+        /**
+         * <b>空作用域</b>（什么也不绑）—— 用于「本层<b>没有预算</b> ⇒ 不给载体赋值」的分支。
+         *
+         * <p>⚠️ <b>为什么需要它</b>：Go 侧 ctx <b>没有 deadline</b> 时，出向调用**也不该有** deadline
+         * ⇒ 若此时给载体绑一个「292 年后到期」的值 ⇒ 出向就会**凭空多出一个 deadline**
+         * ⇒ ⇒ 与 Go 的形态<b>反向</b>（Go 是「没有 ⇒ 没有」）。
+         *
+         * <p>⚠️ 载体<b>没绑</b>时 {@link #remainingNanos()} 返回 {@code -1}
+         * ⇒ 出向拦截器据此<b>不注入</b>任何约束（见
+         * {@code GoStyleOutboundDeadlineInterceptor#effectiveCallOptions}）。
+         */
+        Scope NOOP = () -> { };
+
+        @Override
+        void close();
+    }
+
+    /**
      * 给 stub 套上当前线程的剩余预算；<b>没有预算时原样返回</b>。
      *
      * <p>⚠️ <b>预算已耗尽时给 1 纳秒</b>（而不是原样返回）：

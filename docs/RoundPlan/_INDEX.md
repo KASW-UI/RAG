@@ -13,6 +13,8 @@
 | **写权** | 本目录归**合并收口执行者（主线）**写；域 lane **只读**（与 `docs/PhaseGoal/**`、`docs/PhaseGoal-judge.md` 同属机器/共享面） |
 | **`AGENTS.md`** | 已登记 `docs/RoundPlan/` 指向本文件 ⇒ **无需再动 `AGENTS.md`**（余量仅 **34 B** ⇒ 任何改动必须字节中性或更小） |
 | **上游依据** | `docs/PhasedGoal.md`（阶段一准入线 · P0 九条）· `docs/twoStage.md`（两阶段规范 · §5.6 结论口径 / §5.7 冻结 9 项 / §十 定级）· `docs/PhaseGoal-judge.md`（判定基线）· `docs/DRIFT/**` · `docs/Pitfalls/**` · `docs/Intentional_Deviations/**` |
+| 🆕 **派生层** | **三目录台账 → 施工单的索引** = [`docs/DRIFT/_cross/stage1-derivation.md`](../DRIFT/_cross/stage1-derivation.md)（机器层 = 同目录 `.tsv`）—— 全量问题项 × 11 项 `twoStage.md` §10 字段（`P0-P3` × `A-D` × 是否阻断 × 最终目标影响 × 排期指针 × 证据缺口）。**守门** = `python3 tools/ledger-derive/derive-stage1.py --check`（源台账改了而派生层没重生成 ⇒ **EXIT=1**）。⚠️ **派生层不重新裁定结论**，只投影 + 指路；**「未排期」= 当前没有任何任务/未解决项指向它**（⇒ §4 的真缺口清单就是待补进本目录的活） |
+| 🆕 **U5-O 显式定级叠加层** | **人工定级的落地处**（派生层的 `A-D` / `P0-P3` / 是否阻断从**这里**来）—— [`docs/DRIFT/_cross/grading/_README.md`](../DRIFT/_cross/grading/_README.md)（格式规范 + A-D 判据 + **结论三态**「差异仍成立 · 差异已消失 · 无法证实」+ 六条纪律）· 每条**逐条与 Go 真源源码对比**后定级，**依据列必须含 Go + RAG 双侧 `文件:行号`**（缺一侧 ⇒ 派生层**整行丢弃** ⇒ 无出处的定级不生效） |
 | **旧计划** | 已归档为 [`_legacy-index.md`](_legacy-index.md) + `Round-0.md`~`Round-5.md`（**原位保留 + 历史横幅** ⇒ 保住 12+ 处入链） |
 
 ---

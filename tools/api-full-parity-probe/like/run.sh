@@ -58,7 +58,11 @@ ETCD_CTL_ENDPOINT="${ETCD_CTL_ENDPOINT:-http://127.0.0.1:2379}"
 KAFKA_PORT="${KAFKA_PORT:-49992}"    # Sea-kafka   49992→9093
 NACOS_PORT="${NACOS_PORT:-49848}"    # Sea-nacos   49848→8848
 REDIS_HOST_PORT="${REDIS_HOST_PORT:-49380}"
-JAEGER_PORT="${JAEGER_PORT:-49268}"  # Sea-jaeger  49268→4317
+# ⚠️ **2026-10-30 活体对拍轮订正**：本行原先写死 `49268` ⇒ **实测陈旧**
+#    （本机 `Sea-jaeger` 的宿主映射是 **49317**；其余 4 个探针也都是 49317）
+#    ⇒ 预检直接判「宿主端口不通」⇒ 探针 **EXIT=2（环境问题）**，一个 case 都没跑。
+#    ⇒ 改成与全仓一致（49317）；仍可用 env 覆盖。
+JAEGER_PORT="${JAEGER_PORT:-49317}"  # Sea-jaeger  49317→4317
 
 # ── 端口：**自动挑空闲的**（不许硬编码撞车）──────────────────────────────────
 # ⚠️ 本探针需要 **9 个**宿主端口：

@@ -976,6 +976,8 @@ Result 只用 5 个枚举值。Evidence 列的强度标签见文件头声明。
 > ⚠️ **2026-10-30 真实性复核（users lane）**：原判 **✅ 已关闭（2026-10-24）** ⇒ **现行态 = ✅ 维持已关闭**（**守门脚本已在位且含 admin 入口**）。
 > 依据（两侧，当场核过）：**RAG/工具** `tools/difftest/check-plaintext400-headers.sh` ✅ **存在**（脚本头 `:2` 明写「真实 Tomcat 下断言 text/plain 400 的响应头 —— E-1 收口的端到端守门脚本」）· **RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/advice/GlobalExceptionHandler.java:59`（`@ExceptionHandler(AuthenticationException.class)` ⇒ 401 路径在位）+ `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:728`（`nosniff` 在位）⇒ **「已关闭」所依赖的两件东西都还在**。⚠️ **本轮未复跑真 Tomcat 守门** ⇒ 按 AGENTS.md §0 读作「在该证据强度下一致」。核对日期 2026-10-30。
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run.sh` ⇒ **EXIT=0**（2026-10-30 03:29:45 · 137s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [3b/3] 判定器（🔴 E48 · 第三十九轮：判定从「注释里的承诺」变成「可执行的代码」） ⏐ PASS —— 未复现差异（两侧 Δ_end 一致 ⇒ RAG 侧继承了客户端 deadline） ⏐ ⇒ E38① 的运行期结论成立 ⏐ ⇒ 退出码 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ⇒ 判定退出码 = 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ==> 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../_cross/live-parity-2026-10-30.md)。
+
 ### UNRESOLVED-ADMINAPI-003 · Go 的 `omitempty` 对 struct 无效这一条，本轮只做了静态判定
 
 > ✅ **已关闭（2026-10-24）** ⇒ 见本文件新增 **§1**（逐字节副本 + `go run` 实测）。
@@ -1324,7 +1326,7 @@ RAG 是 `{"code":1006,"msg":"TOKEN已过期","data":null}`。
 
 | # | 问题 | 证据 | 建议 |
 |---|---|---|---|
-| **A-1** | 🔴 **`user-api` 有**同款 charset 缺失**：`user-api/.../advice/GlobalExceptionHandler.java:287` 也是 `headers.setContentType(new MediaType(MediaType.TEXT_PLAIN, …))` ⇒ 400 的 `Content-Type` 同样没有 charset | 与本文件 §1 同型（同一段 javadoc 都写着「Go 的 `net/http.Error` 设 `text/plain; charset=utf-8`」，但代码没做） | 归 users/user owner。⚠️ `tools/difftest/check-plaintext400-headers.sh` **只打 user-api** ⇒ 修 user-api 时顺手把该脚本的断言加严（断言 charset 存在）才是根治 |
+| **A-1** | ✅ **已闭合 · 2026-10-30 订正（前提已不成立）** —— 原记「`user-api` 有**同款 charset 缺失**：`user-api/.../advice/GlobalExceptionHandler.java:287` 也是 `headers.setContentType(new MediaType(MediaType.TEXT_PLAIN, …))` ⇒ 400 的 `Content-Type` 同样没有 charset」⇒ ⇒ **该行原文已不存在**：现行 `:287` = `headers.setContentType(new MediaType(MediaType.TEXT_PLAIN, StandardCharsets.UTF_8));` ⇒ **显式钉了 charset** ⇒ 修复提交 = `c79d1131`「align(users/user): 修 DRIFT-USERAPI-006（400 响应 Content-Type 补 charset，body 按 UTF-8 写出）」 | ① RAG 侧 `service/users/user/user-api/src/main/java/com/rag/users/user/api/advice/GlobalExceptionHandler.java:284-291`（`goStylePlainTextBadRequest` ⇒ `:287` 显式 `StandardCharsets.UTF_8` + `:288` `X-Content-Type-Options: nosniff`）② Go 侧 = `net/http.Error` 写死 `text/plain; charset=utf-8` ⇒ ⇒ **两侧同形**（真 Tomcat 重渲染去掉 `;` 后空格 ⇒ `text/plain;charset=utf-8`） | ✅ **销账**（由 users/user 域 owner 在 `c79d1131` 修掉 · **G1 本轮只做台账订正 · 零代码改动**）<br>⚠️ **残留两项**（落点 `tools/difftest/**` = **共享面 · 不在 G1 写权** ⇒ 已上报）：① 脚本头部注释第 53 行**仍写**「user 域 RAG 侧**仍缺 charset**」⇒ **陈旧注释**；② 该脚本在**域栈未起**时判 **SKIP** ⇒ 三域全 SKIP 时仍 `EXIT=0` ⇒ ⇒ **无栈环境恒绿 = 假绿**（charset 断言 `:26` 已有 ⇒ **判据本身有牙**，只是没跑到） |
 | **A-2** | ⚠️ **~~`docs/Intentional_Deviations/users/**` 下 6 个文件全是 0 字节（空占位）~~**<br>**2026-10-23 22:4x 复核订正：admin 域 3 个已补齐，`users/user` 域 3 个仍空** | `wc -c` 实测全为 0 | N-1 / N-4 / N-5 等「已签字」条目目前**只存在于 `docs/DRIFT/users/admin/_shared.md`**，没有进签字档 ⇒ 下一个 agent 按 `docs/Intentional_Deviations/_INDEX.md` 检索会查不到。**该目录不在本 worker 所有权内 ⇒ 只报告** |
 | **A-3** | ⚠️ **DRIFT-ADMINAPI-004（黑名单 401 的业务码 `401`→`1006`）在 `diff.py` 里被标成「N-1 已签字」**，但 N-1 只签了 body 形状 | §3 | 要么补一份正式签字，要么改 `diff.py` 的 assert 措辞（**`tools/` 是共享资产，不在本 worker 所有权内 ⇒ 只报告**） |
 | **A-4** | ⚠️ **§9 UNRESOLVED-ADMINAPI-002（admin-api 的 text/plain 400 没有真实 Tomcat 守门）** —— **本轮已部分关闭** | 本轮用 `curl -i` 直打真实 Tomcat 两侧栈，抓到了 `Content-Type` / `nosniff` / `Content-Length` / body 逐字节 | **仍缺一条可重复执行的脚本**：`tools/difftest/check-plaintext400-headers.sh` 的两个端口常量是 user-api 的（`RAG_USER=59900` / `GO_USER=18888`），**没有 admin 入口** ⇒ 补 admin 入口需要改共享脚本 ⇒ 归 `tools/` owner。⚠️ 但本轮已证明：**MockMvc 断言完整头值字符串是错的**（见 §1「测试方法论」）⇒ 补脚本时也要注意断言形状 |
@@ -1408,7 +1410,9 @@ assertEquals("text/plain", asPlainText.getResponse().getContentType(),
 | 签字 | 管什么 | 不管什么 |
 |---|---|---|
 | **N-4** | `operator_id` **取值** —— Go 恒 0，RAG 传真实 uid | 不管 claim 校验 |
-| **SD-2026-10-23-01** | claim **校验** —— Go 不校验，RAG 严格校验 | 不管取值<br>⚠️ **2026-10-30 真实性复核（users lane）**：原判（作为 N-4 / SD-2026-10-23-01 的分工说明）**不变** ⇒ **现行态 = ✅ 维持「✅ 仍成立」**（**两侧的校验语义差仍在**）。依据：**RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/IdentityResolver.java:93`（`claimedUID`）＋ `:99`（`!(v instanceof Long)` ⇒ 拒绝）＋ `:104`（`uid <= 0` ⇒ 拒绝）＋ `:132`（`admin == null || admin.equals(getDefaultInstance())` ⇒ 拒绝）＋ `:135`（`admin.getUid() != uid` ⇒ 拒绝）⇒ **「RAG 严格校验」在位** · **Go** `service/user/admin/api/internal/logic/admin/banuserlogic.go:36-39`（取不到 `uid` 即**恒 0、不报错**）⇒ **「Go 不校验」在位**。⇒ **差异仍在 ⇒ 签字仍有效 ⇒「✅ 仍成立」**（签字档取值域，非 DRIFT 的 ✅/🔴）。核对日期 2026-10-30。|
+
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/run.sh` ⇒ **EXIT=0**（2026-10-30 03:29:45 · 137s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [3b/3] 判定器（🔴 E48 · 第三十九轮：判定从「注释里的承诺」变成「可执行的代码」） ⏐ PASS —— 未复现差异（两侧 Δ_end 一致 ⇒ RAG 侧继承了客户端 deadline） ⏐ ⇒ E38① 的运行期结论成立 ⏐ ⇒ 退出码 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ⇒ 判定退出码 = 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ==> 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../_cross/live-parity-2026-10-30.md)。
+| **SD-2026-10-23-01** | claim **校验** —— Go 不校验，RAG 严格校验 | 不管取值<br>⚠️ **2026-10-30 真实性复核（users lane）**：原判（作为 N-4 / SD-2026-10-23-01 的分工说明）**不变** ⇒ **现行态 = ✅ 维持「✅ 仍成立」**（**两侧的校验语义差仍在**）。依据：**RAG** `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/service/IdentityResolver.java:93`（`claimedUID`）＋ `:99`（`!(v instanceof Long)` ⇒ 拒绝）＋ `:104`（`uid <= 0` ⇒ 拒绝）＋ `:132`（`admin == null || admin.equals(getDefaultInstance())` ⇒ 拒绝）＋ `:135`（`admin.getUid() != uid` ⇒ 拒绝）⇒ **「RAG 严格校验」在位** · **Go** `service/user/admin/api/internal/logic/admin/banuserlogic.go:36-39`（取不到 `uid` 即**恒 0、不报错**）⇒ **「Go 不校验」在位**。⇒ **差异仍在 ⇒ 签字仍有效 ⇒「✅ 仍成立」**（签字档取值域，非 DRIFT 的 ✅/🔴）。核对日期 2026-10-30。<br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/difftest/probe-go-omitempty.sh` ⇒ **EXIT=0**（2026-10-30 03:44:00 · 2s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 逐字节相同；<br>`tools/difftest/run.sh` ⇒ **EXIT=0**（2026-10-30 03:29:45 · 137s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：==> [3b/3] 判定器（🔴 E48 · 第三十九轮：判定从「注释里的承诺」变成「可执行的代码」） ⏐ PASS —— 未复现差异（两侧 Δ_end 一致 ⇒ RAG 侧继承了客户端 deadline） ⏐ ⇒ E38① 的运行期结论成立 ⏐ ⇒ 退出码 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ⇒ 判定退出码 = 0（0=PASS / 1=FAIL / 2=INCONCLUSIVE） ⏐ ==> 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../_cross/live-parity-2026-10-30.md)。|
 
 ## 4. 上文 §3~§5 各条的现状（2026-10-23 核对）
 
@@ -1419,7 +1423,7 @@ assertEquals("text/plain", asPlainText.getResponse().getContentType(),
 | DRIFT-ADMINAPI-008（getself 的 4 个 code 不可达） | 同上；通用映射表未动（被 12 个端点共用） |
 | UNRESOLVED-ADMINAPI-002（text/plain 400 无真实 Tomcat 守门） | **部分关闭**：`AdminApiPlainText400ContentTypeTest` 已在，但可重复执行的脚本仍缺（`tools/` 共享资产，不在本域） |
 | UNRESOLVED-ADMINAPI-003 / 004 / 005 / 006 | 未变 |
-| §5 A-1（user-api 同款 charset 缺失） | 仍有效，归 users/user 域 |
+| §5 A-1（user-api 同款 charset 缺失） | ✅ **已闭合**（2026-10-30 订正）—— 修复提交 `c79d1131`；现行 `user-api/.../GlobalExceptionHandler.java:287` 已显式钉 `StandardCharsets.UTF_8` ⇒ 原记的代码原文已不存在 ⇒ **销账**。⚠️ 残留 = 守门脚本的**陈旧注释** + **无栈时恒 SKIP ⇒ EXIT=0 假绿**（落点 `tools/difftest/**` = 共享面 ⇒ 已上报） |
 | §5 A-2（`Intentional_Deviations/users/**` 6 个 0 字节） | ✅ **本域 3 个已补**；`users/user` 的 3 个**仍空**，归 users/user 域 |
 | §5 A-3（`diff.py` 把 ADMINAPI-004 标成「N-1 已签字」） | 措辞指向不精确属实；已由 SD-2026-10-23-08 给出准确引用。⚠️ **`tools/difftest/diff.py` 属共享资产，本轮未改** |
 | §5 A-4（补 admin 入口到 `check-plaintext400-headers.sh`） | 未做，归 `tools/` owner |
@@ -1507,9 +1511,9 @@ SCENARIO=map_empty         JSON={}          ← 对照：map 形态才会被省�
 （原写「RAG : text/plain ← 少了 charset 参数」，并称「守门脚本抓不到 charset 差异 ⇒ 需要独立守门」）。
 两处都已按实测改正（**只改注释，零行为改动**）。
 
-**跨域提示**：`scope=user` 时脚本仍是红的 —— RAG 的 user-api **仍缺 `charset=utf-8`**
-（`Content-Type='text/plain'` vs Go 的 `text/plain; charset=utf-8`）
-⇒ 那是 **users/user 域**的账（对应本文件 §5 A-1），**不是 admin 域的**。
+**跨域提示**（2026-10-30 订正 · 前提已不成立）：原记「`scope=user` 时脚本仍是红的 —— RAG 的 user-api **仍缺 `charset=utf-8`**
+（`Content-Type='text/plain'` vs Go 的 `text/plain; charset=utf-8`）」⇒ ⇒ 现行 `user-api/.../advice/GlobalExceptionHandler.java:287` 已显式钉 charset ⇒ **断言侧已销账**（栈起时脚本不再红）
+⇒ 那本属 **users/user 域**的账（对应本文件 §5 A-1，**已闭合**），**不是 admin 域**的；残留 = 守门脚本头部注释的**陈旧陈述** + **无栈时恒 SKIP ⇒ EXIT=0 假绿**（落点 `tools/difftest/**` = 共享面 ⇒ 已上报）。
 
 ## 3. ✅ UNRESOLVED-ADMINAPI-004 关闭：worker-pool 饱和分支在默认配置下**不可达**
 
@@ -1545,6 +1549,17 @@ SCENARIO=map_empty         JSON={}          ← 对照：map 形态才会被省�
 > 可复现：`bash tools/difftest/exp-admin-worker-pool-load.sh 300` ⇒ `EXIT=0`。
 > 两轮实测均为：Tomcat 并发峰值 **200** / 池并发峰值 **200** / **裸 503 = 0**。
 
+> ⚠️ **2026-10-30 活体对拍（live-parity 轮）订正 —— 原判保留不改**：
+> 本轮实跑 `bash tools/difftest/exp-admin-worker-pool-load.sh 300` ⇒ **EXIT=1**（2026-10-30 04:27:57 · 159s），
+> 两轮实测：Tomcat 并发峰值 **200** / 池并发峰值 **200**（**与上文完全一致**）/ **裸 503 = 95（开）与 100（关）**。
+> ⇒ **① 上面那两个 200 复现了** ⇒ **「池饱和分支在默认配置下不可达」这条结论仍成立**（`200 < 512`）。
+> ⇒ **② 「裸 503 = 0」这一行不可复现** —— 裸 503 是 **CPU shedding 自适应**出来的
+> （`GoStyleAdaptiveShedder` 读整机 CPU，threshold=900‰）⇒ **取决于当时机器有多忙**，负载相关。
+> ⇒ **③ 探针自己的注释也这么写**（"第 1 轮与第 2 轮的裸 503 数可能都是 0，也可能差很多"），
+> **但它的退出码却由这个指标决定** ⇒ 本次判红 ⇒ **EXIT=1 ≠ 结论为假**
+> ⇒ 判读本探针**必须看它自己的判定行**（`✓ 池实际并发峰值 200 < 512 ⇒ 池饱和分支不可达`），不能只看退出码。
+> ⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../../_cross/live-parity-2026-10-30.md) §三·⑯-b。
+>
 > ⚠️ **别用「exec 线程号上界」当并发上限**：Tomcat 线程**只增不复用**，
 > 线程号会随累计请求数一直涨（实测见过 390），与并发无关。
 > 正确口径是**同一时刻不同 exec 线程的个数**。
@@ -2448,3 +2463,106 @@ Sea-RideTheWind_golang/service/common/observability/http.go:88  → http.Error(w
 - **段来源**：共享层已预分配给本域的段（`docs/DRIFT/global/vs-common.md` §4.10.19.3）⇒ **共享层台账零改动**（写权归 G4）。
 - **守门**：域级 `BlindPortGateTest`（落在 **user-rpc**，`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/BlindPortGateTest.java`）**5 条** ⇒ 一并覆盖本组件 ⇒ **本组件不单独建守门**（避免两份规则漂移）。
 - **边界**：**本组件生产代码零改动**（全部落在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项**（Go 侧无对应物 ⇒ 无对照义务）。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W11
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| UNRESOLVED-ADMINAPI-005 | D（该开放项已关闭 ⇒ 无待实现内容） | P3 | 否 | Go `service/user/admin/api/internal/svc/servicecontext.go:27`（`AdminRpc: adminservice.NewAdminService(zrpc.MustNewClient(c.AdminRpc)),` ⇒ 下游不可达即 `logx.Must` **panic** ⇒ 进程起不来）＋ `service/user/admin/api/internal/metrics/metrics.go:9`（`prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "", Subsystem: "admin_api", Name: "intercept_total", …})` ⇒ Prometheus 全名 = `admin_api_intercept_total`）vs RAG `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/client/AdminRpcClient.java:142`（`@GrpcClient("admin-rpc")` ⇒ 启动期装配链在位）＋ `service/users/admin/admin-api/src/main/resources/application.yml:94`（`address: discovery:///admin-rpc`）＋ `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/metrics/AdminApiMetrics.java:122`（`return Counter.builder("admin_api_intercept_total")` ⇒ 与 Go 同名）＋ `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiStartupFailFastTest.java:121`（`assertThat(context).hasFailed();` ⇒ **① 已实测并被守门锁住**）＋ `:125`（`hasMessageContaining("Can't connect to channel");`）＋ `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiPrometheusMetricNameTest.java:116`（`assertTrue(names.contains(GO_METRIC_NAME),` ⇒ **② 已实测**）＋ `:123`（负向断言：不得出现 `admin_api_intercept_total_total`）＋ `tools/difftest/exp-admin-startup-failfast.sh:9`（双侧实证脚本，案例 A = 下游死端口 / 案例 B = Nacos 不可达）⇒ ⇒ 台账记的「**两项启动期事实未实测**」这个开放项**已不存在** ⇒ **差异已消失** ⇒ 归 **D**（无待实现内容）；⚠️ 本轮**未复跑**该脚本与两个 JUnit（证据强度 = 静态源码对照 ＋ 守门在位）⇒ 按 AGENTS.md §0 读作「在该证据强度下一致」；**P3**（本条是证据缺口项，缺口已补 ⇒ 不构成当前验收阻断条件） | 2026-10-30 |
+
+### lane W14
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-ADMINAPI-012 | D（已闭合 ⇒ 无待实现内容） | P1 | 否（不阻断阶段一） | Go `service/user/admin/api/internal/middleware/checkblacklistmiddleware.go:35` = `exists, err := m.Redis.ExistsCtx(r.Context(), blacklistKey)` ＋ `:36` = `if err == nil && exists {` ⇒ **Redis 出错 ⇒ 放行**（fail-open）＋ `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:14` = `maxRetries = 3` ＋ `:32-37` = `red.NewClient(&red.Options{… MaxRetries: maxRetries …})`（**不传任何 timeout** ⇒ 连接被拒 / 被关时**立即失败**、不排队）vs RAG `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/interceptor/AdminJwtAuthInterceptor.java:200` = `redisTemplate.hasKey(blacklistKey)` 包在 `catch (Throwable t)` 里 ＋ `:206` = `return exists != null && exists;` ⇒ **fail-open**（与 Go 同形）＋ `service/common/src/main/java/com/rag/common/redis/GoStyleRedisClientAutoConfiguration.java:132` = `ClientOptions.DisconnectedBehavior.REJECT_COMMANDS`（⇒ 断连即拒单 ⇒ 命令**毫秒级失败**，不再挂到 `commandTimeout` 3s）＋ 注册清单 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:5` ＋ 守门 `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiRedisDisconnectedFastFailTest.java:264` = `assertEquals(ClientOptions.DisconnectedBehavior.REJECT_COMMANDS, …)` ⇒ **差异已消失**：台账正文所述的修法（把 Lettuce 断连行为设成 `REJECT_COMMANDS`）**确已在位**，且域内副本 `RedisDisconnectedBehaviorConfig.java` 已删（该目录现存 `AdminApiProperties.java` / `WebMvcConfig.java`）⇒ 共享层未被遮蔽 ⇒ 断连（FIN）形态下 `hasKey` 快速失败 ⇒ 进 catch ⇒ **fail-open 200**（与 Go 同形）⇒ 原「挂满 3s ⇒ 503」不再发生；⚠️ RST 形态两侧都快速失败（不构成漂移）⇒ 本条无剩余待实现项 | 2026-10-30 |
+
+### lane W5
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| DRIFT-ADMINAPI-013 | D | P3 | 否 | Go `service/user/admin/api/internal/handler/routes.go:15`（生产侧等价面；Go 全仓 `forPort(0)` ／ `new ServerSocket(0)` ／ `RANDOM_PORT` 三个模式串 **0 命中** ⇒ Go 侧无对应物 ⇒ 不构成 Go 对照项）vs RAG `service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/AdminApiStartupFailFastTest.java:101`（`return RealGrpcPort.pick();`）＋ `AdminApiStartupFailFastTest.java:263`（`NettyServerBuilder.forPort(RealGrpcPort.pick())`）＋ `AdminApiRealTomcatResponseBytesTest.java:143`（`r.add("server.port", RealTomcatPort::pick);`）⇒ **差异已消失**（本组件 3 处「OS 盲选口」已全部改走域内私有固定段端口）⇒ 且**生产代码零改动**（全在 `src/test/java`）⇒ 无落码动作 | 2026-10-30 |
+---
+
+> ⚠️ **以下内容原位于本文件中部 —— 2026-10-30（G1 lane）移到末尾**
+> 理由 = **零行位移**：`docs/RoundPlan/_unresolved.md` 与 `docs/DRIFT/_cross/grading/*` 里有指向本文件的
+> **硬编码 `文件:行号` 指针** ⇒ ⇒ 派生层按**纯行号算术**解析 ⇒ ⇒ 中部插一行 ⇒ 指针解析到别的条目
+> ⇒ ⇒ 「排期指针 / 证据缺口组」的成员被静默改写 ⇒ ⇒ **派工面被改掉**。
+> ⇒ ⇒ 纪律：**新增内容一律放文件末尾**；要改中部 ⇒ 用「**就地替换**」（行数不变）而不是「插入新行」。
+> ⇒ ⇒ 判据：`python3 tools/ledger-derive/check-pointer-consistency.py`（派生层输入完整性棘轮）。
+
+## ✅ `DRIFT-ADMINAPI-014` · 出向 admin-rpc **缺 2s 客户端超时** ⇒ 失败只能由**服务端**兜底（2026-10-30 · G1 lane · 域侧自修 · 已落码）
+
+> **证据强度 = L3**（Go ↔ RAG 源码逐条对照 ＋ 本域**真跑**守门 ＋ **变异实测**）
+> ⚠️ **未做双侧活体对拍** ⇒ **不标 L4** ⇒ 「已修」读作「**在 L3 强度下一致**」，不是已闭环（AGENTS.md §〇）。
+
+### 一、现象
+
+Go 侧 `admin-api → admin-rpc` 的出向调用**恒带 2s 客户端超时**；RAG 侧 `devh` 注入的是**裸 stub**
+（**无 call deadline**）⇒ ⇒ **缺「客户端侧」收口**：失败只能由**服务端**拦截器或本进程 HTTP 预算兜底
+⇒ ⇒ 失败**归因**与**收口时刻**都可能与 Go 不同。
+
+### 二、Go 侧出处（逐条 · 本轮亲自读过）
+
+| # | 出处 | 事实 |
+|---|---|---|
+| G1 | `go-zero@v1.10.2/zrpc/config.go:31` | `RpcClientConf.Timeout int64 `json:",default=2000"` ` ⇒ **默认 2000ms** |
+| G2 | `go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25` | `ctx, cancel := context.WithTimeout(ctx, t)` ⇒ **取更早者** ⇒ 出向 deadline = min(入站 ctx 剩余, 2s) |
+| G3 | `service/user/admin/api/etc/admincenter.yaml:35-39` | `AdminRpc:` 段**只有 `Etcd`**、**无 `Timeout`** ⇒ ⇒ 走 G1 默认值 |
+| G4 | `service/user/admin/api/internal/logic/admin/loginlogic.go:43` | `l.svcCtx.AdminRpc.Login(l.ctx, rpcReq)` ⇒ 出向调用**继承 handler 的 ctx** |
+| G5 | `service/user/admin/api/internal/logic/admin/loginlogic.go:47-57` | `st, _ := status.FromError(err)` ⇒ `switch st.Code()`：`NotFound` → `ErrorUserNotExist`(1003)／`Internal` → `ErrorServerCommon`(5001)／`Unauthenticated` → `ErrorLoginWrong`／**`default` → `CodeServerBusy`(1015)** ⇒ `DeadlineExceeded` 落 **default → 1015** |
+| G6 | `service/user/common/errmsg/errmsg.go:6` / `:41` | `CodeServerBusy = 1015` ／ 文案 `服务繁忙` |
+| G7 | `service/user/admin/api/internal/handler/admin/loginhandler.go:27-31` | `httpx.OkJson(w, &response.Response{Code: code, ...})` ⇒ **HTTP 200** ＋ 业务码在 body 里 |
+| G8 | `service/user/admin/api/admincenter.go`（同款 `DisableNativeRestTimeout` ＋ `NewHTTPMiddleware`）＋ `service/common/observability/http.go:30-34` ＋ `:53-56` | `DisableNativeRestTimeout(&c.RestConf)` ⇒ 读 `conf.Timeout`（go-zero `rest/config.go:55` = `Timeout int64 json:",default=3000"` ⇒ **3000ms**）并把 `conf.Middlewares.Timeout = false` ⇒ 随后 `NewHTTPMiddleware(name, httpTimeout, …)` 在 `http.go:53-56` 做 `context.WithTimeout(r.Context(), timeout)` ＋ `r.WithContext(ctx)` ⇒ ⇒ **3s 预算被传进业务 ctx** ⇒ ⇒ **Go 的出向 deadline = min(剩余 3s ctx, 2s 客户端超时)** ⇒ ⇒ 与 RAG 的 `capByClientTimeout(applyTo(stub))` **逐字同形** |
+| G9 | `service/common/observability/http.go:80-88` ＋ `:22` | 3s 预算耗尽 ⇒ **503** ＋ `httpTimeoutBody = "Request Timeout"` ⇒ ⇒ **这正是 RAG 修前形态②的对外形状** |
+
+### 三、⚠️ 差异的准确边界（不要读宽）
+
+RAG 侧下游 `admin-rpc` **自己**带服务端 2s 超时
+（`service/users/admin/admin-rpc/src/main/resources/application.yml:191` = `rpc-timeout: 2s`；
+接线在位由 `python3 tools/difftest/check-grpc-interceptor-wiring.py` = **EXIT=0** 实测确认）⇒ ⇒
+
+| 形态 | Go（真源） | RAG **修前** | RAG **修后** |
+|---|---|---|---|
+| **① 请求到达下游、业务挂死** | 客户端 2s 收口 ⇒ G5 的 default ⇒ **`HTTP 200` + `1015`** | **服务端** 2s 收口 ⇒ `DEADLINE_EXCEEDED` ⇒ 本域映射（`AdminLoginService.java:65-71` 的 default ＋ `GlobalExceptionHandler.mapRPCStatusToCode` 的 default）⇒ **1015** ＋ `:77` `HttpStatus.OK` ⇒ **`HTTP 200` + `1015`** | 同左 ⇒ **与 Go 同形** |
+| **② 请求没到达下游**（进程不可达 / 网络黑洞 / 连接建好但无响应） | 出向 deadline = **min(剩余 3s ctx, 2s 客户端) = 2s** ⇒ 客户端侧收口 ⇒ **`HTTP 200` + `1015`** | **无任何客户端收口** ⇒ 只能等本进程 HTTP 预算（`service/users/admin/admin-api/src/main/resources/application.yml:205` = `http-timeout: 3s`）⇒ ⇒ **`HTTP 503` + `Request Timeout`** | 出向 deadline = **min(剩余 3s ctx, 2s 客户端) = 2s** ⇒ **`HTTP 200` + `1015`** ⇒ **与 Go 同形** |
+
+⇒ ⇒ **本条要修的是形态②**（状态码 + 响应体 + 时刻三者都不同），**不是**形态①。
+
+### 四、RAG 侧修前 / 修后
+
+| | 修前 | 修后（2026-10-30 · G1 lane） |
+|---|---|---|
+| 出向 stub | `@GrpcClient("admin-rpc")` 注入的裸 stub；`adminRpc()` 直接返回它 ⇒ **本组件 13 处出向调用点全是裸 stub**（12 个 Service ＋ `AdminGetSelfService.java:42` 的 `IdentityResolver.resolveAdmin(httpRequest, adminRpcClient.adminRpc())`） | `capByClientTimeout(applyTo(stub))` ⇒ **min(入站剩余, 2s)** ⇒ **一次落码覆盖 13 处** |
+| 落码 | — | `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/client/AdminRpcClient.java`（新增 `CLIENT_TIMEOUT_MILLIS = 2000L` ＋ `adminRpc()` ＋ 包可见 `capByClientTimeout`） |
+
+### 五、守门网 ＋ 变异实测（AGENTS.md §3.3.3）
+
+- **守门**：`service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/client/AdminRpcClientDeadlineCapTest.java`（**5 条**）
+  - **真**构造 `AdminServiceBlockingStub` ＋ **真**读回 `CallOptions.getDeadline()`（**不是**文本级断言）
+  - **真**走 `GoStyleRequestDeadline.begin(long)` 设预算 ⇒ 验 min 语义四支（无预算 / 入站 < 2s / 入站 > 2s / 预算已耗尽）
+  - **真**验对外 accessor（`adminRpc()`）交出的 stub 已带 deadline
+- **变异实测**：
+  - **M2**（accessor 去掉 `capByClientTimeout`）⇒ 红在 `accessorReturnsCappedStub`（「必须带 call deadline ⇒ expected: not <null>」）
+  - **M3**（user-api 侧的同款：cap 常量 2000 → 30000）⇒ 红在「不得超过 2000ms」类断言 ⇒ ⇒ **两模块口径一致**
+  - ⇒ **还原后复绿** ⇒ **不是假绿**
+- ⚠️ **判据自身的坑（已修）**：首版断言把「入站预算 500ms」写成固定下界 ⇒ 实测**只读到 72ms**（首次 mock 生成 + 类加载吃掉 ~400ms）⇒ **假红** ⇒ 已改为「**期望值 − 实测耗时 − slack**」⇒ 既不放过「比 Go 更严」，也不被环境抖动误伤（AGENTS.md §3.3.3 ③：修漂移先改/删错误断言，再改实现）。
+
+### 六、边界（诚实声明）
+
+- ⚠️ **未做双侧活体对拍** ⇒ 本条**不是 L4**。
+- ⚠️ 守门**不**起真实 admin-rpc、**不**发真实请求 ⇒ 证的是「**出向调用的 deadline 口径**」；**不**证「下游挂死时端到端真的回 1015」。
+- ⚠️ **共享层那半边不在本条**：要让 rpc 进程也拿到「入站预算」，`GoStyleRequestDeadline` 需要**作用域化 API** ⇒ 落点 `service/common` ⇒ **G4 写权** ⇒ 已随 `E65` 反馈单转派。
+
