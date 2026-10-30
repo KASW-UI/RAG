@@ -41,10 +41,13 @@ import java.util.concurrent.TimeUnit;
  * <h2>🔴 为什么「没有请求预算时也要套 2s」</h2>
  * <p>Go 的客户端超时是<b>拦截器级别</b>的，与有没有 HTTP 超时中间件<b>无关</b>
  * ⇒ 「有时有客户端超时、有时没有」在 Go 的 ctx 语义里<b>不存在</b>。
- * <br>⇒ 本域是<b>纯 gRPC 进程</b>（{@code web-application-type: none}），
- * {@code GoStyleRequestDeadline} 的 ThreadLocal <b>永远不会被 set</b>
- * （唯一 set 点在共享层的 HTTP worker 里）⇒ 只用 {@code applyTo} 会让本域的出向调用
- * <b>完全没有上限</b> ⇒ 本类把「无预算 ⇒ 用 2000ms」显式写出来。
+ * <br>⇒ 本域的出向调用<b>可能跑在没有请求载体的线程上</b>
+ * （{@code GoStyleRequestDeadline} 的 ThreadLocal 只在<b>绑它的那个线程</b>可见：
+ * 共享层的 HTTP worker、以及共享层 {@code 53bc05ec} 起在
+ * {@code RpcInterceptor.onHalfClose} 绑的 gRPC handler 线程；
+ * ⚠️ <b>2026-10-31 订正</b>：原文写「唯一 set 点在共享层的 HTTP worker 里」<b>已过期</b>）
+ * ⇒ 只用 {@code applyTo} 会让这些线程上的出向调用<b>完全没有上限</b>
+ * ⇒ 本类把「无预算 ⇒ 用 2000ms」显式写出来。
  *
  * <h2>⚠️ 范式来源</h2>
  * <p>本仓 <b>同域</b> {@code favorite-api/.../client/FavoriteRpcClient.java:111,156-168}
@@ -57,6 +60,23 @@ import java.util.concurrent.TimeUnit;
  * <p>Go 的 {@code depCtx} 还会把<b>服务端</b>的 deadline 传播给下游调用（先到者生效）
  * ⇒ RAG 侧「继承服务端 deadline」那一半的落点在<b>共享层</b> ⇒ <b>已登记为 global 的 E65</b>
  * ⇒ 本类不重复实现，也不越权去改共享层。
+ *
+ * <h2>🔴 2026-10-31 归因订正 · 「继承」那一半由<b>devh 拦截器链</b>给，「2s 上界」那一半<b>只在域侧</b></h2>
+ * <p><b>原文这句「本类只解决 2s 封顶那一半」在结论上仍成立，但归因需要补清楚</b>：
+ * <ul>
+ *   <li><b>「继承请求 deadline」那一半 ⇒ 由 devh 全局客户端拦截器链提供</b>：
+ *       {@code GoStyleOutboundDeadlineInterceptor}（{@code @GrpcGlobalClientInterceptor}，
+ *       {@code enabled} <b>默认 true</b>）的 {@code effectiveCallOptions} 第 ① 项读
+ *       {@code GoStyleRequestDeadline.remainingNanos()} ⇒ 域内 stub 只要是 {@code @GrpcClient} 注入的
+ *       （本域 main 代码零命中自建 channel ⇒ <b>无一例外</b>）就<b>已经</b>继承请求 deadline
+ *       ⇒ ⇒ <b>本类的 {@code applyTo} 对「继承」这一半是冗余的</b>；</li>
+ *   <li><b>「2s 客户端上界」那一半 ⇒ 只在域侧</b>：拦截器层的客户端硬上界
+ *       （{@code GoStyleProtectionProperties.OutboundDeadline#capMillis}）<b>默认 0 = 不启用</b>，
+ *       全仓 {@code service/<域>/<组件>/src/main/resources/*.yml} 的 {@code outbound-deadline} <b>零配置</b>
+ *       ⇒ ⇒ Go 的 2000ms 客户端上界<b>只有本类提供</b>
+ *       ⇒ ⇒ 且本类的 {@code applyTo} <b>不可去</b>：要算「{@code min(请求剩余, 2s)}」就得先有「请求剩余」
+ *       ⇒ ⇒ <b>本类是「2s 上界」那一半的唯一落点</b>，不是闭合 E65 的条件。</li>
+ * </ul>
  */
 final class GoStyleClientCallTimeout {
 

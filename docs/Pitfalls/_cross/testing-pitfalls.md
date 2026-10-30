@@ -298,3 +298,29 @@ EOF
 3. **叠取带测试代码 ⇒ 叠完必跑 `test-compile`**（不是 `compile`）⇒ ⇒ 且 **「编译通过」≠「守门转绿」**（Testcontainers 依赖 ⇒ Docker 挂 ⇒ 全 SKIP ⇒ 「BUILD SUCCESS」是 SKIP 不是通过，见 `ENV-06`）。
 4. ⚠️ **commit message 里不写状态断言**（谁活着 / 谁已死 / 什么时候做的）⇒ ⇒ **commit message 是永久的，状态是会变的** ⇒ ⇒ 状态只配写进**台账与会话回执** ⇒ ⇒ commit message 只写「**做了什么 + 为什么 + 依据**」。
 5. ⚠️ **要动别人的工作树之前，先跑一次行为证据**（读它最后一轮的消息时间戳 ＋ `find -newermt` 看它有没有在写文件）⇒ ⇒ 会话列表的 `status` / `status.message` 是**每轮告警**，**不能当执行前提** ⇒ ⇒ 我本轮据它判「四棵 lane 全部停摆」⇒ ⇒ 随后核到其中一棵距取数仅 34 秒仍在写代码 ⇒ ⇒ 基于假前提做的动作（在**它的**工作树里代提交、代修 import）**全部要返工核对**。
+
+## 🔴 双侧对拍 PASS 仍可能不是「生产装配面」⇒ **负控是判据的必需成分** ⇒ 且 **stderr 必须保留**（脚本的 `trap` 会把它吞掉）
+
+**症状长什么样**
+
+- 双侧对拍脚本报 **PASS** ⇒ ⇒ 你以为「测的是生产装配路径」；
+- 但那条**负控**（降级路径）只打到 **stderr** ⇒ ⇒ 而 stderr 被脚本的 `trap ` + "`" + TRAP_TEXT + "`" + ` **删掉**了
+  ⇒ ⇒ **你连「自己这一条读数是哪条路径产生的」都没看见**；
+- ⇒ ⇒ PASS 只说明**两侧输出相等**，**不说明**这个相等是生产路径带来的。
+
+**实证**（RAG 仓 · 2026-10-31）：`tools/semantic-probe/deadline-downstream/run-deadline-downstream-parity.sh` 上一轮（2026-10-30）报 PASS，
+但**没有**留下任何装配面证据；本轮**保留 stderr 重跑**才拿到这三条路径诊断行：
+
+- `probe-devh-channel-factory|InProcessChannelFactory`
+- `probe-global-interceptors|[…GoStyleOutboundDeadlineInterceptor…]`
+- `probe-interceptor-beans|[goStyleGrpcClientBreakerInterceptor, goStyleOutboundDeadlineInterceptor]`
+
+⇒ ⇒ **拦截器确由 `@GrpcGlobalClientInterceptor` 收进 devh 的 registry**（不是探针手工塞进去的）⇒ ⇒ 且 **正控 4ms / 负控 1506ms 可区分**
+⇒ ⇒ 这次的快速失败**可归因于装配面**，不是进程内传播 ⇒ ⇒ 闭合结论的证据强度才从「两侧相等」升到「两侧相等 ＋ 装配面被证实 ＋ 负控可区分」。
+
+**判定式**
+
+1. 双侧对拍的 **PASS 只说明两侧输出相等** ⇒ ⇒ **不说明测的是生产路径** ⇒ ⇒ 必须有一路**负控**：装配面 vs 降级路径 ⇒ ⇒ 两者读数**必须可区分** ⇒ ⇒ 否则这个 PASS **归因不了**。
+2. 探针的诊断行常在 **stderr** ⇒ ⇒ **跑完把 stderr 一起收走** ⇒ ⇒ 脚本里的 `trap` 会删掉它 ⇒ ⇒ 想留证据就临时把 trap 换掉（临时副本放 `/tmp`，**不入仓**）。
+3. 判据要能回答「这一条读数是**哪条路径**产生的」⇒ ⇒ 路径诊断行（factory 类型 / 拦截器名单）必须与读数**同一次跑**取到 ⇒ ⇒ 分两次跑 = 两个证据，**不能互相当证**。
+4. 同族：「跑两遍 ⇒ 两次必须写不同目录」—— **同源**：**证据必须成套地从同一次跑里取到**。

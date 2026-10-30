@@ -13,11 +13,11 @@
 
 ### 1.1 一句话结论
 
-> **三目录**有 **1195** 个带状态的问题项（**23** 个被同源组合并吸收 ⇒ 派生表实收 **1172** 个编号），
+> **三目录**有 **1196** 个带状态的问题项（**23** 个被同源组合并吸收 ⇒ 派生表实收 **1173** 个编号），
 > 其中 **753** 个（**64%**）**已定级**（带阶段归属），
-> 剩下 **419** 个**未定级** —— 其中**开放状态**（🔴 未闭合 / 🟡 部分闭合 / 仍生效 / ⏳ 未签字）又**没有阶段归属**的只有 **3** 条。
+> 剩下 **420** 个**未定级** —— 其中**开放状态**（🔴 未闭合 / 🟡 部分闭合 / 仍生效 / ⏳ 未签字）又**没有阶段归属**的只有 **3** 条。
 > ⇒ **「发现了却没进施工单」已经清零**；这正是「台账能不能当施工单」的量化答案。
-> 证据面上：有活体证据的 **121** 条里，**只有 96 条**的活体证据是**绿**（支持当前结论），
+> 证据面上：有活体证据的 **122** 条里，**只有 97 条**的活体证据是**绿**（支持当前结论），
 > 其余 **25** 条的证据本身是**红 / 环境问题 / 混合** ⇒ **「有活体证据」≠「结论被证实」**。
 > 本派生层把这几条数字**变成可复算的断言**，并把它们排成**可开工的清单**（§四）。
 
@@ -25,14 +25,14 @@
 
 | 事实 | 数字 | 依据 |
 |---|---|---|
-| 三目录条目（**宽口径**扫描） | **2660** 条 / **1404** 个唯一编号 | U1 |
-| 其中**问题项**（自身带状态标记） | **2050** 条 / **1195** 个唯一编号 | U1 + U2 |
-| 旧口径（`ledger-claim-audit.py` 的 `ID_RE` 前缀白名单）能认出 | **787** / 1195 | ⚠️ **漏 408 个唯一编号** |
+| 三目录条目（**宽口径**扫描） | **2661** 条 / **1405** 个唯一编号 | U1 |
+| 其中**问题项**（自身带状态标记） | **2051** 条 / **1196** 个唯一编号 | U1 + U2 |
+| 旧口径（`ledger-claim-audit.py` 的 `ID_RE` 前缀白名单）能认出 | **788** / 1196 | ⚠️ **漏 408 个唯一编号** |
 | 施工单任务（`_task-universe.md`） | 37 条 | §〇 口径 |
 | 施工单 ↔ 台账条目**强链** | **51** 个条目被回指 | U8 |
 
 > ⚠️ **上一轮报给用户的「1183 条目 / 707 唯一 ID」是**旧口径**（前缀白名单）**的数字**
-> ⇒ 本派生层用**宽口径**重扫 ⇒ **2050 条问题项 / 1195 个唯一编号**。
+> ⇒ 本派生层用**宽口径**重扫 ⇒ **2051 条问题项 / 1196 个唯一编号**。
 > **差额不是「多算了」** —— 是旧口径**认不出**整族编号（`MISMATCH-API-*` / `OP-*` / `T-*` / `N-*` /
 > `CD-*` / `ADJ-*` / `A-*` / `B-*` / `C-*` / **`E60` 这类「字母+数字」形态** …）。
 > ⇒ **「落空 0」这类结论的覆盖面小于表面**（同族：弱判据把真缺陷洗成 0）。
@@ -142,6 +142,7 @@
 | `ENV-03` | — | （未回指台账条目） |
 | `ENV-04` | — | `PIT-GLOBAL-033` · `PIT-GLOBAL-038` |
 | `ENV-05` | — | `PIT-GLOBAL-059` · `PIT-GLOBAL-068` |
+| `ENV-07` | — | `E66` |
 | `GAP-01` | B | `G-19` |
 | `GAP-02` | B | （未回指台账条目） |
 | `GAP-03` | B | `G-14` · `U-01` |
@@ -164,18 +165,18 @@
 
 | 归属 | 条目数 | 含义 |
 |---|---|---|
-| **A** | 11 | 阶段 1 准入阻断项（不处理就无法通过简历项目验收） |
+| **A** | 10 | 阶段 1 准入阻断项（不处理就无法通过简历项目验收） |
 | **B** | 28 | 阶段 1 竞争力补强项（技术亮点与验证闭环） |
 | **C** | 70 | 阶段 2 最终工程建设项（业务语义恢复 / 生产工程机制） |
 | **D** | 219 | 经分析确认可不实现或不适用（须有明确理由） |
-| **—** | 519 | **未派生 —— 待人工定级**（不是「不重要」，是「还没定级」） |
+| **—** | 520 | **未派生 —— 待人工定级**（不是「不重要」，是「还没定级」） |
 
 | 优先级 | 条目数 |
 |---|---|
 | P0 | 13 |
 | P1 | 403 |
 | P2 | 96 |
-| P3 | 770 |
+| P3 | 771 |
 
 ---
 
@@ -195,14 +196,14 @@
 | **G1** | 278 | **109** | 0 | `users`（**不含 users-common**）+ `follow` |
 | **G2** | 287 | **70** | 0 | `message` + `like` + `task` |
 | **G3** | 405 | **178** | 0 | `article` + `comment` + `favorite` + `hot` |
-| **G4** | 288 | **189** | 0 | **共享层** `service/common` + `service/users/users-common` + 收口域 `global`（**常设执行者 · 不在域波顺序里**） |
+| **G4** | 289 | **190** | 0 | **共享层** `service/common` + `service/users/users-common` + 收口域 `global`（**常设执行者 · 不在域波顺序里**） |
 | **G1+G4** | 7 | **5** | 0 | **跨派工面并集**（同源组跨域登记） |
 | **G2+G4** | 7 | **3** | 0 | **跨派工面并集**（同源组跨域登记） |
 | **G3+G4** | 7 | **4** | 0 | **跨派工面并集**（同源组跨域登记） |
-| **G1+G3+G4** | 3 | **2** | 0 | **跨派工面并集**（同源组跨域登记） |
+| **G1+G3+G4** | 3 | **1** | 0 | **跨派工面并集**（同源组跨域登记） |
 
 > ⇒ **「状态开放」= 该条仍有待实现项**（🔴 未闭合 / 🟡 部分闭合 / 仍生效 / ⏳ 未签字）；**A/B 类（阶段一范围）**那一列全是 0 ⇒ **每棵树的活都已有排期指针** ⇒ 没有「漏排」需要补派。
-**合计 516 行 / 503 个编号** —— ① **A/B 类**（阶段 1 范围内）**0** 个编号
+**合计 517 行 / 504 个编号** —— ① **A/B 类**（阶段 1 范围内）**0** 个编号
 · ② C/D 类（**阶段 2 承接**，§5.3 暂缓项清单已登记）**88** 条
 · ③ 未定级 **3** 条
 · ④ **已闭合**（逐条 Go 对照后「**差异已消失**」⇒ **无待实现项**）**80** 条
@@ -372,7 +373,7 @@
 | `E38` | global | 同源组 | 2 | ✅ 已一致 / 🔴 未闭合 | ✅ 已一致 | `DRIFT/global/_README.md:388;DRIFT/users/user/rpc.md:832` |
 | `E58` | global | 同源组 | 3 | 🔴 未闭合 / 🟡 部分闭合 | 🔴 未闭合 | `DRIFT/global/_README.md:446;DRIFT/users/user/rpc.md:2257;DRIFT/users/user/rpc.md:2328` |
 | `E59` | global | 同源组 | 4 | ✅ 已一致 / 🔴 未闭合 | ✅ 已一致 | `DRIFT/global/_README.md:447;DRIFT/like/vs-common.md:1498;DRIFT/message/rpc.md:2810` |
-| `E65` | comment | 同源组 | 10 | ✅ 已一致 / 🔴 未闭合 | 🔴 未闭合 | `DRIFT/comment/rpc.md:257;DRIFT/comment/rpc.md:930;DRIFT/favorite/rpc.md:3376` |
+| `E65` | comment | 同源组 | 10 | ✅ 已一致 / 🔴 未闭合 | ✅ 已一致 | `DRIFT/comment/rpc.md:257;DRIFT/comment/rpc.md:930;DRIFT/favorite/rpc.md:3376` |
 | `E68` | favorite | 同源组 | 3 | ✅ 已一致 / 🔴 未闭合 | 🔴 未闭合 | `DRIFT/favorite/vs-common.md:30;DRIFT/global/_README.md:433;DRIFT/global/_README.md:541` |
 | `FB-03` | global | 同源组 | 4 | ✅ 已一致 / 🔴 未闭合 | 🔴 未闭合 | `DRIFT/global/vs-common.md:402;DRIFT/like/vs-common.md:439;DRIFT/task/vs-common.md:112` |
 | `FB-04` | global | 同源组 | 3 | ✅ 已一致 / 🔴 未闭合 | 🔴 未闭合 | `DRIFT/global/vs-common.md:910;DRIFT/like/vs-common.md:179;DRIFT/like/vs-common.md:196` |
@@ -511,8 +512,8 @@
 | 档 | 含义 | 条目数 |
 |---|---|---|
 | **A 活体** | 段内点名了**已在活体台账实跑过**的探针（**带探针的真实退出码**） | 0 |
-| **B 静态** | 有可复算的 `文件:行号` 指针，但无活体探针 | 827 |
-| **C 无指针** | 两样都没有 ⇒ 结论今天不可复算 | 334 |
+| **B 静态** | 有可复算的 `文件:行号` 指针，但无活体探针 | 826 |
+| **C 无指针** | 两样都没有 ⇒ 结论今天不可复算 | 335 |
 
 ### 5.1 A 档内部再分（**「有活体证据」≠「结论被证实」**）
 
@@ -530,16 +531,16 @@
 | **A 活体 · 混(0/4)** | 同上（绿 + 退出码 4）⇒ 需逐条看 | 1 |
 | **A 活体 · 环境(2)** | 探针判定「**环境问题**」⇒ 结论**不可用** | 3 |
 | **A 活体 · 红(1)** | 探针判定**不一致** ⇒ 当前结论**未被证实**（红 ≠ 有缺陷） | 17 |
-| **A 活体 · 绿(0)** | 探针断言**全部成立** ⇒ 这条的活体证据**支持**当前结论 | 96 |
+| **A 活体 · 绿(0)** | 探针断言**全部成立** ⇒ 这条的活体证据**支持**当前结论 | 97 |
 
-> ⇒ **真正「活体坐实」（绿）的只有 96 条**（7%）；
+> ⇒ **真正「活体坐实」（绿）的只有 97 条**（7%）；
 > 其余 **25** 条 A 档的证据本身是**红 / 环境问题 / 混合** ⇒ **不可当成「已坐实」**。
 
 ---
 
 ### 5.2 证据边界声明（**C 档 = 今天不可复算**）
 
-> **本节是「效力边界」的正式声明** —— 用户 2026-10-30 拍板：**C 档条目（334 条）本轮不做活体取证，接受其静态证据**。声明如下：
+> **本节是「效力边界」的正式声明** —— 用户 2026-10-30 拍板：**C 档条目（335 条）本轮不做活体取证，接受其静态证据**。声明如下：
 >
 > 1. **C 档条目的状态 = 台账自述**，不是本轮可复算的结论。
 >    ⇒ 任何引用 C 档条目作为**前提**的结论，必须标注「前提未回源」。
@@ -556,7 +557,7 @@
 
 ---
 
-## 六、全量派生表（1282 条问题项）
+## 六、全量派生表（1283 条问题项）
 
 > 机读请用 [`stage1-derivation.tsv`](stage1-derivation.tsv)（同一次生成，17 列）。
 
@@ -572,7 +573,6 @@
 | `S1-FOLLOW-007` | DRIF | users | **G1** | 🔴 未闭合 | B 静态 | P0 | A | 是 | 间接 · 阶段 1 闭合后才有阶段 2 | BLK-03 | 静态取证 · 缺活体对拍 | `DRIFT/users/stage1-admission.md:524` | — |
 | `S1-USERS-001` | DRIF | users | **G1** | ✅ 已一致 | B 静态 | P0 | A | 否 | 台账已写 · 阶段 1 先补**最小可复现说明书**（README：架构一句话 / 模块清单 / 环境变量表 / 启动顺序 / 验证命 | P4-T01,P5-T02 | — | `DRIFT/users/stage1-admission.md:91;DRIFT/users/stage1-admission.md:491;DRIFT/users/stage1-admission.md:515` | — |
 | `C-3` | DRIF | comment | **G3+G4** | ✅ 已一致 | A 活体 · 绿(0) | P1 | A | 是 | 间接 · 阶段 1 闭合后才有阶段 2 | P3-T04 ｜ BLK-02,DEC-05 | — | `DRIFT/comment/vs-common.md:59;DRIFT/comment/vs-common.md:112;DRIFT/comment/vs-common.md:220` | 同一编号在本文件有三处登记，**现行开放面 = `:112` 的「C-3 / U15（= global E65）出向 gRPC 不继承请求 deadline」**：Go `service/comment/rpc/internal/logic/subject_fallback.go:12`（`reso… |
-| `E65` | DRIF | comment | **G1+G3+G4** | 🔴 未闭合 | B 静态 | P1 | A | 是 | 间接 · 阶段 1 闭合后才有阶段 2 | P1-T05,P2-T01,P2-T02,P2-T03,P2-T04,P2-T05,P2-T06,P3-T01 ｜ BLK-02,GAP-07,GAP-08 | 静态取证 · 缺活体对拍 | `DRIFT/comment/rpc.md:257;DRIFT/comment/rpc.md:930;DRIFT/favorite/rpc.md:3376` | — |
 | `A-5` | DRIF | article | **G3** | 🟡 部分闭合 | C 无指针 | P1 | B | 否 | 间接 · 阶段 1 闭合后才有阶段 2 | GAP-11 | 无可复算指针 · 结论不可复算 | `DRIFT/article/vs-common.md:364` | Go `service/article/rpc/etc/article.yaml:13`（`Password: "${POSTGRES_PASSWORD}"` ⇒ **无 `:默认值` 形态**）＋ `go-zero@v1.10.2/core/conf/config.go:63`（`loader([… |
 | `F-1` | DRIF | favorite | **G3** | 🔴 未闭合 | C 无指针 | P1 | B | 否 | 间接 · 阶段 1 闭合后才有阶段 2 | GAP-13 ｜ ⚠️已关闭指针:GAP-12 | 无可复算指针 · 结论不可复算 | `DRIFT/favorite/vs-common.md:223` | Go `service/favorite/rpc/favorite.go:42-55`（`zrpc.MustNewServer` + `favoritepb.RegisterFavoriteServiceServer` + `s.Start()` ⇒ 真源 rpc 侧真进程入口）＋ `service… |
 | `F-6` | DRIF | favorite | **G3** | 🟡 部分闭合 | C 无指针 | P1 | B | 否 | 间接 · 阶段 1 闭合后才有阶段 2 | GAP-11 | 无可复算指针 · 结论不可复算 | `DRIFT/favorite/vs-common.md:228` | Go `service/favorite/rpc/etc/favorite.yaml:13`（`Password: "${POSTGRES_PASSWORD}"` ⇒ **yaml 里不带兜底值**）＋ `go-zero@v1.10.2/core/conf/config.go:63`（`os.Exp… |
@@ -601,7 +601,7 @@
 | `S1-FOLLOW-011` | DRIF | users | **G1** | ✅ 已一致 | A 活体 · 红(1) | P3 | B | 否 | 间接 · 阶段 1 闭合后才有阶段 2 | 未排期 | 已定性 · 未排期 | `DRIFT/users/stage1-admission.md:528` | — |
 | `S1-USERS-003` | DRIF | users | **G1** | ✅ 已一致 | B 静态 | P3 | B | 否 | 台账已写 · ① `.gitignore` 加 `.env`（+ `.env.*` 但放行 `.env.example`）；② 提交  | P5-T02 | — | `DRIFT/users/stage1-admission.md:141` | — |
 | `S1-USERS-005` | DRIF | users | **G1** | ✅ 已一致 | B 静态 | P3 | B | 否 | 台账已写 · 域内 1 行改完（`${FOLLOW_RPC_PORT:8082}`）⇒ 本轮即做（T3）；阶段 2 可把 6 个组件的 | 未排期 | 已定性 · 未排期 | `DRIFT/users/stage1-admission.md:175;DRIFT/users/stage1-admission.md:519` | — |
-| `E66` | DRIF | comment | **G3+G4** | 🔴 未闭合 | C 无指针 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | P2-T01,P2-T02,P2-T06 ｜ DEC-05 | 静态取证 · 缺活体对拍 | `DRIFT/comment/rpc.md:290;DRIFT/global/_README.md:431;DRIFT/global/vs-common.md:31` | Go `service/comment/rpc/internal/cache/comment_subject_cache.go:76`（`GetSubjectCache(ctx context.Context, subjectID string)` ⇒ 带 ctx）＋ `:84`（`c.rdb.Ge… |
+| `E66` | DRIF | comment | **G3+G4** | 🔴 未闭合 | C 无指针 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | P2-T01,P2-T02,P2-T06 ｜ DEC-05 ｜ ⚠️已关闭指针:ENV-07 | 静态取证 · 缺活体对拍 | `DRIFT/comment/rpc.md:290;DRIFT/global/_README.md:431;DRIFT/global/vs-common.md:31` | Go `service/comment/rpc/internal/cache/comment_subject_cache.go:76`（`GetSubjectCache(ctx context.Context, subjectID string)` ⇒ 带 ctx）＋ `:84`（`c.rdb.Ge… |
 | `G4-16` | DRIF | comment | **G3** | 🔴 未闭合 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/comment/vs-common.md:96` | Go `service/comment/rpc/internal/cache/comment_subject_cache.go:84`（`c.rdb.Get(ctx, …)` ⇒ Go 侧缓存读写吃 ctx ⇒ deadline 到点即止）＋ `service/comment/rpc/interna… |
 | `SD-2026-10-24-CAND-03` | Inte | comment | **G3** | ⏳ 未签字 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 已定性 · 未排期 | `Intentional_Deviations/comment/rpc.md:229` | Go `service/comment/rpc/cmd/fact-authority/main.go:23`（`func main() { os.Exit(execute()) }` ⇒ **独立进程**）＋ `:52`（`listen := os.Getenv("COMMENT_FACT_AUTH… |
 | `DRIFT-CF-001` | DRIF | common | **G4** | 🔴 未闭合 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/common/alignment-2026-10-23.md:375;DRIFT/common/alignment-2026-10-23.md:834` | — |
@@ -1008,6 +1008,7 @@
 | `C-7` | DRIF | comment | **G3** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/comment/vs-common.md:63` | — |
 | `C-8` | DRIF | comment | **G3** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/comment/vs-common.md:64` | — |
 | `C-9` | DRIF | comment | **G3** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/comment/vs-common.md:65` | — |
+| `E65` | DRIF | comment | **G1+G3+G4** | ✅ 已一致 | A 活体 · 绿(0) | P3 | — | 否 | 未判定 | P1-T05,P2-T01,P2-T02,P2-T03,P2-T04,P2-T05,P2-T06,P3-T01 ｜ BLK-02,GAP-07,GAP-08 | 未定级 ⇒ 未排期 | `DRIFT/comment/rpc.md:257;DRIFT/comment/rpc.md:930;DRIFT/favorite/rpc.md:3376` | — |
 | `G4-4` | DRIF | comment | **G3** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | GAP-14 ｜ ⚠️已关闭指针:GAP-12 | 未定级 ⇒ 未排期 | `DRIFT/comment/vs-common.md:89` | — |
 | `MISMATCH-01` | DRIF | comment | **G3** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/comment/rpc.md:80` | — |
 | `MISMATCH-02` | DRIF | comment | **G3** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/comment/rpc.md:93` | — |
@@ -1419,6 +1420,7 @@
 | `PIT-DERIVE-01` | Pitf | _cross | **G4** | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 已定性 · 未排期 | `Pitfalls/_cross/derived-layer.md:12` | — |
 | `PIT-DERIVE-02` | Pitf | _cross | **G4** | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 已定性 · 未排期 | `Pitfalls/_cross/derived-layer.md:44` | — |
 | `PIT-DERIVE-03` | Pitf | _cross | **G4** | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 已定性 · 未排期 | `Pitfalls/_cross/derived-layer.md:70` | — |
+| `PIT-DERIVE-04` | Pitf | _cross | **G4** | 仍生效 | C 无指针 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `Pitfalls/_cross/derived-layer.md:97` | — |
 | `PIT-LANE-01` | Pitf | _cross | **G4** | 仍生效 | C 无指针 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `Pitfalls/_cross/domain-common-lanes.md:17` | — |
 | `PIT-LANE-02` | Pitf | _cross | **G4** | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 已定性 · 未排期 | `Pitfalls/_cross/domain-common-lanes.md:63` | — |
 | `PIT-LANE-03` | Pitf | _cross | **G4** | 仍生效 | C 无指针 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `Pitfalls/_cross/domain-common-lanes.md:97` | — |
@@ -1853,7 +1855,7 @@
    **「跑绿 ≠ 对」** 在这一层同样成立：U3 的 A 档只证明**那条探针的断言**成立，
    **不证明本条目结论的全量成立**。
 2. **U5 拿不到定级 ⇒ 写 `—`** —— 不是「不重要」，是**还没定级**。
-   本轮有 **419** 个编号属这一档（派生表 1172 个编号里的其余部分）
+   本轮有 **420** 个编号属这一档（派生表 1173 个编号里的其余部分）
    ⇒ 它们**不进施工单**，除非先定级；其中**开放状态**的只有 **3** 条。
 3. **U8 的强链只认「指针落在条目段内」或「任务块里直接写了编号」** ——
    **既没写编号也没给指针**的语义关联 ⇒ **不可见**（这是本层的固有上限）。

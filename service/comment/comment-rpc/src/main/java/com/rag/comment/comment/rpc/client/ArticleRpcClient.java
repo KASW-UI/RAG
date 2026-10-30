@@ -3,6 +3,7 @@ package com.rag.comment.comment.rpc.client;
 import com.rag.article.article.proto.ArticleServiceGrpc;
 import com.rag.article.article.proto.GetArticleRequest;
 import com.rag.article.article.proto.GetArticleResponse;
+import com.rag.common.observability.GoStyleRequestDeadline;
 import io.grpc.StatusRuntimeException;
 import net.devh.boot.grpc.client.inject.GrpcClient;
 import org.slf4j.Logger;
@@ -65,10 +66,22 @@ public class ArticleRpcClient {
      * ⇒ 下游挂死时 RAG 侧会一路等到底，Go 侧 2s 就返回
      * ⇒ **可观察行为分叉**（调用耗时 + 失败时机都不同）。
      *
+     * <p>🔴 <b>2026-10-30 订正 · 两段式（纳秒）</b>：本出口跑在 <b>gRPC handler 线程</b>上
+     * （调用链 {@code CommentServiceGrpcImpl.java:73} ⇒ {@code CommentDomainService.java:427/:431/:274/:254}）
+     * ⇒ 共享层 {@code RpcInterceptor.onHalfClose}
+     * （{@code service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:519}）
+     * 绑的 {@code GoStyleRequestDeadline} 载体<b>在本线程可见</b>
+     * ⇒ ⇒ 第一段 {@code applyTo} 把<b>入向剩余预算（纳秒）</b>挂到 stub 上，
+     * 第二段 {@code capByClientTimeout} 再压 2s 客户端封顶
+     * ⇒ ⇒ 语义 = Go 的 {@code context.WithTimeout(ctx, 2s)}（父 ctx 更早则先到者生效）。
+     * <br>⚠️ <b>旧实现读的是毫秒</b>（{@code remainingMillis()}）⇒ 亚毫秒部分被截掉
+     * ⇒ 与 Go 的纳秒预算<b>差 ≤1ms</b> ⇒ 现已对齐。
+     *
      * <p>⚠️ **不要把返回值缓存到字段上**：{@code withDeadlineAfter} 每次返回新实例。
      */
     private ArticleServiceGrpc.ArticleServiceBlockingStub articleRpc() {
-        return GoStyleClientCallTimeout.withDeadline(stub);
+        return GoStyleClientCallTimeout.capByClientTimeout(
+                GoStyleRequestDeadline.applyTo(stub));
     }
 
     /**

@@ -96,6 +96,7 @@
 | `ENV-03` | **本机 Docker 默认镜像源拉大 blob 会 EOF** | 环境面，不是项目缺陷 ⇒ 换 `docker.m.daocloud.io` 后 `docker tag` 回本地名可绕 | Round 1 依赖镜像重建的任何一步 | 本轮计划期实测观察（**仓内无台账出处**） | **Round 1** `P1-T05`（起栈前置）· 受阻时记「未完成任务及原因」 |
 | `ENV-04` | **Docker 端口释放延迟** | 容器 `docker rm -f` 后宿主口**仍被 docker-proxy 占住** ⇒ 必须**轮询** `lsof -nP -iTCP:<port> -sTCP:LISTEN` 直到空才起下一个 ⇒ 属**假红来源**之一 | `P0 #5` / Round 1 `P1-T05` 的判读 | `docs/RoundPlan/round-01/README.md:26` · `docs/Pitfalls/global/cross-domain.md:1307`（PIT-GLOBAL-038 端口占用型假红） | **Round 1** `P1-T05`（轮询到空）· 三步定性法 |
 | `ENV-05` | **共享 Nacos 服务发现面让并发探针互相污染** | 报 `INTERNAL` / `5001` 是**已知串扰**，**不是缺陷** ⇒ **跑红 ≠ 是缺陷** | 并发探针的结果判读（Round 4 `P4-T08`、Round 6 收口回归） | `docs/Pitfalls/global/cross-domain.md:2503`（PIT-GLOBAL-068） | **Round 4** `P4-T08`（探针 Nacos 隔离） |
+| `ENV-07` | **Docker containerd content store I/O 损坏 ⇒ Testcontainers 起不来** | ✅ **已处置（2026-10-31 · Docker 恢复）** —— Docker daemon 已恢复（Server 29.2.1）⇒ ⇒ `docker image inspect redis:7-alpine` 那个此前读不出的 blob（`sha256:6ab0b6e7…`）**现在读得出来了** ⇒ ⇒ 重跑 `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest`：该类真跑 **3 条 / 0F / 0E / 0 skipped** ⇒ ⇒ `service/common` 回归基线回到 **470 / 0F / 0E / 0S**（逐 `TEST-*.xml` 求和，非 stdout 的 BUILD SUCCESS）⇒ ⇒ ⚠️ **本条不可再复现为「环境受阻」**：若 containerd 再损 ⇒ 该类会再次**诚实跳过**⇒ ⇒ 那时的读数**必须写 `skipped`**（不是绿）⇒ ⇒ 载体类守门的判读一律以 surefire XML 为准 | **X-6**（deadline 分层预算与传播）· E66（共享层 Redis 期限那轴）的活体面 · `service/common` 回归基线 | `service/common/target/surefire-reports/TEST-com.rag.common.redis.GoStyleRedisDeadlineLiveRedisWriteFaceGateTest.xml`（skip 原因 = `Assumption failed: live redis 不可用`）· `docker image inspect redis:7-alpine` 的 `input/output error` | **修 Docker Desktop**（containerd 元数据与 snapshotter 已 I/O 损坏 ⇒ 只重启不腾空间会再坏）⇒ ⇒ 修好后重跑该类并把 `skipped` 归 0 ⇒ ⇒ **在此之前 E66 的活体面在本轮无活体读数** |
 
 ---
 
@@ -145,16 +146,16 @@
 |---|---|---|
 | 1. 阶段一阻断项 | **3** | `BLK-01` · `BLK-02` · `BLK-03` |
 | 2. 证据缺口 | **15** | `GAP-01` ~ `GAP-15` |
-| 3. 环境或权限受阻项 | **5** | `ENV-01` ~ `ENV-05` |
+| 3. 环境或权限受阻项 | **6** | `ENV-01` ~ `ENV-05` · `ENV-07` |
 | 4. 等待用户裁定的事项 | **5** | `DEC-01` ~ `DEC-05` |
 | 5. 允许暂缓且不阻断阶段一的事项 | **5** | `DEP-01` ~ `DEP-05` |
 | 6. 阶段一之外的事项 | **6** | `OUT-01` ~ `OUT-06` |
-| **合计** | **39** | — |
+| **合计** | **40** | — |
 
 - **6 类齐全，无遗漏**（类名一字不改、顺序不变 ⇒ 对齐规范 §11.6）。
 - 每条 6 列（`编号 / 事项 / 当前状态 / 影响的判据 / 来源（文件:行号） / 去向 / 处置`），「影响的判据」均落到具体判据编号（`P0 #n` / `X-n` / `C-n` / `S1-n` / `R3 ⑥` / `D-05` / `G-n` / `U-n` / `DRIFT-*`）。
   ⇒ **2026-10-30 第 4 轮修**：`GAP-10` 行原本是 **7 列**（多一格 ⇒ 后面各列整体错位）⇒ 已并回 6 列 ⇒ 全表 38 行**列数一致**（机器校验：列数 ≠ 6 的行 = 0）。
-- **6 类互不重叠**：A 类 3 条；证据缺口 15 条（含 1 条仓外不可核验 `GAP-03`）；环境受阻 5 条；真正需拍板 **5** 条（其中 `DEC-02` 按口径说明第 4 条**仅登记**；`DEC-04`/`DEC-05` 走 `CT-02` 定级路径）；暂缓 5 条；阶段一之外 6 条。
+- **6 类互不重叠**：A 类 3 条；证据缺口 15 条（含 1 条仓外不可核验 `GAP-03`）；环境受阻 6 条；真正需拍板 **5** 条（其中 `DEC-02` 按口径说明第 4 条**仅登记**；`DEC-04`/`DEC-05` 走 `CT-02` 定级路径）；暂缓 5 条；阶段一之外 6 条。
 - **只有第 1 类阻阶段一**；第 5 / 6 类均写明「依据 §1.1 ⑥ 第 4 条 ⇒ 不计入阶段一判定」或等价依据。
 - **本清单不含结论句**（无任何「已通过 / 已对齐」类断言）。
 - 🆕 **排期指针时效（2026-10-30 第 4 轮）** —— 已了结项 = `GAP-10` · `GAP-12` ⇒ 指向它们的指针**失效** ⇒ 补登 `GAP-13`（2 条 B 类）+ `GAP-14`（3 条 C 类）⇒ **派生层「真缺口 A/B 未排期」回到 0 是有据的**（此前那个 0 是**指针失效造成的假零**）。
