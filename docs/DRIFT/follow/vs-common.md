@@ -1302,6 +1302,12 @@ git diff --stat -- service/ # ⇒ 0 行
 > ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
 
 
+### lane W28
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| `S1-FOLLOW-013` | D（差异已消失 ⇒ 本条无待实现内容） | P3 | 否 | Go `go-zero@v1.10.2/rest/router/patrouter.go:71-74`（路径未命中且方法不匹配 ⇒ `pr.handleNotFound(w, r)`）＋ `go-zero@v1.10.2/rest/router/patrouter.go:93-99`（`handleNotFound` ⇒ `pr.notFound` 或 `http.NotFound(w, r)`）＋ `go-zero@v1.10.2/rest/engine.go:261`（`chn.Then(http.NotFoundHandler())` ⇒ 标准库 NotFoundHandler）＋ Go 标准库 `net/http/server.go:2358`（`NotFound` ⇒ `Error(w, "404 page not found", 404)`）＋ `net/http/server.go:2337`／`:2351-2354`（`Error` 写 `Content-Type: text/plain; charset=utf-8` ＋ `X-Content-Type-Options: nosniff` ＋ `fmt.Fprintln` ⇒ body = `"404 page not found\n"` = 18 ＋ 1 = **19 字节**）＋ 真源 `service/follow/api/internal/handler/routes.go:16-63`（8 条 `/follow/v1` 路由注册 ⇒ 未命中路径落到上面的 404 出口）vs RAG `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiFailurePathMatrixTest.java:417`（断言消息现写「…body 带尾随换行、全长 **19** 字节」⇒ **错数 20 已不存在**）＋ `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiFailurePathMatrixTest.java:427-434`（注释自述 2026-10-29 二次订正 ＋ 为何躲过第一轮自查）＋ 域内复扫 `grep -rnE "[0-9]+ ?字节" service/follow --include=*.java`（无 head ／ 无分页）⇒ 7 行命中，其中「20 字节」只剩 `:428` 那句**订正说明**（描述旧版本）⇒ 域内零残留 ⇒ 差异已消失（该错数 2026-10-29 已二次订正）⇒ 且断言本身一直按 body 字面量比（`:416`）＋ Content-Length 按实际字节数比（`:427`／`:440`）⇒ **从未影响测试判据**，只是**文案面** ⇒ 本条无待实现内容 | 2026-10-30 |
+
 ### lane W7
 
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |

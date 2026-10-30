@@ -555,3 +555,22 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTes
 | `S1-FOLLOW-001` 的**全仓统一方案 + `prometheus/settings.yml` scrape job** | 跨 8 个域 + 根级共享文件 ⇒ **不在本 lane 写权面**，且需**真进程 + Prometheus** 才能验 | 已核**本域侧**（端口 / `register-enabled` / starter-web / 探针就绪判据 `tools/metrics-probe/follow/run.sh:355,361`）⇒ 未独立改判 |
 | `S1-FOLLOW-004` 的**compose 编排** | 根级 `docker-compose.yaml` **不在本 lane 写权面** ⇒ 本 lane 只登记 | 已核**现状**（7 个 service ⇒ 无 follow 入口）⇒ 未独立改判 |
 | `S1-FOLLOW-005` 的**真启动 + Nacos 注册地址一致性** | 需**真 Nacos + 真进程** ⇒ 本轮**未起** | 已核**配置层**（`application.yml:143`）⇒ 未独立改判 |
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W28
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| `E2` | D（差异已消失 ⇒ 本域无待实现内容） | P3 | 否 | Go `service/follow/rpc/internal/metrics/metrics.go:13-42`（5 个 `follow_rpc_*` 指标：request_total ／ request_duration_seconds ／ relation_action_total ／ db_error_total ／ recommendation_size）＋ `service/follow/rpc/follow.go:28`（`metrics.InitMetrics()` ⇒ 注册进默认 prometheus registry）＋ `service/follow/rpc/etc/follow.yaml:20-27`（DevServer Enabled:true ／ Host:0.0.0.0 ／ Port:16065 ／ MetricsPath:/metrics ／ EnableMetrics:true）＋ 消费点 `go-zero@v1.10.2/core/service/serviceconf.go:77`（`devserver.StartAgent(sc.DevServer)`）→ `go-zero@v1.10.2/internal/devserver/server.go:45-48`（EnableMetrics ⇒ `handleFunc(MetricsPath, promhttp.Handler().ServeHTTP)`）→ `go-zero@v1.10.2/internal/devserver/server.go:67-75`（`http.ListenAndServe(addr)` ⇒ **独立端口** 16065 上真出 Prometheus 文本）vs RAG `service/follow/follow-rpc/pom.xml:167-174`（actuator ＋ micrometer-prometheus）＋ `service/follow/follow-rpc/pom.xml:214-217`（starter-web ⇒ servlet 载体）＋ `service/follow/follow-rpc/src/main/resources/application.yml:130-131`（`server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}`）＋ `service/follow/follow-rpc/src/main/resources/application.yml:193-207`（exposure include prometheus）＋ `service/follow/follow-rpc/src/main/resources/application.yml:211-212`（prometheus enabled）＋ `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/metrics/FollowRpcMetrics.java:42`／`:45`／`:48`／`:51`／`:54`（5 个同名 meter ＋ `:86-93`／`:156-163`／`:186-192`／`:207-209` 上报点）＋ 活体判据 `tools/metrics-probe/follow/run.sh:353-363`（就绪判据 = 真 GET `/actuator/prometheus` 得 200，否则 `die`）⇒ 台账前提「RAG 纯 gRPC 进程无 HTTP 口」已不成立（2026-10-29 G1 lane 落地 · DRIFT-FOLLOW-006 闭环；探针 2026-10-30 04:32 EXIT=0）⇒ 差异已消失 ⇒ 本域无待实现内容。残留四项**不并入本条**：① 暴露路径 Go `/metrics` ↔ RAG `/actuator/prometheus` ② RAG 多 8 条 `…_seconds_max` 增项 ③ Go 有 `/debug/pprof/*` 而 RAG 无 ⇒ 三项 follow 域台账已自判 P3/D；④ 全仓统一方案 ＋ scrape job 属跨域面（`prometheus/settings.yml:16-25` 只有 `user-api` 一个 job），已由同域 `S1-FOLLOW-001` 单独登记；⑤ 本条提到的同款 5 处（favorite-rpc ／ message-rpc ／ like-rpc ／ user-rpc ／ admin-rpc）属别的域，各域各判 | 2026-10-30 |

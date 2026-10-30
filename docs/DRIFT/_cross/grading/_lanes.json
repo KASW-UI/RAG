@@ -1724,5 +1724,232 @@
     "evidence": "B 静态"
    }
   ]
+ },
+ "W26": {
+  "轮": 4,
+  "条目": [
+   {
+    "id": "G4-1",
+    "dir": "DRIFT",
+    "domain": "comment",
+    "source": "DRIFT/comment/vs-common.md:77",
+    "title": "| **G4-1** | 🔴 **MyBatis-Plus 自动收集 `Interceptor[]` Bean 的机制** —— 全仓**无任何测试**证明 `@Import` 的 `DeadlineQueryTimeoutInjector` 真进了 MyBatis-Plus 执行链 | `service/common",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态",
+    "stage_now": "—",
+    "schedule_now": "GAP-12"
+   }
+  ]
+ },
+ "W27": {
+  "轮": 4,
+  "条目": [
+   {
+    "id": "F-1",
+    "dir": "DRIFT",
+    "domain": "favorite",
+    "source": "DRIFT/favorite/vs-common.md:223",
+    "title": "| **F-1** | **`U7` rpc 层整域双侧活体对拍**（错误码契约层已做成双侧对拍，**但那是 `favorite-common`，不是 rpc 层**；指标 result 语义只有单侧 Go 锚定 ＋ RAG 侧运行时守门） | 🔴 **仍开 —— 本域最大缺口** | 🟢 **G3（本域）** ⇒ ⚠",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针",
+    "stage_now": "—",
+    "schedule_now": "GAP-12"
+   },
+   {
+    "id": "F-2",
+    "dir": "DRIFT",
+    "domain": "favorite",
+    "source": "DRIFT/favorite/vs-common.md:224",
+    "title": "| **F-2** | **§5 交付物清单「第 0 步：组件真的启动一次」** —— `tools/ddl-parity-probe/favorite/run.sh` 的 RAG 侧是**用 `psql` 直接执行 Flyway 迁移脚本**（`run.sh:180-190` 逐个 `psql_q -d ragdb ",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 绿(0)",
+    "stage_now": "—",
+    "schedule_now": "GAP-12"
+   },
+   {
+    "id": "F-4",
+    "dir": "DRIFT",
+    "domain": "favorite",
+    "source": "DRIFT/favorite/vs-common.md:226",
+    "title": "| **F-4** | **P0 #8 的共享面半边**（根级 compose 的 `:?` ＋ 根 README 的 `.env.example`） | 🔴 **仍开**（**域侧那半已修**：`application.yml` 去明文默认值 ＋ `@PostConstruct verifyAccessSecret(",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针",
+    "stage_now": "—",
+    "schedule_now": "GAP-12"
+   },
+   {
+    "id": "G4-4",
+    "dir": "DRIFT",
+    "domain": "favorite",
+    "source": "DRIFT/favorite/vs-common.md:111",
+    "title": "| **G4-4** | 🟡 **A3 form 闸门：共享层的「轴 ② 拒成什么形状」判据对 favorite 不成立** ＋ **共享层内部两份文件自相矛盾** | `service/common/src/main/java/com/rag/common/http/GoStyleFormLimitMode.java",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态",
+    "stage_now": "—",
+    "schedule_now": "GAP-12"
+   },
+   {
+    "id": "L-4",
+    "dir": "DRIFT",
+    "domain": "favorite",
+    "source": "DRIFT/favorite/vs-common.md:87",
+    "title": "| **L-4** | 🔴 **补 favorite 域自己的 otel span ＋ `biz.*` 属性** | `favorite-api/.../service/*`（7 个 Service）＋ `favorite-rpc/.../service/*`（`FavoriteDomainService` / `Fa",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态",
+    "stage_now": "—",
+    "schedule_now": "GAP-10,GAP-12"
+   }
+  ]
+ },
+ "W29": {
+  "轮": 4,
+  "条目": [
+   {
+    "id": "FB-04",
+    "dir": "DRIFT",
+    "domain": "global",
+    "source": "DRIFT/global/vs-common.md:910;DRIFT/like/vs-common.md:179;DRIFT/like/vs-common.md:196",
+    "title": "#### 4.10.9 🔴 G2 派单 **FB-04**（A9）—— **已落码**：业务 handler 执行期能拿到**当前 server span**",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态",
+    "stage_now": "—",
+    "schedule_now": "GAP-12"
+   }
+  ]
+ },
+ "W30": {
+  "轮": 4,
+  "条目": [
+   {
+    "id": "D-2",
+    "dir": "DRIFT",
+    "domain": "like",
+    "source": "DRIFT/like/vs-common.md:68",
+    "title": "| D-2 | 🔴 **A9：like 域 span 属性全缺**（阶段 1 新发现） | RAG `service/like` 各子模块 `src/main` 内 `AttributeKey`/`setAttribute`/`Span.fromContext` **零命中**<br>Go 侧落点：`getlikest",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态",
+    "stage_now": "—",
+    "schedule_now": "GAP-12"
+   },
+   {
+    "id": "D-6",
+    "dir": "DRIFT",
+    "domain": "like",
+    "source": "DRIFT/like/vs-common.md:73",
+    "title": "| D-6 | 🆕 **G3 预告（2026-10-27）· 删除本域的 MyBatis-Plus 排序桥** —— ⛔ **带闸门：必须等 G4 的共享层桥落码后才删** | 本域持有 `service/like/like-rpc/src/main/java/com/rag/like/like/rpc/config/",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态",
+    "stage_now": "—",
+    "schedule_now": "GAP-12"
+   },
+   {
+    "id": "D-7",
+    "dir": "DRIFT",
+    "domain": "like",
+    "source": "DRIFT/like/vs-common.md:72",
+    "title": "| D-7 | 🔴 **阶段 2 新发现：like-api 的「下游 gRPC status → 业务码」映射与 Go 不同**（A4 轴）| **Go 侧**（`service/like/api/internal/logic/like/*.go`，6 个 logic 同形）：`st, ok := status.Fro",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态",
+    "stage_now": "—",
+    "schedule_now": "GAP-12"
+   },
+   {
+    "id": "FB-05",
+    "dir": "DRIFT",
+    "domain": "like",
+    "source": "DRIFT/like/vs-common.md:109",
+    "title": "### 🆕 FB-05 · A1「Redis 调用不感知 deadline」在 like 域**成立**（global 台账 **E66**）⇒ 附本域调用点清单",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态",
+    "stage_now": "—",
+    "schedule_now": "P2-T02,P2-T06 ｜ GAP-12"
+   }
+  ]
+ },
+ "W31": {
+  "轮": 4,
+  "条目": [
+   {
+    "id": "D-4",
+    "dir": "DRIFT",
+    "domain": "message",
+    "source": "DRIFT/message/vs-common.md:72",
+    "title": "| D-4 | 🆕 **G3 预告（2026-10-27）· 删除本域的 MyBatis-Plus 排序桥** —— ⛔ **带闸门：必须等 G4 的共享层桥落码后才删** | 本域持有 `service/message/message-rpc/src/main/java/com/rag/message/message",
+    "status": "🔴 未闭合",
+    "evidence": "B 静态",
+    "stage_now": "—",
+    "schedule_now": "GAP-12"
+   },
+   {
+    "id": "UNRESOLVED-005",
+    "dir": "DRIFT",
+    "domain": "message",
+    "source": "DRIFT/message/api.md:1097",
+    "title": "### UNRESOLVED-005",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态",
+    "stage_now": "—",
+    "schedule_now": "GAP-12"
+   }
+  ]
+ },
+ "W32": {
+  "轮": 4,
+  "条目": [
+   {
+    "id": "U-1",
+    "dir": "DRIFT",
+    "domain": "users",
+    "source": "DRIFT/users/admin/_shared.md:211;DRIFT/users/admin/rpc.md:1475",
+    "title": "| **U-1** | 🔴 `users/user` 的 **DRIFT-USERRPC-V-001 结论被证伪** ⇒ user-rpc 的「status 为 null ⇒ fail-closed 抛 INTERNAL」**与 Go 相反** | users/user owner | `admin/rpc.md` §",
+    "status": "🔴 未闭合",
+    "evidence": "C 无指针",
+    "stage_now": "—",
+    "schedule_now": "GAP-12"
+   }
+  ]
+ },
+ "W25": {
+  "轮": 4,
+  "条目": [
+   {
+    "id": "G4-4",
+    "dir": "DRIFT",
+    "domain": "article",
+    "source": "DRIFT/article/vs-common.md:277",
+    "title": "| **G4-4** | 🟡 **A9 轴定义的措辞缺陷**（共享面 `_cross`） | `docs/DRIFT/_cross/domain-common-lanes.md` 的 A9 行 | 轴定义写「span 属性 **`audit.*`**」，实测：**共享层用 `sea.*`**（`Observabilit",
+    "status": "🟡 部分闭合",
+    "evidence": "B 静态",
+    "stage_now": "—",
+    "schedule_now": "GAP-12"
+   }
+  ]
+ },
+ "W28": {
+  "轮": 4,
+  "条目": [
+   {
+    "id": "E2",
+    "dir": "DRIFT",
+    "domain": "follow",
+    "source": "DRIFT/follow/stage1-admission.md:377",
+    "title": "| **E2** | **`follow-rpc` 的 5 个 `follow_rpc_*` 指标无抓取出口**（Go DevServer `:16065/metrics` 有 · RAG 纯 gRPC 进程无 HTTP 口） | follow 域（**同款 5 处**：`favorite-rpc` / `messag",
+    "status": "🟡 部分闭合",
+    "evidence": "C 无指针",
+    "stage_now": "—",
+    "schedule_now": "GAP-09,GAP-12"
+   },
+   {
+    "id": "S1-FOLLOW-013",
+    "dir": "DRIFT",
+    "domain": "follow",
+    "source": "DRIFT/follow/vs-common.md:823",
+    "title": "| `S1-FOLLOW-013` | `service/follow/follow-api/src/test/java/com/rag/follow/follow/api/FollowApiFailurePathMatrixTest.java:417` | **本轮新增文件自己的断言消息也写了「全长 20 字节」**",
+    "status": "🟡 部分闭合",
+    "evidence": "A 活体 · 混(0/2)",
+    "stage_now": "—",
+    "schedule_now": "GAP-12"
+   }
+  ]
  }
 }

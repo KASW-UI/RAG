@@ -816,6 +816,12 @@ git diff --stat -- service/        # ⇒ 0 行
 > ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
 
 
+### lane W25
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| G4-4 | C（阶段 2 最终工程建设项 · 共享面文档订正） | P3 | 否 | Go `service/common/observability/observability.go:24-29`（共享层六个 attribute key = `sea.error.kind` / `sea.biz_code` / `sea.biz_msg` / `sea.timeout` / `sea.slow` / `sea.duration_ms` ⇒ **共享层是 `sea.*`，不是 `audit.*`**）＋ `service/comment/rpc/internal/logic/update_subject_state_logic.go:53-56`（`audit.operator_id` / `audit.target_type` / `audit.target_id` / `audit.target_state` ⇒ `audit.*` 是 **comment 域**的形状 ⇒ **article 台账原文「`audit.*` 只存在于 users/admin 域」漏了 comment 域**）＋ `service/favorite/api/internal/logic/favorite/delete_favorite_logic.go:43-44`（`biz.user_id` / `biz.favorite_id` ⇒ favorite = `biz.*`）＋ `service/article/rpc/internal/logic/create_article_logic.go:45-46`（`author_id` / `title` ⇒ **article 域业务 span 是裸名，无任何前缀**）vs RAG `docs/DRIFT/_cross/domain-common-lanes.md:85`（A9 行**至今仍写**「span 属性（`audit.*`）」⇒ 措辞缺陷**未被订正**）＋ `service/common/src/main/java/com/rag/common/observability/ObservabilityConstants.java:67`（`sea.error.kind` ⇒ RAG 共享层与 Go 同名同值 ⇒ **错的只有轴定义那一行**）＋ `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/service/ArticleSpans.java:175`（`ATTR_AUTHOR_ID = "author_id"` ⇒ RAG article 侧裸名，与 Go `create_article_logic.go:45` 逐字一致）＋ `service/article/article-rpc/src/test/java/com/rag/article/article/rpc/ArticleSpanWiringTest.java:103`（「没有 `audit.` 前缀（那是 comment 域的形状）」⇒ RAG 侧已按裸名落码并钉死）＋ `docs/DRIFT/article/vs-common.md:48`（本域 A9 行已自订正「属性名是 `sea.*` … 不是 `audit.*`」⇒ **对 article = N/A，article 域自身无漂移**）⇒ **差异仍成立**（缺陷只在共享面 `_cross` 文档的**措辞层**，运行时零影响 ⇒ 落点 = `docs/DRIFT/_cross/domain-common-lanes.md` = 共享面 ⇒ 合并收口执行者订正；G4 已登记 `docs/DRIFT/global/vs-common.md:259`（建议项 2）与 `:431`（处置表）⇒ 本域不重复派单）｜不阻断阶段一（零运行时影响 · 只影响 A9 轴的**判定口径**，10 份域台账据此判「A9 已对齐」）｜修法已由 G4 写成可执行的分层表述（共享层 `sea.*` 两侧一致 ＋ 域特有按域各异：comment=`audit.*` · favorite=`biz.*` · admin=`audit.*` · article=裸名）⇒ 属阶段二最终工程建设项 | 2026-10-30 |
+
 ### lane W4
 
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |

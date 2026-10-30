@@ -18,6 +18,10 @@ C-6	comment
 CD-7	global
 CF-018	common
 D-015	users
+D-2	like
+D-4	message
+D-6	like
+D-7	like
 DRIFT-001	article
 DRIFT-003	common
 DRIFT-018	global
@@ -58,6 +62,7 @@ DRIFT-USERRPC-V-016	users
 DRIFT-USERSCOMMON-006	users
 E10	global
 E18	global
+E2	follow
 E20	global
 E22	global
 E23	global
@@ -93,12 +98,17 @@ E68	favorite
 E69	global
 E70	global
 E9	global
+F-1	favorite
+F-2	favorite
 F-3	article
+F-4	favorite
 F-5	favorite
 F-6	favorite
 FB-01	global
 FB-02	global
 FB-03	global
+FB-04	global
+FB-05	like
 FB-G2-03	message
 FB-G2-04	message
 FIX-06	article
@@ -108,6 +118,7 @@ FIX-11	article
 FIX-13	article
 FIX-17	article
 G-HOT-001	hot
+G4-1	comment
 G4-10	article
 G4-11	article
 G4-12	article
@@ -119,6 +130,8 @@ G4-17	comment
 G4-19	hot
 G4-2	article
 G4-3	article
+G4-4	article
+G4-4	favorite
 G4-5	article
 G4-6	article
 G4-7	article
@@ -133,6 +146,7 @@ G4-A4-06	global
 G4-A4-07	global
 H-4	hot
 L-10	article
+L-4	favorite
 L-6	article
 L-7	article
 L-8	article
@@ -153,6 +167,7 @@ PITFALL-FOLLOW-005	follow
 Round-2	users
 S-3	article
 S-5	article
+S1-FOLLOW-013	follow
 SD-04	message
 SD-2026-10-23-09	global
 SD-2026-10-24-10	global
@@ -177,9 +192,11 @@ U-03	like
 U-05	like
 U-06	like
 U-08	like
+U-1	users
 U-2	users
 U-9	article
 U-9b	article
+UNRESOLVED-005	message
 UNRESOLVED-ADMINAPI-005	users
 UNRESOLVED-MSG-V-001	_cross
 UNRESOLVED-USERSCOMMON-004	users

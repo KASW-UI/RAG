@@ -2047,10 +2047,12 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a("")
     a("### 1.1 一句话结论")
     a("")
-    a(f"> **三目录**有 **{stats['n_problem_ids']}** 个带状态的问题项，")
-    a(f"> 其中只有 **{stats['n_staged']}** 个（**{stats['n_staged_pct']}%**）带阶段归属，")
-    a(f"> **{stats['n_unstaged_open']}** 条是**开放状态**（🔴 未闭合 / 仍生效 / ⏳ 未签字）却**没有阶段归属** ——")
-    a("> **它们既不在施工单里，也没有明确推给阶段 2**。这就是「台账不能当施工单」的量化原因。")
+    a(f"> **三目录**有 **{stats['n_problem_ids']}** 个带状态的问题项"
+      f"（**{stats['n_absorbed_ids']}** 个被同源组合并吸收 ⇒ 派生表实收 **{stats['n_rows_ids']}** 个编号），")
+    a(f"> 其中 **{stats['n_staged']}** 个（**{stats['n_staged_pct']}%**）**已定级**（带阶段归属），")
+    a(f"> 剩下 **{stats['n_unstaged']}** 个**未定级** —— 其中**开放状态**（🔴 未闭合 / 🟡 部分闭合 / 仍生效 / ⏳ 未签字）"
+      f"又**没有阶段归属**的只有 **{stats['n_unstaged_open']}** 条。")
+    a("> ⇒ **「发现了却没进施工单」已经清零**；这正是「台账能不能当施工单」的量化答案。")
     a(f"> 证据面上：有活体证据的 **{stats['n_a_total']}** 条里，**只有 "
       f"{stats['a_sub'].get('A 活体 · 绿(0)', 0)} 条**的活体证据是**绿**（支持当前结论），")
     a(f"> 其余 **{stats['n_a_total'] - stats['a_sub'].get('A 活体 · 绿(0)', 0)}** 条的证据本身是"
@@ -2387,7 +2389,8 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a("   **「跑绿 ≠ 对」** 在这一层同样成立：U3 的 A 档只证明**那条探针的断言**成立，")
     a("   **不证明本条目结论的全量成立**。")
     a("2. **U5 拿不到定级 ⇒ 写 `—`** —— 不是「不重要」，是**还没定级**。")
-    a(f"   本轮有 **{stats['n_unstaged']}** 条属这一档 ⇒ 它们**不进施工单**，除非先定级。")
+    a(f"   本轮有 **{stats['n_unstaged']}** 个编号属这一档（派生表 {stats['n_rows_ids']} 个编号里的其余部分）")
+    a(f"   ⇒ 它们**不进施工单**，除非先定级；其中**开放状态**的只有 **{stats['n_unstaged_open']}** 条。")
     a("3. **U8 的强链只认「指针落在条目段内」或「任务块里直接写了编号」** ——")
     a("   **既没写编号也没给指针**的语义关联 ⇒ **不可见**（这是本层的固有上限）。")
     a("4. **`CASE-*` 被排除** ⇒ 它们是**测试场景矩阵行**（证据层），不是差异条目；")
@@ -2468,11 +2471,10 @@ def main() -> int:
     stats["n_a_total"] = sum(v for k, v in stats["a_sub"].items())
     stats["stage_counts"] = collections.Counter(r["stage"] for r in rows)
     stats["prio_counts"] = collections.Counter(r["prio"] for r in rows)
-    stats["n_staged"] = stats["n_problem_ids"] - stats["stage_counts"].get("—", 0) \
-        - stats["stage_counts"].get("N/A（不适用）", 0)
-    stats["n_staged_pct"] = (stats["n_staged"] * 100 // max(stats["n_problem_ids"], 1))
-    stats["n_unstaged"] = stats["stage_counts"].get("—", 0)
-    stats["n_meta"] = stats["stage_counts"].get("N/A（不适用）", 0)
+    # ⚠️ **2026-10-30 · 修正**：这两个指标原先在**下面**（编号级）才算，但那一段的
+    #   公式把「已定级」与「未定级」**装反了** ⇒ 打印出来的「已定级 X（Y%）」其实是
+    #   **未定级**的数。**指标曾整体反号**（第 1~4 轮报告的「已定级 38%」实为未定级 38%）。
+    #   ⇒ 此处**不再**算这两个指标（避免再次被下面覆盖 ⇒ 两处口径打架）。
     open_states = ("🔴 未闭合", "🟡 部分闭合", "仍生效", "⏳ 未签字")
     # ⚠️ **指标一律按「编号级」聚合**（2026-10-30）——
     #   条目**判定**按 (编号, 域)（消除跨域串味）⇒ 同一编号会有**多行**；
@@ -2514,9 +2516,21 @@ def main() -> int:
     _staged_ids = {r["id"] for r in rows if r["stage"] != "—"}
     # ⇒ 「元教训（N/A）」按编号级：**只有** N/A 的才算元教训（与已定级互斥）
     _meta_ids = {r["id"] for r in rows if r["stage"] == "N/A（不适用）"} - _staged_ids
-    stats["n_staged"] = stats["n_problem_ids"] - len(_staged_ids) - len(_meta_ids)
-    stats["n_staged_pct"] = (stats["n_staged"] * 100 // max(stats["n_problem_ids"], 1))
-    stats["n_unstaged"] = stats["n_problem_ids"] - stats["n_staged"] - len(_meta_ids)
+    # ⚠️ **2026-10-30 · 修正（指标装反 + 分子分母不同源）**
+    #   ① **装反**：原式 `n_staged = n_problem_ids − |已定级编号| − |元教训编号|`
+    #      算出来的是**未定级**的数，却当成「已定级」打印 ⇒ 方向反了。
+    #      （实测症状：第 4 轮定级 17 条后，「已定级」反而从 447 掉到 431。）
+    #   ② **不同源**：`n_problem_ids`（1171）来自**合并前**的 `problems` 扫描；
+    #      而 `rows` 是**合并后**的（同编号同域 ⇒ 合并成一行；同源组 ⇒ 合并到组代表）
+    #      ⇒ 派生表实收 **1152** 个编号，另有 **19** 个编号被**同源组合并吸收**
+    #      （成员编号的行被并进组代表行 ⇒ 成员编号在派生表里**不再独立出现**）。
+    #      ⇒ 分子分母必须**同源** ⇒ 一律以 `rows` 的编号集为准。
+    _row_ids = {r["id"] for r in rows}
+    stats["n_rows_ids"] = len(_row_ids)
+    stats["n_absorbed_ids"] = stats["n_problem_ids"] - len(_row_ids)
+    stats["n_staged"] = len(_staged_ids)
+    stats["n_staged_pct"] = (stats["n_staged"] * 100 // max(len(_row_ids), 1))
+    stats["n_unstaged"] = len(_row_ids) - stats["n_staged"] - len(_meta_ids)
     stats["n_meta"] = len(_meta_ids)
 
     print("── 派生层统计 ──")
@@ -2530,8 +2544,10 @@ def main() -> int:
     print(f"  阶段归属                " + " · ".join(f"{k} {v}" for k, v in sorted(stc.items())))
     unc = sum(1 for r in rows if r["schedule"] == "未排期")
     print(f"  未排期                  {unc:5d}")
-    print(f"  已定级                  {stats['n_staged']:5d} / {stats['n_problem_ids']} ({stats['n_staged_pct']}%)")
-    print(f"  未定级且状态开放        {stats['n_unstaged_open']:5d}   ← 「发现了但没进施工单」")
+    print(f"  已定级                  {stats['n_staged']:5d} / {stats['n_rows_ids']} ({stats['n_staged_pct']}%)"
+          f"   ← 分母 = 派生表编号数（另有 {stats['n_absorbed_ids']} 个编号被同源组合并吸收）")
+    print(f"  未定级                  {stats['n_unstaged']:5d} / {stats['n_rows_ids']}"
+          f"   ← 其中**开放状态**的 {stats['n_unstaged_open']} 条 = 「发现了但没进施工单」")
     print(f"  状态冲突（合并组内）      {stats['n_conflict']:5d}"
           f"   ← 其中「同源组」{stats.get('n_conflict_group', 0)} 条 = 真缺陷（台账两边没同步）")
     print(f"  真缺口 A/B 类未排期     {stats['n_gap_ab']:5d}   ← 阶段一范围内的漏排")

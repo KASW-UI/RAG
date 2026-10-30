@@ -1621,3 +1621,22 @@ git diff --stat -- service/ # ⇒ 0 行
 3. **不声称触发器已对齐** —— 两侧各 0 ⇒ 「无对象可比」。
 4. **不声称数据层已对齐** —— 本节是 **schema 层**。
 5. **不写共享面** —— `docs/DRIFT/_cross/**` · `docs/DRIFT/global/**` · `docs/PhaseGoal-judge.md` · `docs/RoundPlan/**` **本 lane 一律不写**（合并后由**合并收口执行者**统一更新）⇒ 例如 §D.4 残留 ② 的索引差异在 `docs/DRIFT/global/lanes/L3-ddl.md` 有**共享面**的登记，本节**只复述、不修改**该文件。
+
+## 阶段归属定级附录（2026-10-30 · Go 对照）
+
+> 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
+> **权威来源 = 叠加层**（本节是它的镜像，不另立权威）。
+> **判据 = 逐条与 Go 源码对比**（[`docs/twoStage.md`](../../twoStage.md) §10 · A-D 阶段归属 + P0-P3 严重程度）。
+> **纪律**：原值一律保留；本节只**追加**，不改任何既有结论。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层扫描时**不把它当条目**（保留区机制）。
+>
+> ⚠️ **状态订正提示（2026-10-30 · Go 对照）**：本节「依据」列结论为
+> **「差异已消失」**的条目，其台账**既有状态标记（如 🔴 未闭合）已过期**
+> ⇒ **以本节为准**；按「原值一律保留」纪律，**既有标记不回改**。
+
+
+### lane W31
+
+| 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
+|---|---|---|---|---|---|
+| `D-4` | D（差异已消失 ⇒ 无待实现内容） | P3 | 否 | Go `service/message/rpc/internal/model/db.go:31`（`db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})` ⇒ Go 侧 DB **显式构造 ＋ 显式注入** ⇒ **不存在**「自动配置求值顺序」这个概念 ⇒ 排序桥在 Go 侧**无对应物**，是纯表达层 workaround）＋ Go `service/message/rpc/internal/model/message.go:58`（`db := query.Order("created_at desc")` ⇒ 排序语义由查询自身承担，对应 RAG `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/mapper/NotificationMapper.java:47` 的 `w.orderByDesc(NotificationEntity::getCreatedAt)`）vs RAG `service/common/src/main/java/com/rag/common/persistence/MybatisPlusOrderingBridgeAutoConfiguration.java:95-97`（`@AutoConfiguration(afterName=…DataSourceAutoConfiguration, beforeName=…MybatisPlusAutoConfiguration)`）＋ `:98-99`（**类体刻意为空、不注册任何 bean** ⇒ 零行为面）＋ 注册行 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:4` ＋ 依赖面 `service/message/message-rpc/pom.xml:65-66`（`com.rag:common` ⇒ 共享层那份在 message-rpc 的 classpath 上）⇒ ⇒ **域侧那份已不在**：`git log --diff-filter=D` 实测 commit `2016fa6d`（G2 第十七轮）删掉的正是 D-4 点名的两件（域侧桥类 ＋ 整份单行 `imports`）；`service/message/message-rpc/src/main/java/com/rag/message/message/rpc/config/` 现仅剩 `MessageProperties.java`；`git ls-files service/message/message-rpc/src/main/resources/META-INF/` **命中 0**；全仓 `find` `MybatisPlusOrdering*`（排除 target）**只剩共享层那 1 份** ⇒ ⇒ 第十七轮 ③ 点名的本域残留（「产物层无人守」）也已闭合：RAG `service/message/message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcArtifactClasspathGateTest.java:137`（`fatJarMustCarrySharedLayerOrderingBridge`）＋ `:93`（期望值取共享层桥全限定名字面量）＋ `:173`（`assertTrue(imports.contains(SHARED_LAYER_ORDERING_BRIDGE), …)`）＋ `:288`（构建带 `-am` ⇒ reactor 产当轮 `service/common` jar）⇒ ⇒ **差异已消失**（域侧冗余桥已删、闸门已解除、产物层证据已在）⇒ ⇒ 本条**无待实现内容** ⇒ 归 D；P3（该桥**不注册任何 bean** ⇒ 零行为面，且已被收编消解）· **不阻断阶段一** | 2026-10-30 |
