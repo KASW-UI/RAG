@@ -123,6 +123,16 @@ class AdminRpcPrometheusCarrierGateTest {
     @DynamicPropertySource
     static void httpPort(DynamicPropertyRegistry registry) {
         registry.add("server.port", RealTomcatPort::pick);
+        // ⚠️ **必须把 gRPC 业务口覆盖成 0**（= 随机口）——
+        //   本测试**刻意不排除** devh 的 `GrpcServerAutoConfiguration`：
+        //   排除它 = 连带拆掉它提供的 `GrpcServerProperties` / `GrpcServiceDiscoverer` /
+        //   `GlobalServerInterceptorRegistry` 三个 bean ⇒ 而 `GrpcServerFactoryAutoConfiguration`
+        //   又 @Autowired 后两个 ⇒ ⇒ 连锁 `NoSuchBeanDefinitionException` ⇒ 上下文起不来。
+        //   ⚠️ **实测连着踩了三层**（2026-10-31 · 合并收口执行者跑载体门时）：
+        //   ① `GrpcServerProperties` → ② `GrpcServiceDiscoverer` → ③ `GlobalServerInterceptorRegistry`
+        //   ⇒ ⇒ **保持生产装配面不动**，改用「端口置 0」避开与本机已跑服务抢口。
+        //   ⇒ 域侧业务口 = 8081（AdminRpcApplication）⇒ ⇒ 置 0 ⇒ 绑随机口。
+        registry.add("grpc.server.port", () -> 0);
     }
 
     @LocalServerPort
@@ -152,51 +162,11 @@ class AdminRpcPrometheusCarrierGateTest {
      * ＋ 显式 {@code @Import}）⇒ ⇒ 只装被测机制需要的件。
      */
     @SpringBootConfiguration
-    @EnableAutoConfiguration(exclude = {
-            // ⚠️ **必须排除 devh 的 gRPC server 自动配置**：
-            //    devh 3.1.0 的 `GrpcServerAutoConfiguration` **无条件**起 gRPC server
-            //    （它的 `spring-configuration-metadata.json` 里**没有** `grpc.server.enabled`
-            //    ⇒ ⇒ 没有「关掉 gRPC」这个开关）⇒ ⇒ 不排除 ⇒ 它会去绑域侧业务口 8081
-            //    ⇒ ⇒ 与本机已跑的服务抢口 ⇒ BindException ⇒ 上下文起不来。
-            //    ⇒ ⇒ 本测试**不验 gRPC**（验的是 HTTP 载体与暴露面）⇒ ⇒ 排除掉最干净
-            //    ⇒ ⇒ 且**不需要**任何 gRPC 端口（也就不会碰「OS 盲选口」那条红线）。
-            net.devh.boot.grpc.server.autoconfigure.GrpcServerAutoConfiguration.class,
-            // ⚠️ **还必须排除 devh 的 server 工厂自动配置**（2026-10-31 实测踩到）：
-            //    `GrpcServerFactoryAutoConfiguration` 的 `@ConditionalOnClass` 认的是
-            //    `io.grpc.netty.shaded.io.netty.channel.Channel` 与
-            //    `io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder`
-            //    ⇒ ⇒ 这两个类在本域 classpath 上（`grpc-server-spring-boot-starter` 传递引入
-            //    `grpc-netty-shaded`）⇒ ⇒ 这个自动配置**照样激活**
-            //    ⇒ ⇒ 它的 `shadedNettyGrpcServerFactory` bean 要 `GrpcServiceDiscoverer`
-            //    ⇒ ⇒ 而那个 bean 是**被排除的**
-            //    `GrpcServerAutoConfiguration.defaultGrpcServiceDiscoverer()` 提供的
-            //    ⇒ ⇒ `NoSuchBeanDefinitionException` ⇒ **上下文起不来** ⇒ 4 条用例全 Error。
-            //    ⇒ ⇒ 本测试**不验 gRPC** ⇒ ⇒ 排除掉最干净 ⇒ ⇒ 且不需要任何 gRPC 端口。
-            net.devh.boot.grpc.server.autoconfigure.GrpcServerFactoryAutoConfiguration.class,
-    })
+    @EnableAutoConfiguration
     @Import(AdminRpcMetrics.class)
     static class MinimalCarrierApp {
 
-        /**
-         * 🔴 **必须自己补一个** {@link net.devh.boot.grpc.server.config.GrpcServerProperties} bean。
-         *
-         * <p>⚠️ **为什么**：被排除的 {@code GrpcServerAutoConfiguration} 里带
-         * {@code @Bean defaultGrpcServerProperties()} ⇒ ⇒ 排除它 ⇒
-         * {@code GrpcServerProperties} 这个 bean 就没了 ⇒ ⇒ 而 devh 的
-         * {@code GrpcMetadataNacosConfiguration} 等**其它**自动配置
-         * （它们**不**依赖被排除的那个）**@Autowired 这个 bean**
-         * ⇒ ⇒ 少一个就 {@code NoSuchBeanDefinitionException} ⇒ **上下文起不来**
-         * （2026-10-31 实测：只排除 server 自动配置 ⇒ 报「No qualifying bean of type
-         * 'net.devh.boot.grpc.server.config.GrpcServerProperties}' ⇒ 4 条用例全 Error）。
-         *
-         * <p>⇒ ⇒ 这里补一个**空壳**（走构造器默认值，不做属性绑定）
-         * ⇒ ⇒ 目的**只是**让那些自动配置能完成装配
-         * ⇒ ⇒ 它**不会**被用来起 gRPC server（那个自动配置已被排除）。
-         */
-        @Bean
-        net.devh.boot.grpc.server.config.GrpcServerProperties grpcServerProperties() {
-            return new net.devh.boot.grpc.server.config.GrpcServerProperties();
-        }
+
     }
 
     // ====================================================================================

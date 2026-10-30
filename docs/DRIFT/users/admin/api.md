@@ -2464,6 +2464,69 @@ Sea-RideTheWind_golang/service/common/observability/http.go:88  → http.Error(w
 - **守门**：域级 `BlindPortGateTest`（落在 **user-rpc**，`service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/support/BlindPortGateTest.java`）**5 条** ⇒ 一并覆盖本组件 ⇒ **本组件不单独建守门**（避免两份规则漂移）。
 - **边界**：**本组件生产代码零改动**（全部落在 `src/test/java`）⇒ ⇒ **不构成 Go 对照项**（Go 侧无对应物 ⇒ 无对照义务）。
 
+## ✅ `DRIFT-ADMINAPI-014` · 出向 admin-rpc **缺 2s 客户端超时** ⇒ 失败只能由**服务端**兜底（2026-10-30 · G1 lane · 域侧自修 · 已落码）
+
+> **证据强度 = L3**（Go ↔ RAG 源码逐条对照 ＋ 本域**真跑**守门 ＋ **变异实测**）
+> ⚠️ **未做双侧活体对拍** ⇒ **不标 L4** ⇒ 「已修」读作「**在 L3 强度下一致**」，不是已闭环（AGENTS.md §〇）。
+
+### 一、现象
+
+Go 侧 `admin-api → admin-rpc` 的出向调用**恒带 2s 客户端超时**；RAG 侧 `devh` 注入的是**裸 stub**
+（**无 call deadline**）⇒ ⇒ **缺「客户端侧」收口**：失败只能由**服务端**拦截器或本进程 HTTP 预算兜底
+⇒ ⇒ 失败**归因**与**收口时刻**都可能与 Go 不同。
+
+### 二、Go 侧出处（逐条 · 本轮亲自读过）
+
+| # | 出处 | 事实 |
+|---|---|---|
+| G1 | `go-zero@v1.10.2/zrpc/config.go:31` | `RpcClientConf.Timeout int64 `json:",default=2000"` ` ⇒ **默认 2000ms** |
+| G2 | `go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25` | `ctx, cancel := context.WithTimeout(ctx, t)` ⇒ **取更早者** ⇒ 出向 deadline = min(入站 ctx 剩余, 2s) |
+| G3 | `service/user/admin/api/etc/admincenter.yaml:35-39` | `AdminRpc:` 段**只有 `Etcd`**、**无 `Timeout`** ⇒ ⇒ 走 G1 默认值 |
+| G4 | `service/user/admin/api/internal/logic/admin/loginlogic.go:43` | `l.svcCtx.AdminRpc.Login(l.ctx, rpcReq)` ⇒ 出向调用**继承 handler 的 ctx** |
+| G5 | `service/user/admin/api/internal/logic/admin/loginlogic.go:47-57` | `st, _ := status.FromError(err)` ⇒ `switch st.Code()`：`NotFound` → `ErrorUserNotExist`(1003)／`Internal` → `ErrorServerCommon`(5001)／`Unauthenticated` → `ErrorLoginWrong`／**`default` → `CodeServerBusy`(1015)** ⇒ `DeadlineExceeded` 落 **default → 1015** |
+| G6 | `service/user/common/errmsg/errmsg.go:6` / `:41` | `CodeServerBusy = 1015` ／ 文案 `服务繁忙` |
+| G7 | `service/user/admin/api/internal/handler/admin/loginhandler.go:27-31` | `httpx.OkJson(w, &response.Response{Code: code, ...})` ⇒ **HTTP 200** ＋ 业务码在 body 里 |
+| G8 | `service/user/admin/api/admincenter.go`（同款 `DisableNativeRestTimeout` ＋ `NewHTTPMiddleware`）＋ `service/common/observability/http.go:30-34` ＋ `:53-56` | `DisableNativeRestTimeout(&c.RestConf)` ⇒ 读 `conf.Timeout`（go-zero `rest/config.go:55` = `Timeout int64 json:",default=3000"` ⇒ **3000ms**）并把 `conf.Middlewares.Timeout = false` ⇒ 随后 `NewHTTPMiddleware(name, httpTimeout, …)` 在 `http.go:53-56` 做 `context.WithTimeout(r.Context(), timeout)` ＋ `r.WithContext(ctx)` ⇒ ⇒ **3s 预算被传进业务 ctx** ⇒ ⇒ **Go 的出向 deadline = min(剩余 3s ctx, 2s 客户端超时)** ⇒ ⇒ 与 RAG 的 `capByClientTimeout(applyTo(stub))` **逐字同形**<br>⚠️ **2026-10-31 订正 · 两半分工（别读成「applyTo 是冗余」）**：出向 deadline = min(**请求剩余**, **2s 客户端上界**) —— 「请求剩余」那半由**共享层** `GoStyleOutboundDeadlineInterceptor` 提供（它是 `@GrpcGlobalClientInterceptor` ⇒ 接在 devh channel 上 ⇒ **裸 stub 也继承**）⇒ ⇒ 「2s 客户端上界」那半**当前只有域侧 `applyTo` 能提供**（共享层「客户端硬上界」**默认不启用**：`GoStyleProtectionProperties.OutboundDeadline#getCapMillis()` **默认 0**）⇒ ⇒ ⇒ **本处 `applyTo` 不是冗余**（＝ `P2-T04`「补 2000ms 硬上界」的域侧落点）· **也不是「出向不继承请求 deadline」那一族的闭合条件**（那一族已由共享层拦截器覆盖） |
+| G9 | `service/common/observability/http.go:80-88` ＋ `:22` | 3s 预算耗尽 ⇒ **503** ＋ `httpTimeoutBody = "Request Timeout"` ⇒ ⇒ **这正是 RAG 修前形态②的对外形状** |
+
+### 三、⚠️ 差异的准确边界（不要读宽）
+
+RAG 侧下游 `admin-rpc` **自己**带服务端 2s 超时
+（`service/users/admin/admin-rpc/src/main/resources/application.yml:191` = `rpc-timeout: 2s`；
+接线在位由 `python3 tools/difftest/check-grpc-interceptor-wiring.py` = **EXIT=0** 实测确认）⇒ ⇒
+
+| 形态 | Go（真源） | RAG **修前** | RAG **修后** |
+|---|---|---|---|
+| **① 请求到达下游、业务挂死** | 客户端 2s 收口 ⇒ G5 的 default ⇒ **`HTTP 200` + `1015`** | **服务端** 2s 收口 ⇒ `DEADLINE_EXCEEDED` ⇒ 本域映射（`AdminLoginService.java:65-71` 的 default ＋ `GlobalExceptionHandler.mapRPCStatusToCode` 的 default）⇒ **1015** ＋ `:77` `HttpStatus.OK` ⇒ **`HTTP 200` + `1015`** | 同左 ⇒ **与 Go 同形** |
+| **② 请求没到达下游**（进程不可达 / 网络黑洞 / 连接建好但无响应） | 出向 deadline = **min(剩余 3s ctx, 2s 客户端) = 2s** ⇒ 客户端侧收口 ⇒ **`HTTP 200` + `1015`** | **无任何客户端收口** ⇒ 只能等本进程 HTTP 预算（`service/users/admin/admin-api/src/main/resources/application.yml:205` = `http-timeout: 3s`）⇒ ⇒ **`HTTP 503` + `Request Timeout`** | 出向 deadline = **min(剩余 3s ctx, 2s 客户端) = 2s** ⇒ **`HTTP 200` + `1015`** ⇒ **与 Go 同形** |
+
+⇒ ⇒ **本条要修的是形态②**（状态码 + 响应体 + 时刻三者都不同），**不是**形态①。
+
+### 四、RAG 侧修前 / 修后
+
+| | 修前 | 修后（2026-10-30 · G1 lane） |
+|---|---|---|
+| 出向 stub | `@GrpcClient("admin-rpc")` 注入的裸 stub；`adminRpc()` 直接返回它 ⇒ **本组件 13 处出向调用点全是裸 stub**（12 个 Service ＋ `AdminGetSelfService.java:42` 的 `IdentityResolver.resolveAdmin(httpRequest, adminRpcClient.adminRpc())`） | `capByClientTimeout(applyTo(stub))` ⇒ **min(入站剩余, 2s)** ⇒ **一次落码覆盖 13 处**<br>⚠️ **2026-10-31 订正 · 两半分工（别读成「applyTo 是冗余」）**：出向 deadline = min(**请求剩余**, **2s 客户端上界**) —— 「请求剩余」那半由**共享层** `GoStyleOutboundDeadlineInterceptor` 提供（它是 `@GrpcGlobalClientInterceptor` ⇒ 接在 devh channel 上 ⇒ **裸 stub 也继承**）⇒ ⇒ 「2s 客户端上界」那半**当前只有域侧 `applyTo` 能提供**（共享层「客户端硬上界」**默认不启用**：`GoStyleProtectionProperties.OutboundDeadline#getCapMillis()` **默认 0**）⇒ ⇒ ⇒ **本处 `applyTo` 不是冗余**（＝ `P2-T04`「补 2000ms 硬上界」的域侧落点）· **也不是「出向不继承请求 deadline」那一族的闭合条件**（那一族已由共享层拦截器覆盖） |
+| 落码 | — | `service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/client/AdminRpcClient.java`（新增 `CLIENT_TIMEOUT_MILLIS = 2000L` ＋ `adminRpc()` ＋ 包可见 `capByClientTimeout`） |
+
+### 五、守门网 ＋ 变异实测（AGENTS.md §3.3.3）
+
+- **守门**：`service/users/admin/admin-api/src/test/java/com/rag/users/admin/api/client/AdminRpcClientDeadlineCapTest.java`（**5 条**）
+  - **真**构造 `AdminServiceBlockingStub` ＋ **真**读回 `CallOptions.getDeadline()`（**不是**文本级断言）
+  - **真**走 `GoStyleRequestDeadline.begin(long)` 设预算 ⇒ 验 min 语义四支（无预算 / 入站 < 2s / 入站 > 2s / 预算已耗尽）
+  - **真**验对外 accessor（`adminRpc()`）交出的 stub 已带 deadline
+- **变异实测**：
+  - **M2**（accessor 去掉 `capByClientTimeout`）⇒ 红在 `accessorReturnsCappedStub`（「必须带 call deadline ⇒ expected: not <null>」）
+  - **M3**（user-api 侧的同款：cap 常量 2000 → 30000）⇒ 红在「不得超过 2000ms」类断言 ⇒ ⇒ **两模块口径一致**
+  - ⇒ **还原后复绿** ⇒ **不是假绿**
+- ⚠️ **判据自身的坑（已修）**：首版断言把「入站预算 500ms」写成固定下界 ⇒ 实测**只读到 72ms**（首次 mock 生成 + 类加载吃掉 ~400ms）⇒ **假红** ⇒ 已改为「**期望值 − 实测耗时 − slack**」⇒ 既不放过「比 Go 更严」，也不被环境抖动误伤（AGENTS.md §3.3.3 ③：修漂移先改/删错误断言，再改实现）。
+
+### 六、边界（诚实声明）
+
+- ⚠️ **未做双侧活体对拍** ⇒ 本条**不是 L4**。
+- ⚠️ 守门**不**起真实 admin-rpc、**不**发真实请求 ⇒ 证的是「**出向调用的 deadline 口径**」；**不**证「下游挂死时端到端真的回 1015」。
+- ⚠️ **共享层那半边不在本条**：要让 rpc 进程也拿到「入站预算」，`GoStyleRequestDeadline` 需要**作用域化 API** ⇒ 落点 `service/common` ⇒ **G4 写权** ⇒ 已随 `E65` 反馈单转派。
+
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
 > 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。

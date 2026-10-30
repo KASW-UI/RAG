@@ -1466,7 +1466,7 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时（`service/users/user/
 | `users/admin/admin-rpc` | 有 | 无 | 无 | 无 | 无 | **无** |
 | `follow-rpc` | 有 | **有** | **有** | 无 | 无 | **有** |
 
-⇒ ⇒ **载体层 = 1/10 有、9/10 无** ⇒ ⇒ **「RAG 侧能被 Prometheus 抓到的 rpc」只有 `follow-rpc` 一个**。
+⇒ ⇒ **载体层 = 8/10 有、2/10 无** ⇒ ⇒ **「RAG 侧能被 Prometheus 抓到的 rpc」有 8 个**（⚠️ **2026-10-31 订正 · 合并收口执行者**：原写「**1/10 有、9/10 无**」**已被实测推翻** ⇒ ⇒ **逐模块 `mvn -o -B dependency:list` 实测 `tomcat-embed-core`**：有载体 = article / favorite / follow / hot / like / message / user-user-rpc / user-admin-rpc；无载体 = **comment-rpc / task-rpc** 两域 ⇒ ⇒ ⇒ **「只有 follow-rpc 一个」这句话已作废**）。
 
 **（3）叠上配置层（G4 的三态划分）后的净结论**
 
@@ -1477,7 +1477,7 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时（`service/users/user/
 
 **（4）对我域台账的两处影响（已同步）**
 
-- `docs/DRIFT/follow/rpc.md:273` 的「8 个 rpc / 0/8」⇒ 订正为「**10 个 rpc / 载体层 1/10 有 / 9/10 无**」＋ 补两层口径与判据来源。
+- `docs/DRIFT/follow/rpc.md:273` 的「8 个 rpc / 0/8」⇒ 订正为「**10 个 rpc / 载体层 8/10 有 / 2/10 无**」＋ 补两层口径与判据来源（⚠️ **2026-10-31 再订正**：原写的「1/10 有 / 9/10 无」**已被依赖树实测推翻** ⇒ ⇒ 有载体 8 个 · 无载体 2 个（comment-rpc / task-rpc））。
 - `docs/DRIFT/follow/stage1-admission.md:79` 的「`favorite-rpc` / `message-rpc` / `like-rpc` / `user-user-rpc` **均已补上** ⇒ 出口已开」⇒ **被本轮实测证伪**（这 4 个模块的依赖树里都没有 web starter/tomcat）⇒ 已订正。
 - ✅ **users 域 `user/rpc.md:280` 的「指标可抓取性」改判（OBSERVABLE DIFFERENCE）成立且更强** —— 已补载体层证据（`user-rpc` 依赖树只有 actuator、无 tomcat）⇒ ⇒ **不是 users 域孤例，是 9/10 的通例** ⇒ ⇒ **该改判不撤**。
 
