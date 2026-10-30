@@ -4802,7 +4802,7 @@ if (connectTimeout != null) {                                     // :16
 
 - **三域业务启动类在真 PG/Redis 下真起了一遍**：user-rpc **Tomcat 22290** · admin-rpc **Tomcat 22295** · follow-rpc **Tomcat 22360** ⇒ ⇒ 三个口都落在**域内固定段**（222xx / 223xx）⇒ ⇒ 本轮只证「**在真 PG/Redis 下起得来**」
 - 本轮**真容器启动 35 次**（`postgres:16-alpine` / `redis:7-alpine`）⇒ ⇒ 三域含容器的用例**本轮真跑且全绿**（此前是「Docker 停 ⇒ 类级 error ⇒ 折叠」）
-- ⚠️ **仍未覆盖（不得写成已闭环）**：① 域侧「logout 走的是共享层那个 Redis 期限代理」的**装配接线**（域侧 `AdminLogoutDeadlineHandoffTest` 用 **Mockito 替换数据层** ⇒ ⇒ **只证控制流，不证代理接线**）② 真 Redis 上「**预算耗尽 ⇒ 写不发生**」的**活体**行为（共享层的 `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` 本轮 **3 条全 skipped** ⇒ ⇒ 需要外部 Redis 地址）③ **RAG↔Go 双侧活体对拍**
+- ⚠️ **仍未覆盖（不得写成已闭环）**：① 域侧「logout 走的是共享层那个 Redis 期限代理」的**装配接线**（域侧 `AdminLogoutDeadlineHandoffTest` 用 **Mockito 替换数据层** ⇒ ⇒ **只证控制流，不证代理接线**）② **RAG↔Go 双侧活体对拍** ⚠️ **【2026-10-31 订正】** 原列的 ②「真 Redis 上『**预算耗尽 ⇒ 写不发生**』的**活体**行为（共享层的 `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` 本轮 **3 条全 skipped** ⇒ ⇒ 需要外部 Redis 地址）」**已过期** —— 该守门在主干 **2026-10-31 03:23 真跑通过**（surefire `TEST-com.rag.common.redis.GoStyleRedisDeadlineLiveRedisWriteFaceGateTest.xml` ⇒ `tests=3 · failures=0 · errors=0 · skipped=0` ⇒ **不是 SKIP**）⇒ ⇒ 且它正是「**独立通道读回仍是基线值** ⇒ 命令真的没落进 Redis」那一格 ⇒ ⇒ **这一件已达成** ⇒ ⇒ **残余从三件收敛到两件**（① 装配接线 · ② 双侧活体对拍）
 - ⇒ ⇒ 故 **E66 那格（admin 域）仍是「机制已落 · 活体验证未做」** ⇒ ⇒ **不改**
 
 ---

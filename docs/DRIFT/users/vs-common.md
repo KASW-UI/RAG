@@ -5430,7 +5430,7 @@ git diff --stat -- service/ # ⇒ 0 行
 | **证据强度** | **L4**（运行时双侧活体）—— ✅ **双侧活体探针已坐实**（`tools/semantic-probe/deadline-downstream/`，2026-10-26 第四十六轮）：Go `failed_fast=true` / `code=4` / `outgoing_carrier=present_expired` ⇔ RAG `failed_fast=false` / `code=0` / `outgoing_carrier=absent`；2026-10-29 复跑 `tools/difftest/check-deadline-downstream.py` ⇒ **EXIT=0**（**漂移形态门** ⇒ PASS ⇒ **漂移仍在**）⇒ ⚠️ **本轮未重新实测**（沿用上述活体证据） |
 | **建议修法** | **共享层**在 `onHalfClose` 里把有效期限也绑进 `GoStyleRequestDeadline`（⇒ `applyTo` 立刻生效）**＋ 各域裸 stub 调用点改用 `applyTo`** ⇒ **不需要架构级改造、不需要 interrupt** ⇒ 与 Go 的 ctx 传播**同构**<br>⚠️ **min 语义（2026-10-30 由 G4 独立复核补的约束，本轮已逐条复验）**：Go 的出向 deadline = **min(入站请求剩余, 客户端默认超时 2000ms / 该域 yaml 的 `Timeout`)** ⇒ ⇒ RAG 侧若只注入「入站剩余」⇒ **比 Go 宽松最多 2000ms**（少了一次与客户端默认超时的 min）⇒ ⇒ 实现要**取更早者**，且保留「**无入站 deadline ⇒ 不注入**」这条路径（对齐 Go `context.WithTimeout` 在无父 deadline 时的行为） |
 | **影响面** | **共享层 `service/common`** ＋ 各域裸 stub 调用点（**follow 域那一半 = `follow-rpc/client/UserRpcClient.java:50`**）⇒ ⚠️ 修法**同时涉及共享层与域内代码** ⇒ `AGENTS.md` §3c「**必须同一次提交**（否则留下半截）」⇒ ⇒ **G1 不能单独改 follow-rpc 的裸 stub** ⇒ ⇒ **整条转 G4** |
-| **是否阻塞本波** | 🔴 **是** —— global 2026-10-29 复核已把 `E65` **升级为 A 类**，并写明「『**共享层 A 类硬阻塞 = 0 ⇒ 阶段一通过**』这句话**作废**」⇒ 本条**直接决定阶段一 X-6 判据** |
+| **是否阻塞本波** | ✅ **否** —— ⚠️ **【2026-10-31 订正】** 原判「**是**」（global 2026-10-29 复核曾把 `E65` 升级为 A 类，并写明「『**共享层 A 类硬阻塞 = 0 ⇒ 阶段一通过**』这句话**作废**」）**已过期** —— E65 本体已由 global 判为**已闭合**（2026-10-30 双侧活体逐键相等）⇒ ⇒ 本条**不再决定阶段一 X-6 判据**；残余的**客户端硬上界 2000ms** 那一轴**独立**归 `P2-T04`（域侧 yml）⇒ ⇒ **不与 E65 并回** |
 
 > ⚠️ **2026-10-30 订正（由 G4 独立复核触发）**：本反馈单初版的「Go 侧」第 ① 条写的是「`follow/rpc/internal/logic/helper.go:82` = `depCtx` = `otel.Tracer().Start(ctx,…)` 的返回值」⇒ ⇒ **该描述的机制是错的**（`文件:行号` 对、**机制不对**）—— G4 派出的核验 agent 实测该行原文 = `resp, err := svcCtx.UserRpc.GetUser(ctx, &userservice.GetUserReq{Uid: userID})` ⇒ **直接透传 handler 的 ctx、无 `depCtx`、无 otel**；而 `depCtx` 全仓**只在 favorite 域**（`service/favorite/rpc/internal/logic/helper.go:93` / `:98` / `:127` / `:133`）⇒ ⇒ **本条已按实测订正**（机制改为「直接透传 ctx」，并补上 favorite 域的 `depCtx` 出处 + grpc-go wire 层两处锚点）。
 > 📌 **教训（记下来免得下一个人再犯）**：这条错**不是自己编的，是从 global 台账的 `E65` 条目抄来的** ⇒ ⇒ **台账里引用的 `文件:行号` 也要自己读那一行** —— §3.1 的纪律「每个 Go 事实必须带 `文件:行号`」只保证**有指针**，**不保证指针背后的机制描述是对的** ⇒ ⇒ **抄别人的出处 ⇒ 必须重读原文件**（本轮已改：go-zero / grpc-go 那几条本轮就是自己读的 ⇒ 只有 domain 层那条是抄的 ⇒ 恰好被 G4 的独立复核抓到）。
@@ -5945,10 +5945,10 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
 - **路径乙（deadline 未到、Redis 自己慢）**：RAG 跑满 3s command timeout ⇒ `catch (Exception)` ⇒ 记日志 + `INTERNAL`(5001)；Go 侧 socket 层不绑 deadline ⇒ 同样跑满固定 3s 读超时 ⇒ 同样记日志 + `INTERNAL` ⇒ ⇒ **两侧同形**（此路径原本就同形）
 - **客户端可见码**：**两侧同集合 {1015, 5001}**（⚠️ 不是「都是 1015」那个单点读法 —— Go 侧 select 两分支同时就绪时随机选 ⇒ 探针活体 200000 轮里 22 次 ≈ 0.011% 落到 5001）⇒ ⇒ **不是 wire 级漂移**
 
-**三、⚠️ 本条仍维持 OPEN 的理由（收敛到三件，都未做）**
+**三、⚠️ 本条仍维持 OPEN 的理由（收敛到两件）**
 
 1. 共享层 Redis 期限代理**是否真在**本域 Redis 连接链上（**装配接线** ⇒ 跨 lane ⇒ G4 侧守）
-2. 真 Redis 上「**预算耗尽 ⇒ 写不发生**」的**活体**行为（共享层的 `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` 本轮 **3 条全 skipped** ⇒ 需外部 Redis 地址）
+2. **已达成（2026-10-31 03:23 · 主干真跑）** —— 真 Redis 上「**预算耗尽 ⇒ 写不发生**」的**活体**行为：共享层的 `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` ⇒ surefire `tests=3 · failures=0 · errors=0 · skipped=0`（**不是 SKIP**）⇒ ⇒ 该守门以「**独立通道读回仍是基线值**」证明命令真的没落进 Redis ⇒ ⇒ **原列的 ③「3 条全 skipped ⇒ 需外部 Redis 地址」已过期**
 3. **RAG↔Go 双侧活体对拍**（同请求、同 ctx 形态 ⇒ 比抓到的码集合）
 
-⇒ ⇒ **E66 那格维持「机制已落 · 活体验证未做」** ⇒ ⇒ **不改**
+⇒ ⇒ **E66 那格维持「机制已落 · 活体验证未做」**（**理由已收敛**：原「三件未做」⇒ 现为「① 装配接线 + ② 双侧活体对拍」两件；真 Redis 活体那一件已于 2026-10-31 达成）⇒ ⇒ **不改**
