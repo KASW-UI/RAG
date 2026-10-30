@@ -15,7 +15,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * DRIFT-018 对齐的回归网：admin-rpc 侧 13 个业务方法必须都有 deadline 入口守卫。
+ * DRIFT-018 对齐的回归网：admin-rpc 侧 <b>12</b> 个业务方法必须都有 deadline 入口守卫。
+ *
+ * <p>⚠️ <b>口径：13 个业务方法里，{@code logout} 例外</b>（Go 侧 logoutlogic 无 ctx 预检 ⇒ 域内不设闸门；
+ * 理由与出处见下方 {@code GUARDED} 字段的说明）⇒ ⇒ 本类守 <b>12</b> 个，logout 由
+ * {@code AdminLogoutDeadlineHandoffTest} 单独守。
  *
  * <p><b>背景（2026-10-21）</b>：AGENTS.md §3.4.1 B-1 原写
  * 「当前 {@code user-rpc} 一处都未使用 {@code DeadlineState}」——
@@ -36,9 +40,20 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class AdminDomainServiceDeadlineTest {
 
-    /** admin-api 对 admin-rpc 的 13 个业务调用，缺一即视为回退。 */
+    /**
+     * admin-api 对 admin-rpc 的 <b>12</b> 个业务调用，缺一即视为回退。
+     *
+     * <p>⚠️ <b>为什么清单里没有 {@code logout}</b>（2026-10-30 订正；上一版把它列在内 ⇒ 必假红）：
+     * Go 侧 {@code service/user/admin/rpc/internal/logic/logoutlogic.go}（全文 46 行）
+     * <b>没有 ctx 预检</b> —— 它直接做 {@code SetexCtx(l.ctx, …)}（<b>写绑 ctx</b>），
+     * 失败落 {@code codes.Internal}「注销失败,Redis写入异常」（{@code logoutlogic.go:38-42}）。
+     * ⇒ RAG 侧若在 logout 入口设 deadline 闸门，handler 级码会是 {@code DEADLINE_EXCEEDED}(1015)，
+     * 与 Go 的 {@code INTERNAL}(5001) <b>不同形</b> ⇒ ⇒ 域内闸门已撤（依据见
+     * {@code AdminDomainService.logout} 的 javadoc「L4 期限感知上移到共享层」段）。
+     * ⇒ 该条<b>另</b>由 {@code AdminLogoutDeadlineHandoffTest} 守门（域侧不再抢先拦 ＋ handler 级码映射）。
+     */
     private static final List<String> GUARDED = List.of(
-            "login", "logout", "getSelf", "updateSelf", "createAdmin",
+            "login", "getSelf", "updateSelf", "createAdmin",
             "createInviteCode", "banUser", "unBanUser", "getUser",
             "getUserList", "updateUser", "deleteUser", "resetUserPassword");
 
@@ -57,7 +72,7 @@ class AdminDomainServiceDeadlineTest {
     }
 
     @Test
-    @DisplayName("DRIFT-018：admin-rpc 的 13 个业务方法入口都拦下已过期请求")
+    @DisplayName("DRIFT-018：admin-rpc 的 12 个业务方法入口都拦下已过期请求（logout 例外 · 见 GUARDED 说明）")
     void everyBusinessMethodRejectsInterruptedThreadAtEntry() {
         List<String> notGuarded = new ArrayList<>();
 

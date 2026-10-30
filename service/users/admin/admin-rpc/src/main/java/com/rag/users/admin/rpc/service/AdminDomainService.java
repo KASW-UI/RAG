@@ -254,9 +254,32 @@ public class AdminDomainService {
      * </ol>
      *
      * <p>D-007：TTL 必须等于 JWT 过期秒数，不能写死 24h。
+     *
+     * <p><b>L4 期限感知上移到共享层（2026-10-30 订正 · 域内入口闸门已撤）</b>：
+     * <ul>
+     *   <li><b>Go 出处</b>：{@code service/user/admin/rpc/internal/logic/logoutlogic.go}
+     *       （<b>全文 46 行</b>）—— <b>没有 ctx 预检</b>；{@code :38}
+     *       {@code SetexCtx(l.ctx, …)} <b>写绑 ctx</b>；{@code :39-42} 写失败 ⇒
+     *       {@code status.Error(codes.Internal, "注销失败,Redis写入异常")}
+     *       ⇒ <b>handler 级码 = INTERNAL(5001)</b>。</li>
+     *   <li><b>本实现</b>：<b>入口不设 deadline 闸门</b> ⇒ 期限耗尽时请求<b>照样走到 Redis 写</b>
+     *       ⇒ 与 Go 同形（Go 也不是在入口拒，而是让写去失败）。</li>
+     *   <li><b>期限由谁感知</b>：共享层（{@code service/common}）的 Redis 期限代理
+     *       （{@code GoStyleRedisDeadlineConnection} ⇒ {@code GoStyleRedisDeadline.assertNotExhausted}
+     *       抛 {@code org.springframework.dao.QueryTimeoutException}）
+     *       ⇒ 该异常<b>不是</b> grpc 的 {@code StatusRuntimeException}
+     *       ⇒ 落进下面的 {@code catch (Exception e)} ⇒ {@code INTERNAL}「注销失败,Redis写入异常」
+     *       ⇒ <b>与 Go 的 handler 级码逐字同形</b>。</li>
+     *   <li><b>客户端可见层不变</b>：期限耗尽时由服务端拦截器的超时调度器<b>先</b> close
+     *       ⇒ 客户端仍是 {@code DEADLINE_EXCEEDED}(1015) ⇒ 与 Go 的
+     *       {@code service/common/observability/rpc.go:59-72} 的 select 同形。</li>
+     * </ul>
+     *
+     * <p>🔴 <b>合并约束（必须与共享层代理同一个提交）</b>：若共享层代理<b>未同时</b>在位，
+     * 本方法就<b>没有任何</b>期限感知 ⇒ 期限已耗尽时<b>仍会把黑名单写进 Redis</b>
+     * ⇒ <b>RAG 写、Go 不写</b> ⇒ 构成 {@code E66} 的暴露面 ⇒ ⇒ <b>禁止单独合入主干</b>。
      */
     public boolean logout(String token) {
-        checkDeadline();
         if (token == null || token.isEmpty()) {
             throw Status.INVALID_ARGUMENT.withDescription("Token不能为空").asRuntimeException();
         }
@@ -268,6 +291,11 @@ public class AdminDomainService {
         } catch (StatusRuntimeException e) {
             // B-1：DEADLINE_EXCEEDED 必须上抛，不能掉进下面的 db_error 分支被改写成 INTERNAL。
             //       （客户端可见值两侧都是 1015；**理由**见类级 javadoc「B-1 放行分支」段 + DRIFT-ARPC-011）
+            // ⚠️ 2026-10-30：本 catch **只**拦 grpc 的 StatusRuntimeException（PG 57014 走
+            //   SqlTimeoutStatusTranslator 翻成 DEADLINE_EXCEEDED 的那条路）；共享层 Redis 期限代理
+            //   抛的是 **org.springframework.dao.QueryTimeoutException**（Spring 的，不是 grpc 的）
+            //   ⇒ 它**不**被本分支拦 ⇒ 落进下面的 catch (Exception) ⇒ INTERNAL「注销失败,Redis写入异常」
+            //   ⇒ 与 Go 的 codes.Internal 逐字同形（**这是有意的顺序，不是漏网**）。
             throw e;
         } catch (Exception e) {
             log.error("admin logout Redis setex failed", e);
