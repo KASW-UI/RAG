@@ -3410,7 +3410,7 @@ resp, err := svcCtx.UserRpc.GetUser(depCtx, &userservice.GetUserReq{Uid: userID}
 
 ```
 Go  | PROBE|downstream_deadline_failfast|failed_fast=true|code=4|outgoing_carrier=present_expired|sql_carrier=present_expired
-RAG | PROBE|downstream_deadline_failfast|failed_fast=false|code=0|outgoing_carrier=absent|sql_carrier=present_expired
+RAG | PROBE|downstream_deadline_failfast|failed_fast=false|code=0|outgoing_carrier=absent|sql_carrier=present_expired   ← 【2026-10-30 订正】**本行是变更前的历史记录**（探针借用自 `tools/semantic-probe/deadline-downstream/` · 共享面单写权）：共享层 `53bc05ec` 起 `RpcInterceptor.onHalfClose` 也绑 `GoStyleRequestDeadline` ⇒ **本域出向载体已从 `absent` 变为 `present_expired`**（该键已升为 parity 键）⇒ ⇒ 与 Go 一致；**本域的 `failed_fast`/`code` 亦随之同形**（证据与逐条比对见本文件「共享层『出向 deadline 载体』落码后的本域侧确认」段）
 ```
 
 ⇒ **EXIT=0**（形态与已登记一致 ⇒ 漂移还在）⇒ 与 global 第四十六轮的结论**逐键一致** ✅
@@ -4208,6 +4208,78 @@ EXIT=0
 
 - Go `service/favorite/rpc/etc/favorite.yaml:13` = `Password: "${POSTGRES_PASSWORD}"`（**裸**）⇒ `core/conf/config.go:63` 的 `os.ExpandEnv` **不认** `${VAR:default}` ⇒ 缺变量 ⇒ 空口令 ⇒ fail-fast ⇒ ⇒ RAG 侧原先的 `${POSTGRES_PASSWORD:password}` 属「比 Go 松」⇒ 本轮取消。
 - ⚠️ **残余差异（失败时刻不同）**：Go = 启动成功、连库时失败；RAG = 启动即失败 ⇒ 属「RAG 更严」的一侧 ⇒ 由**合并收口执行者**在合并窗口统一登记。
+
+## 📌 追加 · ✅ **共享层「出向 deadline 载体」落码后的本域侧确认**（2026-10-30 · G3 第三轮）
+
+> **一句话**：共享层 `53bc05ec` 之后，**favorite-rpc 的两条出向出口首次真正继承入向 deadline** ⇒
+> ⇒ 本域出向 deadline 语义与 Go **逐字同形**（`min(入向剩余, 2s 封顶)`）⇒
+> ⇒ **没有产生新的客户端可见失败形态**（出向超时两侧都折叠成 5001 / INTERNAL）。
+> ⚠️ **销账权不在本域**（该条的落点是 `service/common`）⇒ 本节只给**域侧事实 + 证据**，判定归 global。
+
+### ① 变更本体（共享层）
+
+- `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:494`（`onHalfClose`）
+  ⇒ `:517`（`DeadlineState.bindAbsoluteNanos`）＋ `:519`（`GoStyleRequestDeadline.bindAbsoluteNanos`）
+  ⇒ **两个载体绑到同一个绝对时刻**（`absoluteDeadlineNanos` 在 `:311-312` 算一次 ⇒ 两载体不会各算各的 now）。
+- 🔴 **无 ThreadLocal 污染**：`:517-520` 的两个 Scope 是 try-with-resources ⇒ handler 返回即恢复
+  ⇒ **不会把上一请求的 deadline 带给下一请求**。
+
+### ② 生效条件 —— **不是无条件变更**
+
+- `RpcInterceptor.java:302-304`：`serverBudgetNanos` = 服务端 timeout（`<=0` ⇒ MAX）·
+  `effectiveTimeoutNanos = min(serverBudgetNanos, clientDeadlineRemainingNanos())`。
+- **favorite-rpc 未配 `grpc.server.timeout`**（`service/favorite/favorite-rpc/src/main/resources/application.yml`
+  的 `grpc.server` 段只有 `port` / `address` / `reflection-service-enabled`）⇒ 服务端预算 = MAX。
+- ⇒ ⇒ **只有「客户端带 gRPC deadline」时才绑定** ⇒ **常规路径（客户端不带 deadline）= 零行为变化**。
+
+### ③ 语义同形论证（Go 出处 = 消费点）
+
+- **Go 侧**：`service/favorite/rpc/internal/logic/helper.go:96-98`
+  （`depCtx, span := otel.Tracer("favorite-rpc").Start(ctx, "Dependency.User.GetUser")`）
+  ⇒ `depCtx` **继承 handler ctx 的 deadline**；`:133`（article 路径）同款。
+  再被 `go-zero@v1.10.2/zrpc/internal/client.go:113-117` ⇒ `clientinterceptors.TimeoutInterceptor(timeout)`
+  ⇒ `go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25`
+  （`ctx, cancel = context.WithTimeout(ctx, t)` ⇒ **在已有 ctx 之上再套一层**）
+  ⇒ 有效预算 = **`min(入向剩余, 2000ms)`**（`zrpc/config.go:31` 的 `json:",default=2000"`）。
+- **RAG 侧**：`client/UserRpcClient.java:55-57` ＝
+  `GoStyleClientCallTimeout.capByClientTimeout(GoStyleRequestDeadline.applyTo(userServiceBlockingStub))`
+  ⇒ `applyTo` 继承（`service/common/.../GoStyleRequestDeadline.java:192-201`）
+  ⇒ `capByClientTimeout` 2s 封顶（`client/GoStyleClientCallTimeout.java:89-96`）⇒ 同样是 **`min(入向剩余, 2s)`**。
+- ⇒ ⇒ **两侧同形** ⇒ ⇒ **这是补上一处旧偏离，不是新偏离** —— 旧口径「rpc 进程 ⇒ ThreadLocal 恒 null ⇒
+  恒 no-op ⇒ 实际零 deadline」**已过期**（与 global 在 `docs/DRIFT/global/vs-common.md` B-05 行的就地订正一致）。
+
+### ④ 新的失败形态 —— **没有客户端可见分叉**（两条出向路径逐条核过）
+
+- 出向超时 ⇒ grpc-java 抛 `StatusRuntimeException(DEADLINE_EXCEEDED)`。
+- **user 路径**：RAG `service/FavoriteUserGuard.java:111-128` ⇒ 非 `NOT_FOUND` ⇒ 一律
+  `FavoriteExceptions.internalServerCommon()` = **5001 / INTERNAL**；
+  Go `helper.go:104-107` ⇒ 非 `NotFound` ⇒ `favoritecommon.GRPCError(codes.Internal, favoritecommon.ErrorServerCommon)` = **5001 / INTERNAL**。
+- **article 快照路径**：RAG `service/FavoriteArticleSnapshotResolver.java:289-304` ⇒ 同款 `internalServerCommon()`；
+  Go `helper.go:141-145` ⇒ `codes.Internal` + `ErrorServerCommon`。
+- **入向侧未变**（`DeadlineState` 早已绑定；超时调度器 `close(DEADLINE_EXCEEDED)` 与本轮无关）。
+- ⇒ ⇒ **结论：域侧没有新的客户端可见失败形态**（两侧都是 5001 / INTERNAL）。
+
+### ⑤ 诚实边界（不外推）
+
+- 载体是 **ThreadLocal** ⇒ 只对**同一线程**的出向调用可见；Go 的 `depCtx` 走 ctx 链 ⇒ **goroutine 会继承**
+  ⇒ 若业务把出向调用派到别的线程 ⇒ 两侧不同。
+  **本域现状不受影响**：两条出向调用都在调用线程内**同步发起**
+  （`FavoriteUserGuard.java:94` · `FavoriteArticleSnapshotResolver.java:140-145` ⇒ `tracedDependency`
+  是同步实现，`service/favorite/favorite-common/.../span/FavoriteSpans.java:394-417` 无 executor）。
+  ⚠️ 但这是**载体形态本身的边界**（登记在案）。
+- **只核了 favorite-rpc 的两条出向出口**；article / hot / comment 域本轮未核 ⇒ **不外推**。
+- 📌 **载体在位这一层已有活体证据（L4）**：2026-10-30 **只读借用**双侧探针
+  （`tools/semantic-probe/deadline-downstream/` = **共享面** ⇒ global 单写权 ⇒ 拷到 `/tmp` 后只把 `RAG_ROOT` 指向本工作树，
+  其余**一个字节都没改**）⇒ **EXIT=0** ⇒ 实测 `outgoing_carrier` **两侧均 `present_expired`**（parity 键）
+  ⇒ ⇒ **「载体在位」= L4 活体**；`failed_fast`/`code` 仍是已登记的 drift 形态 ⇒ **形态未变** ⇒ 探针期望值仍有效。
+- ⚠️ **但「域内 client 有没有消费载体」探针测不到**（脚本期望表自述：其 RAG 半边**手搓 Netty channel** ⇒ 不走 devh 全局拦截器
+  ⇒ 测不到已落地的 `GoStyleOutboundDeadlineInterceptor`）⇒ ⇒ **本节关于「域内出口确实继承」的那一段 = L2（源码级逐行对照）**，
+  **不是 L4 活体** ⇒ ⇒ 两者不要混引。
+
+### ⑥ 对本域台账的影响
+
+- `docs/DRIFT/favorite/vs-common.md:29`（`E65` 行）与本文件 §37 的机制结论**已就地订正**（域侧事实消解）。
+- ⚠️ **销账权在 global**：落点是 `service/common` ⇒ 本域**不自行改判 OPEN/CLOSED** ⇒ 只报事实与证据。
 
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
