@@ -2282,10 +2282,10 @@ Boot 4.0.8 的 `LettuceConnectionConfiguration` **没有** `getPoolConfig` 方�
 | 待办 | 卡在哪 | 谁能解 |
 |---|---|---|
 | article 域 gRPC 测试段号（预留池 `22200–22599` **仍未分配** ⇒ **本域不擅自占预留段**）| global 段表是 **G4 写权面** | **G4**（会话恢复后）|
-| 共享层 `MAX_PARAMETER_COUNT` `10001 → 10000`（差一格那一行）| `service/common/**` = **G4 唯一写者** | **G4** |
+| 共享层 `MAX_PARAMETER_COUNT` `10001 → 10000`（差一格那一行）| ⛔ **本行作废（2026-10-30 · G3 复核）** —— ① `docs/DRIFT/favorite/api.md` §21.3（2026-10-28 · G3 · L1）已判「改成 10000 ⇒ Tomcat 在第 10000 段就早于 Go 拒 ⇒ 400+HTML ⇒ **反而制造新漂移**」；② 本轮 hot 域**真 Tomcat 活体**（新增 `HotApiQuerySegmentLimitRealTomcatTest` 4/4 绿）实测「10001 段 ⇒ 200 + {code:5001}」＋「10000 段 ⇒ 200 + {code:200}」⇒ **两侧同在第 10001 段翻转 ⇒ 无「差一格」**；③ 共享层自己的设计文档 `GoStyleTomcatParameterLimitCustomizer.java:73-76` 写的也是「10001 = Go 段数上限 +1 ⇒ 10001 段 ⇒ Go 拒 ⇒ 我们也拒」⇒ ⇒ **不得派这张单给 G4**（会让人做一件已判作废的改动）| ⛔ **不需要**（已消解）|
 | 合并共享层后重跑全量（`15cf93a` 改了生产代码 ⇒ 本域基线失效）| 需要 G4 的共享层提交先落 | **G4** |
 | 合并后统一 `python3 tools/check-ledger-count.py --fix`（**315 → 330**）| `docs/Pitfalls/_INDEX.md` = **合并收口执行者写权面** | **合并收口执行者** |
-| comment C-5（tools 探针骨架）| `tools/**` = **G4 写权面**（本来就该它做）| **G4** |
+| comment C-5（tools 探针骨架）| ✅ **已完成（2026-10-30 · G3 实测）** —— `tools/errmsg-probe/comment/`（`run-parity.sh` + `mutate-parity.sh` + `go/` + `java/` + `README.md`）**已在版本控制内**（`git ls-files` 命中）⇒ 且本轮实跑 `bash tools/errmsg-probe/comment/run-parity.sh` ⇒ **EXIT=0**（Go 侧 137 行 sha256 `514e3a71…` == Java 侧同值 · OBS 段 3 条仍登记）⇒ ⇒ **不需要 G4 再做**（另按 AGENTS.md §5.3f「共享判据 = 依赖度数」，该目录只被 comment 域引用 ⇒ **真私有 ⇒ 本属 G3 写权面**）| ⛔ **不需要**（已消解）|
 
 ⇒ ⇒ **纪律（本轮新增，两条）**：
 1. 🔴 **「已送达」≠「对方会回」** ⇒ ⇒ 跨 lane 事项**不能只靠等** ⇒ ⇒ **能在域侧自修的先自修**

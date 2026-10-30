@@ -222,13 +222,14 @@
 |---|---|---|---|---|---|
 | **F-1** | **`U7` rpc 层整域双侧活体对拍**（错误码契约层已做成双侧对拍，**但那是 `favorite-common`，不是 rpc 层**；指标 result 语义只有单侧 Go 锚定 ＋ RAG 侧运行时守门） | 🔴 **仍开 —— 本域最大缺口** | 🟢 **G3（本域）** ⇒ ⚠️ **环境受限**（Go 侧 `etcd` / Kafka 仍不可拉起） | 否 | [`rpc.md` §9.3 `U7`](rpc.md) |
 | **F-2** | **§5 交付物清单「第 0 步：组件真的启动一次」** —— `tools/ddl-parity-probe/favorite/run.sh` 的 RAG 侧是**用 `psql` 直接执行 Flyway 迁移脚本**（`run.sh:180-190` 逐个 `psql_q -d ragdb -f -`）⇒ **全程不启 Java 进程** ⇒ 它证明的是「迁移脚本产出的 DDL 与 Go `AutoMigrate` 一致」（A8 的 L4 成立），**不构成「组件真的启动过」的证据** | 🔴 **仍未完成**（原稿误勾 `[x]` ⇒ 已改回 `[ ]`） | 🟢 **G3（本域）** | 否（影响 A8 结论的**解读**，不改 A8 判定） | 本文件 §5 交付物清单第 1 项 |
-| **F-3** | **`DRIFT-HOTAPI-030` 后续格**（总「值」数超过 Go 的 10000 段上限：Go 拒 400 ＋ `net/url` 原文 / 本域**没有**实现这道段数上限） | 🔴 **仍 OPEN**（**显式登记，不假装闭合**）<br>📌 **2026-10-29 订正**：「Go 拒 400 ＋ `net/url` 原文」这个**拒绝形状**前提**已被证伪**（Go 侧落 **HTTP 200 + `{code:5003}`**，见 `service/favorite/api/internal/handler/favorite/get_favorites_by_folder_handler.go:18-24`）⇒ **仍 OPEN 的是「翻转点差一格」**（Go ≥10001 段解析失败 vs RAG ≤10001 段放行 ⇒ RAG 翻转点 **10002 段** / Go **10001 段**）⇒ **修法 = 共享层 `MAX_PARAMETER_COUNT` `10001 → 10000`**，**至今未落** ⇒ **状态仍 🔴 仍 OPEN** | 🔴 **global / G4**（共享层段数闸门因本域 = `OFF` 而**不装**）＋ 域侧那半<br>📌 2026-10-29：域侧那半**已就位**（域内判据只数非空值）；**缺口全在共享层的 `MAX_PARAMETER_COUNT` 值**（10001 ⇒ 需 10000） | 否 | 本文件 §4 表「仍未闭合的下一格」行 |
+| **F-3** | **`DRIFT-HOTAPI-030` 后续格**（**query 段数轴**：总「段」数超过 Go 的 10000 段上限） | ✅ **已闭合（2026-10-30 · G3 · **L4 真 Tomcat 活体**）** —— 🔴 **原「仍 OPEN」是过报，已销账**<br>📌 **销账依据（三条，逐条可复算）**：<br>① **Go 真源逐行**：go1.25.11 `src/net/url/url.go:1019-1021`（`parseQuery` 里 `if !urlParamsWithinMax(strings.Count(query, "&") + 1) { return errors.New("number of URL query parameters exceeded limit") }`）+ `:1001`（`defaultMaxParams = 10000`）+ `:1003-1005`（`urlParamsWithinMax` ⇒ `params <= defaultMaxParams`）⇒ ⇒ **Go 的翻转点 = 第 10001 段**；<br>② **共享层判据与 Go 逐字同形**：`service/common/.../http/GoStyleFormValues.java:215`（`MAX_URL_QUERY_PARAMS = 10000`）· `:262`（`countQuerySegments(query) > MAX_URL_QUERY_PARAMS` ⇒ 拒）· `:307`（`countQuerySegments` = `1 + count('&')` ⇒ ≡ Go 的 `Count("&")+1`）⇒ ⇒ **RAG 的翻转点 = 第 10001 段 = 与 Go 同**；<br>③ **本域 L4 活体**：`service/favorite/favorite-api/src/test/java/com/rag/favorite/favorite/api/FavoriteApiRealTomcatGateTest.java` —— **2026-10-30 实跑 16/16 绿**（`querySegmentCountOver10000IsRejectedLikeGo` ✔ + `exactly10000QuerySegmentsArePassedThrough` ✔ + `querySegmentLimitIsUniformAcrossEndpoints` ✔ + `containerParameterLimitIsSurfacedAsGoParseError` ✔）⇒ **RAG 在第 10001 段拒、在第 10000 段放行 ⇒ 与 Go 同格**<br>⇒ ⛔ **原「修法 = 共享层 `MAX_PARAMETER_COUNT` `10001 → 10000`」已作废**（`api.md` §21.3 · 2026-10-28 · G3 · L1：改成 10000 ⇒ Tomcat 在第 10000 段就早于 Go 拒 ⇒ 400+HTML ⇒ **反而制造新漂移**）⇒ ⇒ **不得派这张单给 G4**（会让人做一件已判作废的改动）<br>⇒ ⚠️ **本条只闭合「query 段数轴」** ⇒ **body form 参数轴是另一条、真实残留** ⇒ 见本文件 §6 的 **`F-8`**（C 类 · RAG 比 Go **宽一格**） | ⛔ **不再需要共享层改动**（域侧判据已在位 · 共享层常量**不许动**）<br>⇒ ⚠️ **原写「共享层段数闸门因本域 = `OFF` 而不装」是对的**（本域 `application.yml` **无** `go-form-limit` 段 ⇒ 默认 `off`）⇒ **判据由本域自己的 `FavoriteGoQueryLimitInterceptor` 承担**（它调共享层 `GoStyleFormValues#goParseViolation` ⇒ 判据仍是同一份） | 否 | 本文件 §4 表「仍未闭合的下一格」行（**已销账**）<br>新增：**F-8**（body form 参数轴 · C 类） |
 | **F-4** | **P0 #8 的共享面半边**（根级 compose 的 `:?` ＋ 根 README 的 `.env.example`） | 🔴 **仍开**（**域侧那半已修**：`application.yml` 去明文默认值 ＋ `@PostConstruct verifyAccessSecret()` ＋ test scope `application.properties` ＋ **3 例真 `ApplicationContextRunner`** 守门 ⇒ **3/3 绿**） | 🔴 **合并收口执行者**（根级文件**无人拥有** ⇒ 根因**并入 G1 的 `S1-USERS-001`**） | **否**（域侧已修 ⇒ P0 #8 的**域侧部分**闭合；⚠️ **P0 #8 整体仍不能判 ✅**） | [`api.md` §24](../favorite/api.md) 第 6/8/11 项 |
 | **F-5** | **405 响应多一个 `Content-Type`**（2026-10-25 第十四轮新发现） | 🔴 **仍开** | 🔴 **global / 收口**（落点在 `service/common` ⇒ **不在 G3 写权面**） | 否 | [`api.md` 头部「未决」行](../favorite/api.md) |
 | **F-6** | **rpc 域的其余明文默认值**（`${POSTGRES_PASSWORD:password}` / `${MINIO_SECRET_KEY:minioadmin}` / `${*_AUTHORITY_TOKEN:}`） | 🟡 **已登记，本轮未动** | 🔴 **G4**（需**单独单据**） | 否 | [`api.md` §24.2 第 8 项第 ③ 条](../favorite/api.md) |
 | **F-7** | **本机 `ddl-favorite-pg` 需重跑一次真 Flyway 迁移**（或重建容器）才能让静态对照与 L4 结论一致 | ⚠️ **环境动作**（**不是代码缺陷** ⇒ 登记为未闭合项，不阻塞阶段一） | 🟢 **G3（本域）** | 否 | [`rpc.md` §「可执行动作」](rpc.md) |
+| **F-8** | **body form 参数轴**（**与 F-3 是两条不同的轴** —— F-3 = **query 段数**，本条 = **urlencoded POST body 的参数个数**） | 🟡 **真实残留（2026-10-30 · G3 新登记）**<br>**阶段归属（`docs/twoStage.md` §10）：C 类**（阶段 2 最终工程建设项）· **优先级 P3** · **不阻断阶段一**<br>⚠️ **方向：RAG 比 Go 宽一格**（⚠️ **不是「RAG 更严」，方向相反**） | 🟢 **域侧可自修**（**但不得改容器常量**）<br>⇒ **依据**：Go 侧 `net/http/request.go:1294`（`parsePostForm` 的 `application/x-www-form-urlencoded` 分支 ⇒ **`url.ParseQuery(string(b))`** ⇒ **Go 的 10000 段上限同样作用于 body**）+ `net/url/url.go:1019-1021` ⇒ ⇒ **Go 在第 10001 个 body 参数就拒**；而 RAG 侧：① 共享层的 Go 语义闸门 `GoStyleFormValues#goParseViolation` **只判 `request.getQueryString()`**（**不判 body**）⇒ body 轴上没有 Go 语义判据；② 兜底只剩**容器** `maxParameterCount`（运行时由 `GoStyleTomcatParameterLimitCustomizer` 抬到 **10001**）⇒ ⇒ **RAG 允许第 10001 个 body 参数 ⇒ 比 Go 宽一格**<br>⇒ ⛔ **不许改容器常量**（改 10000 ⇒ Tomcat 抢在应用层之前 HTML 400 拒 ⇒ **制造新漂移**；改 -1 ⇒ 容器这道闸门整个消失）⇒ ⇒ **正确修法 = 域侧闸门也判 body**（照 favorite 域 `FavoriteGoQueryLimitInterceptor` 的形态：判据仍取共享层那份，只多传一个 body 的 query 串）<br>⇒ ⚠️ **可达性**：需 `Content-Type: application/x-www-form-urlencoded` 的 POST ＋ > 10000 个 body 参数 ＋ 其中**非空值 ≤ 2048**（否则先撞 Go 的 2048 非空值规则）⇒ ⇒ **窄但真实** | 否 | **跨域同源**：`article` / `hot` 两域同轴同因（见 [`article/vs-common.md` 的 `A-3`](../article/vs-common.md) 与 [`hot/vs-common.md` 的 `H-A2'`](../hot/vs-common.md) 的销账行）⇒ **四域共用一条修法** ⇒ 建议**同一次提交**落码（AGENTS.md §5.3c「修法同时涉及多处 ⇒ 必须同一次提交」） |
 
-⇒ **favorite 域的「域内可动」未闭合项 = F-1 / F-2 / F-7 三条**（F-3/F-5 属 global，F-4 属根级，F-6 属 G4）⇒ ⇒ **本域阶段一判定不变**。
+⇒ **favorite 域的「域内可动」未闭合项 = F-1 / F-2 / F-7 / F-8 四条**（F-3 **已于 2026-10-30 销账** · F-5 属 global · F-4 属根级 · F-6 属 G4）⇒ ⇒ **本域阶段一判定不变**（F-8 = C 类 · 不阻断）。
 
 ---
 
@@ -330,6 +331,71 @@
 **④ 等批准** ⇒ **批准后才开工**（**回执落笔时**本轮除本回执小节外不写任何代码、不改任何台账；已读动作仅限只读：四档台账 + `_cross` + 阶段标准 + 回执模板）⇒ **Jason 于 2026-10-29 03:44 在本 lane 会话内明示「继续」**（消息 id `182054`）⇒ **已获批开工**（⑤ 由调度员代填，见本节末尾）。
 
 **⑤ 批准记录：Jason · 2026-10-29 03:44 · 批准范围：本 lane 回执 ① 所列候选任务 **H-A1**（hot proto 消息体 wire 探针落码）+ **A-1**（article 域双侧活体对拍）+ **F-1**（favorite-rpc 整域双侧活体对拍）· **G4 反馈单 1 张**（7 项，含补守门 `PINNED` 两行 `gorm.io/driver/postgres: v1.6.0` + `github.com/lovoo/goka: v1.1.16`）· **自有写权面 2 处台账过期描述**（`article/common.md:22` / `:74-77`、`comment/common.md:110` vs `:112`）**　← 由**调度员代填**（依据：Jason 于 2026-10-29 03:44 在**本 lane 会话内**明示「继续」· 消息 id `182054`；**回执人不得自批**· **代填 ≠ 代批准**）
+
+---
+
+【开工前置回执 · G3 · **2026-10-30**】（第二轮 · 派生层施工单轮）
+
+**① 任务范围**（本 lane = `article` + `comment` + `favorite` + `hot`，**阶段 1**）：
+
+本轮任务来源 = [`docs/DRIFT/_cross/stage1-derivation.md`](../_cross/stage1-derivation.md) §4.0（波次分布）+ §4.4（④ 已闭合 · **台账没销账**）＋ 四域各自的「阶段归属定级附录（2026-10-30 · Go 对照）」。
+⚠️ **施工单 §4.1「A/B 类 · 开放且未排期」= 0 条** ⇒ **本 lane 没有「漏排」要补** ⇒ 本轮做的是**销账与订正**，不是新功能开发。
+
+- **W1 · 「段数轴」跨三域假开口的核验与销账**（同一条 `DRIFT-HOTAPI-030` 后续格在三域各登记一份：`A-3`@article · `F-3`@favorite · `H-A2'`@hot）
+  - **台账原文的修法 = 共享层 `GoStyleTomcatParameterLimitCustomizer.MAX_PARAMETER_COUNT` 10001 → 10000** ⇒ 三域都写「🔴 global / G4」。
+  - ⚠️ **该修法已作废**：`docs/DRIFT/favorite/api.md` §21.3（**2026-10-28 · G3 · L1**）已判「改成 10000 ⇒ Tomcat 在第 10000 段就早于 Go 拒 ⇒ 400+HTML ⇒ **反而制造新漂移**」⇒ ⇒ **派这张单给 G4 = 让 G4 做一件已判作废的改动**。
+  - ⇒ **本轮改为核验「RAG 首个翻转点到底在第几段」**，据实定级，**不派单**。
+- **W2 · C-5 销账**（comment 域 · `tools/errmsg-probe/comment/` 探针）—— **域侧可自修 / 域侧可销账**。
+- **W3 · `docs/DRIFT/hot/rpc.md` §十二.7 待办表**里「comment C-5 探针骨架 ⇒ G4」= **过期待办** ⇒ 订正。
+- **W4 · `tools/errmsg-probe/comment/run-parity.sh` 头部注释**残留 follow 字样 ⇒ 域内可自修（`tools/errmsg-probe/comment/` 真私有 ⇒ 按 AGENTS.md §5.3f 归 G3）。
+- **W5 · hot 域段数轴补真 Tomcat 门禁**（`hot-api` **无**任何段数用例 ⇒ 取证缺口）⇒ 补齐后才谈定级。
+
+- **不做**（明确边界）：
+  - **阶段 2**（`docs/twoStage.md` §1.3 / §2.2 / §6 / §7 / §9 故障矩阵 · 生产流量 · SLO）⇒ 收口执行者的事，**不预支**。
+  - **共享层** `service/common/**` ＋ `service/users/users-common/**` ⇒ **只有 G4 能写** ⇒ 本 lane **只读**；发现共享层缺陷 ⇒ **只登记反馈单（7 项）**，不自己动手。
+  - **共享索引面**：`AGENTS.md` / 三个 `_INDEX.md` / `docs/DRIFT/_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/Worktree.md` / `docs/PhaseGoal-judge.md` / `docs/PhaseGoal/g3.md`（机器生成物）⇒ **不写**。
+  - **根级文件**（`docker-compose.yaml` / 根 `README.md` / `.env.example`）⇒ **无人拥有 ⇒ 归合并收口执行者**。
+  - **已签字偏离 + `CAND` 族未签字候选**（`docs/Intentional_Deviations/`）⇒ 按 AGENTS.md §5.3c「**登记完就躺着，不升级为拍板**」⇒ 不重复质疑、不推拍板、不「顺手修回 Go 行为」。
+
+**② 已读四档**（**本 lane 面**的具体路径 + 读到的关键结论）：
+
+- `docs/DRIFT/favorite/api.md` ⇒ §24 **P0 #8 域侧已修**（yaml 去明文默认值 + `@PostConstruct verifyAccessSecret()` + **3 例真 `ApplicationContextRunner`**）；**§21.3 = 本轮 W1 的关键依据**（判「共享层 10001→10000」的修法**作废**）· §21.4 域侧自装段数判据 · §21.5 五条真 Tomcat 守门 · §21.7 L4 实测（10001 段 ⇒ `200 + 5003`）；`U9`（Go 16062 DevServer HTTP 面）待拍板 · 405 多一个 `Content-Type`（落点 `service/common`）。
+- `docs/DRIFT/favorite/rpc.md` ⇒ §9.3 **`U7` rpc 层整域双侧活体**（`tools/api-full-parity-probe/favorite-rpc/` 已落仓 ⇒ 环境受限已解除）；`U1~U6` 逐条复核结论；§5 照抄 Go 的三处「不完美」（`Location` 二次转义 / 301 body 两个 `\n` / 404·401 一个 `\n`）。
+- `docs/DRIFT/favorite/common.md` ⇒ ✅ 错误码契约层双侧逐字节（sha256 `f23fe570…`）；`DEV-FAV-COMMON-001/002` 已签字（`GRPCError(codes.OK,…)` 与 `status.FromError` 判定面 ⇒ **不可达豁免**，实测重数 = 56 个调用点无一传 `codes.OK`）。
+- `docs/DRIFT/favorite/proto.md` ⇒ 行为层 **0 行差异**；`PIT-FAV-PROTO-001/002` ⇒「复制忠实 ≠ 消费方式已验」+「默认值不落 wire 只能从生成码看 ⇒ **生成码不在版本库**（`target/` 被忽略）⇒ 必须先构建再读 `writeTo`」。
+- `docs/DRIFT/favorite/vs-common.md` ⇒ §2 九轴（**A3/A4/A6/A7/A8 = L4**；A1/A2/A5/A9 = L1~L3）· §4 仍未闭合的下一格 = **`DRIFT-HOTAPI-030` 后续格**（**本轮 W1 的销账对象**）· §5 第 0 步「组件真的启动一次」（DDL 探针是 `psql` 直跑迁移脚本 ⇒ 证的是 DDL 一致，不是「组件启动过」）；**文末定级附录（2026-10-30）= 权威面**（`F-2`/`F-4`/`F-6` 判 D 或 B · 域侧可修）。
+- `docs/Intentional_Deviations/favorite/` ⇒ 共 9 条已签（`DEV-FAV-API-001/002` 401·500 body 形态 · `DEV-FAV-COMMON-001/002` · `DEV-FAV-RPC-001/003/004/006/007`）+ **2 条已撤销**（`DEV-FAV-RPC-002/005` ⇒ 前提被逐行核对证伪 ⇒ **登记 ≠ 签字的前提必须先复核**）；`favorite/proto.md` = 0 条；⚠️ `DEV-FAV-API-001/002` 与 `DEV-FAV-RPC-006/007` **有探针断言差异仍在**（`api-envelope-probe` / `ddl-parity-probe`）⇒ 「改成和 Go 一样」会直接 **exit 1**。
+- `docs/Pitfalls/favorite/` ⇒ api 17 + rpc 40 + common 2 + proto 2 = 61 条；最关键：`PIT-FAV-API-012`「守门期望值若引用**被测代码的常量** ⇒ 那条守门是哑的 ⇒ 期望值写死字面量」· `PIT-FAV-API-008`「`RANDOM_PORT` 挑的端口可能不是你的（macOS 同号端口被别的会话容器抢走）」· `PIT-FAV-RPC-033`「引用 `文件:行号` 前先确认该符号在**本分支**存在」· `PIT-FAV-RPC-030`「新写了带 Go 锚点的文件 ⇒ **必须跑管它的那个门禁**」· `PIT-FAV-COMMON-001`「拿我的 stub 验我的 stub ⇒ 真源 import 了 grpc 就**不可能** stub」。
+- `docs/PhaseGoal/g3.md` ⇒ lane 判定 **✅**（16 组件 ✅ 16 · 🟡 0 · 🔴 0）· §2.1「本 lane 自修」= **无** · §2.2 转派 G4 = 4 行（comment-rpc `D8/D9/U13` · favorite-api `U9/405/B2` · favorite-rpc `U7/U9/E65` · hot-api `DRIFT-HOTAPI-030/031`）⇒ **落点 100% 在共享层 ⇒ 本 lane 只登记**；§3 **P0 #4 主责**（article 失败路径最密集）· 协作 #1/#2/#3/#6/#8；§4 矩阵 C 11 项协作；§5 收口验收命令全可复算。
+- `docs/PhaseGoal-judge.md` ⇒ 权威判定源；§七 **P0 #4 = ✅ 满足**（227 条失败路径矩阵 · 变异 13/13 精确转红 · 错误码 9/9 域双侧逐字节）· §九 **`G-19`**（proto **消费方式**在 10 个 proto 上全部未取证）· §九 `G-3`（article 双侧活体，2026-10-29 已闭合为 3 场景 + 两侧播种同一行）；⚠️ **证据强度不许混写**：双侧活体 = L4 · 失败路径矩阵 = **L3（只起 RAG 单侧）** · 错误码 = L1/L2（双侧**静态**）。
+- `docs/PhasedGoal.md` ⇒ P0 九条（`:38-52`）/ P1 竞争力（`:54-68`）/ P2 不阻塞（`:70-78`）⇒ 可判定版在 `PhaseGoal-judge.md`（`:26-36` 明写）。
+- `docs/twoStage.md` ⇒ §4 阶段 0 事实基线（`:258-310`）· §5.3 差异与暂缓项 **11 项必填**（`:359-379`，明写「不得只写『后续优化』」）· §5.4 改造记录 **9 项必填**（`:381-397`，「必须根据计划**实际修改**项目，而不是只输出建议」）· §10 阶段归属 A/B/C/D（`:941-975`）。
+- `docs/RoundPlan/_unresolved.md` ⇒ `GAP-11`（B 类 6 条 · 全不阻阶段一）· `GAP-12` **已关闭**（指针失效）· `GAP-13/14/15`；⇒ **`GAP-11` 里落到本域的两条 = `A-5`/`F-6`（明文默认值，已由 `DEP-03`/`S1-USERS-002` 覆盖 ⇒ 不新开任务）与 `C-5`（comment 探针）**。
+- `docs/RoundPlan/_task-universe.md` + `docs/DRIFT/_cross/stage1-derivation.tsv` ⇒ 施工单机器层（16 列 · 含 `wave` 派工面）⇒ **G3 命中 414 行 / 状态开放 179 / A/B 类未排期 0**。
+- `docs/DRIFT/_cross/stage1-derivation.md` ⇒ §4.0 波次分布（G1 275/G2 281/**G3 404**/G4 274）· §4.1 **空表**（真缺口 A/B = 0）· §4.4 **④ 已闭合 103 条**（「台账没销账 · 无待实现项」⇒ 处置 = 回写台账）· §七 效力边界（只读台账不读代码 ⇒ 台账写 ✅ 仍须按 §3.3 确认）。
+- `docs/DRIFT/_cross/live-parity-2026-10-30.md` ⇒ 三条硬纪律 + **17 条「工具自己骗人」** + 本轮台账改判 9 条（代码是真相 · 台账错就改台账）+ 三层证据报告（A 活体 115 / B 静态 974 / C 待核实 94）。
+- `docs/DRIFT/_cross/ddl-type-divergences.md` ⇒ §四 **9 域逐域机器核**（`article` 残留 0 · `comment` 21 实质 · `favorite` 2 · `hot` **N/A**）· §4.1「**没有结论 ≠ 没问题**」5 档；⚠️ **DEFAULT 残留 22 处**（users 8 + message 6 + comment 8）**仍未修**、**刻意保留**。
+- `docs/DRIFT/_cross/open-items.md` + `_cross/component-coverage-matrix.md` + `_cross/domain-common-lanes.md` + `_cross/cross-domain-coupling.md` + `_cross/go-anchors.md` ⇒ 跨组件不变量（共享 Flyway 账本 · 建表责任交叉 · 事实投递链路 · **rpc 必须先于 api** 的排序约束）+ A1~A9 九轴定义。
+- `docs/Pitfalls/_cross/` ⇒ `testing-pitfalls.md`（绿测试可能是「错误答案的守卫」⇒ 修漂移**先改/删错误断言再改实现**）· `framework-mechanism-evidence.md`（四类静默失效）· `flyway-ledger-collision.md` · `fix-round-lessons.md`（11 条元教训）· `signed-deviations.md`（签字偏离的处置纪律）。
+- `docs/Worktree.md` §二·五 + §三·1d/§1f ⇒ **开工前置四步**（① 定任务 ② 读四档 ③ 回执 ④ 经批准才开工）· 回执落点与核验命令 · 波次写权表 · **域内探针按域授权（T-0.5 选项 A）**。
+
+**③ 待批准项**（需 Jason 拍板；**回执人不得自批**）：
+
+1. 🔴 **「body form 参数轴」= 真实残留（本轮核出并已登记为 `F-8`）** —— ⚠️ **方向与本回执落笔时的初判相反，已订正**：**RAG 比 Go 宽一格，不是「RAG 更严」**。
+   ⇒ **依据（Go 侧逐行）**：`net/http/request.go:1294`（`parsePostForm` 的 `application/x-www-form-urlencoded` 分支 ⇒ **`url.ParseQuery(string(b))`** ⇒ **Go 的 10000 段上限同样作用于 body**）+ `net/url/url.go:1019-1021` ⇒ ⇒ **Go 在第 10001 个 body 参数就拒**；而 RAG 侧：① 共享层 Go 语义闸门 `GoStyleFormValues#goParseViolation` **只判 `request.getQueryString()`**（**不判 body**）⇒ body 轴上没有 Go 语义判据；② 兜底只剩**容器** `maxParameterCount`（运行时被 `GoStyleTomcatParameterLimitCustomizer` 抬到 **10001**）⇒ ⇒ **RAG 允许第 10001 个 body 参数 ⇒ 宽一格**。
+   ⇒ ⚠️ 与 query 段数轴（两侧同在第 10001 段翻转 ⇒ 本轮已销账）是**两条不同的轴**，不能一起销账。
+   ⇒ ⛔ **不许改容器常量**（改 10000 ⇒ Tomcat 抢在应用层之前 HTML 400 拒 ⇒ **制造新漂移**；改 -1 ⇒ 容器这道闸门整个消失）⇒ ⇒ **正确修法 = 域侧闸门也判 body**（照 favorite 域 `FavoriteGoQueryLimitInterceptor` 的形态）。
+   ⇒ **已按 C 类登记**（`docs/DRIFT/favorite/vs-common.md` §6 的 **`F-8`** · 跨域同源 ⇒ `article` / `hot` 同轴）⇒ 按 AGENTS.md §5.3c「**登记完就躺着**」⇒ **不推拍板**。
+2. 🔴 **共享面 / 机器生成物的过期表述** ⇒ **本 lane 不写，只登记给合并收口执行者**：
+   - `docs/DRIFT/_cross/open-items.md:15`（`DRIFT-HOTAPI-030`「跨域待拍板」条）与 §四.4 的「三域销账」**不再自洽**。
+   - `docs/PhaseGoal/g3.md` §3 **P0 #4** 行仍写「`article` 域**没有**失败路径探针」，而 `docs/PhaseGoal-judge.md:375`（§七 P0 #4）已写「失败路径矩阵 **0 域无缺口**（227 条 · article **104** 条）」⇒ **生成器输入未同步**（该文件是机器生成物 ⇒ 改基线后重跑生成器，不是手改）。
+3. ℹ️ **W5 的两种结局都已预判**：门禁绿 ⇒ `H-A2'` 销账；门禁红 ⇒ **真漂移** ⇒ 转域侧自修或升为 A/B 类 ⇒ **届时再定级**（本回执不预判结论）。
+4. ℹ️ **登记类事项不占拍板额度** —— `CAND` 族（comment 4 条未签字 · hot `SD-2026-10-25-CAND-10`）＋ 四域已签字偏离（article 2 · comment 5 · favorite 9 · hot 17）⇒ 按 §5.3c **不推拍板、不重复质疑** ⇒ 本回执**无相关待批准项**。
+
+**④ 等批准** ⇒ **批准后才开工**（本回执落笔时除本小节外未写任何代码 / 未改任何台账；已读动作仅限只读：四档台账 + `_cross` + 阶段标准 + 本轮实跑验证）。
+⇒ **Jason 于 2026-10-30 10:32 在本 lane 会话内明示「开始工作」** ⇒ **已获批开工**（⑤ 由调度员代填，见本节末尾）。
+
+**⑤ 批准记录：Jason · 2026-10-30 10:32 · 批准范围：本轮 W1~W5 五项（段数轴跨三域核验与销账 · C-5 销账 · hot §十二.7 过期待办订正 · comment 探针头部注释订正 · hot 域段数轴真 Tomcat 门禁补齐）＋ ③ 第 1 条的「body form 参数轴」登记（已落 `favorite/vs-common.md` §6 `F-8` · C 类）　← 由**调度员代填**（依据：Jason 于 2026-10-30 10:32 在**本 lane 会话内**明示「开始工作」；**回执人不得自批**· **代填 ≠ 代批准**）
 
 ---
 
