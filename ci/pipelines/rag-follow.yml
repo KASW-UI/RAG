@@ -1,0 +1,264 @@
+---
+# =============================================================================
+# ci/pipelines/rag-follow.yml —— follow 域（follow-api + follow-rpc）
+#
+# 【职责】follow 域（follow-api + follow-rpc）的构建、测试、静态守门与结果汇总。
+#
+# 【触发面】git 资源的 paths —— 只监听本流水线负责的路径：
+#   · service/follow/**                              本域
+#   · service/users/user/user-proto/**               本域编译期消费的外部模块（改了必须重跑本域）
+#   · service/common/**                              共享层（多域依赖）
+#   · service/users/users-common/**                  共享层（多域依赖）
+#   · pom.xml / service/pom.xml                      根 pom 与模块清单
+#   · mvnw / .mvn/** / ci/**                         构建工具链与 CI 自身脚本
+#
+# 【为什么带外部模块的路径】
+#   proto / common 是**跨域编译期依赖**（依赖矩阵见 ci/README.md）。
+#   只监听本域 ⇒ 「上游 proto 改了 ⇒ 本域会断」这类影响会被漏掉，
+#   而漏项不会报错 ⇒ 只能靠把依赖显式写进触发面来兜住。
+#
+# 【执行阶段】
+#   maven-build    构建（package -DskipTests）      ← privileged（DinD）
+#   maven-test     测试（test）                      ← privileged（DinD）
+#   static-gates   静态守门 + 产物级 jar 可执行性检查
+#   report         汇总 surefire 报告（读 TEST-*.xml）
+#
+# 【生成说明】本文件由 ci/generate-pipelines.py 从 pom 依赖图生成，
+#   task 配置内联自 ci/tasks/*.yml（唯一真源）。
+#   改了 pom 的模块依赖后跑 `python3 ci/generate-pipelines.py`；
+#   校验用 `python3 ci/generate-pipelines.py --check`。
+# =============================================================================
+
+resources:
+- name: repo
+  type: git
+  source:
+    uri: https://github.com/KASW-UI/RAG.git
+    branch: do-my-own-gh
+    paths:
+    - service/follow/**
+    - service/users/user/user-proto/**
+    - service/common/**
+    - service/users/users-common/**
+    - pom.xml
+    - service/pom.xml
+    - mvnw
+    - .mvn/**
+    - ci/**
+
+jobs:
+- name: build-and-test
+  plan:
+  - get: repo
+    trigger: true
+  - task: maven-build
+    privileged: true
+    config:
+      # =============================================================================
+      # ci/tasks/maven-build.yml —— 通用构建阶段（11 条流水线共用）
+      #
+      # 【为什么用 DinD（Docker-in-Docker）而不是"挂宿主 docker.sock"】
+      #   本仓 128 个测试文件直接起 Testcontainers 容器 ⇒ 任务容器里必须有一个
+      #   **Docker API 可达的 daemon**。
+      #
+      #   "wormhole"（把宿主的 docker.sock 挂进任务容器）在 Concourse 8 上**做不到**：
+      #   · Concourse 8 的 task 配置只有 `container_limits`，**没有**任意挂载声明
+      #     （实测：concourse 二进制里 `container_spec` 零命中，`container_limits` 有命中
+      #      ⇒ 该 schema 里不存在挂载项）；
+      #   · worker 的可用环境变量里也没有任何"挂载宿主路径"的开关
+      #     （CONCOURSE_GARDEN_* / CONCOURSE_CONTAINERD_* 全是运行时/资源类）。
+      #   ⇒ 剩下唯一官方支持的形态就是 DinD：
+      #     **task step 开 privileged: true**，在任务容器里起一个内层 dockerd，
+      #     再在**内层 daemon** 上跑构建容器。
+      #     这正是 Testcontainers 官方文档给的 Concourse 示例形态
+      #     （docs/supported_docker_environment/continuous_integration/concourse_ci.md）。
+      #
+      # 【嵌套容器为什么能连上内层 daemon 起的 PG】
+      #   · 嵌套容器用 `-v /var/run/docker.sock:/var/run/docker.sock` 拿到内层 socket；
+      #   · 内层 daemon 把固定宿主口（如 22760）发布在**内层 daemon 所在容器**的 0.0.0.0；
+      #   · 嵌套容器的默认网关 = 内层 bridge 的网关 = 内层 daemon 所在容器的 IP；
+      #   · Testcontainers 检测到自己在容器里 ⇒ 不用 localhost，改用默认网关
+      #     ⇒ 连接串 = jdbc:postgresql://<内层网关>:22760/... ⇒ 可达。
+      #   ⇒ 本仓的固定端口段（22700–22999，按域互斥）因此落在**每个任务容器自己的
+      #     网络命名空间**里 ⇒ **11 条流水线并行也不会互相抢端口**（比宿主共享端口更安全）。
+      #
+      # 【缓存】
+      #   caches: .m2 —— 任务容器内路径是 <工作目录>/.m2（默认 /tmp/build/.m2）；
+      #   脚本按**同一路径**把它 bind 进嵌套容器的 /root/.m2 ⇒ Maven 依赖跨构建复用。
+      #   （Concourse 的 cache 卷挂在任务容器上，嵌套容器看到的也是同一路径。）
+      platform: linux
+
+      image_resource:
+        type: registry-image
+        source:
+          repository: ((registry))/library/docker
+          tag: 27-dind
+
+      inputs:
+      - name: repo
+
+      caches:
+      - path: .m2
+        key: m2-repo-v1
+
+      params:
+        # 要构建的模块目录（逗号分隔，相对仓库根），例如
+        #   service/article/article-api,service/article/article-rpc
+        MODULES: ''
+        # 嵌套容器里跑构建的镜像（固定版本；必须带镜像源前缀，否则拉不动）
+        IMAGE: ((registry))/library/maven:3.9.11-eclipse-temurin-21
+        # 镜像源主机（host 或 host:port）。带端口 = 本地 registry ⇒ 内层 dockerd
+        # 会把它当 insecure mirror + mirror 源（见 ci/scripts/dind-run.sh）
+        REGISTRY: ((registry))
+        # 交给 ci/scripts/dind-run.sh 的阶段名（对应 ci/scripts/<stage>.sh）
+        STAGE: build
+        # 可选的 Maven 镜像源（如内网 Nexus）。留空 = 走默认 Central。
+        # 非空时 dind-run.sh 会把 settings.xml 写进 $PWD/.m2 ⇒ 嵌套容器里的
+        # Maven 自动生效（不写 <mirror>，改用「额外仓库」⇒ 镜像缺件仍可回退 Central）
+        MAVEN_MIRROR_URL: ''
+
+      run:
+        path: sh
+        args:
+        - repo/ci/scripts/dind-run.sh
+    params:
+      MODULES: service/follow/follow-api,service/follow/follow-rpc
+      REGISTRY: ((registry))
+      MAVEN_MIRROR_URL: ((maven_mirror))
+  - task: maven-test
+    privileged: true
+    config:
+      # =============================================================================
+      # ci/tasks/maven-test.yml —— 通用测试阶段（11 条流水线共用）
+      #
+      # 【与 maven-build 的关系】
+      #   两个独立 step ⇒ Concourse 上"构建失败"与"测试失败"是两个不同状态，
+      #   失败发生在哪个阶段一眼可见（提示词 §三.6 的明确要求）。
+      #   代价是 test 阶段会重新编译一次（task 容器之间不共享 target/），
+      #   实测约 10 秒量级，相对于分钟级的测试执行可以忽略。
+      #
+      # 【outputs 的作用】
+      #   把带 target/ 的 repo 往下传 ⇒ 后续 static-gates 能读到**本次构建**的
+      #   可执行 jar（check-jar-executable.sh 需要它），report 能读到本次的
+      #   surefire 报告。
+      #
+      # 【Docker / Testcontainers】
+      #   形态与 maven-build 相同：DinD（内层 dockerd + 嵌套构建容器）。
+      #   环境的准备与前置断言在 ci/scripts/testcontainers-env.sh（被 test.sh source）。
+      platform: linux
+
+      image_resource:
+        type: registry-image
+        source:
+          repository: ((registry))/library/docker
+          tag: 27-dind
+
+      inputs:
+      - name: repo
+
+      outputs:
+      - name: repo
+        path: repo
+
+      caches:
+      - path: .m2
+        key: m2-repo-v1
+
+      params:
+        MODULES: ''
+        IMAGE: ((registry))/library/maven:3.9.11-eclipse-temurin-21
+        # 镜像源主机（host 或 host:port）。带端口 = 本地 registry ⇒ 内层 dockerd
+        # 会把它当 insecure mirror + mirror 源（见 ci/scripts/dind-run.sh）
+        REGISTRY: ((registry))
+        STAGE: test
+        # 可选的 Maven 镜像源（与 maven-build 同义，见 ci/tasks/maven-build.yml）
+        MAVEN_MIRROR_URL: ''
+
+      run:
+        path: sh
+        args:
+        - repo/ci/scripts/dind-run.sh
+    params:
+      MODULES: service/follow/follow-api,service/follow/follow-rpc
+      REGISTRY: ((registry))
+      MAVEN_MIRROR_URL: ((maven_mirror))
+  - task: static-gates
+    config:
+      # =============================================================================
+      # ci/tasks/static-gates.yml —— 通用静态守门阶段（11 条流水线共用）
+      #
+      # 【为什么用 python 镜像而不是 maven 镜像】
+      #   这一步不跑 Maven，只跑 tools/difftest/ 下的静态守门脚本：
+      #   · 7 个是 python3 脚本
+      #   · 1 个（check-jar-executable.sh）是 bash 脚本（用了数组/[[ ]]/进程替换）
+      #   ⇒ 需要一个同时有 python3 + bash 的镜像。
+      #   python:3.12-bookworm 两者都有，且体积比 maven 镜像小得多
+      #   （静态门阶段不需要 JDK）。
+      #
+      # 【脚本清单的取舍（实测分类，2026-10-30）】
+      #   ✅ 纳入（纯静态、无外部依赖）：
+      #      check-no-prod-secrets.py / check-no-nul-bytes.py /
+      #      check-datasource-password-form.py / check-tomcat-limits.py /
+      #      check-grpc-interceptor-wiring.py / check-grpc-runtime-classpath.py /
+      #      check-flyway-ledger.py  +  产物级 check-jar-executable.sh
+      #   ❌ 不纳入（写成"已跑"就是虚构）：
+      #      · check-ddl-static.py            → 需要活体 PG 容器
+      #      · check-proto-static.sh /
+      #        check-surface-parity.py /
+      #        check-phasegoal-consistency.py → 需要 Go 真源仓库
+      #      · check-plaintext400-headers.sh /
+      #        check-flyway-concurrent.sh      → 需要起真实进程
+      platform: linux
+
+      image_resource:
+        type: registry-image
+        source:
+          repository: ((registry))/library/python
+          tag: 3.12-bookworm
+
+      inputs:
+      - name: repo
+
+      params:
+        # 本域的 api/rpc 模块目录（空格分隔），用于产物级 jar 可执行性检查；
+        # 共享层流水线没有可执行 jar ⇒ 留空 ⇒ 跳过该项。
+        JAR_MODULES: ''
+
+      run:
+        path: sh
+        args:
+        - repo/ci/scripts/run-static-gates.sh
+    params:
+      JAR_MODULES: service/follow/follow-api service/follow/follow-rpc
+      REGISTRY: ((registry))
+  - task: report
+    config:
+      # =============================================================================
+      # ci/tasks/report.yml —— 通用结果汇总阶段（11 条流水线共用）
+      #
+      # 【产出什么】
+      #   · 每个模块的用例数 / 失败数 / 错误数 / 跳过数（表）
+      #   · 失败用例清单（类名 + 用例名 + 消息首行）
+      #   · 本次构建对应的 Git 提交（从 git 资源的 .git/ref 读）
+      #   · 有失败/错误 ⇒ 退出码 1 ⇒ 这一步红 ⇒ 构建判负
+      #
+      # 【统计口径】
+      #   一律读 surefire 的 TEST-*.xml（权威）⇒ 不读 *.txt 摘要
+      #   （实测过 .txt 会与 XML 不一致，按 .txt 求和会得出"少了 N 条"的假回归）。
+      platform: linux
+
+      image_resource:
+        type: registry-image
+        source:
+          repository: ((registry))/library/python
+          tag: 3.12-bookworm
+
+      inputs:
+      - name: repo
+
+      run:
+        path: sh
+        args:
+        - repo/ci/scripts/collect-surefire.sh
+    params:
+      REGISTRY: ((registry))

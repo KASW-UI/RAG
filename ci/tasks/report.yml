@@ -1,0 +1,28 @@
+---
+# =============================================================================
+# ci/tasks/report.yml —— 通用结果汇总阶段（11 条流水线共用）
+#
+# 【产出什么】
+#   · 每个模块的用例数 / 失败数 / 错误数 / 跳过数（表）
+#   · 失败用例清单（类名 + 用例名 + 消息首行）
+#   · 本次构建对应的 Git 提交（从 git 资源的 .git/ref 读）
+#   · 有失败/错误 ⇒ 退出码 1 ⇒ 这一步红 ⇒ 构建判负
+#
+# 【统计口径】
+#   一律读 surefire 的 TEST-*.xml（权威）⇒ 不读 *.txt 摘要
+#   （实测过 .txt 会与 XML 不一致，按 .txt 求和会得出"少了 N 条"的假回归）。
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: ((registry))/library/python
+    tag: 3.12-bookworm
+
+inputs:
+- name: repo
+
+run:
+  path: sh
+  args:
+  - repo/ci/scripts/collect-surefire.sh

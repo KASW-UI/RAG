@@ -1,0 +1,68 @@
+---
+# =============================================================================
+# ci/tasks/maven-build.yml —— 通用构建阶段（11 条流水线共用）
+#
+# 【为什么用 DinD（Docker-in-Docker）而不是"挂宿主 docker.sock"】
+#   本仓 128 个测试文件直接起 Testcontainers 容器 ⇒ 任务容器里必须有一个
+#   **Docker API 可达的 daemon**。
+#
+#   "wormhole"（把宿主的 docker.sock 挂进任务容器）在 Concourse 8 上**做不到**：
+#   · Concourse 8 的 task 配置只有 `container_limits`，**没有**任意挂载声明
+#     （实测：concourse 二进制里 `container_spec` 零命中，`container_limits` 有命中
+#      ⇒ 该 schema 里不存在挂载项）；
+#   · worker 的可用环境变量里也没有任何"挂载宿主路径"的开关
+#     （CONCOURSE_GARDEN_* / CONCOURSE_CONTAINERD_* 全是运行时/资源类）。
+#   ⇒ 剩下唯一官方支持的形态就是 DinD：
+#     **task step 开 privileged: true**，在任务容器里起一个内层 dockerd，
+#     再在**内层 daemon** 上跑构建容器。
+#     这正是 Testcontainers 官方文档给的 Concourse 示例形态
+#     （docs/supported_docker_environment/continuous_integration/concourse_ci.md）。
+#
+# 【嵌套容器为什么能连上内层 daemon 起的 PG】
+#   · 嵌套容器用 `-v /var/run/docker.sock:/var/run/docker.sock` 拿到内层 socket；
+#   · 内层 daemon 把固定宿主口（如 22760）发布在**内层 daemon 所在容器**的 0.0.0.0；
+#   · 嵌套容器的默认网关 = 内层 bridge 的网关 = 内层 daemon 所在容器的 IP；
+#   · Testcontainers 检测到自己在容器里 ⇒ 不用 localhost，改用默认网关
+#     ⇒ 连接串 = jdbc:postgresql://<内层网关>:22760/... ⇒ 可达。
+#   ⇒ 本仓的固定端口段（22700–22999，按域互斥）因此落在**每个任务容器自己的
+#     网络命名空间**里 ⇒ **11 条流水线并行也不会互相抢端口**（比宿主共享端口更安全）。
+#
+# 【缓存】
+#   caches: .m2 —— 任务容器内路径是 <工作目录>/.m2（默认 /tmp/build/.m2）；
+#   脚本按**同一路径**把它 bind 进嵌套容器的 /root/.m2 ⇒ Maven 依赖跨构建复用。
+#   （Concourse 的 cache 卷挂在任务容器上，嵌套容器看到的也是同一路径。）
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: ((registry))/library/docker
+    tag: 27-dind
+
+inputs:
+- name: repo
+
+caches:
+- path: .m2
+  key: m2-repo-v1
+
+params:
+  # 要构建的模块目录（逗号分隔，相对仓库根），例如
+  #   service/article/article-api,service/article/article-rpc
+  MODULES: ''
+  # 嵌套容器里跑构建的镜像（固定版本；必须带镜像源前缀，否则拉不动）
+  IMAGE: ((registry))/library/maven:3.9.11-eclipse-temurin-21
+  # 镜像源主机（host 或 host:port）。带端口 = 本地 registry ⇒ 内层 dockerd
+  # 会把它当 insecure mirror + mirror 源（见 ci/scripts/dind-run.sh）
+  REGISTRY: ((registry))
+  # 交给 ci/scripts/dind-run.sh 的阶段名（对应 ci/scripts/<stage>.sh）
+  STAGE: build
+  # 可选的 Maven 镜像源（如内网 Nexus）。留空 = 走默认 Central。
+  # 非空时 dind-run.sh 会把 settings.xml 写进 $PWD/.m2 ⇒ 嵌套容器里的
+  # Maven 自动生效（不写 <mirror>，改用「额外仓库」⇒ 镜像缺件仍可回退 Central）
+  MAVEN_MIRROR_URL: ''
+
+run:
+  path: sh
+  args:
+  - repo/ci/scripts/dind-run.sh
