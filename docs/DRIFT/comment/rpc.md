@@ -1271,6 +1271,61 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 - ⇒ RAG 侧原先 `service/comment/comment-rpc/src/main/resources/application.yml:67` 的 `${POSTGRES_PASSWORD:password}`（走 Spring 的 `:default`）⇒ 缺变量时会用默认值连上去 ⇒ **RAG 比 Go 松** ⇒ 属**真漂移** ⇒ 本轮**取消兜底**。
 - ⚠️ **残余差异（失败时刻不同）**：Go = 启动成功、连库时失败；RAG = 启动即失败 ⇒ 属「RAG 更严」的一侧 ⇒ 由**合并收口执行者**在合并窗口统一登记。
 
+
+## 📌 追加 · ✅ **comment 域两个出向出口的 deadline 继承形态：逐出口核对（两侧同形）**（2026-10-30 · G3 第五轮）
+
+> **一句话**：本域 `comment-rpc` 有 **2 条**出向出口，它们对「入向 deadline 载体」的**可见性不同** ——
+> ⇒ 一条在 **gRPC handler 线程**（载体可见 ⇒ **继承**入向剩余预算），
+> ⇒ 一条在 **Kafka consumer 线程**（载体不可见 ⇒ **只有 2s 客户端封顶**）；
+> ⇒ 而 **Go 侧那一条 consumer 出口的 ctx 同样没有 deadline** ⇒ ⇒ **两侧逐出口同形**。
+> ⇒ ⇒ **「继承」那一半只对 handler 线程那条出口成立**；consumer 那条**不是漂移**。
+> ⚠️ **销账权不在本域**（C-3 / U15 的落点是 `service/common` ＋ global E65）⇒ 本节只给**域侧事实 + 证据**，判定归 global。
+
+### 为什么「载体在位」这一个事实不足以判定继承
+
+共享层的载体是 **ThreadLocal**（`service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java:64` 的 `DEADLINE_NANOS`），
+绑定点只有 gRPC 服务端拦截器一处（`service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:494` 的 `onHalfClose`
+⇒ `:517` 绑 `DeadlineState` ＋ `:519` 绑 `GoStyleRequestDeadline` ⇒ 同一绝对时刻，`:311-312` 算一次）。
+
+⇒ ⇒ **载体只在「跑 gRPC handler 的那个线程」上可见** ⇒ ⇒ 同一个域里的两条出向出口，
+**只要调用线程不同，继承结论就可能相反** ⇒ ⇒ 只看「载体在位」就下「本域出向已继承」的结论，是**跨线程的越界推断**。
+
+### 出口一 · `ArticleRpcClient`（**在 gRPC handler 线程 ⇒ 继承**）
+
+| 项 | 证据（`文件:行号`） |
+|---|---|
+| RAG 调用点 | `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/client/ArticleRpcClient.java:71`（`GoStyleClientCallTimeout.withDeadline(stub)`）· 发起点 `:83` |
+| RAG 调用链 | `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/impl/CommentServiceGrpcImpl.java:73`（`domainService.getComment(request)`）⇒ `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentDomainService.java:427`（`loadSubject`）⇒ `:431` ⇒ `:274`（`resolveSubjectFallback`）⇒ `:254`（`resolveOwnerId`）⇒ `fetchAuthorId` ⇒ ⇒ **全程在 gRPC handler 线程上** |
+| Go 对照 | `service/comment/rpc/internal/logic/subject_fallback.go:12`（`resolveSubjectFallback(ctx context.Context, …)` ⇒ ctx 由 handler 传入）· `:17`（`articleRPC.GetArticle(ctx, …)` ⇒ 父 deadline 经 ctx 传播 ⇒ 到点即止） |
+| 载体可见性 | ⇒ handler 线程 ⇒ 共享层 `RpcInterceptor.onHalfClose` 绑的载体**可见** ⇒ ⇒ **继承入向剩余预算**（= `min(2s, 剩余)`） |
+| 当前实现的精度 | `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/client/GoStyleClientCallTimeout.java:90-96` 读 `GoStyleRequestDeadline.remainingMillis()` ⇒ **毫秒截断**（`service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java:90-96`）⇒ 与 Go 的纳秒预算（`go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25`）**差 ≤1ms** |
+
+### 出口二 · `MessageRpcClient`（**在 Kafka consumer 线程 ⇒ 不继承** —— 且 Go 侧同样不继承）
+
+| 项 | 证据（`文件:行号`） |
+|---|---|
+| RAG 调用点 | `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/client/MessageRpcClient.java:66`（`GoStyleClientCallTimeout.withDeadline(stub)`）· 发起点 `:81` |
+| RAG 调用链 | `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/service/CommentAuditListener.java:249`（`messageRpcClient.sendNotification(…)`）⇒ 该类 `:99` 是 `@KafkaListener` ⇒ ⇒ **调用发生在 Kafka consumer 线程**，不是 gRPC handler 线程 |
+| 载体可见性 | ⇒ consumer 线程 ⇒ 共享层 `RpcInterceptor` 绑的 ThreadLocal **不可见**（`GoStyleRequestDeadline.remainingMillis()` 返回 `-1`）⇒ ⇒ 出向**只有 2s 客户端封顶**（`service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/client/GoStyleClientCallTimeout.java:92-94` 的 `DEFAULT_CALL_TIMEOUT_MILLIS` 分支） |
+| Go 对照 | `service/comment/rpc/internal/mqs/audit_consumer.go:101`（`l.svcCtx.MessageRpc.SendNotification(ctx, …)`）⇒ 该 `ctx` 是 **Kafka 消费 ctx**，**本身没有 deadline** ⇒ ⇒ Go 侧该出口**同样只有客户端 2s 封顶** ⇒ ⇒ **两侧同形 ⇒ 不是漂移** |
+| ⚠️ 结论的形状 | 这条**不是**「RAG 少继承了」⇒ **不得**被当成漂移去「修」⇒ ⇒ 也**不得**用它去论证「载体机制在本域无效」 |
+
+### 证据强度分层（诚实边界 · 不外推）
+
+| 结论 | 强度 | 依据 |
+|---|---|---|
+| 共享层在 gRPC handler 上绑定载体 | **L4 活体** | 上一轮 favorite 域侧确认已实测（`docs/DRIFT/favorite/rpc.md` 本轮新增段）· 共享层 `RpcInterceptor.java:494`/`:517`/`:519` |
+| 出口一的**调用线程**与**调用链** | **L2 源码级** | 逐字读了 `@KafkaListener`（`CommentAuditListener.java:99`）、gRPC impl（`CommentServiceGrpcImpl.java:73`）与 `CommentDomainService` 的私有方法链（`:427`/`:431`/`:274`/`:254`） |
+| 出口二**不继承** | **L2 源码级 ＋ 否定结论** | 依据 = 「共享层的绑定点**只有** gRPC 拦截器一处」这一**枚举完整性**前提 ⇒ 已核 `service/common` 内 `GoStyleRequestDeadline.begin(` / `bindAbsoluteNanos(` 的全部调用点 ⇒ 无第二个绑定点 |
+| ⚠️ **未覆盖** | — | 本节**不**证明「出口二在生产里真的拿到了 2s」—— 那需要活体计时；本节只证明**两侧的 deadline 形态同形**（RAG 侧 2s 封顶 ＋ Go 侧 2s 封顶） |
+
+### 对本域台账的影响
+
+- `docs/DRIFT/comment/vs-common.md:112`（C-3 / U15 的现行开放面标题）**已就地订正**：「等 global 统一载体」这一步**已完成** ⇒ 开放面收窄为**精度对齐** ＋ **逐出口线程差异**。
+- `docs/DRIFT/comment/vs-common.md:119`（影响面格）**已就地订正**：补上「两个出口载体可见性不同 ⇒ 继承结论不同」。
+- `docs/DRIFT/comment/vs-common.md:834`（C-3 行）上一轮已订正为「继承已闭合 · 残留 = 精度差 ≤1ms」⇒ **本节补充的是它未覆盖的「逐出口」维度**（该行原文只举了 `client/ArticleRpcClient.java:71` 一个出口）。
+- ⚠️ **本节不销 C-3** ⇒ C-3 仍是 **P1 · 阻断阶段一**（销账权在 global）⇒ 本域只给事实。
+
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
 > 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
