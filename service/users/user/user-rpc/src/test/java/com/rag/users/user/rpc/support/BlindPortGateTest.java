@@ -159,7 +159,7 @@ class BlindPortGateTest {
     // ==================================================================
 
     @Test
-    @DisplayName("② 段归属：9 个端口类的段落在本域预分配段内、子段互不重叠、不在临时段、不撞 Testcontainers 段")
+    @DisplayName("② 段归属：11 个端口类的段落在本域预分配段内、子段互不重叠、不在临时段、不撞 Testcontainers 段")
     void portClassesStayInsideDomainBand() throws IOException {
         Map<String, int[]> bands = new LinkedHashMap<>();
         for (String module : DOMAIN_MODULE_DIRS) {
@@ -174,9 +174,12 @@ class BlindPortGateTest {
         }
 
         assertThat(bands)
-                .as("要有 6 个 RealGrpcPort + 3 个 RealTomcatPort"
-                        + "（user-api / admin-api / follow-api 各要一个 Tomcat 口）")
-                .hasSize(9);
+                .as("要有 6 个 RealGrpcPort + 5 个 RealTomcatPort"
+                        + "（user-api / admin-api / follow-api 各要一个 Tomcat 口"
+                        + "；🆕 2026-10-30 · G1 lane · 指标抓取出口补载体："
+                        + "**user-rpc 与 admin-rpc 也各要一个 Tomcat 口**"
+                        + "——它们现在有了 servlet 载体，载体守门要真起 web server ⇒ 必须有固定段端口）")
+                .hasSize(11);
 
         List<int[]> ranges = new ArrayList<>();
         for (Map.Entry<String, int[]> e : bands.entrySet()) {

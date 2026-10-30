@@ -23,11 +23,12 @@ import java.util.Enumeration;
 /**
  * 显式注册 user-rpc 实例到 Nacos。
  *
- * <p>DRIFT-NEW-011 根因：user-rpc 是纯 gRPC 进程（无 Tomcat/Jetty Web Server），
- * Spring Cloud Commons 的 {@code NacosAutoServiceRegistration} 默认监听
- * {@code WebServerInitializedEvent} 触发自动注册 —— user-rpc 没发这个 event，
- * 所以启动时 Nacos client 装配完但不调 register，本地 API 调
- * {@code /v1/ns/instance/list} 永远返回 hosts=[]。
+ * <p>DRIFT-NEW-011 根因：user-rpc 原先没有 web 容器 ⇒ Spring Cloud Commons 的 {@code NacosAutoServiceRegistration}
+ * 默认监听 {@code WebServerInitializedEvent} 触发自动注册 —— 那时 user-rpc 不发这个 event ⇒ 启动时不调 register
+ * ⇒ 本地 API 查实例列表永远 hosts=[]。
+ *
+ * <p>🔴 <b>2026-10-30 补载体后前提已变</b>：现在会发该 event ⇒ ⇒ 自动注册被触发，取的是 <b>web server 端口</b>（观测口 9094，非 gRPC 口 49210）
+ * ⇒ ⇒ Nacos 出现错端口实例 ⇒ ⇒ gRPC 链路断（业务码塌 1015）⇒ ⇒ yml 必须写 {@code register-enabled: false}（详见 yml Nacos 段注释）。
  *
  * <p>1:1 语义对齐 Go 端：Go user-rpc 启动时主动调
  * {@code NamingService.RegisterInstance(serviceName, groupName, instance)}
