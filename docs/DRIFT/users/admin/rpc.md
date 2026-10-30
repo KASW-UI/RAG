@@ -4512,10 +4512,10 @@ if (connectTimeout != null) {                                     // :16
 **（5）🔴 自我推翻：上面「子情形甲2 = Go 拉黑 token、RAG 没拉黑」是错的 ⇒ 方向反了（2026-10-30 16:5x · G4 独立复核 + G1 复核通过）**
 
 - ⚠️ **我的原推理错在把「命令已下发」当成跨两侧的同一瞬间状态**。两侧检查点是**先后**关系：**Go 的检查在 dispatch 之前**（`redis.go:808-824` `withConn` 用原始 ctx ⇒ `pool.go:837` ⇒ `:1099-1104` `waitTurn` fast path **无条件先查 `ctx.Done()`**；slow path `:1113` `Acquire(ctx,…)`；`:589-591` `dialConn(ctx)`；且 **`redis.go:842-846` 重试每次都重新检查**）⇒ ⇒ **ctx 一过期，Go 一次都不写**；而 **RAG 的域侧守卫更早**（`AdminDomainService.java:259`）⇒ ⇒ **T1 拒绝 ⇒ T2 更晚时 ctx 必已过期 ⇒ Go 也拒绝** ⇒ ⇒ **「Go 写、RAG 不写」不存在 ⇒ 本段原断言作废**。
-- ⇒ ⇒ **真正的残余在相反方向（RAG 更宽）**：deadline 在「取连接/拨号窗口」内过期 **且** Go 需新建连接 ⇒ Go 的 `dialConn(ctx)` 受 ctx 约束 ⇒ **不写**；RAG 的 Lettuce 取连接无 ctx 语义 ⇒ ⇒ **仍写** ⇒ ⇒ **RAG 写下 Go 不会写的东西**。⚠️ Go 若复用空闲连接 ⇒ socket 阶段不看 ctx ⇒ **Go 也写** ⇒ 两侧同形。⚠️ **G4 的连接代理盖不住这条**（`assertNotExhausted` 在取连接之前 ⇒ 代理检查后、取连接期间过期 ⇒ 不再检查）⇒ ⇒ **E66 同形化不可完全闭合 = 诚实边界（框架限制）**。
+- ⇒ ⇒ **真正的残余在相反方向（RAG 更宽）· 2026-10-30 22:1x 窗口已收窄**：残余**不再是**「取连接/拨号窗口」（该窗口**已被** `GoStyleRedisDeadlineConnectionFactory.java:57-59` 的**建连前** `assertNotExhausted("getConnection")` 覆盖 ⇒ ⇒ 预算耗尽 ⇒ **连都不拨**）⇒ ⇒ **残余 = 命令已在 socket 上传输途中、预算耗尽** ⇒ Lettuce 的写超时与 grpc deadline 无关 ⇒ 写**可能落库**；Go 侧 `go-redis` 的写超时绑 ctx ⇒ 可能中断 ⇒ ⇒ **RAG 写下 Go 不会写的东西**。⚠️ Go 若复用空闲连接 ⇒ socket 阶段不看 ctx ⇒ **Go 也写** ⇒ 两侧同形。⚠️ **这一条代理盖不住**（检查点在**命令下发前** ⇒ 已下发到 socket 的写无法撤回）⇒ ⇒ **E66 同形化不可完全闭合 = 诚实边界（框架限制）**。
 - ⇒ ⇒ **错误面必须分两层**：**① 客户端可见码** 两侧都是 **1015**（Go 侧**实际生效的**是 `service/common/observability/rpc.go:59-72` 的 `select` ⇒ `:69` `codes.DeadlineExceeded`；⚠️ **go-zero 原生那层已被关掉** —— `service/user/admin/rpc/admin.go:33` 调 `DisableNativeRpcTimeout` ⇒ `conf.Timeout=0` ⇒ `timeoutinterceptor.go` 不生效；RAG 侧 = `RpcInterceptor.java:346-356` 首次 close 定 status）⇒ **不是 wire 级漂移** ✔；**② handler 级业务码** Go = **5001** vs RAG 现状 = **1015** ⇒ ⇒ **两侧确实不同** ⇒ ⇒ 🔴 ~~**该层【不可观察】⇒ 不构成漂移 ⇒ 保留 `checkDeadline()`、域侧零落码**~~（🔴 **已作废 · 2026-10-30 16:3x，见（6）段**：我 16:8x 拿①的结论去否定② ⇒ 「不可观察」只说明**客户端面**不变，**不说明 handler 面同形** ⇒ ⇒ **② 正是本条本体 ⇒ 归本域改**）⇒ ⇒ **客户端面不变**（1015）**但 handler 面必须同形**（Go 5001）⇒ ⇒ **不需要签字、需要改实现**。
 - ⇒ ⇒ **域侧正确改法 = 撤掉抢先守卫（不是「主动抛 INTERNAL」）**（2026-10-30 16:3x 订正 ⇒ **本轮已落码**）：Go 的语义是「**先尝试写、失败才报 `INTERNAL`**」（`logoutlogic.go:38-42`）⇒ ⇒ 域侧同形 = **让写尝试发生** ⇒ 由 Redis 侧失败（共享层代理抛 `QueryTimeoutException`）⇒ 落进现有 `catch (Exception e)` ⇒ **自动得到 `INTERNAL`「注销失败,Redis写入异常」= Go 的 5001** ⇒ ⇒ **只删一行、不新增分支** ⇒ ⇒ **`AdminDomainServiceDeadlineTest.java` 的 `GUARDED` 清单已把 `logout` 移出**（13 → **12**，纪律 = AGENTS.md §3.3 ③「先改断言、再改实现」）⇒ ⇒ **「G4 建议的改成 `INTERNAL`」仍然不采纳**（它会**跳过**写尝试 ⇒ 与 Go 的「先尝试写、失败才报」不同形）。
-- ⇒ ⇒ ~~**同批合约束取消**~~（🔴 **已作废 · 2026-10-30 16:3x**：前提「域侧不需要动」已被推翻 ⇒ ⇒ **约束【恢复】**：本域改动**必须与 G4 的共享层代理同一个提交**进主干 ⇒ 理由 = 域内闸门撤掉后若代理**未**在位 ⇒ 该方法**没有任何**期限感知 ⇒ 期限已耗尽时**仍会把黑名单写进 Redis** ⇒ ⇒ **RAG 写、Go 不写** ⇒ ⇒ **E66 暴露面** ⇒ ⇒ **单独合入 = 倒退** ⇒ 清单编号 **M-6** · 落点 `docs/Worktree.md` §3-1 M 表 + §3-2 合并约束段（**不在 G1 写权面** · 由主线收口执行者写））。
+- ⇒ ⇒ ~~**同批合约束取消**~~（🔴 **已作废 · 2026-10-30 16:3x**：前提「域侧不需要动」已被推翻 ⇒ ⇒ **约束【恢复】**（🔴 **又作废 · 2026-10-30 22:1x** · G4 第四次订正 `4e30d898` ＋ G1 自读复核：共享层半边**已把预算检查前移到建连之前** ⇒ ⇒ 域侧那半**单独存在也不倒退** ⇒ ⇒ **约束取消**）：本域改动**必须与 G4 的共享层代理同一个提交**进主干 ⇒ 理由 = 域内闸门撤掉后若代理**未**在位 ⇒ 该方法**没有任何**期限感知 ⇒ 期限已耗尽时**仍会把黑名单写进 Redis** ⇒ ⇒ **RAG 写、Go 不写** ⇒ ⇒ **E66 暴露面** ⇒ ⇒ **单独合入 = 倒退** ⇒ 清单编号 **M-6** · 落点 `docs/Worktree.md` §3-1 M 表 + §3-2 合并约束段（**不在 G1 写权面** · 由主线收口执行者写））。
 - ⇒ ⇒ **落码归属与顺序（2026-10-30 16:3x 订正 ⇒ 域侧已落码）**：**本域改动 = 3 个文件** ⇒ ① `AdminDomainService.java` 的 `logout()` **删掉入口 `checkDeadline()`**（只删一行）⇒ ② `AdminDomainServiceDeadlineTest.java` 的 `GUARDED` **移出 `logout`**（13 → 12）⇒ ③ **新增** `AdminLogoutDeadlineHandoffTest.java`（3 条：域侧不再抢先拦 / handler 级码 = INTERNAL / 反向 token 空仍 INVALID_ARGUMENT）⇒ ⇒ **修法 = 共享层代理（G4）＋ 域侧撤闸门（G1）两处 · 同一个提交**。⚠️ 仍然成立的诚实边界 = 「取连接/拨号窗口内过期 ⇒ RAG 写、Go 不写」且**代理盖不住** ⇒ **不可完全闭合 = 框架限制** ⇒ 不追。⚠️ 本轮证据强度 = **L3**（静态 + 域内单测；新测试用 Mockito 替换数据层 ⇒ 不证代理接线）⇒ **不是 L4**。
 
 **（6）🔴 订正：上面「② handler 级不可观察 ⇒ 不是漂移 ⇒ 保留 `checkDeadline()`」是错的 ⇒ 域侧已落码（2026-10-30 16:3x · 主线收口执行者更正停工通知 + G1 独立复核通过）**
@@ -4526,11 +4526,11 @@ if (connectTimeout != null) {                                     // :16
   - **Go 侧** `service/user/admin/rpc/internal/logic/logoutlogic.go` **全文 46 行** ⇒ `:32-35` 只校验 token 非空 ⇒ `:36` 拼 key ⇒ `:37` 取 `AccessExpire` ⇒ `:38` `SetexCtx(l.ctx, …)`（**写绑 ctx**）⇒ `:39-42` 失败 ⇒ `status.Error(codes.Internal, "注销失败,Redis写入异常")` ⇒ ⇒ **全文无 ctx 预检** ⇒ ⇒ **handler 级码 = 5001**。
   - **RAG 侧** `service/users/admin/admin-rpc/.../AdminServiceGrpcImpl.java:82-85` 的 `logout` **本身无 deadline 闸门** ⇒ ⇒ **域内 `checkDeadline()` 是该路径唯一闸门** ⇒ ⇒ 删掉它 ⇒ 请求**照样走到 Redis 写** ⇒ 与 Go「先尝试写、失败才报」同形。
   - **B-1 catch 顺序（收口执行者点名要确认）**：共享层代理抛 `org.springframework.dao.QueryTimeoutException`（`service/common/.../redis/GoStyleRedisDeadline.java:88-92`）⇒ ⇒ **不是** grpc `StatusRuntimeException` ⇒ ⇒ **不被** B-1 分支拦 ⇒ ⇒ 落进 `catch (Exception e)` ⇒ `INTERNAL`「注销失败,Redis写入异常」⇒ ⇒ **与 Go 的 `codes.Internal` 逐字同形** ⇒ ⇒ **B-1 分支必须保留**（服务 PG 57014 那条路）⇒ ⇒ **这个顺序是有意的、不是漏网**。
-  - **客户端可见层不变**：`RpcInterceptor.java:314-320` 调度器在 deadline 时刻 close ⇒ **首次 close 定客户端 status**（`:346-356`）⇒ ⇒ handler 返回 5001 的时刻**晚于**调度器 close ⇒ ⇒ 第二次 close 被 grpc 忽略 ⇒ ⇒ **客户端仍拿 1015** ⇒ 与 Go 同形 ✔。
+  - **客户端可见层不变**：`RpcInterceptor.java:314-320` 调度器在 deadline 时刻 close ⇒ **首次 close 定客户端 status**（`RpcInterceptor.java:371-381`，**M6 那句在 `:377-378`**；⚠️ 2026-10-30 22:1x 订正 —— 原写 `:346-356` ＝ **G4 订正前**的坐标，`:353-354` 实际是「造 `TimeoutException`」那两行）⇒ ⇒ handler 返回 5001 的时刻**晚于**调度器 close ⇒ ⇒ 第二次 close 被 grpc 忽略 ⇒ ⇒ **客户端仍拿 1015** ⇒ 与 Go 同形 ✔。
 - **本域落码（3 个文件 · G1 写权面内）**：① `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminDomainService.java` ⇒ **`logout()` 删掉入口 `checkDeadline()`**（**只删一行、不新增分支**）⇒ 方法 javadoc 补 **Go 出处 / 语义等价论证 / 客户端可见层不变 / 🔴 合并约束** 四段 ⇒ 现行锚点 `:282`（入口）/ `:290`（Redis 写）/ `:291`（B-1）/ `:301-302`（catch + INTERNAL）；② `.../src/test/java/com/rag/users/admin/rpc/service/AdminDomainServiceDeadlineTest.java` ⇒ **`GUARDED` 移出 `logout`**（13 → **12**）⇒ 字段/类 javadoc 与 `@DisplayName` 同步 ⇒ **纪律 = AGENTS.md §3.3 ③「先改断言、再改实现」**；③ **新增** `.../src/test/java/com/rag/users/admin/rpc/service/AdminLogoutDeadlineHandoffTest.java`（**3 条**）⇒ ① 域侧不再抢先拦（期限已耗尽仍**调用到** Redis 写 ⇒ `verify(...).set(...)`）· ② handler 级码 = `INTERNAL`「注销失败,Redis写入异常」（用代理**实际抛的异常类型**驱动）· ③ 反向：token 为空仍 `INVALID_ARGUMENT`「Token不能为空」（防「撤闸门」顺手撤掉参数校验）。
 - **测试结果（2026-10-30 16:31 实跑）**：定向 4 类 = **7 条 / 0F / 0E / 0S** ⇒ `AdminLogoutDeadlineHandoffTest` **3/3** · `AdminDomainServiceDeadlineTest` **2/2** · `AdminRpcLogoutClientVisibleGrpcStatusTest` **1/1**（真 PG + 真 Redis · 13.4s）· `AdminRpcLogoutClientVisibleGrpcStatusDefaultBehaviorTest` **1/1**（18.2s）⇒ ⇒ **既有两条 logout 客户端可见码测试未被打破**（它们本就不依赖域内闸门：一条「Redis 断连 ⇒ INTERNAL」、一条「命令排队 ⇒ 2s 预算先到 ⇒ 1015」）。
-- 🔴 **合并约束（本条唯一未闭合项 · 清单编号 M-6）**：**本域改动与共享层代理必须同一个提交进主干** ⇒ 理由 = 域内闸门撤掉后若代理**未**在位 ⇒ 该方法**没有任何**期限感知 ⇒ 期限已耗尽时**仍会把黑名单写进 Redis** ⇒ ⇒ **RAG 写、Go 不写** ⇒ ⇒ **E66 暴露面** ⇒ ⇒ **单独合入 = 倒退** ⇒ ⇒ 落点 `docs/Worktree.md` §3-1 的 M 表 + §3-2 的合并约束段（**不在 G1 写权面** · 由主线收口执行者写）。
-- ⚠️ **诚实边界（本轮无「双侧活体」新证据）**：① 新测试用 **Mockito 替换数据层** ⇒ 只证「域服务的控制流与异常映射」，**不证**「共享层代理真的在 Redis 调用路径上」（那由 G4 的 `GoStyleRedisDeadlineGateTest` 守 · **跨 lane**）⇒ ⇒ **本轮证据强度 = L3，不是 L4**；② **真链路复跑**（真 Redis ＋ 真 gRPC ＋ 真实期限耗尽）属**主干合入后**的复跑项；③ 残余「取连接/拨号窗口内过期 ⇒ RAG 写、Go 不写」**依旧成立**且代理盖不住 ⇒ **不可完全闭合 = 框架限制** ⇒ **不追**。
+- 🔴 **合并约束（本条唯一未闭合项 · 清单编号 M-6）**：**2026-10-30 22:1x 订正 ⇒ 本条已作废**（G4 第四次订正 `4e30d898` ＋ G1 自读复核：共享层半边**已把预算检查前移到建连之前** ⇒ ⇒ 域侧那半**单独存在也不倒退** ⇒ ⇒ **约束取消**；且主干 `53bc05ec` 已把两半放**同一提交** ⇒ ⇒ 现状本就是约束要求的形态）—— 原文：**本域改动与共享层代理必须同一个提交进主干** ⇒ 理由 = 域内闸门撤掉后若代理**未**在位 ⇒ 该方法**没有任何**期限感知 ⇒ 期限已耗尽时**仍会把黑名单写进 Redis** ⇒ ⇒ **RAG 写、Go 不写** ⇒ ⇒ **E66 暴露面** ⇒ ⇒ **单独合入 = 倒退** ⇒ ⇒ 落点 `docs/Worktree.md` §3-1 的 M 表 + §3-2 的合并约束段（**不在 G1 写权面** · 由主线收口执行者写）。
+- ⚠️ **诚实边界（本轮无「双侧活体」新证据）**：① 新测试用 **Mockito 替换数据层** ⇒ 只证「域服务的控制流与异常映射」，**不证**「共享层代理真的在 Redis 调用路径上」（那由 G4 的 `GoStyleRedisDeadlineGateTest` 守 · **跨 lane**）⇒ ⇒ **本轮证据强度 = L3，不是 L4**；② **真链路复跑**（真 Redis ＋ 真 gRPC ＋ 真实期限耗尽）属**主干合入后**的复跑项；③ 残余**已收窄**（2026-10-30 22:1x）：**不再是**「取连接/拨号窗口」（已被 `GoStyleRedisDeadlineConnectionFactory.java:57-59` 的建连前检查覆盖）⇒ ⇒ 残余 = **命令在 socket 上传输途中预算耗尽 ⇒ RAG 写、Go 不写** ⇒ 代理盖不住（检查点在下发前）⇒ **不可完全闭合 = 框架限制** ⇒ **不追**。
 ---
 
 > ⚠️ **以下内容原位于本文件中部 —— 2026-10-30（G1 lane）移到末尾**
@@ -4540,7 +4540,7 @@ if (connectTimeout != null) {                                     // :16
 > ⇒ ⇒ 纪律：**新增内容一律放文件末尾**；要改中部 ⇒ 用「**就地替换**」（行数不变）而不是「插入新行」。
 > ⇒ ⇒ 判据：`python3 tools/ledger-derive/check-pointer-consistency.py`（派生层输入完整性棘轮）。
 
-- 🔴 **2026-10-30 16:3x 订正 ⇒ 「本轮不改代码」已过期**：**域侧已落码**（共享层代理那半边由 G4 落）⇒ ⇒ 处置 = **两处 · 同一个提交**（清单编号 **M-6**）⇒ ① **共享层（G4）**：Redis 期限代理（`GoStyleRedisDeadlineConnection` ⇒ 派发前查预算）⇒ ② **域侧（G1 · 本轮已落）**：**撤掉 logout 入口的 `checkDeadline()`** ⇒ 让写尝试发生 ⇒ 由代理抛 `QueryTimeoutException` ⇒ 落进现有 `catch (Exception e)` ⇒ **自动得到 `INTERNAL`「注销失败,Redis写入异常」= Go 的 5001**（handler 级逐字同形）⇒ ⇒ **客户端可见面不变（1015）** ⇒ **同批合约束恢复**（理由与落点见文末订正小节（6）段）。
+- 🔴 **2026-10-30 16:3x 订正 ⇒ 「本轮不改代码」已过期**：**域侧已落码**（共享层代理那半边由 G4 落）⇒ ⇒ 处置 = **两处 · 同一个提交**（清单编号 **M-6** · 🔴 **该约束已于 2026-10-30 22:1x 取消** · G4 第四次订正 `4e30d898` ＋ G1 自读复核：共享层半边**已把预算检查前移到建连之前** ⇒ ⇒ 域侧那半单独存在也不倒退 ⇒ ⇒ 现状本就是约束要求的形态）⇒ ① **共享层（G4）**：Redis 期限代理（`GoStyleRedisDeadlineConnection` ⇒ 派发前查预算）⇒ ② **域侧（G1 · 本轮已落）**：**撤掉 logout 入口的 `checkDeadline()`** ⇒ 让写尝试发生 ⇒ 由代理抛 `QueryTimeoutException` ⇒ 落进现有 `catch (Exception e)` ⇒ **自动得到 `INTERNAL`「注销失败,Redis写入异常」= Go 的 5001**（handler 级逐字同形）⇒ ⇒ **客户端可见面不变（1015）** ⇒ **同批合约束恢复**（🔴 **已作废 · 2026-10-30 22:1x** · 理由与落点见本文件文末「订正小节（第二次）」段）。
 
 ---
 
@@ -4556,3 +4556,22 @@ if (connectTimeout != null) {                                     // :16
 > - ⚠️ **两条有意的不完整对齐（已登记，转派单 `G4-15b`/`G4-15c`）**：① Go 的 **Info 分支**（每个请求把全量 body 打 Info）**刻意不落**；② Go 的 Stat 装在 **breaker/shedding 之外**、RAG 装在**最内层** ⇒ ⇒ **慢调用的判定口径会有差异**。
 > - ⚠️ **为什么「只落慢调用日志」**（落点约束，G4 已核）：改 `Composition` record ⇒ **破坏 3 个域级守门测试 ＋ 1 个共享层测试的编译**（跨域）⇒ Prometheus 还要给 `service/common/pom.xml` 加 micrometer ⇒ 且「出口口径」是**运维决策**（Go 侧 8/10 个 rpc 的 `Prometheus.Host` 为空 ⇒ `StartAgent` 早退 ⇒ **配了也不产观测值**）。
 > - 📌 **派生层同步提示**：本条在 `docs/DRIFT/_cross/stage1-derivation.tsv` 里的行（`status` 列）会随本次订正由 🔴 变 🟡 ⇒ **派生层重生成由合并收口执行者做**（`_cross/**` = 共享面 ⇒ **G1 不写**）。
+---
+
+### ⚠️ 订正小节（第二次）：M-6 合并约束**已取消** ＋ 客户端可见层坐标订正（2026-10-30 22:1x · G4 第四次订正 `4e30d898` + G1 自读复核）
+
+> ⚠️ **本小节标题刻意不含任何编号 token** ⇒ 派生层不把它当条目候选 ⇒ 也不劫持任何既有编号的 `domain` / `wave` / `basis`。
+> ⚠️ **本小节不重登记** ⇒ 条目本体仍是 `DRIFT-ARPC-010`（= E66 · 本文件 §5 登记位置）⇒ ⇒ **销账时不要当两条**。
+
+**一、M-6 合并约束取消（域侧撤闸门仍是更贴 Go 的一侧）**
+
+- 主干 `53bc05ec`（`feat(M-6 原子)`）已把**共享层半边 + 域侧半边放在同一提交** ⇒ ⇒ 现状本就是 M-6 要求的形态。
+- 且共享层半边已把预算检查**前移到建连之前**（`GoStyleRedisDeadlineConnectionFactory.java:57-59` 检查 ⇒ `:60` 才 `delegate.getConnection()`）⇒ ⇒ **M-6 的唯一理由**（「代理不在位时域侧撤闸门 ⇒ 无期限感知 ⇒ RAG 写、Go 不写」）**不再成立** ⇒ ⇒ **约束取消**（G4 第四次订正 `4e30d898` 同结论）。
+- ⇒ ⇒ **本域不擅自回退撤闸门**：① **客户端可见面**两侧都是 **1015**（Go `service/common/observability/rpc.go:68-71` ⇒ `:69` `codes.DeadlineExceeded`；RAG `RpcInterceptor.java:361-363` 首次 close 定 status）⇒ ⇒ 回退与否**对客户端不可见**；② **handler 级码** = `INTERNAL`「注销失败,Redis写入异常」= Go `service/user/admin/rpc/internal/logic/logoutlogic.go:39-42` **逐字同形** ⇒ ⇒ **撤闸门这一侧更贴 Go**；③ 按 G4 自己 §五 的更正标准（「不可观察的差异不是漂移」），②这一层**本就不可观察** ⇒ ⇒ **维持现状，交收口执行者知情**。
+- ⚠️ **G4 回执的「域侧零落码 ⇒ `checkDeadline()` 保留 ⇒ 你那一行不用落」与主干现状冲突**（主干 `53bc05ec` 已撤）⇒ ⇒ **本条只订正台账口径，不动代码** ⇒ ⇒ 冲突已上报收口执行者。
+
+**二、客户端可见层坐标订正（G4 指出 · G1 已逐行复核）**
+
+- ❌ **原写**：`RpcInterceptor.java:314-320` 调度器 + 「首次 close 定客户端 status（`:346-356`）」。
+- ✅ **现行**：调度器 `:338-367`（`:344` `timeoutScheduler().schedule(...)` ⇒ `:361-363` `target.close(Status.DEADLINE_EXCEEDED ...)`）；**首次 close 定 status 的那句在 `:377-378`**（`:377` 注释「M6：只有第一次 close 负责打标 + end span」· `:378` `if (!spanFinalized.compareAndSet(false, true)) {`）⇒ ⇒ 本文件正文里凡写 `:346-356` 的**已就地订正**。
+- ⚠️ `:353-354` = 「造 `TimeoutException`」那两行（`new TimeoutException(goStyleStatusMessage(...))`）⇒ ⇒ **不是** M6 那句。
