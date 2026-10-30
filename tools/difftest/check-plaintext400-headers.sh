@@ -49,11 +49,23 @@
 #   bash tools/difftest/check-plaintext400-headers.sh task     # 只跑 task 域
 #
 # 为什么需要分域：本脚本是**共享资产**，同时守 user 域与 admin 域。
-# 2026-10-24 实测：admin 域两侧**归一化后逐字一致**（✅），
-# 而 user 域 RAG 侧**仍缺 charset**（`text/plain` vs Go 的 `text/plain; charset=utf-8`）
-# —— 那是 **users/user 域**的账（DRIFT 记录见 docs/DRIFT/users/user/）。
-# ⇒ 若不分域，admin 域的守门会被 user 域未修的差异拖红 ⇒ admin 域无法自助用本脚本当门禁。
-# ⇒ 分域后：各域的退出码只反映**自己**的断言结果，差异依然可见（跑 all 时仍是红的）。
+# ⚠️ **2026-10-30 订正**：本段原写「2026-10-24 实测：user 域 RAG 侧**仍缺 charset**」
+#    ⇒ ⇒ **该状态已过期**（陈旧断言）：user 域的 charset 缺失**已由 `c79d1131` 修掉** ——
+#    `service/users/user/user-api/src/main/java/com/rag/users/user/api/advice/GlobalExceptionHandler.java`
+#    的 `goStylePlainTextBadRequest()` 现在显式
+#    `headers.setContentType(new MediaType(MediaType.TEXT_PLAIN, StandardCharsets.UTF_8))`
+#    ⇒ 写出 `text/plain;charset=UTF-8` ⇒ ⇒ **三个域现在都要过 charset 断言**。
+#    ⇒ ⇒ **「user 域仍缺 charset」这句话不能再当现状引用。**
+#    （**仍分域的理由不变**：某个域的差异不该拖红其它域的守门 ⇒ 各域退出码只反映自己。）
+#
+# ── 退出码语义（2026-10-30 改 · 原先只有 0/1） ──
+#   0 = 已评估且全部满足
+#   1 = 已评估且存在不满足项
+#   2 = **未评估**（所选 scope 的域栈一个都没起 ⇒ ⇒ **本次运行没产生任何断言**）
+#   ⚠️ 改这一条的**原因**：原实现是「全部 SKIP ⇒ `EXIT=0` ＋ 打印『全部满足 ✅』」
+#      ⇒ ⇒ **无栈环境恒绿 = 假绿**（一条断言都没跑，却报告通过）
+#      ⇒ ⇒ 与 `check-proto-static.sh` / `produce_hot_rpc_events.sh` 的 exit 2 惯例一致
+#      （2 = 前置条件不满足 ⇒ 本次运行无意义 ≠ 通过）。
 set -uo pipefail
 
 SCOPE="${1:-all}"
@@ -69,6 +81,8 @@ GO_ADMIN="${GO_ADMIN:-http://127.0.0.1:18889}"
 RAG_TASK="${RAG_TASK:-http://127.0.0.1:58886}"
 GO_TASK="${GO_TASK:-http://127.0.0.1:18886}"
 fail=0
+evaluated=0   # 本次真正跑到断言的域数
+skipped=0     # 因栈未起而整域跳过的域数
 
 # 端口是否可达 —— 用来让「某一域没起」变成 **SKIP** 而不是 **FAIL**。
 # ⚠️ 只探 TCP 连通性，不发业务请求：发业务请求去判断「有没有起」会把
@@ -160,6 +174,7 @@ echo "    Go  admin = $GO_ADMIN"
 if [[ "$SCOPE" == "all" || "$SCOPE" == "user" ]]; then
     # ⚠️ 域栈没起 ⇒ SKIP 而非 FAIL：某个域的差异不该拖红其它域的守门。
     if port_open "$RAG_USER"; then
+        evaluated=$((evaluated + 1))
         probe_pair "[user] register 缺 email（GoRequiredFieldException 分支）" \
             "$RAG_USER/user/v1/register" "$GO_USER/usercenter/v1/user/register" \
             '{"username":"e1hdr","password":"pw123456"}'
@@ -168,12 +183,14 @@ if [[ "$SCOPE" == "all" || "$SCOPE" == "user" ]]; then
             "$RAG_USER/user/v1/register" "$GO_USER/usercenter/v1/user/register" \
             '{"username":"e2hdr","password":"pw123456","email":123}'
     else
+        skipped=$((skipped + 1))
         echo "    [SKIP] user 域：$RAG_USER 不可达（该域栈未起）"
     fi
 fi
 
 if [[ "$SCOPE" == "all" || "$SCOPE" == "admin" ]]; then
     if port_open "$RAG_ADMIN"; then
+        evaluated=$((evaluated + 1))
         probe_pair "[admin] create 缺 username（public 路径 ⇒ 400 text/plain）" \
             "$RAG_ADMIN/admin/v1/create" "$GO_ADMIN/admincenter/v1/admin/create" \
             '{}'
@@ -182,6 +199,7 @@ if [[ "$SCOPE" == "all" || "$SCOPE" == "admin" ]]; then
             "$RAG_ADMIN/admin/v1/create" "$GO_ADMIN/admincenter/v1/admin/create" \
             '{"username":"e4hdr","password":"pw123456","email":123}'
     else
+        skipped=$((skipped + 1))
         echo "    [SKIP] admin 域：$RAG_ADMIN 不可达（该域栈未起）"
     fi
 fi
@@ -190,6 +208,7 @@ if [[ "$SCOPE" == "all" || "$SCOPE" == "task" ]]; then
     # ⚠️ task-api 的 400 分支（畸形 JSON / 空 body）**不经过 task-rpc**
     #    ⇒ 只起 task-api 就能守（DRIFT-TASK-API-004）。
     if port_open "$RAG_TASK"; then
+        evaluated=$((evaluated + 1))
         probe_pair "[task] get 畸形 JSON" \
             "$RAG_TASK/taskcenter/v1/task/get" "$GO_TASK/taskcenter/v1/task/get" \
             '{not json'
@@ -198,15 +217,25 @@ if [[ "$SCOPE" == "all" || "$SCOPE" == "task" ]]; then
             "$RAG_TASK/taskcenter/v1/task/get" "$GO_TASK/taskcenter/v1/task/get" \
             ''
     else
+        skipped=$((skipped + 1))
         echo "    [SKIP] task 域：$RAG_TASK 不可达（task-api 未起）"
     fi
 fi
 
 echo "════════════════════════════════════════════════"
-if [ "$fail" = "0" ]; then
-    echo "结果（scope=${SCOPE}）：全部满足 ✅"
-    exit 0
-else
+if [ "$fail" != "0" ]; then
     echo "结果（scope=${SCOPE}）：存在不满足项 ❌ —— text/plain 400 的响应头仍有问题（status / charset / nosniff）"
     exit 1
+elif [ "$evaluated" -eq 0 ]; then
+    echo "结果（scope=${SCOPE}）：⚠️ **未评估** —— 所选 scope 的域栈一个都没起（SKIP ${skipped} 个域）"
+    echo "        ⇒ ⇒ **本次运行一条断言都没产生** ⇒ ⇒ 退出码 **2 = 未评估**（**不是「通过」）**"
+    echo "        ⇒ ⇒ **无栈环境恒绿 = 假绿**：拿这个退出码当守门信号，等于什么都没测就说通过。"
+    echo "        ⇒ ⇒ 要真跑：把对应域的 RAG 栈 ＋ Go 栈都起起来，再重跑本脚本。"
+    exit 2
+else
+    echo "结果（scope=${SCOPE}）：已评估 ${evaluated} 个域，全部满足 ✅"
+    if [ "$skipped" -gt 0 ]; then
+        echo "        ⚠️ 另有 ${skipped} 个域因栈未起被整域跳过（**这些域本轮未被覆盖**）"
+    fi
+    exit 0
 fi
