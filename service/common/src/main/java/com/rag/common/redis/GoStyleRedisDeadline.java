@@ -148,9 +148,14 @@ public final class GoStyleRedisDeadline {
      *       ＋ 文案「注销失败,Redis写入异常」⇒ ⇒ 那正是 Go 的 handler 级码
      *       （{@code logoutlogic.go:41}）；⚠️ <b>但带域侧抢先 {@code checkDeadline()} 的路径
      *       根本走不到这里</b>（域侧检查先触发 ⇒ handler 级是 1015）⇒ ⇒ ⇒
-     *       <b>该路径的 handler 级业务码与 Go 的 5001 不同</b>
-     *       ⇒ ⇒ 完全同形需域侧去掉那处抢先检查 ⇒ <b>users 域写权 ⇒ 归 G1</b>
-     *       ⇒ ⇒ 逐条证据见 {@code docs/DRIFT/global/vs-common.md} §4.19.7 第二节。</li>
+     *       <b>该路径的 handler 级业务码与 Go 的 5001 不同 —— 但这一面【不可观察】</b>：
+     *       客户端可见码由<b>拦截器层</b>决定，不是由 handler 内部返回什么码决定 ——
+     *       Go 侧 {@code service/common/observability/rpc.go:59-72} 的 select 竞速
+     *       （timeout 分支不拿锁 ⇒ 先就绪 ⇒ 1015，handler 事后返回的码被丢弃），
+     *       本层 {@code RpcInterceptor.java:377-378} 的「只有第一次 close 负责打标」
+     *       （第一次 close 定客户端可见 status ⇒ 1015）
+     *       ⇒ ⇒ <b>⇒ 故不是漂移 ⇒ 域侧零落码（那道抢先的 checkDeadline 保留）</b>
+     *       ⇒ ⇒ 逐条证据见 {@code docs/DRIFT/global/vs-common.md} §4.19.9 第二节。</li>
      * </ul>
      *
      * @param operation 被拦下的操作名（进消息，便于排查）
