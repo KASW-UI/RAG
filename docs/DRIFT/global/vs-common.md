@@ -6511,9 +6511,9 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 **二、⚠️ 必须写清的限定：这处在本模块内是「潜在引信」，不是「正在起火的红项」**
 
 - **机制**（合并收口执行者 javap 实测）：devh `GrpcClientAutoConfiguration.grpcNameResolverRegistration(List<NameResolverProvider>)` ⇒ `io.grpc.NameResolverRegistry.getDefaultRegistry()`（**进程级全局**）⇒ `DiscoveryClientResolverFactory.getDefaultScheme()` = `"discovery"` ⇒ ⇒ **无显式 scheme 的 target** 被接管去 Nacos 查服务名 ⇒ `UNAVAILABLE` ⇒ 「单跑绿、同跑红」。
-- ⚠️ **但 `service/common` 的依赖树里没有 `nacos-discovery`**（本层实测：`mvn -o -pl service/common dependency:list` ⇒ 无 `nacos*` / `*discovery*`）⇒ ⇒ 本模块**没有** `DiscoveryClientResolverFactory` 这个 `NameResolverProvider` ⇒ ⇒ `grpcNameResolverRegistration` 注入的是**空列表** ⇒ ⇒ **本模块内不存在接管者**。
-- ⇒ ⇒ **实测证据**：同一 JVM 里先跑 `@SpringBootTest`（`GoStyleGrpcClientBreakerRpcAssemblyTest` · `@ImportAutoConfiguration(GrpcClientAutoConfiguration.class)`）再跑本类 ⇒ **改前（`forAddress`）与改后（`forTarget("dns:///…")`）都是 9/9 全绿** ⇒ ⇒ 「同跑红」在**本模块复现不出来**。
-- ⇒ ⇒ **本处改动 = 按静态守门口径的预防性消歧**（不是修一个可观察的红）。改它的理由是**守门**：`tools/difftest/check-grpc-channel-target-scheme.py` 的判据 = 扫 `service/**/*.java` 的**代码态** `forAddress(`，**不区分模块有没有 Nacos** ⇒ ⇒ 不改就得登记例外 ⇒ 而例外集的目标是「**剪到 0 ⇒ 零豁免**」⇒ ⇒ **改代码是唯一出路**；且共享层将来若引入 discovery（依赖面一变）这处即刻变成真陷阱。
+- ⚠️ **限定之二（与下一条**独立**）：`service/common` 的依赖树里没有 `nacos-discovery`**（本层实测：`mvn -o -pl service/common dependency:tree` ⇒ **无 `nacos*` / 无 `spring-cloud*` / 无 `*discovery*`**）⇒ ⇒ 本模块**没有** `DiscoveryClientResolverFactory` 这个 `NameResolverProvider`（它要 spring-cloud 的 `DiscoveryClient`）⇒ ⇒ `grpcNameResolverRegistration` 注入的是**空列表** ⇒ ⇒ **本模块内不存在接管者**。
+- ⇒ ⇒ **实测（本层 2026-10-31）**：同一 JVM 里先跑 `@SpringBootTest`（`GoStyleGrpcClientBreakerRpcAssemblyTest` · `@ImportAutoConfiguration(GrpcClientAutoConfiguration.class)`）再跑本类 ⇒ **改前（`forAddress`）与改后（`forTarget("dns:///…")`）都是 9/9 全绿** ⇒ ⇒ ⇒ **⚠️ 这只证明「这条路径压根没触发」，不是「机制不成立」**（合并收口执行者 2026-10-31 纠正）—— 本类的 channel **只用来取 `authority()`**（同文件 javadoc 自证）⇒ ⇒ `authority()` 是**本地计算**的 ⇒ ⇒ **不触发 channel 解析** ⇒ ⇒ **无论有没有被 devh 接管它都绿** ⇒ ⇒ ⇒ 所以「同跑红」在**本模块复现不出来** = **惰性点**，**不是「安全」**。
+- ⇒ ⇒ **机制本身成立**（合并收口执行者 2026-10-31 核）：G3 在 **hot-rpc 的真发 RPC 那处**采到实测日志（`Failed to resolve name … serviceId: 127.0.0.1:22101` ＋ `Can not get hosts from nacos server`）⇒ ⇒ 9 个点位的定性：**真发 RPC 的是活雷**（users 域 4 个 logout 测试 ＋ user-api 的 `UserApiGrpcNegotiationTest` ⇒ 归 **G1**）· **不真发的是惰性点**（共享层这处 ＋ hot-api 的 `CapturingClientInterceptor`）⇒ ⇒ ⇒ **本处改动 = 按静态守门口径的预防性消歧**（不是修一个可观察的红）。改它的理由是**守门**：`tools/difftest/check-grpc-channel-target-scheme.py` 的判据 = 扫 `service/**/*.java` 的**代码态** `forAddress(`，**不区分模块有没有 Nacos** ⇒ ⇒ 不改就得登记例外 ⇒ 而例外集的目标是「**剪到 0 ⇒ 零豁免**」⇒ ⇒ **改代码是唯一出路**；且共享层将来若引入 discovery（依赖面一变）这处即刻变成真陷阱。
 
 **三、验证**
 
@@ -6528,4 +6528,4 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 
 - **本层只改了 `service/common/**` 写权面内的这 1 处**；其余 8 条例外分属 comment / hot / users 三域（各域 lane 的面）⇒ ⇒ **不代改**。
 - 静态守门是**词法级**判据（剥注释与字符串字面量）⇒ 它拦的是**形态**，不是运行时行为 ⇒ ⇒ 「本模块无 Nacos ⇒ 这处不会被接管」这条限定**静态守门看不出来**（只能靠本节的依赖树实测）⇒ ⇒ **别把「守门绿」读成「运行时同形已证」**。
-- 「同跑红」的真实现场在**带 Nacos discovery 的域模块**（like / message / comment / follow / users / task）—— 那 14 处先例都在那些域里 ⇒ ⇒ 本节这条**限定**只对共享层这一处成立。
+- ⚠️ **「同跑红」的真实现场在「真发 RPC」的那几处** ⇒ ⇒ users 域 4 个 logout 测试 ＋ user-api 的 `UserApiGrpcNegotiationTest`（**接收者是 `NettyChannelBuilder`** ⇒ 它也继承 `ManagedChannelBuilder` ⇒ **改法同形**）⇒ ⇒ 归 **G1**；comment-rpc ＋ hot-rpc 那两处 G3 已修 ⇒ ⇒ **本节这条「惰性点」限定只对共享层这一处成立** ⇒ ⇒ **别把它外推成「这类形态都不必改」**。
