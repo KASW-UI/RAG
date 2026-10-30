@@ -1326,6 +1326,111 @@ G4 commit `0c72969`「修 `service/common` 两处 UTF-8 替换字符（U+FFFD）
 - `docs/DRIFT/comment/vs-common.md:834`（C-3 行）上一轮已订正为「继承已闭合 · 残留 = 精度差 ≤1ms」⇒ **本节补充的是它未覆盖的「逐出口」维度**（该行原文只举了 `client/ArticleRpcClient.java:71` 一个出口）。
 - ⚠️ **本节不销 C-3** ⇒ C-3 仍是 **P1 · 阻断阶段一**（销账权在 global）⇒ 本域只给事实。
 
+
+## 📌 追加 · ✅ **本域出向 deadline 载体：纳秒精度已落码 + 守门网已补（L4 活体 + 变异转红）**（2026-10-30 · G3 第六轮）
+
+> **一句话**：Jason 拍板「本轮做」⇒ 本域两个出向出口已从**毫秒版**改为**纳秒两段式**
+> ⇒ ⇒ **精度差 ≤1ms 消除** ⇒ ⇒ 并补了一条**能真正触发载体**的守门
+> ⇒ ⇒ 「域内出口确实继承入向 deadline」这条**从 L2 源码级升到 L4 活体**。
+> ⚠️ **销账权不在本域**（C-3 / U15 的落点是 `service/common` ＋ global E65）⇒ 本节只给**域侧事实 + 证据**。
+
+### 落码清单（4 个文件）
+
+| 位置 | 改动 |
+|---|---|
+| `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/client/GoStyleClientCallTimeout.java` | `withDeadline`（读 `remainingMillis()`）⇒ 改为 **`capByClientTimeout`**（读 stub 上 deadline 的**纳秒**剩余），语义 = `min(载体剩余纳秒, 2s)`；常量改名 `CLIENT_TIMEOUT_MILLIS`（对齐同款正确实现） |
+| `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/client/ArticleRpcClient.java:71` | 调用点改为 `GoStyleClientCallTimeout.capByClientTimeout(GoStyleRequestDeadline.applyTo(stub))` |
+| `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/client/MessageRpcClient.java:66` | 同上 |
+| `service/comment/comment-rpc/src/test/java/com/rag/comment/comment/rpc/client/CommentOutboundDeadlineCarrierGateTest.java` | **新增守门**（5 条用例） |
+
+⚠️ **范式来源（同仓已有正确实现，不发明第三种写法 · AGENTS.md §3.2）**：
+`service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/client/GoStyleClientCallTimeout.java:89-100`
+（`capByClientTimeout`）＋ 同域两个调用点
+（`client/ArticleRpcClient.java:56-57` · `client/UserRpcClient.java:55-56` 的 `capByClientTimeout(applyTo(stub))` 形态）⇒ 本域**照抄**。
+
+### Go 侧的语义基准（消费点）
+
+- **min 语义**：`go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25`
+  `ctx, cancel := context.WithTimeout(ctx, t)` ⇒ 父 ctx 更早则**先到者生效** ⇒ Java 侧取 `min`。
+- **纳秒精度**：同一行的 `t` 是**纳秒** ⇒ Go 侧**不**做毫秒截断 ⇒ 本域旧实现读 `remainingMillis()` ⇒ **差 ≤1ms** ⇒ 本轮消除。
+- **无条件 2s**：`go-zero@v1.10.2/zrpc/internal/client.go:113-117`（装拦截器）
+  ＋ `go-zero@v1.10.2/zrpc/internal/config.go:15`（`Timeout bool json:",default=true"`）
+  ＋ `go-zero@v1.10.2/zrpc/config.go:31`（`Timeout int64 json:",default=2000"`）。
+- **父 ctx 的 deadline 来自入向**：`go-zero@v1.10.2/zrpc/internal/serverinterceptors/timeoutinterceptor.go:34`。
+
+### 守门网（5 条用例 · 各管一个语义维度 · 缺一条都不够）
+
+| 用例 | 证什么 | 形态 |
+|---|---|---|
+| `carrierIsReallyBoundOnHandlerThreadOverRealWire` | **载体在 gRPC handler 线程真的绑上了** ＋ 客户端的 deadline **真的穿过 wire 到了服务端** | **真 socket**（`RealGrpcPort.pick()`，本域段 22600–22699）＋ 真装共享层 `RpcInterceptor.newUnaryServerInterceptor(Duration.ZERO, …)` ＋ 客户端 `withDeadlineAfter(1500ms)` |
+| `outboundIsCappedAtTwoSecondsWhenInboundBudgetIsLonger` | 入向预算 **> 2s** ⇒ 出向上界被压到 **2s**（客户端封顶真的生效） | 同上（客户端 `withDeadlineAfter(5000ms)`） |
+| `outboundInheritsInboundBudgetWhenItIsShorter` | 入向预算 **< 2s** ⇒ 出向上界**继承入向剩余**（不是无脑套 2s） | 同上（客户端 `withDeadlineAfter(1500ms)`） |
+| `outboundBudgetKeepsNanosecondPrecision` | 域内出向计算点**不截断亚毫秒** | 手动绑定已知绝对纳秒（10.9ms）⇒ 测**相对损失**（出向比载体窄了多少）⇒ 纳秒版 ≈ μs 级；毫秒版 ≈ **0.9ms** ⇒ **必然红** |
+| `noCarrierStillGetsTwoSecondClientCap` | 无载体时 2s 客户端封顶**无条件在**（Go 侧是拦截器级别的） | 域内真实消费点 + 真 stub |
+
+⚠️ **为什么必须拆成「长预算」与「短预算」两个场景**：入向预算**短于** 2s 时，
+「继承入向预算」与「原样返回（不压任何 deadline）」算出来的上界**完全相同**
+⇒ ⇒ 单一「短预算」场景**分辨不了**这两种实现
+⇒ ⇒ 本轮实测：只留「短预算」场景时，注入「完全不压 deadline」的变异**不会让它转红**
+⇒ ⇒ 拆成两个场景后该变异**精确转红**（见下面的变异矩阵）。
+
+⚠️ **为什么第一条必须用真 socket 而不是 in-process**：in-process **不走 wire** ⇒ 没有 `grpc-timeout` 头
+⇒ 服务端 `io.grpc.Context.current().getDeadline()` 读到 `null` ⇒ 载体**根本不会绑** ⇒ 用 in-process 写这条 ⇒ **必然假红**。
+
+⚠️ **为什么载体在 handler 线程可见**（载体是 ThreadLocal ⇒ 只在绑它的线程可见）：
+grpc-java 的 `ServerBuilder` **默认 executor = directExecutor**
+⇒ `ServerCalls.asyncUnaryCall` 最终用 `call.getExecutor()` ⇒ **同线程** ⇒ 与生产形态同款。
+
+#### 🔴 变异矩阵（守门非假绿 · 2026-10-30 实测）
+
+逐个注入三种「错误实现」，看**哪些用例转红** ⇒ ⇒ 证明每个语义维度都有**专属**判据：
+
+| 注入的变异 | 转红的用例（实测） |
+|---|---|
+| 纳秒 → 毫秒截断（旧实现语义） | `outboundBudgetKeepsNanosecondPrecision` |
+| 完全不压 deadline（原样返回 stub） | `noCarrierStillGetsTwoSecondClientCap` ＋ `outboundIsCappedAtTwoSecondsWhenInboundBudgetIsLonger` |
+| 无视入向预算，永远只套 2s | `outboundBudgetKeepsNanosecondPrecision` ＋ `outboundInheritsInboundBudgetWhenItIsShorter` |
+
+⇒ ⇒ **三个语义维度（纳秒精度 / 2s 封顶 / 继承入向）各有专属判据**
+⇒ ⇒ 本守门**对被测差异有判别力**，不是「错误答案的守卫」⇒ 三个变异均已还原（仓内无残留锚点）⇒ 还原后复跑全绿。
+
+⚠️ **稳定性**：本守门连跑 **3 次全绿**（判据 0.4ms 不抖）⇒ 不是「时红时绿」的假信号。
+
+#### 🔴 判据设计的两处坑（已被本轮实测踩过 · 防下一个人重踩）
+
+1. **绝对剩余值不能当判据**：本机「两次 `System.nanoTime()` 调用之间」的机器开销约 **0.3–0.5ms**
+   ⇒ ⇒ 用绝对值判会**时红时绿**（假信号）⇒ 必须拿「载体当下的剩余」当基线，只测**相对损失**。
+2. **第一次跑要付类加载 + JIT 的钱**（实测 ≈ **0.15ms**）⇒ ⇒ 那笔钱会混进「相对损失」
+   ⇒ ⇒ 必须**先热身**（跑一遍同款路径）再测 ⇒ 否则会**误判成精度损失**。
+
+### 证据强度（诚实边界）
+
+| 结论 | 强度 | 依据 |
+|---|---|---|
+| 载体在 gRPC handler 线程真的绑上 | **L4 活体** | 真 wire ＋ 真共享层拦截器 ＋ 客户端 deadline 真的到了服务端（`carrierIsReallyBoundOnHandlerThreadOverRealWire`） |
+| 域内出向上界是**纳秒**且无毫秒截断 | **L4 活体 ＋ 变异精确转红** | `outboundBudgetKeepsNanosecondPrecision` |
+| 无载体时 2s 封顶 | **L4 活体** | `noCarrierStillGetsTwoSecondClientCap` |
+| 出口二（Kafka consumer 线程）**不继承** | **L2 源码级** | 上一轮新增段的逐出口核对（线程归属靠读注解与调用链）⇒ ⚠️ **未**做活体计时 |
+
+### 收益边界（别把这次的收益说大）
+
+- **出口一**（`ArticleRpcClient`，gRPC handler 线程）：**收益真实存在** ⇒ 出向上界由「毫秒截断」改为「纳秒」⇒ 与 Go 一致（差 ≤1ms 的漂移消除）。
+- **出口二**（`MessageRpcClient`，Kafka consumer 线程）：**收益为零** ⇒ 载体在该线程**不可见** ⇒ 走的是「无载体 ⇒ 2s 封顶」分支 ⇒ 改动前后**同一条路径** ⇒ 且 Go 侧该出口的 ctx 同样无 deadline ⇒ **两侧同形，不是漂移**。
+
+### 🔴 验证方法学发现（影响「本域此前所有不带 `-am` 的回归结论」· 2026-10-30）
+
+- **现象**：本轮改本域代码后，`mvn -pl service/comment/comment-rpc test`（**不带 `-am`**）编译**失败**：
+  `GoStyleRequestDeadline` 找不到 `remainingNanos` / `bindAbsoluteNanos` / `Scope`。
+- **根因**：`com.rag:common:0.0.1-SNAPSHOT` 在**本地 m2 里的 jar 是 2026-10-29 08:08 的旧版**
+  （反编译确认：只有 `begin` / `clear` / `isPresent` / `remainingMillis` / `applyTo`
+  ⇒ **没有** 53bc05ec 落的 `remainingNanos` / `bindAbsoluteNanos` / `Scope`）
+  ⇒ ⇒ 不带 `-am` 时 Maven **从 m2 取旧 jar** ⇒ **测的不是工作树里的共享层代码**。
+- **⇒ 结论**：⚠️ **凡是验「共享层落码后行为」的回归，必须带 `-am`**（或先 `mvn install` 共享层）
+  ⇒ ⇒ **本域此前几轮「12 模块全绿」的数字（含 2026-10-30 合并后那轮 1240 tests）
+  ⇒ ⇒ 只能读作「旧共享层 ＋ 域内代码全绿」，**不**证明「合并后（含 53bc05ec）全绿」**
+  ⇒ ⇒ 本轮已用 `-am` 重跑（结论见本轮提交说明）。
+- ⚠️ **这是跨 lane 的方法学问题**（别的 lane 若也用不带 `-am` 的命令，同样中招）⇒ **已报合并收口执行者**。
+
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
 > 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。

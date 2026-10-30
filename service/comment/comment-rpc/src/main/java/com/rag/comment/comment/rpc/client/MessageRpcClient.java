@@ -1,5 +1,6 @@
 package com.rag.comment.comment.rpc.client;
 
+import com.rag.common.observability.GoStyleRequestDeadline;
 import com.rag.message.message.proto.MessageServiceGrpc;
 import com.rag.message.message.proto.NotificationKind;
 import com.rag.message.message.proto.SendNotificationReq;
@@ -60,10 +61,20 @@ public class MessageRpcClient {
      * ⇒ 下游挂死时 RAG 侧会一路等到底，Go 侧 2s 就返回
      * ⇒ **可观察行为分叉**（调用耗时 + 失败时机都不同）。
      *
+     * <p>🔴 <b>2026-10-30 订正 · 两段式（纳秒）</b>：本出口跑在 <b>Kafka consumer 线程</b>上
+     * （调用点 {@code service/CommentAuditListener.java:249}，该类 {@code :99} 是 {@code @KafkaListener}）
+     * ⇒ 共享层 {@code RpcInterceptor.onHalfClose} 绑的 {@code GoStyleRequestDeadline} 载体
+     * <b>在本线程不可见</b> ⇒ ⇒ 第一段 {@code applyTo} <b>原样返回 stub</b>（不挂 deadline）
+     * ⇒ ⇒ 第二段 {@code capByClientTimeout} 看到「无 deadline」⇒ 套 <b>2s</b> 客户端封顶
+     * ⇒ ⇒ 与 Go 侧<b>同形</b>：Go 的 {@code service/comment/rpc/internal/mqs/audit_consumer.go:101}
+     * 传的 ctx 是 <b>Kafka 消费 ctx（无 deadline）</b> ⇒ Go 侧这条出口同样只有 2s 封顶
+     * ⇒ ⇒ <b>本出口不是漂移</b>（逐出口证据 ⇒ {@code docs/DRIFT/comment/rpc.md} 第五轮新增段）。
+     *
      * <p>⚠️ **不要把返回值缓存到字段上**：{@code withDeadlineAfter} 每次返回新实例。
      */
     private MessageServiceGrpc.MessageServiceBlockingStub messageRpc() {
-        return GoStyleClientCallTimeout.withDeadline(stub);
+        return GoStyleClientCallTimeout.capByClientTimeout(
+                GoStyleRequestDeadline.applyTo(stub));
     }
 
     /**
