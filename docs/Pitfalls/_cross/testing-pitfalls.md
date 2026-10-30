@@ -352,3 +352,42 @@ EOF
 - **⇒ 同族**：与「单跑绿、同跑红」（进程级全局状态）同源 —— 本条补的是
   「**你以为环境是常量，其实它是并发度的函数**」这个 B：**你以为端口是「挑一个空闲的」，
   其实它是「此刻这一刻有多少个进程在挑」**。
+
+## 🔴 **同一个数错了三次（`1/10` → `3/10` → `8/10`）⇒ ⇒ 每次都是「判据形态」错 ⇒ ⇒ 「进程有没有载体」不能用「依赖树里有 tomcat」判**
+
+> **形态**：要回答「**这个进程真能不能起 HTTP 容器 / 能不能被抓取**」这类**运行时语义**问题
+> ⇒ ⇒ 却拿**静态依赖的某一项**（`tomcat-embed-core` 在不在）当判据
+> ⇒ ⇒ 于是每次「载体面变了」都只改**数字**、不改**判据**
+> ⇒ ⇒ ⇒ **同一个数错三次，每次都能自洽、每次都"有依据"**。
+
+- **实证（RAG 仓 · 2026-10-31 · 合并收口执行者）**：全仓 10 个 rpc 组件的「指标可抓取面」先后出现过三个数：
+  ① **`1/10`**（「只有 `follow-rpc` 有 HTTP 载体」）—— 判据 = **依赖树里有 `tomcat-embed-core`**；
+  ② **`3/10`**（follow ＋ user-user-rpc ＋ user-admin-rpc）—— 判据 = **grep pom 里的 `spring-boot-starter-web`**；
+  ③ **`8/10`** —— 判据 = **依赖树里有 `tomcat-embed-core`**（①的同一个判据，只是数字变了）。
+  ⇒ ⇒ **三个数里有两个是判据错**（②），一个的判据**也不完整**（①/③）。
+- **真判据是三层**（2026-10-31 逐域实测，每层都可复算）：
+  · **L1 配置面** = yml 的 `management:` 段**没有把 prometheus endpoint 关掉**
+    （`endpoint.prometheus.enabled` ≠ false ∧ `endpoints.enabled-by-default` ≠ false
+    ∧ `endpoints.web.exposure.include` 含 `prometheus`）⇒ **10/10**；
+  · **L2 载体面** = 部署 classpath 能让 `WebApplicationType.deduceFromClasspath()` 推出 **SERVLET**
+    ⇒ ⇒ **需要 `jakarta.servlet.Servlet` ＋ `ConfigurableWebApplicationContext` 同时在**
+    ⇒ ⇒ ∧ **没有被 `spring.main.web-application-type: none` 强制关掉**
+    ⇒ ⇒ ∧ **真有 servlet 容器实现**（`tomcat-embed-core` / `jetty-server` / `undertow-core`）⇒ **8/10**；
+  · **L3 可抓取面** = L1 ∧ L2 ∧ **有 `spring-webmvc`**
+    （没有它，actuator 的 servlet 端点**不注册** ⇒ 容器在、端点不在 ⇒ `/actuator/prometheus` 404）⇒ **8/10**。
+  ⇒ ⇒ **三个分母不许混用**（配置面 / 载体面 / 可抓取面）⇒ ⇒ 而且**「载体面」与「可抓取面」本就不是同一个数**。
+- **判定式**：
+  ① **问「运行时语义」就别用静态代理判** ⇒ ⇒ 「会不会起容器」要落到**框架自己的推导函数**上
+    ⇒ ⇒ **Spring Boot 侧 = `WebApplicationType.deduceFromClasspath()`**；
+  ② **框架的判定常量要 `javap` 读，不要凭记忆推理** ⇒ ⇒ 本例的指示类 =
+    `jakarta.servlet.Servlet` ＋ `org.springframework.web.context.ConfigurableWebApplicationContext`
+    ⇒ ⇒ **读的是常量、不是推理** ⇒ ⇒ 若凭记忆写「有 tomcat 就行」，
+    **就会把 `comment-rpc` 判成有载体**（它只有 `provided` 作用域的 `jakarta.servlet-api` ＋ 显式 `none`）；
+  ③ **静态代理至少要过三关**：classpath 在 ⇒ 配置没把它关掉 ⇒ 端点真注册 ⇒ ⇒ **少一关就得到一个自洽的错数**；
+  ④ **同一个数第二次被修正时，要连判据一起修** ⇒ ⇒ 只改数字 ⇒ 下次载体面再变时，
+    **同一个判据会再错一次**（本例 ① → ③ 就是这么发生的）；
+  ⑤ **判据一旦定案，就要有唯一口径源** ⇒ ⇒ 本例把三层判据 + 逐域清单写进台账的一个小节，
+    上文所有引用该数的行**就地订正** ⇒ ⇒ 「后面谁再报这个数，一律回那一份」。
+- **⇒ 同族**：与「判据形态错了」系列（「零命中」的判据形态 / 「grep pom ≠ 依赖树」/ 「断言存在 ≠ 机制生效」）
+  同源 —— 本条补的是「**你以为你在测一个数，其实你在测一个代理**」这个 B：
+  **你以为「有没有 tomcat」就是「有没有容器」，其实框架的判定是多项合取**。
