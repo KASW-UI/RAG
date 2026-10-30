@@ -4917,7 +4917,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 | **G4-14d** | 各域 `application.yml`（`grpc.client.*` 的**上界**配置） | 客户端硬上界（Go 的 `Timeout`）本轮**未启用** | `go-zero@v1.10.2/zrpc/config.go:31`（default=2000）＋ 真源 `service/article/api/etc/article-api.yaml:12`（**70000** ⇒ api→article-rpc 的**客户端**上界）；⚠️ `service/article/rpc/etc/article.yaml:3` 的 70000 是**服务端**超时、同文件 `:90` 的 10000 才是客户端 | 共享层能力已具备（`rag.protection.outbound-deadline.cap-millis`），**默认 0 = 不启用** | E1 | 逐域按 Go 的 yaml 值启用；⚠️ devh `3.1.0.RELEASE` **没有** `grpc.client.*.deadline` 属性 ⇒ **不能靠那个键配** | 10 个 rpc ＋ 9 个 api 组件 | 否（**这一轴仍是漂移**） |
 | **G4-15a** | `docs/Intentional_Deviations/`（**共享面，不在 G4 写权面**） | 【订正 · 见 §4.19.5】原写的现象「反馈单 2/3 的落码让 RAG 的 Redis 命令**比 Go 更严**」**不成立** ⇒ ⇒ 本行**整条作废**，不要按「有意偏离」去登记 | ①（**派发前 · 决定性**）`go-redis/v9@v9.20.0/internal/pool/pool.go:1098-1104`（`ConnPool.waitTurn` fast path **无条件先查 `ctx.Done()`** ⇒ `ctx.Err()` ⇒ **命令根本不下发**）②（socket 层）`go-redis/v9@v9.20.0/redis.go:1024-1032`（`baseClient.context(ctx)` ⇒ ctx 变 `context.Background()`）＋ `internal/pool/conn.go:961-991`（socket deadline = 固定 3s） | 共享层已落「预算耗尽 ⇒ 不再下发命令」⇒ **落码后与 Go ① 同形**（**不是更严**）；② 本层不动 ⇒ 仍同形 | E1（本层实测 · 逐行读过 · 完整调用链见 §4.19.5） | **不登记有意偏离**（前提已不成立）⇒ 若要继续做 `G4-15d` 的「socket 层收紧」⇒ **那才是比 Go 更严** ⇒ 需**另立一条**并签字 | 全仓用 Redis 的 10 个组件 / 7 个域（【订正 · 见本文件 §4.10.27.2】原写「8 个域」是错的 ⇒ 复算 = 10 个组件） | 否（**但按原行去登记 = 会造一条假偏离**） |
 | **G4-15b** | 共享层 `GoStyleRpcProtectionChain` 的 Stat 落点（**链层位置**） | Go 的 Stat 层在 **breaker/shedding 之外** ⇒ 它量到的耗时**含**降载/熔断开销；RAG 原先在最内层 ⇒ **不含** | `go-zero@v1.10.2/zrpc/server.go:151-153`（Stat 注册点）＋ `:157-163`（Breaker/Shedding 在其外） | 🟡 **2026-10-31 部分闭合**（**链层位置已对齐**；残余＝时长测量点的毫秒级口径差，见 §4.19.20 ⑦3）：共享层新增 `GoStyleStatInterceptor` ＋ `GoStyleRpcProtectionChain.statThen(...)` ⇒ 链序 = `recover → stat → prometheus → breaker → shedding → 业务` ⇒ **Stat 在 breaker/shedding 之外**（与 Go 同形）⇒ 且 **未改 `Composition`**（改它会破 **8 个**域级守门编译 ⇒ 改走 `Layered.countedInLayerNames()`：观测层不进「保护层名单」⇒ **域级守门一条不破** ⇒ ⇒ **不必升级为全量回归波**） | L3（真链上跑通：降载拒绝也进样本 ⇒ 见 §4.19.20） | ——（已落） | 10 个 rpc 组件 | 否（口径差异已消） |
-| **G4-15c** | 共享层 `GoStyleRpcProtectionChain` ＋ `service/common/pom.xml` | Stat 的 **Info 分支**（Go 每个请求打全量 body）**刻意不落**（**至今仍未落**）；Prometheus 层 ＋ `stat.Metrics` 周期报告（qps/median/t99）**已于 2026-10-31 落** | `go-zero@v1.10.2/zrpc/internal/serverinterceptors/statinterceptor.go:94`（Info 分支）＋ `:54-56`/`:120-181`（`stat.Metrics` 聚合）＋ `zrpc/server.go:154-156`（Prometheus 层） | RAG 侧：慢调用日志**已落**；🟡 **部分闭合**（本条 3 项里 **2 项已落**）：Info 分支**有意不落**（**至今仍未落** ⇒ ⇒ **本条未整体闭合**）；周期报告**已落**（`GoStyleStatMetrics`：60s 一行 qps/avg/med/90th/99th/99.9th）；Prometheus 层**已落**（`GoStylePrometheusInterceptor` ＋ `MicrometerPrometheusSink`） | L3 ＋ **L4 双侧活体对拍**（Go 真源 `core/stat` 的**真实实现**出基准 ⇒ 逐值比对 ⇒ 见 §4.19.20） | ① **已落**：Prometheus 写入面（`micrometer-core` 以 **optional** 进 `service/common/pom.xml` ⇒ **不传递给下游** ⇒ 域侧要用需自己声明 ＋ actuator ＋ HTTP 载体）+ `stat.Metrics` 周期报告；② **仍未落**：Stat 的 **Info 分支**（每请求打全量 body ⇒ 日志量级问题 ⇒ 留待专项）；③ **出口可达性**仍是**逐域三态**（§4.19.7/§4.19.8 的结论不变：配置面 8/10、载体面 **1/10** 可被抓取）⇒ ⇒ 域侧部分**转派**（§4.19.20 转派单） | 10 个 rpc ＋ 9 个 api 组件 | 否（命中 `docs/PhasedGoal.md` P1 面） |
+| **G4-15c** | 共享层 `GoStyleRpcProtectionChain` ＋ `service/common/pom.xml` | Stat 的 **Info 分支**（Go 每个请求打全量 body）**刻意不落**（**至今仍未落**）；Prometheus 层 ＋ `stat.Metrics` 周期报告（qps/median/t99）**已于 2026-10-31 落** | `go-zero@v1.10.2/zrpc/internal/serverinterceptors/statinterceptor.go:94`（Info 分支）＋ `:54-56`/`:120-181`（`stat.Metrics` 聚合）＋ `zrpc/server.go:154-156`（Prometheus 层） | RAG 侧：慢调用日志**已落**；🟡 **部分闭合**（本条 3 项里 **2 项已落**）：Info 分支**有意不落**（**至今仍未落** ⇒ ⇒ **本条未整体闭合**）；周期报告**已落**（`GoStyleStatMetrics`：60s 一行 qps/avg/med/90th/99th/99.9th）；Prometheus 层**已落**（`GoStylePrometheusInterceptor` ＋ `MicrometerPrometheusSink`） | L3 ＋ **L4 双侧活体对拍**（Go 真源 `core/stat` 的**真实实现**出基准 ⇒ 逐值比对 ⇒ 见 §4.19.20） | ① **已落**：Prometheus 写入面（`micrometer-core` 以 **optional** 进 `service/common/pom.xml` ⇒ **不传递给下游** ⇒ 域侧要用需自己声明 ＋ actuator ＋ HTTP 载体）+ `stat.Metrics` 周期报告；② **仍未落**：Stat 的 **Info 分支**（每请求打全量 body ⇒ 日志量级问题 ⇒ 留待专项）；③ **出口可达性**仍是**逐域三态**（⚠️ **【2026-10-31 订正 · 合并收口执行者】§4.19.7/§4.19.8 的分母**已作废** —— 原写「配置面 8/10、载体面 **1/10** 可被抓取」⇒ ⇒ **实测 = 配置面 10/10、载体面 8/10、可抓取面 8/10** ⇒ ⇒ 「只有 `follow-rpc` 有载体」这句话**已作废** ⇒ ⇒ 判据 = Spring Boot 4 的 `WebApplicationType.deduceFromClasspath()` 推导 ＋ 部署产物核对 ＋ `spring-webmvc` 是否注册 actuator servlet 端点 ⇒ 逐格见 `docs/DRIFT/global/vs-common.md` §4.19.23）⇒ ⇒ 域侧部分**转派**（§4.19.20 转派单） | 10 个 rpc ＋ 9 个 api 组件 | 否（命中 `docs/PhasedGoal.md` P1 面） |
 | **G4-15d** | 共享层 Redis 能力面的**严格模式** | 「命令等待不超过剩余预算」本轮**不落** | —— | 共享层只落了「预算耗尽 ⇒ 不再下发命令」；【订正 · 见 §4.19.5】原写「命令级 socket 超时随预算收紧」在公开 API 上不可达 ⇒ **是错的** ⇒ ⇒ **那条路线是可达的**：lettuce `TimeoutOptions$TimeoutSource`（public abstract · `getTimeout(RedisCommand)`）＋ `TimeoutOptions$Builder.timeoutSource(…)` ＋ `ClientOptions$Builder.timeoutOptions(…)` ＋ Boot 4 的 `LettuceClientOptionsBuilderCustomizer`（实测 `LettuceConnectionConfiguration.createClientOptions` 字节码：customizer 在硬编码 `timeoutOptions` **之后** ⇒ **可覆盖**）⇒ ⇒ **本轮不落的理由从「不可达」改为「会造成新的有意偏离（比 Go 严）⇒ 需另立一条并签字」** | E1（javap + 字节码实测 · §4.19.5） | ① 若要做「socket 超时随剩余预算收紧」⇒ 走 `TimeoutSource` 路线 ⇒ **先登记为有意偏离并签字**（Go 的 socket 层**不**收紧）；② 若要做「命令等待不超过剩余预算」⇒ 需把命令丢到另一线程再 `Future.get(remaining)` ⇒ 与**事务绑定**（ThreadLocal 事务连接在调用线程上）和线程亲和冲突 ⇒ ⇒ 另立一轮专项 | 10 个用 Redis 的组件 / 7 个域（【订正 · 见本文件 §4.10.27.2】原写「8 个域」是错的 ⇒ 复算 = 10 个组件） | 否 |
 
 ### 4.19.3 🟡 本节的**诚实边界**（AGENTS.md §0：「已改」≠「已验证」）
@@ -5266,7 +5266,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 
 1. **仍是源码级证据（E1）** —— 本轮**没有任何一侧的活体对拍**（没有真起 Go 进程抓 `/metrics`、没有真起 RAG 进程打 `/actuator/prometheus`）⇒ ⇒ 「Go 产 / RAG 不产」这类断言一律读作「**按配置与源码推导**」，**不得**外推为「已实测」。
 2. **Go 侧结论来自「读源码 ＋ 一个 `conf.Load` 行为探针」** ⇒ ⇒ 探针验证的是**配置填充语义**，**不是**「进程真的起了 :9091」⇒ ⇒ 出口是否真可达，仍需活体验证。
-3. **RAG 侧「有出口」的结论来自 yml 文本** ⇒ ⇒ 未验证「`/actuator/prometheus` 在真进程里真的可达」（那要看依赖与容器条件）⇒ ⇒ 同上，读作配置面。⇒ ⇒ 🆕 **2026-10-30 16:7x 补层**：该边界已由**依赖树实测**推进到「**载体层已量**」⇒ ⇒ **10 个 rpc 域里只有 `follow-rpc` 有 HTTP 容器**（其余 9 个只有 actuator）⇒ ⇒ ⇒ **「7 个有出口」是配置面、可被抓取只有 1/10** ⇒ ⇒ 逐格见 **§4.19.8**（⚠️ **依赖树仍是静态证据** ⇒ 真进程 curl 一次仍未做）。
+3. **RAG 侧「有出口」的结论来自 yml 文本** ⇒ ⇒ 未验证「`/actuator/prometheus` 在真进程里真的可达」（那要看依赖与容器条件）⇒ ⇒ 同上，读作配置面。⇒ ⇒ 🆕 **2026-10-30 16:7x 补层**：该边界已由**依赖树实测**推进到「**载体层已量**」⇒ ⇒ ⚠️ **【2026-10-31 订正 · 合并收口执行者】本句原写「**10 个 rpc 域里只有 `follow-rpc` 有 HTTP 容器**（其余 9 个只有 actuator）⇒ ⇒ ⇒ **「7 个有出口」是配置面、可被抓取只有 1/10**」= **已作废**（**不是过期 —— 是判据与数字都错**）⇒ ⇒ **2026-10-31 逐域重测**：**配置面 10/10**（10 个域的 `management.endpoints.web.exposure.include` 全含 `prometheus`，且**无一个**被 `enabled-by-default:false` / `prometheus.enabled:false` 关掉）· **载体面 8/10**（article / favorite / follow / hot / like / message / users-admin / users-user）· **可抓取面 8/10**（= 载体面集合）⇒ ⇒ **无载体 = `comment-rpc`（显式 `spring.main.web-application-type: none` ＋ 部署产物里无 servlet 容器实现）与 `task-rpc`（classpath 无 `jakarta.servlet.Servlet`）** ⇒ ⇒ 逐格见 **§4.19.23**（⚠️ **依赖树仍是静态证据** ⇒ 真进程 curl 一次仍未做；⚠️ **运行期只验过 follow / admin / user 三域** ⇒ 其余 5 个载体域仍是静态证据）。
 
 ### 4.19.7 🔴 本层第三次自查订正（2026-10-30 16:2x · G4 lane）：**客户端可见错误码两侧同形**（原判「仍与 Go 不同」⇒ 错）〔**【订正 · 见 §4.19.12】此处「同形」是**单点口径** ⇒ 已被真源探针推翻**：Go 侧**集合** = {1015, 5001}、RAG 侧（保留域侧抢先检查）= {1015} ⇒ ⇒ **真同集合要等域侧删掉抢先检查之后**〕＋ **副作用差异的方向被再次订正**（原判与反馈单的转述**都错**）＋ **两层错误面必须分开说**
 
@@ -5367,7 +5367,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 | admin-rpc / user-rpc / hot-rpc | 三重关闭 | 无 | 抓不到 |
 | task-rpc | 开 | 无 | 抓不到 |
 
-⇒ ⇒ ⇒ **RAG 侧实际能被 Prometheus 抓到的 rpc = 1/10**（只有 `follow-rpc`）⇒ ⇒ ⇒ **§4.19.6 第三节 ② 态那 5 个域里，只有 `follow-rpc` 真能被抓到**（其余 4 个配置层开了 prometheus endpoint，但进程里没有 servlet 容器 ⇒ 抓取方连不上 HTTP）。
+⇒ ⇒ ⇒ ⚠️ **【2026-10-31 订正 · 合并收口执行者】本行原写「**RAG 侧实际能被 Prometheus 抓到的 rpc = 1/10**（只有 `follow-rpc`）⇒ ⇒ ⇒ **§4.19.6 第三节 ② 态那 5 个域里，只有 `follow-rpc` 真能被抓到**（其余 4 个配置层开了 prometheus endpoint，但进程里没有 servlet 容器 ⇒ 抓取方连不上 HTTP）」= **已作废** ⇒ ⇒ **2026-10-31 逐域重测 = 8/10**（article / favorite / follow / hot / like / message / users-admin / users-user）⇒ ⇒ ⇒ **§4.19.6 第三节的三态随之改写**：②「两侧都有、但路径与端口都不同」那 5 个域**今天全部可被抓取**（不再是「只有 `follow-rpc` 能」）⇒ ⇒ **今天无载体的 2 个 = `comment-rpc` / `task-rpc`** ⇒ ⇒ 它们 yml 里的 `exposure.include` 那行是**死配置**（写了但没有载体 ⇒ 抓取方连不上 HTTP）⇒ ⇒ 判据与逐域清单见 **§4.19.23**。
 
 **四、Go 侧口径 ＋ 净差（⚠️ 按轴读，勿混用）**
 
@@ -5930,7 +5930,7 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 | 客户端硬上界（Go 2000ms）默认未启用（`cap-millis=0`） | **各域 lane**（域侧 yml） | 域内 yml 不在 G4 写权面 ⇒ 与 `:5791` 同一条归属 |
 | 共享层 Redis 代理 ＋ 域侧 `logout` 抢先检查删除（**原子提交**） | **合并收口执行者**（主干做） | 需域侧 3 个文件（G1 交付）⇒ 共享层那半已在本 lane 落码 |
 | 出向载体漂移形态门改**等值**口径 | **合并收口执行者**（`tools/**`） | `tools/**` 无 lane 拥有 ⇒ 其已修锚点，剩口径改动 |
-| Prometheus 两层 ＋ `stat.Metrics` 周期报告 | **待 Jason 拍板** | 运维出口决策；实测 10 个 rpc 域只有 `follow-rpc` 有 HTTP 容器 ⇒ 建议转阶段 2 |
+| Prometheus 两层 ＋ `stat.Metrics` 周期报告 | **待 Jason 拍板** | 运维出口决策；⚠️ **【2026-10-31 订正 · 合并收口执行者】原写「实测 10 个 rpc 域只有 `follow-rpc` 有 HTTP 容器 ⇒ 建议转阶段 2」的**前提已作废** ⇒ ⇒ 逐域重测 = **载体面 8/10 / 可抓取面 8/10**（无载体 = `comment-rpc` / `task-rpc`；判据 = Spring Boot 4 的 `WebApplicationType.deduceFromClasspath()` 推导 ＋ 部署产物核对 ＋ `spring-webmvc` 是否注册 actuator servlet 端点 ⇒ 逐格见 `docs/DRIFT/global/vs-common.md` §4.19.23）⇒ ⇒ ⇒ **「建议转阶段 2」这条建议的前提已变**（原前提 = 「只有 1 个域能抓」⇒ 现前提 = 「8 个域能抓、2 个域没载体」）⇒ ⇒ **本拍板项待重开**（本层**不径行改判**） |
 | Stat 链层位置（`G4-15b`） | **主线 / 全量回归波** | 要改 `Composition` record ⇒ 破坏 3 个域级守门测试的编译 ⇒ 跨域 |
 | api 侧双侧活体对拍 | **各域 lane** | 需各域真进程 ＋ 真上游 ⇒ 本 lane 只有共享层装配链证据 |
 | 派生层重生成 | **合并收口执行者**（合并窗口） | `docs/DRIFT/_cross/**` 不在 G4 写权面 ⇒ 四棵 lane 全合后统一做 |
@@ -6310,7 +6310,7 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 2. ⚠️ **服务名形态不同**：Go 的 stat 报告行首是 `(follow.rpc)`（真源 `service/follow/rpc/etc/follow.yaml:1` 的 `Name:`）⇒ 本仓是 `(follow-rpc)`（`spring.application.name`）⇒ 那是**服务身份字符串**本身的差异（注册进 Nacos 的名字就是 `follow-rpc`）⇒ **聚合语义逐位相同**。
 3. ⚠️ **时长测量点差一档**：Go 在「handler 返回」时取（**不含**响应写回）⇒ 本仓在「`onHalfClose` 结束；未走到则退回 close 时刻」取 ⇒ **毫秒级口径差**（已登记，不掩饰）。
 4. ⚠️ **`%.1f` 的平局差异**：Go 的 `fmt` 用 **unbiased**（平局取偶）⇒ Java 的 `String.format` 用 **HALF_UP**（平局远离零）⇒ 某个值**恰好落在 `.x5` 平局**时最后一位可能差 1 ⇒ **格式化器差异**，不是聚合差异（本轮 5 组基准值均无平局）。
-5. ⚠️ **出口可达面未变**：仍是**逐域三态**（配置面 8/10、**载体面 1/10** 可被抓取）⇒ ⇒ 本轮落的是**能力**，不是**可达性** ⇒ ⇒ 域侧部分见 ⑧ `G4-17a`。
+5. ⚠️ **出口可达面**：仍是**逐域三态**（⚠️ **【2026-10-31 订正 · 合并收口执行者】分母**已作废** ⇒ ⇒ **配置面 10/10、载体面 8/10、可抓取面 8/10** ⇒ ⇒ 逐格见 **§4.19.23**）⇒ ⇒ 本轮落的是**能力**，不是**可达性** ⇒ ⇒ 域侧部分见 ⑧ `G4-17a`。
 6. ⚠️ **样本容器无上限**（照 Go）：Go 的 `metricsContainer.tasks` 是裸 slice ⇒ 一个周期内的请求数 = 样本数 ⇒ 高 QPS 下内存随 QPS × 周期线性增长 ⇒ **刻意照抄**（§3.1：行为差异默认判 RAG 错 ⇒ 这里不能"顺手优化"）。
 7. ⚠️ **本轮未跑任何 Go↔RAG 的「Prometheus 暴露文本」双侧活体对拍**（只对拍了 `core/stat` 的**聚合语义**）⇒ ⇒ 「暴露文本逐字一致」**不成立**（见 ⑦1 的两处已知格式差异）⇒ 暴露面的证据强度 = **L3（本仓侧真 scrape 断言）**，不是 L4。
 
@@ -6318,7 +6318,7 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 
 | # | 落点 | 现象 | Go 侧 `文件:行号` | RAG 侧现状 | 证据强度 | 建议修法 | 影响面 | 阻塞本波 |
 |---|---|---|---|---|---|---|---|---|
-| **G4-17a** | 各 rpc 域的 `pom.xml` ＋ `application.yml`（**域侧写权面**） | **抓取出口不可达**：本轮落了「写 Prometheus」的能力，但 10 个 rpc 域里**只有 `follow-rpc` 有 HTTP 载体** ⇒ 「实际可被抓取」= **1/10** | `go-zero@v1.10.2/core/internal/devserver/server.go:44-49`（`EnableMetrics` ⇒ `prometheus.Enable()` ＋ `promhttp.Handler()`）＋ `:67-75`（**独立端口** `http.ListenAndServe`）＋ 真源 `service/follow/rpc/etc/follow.yaml:20-27`（`DevServer.Port: 16065` / `MetricsPath: /metrics`） | 共享层能力已具备（`GoStylePrometheusMetrics` ＋ `AutoConfiguration.imports` 登记）⇒ **零域侧改动即生效**；但**没有 registry 的域 ⇒ 一条都不写**（＝ Go 的 `prometheus.Enabled()==false`） | L3（本仓侧真 scrape）＋ E1（Go 侧逐行读过） | ① 各域加 `spring-boot-starter-web` ＋ `micrometer-registry-prometheus`（**或**已有 actuator 者只加 registry）＋ `server.port`（对齐 Go 的 `DevServer.Port`）＋ `management.endpoints.web.exposure.include: prometheus`；⚠️ **各域的 `micrometer-core` 必须自己声明**（共享层那条是 **optional** ⇒ **不传递**） | 10 个 rpc 组件 | 否（能力已具备 ⇒ 逐域启用即可） |
+| **G4-17a** | 各 rpc 域的 `pom.xml` ＋ `application.yml`（**域侧写权面**） | **抓取出口不可达（只剩 2 域）**：本轮落了「写 Prometheus」的能力，但 ⚠️ **【2026-10-31 订正 · 合并收口执行者】原写「10 个 rpc 域里**只有 `follow-rpc` 有 HTTP 载体** ⇒ 「实际可被抓取」= **1/10**」= **已作废** ⇒ ⇒ 逐域重测 = **载体面 8/10 / 可抓取面 8/10** ⇒ ⇒ ⇒ **本单收缩为「只剩 2 个域无载体」= `comment-rpc`（显式 `web-application-type: none` ＋ 产物无容器实现）＋ `task-rpc`（classpath 无 servlet 指示物）** ⇒ ⇒ 这两域的 `exposure.include` 是**死配置** ⇒ ⇒ 判据 = Spring Boot 4 的 `WebApplicationType.deduceFromClasspath()` 推导 ＋ 部署产物核对 ＋ `spring-webmvc` 是否注册 actuator servlet 端点 ⇒ 逐格见 `docs/DRIFT/global/vs-common.md` §4.19.23 | `go-zero@v1.10.2/core/internal/devserver/server.go:44-49`（`EnableMetrics` ⇒ `prometheus.Enable()` ＋ `promhttp.Handler()`）＋ `:67-75`（**独立端口** `http.ListenAndServe`）＋ 真源 `service/follow/rpc/etc/follow.yaml:20-27`（`DevServer.Port: 16065` / `MetricsPath: /metrics`） | 共享层能力已具备（`GoStylePrometheusMetrics` ＋ `AutoConfiguration.imports` 登记）⇒ **零域侧改动即生效**；但**没有 registry 的域 ⇒ 一条都不写**（＝ Go 的 `prometheus.Enabled()==false`） | L3（本仓侧真 scrape）＋ E1（Go 侧逐行读过） | ① 各域加 `spring-boot-starter-web` ＋ `micrometer-registry-prometheus`（**或**已有 actuator 者只加 registry）＋ `server.port`（对齐 Go 的 `DevServer.Port`）＋ `management.endpoints.web.exposure.include: prometheus`；⚠️ **各域的 `micrometer-core` 必须自己声明**（共享层那条是 **optional** ⇒ **不传递**） | 10 个 rpc 组件 | 否（能力已具备 ⇒ 逐域启用即可） |
 | **G4-17b** | `tools/semantic-probe/`（**共享面，无 lane 拥有**） | 本轮的 Go 侧对拍探针在 `/tmp/statprobe` ⇒ **不入仓** ⇒ 没有可复算的回归网 | 同上 | 本仓侧期望值已逐字抄进 `GoStyleStatMetricsTest` ⇒ 但**Go 侧的基准生成过程没进仓** ⇒ 换一台机器/换一版 go-zero 后无法一键复算 | L4（双侧活体 · 本轮实测过） | 把 `/tmp/statprobe` 整理成 `tools/semantic-probe/stat-metrics/`（Go 侧 + 跑法 + 期望值文件）⇒ ⇒ 与既有的 `deadline-downstream` 探针同款 | 共享面工具链 | 否 |
 | **G4-17c** | `docs/Intentional_Deviations/`（**签字落点不归本层**） | **对外契约不同**：Go 的暴露路径是 DevServer 的 `/metrics`（**独立端口 6060/逐域端口**）⇒ 本仓走 actuator 的 `/actuator/prometheus`（**管理端口**）⇒ 路径与端口都不同 | `go-zero@v1.10.2/core/internal/devserver/config.go:4-13`（默认端口 6060 / 路径 `/metrics` / 默认开启） | 本仓：actuator 路径 ＋ 逐域 `management.server.port` | E1 | 登记为「有意偏离候选」（暴露路径与端口）⇒ **建议签**（RAG 侧走 actuator 是生态惯例，且 Go 侧 DevServer 本就是「另起一个小 server」） | 全仓运维面 | 否 |
 （**本节编号：§4.19.20** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
@@ -6414,3 +6414,46 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
   **不覆盖**（已如实登记为盲区）。
 - **详细记录** ⇒ `docs/DRIFT/common/protection.md` 末节（客户端硬上界的共享层那半）。
 （**本节编号：§4.19.22** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
+
+### 🔴 载体面三层判据的逐域实测：配置面 10/10 · 载体面 8/10 · 可抓取面 8/10
+
+> **本节是「载体面」这个数的唯一口径来源**（2026-10-31 · 合并收口执行者 · 实测）。
+> ⚠️ **本仓此前对这个数错了三次**（`1/10` ⇒ `3/10` ⇒ `8/10`）⇒ ⇒ **每次都是「判据形态」错，不是过期**
+> ⇒ ⇒ **本节把判据写死** ⇒ ⇒ 后面谁再报这个数，一律按本节的口径与清单回 ⇒ ⇒ **不要重新发明判据**。
+
+**一、三层判据（逐层可复算；判据 = 运行时语义，不是文本命中）**
+
+| 层 | 判据（怎么算） | 复算依据 | 实测 |
+|---|---|---|---|
+| **L1 配置面** | yml 的 `management:` 段**没有把 prometheus endpoint 关掉**：`endpoint.prometheus.enabled` ≠ false ∧ `endpoints.enabled-by-default` ≠ false ∧ `endpoints.web.exposure.include` 含 `prometheus` | 逐域读 `service/<域>/<域>-rpc/src/main/resources/` 下的配置文件（⚠️ `users/user-rpc` 的文件名是 **`application.yaml`**，只扫 `*.yml` 必漏） | **10/10** |
+| **L2 载体面** | 进程**真能起 HTTP 容器** ⇒ 部署 classpath 同时含 `jakarta.servlet.Servlet`（`tomcat-embed-core` 或 `jakarta.servlet-api`）**与** `org.springframework.web.context.ConfigurableWebApplicationContext`（`spring-web`）⇒ `WebApplicationType.deduceFromClasspath()` 推出 **SERVLET** ∧ **没有被 `spring.main.web-application-type: none` 强制关掉** ∧ 真有 servlet 容器实现（`tomcat-embed-core` / `jetty-server` / `undertow-core`） | `javap -p -c -cp ~/.m2/repository/org/springframework/boot/spring-boot/4.0.8/spring-boot-4.0.8.jar org.springframework.boot.WebApplicationType` ⇒ **实测**指示类 = `jakarta.servlet.Servlet` ＋ `org.springframework.web.context.ConfigurableWebApplicationContext`（**读的是常量、不是推理**）；依赖用 `mvn -o -B dependency:list -pl <模块>` 查（**不是 grep pom**） | **8/10** |
+| **L3 可抓取面** | L1 ∧ L2 ∧ **有 `spring-webmvc`**（没有它，actuator 的 servlet 端点**不注册** ⇒ 容器在、端点不在 ⇒ `/actuator/prometheus` 404） | 同上（`dependency:list` 查 `org.springframework:spring-webmvc`） | **8/10** |
+
+**二、逐域清单（10 个 rpc 组件）**
+
+| 组件 | L1 配置面 | L2 载体面 | L3 可抓取面 | 备注 |
+|---|---|---|---|---|
+| `article-rpc` | ✔ | ✔ | ✔ | |
+| `favorite-rpc` | ✔ | ✔ | ✔ | |
+| `follow-rpc` | ✔ | ✔ | ✔ | 载体端口 16065 |
+| `hot-rpc` | ✔ | ✔ | ✔ | |
+| `like-rpc` | ✔ | ✔ | ✔ | |
+| `message-rpc` | ✔ | ✔ | ✔ | |
+| `users/admin/admin-rpc` | ✔ | ✔ | ✔ | 载体端口 9097 |
+| `users/user/user-rpc` | ✔ | ✔ | ✔ | 载体端口 9094 |
+| `comment-rpc` | ✔ | ✘ | ✘ | **显式 `spring.main.web-application-type: none`** ＋ 部署产物里**无 servlet 容器实现**（只有 `tomcat-embed-el`＝EL 引擎、不是容器）⇒ ⇒ yml 那行 `exposure.include` 是**死配置** |
+| `task-rpc` | ✔ | ✘ | ✘ | classpath 上**无** `jakarta.servlet.Servlet` ⇒ `WebApplicationType` 推导出 **NONE** ⇒ yml 那行 `exposure.include` 是**死配置** |
+
+**三、本节的诚实边界**
+
+1. **L1 / L2 / L3 全是静态证据**（yml 文本 ＋ 依赖树 ＋ 部署产物）⇒ ⇒ **不是**「真进程 curl 一次」⇒ ⇒
+   **运行期只验过 follow / admin / user 三域**（那三域的载体守门真起过 Tomcat 容器）⇒ ⇒
+   **其余 5 个载体域（article / favorite / hot / like / message）仍是静态证据** ⇒ ⇒
+   要升级到活体证据，得逐域起真进程 curl 一次。
+2. **判据本身是 Spring Boot 4.0.8 的实现** ⇒ ⇒ 换 Boot 大版本 ⇒ 指示类可能变 ⇒ ⇒
+   **本节的数字不得外推到别的 Boot 版本**。
+3. **本节只判「载体在不在」** ⇒ ⇒ **不判「抓取方能不能连上」**（网络 / 鉴权 / 路径 / 端口全不在本节范围）⇒ ⇒
+   Go 侧的 `/metrics` 与 RAG 侧的 `/actuator/prometheus` 的**路径与端口差异是另一条轴**（见 §4.19.6 第三节的三态分类）。
+4. ⚠️ **本节作废的旧数**：`1/10`（只有 `follow-rpc` 有载体）· `3/10`（follow ＋ user-user-rpc ＋ user-admin-rpc）·
+   `配置面 8/10` ⇒ ⇒ **三个都作废** ⇒ ⇒ 现口径 = **配置面 10/10 · 载体面 8/10 · 可抓取面 8/10** ⇒ ⇒
+   上文凡引用这三个数的行**均已就地订正**（零行位移）⇒ ⇒ **本节是唯一的口径源**。
