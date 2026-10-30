@@ -3357,10 +3357,10 @@ global 第三十六轮把 E47 的定性**反过来了**：
 
 ⇒ ✅ **「不要改回 Go 行为」本域完全同意**（且已在 `DRIFT-ARPC-011` 留档防回退）。
 ⇒ 🔴 **但「wire 上码值不同 ⇒ 客户端可见」这一层，本域复核后不成立** ——
-**客户端可见的 HTTP 业务码两侧都是 1015**（机制逐环见 `DRIFT-ARPC-011` §1.8.1：
+**客户端可见的 HTTP 业务码按集合读**（Go 侧集合 = {1015, 5001} ⇒ 不再是「两侧都是 1015」那个单点读法；机制逐环见 `DRIFT-ARPC-011` §1.8.1：
 Go 侧 logic 返 INTERNAL，但 `rpc.go` 的 select 在 ctx 取消时走 `timeoutCtx.Done()` 分支
 —— **该分支不需要锁，而 `case <-done:` 要 `lock.Lock()`** ⇒ 超时分支先就绪
-⇒ 客户端拿 `DEADLINE_EXCEEDED` ⇒ admin-api 落 `mapRPCStatusToCode` 的 **default** ⇒ **1015**）。
+⇒ 该分支先就绪时客户端拿 `DEADLINE_EXCEEDED` ⇒ admin-api 落 `mapRPCStatusToCode` 的 **default** ⇒ **1015**；但该 select 是**竞速** ⇒ 存在 handler 先返回 ⇒ 客户端拿到 **5001** 的窄窗口）。
 ⇒ ⇒ **这是「源码层形态差异」，不是 wire 级漂移** ⇒ 归「**表述差异**」类 ⇒ **不需要用户签字**
 ⇒ ⇒ 与 global 的 E58「有意偏离候选 🏷 建议签」**定性不同** ⇒ **已回信 global 请其复核**。
 ⇒ ⚠️ **本域另外把 global 的 Go 侧清单数纠正了**（它列 12 处、行号全部小 1 ⇒ 实际 **20 处**）⇒ 详见 `DRIFT-ARPC-011` §1.8.2。
@@ -3478,7 +3478,7 @@ global 第三十三轮已销案（`hot-rpc` **无 mapper / 无 MyBatis / 无 SQL
 - 台账订正 **6 处**过期断言 + **新增 `DRIFT-ARPC-011`**（防回退留档）+ **新增章节** + **新增 `P-16`** + **P-4 补一条当场闭环实例**。
 - **33 处路径引用**由 `...` 缩写式展开为完整路径 ⇒ 见 §8（含**根因判断的自我订正**）。
 - ⚠️ **回信 global**：① 「`Δ_end` 不变」这条错误结论 ② 与他们「`UNRESOLVED-ARPC-002` 的定性不变」的**冲突**
-  ③ **E47/E58 的「客户端可见」这层不成立**（两侧都是 1015 ⇒ 非 wire 漂移 ⇒ 不需签字）
+  ③ **E47/E58 的「客户端可见」这层不成立**（客户端可见面按集合读 = {1015, 5001} ⇒ 非 wire 漂移 ⇒ 不需签字）
   ④ **他们 Go 侧 admin 清单漏了 8 处、行号全部小 1**（实际 **20** 处）⑤ E47 不命中 ⑥ E48 第三步判据 ⑦ hot-rpc 销案。
 - ⚠️ **回信 users/user 域**：① 确认其 B-1 结论在我域成立、**面 A / 面 B 的分离**（我域面 A 已闭环、面 B = ARPC-010 仍开着）
   ② **负控已补**（M1~M4 全跑过，**自己写的没照抄**）③ **V-012/ARPC-010 口径我域已符合**（SQL + Redis 两条路径的 `log.error` 都带原始异常 ⇒ 无需改代码）
@@ -4493,7 +4493,7 @@ if (connectTimeout != null) {                                     // :16
 - **socket 层（两侧同形）**：`redis.go:968` / `:985` 的 `c.context(ctx)`（`:1027-1032`）在 `ContextTimeoutEnabled=false`（`options.go:174` 零值 bool；go-zero `core/stores/redis/redisclientmanager.go:32-40` 建客户端时**未设**该字段）时换成 `context.Background()` ⇒ 只剩**固定 3s** `ReadTimeout`（`internal/pool/conn.go:961-991`）。
 - ⇒ ⇒ **Go = 派发前感知 + socket 层不感知**；RAG 侧 Redis 调用路径**两头都不感知** ⇒ ⇒ **本条是漂移（成立）** ⇒ ⇒ **不是有意偏离 ⇒ 不需要签字**。
 
-**（2）为什么客户端两侧都是 1015（logic 层的 `INTERNAL` 到不了客户端）**
+**（2）为什么客户端可见面按集合读 = {1015, 5001}（logic 层的 `INTERNAL` 大多到不了客户端）**
 
 - **Go 侧**：`logoutlogic.go:39-42` 返回 `status.Error(codes.Internal, "注销失败,Redis写入异常")` —— ⚠️ **这是 logic 层返回值**；`service/common/observability/rpc.go:59-72` 的 `select` 里 `case <-done:`（`:63-67`）**要先 `lock.Lock()`**（`:64`），而 `case <-timeoutCtx.Done():`（`:68-71`）**不需要拿锁** ⇒ ctx 已 Done 时**超时分支几乎必然先就绪** ⇒ ⇒ 客户端拿 **`DEADLINE_EXCEEDED`**（⇒ admin-api `GlobalExceptionHandler.java:90` 落 default ⇒ **1015**）。
 - **RAG 侧（保留守卫时的现状 · 该守卫已于 2026-10-30 删除）**：`AdminDomainService.java` 的 `checkDeadline()` **在 Redis 写之前就抛** `DEADLINE_EXCEEDED` ⇒ 客户端只拿 **1015** ⇒ ⇒ 客户端可见码**集合 = {1015}**（= Go 集合 {1015, 5001} 的**真子集** ⇒ 仍是一处窄但可观察的差异 ⇒ 需登记为有意偏离候选并签字）；⚠️ 原写 `:259` **已失效**（那处 `checkDeadline()` 已删 ⇒ 现行 `logout` 在 `:282-305`，Redis 写在 `:290`）
@@ -4567,7 +4567,7 @@ if (connectTimeout != null) {                                     // :16
 
 - 主干 `53bc05ec`（`feat(M-6 原子)`）已把**共享层半边 + 域侧半边放在同一提交** ⇒ ⇒ 现状本就是 M-6 要求的形态。
 - 且共享层半边已把预算检查**前移到建连之前**（`GoStyleRedisDeadlineConnectionFactory.java:57-59` 检查 ⇒ `:60` 才 `delegate.getConnection()`）⇒ ⇒ **M-6 的唯一理由**（「代理不在位时域侧撤闸门 ⇒ 无期限感知 ⇒ RAG 写、Go 不写」）**不再成立** ⇒ ⇒ **约束取消**（G4 第四次订正 `4e30d898` 同结论）。
-- ⇒ ⇒ **本域不擅自回退撤闸门**：① **客户端可见面**两侧都是 **1015**（Go `service/common/observability/rpc.go:68-71` ⇒ `:69` `codes.DeadlineExceeded`；RAG `RpcInterceptor.java:361-363` 首次 close 定 status）⇒ ⇒ 回退与否**对客户端不可见**；② **handler 级码** = `INTERNAL`「注销失败,Redis写入异常」= Go `service/user/admin/rpc/internal/logic/logoutlogic.go:39-42` **逐字同形** ⇒ ⇒ **撤闸门这一侧更贴 Go**；③ 按 G4 自己 §五 的更正标准（「不可观察的差异不是漂移」），②这一层**本就不可观察** ⇒ ⇒ **维持现状，交收口执行者知情**。
+- ⇒ ⇒ **本域不擅自回退撤闸门**：① **客户端可见面按集合读** = **{1015, 5001}**（Go `service/common/observability/rpc.go:68-71` ⇒ `:69` `codes.DeadlineExceeded`；RAG `RpcInterceptor.java:361-363` 首次 close 定 status ⇒ ⇒ 两侧**通常**同为 1015，但 Go 侧那个 select 是**竞速** ⇒ 存在 handler 先返回 ⇒ 客户端拿到 **5001** 的窄窗口）⇒ ⇒ 回退与否**基本对客户端不可见**（窄窗口内可能不同）；② **handler 级码** = `INTERNAL`「注销失败,Redis写入异常」= Go `service/user/admin/rpc/internal/logic/logoutlogic.go:39-42` **逐字同形** ⇒ ⇒ **撤闸门这一侧更贴 Go**；③ 按 G4 自己 §五 的更正标准（「不可观察的差异不是漂移」），②这一层**本就不可观察** ⇒ ⇒ **维持现状，交收口执行者知情**。
 - ⚠️ **G4 回执的「域侧零落码 ⇒ `checkDeadline()` 保留 ⇒ 你那一行不用落」与主干现状冲突**（主干 `53bc05ec` 已撤）⇒ ⇒ **本条只订正台账口径，不动代码** ⇒ ⇒ 冲突已上报收口执行者。
 
 **二、客户端可见层坐标订正（G4 指出 · G1 已逐行复核）**
