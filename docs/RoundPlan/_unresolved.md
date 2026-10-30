@@ -96,7 +96,6 @@
 | `ENV-03` | **本机 Docker 默认镜像源拉大 blob 会 EOF** | 环境面，不是项目缺陷 ⇒ 换 `docker.m.daocloud.io` 后 `docker tag` 回本地名可绕 | Round 1 依赖镜像重建的任何一步 | 本轮计划期实测观察（**仓内无台账出处**） | **Round 1** `P1-T05`（起栈前置）· 受阻时记「未完成任务及原因」 |
 | `ENV-04` | **Docker 端口释放延迟** | 容器 `docker rm -f` 后宿主口**仍被 docker-proxy 占住** ⇒ 必须**轮询** `lsof -nP -iTCP:<port> -sTCP:LISTEN` 直到空才起下一个 ⇒ 属**假红来源**之一 | `P0 #5` / Round 1 `P1-T05` 的判读 | `docs/RoundPlan/round-01/README.md:26` · `docs/Pitfalls/global/cross-domain.md:1307`（PIT-GLOBAL-038 端口占用型假红） | **Round 1** `P1-T05`（轮询到空）· 三步定性法 |
 | `ENV-05` | **共享 Nacos 服务发现面让并发探针互相污染** | 报 `INTERNAL` / `5001` 是**已知串扰**，**不是缺陷** ⇒ **跑红 ≠ 是缺陷** | 并发探针的结果判读（Round 4 `P4-T08`、Round 6 收口回归） | `docs/Pitfalls/global/cross-domain.md:2503`（PIT-GLOBAL-068） | **Round 4** `P4-T08`（探针 Nacos 隔离） |
-| `ENV-06` | **本机 Docker daemon 不健康（socket 返回 500）⇒ Testcontainers 起不来 ⇒ 载体守门**全部 SKIP**（**「BUILD SUCCESS」不是通过**） | 🔴 **2026-10-30 主干实测**：`curl --unix-socket ~/.docker/run/docker.sock http://localhost/_ping` ⇒ **500**；Testcontainers 报 `Could not find unix domain socket` ＋ `DockerDesktopClientProviderStrategy: failed ... Status 500` ⇒ ⇒ **`MessageRpcMetricsCarrierGateTest` 与 `LikeRpcMetricsCarrierGateTest` 各 3 条全部 SKIPPED**（**以 surefire XML 为准**：`tests=3 · skipped=3`）⇒ ⇒ 「0 失败 + BUILD SUCCESS」是 **SKIP**，**不是通过**（`PIT-GLOBAL-054` 同族）⇒ ⇒ **G2 的载体落码（`289dbc70`）在主干上尚未取得运行期证据** | 两条载体守门的运行期断言（`rag.side=rpc` ⇒ api 侧中间件不注册 ＋ 观测口可达）· ⚠️ **不阻阶段一**（载体属 `S1-FOLLOW-001` 既有流程 · 阶段二面） | `service/message/message-rpc/target/surefire-reports/TEST-com.rag.message.message.rpc.MessageRpcMetricsCarrierGateTest.xml` · `service/like/like-rpc/target/surefire-reports/TEST-com.rag.like.like.rpc.LikeRpcMetricsCarrierGateTest.xml`（**实跑产物**）· 环境面同族：`ENV-03`（镜像源 EOF）· `ENV-04`（端口释放延迟） | 恢复 Docker daemon 后**重跑这两条载体守门** ⇒ 在此之前**一律写「未评估」，不得写「已通过」**（§8.3「环境受阻」口径：基础设施起不来 ⇒ 归「受阻」⇒ **不吸收到「有条件通过」**） |
 
 ---
 
@@ -146,11 +145,11 @@
 |---|---|---|
 | 1. 阶段一阻断项 | **3** | `BLK-01` · `BLK-02` · `BLK-03` |
 | 2. 证据缺口 | **15** | `GAP-01` ~ `GAP-15` |
-| 3. 环境或权限受阻项 | **6** | `ENV-01` ~ `ENV-06` |
+| 3. 环境或权限受阻项 | **5** | `ENV-01` ~ `ENV-05` |
 | 4. 等待用户裁定的事项 | **5** | `DEC-01` ~ `DEC-05` |
 | 5. 允许暂缓且不阻断阶段一的事项 | **5** | `DEP-01` ~ `DEP-05` |
 | 6. 阶段一之外的事项 | **6** | `OUT-01` ~ `OUT-06` |
-| **合计** | **40** | — |
+| **合计** | **39** | — |
 
 - **6 类齐全，无遗漏**（类名一字不改、顺序不变 ⇒ 对齐规范 §11.6）。
 - 每条 6 列（`编号 / 事项 / 当前状态 / 影响的判据 / 来源（文件:行号） / 去向 / 处置`），「影响的判据」均落到具体判据编号（`P0 #n` / `X-n` / `C-n` / `S1-n` / `R3 ⑥` / `D-05` / `G-n` / `U-n` / `DRIFT-*`）。
