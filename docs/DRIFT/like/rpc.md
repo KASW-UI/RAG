@@ -2657,9 +2657,9 @@ like_rpc_action_total{action="unknown",result="invalid_param",target_type="artic
 - `apiSideAutoConfigurationsMustNotRegisterWhenSideIsRpc()` ⇒ 共享层的 `rag.side` 门落码后 ⇒
   **3 个** api 侧**自动配置**（`GoStylePathNormalizingAutoConfiguration` /
   `GoStyleJsonContentTypeAdvice` / `GoStyleBreakerRouteTemplateAutoConfiguration`）不许注册。
-  ⚠️ **本分支上这条是「显式 skip」而不是通过**：共享层的门在 **G4 写权面**、尚未合入本分支
-  ⇒ 守门用**反射探测机制是否存在**来决定跑/跳过（跳过原因写在报告里）⇒
-  ⇒ **skip ≠ 通过**；门合入的那一刻起，它自动变成强制判据。
+  ⚠️ **【订正 · 见文末「rebase 后守门转强制判据」小节】**：本分支**已 rebase 到主干 `89ec4245`** ⇒ ⇒ 共享层的门**已在树上**
+  ⇒ ⇒ 这条**不再 skip**、**执行**且**通过**（两域各 `Tests run 4 / Skipped 0`）⇒ ⇒ 已是**强制判据**；⚠️ 但「机制到位 ⇒ 自动转强制」
+  ⇒ 当时是**假的**（探针用 JDK `getAnnotation` **不穿透元注解** ⇒ rebase 后仍 skip）⇒ ⇒ 已改用 `AnnotatedElementUtils.findMergedAnnotation`。
 
 **🔴 跨 lane 依赖（登记给 G4 / 合并收口执行者）**：共享层把 `rag.side` 门从 **2 个类**
 扩到**全部** api 侧 web 组件，尚余 **9 个**（`GoStyleBreakerRouteTemplateAutoConfiguration` ·  ←【订正 · 见文末「跨 lane 依赖的数量订正」小节】：该数**已过期** ⇒ G4 已把门扩到**全部 13 个**（自动配置面 3 ＋ 扫描面 10）⇒ ⇒ 实际剩余 **0 个**（不是 9 / 10）
@@ -2761,8 +2761,8 @@ RAG 侧**实测**（2026-10-30 20:07 · 真 fat jar ＋ 不设 `POSTGRES_PASSWOR
   **8 个**扫描面 api 侧 HTTP 中间件（CPU 降载 / 最大连接 / 最大字节 / 熔断 / traceparent / 表单限值 ×2 /
   Tomcat 参数上限）**一个都不在容器里**；
 - 同一测试的 `apiSideAutoConfigurationsMustNotRegisterWhenSideIsRpc()` ⇒ **3 个**自动配置面类不在容器里
-  ⚠️ **本分支上这条是「显式 skip」而不是通过**（共享层门在 **G4 写权面**、尚未合入本分支 ⇒ 守门用
-  **反射探测机制是否存在**来决定跑/跳过 ⇒ ⇒ **skip ≠ 通过**；门合入的那一刻起自动变成强制判据）。
+  ⚠️ **【订正 · 见文末「rebase 后守门转强制判据」小节】**：本分支**已 rebase 到主干 `89ec4245`** ⇒ ⇒ 这条**执行**且**通过**
+  （两域各 `Tests run 4 / Skipped 0`）⇒ ⇒ 已是**强制判据**（「skip ≠ 通过」的纪律依然成立 —— 只是本条现在**不是** skip）。
 - ⇒ ⇒ 合计：**rpc 进程里 api 侧 web 中间件 = 0**。
 
 **依据三 · `HttpPoolLifecycle` 不属于「剩余项」（否掉一版错误口径）**
@@ -2779,7 +2779,7 @@ RAG 侧**实测**（2026-10-30 20:07 · 真 fat jar ＋ 不设 `POSTGRES_PASSWOR
 ⇒ ⇒ 由主干新守门 `tools/difftest/check-rpc-common-scan-exclusion.py` 断言①（结构面）机械守住；
 断言②（形态面：servlet 形态必须显式 `rag.side: rpc`）与本域本轮落码一致。
 
-**本轮只读实测（2026-10-30 · 未把 `tools/` 文件合入本分支 —— `tools/**` 是 G4 写权面）**
+**本轮只读实测（2026-10-30 · 当时未把 `tools/` 文件合入本分支 —— `tools/**` 是 G4 写权面）**【订正 · 见文末「rebase 后守门转强制判据」小节】：**本分支已 rebase 到主干 `89ec4245`** ⇒ ⇒ `tools/` 已在树上 ⇒ ⇒ 现可直接实跑。
 
 - 守门在本分支上 **EXIT=0**：结构面 ✅（10 个 rpc 域都没有扫 `com.rag.common`）；
   形态面 ✅（`like-rpc` / `message-rpc` 已显式 `rag.side: rpc`）。【订正 · 见文末「主干实况复判」小节】：「白名单那两条已 stale ⇒ 可剪枝」这个措辞**不准** ⇒ ⇒ 那两条本就是**假命中**（守门漏剥 pom 注释）⇒ ⇒ 已由主干 `a0d6ef13` 修判据并把白名单 **5→1**。
@@ -2806,7 +2806,7 @@ RAG 侧**实测**（2026-10-30 20:07 · 真 fat jar ＋ 不设 `POSTGRES_PASSWOR
   ⇒ 修判据 + 剪白名单 5→1」⇒ ⇒ **本节上文那条「新发现（共享面缺口）」已经落地修掉** ⇒ ⇒ 白名单 **5→1**。
 - 在该主干树上实跑 `tools/difftest/check-rpc-common-scan-exclusion.py` ⇒ **EXIT=0**；
   形态面只剩 **1 条** = **follow-rpc**（**真活偏离** · 载体 2026-10-29 已落主干 ⇒ 它**真**有 web starter
-  ⇒ 13 个 api 侧类会挂到 16065 观测口 ⇒ **G1 面**，不在本域写权面）。
+  ⇒ 13 个 api 侧类会挂到 16065 观测口 ⇒ **G1 面**）。【订正 · 见文末小节】：该条**已被主干 `e86ec93b` 消掉** ⇒ ⇒ 现形态面违例 = **0 条**、白名单 = **0 条**（零豁免）。
   ⇒ ⇒ **like-rpc / message-rpc / task-rpc 在修好的守门下既不是「形态面违例」，也不是「白名单命中」**。
 
 **依据二 · 依赖树实测（主干真实树，不是 pom 文本）**
