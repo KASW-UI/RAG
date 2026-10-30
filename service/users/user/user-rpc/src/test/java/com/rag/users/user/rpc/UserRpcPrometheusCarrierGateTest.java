@@ -6,6 +6,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 
+import com.rag.common.http.GoStyleJsonContentTypeAdvice;
+import com.rag.common.http.GoStylePathNormalizingAutoConfiguration;
+import com.rag.common.protection.GoStyleBreakerRouteTemplateAutoConfiguration;
 import com.rag.common.http.GoStyleFormLimitWebMvcConfig;
 import com.rag.common.http.GoStyleFormValueLimitInterceptor;
 import com.rag.common.http.GoStyleJsonBodyConverterConfig;
@@ -295,21 +298,22 @@ class UserRpcPrometheusCarrierGateTest {
      * ⇒ ⇒ classpath 上<b>有了</b> webmvc ⇒ ⇒ 这 10 类**技术上可以活**
      * ⇒ ⇒ 「它们仍然不在」才变成一个<b>需要守门的事实</b>。
      *
-     * <p>⚠️ <b>判据写成「结果」而不是「机制」</b>（跨分支稳定的关键）：
+     * <p>⚠️ <b>13 类分两批挡</b>（本树已含共享层的 {@code @ConditionalOnApiSide}，`53bc05ec`）：
      * <ul>
-     *   <li><b>本分支</b>：共享层的 {@code @ConditionalOnApiSide}（主干 {@code 53bc05ec}）
-     *       <b>不在本分支基线</b> ⇒ ⇒ 这 10 类靠<b>域侧约定</b>不活 ——
+     *   <li><b>10 个组件扫描类</b>（{@code @Component} / {@code @Configuration}）：
      *       {@code UserRpcApplication} 的 {@code @ComponentScan} 刻意<b>不扫</b>
-     *       {@code com.rag.common}（启动类注释写明不能加）⇒ ⇒ 不注册；</li>
-     *   <li><b>主干</b>：{@code @ConditionalOnApiSide} + {@code rag.side: rpc}（{@code e86ec93b}）
-     *       ⇒ ⇒ 即便有人把 {@code com.rag.common} 加进 {@code scanBasePackages} 也<b>仍不注册</b>
-     *       ⇒ ⇒ 护栏强度<b>高于</b>本分支。</li>
+     *       {@code com.rag.common}（启动类注释写明不能加）⇒ ⇒ <b>第一道</b>：域侧约定挡住；</li>
+     *   <li><b>3 个自动配置面</b>（走 {@code AutoConfiguration.imports} ⇒ <b>与组件扫描解耦</b>）：
+     *       ⇒ ⇒ 「不扫 {@code com.rag.common}」<b>挡不住</b>它们
+     *       ⇒ ⇒ <b>第二道</b>：{@code @ConditionalOnApiSide} + {@code rag.side: rpc}（{@code e86ec93b}）挡住；</li>
      * </ul>
+     * ⇒ ⇒ 两道叠加 ⇒ ⇒ <b>13 类全部不注册</b> ⇒ ⇒ 断言可写成「13 类全不在」这一条
+     * ⇒ ⇒ ⚠️ <b>与 Go 同形的依据</b>：Go 侧 rpc 是 {@code zrpc.MustNewServer} ⇒ <b>零 rest 中间件</b>
      * ⇒ ⇒ 断言写成「不在容器」⇒ ⇒ 两侧都绿；
      * ⇒ ⇒ <b>不能</b>断言成「靠 rag.side 挡住」⇒ ⇒ 那是跨分支不稳定的写法。
      */
     @Test
-    @DisplayName("🟢 rpc 侧隔离 —— 10 类 api 侧中间件不在容器里（Go 侧 rpc 零 rest 中间件）")
+    @DisplayName("🟢 rpc 侧隔离 —— 13 类 api 侧 web Bean 全部不在容器里（Go 侧 rpc 零 rest 中间件）")
     void apiSideMiddlewareIsAbsentFromRpcContainer() {
         assertThat(context.getBeanNamesForType(GoStyleFormLimitWebMvcConfig.class))
                 .as("GoStyleFormLimitWebMvcConfig 属 api 侧 rest 中间件 ⇒ rpc 侧不得注册")
@@ -341,6 +345,18 @@ class UserRpcPrometheusCarrierGateTest {
         assertThat(context.getBeanNamesForType(HttpMiddlewareFilter.class))
                 .as("HttpMiddlewareFilter 属 api 侧 ⇒ rpc 侧不得注册")
                 .isEmpty();
+        // ↓ 下面 3 个是**自动配置面**（走 AutoConfiguration.imports ⇒ 与组件扫描解耦）
+        //   ⇒ 它们**不靠**「rpc 不扫 com.rag.common」那道域侧约定挡住
+        //   ⇒ ⇒ 只能靠共享层的 @ConditionalOnApiSide ＋ rag.side: rpc
+        assertThat(context.getBeanNamesForType(GoStyleJsonContentTypeAdvice.class))
+                .as("GoStyleJsonContentTypeAdvice 是自动配置面 ⇒ 靠 @ConditionalOnApiSide 挡 ⇒ rpc 侧不得注册")
+                .isEmpty();
+        assertThat(context.getBeanNamesForType(GoStylePathNormalizingAutoConfiguration.class))
+                .as("GoStylePathNormalizingAutoConfiguration 是自动配置面 ⇒ rpc 侧不得注册")
+                .isEmpty();
+        assertThat(context.getBeanNamesForType(GoStyleBreakerRouteTemplateAutoConfiguration.class))
+                .as("GoStyleBreakerRouteTemplateAutoConfiguration 是自动配置面 ⇒ rpc 侧不得注册")
+                .isEmpty();
     }
 
     /**
@@ -355,9 +371,10 @@ class UserRpcPrometheusCarrierGateTest {
      * <ul>
      *   <li>本断言读的是<b>域内真实 yml</b>（本测试<b>不自带</b> {@code rag.side}
      *       ⇒ 它读的是 classpath 上 {@code target/classes/application.yaml} 的真值）；</li>
-     *   <li><b>本分支基线尚未含</b> {@code @ConditionalOnApiSide} ⇒ ⇒ 在本分支上
-     *       这一行<b>还没有消费者</b>（护栏由「不扫 com.rag.common」兜着）；
-     *       ⇒ ⇒ 主干同步后它才有消费者、这条断言才与「机制」对齐。</li>
+     *   <li>本树<b>已含</b>共享层的 {@code @ConditionalOnApiSide}（{@code 53bc05ec}）
+     *       ⇒ ⇒ 这一行<b>现在真的被读</b> ⇒ ⇒ 这条断言与「机制」<b>已对齐</b>
+     *       （⚠️ 前提：编译产物必须是新的 —— {@code -pl} 不带 {@code -am} 会用
+     *       {@code ~/.m2} 里的<b>旧 jar</b> ⇒ ⇒ 源码里有的注解在运行时不存在 ⇒ ⇒ 断言必红）。</li>
      * </ul>
      */
     @Test

@@ -829,7 +829,7 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
 - ⚠️ **未做**「业务启动类在真 PG/Redis 下真起一遍」⇒ ⇒ **L4 活体验证仍缺**（需 Docker；本机 Docker 全停）
 - ⚠️ **未做** Go 侧真进程的同请求抓取比对（本文件 `:20` 记的那次活体对拍 `tools/metrics-probe/follow/run.sh` EXIT=0 是 2026-10-30 那一轮，与本轮守门是**两件事**）
 - ⚠️ 守门用**独立最小上下文**（**无 `@ComponentScan`**）⇒ ⇒ 不被 PG/Redis 绑架 ⇒ ⇒ 测的正是「载体 + 暴露面 + 指标定义」三件事
-- ⚠️ **「13 个 api 侧 Bean 不在容器里」已落 10 类**（那 10 个 `@Component`/`@Configuration` 扫描类；判据按**结果**写「不在容器」⇒ ⇒ **两侧都绿**）；**剩 3 个自动配置面交不了** —— 它们走 `AutoConfiguration.imports` ⇒ ⇒ 与组件扫描解耦 ⇒ ⇒ **在不在容器依赖分支基线**（本分支 = 在；主干有 `@ConditionalOnApiSide` = 不在）⇒ ⇒ 跨分支不稳定 ⇒ ⇒ **不给恒红守门**，待主干同步后补（见文末小节）
+- ✅ **「13 个 api 侧 web Bean 不在容器里」已全部落**（**2026-10-31 · 合并主干后**）：10 个组件扫描类 ＋ 3 个自动配置面（`GoStyleJsonContentTypeAdvice` / `GoStylePathNormalizingAutoConfiguration` / `GoStyleBreakerRouteTemplateAutoConfiguration`）⇒ ⇒ 判据按**结果**写「不在容器」⇒ ⇒ **两侧都绿** ⇒ ⇒ 那 3 个自动配置面此前「交不了」的原因是**本分支基线尚未含**共享层的 `@ConditionalOnApiSide`（`53bc05ec`）⇒ ⇒ **合并主干后即可写** ⇒ ⇒ 原写「跨分支不稳定 ⇒ 不给恒红守门」**已过期**（见文末小节）
 
 **七、端口段表需扩（共享层写权面 ⇒ 已登记转派）**
 
@@ -851,10 +851,10 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
 
 | 用例 | 判据 | 为什么这个写法跨分支稳 |
 |---|---|---|
-| `apiSideMiddlewareIsAbsentFromRpcContainer` | 10 个 api 侧类的 `getBeanNamesForType` **全为空** | 本分支靠「rpc 不扫 `com.rag.common`」；主干靠 `@ConditionalOnApiSide` ＋ `rag.side: rpc` ⇒ ⇒ **机制不同、结果相同** ⇒ ⇒ 断言「结果」⇒ ⇒ 两侧都绿 |
-| `rpcSideFlagIsDeclared` | 读**域内真实 yml**（本测试**不自带** `rag.side`）⇒ 值 = `rpc` | 防「那行被删 / 被改成 api」；⚠️ 在本分支上它**还没有消费者**（见第四节） |
+| `apiSideMiddlewareIsAbsentFromRpcContainer` | **13 个** api 侧 web Bean 的 `getBeanNamesForType` **全为空** | **本树已含** `@ConditionalOnApiSide`（`53bc05ec`）＋ `rag.side: rpc` ⇒ ⇒ 13 类**分两批挡**（10 个扫描类靠域侧约定 ＋ 3 个自动配置面靠 `@ConditionalOnApiSide`）⇒ ⇒ **两侧同机制、结果相同** ⇒ ⇒ 断言「结果」⇒ ⇒ 两侧都绿 ⇒ ⇒ **且有牙**（变异 `rag.side → api` ⇒ 精确转红，见文末小节） |
+| `rpcSideFlagIsDeclared` | 读**域内真实 yml**（本测试**不自带** `rag.side`）⇒ 值 = `rpc` | 防「那行被删 / 被改成 api」；✅ **合并主干后它已有消费者**（共享层 `@ConditionalOnApiSide` = `@ConditionalOnProperty(name="rag.side", havingValue="api")` ⇒ `53bc05ec`）⇒ ⇒ 这行 yml **从此是必做项**，不再是防御性配置 |
 
-被断言的 10 类（`@Component` / `@Configuration` 扫描类）：`GoStyleFormLimitWebMvcConfig` · `GoStyleFormValueLimitInterceptor` · `GoStyleJsonBodyConverterConfig` · `GoStyleTomcatParameterLimitCustomizer` · `GoStyleTraceparentFilter` · `GoStyleBreakerFilter` · `GoStyleCpuSheddingFilter` · `GoStyleMaxBytesFilter` · `GoStyleMaxConnsFilter` · `HttpMiddlewareFilter`
+被断言的 **13 类** = **10 个组件扫描类**（`@Component` / `@Configuration`）：`GoStyleFormLimitWebMvcConfig` · `GoStyleFormValueLimitInterceptor` · `GoStyleJsonBodyConverterConfig` · `GoStyleTomcatParameterLimitCustomizer` · `GoStyleTraceparentFilter` · `GoStyleBreakerFilter` · `GoStyleCpuSheddingFilter` · `GoStyleMaxBytesFilter` · `GoStyleMaxConnsFilter` · `HttpMiddlewareFilter` ＋ **3 个自动配置面**（走 `AutoConfiguration.imports` ⇒ 与组件扫描解耦）：`GoStyleJsonContentTypeAdvice` · `GoStylePathNormalizingAutoConfiguration` · `GoStyleBreakerRouteTemplateAutoConfiguration`
 
 **三、Go 出处（逐行读过）**
 
@@ -863,11 +863,11 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
 
 **四、跨分支差异（同一句断言、两种机制、两种含义）**
 
-- **主干**：`@ConditionalOnApiSide`（`53bc05ec`）＋ `rag.side: rpc`（`e86ec93b`）⇒ ⇒ **13 类全部不注册** ⇒ ⇒ rpc 侧 web 容器上**零个 api 侧中间件** ⇒ ⇒ **载体任务没有引入偏离**，与 Go 的 `zrpc.MustNewServer` 同形
-- **本分支**：`@ConditionalOnApiSide` **不在本分支基线**（`53bc05ec` 不是本分支的祖先）⇒ ⇒
-  - 10 类扫描类 ⇒ 靠**域侧约定**不活（`FollowRpcApplication` 的 `@ComponentScan` 刻意不扫 `com.rag.common`，启动类注释写明不能加）⇒ 不注册 ⇒ **结果同主干**
-  - **3 个自动配置面 ⇒ 会注册** ⇒ ⇒ 「它们在不在容器」**依赖分支基线** ⇒ ⇒ 断言写「在」⇒ 主干红；写「不在」⇒ 本分支红 ⇒ ⇒ **跨分支不稳定 ⇒ 不给恒红守门** ⇒ 待主干同步后补
-- ⇒ ⚠️ **边界**：载体守门测出的 prometheus 输出是在**本分支（3 个面挂着）**的条件下测的 ⇒ ⇒ **载体功能结论可外推**（两侧输出都对），但**「中间件洁净度」不可外推**
+- **本树已含** `@ConditionalOnApiSide`（`53bc05ec`，**2026-10-31 合并主干后**）＋ `rag.side: rpc`（`e86ec93b`）⇒ ⇒ **13 类全部不注册** ⇒ ⇒ rpc 侧 web 容器上**零个 api 侧中间件** ⇒ ⇒ **载体任务没有引入偏离**，与 Go 的 `zrpc.MustNewServer` 同形
+- **13 类分两批挡**（两批机制不同、结果相同）：
+  - 10 个**组件扫描类** ⇒ 靠**域侧约定**不活（`FollowRpcApplication` 的 `@ComponentScan` 刻意不扫 `com.rag.common`，启动类注释写明不能加）⇒ 不注册 —— **第一道**
+  - 3 个**自动配置面** ⇒ 走 `AutoConfiguration.imports` ⇒ ⇒ 「不扫 `com.rag.common`」**挡不住**它们 ⇒ ⇒ 靠 `@ConditionalOnApiSide` ＋ `rag.side: rpc` 挡 —— **第二道** ⇒ ⇒ 两道叠加 ⇒ ⇒ 「13 类全不在」这一条**跨分支稳定**（主干与本树同机制）⇒ ⇒ 原写「跨分支不稳定 ⇒ 不给恒红守门」**已过期** ⇒ ⇒ **守门已落**（见文末小节）
+- ⇒ ✅ **该边界已消解**：合并主干后本树与主干**同机制**（13 类全不注册）⇒ ⇒ **载体功能结论**与**「中间件洁净度」结论都可外推** ⇒ ⇒ ⚠️ 仅保留一条边界：读数依赖 Docker 容器（条数口径见文末小节）
 
 **五、那 3 个面是谁（自读主干 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`，共 7 项）**
 
@@ -875,19 +875,69 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
 - `GoStylePathNormalizingAutoConfiguration` —— 同上
 - `GoStyleBreakerRouteTemplateAutoConfiguration` —— `@AutoConfiguration` ＋ `@ConditionalOnClass(RequestMappingHandlerMapping)`
 - ⚠️ **前两个的开关就是「有没有 web 容器」⇒ ⇒ 载体任务正是把它们从「不活」翻成「活」的那个开关**（第三个靠 classpath 有没有 spring-webmvc ⇒ 同一个开关）
-- ⇒ ⇒ **登记为「载体引入的行为变化」**：Go 侧 rpc 的 16065 是 go-zero DevServer（`devserver.StartAgent` ⇒ 独立端口 `http.ListenAndServe`，**不跑 rest 中间件链**）⇒ ⇒ RAG 侧 rpc 的 web 容器上（在本分支上）多挂了 3 层 api 侧中间件 ⇒ ⇒ 主干靠 `@ConditionalOnApiSide` 已消除 ⇒ ⇒ **本域不自行签字**
+- ⇒ ⇒ **曾登记为「载体引入的行为变化」**：Go 侧 rpc 的 16065 是 go-zero DevServer（`devserver.StartAgent` ⇒ 独立端口 `http.ListenAndServe`，**不跑 rest 中间件链**）⇒ ⇒ RAG 侧 rpc 的 web 容器上会多挂 3 层 api 侧中间件 ⇒ ⇒ ⚠️ **2026-10-31 合并主干后该登记已消解**：共享层的 `@ConditionalOnApiSide`（`53bc05ec`）＋ `rag.side: rpc` ⇒ ⇒ **这 3 个面在 rpc 侧也不注册** ⇒ ⇒ **不是偏离** ⇒ ⇒ **本域不自行签字，也无需登记**
 
-**六、变异实测（三域同款实现 ⇒ 同款判据；实测在 user-rpc 单跑完成，follow-rpc 跑同一批断言全绿）**
+**六、变异实测（合并主干前 · 三域同款实现 ⇒ 同款判据；实测在 user-rpc 单跑完成，follow-rpc 跑同一批断言全绿；⚠️ 其中第 3 条在合并主干后已过期 ⇒ 见文末小节）**
 
 | 变异 | 实测结果 | 读法 |
 |---|---|---|
 | `@Import` 一个**有依赖**的 api 侧类（`GoStyleBreakerFilter`） | **6 条全 Error**（上下文起不来：`No qualifying bean of type 'GoStyleProtectionProperties'`） | ⇒ **api 侧中间件一旦进 rpc 容器，rpc 域直接起不来** ⇒ 比「断言红」更硬 |
 | `@Import` 一个**无依赖**的 api 侧类（`GoStyleTraceparentFilter`） | **6 条里 1 条 Failure / 0 Error**（唯一红的是 `apiSideMiddlewareIsAbsentFromRpcContainer`） | ⇒ 新断言**有牙**：**精确转红**，不是上下文挂掉 |
-| （负面实测）把 yml 的 `rag.side` 改成 `api` | `rpcSideFlagIsDeclared` **红**；`apiSideMiddlewareIsAbsentFromRpcContainer` **仍绿** | ⇒ **实测坐实边界**：本分支上护栏是「不扫 common」不是 `rag.side` ⇒ ⇒ **这条类断言在本分支上抓不到 `rag.side` 回归**；主干上才有牙 |
+| （负面实测）把 yml 的 `rag.side` 改成 `api` | `rpcSideFlagIsDeclared` **红**；`apiSideMiddlewareIsAbsentFromRpcContainer` **仍绿** | ⇒ **实测坐实边界**：**合并主干前**本分支上护栏是「不扫 common」不是 `rag.side` ⇒ ⇒ **这条类断言在合并主干前抓不到 `rag.side` 回归**；⚠️ **合并主干后已过期**（同一变异现在**类断言也红** ⇒ 有牙）⇒ ⇒ **现读数见文末小节** |
 
-⇒ ⇒ 三个变异**全部还原**（`git diff` 只剩 3 个测试文件的 +105 行新增，三个 yml 均无 diff）
+⇒ ⇒ 三个变异**全部还原**（`git diff` 只剩 3 个测试文件的 +105 行新增，三个 yml 均无 diff）⇒ ⇒ ⚠️ **合并主干后重测的第四个变异（三域同跑）也已还原**（见文末小节）
 
 **七、回归（2026-10-31 · 三域同跑）**
 
-- 三域合计 **379 条**（基线 373 ⇒ **+6** = 三域各 2 条新断言，数目严丝合缝）· **Failures = 0** · **Errors = 13**（user-rpc 7 + admin-rpc 6 + follow-rpc 0）⇒ ⇒ **13 个全部是 `Previous attempts to find a Docker environment failed`**（Docker 整个停了 ⇒ 真 PG/Redis 用例跑不了）⇒ ⇒ **无其它 Error** · Skipped 98
+- ⚠️ **口径订正（2026-10-31 · 合并主干后复跑）**：上面那个 **379** 是 **surefire XML 读数**，**随 Docker 的故障形态变化** ⇒ ⇒ **不能当覆盖面用**（详见文末小节）⇒ ⇒ **覆盖面口径 = 源声明测试方法数**：基线 `7bc9df3c` **445** ⇒ 载体扩面 `e61360d9` **451**（**+6** = 三域各 2 条，数目严丝合缝）⇒ ⇒ 合并主干 `27fb2a6c` **仍是 451** ⇒ ⇒ **一条未丢**（三域测试类 32+29+17 = **78 类**，全程未变）
 - ⇒ ⇒ 证据强度 **L3**（真容器 + 真 HTTP 抓取已验；真 PG/Redis 那层**未跑** ⇒ 到不了 L4）
+
+---
+
+## 合并主干后的判别力实测 ＋ 回归条数口径订正
+
+**一、这一节解决两件事**
+
+- ① **判别力**：「13 类 api 侧 web Bean 全不在容器里」这条断言，在合并主干（`27fb2a6c`）后**到底有没有牙**？⇒ ⇒ 实测（第四个变异）
+- ② **条数口径**：上文那个 **379**（以及本轮中途观察到的 **299**）**能不能当覆盖面用**？⇒ ⇒ **不能** ⇒ ⇒ 订正
+
+**二、第四个变异：`rag.side: rpc` → `api`（三域同跑，2026-10-31 02:0x–02:1x）**
+
+| 变异 | 实测结果 | 读法 |
+|---|---|---|
+| 三域 yml 的 `rag.side` 改成 `api` | **三域各 `Tests run: 6, Failures: 2, Errors: 0`** —— ① `rpcSideFlagIsDeclared` 红（`expected: "rpc" but was: "api"`）② `apiSideMiddlewareIsAbsentFromRpcContainer` 红（`Expecting empty but was: ["com.rag.common.http.GoStyleJsonContentTypeAdvice"]`） | ⇒ ⇒ **与合并主干前那个负面实测结论相反**：合并前该变异只让「配置断言」红、**类断言仍绿** ⇒ ⇒ 合并后**类断言也红** ⇒ ⇒ 「13 类全不在」**有牙**（不是恒绿）⇒ ⇒ 且 **0 Error** ⇒ ⇒ 红在**目标断言**，不是上下文起不来 |
+
+- ⇒ ⇒ **机制侧的旁证**（共享层，非本域）：`GoStyleApiSideMiddlewareActivationGateTest` **5 条全绿**（形态③ vs 形态⑤ **只差 `rag.side` 一个变量**）⇒ ⇒ `@ConditionalOnApiSide` 这个**元注解真生效**（AGENTS.md §3.3：注解存在 ≠ 机制生效）
+- ⇒ ⇒ **三个 yml 全部 `git checkout` 还原**（`side: rpc`）⇒ ⇒ 还原后复跑 **三域各 6 条全绿**
+
+**三、⚠️ 同一个变异、两个结论 —— 判别力不能跨基线继承**
+
+| 基线 | `rag.side → api` 的实测 | 结论 |
+|---|---|---|
+| 合并主干**前**（本分支基线无 `@ConditionalOnApiSide`） | 只有配置断言红；类断言**仍绿** | ⇒ 当时的边界**准确**：类断言抓不到 `rag.side` 回归 |
+| 合并主干**后**（本树已含 `53bc05ec`） | 配置断言 **＋ 类断言** 都红 | ⇒ 当时的边界**已过期**：类断言**有牙** |
+
+- ⇒ ⇒ **教训**：同一句断言的判别力**取决于基线** ⇒ ⇒ 「这条断言有没有牙」**不能跨基线继承** ⇒ ⇒ 必须**在当前基线上重测**（本轮已重测）
+
+**四、⚠️ 回归条数口径订正（上文那个「379 条」不能当覆盖面用）**
+
+- **覆盖面口径（环境无关，可跨 commit 比）= 源声明测试方法数**：`7bc9df3c`（基线）**445** ⇒ `e61360d9`（载体守门扩面）**451**（**+6** = 三域各 2 条，数目严丝合缝）⇒ ⇒ `27fb2a6c`（合并主干后）**仍是 451** ⇒ ⇒ **一条未丢**（三域测试类 32+29+17 = **78 类**，全程未变）
+- **执行条数口径（环境相关）**：本轮 Docker 恢复后复跑 = **三域合计 417 条**（user-rpc **181** ＋ admin-rpc **139** ＋ follow-rpc **97**）· **Failures = 0** · **Errors = 0** · **Skipped = 0** ⇒ ⇒ **BUILD SUCCESS**
+- ⚠️ **为什么之前会看到 379 / 299 两个数**：容器在 `@BeforeAll` 起不来 ⇒ ⇒ **整类 N 个方法折叠成 1 条 error** ⇒ ⇒ 总条数**变小** ⇒ ⇒ **两个读数都是「折叠后」的读数，口径不同 ⇒ 不可相减**
+- ✅ **交叉验证**：把折叠掉的类按**源方法数**展开 ⇒ 得 **417**（181 / 139 / 97）⇒ ⇒ 与 Docker 恢复后的**真实读数逐条吻合** ⇒ ⇒ **折叠假说成立**（不是「丢了 80 条测试」）
+- ⚠️ **教训**：「测试条数下降」这个现象**先分清是「覆盖面变小」还是「读数折叠」** ⇒ ⇒ 判据 = **源声明方法数**（与环境无关）＋ **XML 读数**（与环境相关）**两个数一起报** ⇒ ⇒ 只报一个数会误判
+
+**五、⚠️ Docker 故障的根因（不是「整个停了」，是「存储层损坏」）**
+
+- 现象：容器类**类级 error**，消息是 `Can't get Docker image: RemoteDockerImage(imageName=postgres:16-alpine, …)` ⇒ ⇒ **拉镜像阶段**失败
+- 根因：Docker Desktop 的 containerd content store **blob I/O 错误** —— `blob sha256:16bc… expected at /var/lib/desktop-containerd/daemon/io.containerd.content.v1.content/blobs/sha256/16bc…: open …: **input/output error**` ⇒ ⇒ **宿主磁盘 94% 满**（当时剩 763 MiB）⇒ ⇒ 写不进 blob ⇒ ⇒ 镜像起不来
+- ⚠️ **与旧记的消息不是同一阶段**：旧记 `Previous attempts to find a Docker environment failed` = **守护进程完全不可达**；本轮 = **守护进程活着、镜像拉不动** ⇒ ⇒ 「Docker 整个停了」这句**不够准** ⇒ ⇒ 应写成「Docker 存储层因磁盘满损坏」
+- ✅ **已自愈**：磁盘从 763 MiB 回到 **65 GiB**（15%）⇒ ⇒ Docker 守护进程 API 恢复 200（29.2.1 · 62 容器）⇒ ⇒ **本轮复跑全部转绿** ⇒ ⇒ 全反应堆 **0 Failures / 0 Errors**
+- ⚠️ 共享层那 1 个 Error（`MybatisPlusInterceptorChainGateTest`）= **时序artifact**（它在 02:13 跑，Docker 尚未恢复）⇒ ⇒ 单独复跑 **3 条全绿** ⇒ ⇒ **已销号**（共享层写权面，本域只报不改）
+
+**六、✅ L4 活体验证（本轮达成；上文那些「未做」里的一部分现在做完了）**
+
+- **三域业务启动类在真 PG/Redis 下真起了一遍**：user-rpc **Tomcat 22290** · admin-rpc **Tomcat 22295** · follow-rpc **Tomcat 22360** ⇒ ⇒ 三个口都落在**域内固定段**（222xx / 223xx）⇒ ⇒ 本轮只证「**在真 PG/Redis 下起得来**」
+- 本轮**真容器启动 35 次**（`postgres:16-alpine` / `redis:7-alpine`）⇒ ⇒ 三域含容器的用例**本轮真跑且全绿**（此前是「Docker 停 ⇒ 类级 error ⇒ 折叠」）
+- ⚠️ **仍未覆盖（不得写成已闭环）**：① 域侧「logout 走的是共享层那个 Redis 期限代理」的**装配接线**（域侧 `AdminLogoutDeadlineHandoffTest` 用 **Mockito 替换数据层** ⇒ ⇒ **只证控制流，不证代理接线**）② 真 Redis 上「**预算耗尽 ⇒ 写不发生**」的**活体**行为（共享层的 `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` 本轮 **3 条全 skipped** ⇒ ⇒ 需要外部 Redis 地址）③ **RAG↔Go 双侧活体对拍**
+- ⇒ ⇒ 故 **E66 那格（admin 域）仍是「机制已落 · 活体验证未做」** ⇒ ⇒ **不改**
