@@ -68,8 +68,12 @@ public final class GoStyleStatInterceptor implements ServerInterceptor {
         this(GoStyleStatMetrics.getInstance());
     }
 
-    /** 测试注入用（让断言能拿到具体的聚合器实例）。 */
-    GoStyleStatInterceptor(GoStyleStatMetrics metrics) {
+    /**
+     * 用指定的聚合器构造（<b>测试接缝</b>：让断言能拿到一个干净的聚合器，而不是进程级单例）。
+     *
+     * <p>⚠️ 生产路径用 {@link #GoStyleStatInterceptor()}（进程级单例 ＋ 幂等上报线程）。
+     */
+    public GoStyleStatInterceptor(GoStyleStatMetrics metrics) {
         this.metrics = metrics;
         // Go: zrpc/server.go:37 —— metrics := stat.NewMetrics(c.ListenOn)
         //   ⇒ **每个 rpc server 一个** ⇒ 只有「真的装了 Stat 层」的进程才会有这条上报线程
@@ -104,16 +108,47 @@ public final class GoStyleStatInterceptor implements ServerInterceptor {
             }
         };
 
-        ServerCall.Listener<ReqT> listener = next.startCall(watched, headers);
+        ServerCall.Listener<ReqT> listener;
+        try {
+            listener = next.startCall(watched, headers);
+        } catch (RuntimeException | Error e) {
+            // 🔴 Go: statinterceptor.go:52-56 —— 样本是写在 **defer** 里的
+            //    ⇒ ⇒ **panic 时照样记一条**（defer 在栈展开时执行）。
+            //    ⇒ 本仓若只在 close 时记 ⇒ panic 路径**一条都不记**（因为兜底的 recover 层
+            //    关闭的是**它自己**那层包装 call，不是本层的 ⇒ 本层的 close 根本不会被调用）
+            //    ⇒ ⇒ 与 Go 不一致 ⇒ ⇒ 必须在这里（panic 展开点）补记一次。
+            recordOnce(recorded, metrics, startNanos, handlerDoneNanos[0]);
+            throw e;
+        }
         return new ForwardingServerCallListener.SimpleForwardingServerCallListener<ReqT>(listener) {
             @Override
             public void onHalfClose() {
-                super.onHalfClose();
+                try {
+                    super.onHalfClose();
+                } catch (RuntimeException | Error e) {
+                    // 🔴 同上：handler 自身 panic 时，Go 的 defer 也会跑 ⇒ 照记一条。
+                    recordOnce(recorded, metrics, startNanos, handlerDoneNanos[0]);
+                    throw e;
+                }
                 // ⚠️ 记「handler 跑完的时刻」⇒ 时长口径贴近 Go 的「handler 返回时」（不含响应写回）。
-                //    ⚠️ 必须在 super 之后记：super 抛 panic 时本行不执行 ⇒ 时长退回 close 时刻
-                //    （Go 的 panic 路径同样是「栈展开到 defer」⇒ 口径一致）。
                 handlerDoneNanos[0] = System.nanoTime();
             }
         };
+    }
+
+    /**
+     * 记一条样本（<b>幂等</b>：一次请求只记一条）。
+     *
+     * @param recorded       「已记过」标记
+     * @param metrics        聚合器
+     * @param startNanos     起点
+     * @param handlerDoneNanos handler 结束时刻（0 = 没走到那一步）
+     */
+    private static void recordOnce(java.util.concurrent.atomic.AtomicBoolean recorded,
+            GoStyleStatMetrics metrics, long startNanos, long handlerDoneNanos) {
+        if (recorded.compareAndSet(false, true)) {
+            long end = handlerDoneNanos > 0L ? handlerDoneNanos : System.nanoTime();
+            metrics.add(Math.max(0L, end - startNanos));
+        }
     }
 }

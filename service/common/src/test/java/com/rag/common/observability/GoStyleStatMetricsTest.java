@@ -76,7 +76,7 @@ class GoStyleStatMetricsTest {
 
         GoStyleStatMetrics.StatReport report = round(metrics);
 
-        assertThat(report.qps()).isEqualTo(0.016666668f);        // Go: 1/60
+        assertThat(report.reqsPerSecond()).isEqualTo(0.016666668f);        // Go: 1/60
         assertThat(report.drops()).isZero();
         assertThat(report.average()).isEqualTo(5F);              // Go: 5/1
         assertThat(report.median()).isEqualTo(5F);
@@ -129,7 +129,7 @@ class GoStyleStatMetricsTest {
         assertThat(report.top90th()).isEqualTo(10F);              // Go: topK(top50p,1)[0]
         assertThat(report.top99th()).isEqualTo(10F);              // Go: onePercent=0 ⇒ 取 top10p 的最大值
         assertThat(report.top99p9th()).isEqualTo(10F);
-        assertThat(report.qps()).isEqualTo(0.16666667f);          // Go: 10/60
+        assertThat(report.reqsPerSecond()).isEqualTo(0.16666667f);          // Go: 10/60
     }
 
     @Test
@@ -147,7 +147,7 @@ class GoStyleStatMetricsTest {
         assertThat(report.top90th()).isEqualTo(91F);
         assertThat(report.top99th()).isEqualTo(100F);
         assertThat(report.top99p9th()).isEqualTo(100F);
-        assertThat(report.qps()).isEqualTo(1.6666666f);          // Go: 100/60
+        assertThat(report.reqsPerSecond()).isEqualTo(1.6666666f);          // Go: 100/60
     }
 
     // ==================================================================
@@ -166,7 +166,7 @@ class GoStyleStatMetricsTest {
         GoStyleStatMetrics.StatReport report = round(metrics);
 
         assertThat(report.drops()).isEqualTo(3);
-        assertThat(report.qps())
+        assertThat(report.reqsPerSecond())
                 .as("Go: metrics.go:130 —— qps = size/60，size 只数**非 drop** 的样本")
                 .isEqualTo(0.033333335f);
         assertThat(report.average())
@@ -186,7 +186,7 @@ class GoStyleStatMetricsTest {
 
         GoStyleStatMetrics.StatReport report = round(metrics);
 
-        assertThat(report.qps()).isZero();
+        assertThat(report.reqsPerSecond()).isZero();
         assertThat(report.average()).isZero();
         assertThat(report.median()).isZero();
         assertThat(report.top90th()).isZero();
@@ -248,7 +248,7 @@ class GoStyleStatMetricsTest {
         assertThat(metrics.pendingDrops()).isZero();
 
         GoStyleStatMetrics.StatReport empty = round(metrics);
-        assertThat(empty.qps()).isZero();
+        assertThat(empty.reqsPerSecond()).isZero();
     }
 
     // ==================================================================

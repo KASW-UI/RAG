@@ -4916,8 +4916,8 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 | **G4-14c** | `docs/RoundPlan/round-02/outbound-stub-inventory.md` ＋ `count-outbound-stubs.py`（**共享面**） | P2-T01 的交付物**尚不存在**（`docs/RoundPlan/round-02/` 下只有 `README.md`） | —— | 本层已**独立重数**：**21 个出向 stub 类 / 27 处零 deadline 调用点 / 7 个零上界类**（台账的「30 处 / 11 类」已过期：favorite-rpc ×2 ＋ comment-rpc ×2 已于 2026-10-27 域侧自修） | E1（本层实测，检索命令可复算） | 按本层重数落盘 ＋ 跑一次 `--assert-no-zero-deadline` | 派工面 | 否（是本轮其余任务的前置） |
 | **G4-14d** | 各域 `application.yml`（`grpc.client.*` 的**上界**配置） | 客户端硬上界（Go 的 `Timeout`）本轮**未启用** | `go-zero@v1.10.2/zrpc/config.go:31`（default=2000）＋ 真源 `service/article/api/etc/article-api.yaml:12`（**70000** ⇒ api→article-rpc 的**客户端**上界）；⚠️ `service/article/rpc/etc/article.yaml:3` 的 70000 是**服务端**超时、同文件 `:90` 的 10000 才是客户端 | 共享层能力已具备（`rag.protection.outbound-deadline.cap-millis`），**默认 0 = 不启用** | E1 | 逐域按 Go 的 yaml 值启用；⚠️ devh `3.1.0.RELEASE` **没有** `grpc.client.*.deadline` 属性 ⇒ **不能靠那个键配** | 10 个 rpc ＋ 9 个 api 组件 | 否（**这一轴仍是漂移**） |
 | **G4-15a** | `docs/Intentional_Deviations/`（**共享面，不在 G4 写权面**） | 【订正 · 见 §4.19.5】原写的现象「反馈单 2/3 的落码让 RAG 的 Redis 命令**比 Go 更严**」**不成立** ⇒ ⇒ 本行**整条作废**，不要按「有意偏离」去登记 | ①（**派发前 · 决定性**）`go-redis/v9@v9.20.0/internal/pool/pool.go:1098-1104`（`ConnPool.waitTurn` fast path **无条件先查 `ctx.Done()`** ⇒ `ctx.Err()` ⇒ **命令根本不下发**）②（socket 层）`go-redis/v9@v9.20.0/redis.go:1024-1032`（`baseClient.context(ctx)` ⇒ ctx 变 `context.Background()`）＋ `internal/pool/conn.go:961-991`（socket deadline = 固定 3s） | 共享层已落「预算耗尽 ⇒ 不再下发命令」⇒ **落码后与 Go ① 同形**（**不是更严**）；② 本层不动 ⇒ 仍同形 | E1（本层实测 · 逐行读过 · 完整调用链见 §4.19.5） | **不登记有意偏离**（前提已不成立）⇒ 若要继续做 `G4-15d` 的「socket 层收紧」⇒ **那才是比 Go 更严** ⇒ 需**另立一条**并签字 | 全仓用 Redis 的 10 个组件 / 7 个域（【订正 · 见本文件 §4.10.27.2】原写「8 个域」是错的 ⇒ 复算 = 10 个组件） | 否（**但按原行去登记 = 会造一条假偏离**） |
-| **G4-15b** | 共享层 `RpcInterceptor` 的 Stat 落点（**链层位置**） | Go 的 Stat 层在 **breaker/shedding 之外** ⇒ 它量到的耗时**含**降载/熔断开销；RAG 的在最内层 ⇒ **不含** | `go-zero@v1.10.2/zrpc/server.go:151-153`（Stat 注册点）＋ `:157-163`（Breaker/Shedding 在其外） | 本层已落慢调用日志（在 `RpcInterceptor` 内 ⇒ 最内层） | E1 | 若要严格对齐 ⇒ 在 `GoStyleRpcProtectionChain` **新增一层** ⇒ ⇒ 改 `Composition` record ⇒ **破坏 3 个域级守门测试的编译** ⇒ ⇒ **跨域** ⇒ 转主线/全量回归波 | 10 个 rpc 组件 | 否（但**口径差异要签字**） |
-| **G4-15c** | 共享层 `GoStyleRpcProtectionChain` ＋ `service/common/pom.xml` | Stat 的 **Info 分支**（Go 每个请求打全量 body）**刻意不落**；Prometheus 两层 ＋ `stat.Metrics` 周期报告（qps/median/t99）**未落** | `go-zero@v1.10.2/zrpc/internal/serverinterceptors/statinterceptor.go:94`（Info 分支）＋ `:54-56`/`:120-181`（`stat.Metrics` 聚合）＋ `zrpc/server.go:154-156`（Prometheus 层） | RAG 侧：慢调用日志**已落**；Info 分支**有意不落**；周期报告**未落**；Prometheus **未落** | E1 | Prometheus 需给 `service/common/pom.xml` 加 `micrometer-core`（该模块现在零 micrometer）＋ **「出口口径」是运维决策**（【订正 · 见 §4.19.6】原写「Go 侧只有 article-rpc/hot-rpc 配了 `Prometheus.Host`，其余 8/10 个 `prometheus.Enabled()==false` ⇒ 配了也不产观测值」**是错的** —— 那段推理只看了「push agent」一条出口，**漏了 DevServer 的 `/metrics`** 会调 `prometheus.Enable()` ⇒ ⇒ **订正后：8/10 照产**（6 个靠 DevServer 的 `/metrics` ＋ 2 个靠 push agent），**2 个不产**（`comment-rpc` / `task-rpc`）⇒ ⇒ **「出口」是逐域三态、不是全局有/无**）⇒ ⇒ **【订正 · 见 §4.19.8】那三态是「配置层」口径**（yml 里写没写 prometheus endpoint）⇒ ⇒ **载体层实测：10 个 rpc 域里只有 `follow-rpc` 有 HTTP 容器（其余 9 个只有 actuator）⇒ ⇒ 「实际可被抓取」= 1/10**（⇒ ⇒ ⇒ **「7 个有出口」是配置面、不是可达面**）⇒ ⇒ 整包转主线 | 10 个 rpc ＋ 9 个 api 组件 | 否（命中 `docs/PhasedGoal.md` P1 面） |
+| **G4-15b** | 共享层 `GoStyleRpcProtectionChain` 的 Stat 落点（**链层位置**） | Go 的 Stat 层在 **breaker/shedding 之外** ⇒ 它量到的耗时**含**降载/熔断开销；RAG 原先在最内层 ⇒ **不含** | `go-zero@v1.10.2/zrpc/server.go:151-153`（Stat 注册点）＋ `:157-163`（Breaker/Shedding 在其外） | 🟡 **2026-10-31 部分闭合**（**链层位置已对齐**；残余＝时长测量点的毫秒级口径差，见 §4.19.20 ⑦3）：共享层新增 `GoStyleStatInterceptor` ＋ `GoStyleRpcProtectionChain.statThen(...)` ⇒ 链序 = `recover → stat → prometheus → breaker → shedding → 业务` ⇒ **Stat 在 breaker/shedding 之外**（与 Go 同形）⇒ 且 **未改 `Composition`**（改它会破 **8 个**域级守门编译 ⇒ 改走 `Layered.countedInLayerNames()`：观测层不进「保护层名单」⇒ **域级守门一条不破** ⇒ ⇒ **不必升级为全量回归波**） | L3（真链上跑通：降载拒绝也进样本 ⇒ 见 §4.19.20） | ——（已落） | 10 个 rpc 组件 | 否（口径差异已消） |
+| **G4-15c** | 共享层 `GoStyleRpcProtectionChain` ＋ `service/common/pom.xml` | Stat 的 **Info 分支**（Go 每个请求打全量 body）**刻意不落**（**至今仍未落**）；Prometheus 层 ＋ `stat.Metrics` 周期报告（qps/median/t99）**已于 2026-10-31 落** | `go-zero@v1.10.2/zrpc/internal/serverinterceptors/statinterceptor.go:94`（Info 分支）＋ `:54-56`/`:120-181`（`stat.Metrics` 聚合）＋ `zrpc/server.go:154-156`（Prometheus 层） | RAG 侧：慢调用日志**已落**；🟡 **部分闭合**（本条 3 项里 **2 项已落**）：Info 分支**有意不落**（**至今仍未落** ⇒ ⇒ **本条未整体闭合**）；周期报告**已落**（`GoStyleStatMetrics`：60s 一行 qps/avg/med/90th/99th/99.9th）；Prometheus 层**已落**（`GoStylePrometheusInterceptor` ＋ `MicrometerPrometheusSink`） | L3 ＋ **L4 双侧活体对拍**（Go 真源 `core/stat` 的**真实实现**出基准 ⇒ 逐值比对 ⇒ 见 §4.19.20） | ① **已落**：Prometheus 写入面（`micrometer-core` 以 **optional** 进 `service/common/pom.xml` ⇒ **不传递给下游** ⇒ 域侧要用需自己声明 ＋ actuator ＋ HTTP 载体）+ `stat.Metrics` 周期报告；② **仍未落**：Stat 的 **Info 分支**（每请求打全量 body ⇒ 日志量级问题 ⇒ 留待专项）；③ **出口可达性**仍是**逐域三态**（§4.19.7/§4.19.8 的结论不变：配置面 8/10、载体面 **1/10** 可被抓取）⇒ ⇒ 域侧部分**转派**（§4.19.20 转派单） | 10 个 rpc ＋ 9 个 api 组件 | 否（命中 `docs/PhasedGoal.md` P1 面） |
 | **G4-15d** | 共享层 Redis 能力面的**严格模式** | 「命令等待不超过剩余预算」本轮**不落** | —— | 共享层只落了「预算耗尽 ⇒ 不再下发命令」；【订正 · 见 §4.19.5】原写「命令级 socket 超时随预算收紧」在公开 API 上不可达 ⇒ **是错的** ⇒ ⇒ **那条路线是可达的**：lettuce `TimeoutOptions$TimeoutSource`（public abstract · `getTimeout(RedisCommand)`）＋ `TimeoutOptions$Builder.timeoutSource(…)` ＋ `ClientOptions$Builder.timeoutOptions(…)` ＋ Boot 4 的 `LettuceClientOptionsBuilderCustomizer`（实测 `LettuceConnectionConfiguration.createClientOptions` 字节码：customizer 在硬编码 `timeoutOptions` **之后** ⇒ **可覆盖**）⇒ ⇒ **本轮不落的理由从「不可达」改为「会造成新的有意偏离（比 Go 严）⇒ 需另立一条并签字」** | E1（javap + 字节码实测 · §4.19.5） | ① 若要做「socket 超时随剩余预算收紧」⇒ 走 `TimeoutSource` 路线 ⇒ **先登记为有意偏离并签字**（Go 的 socket 层**不**收紧）；② 若要做「命令等待不超过剩余预算」⇒ 需把命令丢到另一线程再 `Future.get(remaining)` ⇒ 与**事务绑定**（ThreadLocal 事务连接在调用线程上）和线程亲和冲突 ⇒ ⇒ 另立一轮专项 | 10 个用 Redis 的组件 / 7 个域（【订正 · 见本文件 §4.10.27.2】原写「8 个域」是错的 ⇒ 复算 = 10 个组件） | 否 |
 
 ### 4.19.3 🟡 本节的**诚实边界**（AGENTS.md §0：「已改」≠「已验证」）
@@ -5257,10 +5257,10 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 
 **五、本单的处置 ⇒ 不产生新的共享层落码需求（三块都已被既有处置覆盖）**
 
-- **Stat 层**：① 慢调用日志 ⇒ **本 lane 已落**（`RpcInterceptor` 的 close 路径，500ms 阈值，2 条守门）✔；② 按 method 记 latency ⇒ **已有**（`RpcInterceptor.java:358` ＋ `Observability.java:138-149` ⇒ 写 OTel span 属性）⚠️ **不是 Prometheus 指标**；③ 剩下的是 `stat.Metrics` 的**周期聚合报告**（qps/median/t99）⇒ **未落** ⇒ 已在 `G4-15c` 转派单里。
-- **Prometheus 拦截器层**：**未落** ⇒ `G4-15c` ⇒ ⚠️ **超出 Jason 2026-10-30 的既有批准**（他批的是「**只落 Stat 的慢调用日志**」＋「**不动 `Composition`**」）⇒ ⇒ 若要落 ⇒ **需要新的批准**（且 `Composition` record 改字段 ⇒ 破坏 3 个域级守门测试编译 ⇒ 跨域）。
+- **Stat 层**：① 慢调用日志 ⇒ **本 lane 已落**（`RpcInterceptor` 的 close 路径，500ms 阈值，2 条守门）✔；② 按 method 记 latency ⇒ **已有**（`RpcInterceptor.java:358` ＋ `Observability.java:138-149` ⇒ 写 OTel span 属性）⚠️ **不是 Prometheus 指标**；③ `stat.Metrics` 的**周期聚合报告**（qps/median/t99）⇒ ✅ **2026-10-31 已落**（共享层 `GoStyleStatMetrics`：60s 一行；**双侧活体对拍**过 Go 真源 `core/stat` 的真实实现 ⇒ 见 §4.19.20）⇒ ⇒ **原写的「未落」作废**。
+- **Prometheus 拦截器层**：✅ **2026-10-31 已落**（Jason 批准「本波落码」）⇒ 共享层 `GoStylePrometheusInterceptor` ＋ `MicrometerPrometheusSink` ＋ `GoStyleRpcMetricsConfiguration`（登记在 `AutoConfiguration.imports` ⇒ **10 个 rpc 组件零改动**）⇒ ⚠️ **原写的「超出 Jason 2026-10-30 的既有批准 ⇒ 需新的批准」作废**（新批准已拿到）⇒ 且 **未改 `Composition`** ⇒ ⇒ **未破坏任何域级守门**（原写的「破坏 3 个域级守门测试编译」不成立：实际是 **8 个**域级守门，而本层改走 `Layered.countedInLayerNames()` 让观测层不进名单 ⇒ **一条不破**）⇒ ⇒ **不必升级为全量回归波**。
 - **抓取出口**：**逐域三态**（见第三节）⇒ ⇒ 落点是**各域 yml**（域侧写权）⇒ ⇒ **不归 G4**；G1 自己也把它划给「全仓 rpc 层指标出口统一方案」交主会话拍板 ⇒ ⇒ **转派**。
-- ⇒ ⇒ **本层本轮零代码改动** ⇒ ⇒ **不需要新的批准** ⇒ ⇒ 只登记 ＋ 回执。
+- ⇒ ⇒ **本层本轮零代码改动** ⇒ ⇒ **不需要新的批准** ⇒ ⇒ 只登记 ＋ 回执。〔**【2026-10-31 订正 · G4 lane】本节写的是「上一轮」的处置**；Prometheus 层与 `stat.Metrics` 周期报告**已于 2026-10-31 落码**（Jason 批准「本波落码」）⇒ ⇒ 详见 §4.19.20〕
 
 **六、本节的诚实边界**
 
@@ -6205,4 +6205,119 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 - 本层的**出向 deadline 传播那一面**已跑过双侧活体对拍（探针，EXIT=0 · PASS，见 §4.19.18 / §4.19.19）⇒ ⇒ **但本节这一格（user 域 logout 的 handler 级码）未跑活体对拍** ⇒ ⇒ ⇒ 本节的「handler 级码 1015 vs 5001」是**源码级**结论，不是活体实测。
 - 「残余窗口已被闭掉」是**源码级**结论（两处检查点实测存在）⇒ ⇒ **不等于「E66 可闭合」** ⇒ ⇒ 那需要调度员的定级复判 ＋ 一条活体对拍。
 
-（**本节编号：§4.19.19** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
+（**本节编号：§4.19.20** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
+### 4.19.20 ✅🔴 第十七次订正（2026-10-31 01:3x · G4 lane）：**Prometheus 层 ＋ `stat.Metrics` 周期报告落码** ＋ 双侧活体对拍 ＋ 5/5 变异
+
+> 📌 **纪律**：本小节**只追加**，不改既有条目的行号；凡与上文冲突处，**以本节为准**并在下文明写「上文哪一行按本节读」。
+> 上文 §4.19.2 的 `G4-15b` / `G4-15c` 两行与 §4.19.7 的「五、本单的处置」三行，**已就地订正**（本轮）⇒ 那些行不再保留旧结论。
+
+#### ① 授权与时序（本轮为什么能落码）
+
+| 时点 | 事件 | 效力 |
+|---|---|---|
+| 2026-10-30 | Jason 批准「**只落 Stat 的慢调用日志**」＋「**不动 `Composition`**」 | 当时的授权范围（**只落慢调用日志**） |
+| 2026-10-31 01:08:54 | 合并收口执行者代提交 `09c9ff16`（WIP 存证），其 commit message 写「Prometheus ＋ `stat.Metrics` **本波不落、转阶段二**」（理由：可抓取面只有 1/10 ⇒ 性价比不成立） | ⚠️ **该拍板的前提是「G4 会话已停摆」** ⇒ 与下条冲突 |
+| 2026-10-31 01:3x | **Jason 的问卷答复**（`ask_a1c544ad2699ab894b9a857a` · 步骤 `prom-layer` ＝ **落 Prometheus 拦截器层**）⇒ ⇒ **晚于上一条** ⇒ **以 Jason 为准** | ✅ **本轮落码的授权** |
+| 2026-10-31 01:3x | Jason 同一问卷的另一问（`commits` ＝ **保留本地提交、不 push**） | ⇒ 本层**不 push** |
+
+> 🔴 **一处「批准前提被实测推翻」——落码路径比问卷问题描述里假设的更省**：
+> 问卷的问题描述假设落码要「**改 `Composition` record** ⇒ 破坏 3 个域级守门测试编译 ⇒ **升级为全量回归波**」。
+> **本轮实测：根本不需要改 `Composition`** ⇒ ⇒ 实际受影响的域级守门是 **8 个**（不是 3 个），
+> 而本轮用 `Layered.countedInLayerNames()` 让**观测层不进「保护层名单」**
+> ⇒ ⇒ `layerNames(chain)` 的输出**仍是** `[recover, breaker, shedding]`
+> ⇒ ⇒ **8 个域级守门一条不破**（`task` / `like` / `message` / `article` / `comment` / `favorite` / `follow` / `admin` 的 `*ProtectionChainWiringTest`）
+> ⇒ ⇒ **不需要升级为全量回归波**，也不需要任何域侧改动。
+> ⇒ 全链层名改用新增的 `allLayerNames(chain)` 观测（Go 的注册序：`zrpc/server.go:144-167`）。
+
+#### ② 落码清单（共享层写权面内 · 14 个文件）
+
+| 类别 | 文件 | 要点 |
+|---|---|---|
+| 新增 | `observability/GoStyleStatMetrics.java` | `core/stat` 的 Java 复刻：进程级单例 ＋ 60s 周期报告 ＋ **三个怪癖逐字照抄** |
+| 新增 | `observability/GoStyleStatInterceptor.java` | Stat 层：耗时喂聚合器；**panic 路径照 Go 的 `defer` 语义补记** |
+| 新增 | `observability/GoStylePrometheusSink.java` | 写入面**接缝**（共享层不直接依赖 Micrometer ⇒ 不把指标栈塞给 19 个没有 registry 的组件） |
+| 新增 | `observability/GoStylePrometheusMetrics.java` | 静态 holder（**每次请求取** ⇒ 不受「链构造早于装配」的顺序影响） |
+| 新增 | `observability/GoStylePrometheusInterceptor.java` | Prometheus 层：耗时直方图 ＋ 状态码计数；**panic 不记**（Go 的直线代码被跳过） |
+| 新增 | `observability/MicrometerPrometheusSink.java` | Micrometer 实现（共享层里**唯一**引用 Micrometer 类型的类） |
+| 新增 | `observability/GoStylePrometheusMeterRegistryBridge.java` | 装配点：**没有 registry ⇒ 不装 sink**（＝ Go 的 `prometheus.Enabled()==false`） |
+| 新增 | `observability/GoStyleRpcMetricsConfiguration.java` | 登记在 `AutoConfiguration.imports` ⇒ **10 个 rpc 组件零改动**；同时绑定 Stat 的服务名 |
+| 改 | `protection/GoStyleRpcProtectionChain.java` | 插入 `statThen` / `prometheusThen` ＋ `Layered.countedInLayerNames()` ＋ `allLayerNames` |
+| 改 | `protection/GoStyleProtectionProperties.java` | 新增 `Stat` / `Prometheus` 两个开关（Go `Middlewares.Stat` / `Middlewares.Prometheus`，默认 true） |
+| 改 | `protection/GoStyleRpcSheddingInterceptor.java` | 降载拒绝时 `metrics.AddDrop()`（Go `sheddinginterceptor.go:28`）⇒ 否则每分钟那行的 `drops` 恒为 0 |
+| 改 | `service/common/pom.xml` | `micrometer-core` 以 **optional** 进（**不传递给下游**）＋ `micrometer-registry-prometheus` 仅 test |
+| 改 | `AutoConfiguration.imports` | 登记 `GoStyleRpcMetricsConfiguration` |
+| 新增测试 | `GoStyleStatMetricsTest`（10 条）· `GoStylePrometheusSinkGateTest`（6 条）· `GoStyleRpcMetricsChainGateTest`（12 条） | 见下 |
+
+#### ③ 链序（Go 的注册序 ⇒ 逐位对齐）
+
+| 位置 | Go（`zrpc/server.go:144-167`，先注册的最外层） | 本仓 |
+|---|---|---|
+| 最外 | Recover | `recover` |
+| 次外 | **Stat** | `stat`（**本轮新增**） |
+| | **Prometheus** | `prometheus`（**本轮新增**） |
+| | Breaker | `breaker` |
+| | Shedding | `shedding` |
+| 最内 | Timeout / handler | 业务观测拦截器（`RpcInterceptor`） |
+
+⇒ 🔴 **位置不是装饰**：Stat / Prometheus 装在 breaker / shedding 的**外层** ⇒ **被降载 / 熔断拒绝的请求也会被记一笔**（Go 的 shedding 层是「返回 error」⇒ Prometheus 层的后置代码照样执行 ⇒ 记到 `code=8` / `code=14`）⇒ 若装到内侧，这两类请求在指标里**整个消失**且**不报错** ⇒ 已有专门守门钉住（`GoStyleRpcMetricsChainGateTest#sheddingRejectionIsAlsoRecorded`）。
+
+#### ④ 双侧活体对拍（Go 真源的**真实实现**出基准）
+
+- **Go 侧**：独立进程探针（`/tmp/statprobe`，**不入库** ⇒ 见 ⑧ `G4-17b`）跑**真源** `github.com/zeromicro/go-zero/core/stat`（**v1.10.2**，与真源 `go.mod` 同版本），用 `stat.SetReportWriter` 把 60s 一轮的 `stat.StatReport` 以 JSON 吐出（pid 96230）。
+- **本仓**：`GoStyleStatMetricsTest` 的期望值 = **那份 JSON 的逐字抄录**（**不是**照 Go 源码手算）。
+
+| case | 样本 | Go 真源输出 | 本仓断言 |
+|---|---|---|---|
+| `case-one` | 1 × 5ms | `qps 0.016666668, drops 0, avg 5, med 5, t90 5, t99 5, t99p9 5` | 逐值相等 ✔ |
+| `case-frac` | 3 × 0.9ms | `qps 0.05, drops 0, avg 0.6666667, med 0.9, t90 0.9, t99 0.9, t99p9 0.9` | 逐值相等 ✔ |
+| `case-ten` | 10 × (1..10)ms | `qps 0.16666667, drops 0, avg 5.5, med 6, t90 10, t99 10, t99p9 10` | 逐值相等 ✔ |
+| `case-hundred` | 100 × (1..100)ms | `qps 1.6666666, drops 0, avg 50.5, med 51, t90 91, t99 100, t99p9 100` | 逐值相等 ✔ |
+| `case-drops` | 2 × (2,3)ms ＋ 3 drops | `qps 0.033333335, drops 3, avg 2.5, med 3, t90 3, t99 3, t99p9 3` | 逐值相等 ✔ |
+| `case-zero` | 无样本 | 全 0 | 逐值相等 ✔ |
+
+⇒ ⇒ **三个怪癖各有实证**（不是「照着读了一遍」）：
+① **avg 先整除再除**（`core/stat/metrics.go:135`）：三个 0.9ms ⇒ 总 2.7ms ⇒ **整除成 2ms** ⇒ avg = 2/3 = **0.6666667**（不是 0.9）；
+② **median 实为上偏分位数**（`:137-141` ＋ `core/stat/topk.go:31-44`）：十个样本 ⇒ `topK(tasks,5)[0]` = **6**（不是 5.5、不是 5）；
+③ **小样本退化成最大值**（`:157-176`）：单样本 ⇒ median/90th/99th/99.9th 全 = 5。
+⇒ ⇒ 另：**drops 与 qps/avg 的分母互斥**（`:107-118`：drop 样本不进 `tasks`、不进 `duration`）。
+
+#### ⑤ 变异验证（5/5 **断言级**转红 ＋ 还原后转绿）
+
+| 变异 | 改什么 | 必须转红的判据 | 结果 |
+|---|---|---|---|
+| M1 | `avg` 改成「先除后截断」 | `averageTruncatesTotalMillisecondsFirst` | ✅ 断言红 |
+| M2 | prometheus 层**计入** `layerNames` 名单 | `protectionLayerNamesStayUnchangedForDomainGates` | ✅ 断言红 |
+| M3 | panic 也记 Prometheus | `panicThenLaterCloseStillRecordsNothing` | ✅ 断言红 |
+| M4 | 桶边界少一个（11 个） | `bucketBoundariesMatchGo` | ✅ 断言红 |
+| M5 | 降载不再喂 `drops` | `sheddingRejectionIsAlsoRecorded` | ✅ 断言红 |
+
+⇒ ⇒ **每个变异还原后必须再跑一次绿**（否则「红」可能来自残留的**变异版 `.class`**）⇒ 5/5 还原后全绿。
+
+> 🔴 **本轮踩到并已修掉的两个「自己的坑」（写在这里，避免下一轮重犯）**：
+> ① **还原 ≠ 重新编译**：备份用 `shutil.copy2` 会**保留旧 mtime** ⇒ Maven 增量编译认为「没变」⇒ **留下变异版的 `.class`** ⇒ 表现为「还原后仍然红」⇒ 修法 = 还原后 `touch`（本轮改为每次都 `mvn clean test`）。
+> ② **「红」要先定位红在哪一行**：本轮第一次跑变异时，我新加的 `drops` 断言**类型不匹配**（`long` vs `int`）⇒ **测试根本没编译** ⇒ 前面 4 个「红」全是**编译红（假红）** ⇒ ⇒ 全部重跑（§3.3 的「跑绿 ≠ 对」＋「判据红了 ⇒ 先定位红在哪一行」同族）。
+
+#### ⑥ 回归（本轮权威数）
+
+- `mvn -o -B -pl service/common -am clean test -Dtest='!GoStyleRedisDeadlineLiveRedisWriteFaceTest,!MybatisPlusInterceptorChainGateTest' -DfailIfNoTests=false`
+  ⇒ **470 条 / 0 失败 / 0 错误 / 0 跳过 · BUILD SUCCESS · 1:08**（**87 个** `TEST-*.xml` 逐 `testsuite` 求和 = 470，与 maven 汇总行逐字一致）
+- ⇒ **上一轮基线 442 ⇒ 本轮 470（+28 ＝ 本轮新增的 10 ＋ 6 ＋ 12）** ⇒ 口径与上一轮**同**（排除串里那个写错的类名 `...FaceTest` 仍然**匹配不到任何类** ⇒ 真实生效的排除只有 `MybatisPlusInterceptorChainGateTest` 一个 ⇒ **已用产物反查**：87 个类里**有** `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest`、**没有** `MybatisPlusInterceptorChainGateTest`）。
+- 机器守门 11 项：10 项 EXIT=0；`check-ledger-selfcheck` 唯一红 = **层 3 链判据依赖当前分支**（HEAD 影子逐字同因）⇒ 归合并收口执行者合批后自愈。
+
+#### ⑦ 本节的**诚实边界**（AGENTS.md §0：「已改」≠「已验证」）
+
+1. ⚠️ **暴露格式有两处差异**（**不是**指标语义差异）：① Micrometer 对每个 summary 额外暴露一个 `rpc_server_requests_duration_ms_max` gauge（Go 的 client_golang **没有**这个 family ⇒ **RAG 的暴露面比 Go 多一个 family**）；② `le` 标签 Micrometer 写 `le="1.0"`、client_golang 写 `le="1"` ⇒ **桶边界数值相同**、字面量写法不同。
+2. ⚠️ **服务名形态不同**：Go 的 stat 报告行首是 `(follow.rpc)`（真源 `service/follow/rpc/etc/follow.yaml:1` 的 `Name:`）⇒ 本仓是 `(follow-rpc)`（`spring.application.name`）⇒ 那是**服务身份字符串**本身的差异（注册进 Nacos 的名字就是 `follow-rpc`）⇒ **聚合语义逐位相同**。
+3. ⚠️ **时长测量点差一档**：Go 在「handler 返回」时取（**不含**响应写回）⇒ 本仓在「`onHalfClose` 结束；未走到则退回 close 时刻」取 ⇒ **毫秒级口径差**（已登记，不掩饰）。
+4. ⚠️ **`%.1f` 的平局差异**：Go 的 `fmt` 用 **unbiased**（平局取偶）⇒ Java 的 `String.format` 用 **HALF_UP**（平局远离零）⇒ 某个值**恰好落在 `.x5` 平局**时最后一位可能差 1 ⇒ **格式化器差异**，不是聚合差异（本轮 5 组基准值均无平局）。
+5. ⚠️ **出口可达面未变**：仍是**逐域三态**（配置面 8/10、**载体面 1/10** 可被抓取）⇒ ⇒ 本轮落的是**能力**，不是**可达性** ⇒ ⇒ 域侧部分见 ⑧ `G4-17a`。
+6. ⚠️ **样本容器无上限**（照 Go）：Go 的 `metricsContainer.tasks` 是裸 slice ⇒ 一个周期内的请求数 = 样本数 ⇒ 高 QPS 下内存随 QPS × 周期线性增长 ⇒ **刻意照抄**（§3.1：行为差异默认判 RAG 错 ⇒ 这里不能"顺手优化"）。
+7. ⚠️ **本轮未跑任何 Go↔RAG 的「Prometheus 暴露文本」双侧活体对拍**（只对拍了 `core/stat` 的**聚合语义**）⇒ ⇒ 「暴露文本逐字一致」**不成立**（见 ⑦1 的两处已知格式差异）⇒ 暴露面的证据强度 = **L3（本仓侧真 scrape 断言）**，不是 L4。
+
+#### ⑧ 转派单（本层**不能做**的部分 ⇒ 交各域 lane / 合并收口执行者）
+
+| # | 落点 | 现象 | Go 侧 `文件:行号` | RAG 侧现状 | 证据强度 | 建议修法 | 影响面 | 阻塞本波 |
+|---|---|---|---|---|---|---|---|---|
+| **G4-17a** | 各 rpc 域的 `pom.xml` ＋ `application.yml`（**域侧写权面**） | **抓取出口不可达**：本轮落了「写 Prometheus」的能力，但 10 个 rpc 域里**只有 `follow-rpc` 有 HTTP 载体** ⇒ 「实际可被抓取」= **1/10** | `go-zero@v1.10.2/core/internal/devserver/server.go:44-49`（`EnableMetrics` ⇒ `prometheus.Enable()` ＋ `promhttp.Handler()`）＋ `:67-75`（**独立端口** `http.ListenAndServe`）＋ 真源 `service/follow/rpc/etc/follow.yaml:20-27`（`DevServer.Port: 16065` / `MetricsPath: /metrics`） | 共享层能力已具备（`GoStylePrometheusMetrics` ＋ `AutoConfiguration.imports` 登记）⇒ **零域侧改动即生效**；但**没有 registry 的域 ⇒ 一条都不写**（＝ Go 的 `prometheus.Enabled()==false`） | L3（本仓侧真 scrape）＋ E1（Go 侧逐行读过） | ① 各域加 `spring-boot-starter-web` ＋ `micrometer-registry-prometheus`（**或**已有 actuator 者只加 registry）＋ `server.port`（对齐 Go 的 `DevServer.Port`）＋ `management.endpoints.web.exposure.include: prometheus`；⚠️ **各域的 `micrometer-core` 必须自己声明**（共享层那条是 **optional** ⇒ **不传递**） | 10 个 rpc 组件 | 否（能力已具备 ⇒ 逐域启用即可） |
+| **G4-17b** | `tools/semantic-probe/`（**共享面，无 lane 拥有**） | 本轮的 Go 侧对拍探针在 `/tmp/statprobe` ⇒ **不入仓** ⇒ 没有可复算的回归网 | 同上 | 本仓侧期望值已逐字抄进 `GoStyleStatMetricsTest` ⇒ 但**Go 侧的基准生成过程没进仓** ⇒ 换一台机器/换一版 go-zero 后无法一键复算 | L4（双侧活体 · 本轮实测过） | 把 `/tmp/statprobe` 整理成 `tools/semantic-probe/stat-metrics/`（Go 侧 + 跑法 + 期望值文件）⇒ ⇒ 与既有的 `deadline-downstream` 探针同款 | 共享面工具链 | 否 |
+| **G4-17c** | `docs/Intentional_Deviations/`（**签字落点不归本层**） | **对外契约不同**：Go 的暴露路径是 DevServer 的 `/metrics`（**独立端口 6060/逐域端口**）⇒ 本仓走 actuator 的 `/actuator/prometheus`（**管理端口**）⇒ 路径与端口都不同 | `go-zero@v1.10.2/core/internal/devserver/config.go:4-13`（默认端口 6060 / 路径 `/metrics` / 默认开启） | 本仓：actuator 路径 ＋ 逐域 `management.server.port` | E1 | 登记为「有意偏离候选」（暴露路径与端口）⇒ **建议签**（RAG 侧走 actuator 是生态惯例，且 Go 侧 DevServer 本就是「另起一个小 server」） | 全仓运维面 | 否 |

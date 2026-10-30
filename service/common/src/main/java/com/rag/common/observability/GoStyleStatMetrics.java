@@ -238,7 +238,7 @@ public final class GoStyleStatMetrics {
                     top99p9th = mostDuration;
                 }
             } else {
-                float mostDuration = topDurationMillis(tasks);
+                float mostDuration = topDurationMillis(tasks, size);
                 median = mostDuration;
                 top90th = mostDuration;
                 top99th = mostDuration;
@@ -257,10 +257,20 @@ public final class GoStyleStatMetrics {
 
     /** Go {@code metrics.go:198-205 getTopDuration}：{@code topK(tasks, 1)[0]} = 最大值。 */
     private static float topDurationMillis(long[] tasks) {
-        if (tasks.length < 1) {
+        return topDurationMillis(tasks, tasks.length);
+    }
+
+    /**
+     * 同上，但显式给出<b>有效样本数</b>。
+     *
+     * <p>⚠️ 原始样本数组的<b>容量</b>可能大于样本数（Go 的 slice 同款：{@code c.tasks} 的 cap 可大于 len）
+     * ⇒ ⇒ 必须按<b>有效长度</b>取，否则会把扩容留下的 0 当样本（0 不会改变最大值，但会改变 topK 的 k 语义）。
+     */
+    private static float topDurationMillis(long[] tasks, int size) {
+        if (size < 1) {
             return 0F;
         }
-        return nanosToMillis(topK(tasks, tasks.length, 1)[0]);
+        return nanosToMillis(topK(tasks, size, 1)[0]);
     }
 
     /**
