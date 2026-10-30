@@ -413,14 +413,18 @@ def run(root: str, do_print: bool) -> int:
 
 # ---------------------------------------------------------------- 内置变异自测
 
-def _mutate(root: str, rel: str, old: str, new: str) -> str:
-    """在影子副本里改一个串 ⇒ 返回影子根。
+def _mutate(root: str, edits: list[tuple[str, str, str]]) -> str:
+    """在影子副本里按顺序应用若干处 `(rel, old, new)` 改动 ⇒ 返回影子根。
 
     ⚠️ **影子 = HEAD ＋ 工作区增量**（不是纯 `git archive HEAD`）——
     否则**新增文件不在影子里**（本轮新增的白名单文件就是这种）⇒ ⇒ 影子里的
     follow-rpc 会从「白名单豁免」变成「真违规」⇒ ⇒ 变异会**因错误的原因红**
     ⇒ ⇒ 守门的变异测试会得出「判据有效」的假结论。
     ⇒ ⇒ 这里把 `git status --porcelain` 里列出的改动文件（排除 `target/`）覆盖进影子。
+
+    ⚠️ **2026-10-30 · 支持多段编辑的起因**：某条变异要同时改**两个文件**
+    （pom 加真依赖 ＋ yml 加 `web-application-type: none`）才能构造出
+    「**两个条件互相抵消**」的场景 ⇒ ⇒ 单点替换做不到 ⇒ ⇒ 框架扩成 `edits` 列表。
     """
     shadow = tempfile.mkdtemp(prefix="rpcscan_mut_")
     r = subprocess.run(
@@ -446,52 +450,110 @@ def _mutate(root: str, rel: str, old: str, new: str) -> str:
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             shutil.copy2(src, dst)
 
-    full = os.path.join(shadow, rel)
-    txt = open(full, encoding="utf-8").read()
-    if old not in txt:
-        raise RuntimeError(f"变异锚点未命中：{rel} :: {old!r}")
-    open(full, "w", encoding="utf-8").write(txt.replace(old, new, 1))
+    for rel, old, new in edits:
+        full = os.path.join(shadow, rel)
+        txt = open(full, encoding="utf-8").read()
+        if old not in txt:
+            raise RuntimeError(f"变异锚点未命中：{rel} :: {old!r}")
+        open(full, "w", encoding="utf-8").write(txt.replace(old, new, 1))
     return shadow
 
 
+# ⚠️ **2026-10-30 · 变异集重锚的起因（一次真实的「判据在靠错误的原因红」）**：
+#   原 M3 = 「把 comment-rpc 的 `web-application-type: none` 改成 `servlet` ⇒ 它没有
+#   `rag.side` ⇒ 必须被抓住」⇒ ⇒ 它**曾经能红**，**靠的正是我刚修掉的 pom 注释 bug**：
+#   ⇒ ⇒ comment-rpc 的 pom **注释**里提到了 `spring-boot-starter-web` ⇒ ⇒ 旧判定
+#   ⇒ ⇒ 把它当成「真依赖」⇒ ⇒ 改完 yml 就成了「servlet 形态」⇒ ⇒ 于是报红。
+#   ⇒ ⇒ pom bug 修好后（**剥注释**）⇒ ⇒ comment-rpc **本来就没有 servlet 容器**
+#   ⇒ ⇒ 改 yml 也变不成 servlet 形态 ⇒ ⇒ **M3 空转**（变异后仍绿 ⇒ 判据失去判别力）。
+#   ⇒ ⇒ **实测底数**：10 个 rpc 域里**只有 follow-rpc 有真的 `spring-boot-starter-web`**
+#   ⇒ ⇒   （其余 9 个：4 个有 `web-application-type: none` · 5 个两者皆无）
+#   ⇒ ⇒ 「改 `none` 就变 servlet 形态」这条路在当前树上**已不成立** ⇒ ⇒ 必须重锚。
+#   ⇒ ⇒ **重锚后的三件事**：① M2 改成「**替换**已有的 `side: rpc` → `side: api`」
+#   ⇒ ⇒   （原先是「插入」⇒ 会造出**重复 YAML 键**⇒ 靠「后者覆盖前者」才红 ⇒ 脆）
+#   ⇒ ⇒ ② M3 改成「**删掉** follow-rpc 的 `rag.side`」⇒ ⇒ 证明「门确实在生效路径上」
+#   ⇒ ⇒ ③ M5 **新增阴性对照** = M4 **＋** `web-application-type: none`
+#   ⇒ ⇒   ⇒ ⇒ 两个条件**互相抵消** ⇒ ⇒ **必须仍绿** ⇒ ⇒ 钉死「`none` 条件确实被消费」
+#   ⇒ ⇒   （若 `none` 没被消费 ⇒ M5 会红 ⇒ ⇒ 那就证明这条判据是空转）
 MUTATIONS = [
     (
         "M1 结构面：给某个 rpc 域的 @SpringBootApplication 加 scanBasePackages={\"com.rag.common\"}",
-        "service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/UserRpcApplication.java",
-        "@SpringBootApplication // 等价于 @SpringBootConfiguration、@EnableAutoConfiguration、@ComponentScan 三者的组合",
-        "@SpringBootApplication(scanBasePackages = {\"com.rag.common\"}) // 等价于 @SpringBootConfiguration、@EnableAutoConfiguration、@ComponentScan 三者的组合",
+        [(
+            "service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/UserRpcApplication.java",
+            "@SpringBootApplication // 等价于 @SpringBootConfiguration、@EnableAutoConfiguration、@ComponentScan 三者的组合",
+            "@SpringBootApplication(scanBasePackages = {\"com.rag.common\"}) // 等价于 @SpringBootConfiguration、@EnableAutoConfiguration、@ComponentScan 三者的组合",
+        )],
         "struct",
     ),
     (
-        "M2 形态面：给某个 servlet 形态的 rpc 域 yml 写上 `rag.side: api`（**不是 rpc** ⇒ 应当被抓住）",
-        "service/follow/follow-rpc/src/main/resources/application.yml",
-        "grpc:",
-        "rag:\n  side: api\ngrpc:",
+        "M2 形态面 · 值面：把 follow-rpc 已有的 `rag.side: rpc` **改成** `rag.side: api`"
+        "（**不是 rpc** ⇒ 应当被抓住）"
+        " ⇒ ⇒ 用**替换**而不是「插入」⇒ ⇒ 不造重复 YAML 键 ⇒ ⇒ 不靠「后者覆盖前者」才红",
+        [(
+            "service/follow/follow-rpc/src/main/resources/application.yml",
+            "rag:\n  side: rpc\n",
+            "rag:\n  side: api\n",
+        )],
         "shape",
     ),
     (
-        "M3 形态面：把一个**非** servlet 形态的 rpc 域（`web-application-type: none`）改成 servlet 形态"
-        " ⇒ 它没有 `rag.side` ⇒ 必须被抓住（且它**不在白名单** ⇒ 测的是真分支，不是豁免分支）",
-        "service/comment/comment-rpc/src/main/resources/application.yml",
-        "    web-application-type: none",
-        "    web-application-type: servlet",
+        "M3 形态面 · 门缺失面：**删掉** follow-rpc 的 `rag.side` ⇒ ⇒ 它**仍**是 servlet 形态"
+        "（真 web starter 在主干上）⇒ ⇒ 但没有 `rag.side` ⇒ ⇒ **必须被抓住**"
+        " ⇒ ⇒ 证明「形态面这条断言在**生效路径**上」⇒ ⇒ 不是靠白名单豁免撑着",
+        [(
+            "service/follow/follow-rpc/src/main/resources/application.yml",
+            "rag:\n  side: rpc\n",
+            "",
+        )],
         "shape",
     ),
     (
-        "M4 形态面：给一个**非** servlet 形态的 rpc 域的 pom 加**真依赖** `spring-boot-starter-web`"
-        " ⇒ 它没有 `rag.side` ⇒ 必须被抓住"
+        "M4 形态面 · pom 真依赖面：给一个**非** servlet 形态的 rpc 域的 pom 加**真依赖**"
+        " `spring-boot-starter-web` ⇒ 它没有 `rag.side` ⇒ 必须被抓住"
         " ⇒ 与 M2/M3 互补：M2/M3 测的是「yml 侧」，本条测的是「**pom 真依赖侧**」"
         " ⇒ ⇒ 堵住「pom 判定根本没被测到」的缺口"
         " ⇒（背景：该判定原先用**纯文本正则不剥 XML 注释** ⇒ 把 pom **注释**里的"
         " `spring-boot-starter-web` 当成真依赖 ⇒ 四个域被误判 ⇒ ⇒ **假违例 + 假豁免 + 派错工单**）",
-        "service/task/task-rpc/pom.xml",
-        "    </dependencies>",
-        "        <dependency>\n"
-        "            <groupId>org.springframework.boot</groupId>\n"
-        "            <artifactId>spring-boot-starter-web</artifactId>\n"
-        "        </dependency>\n"
-        "    </dependencies>",
+        [(
+            "service/task/task-rpc/pom.xml",
+            "    </dependencies>",
+            "        <dependency>\n"
+            "            <groupId>org.springframework.boot</groupId>\n"
+            "            <artifactId>spring-boot-starter-web</artifactId>\n"
+            "        </dependency>\n"
+            "    </dependencies>",
+        )],
         "shape",
+    ),
+    (
+        "M5 形态面 · **阴性对照**：M4 的那处改动 **＋** 给同一个域加 `web-application-type: none`"
+        " ⇒ ⇒ 两个条件**互相抵消**（有 web starter ⇒ 但 `none` ⇒ 非 servlet 形态）"
+        " ⇒ ⇒ **必须仍绿** ⇒ ⇒ 钉死「`web-application-type: none` 这个条件**确实被消费**」"
+        " ⇒ ⇒ 若它没被消费 ⇒ M5 会红 ⇒ ⇒ 那就证明形态面判据**只看 web starter** = 空转"
+        " ⇒ ⇒ 与 M4 构成**正负一对**（同一组改动，只差 `none` 一行 ⇒ ⇒ 差异被隔离）",
+        [
+            (
+                "service/task/task-rpc/pom.xml",
+                "    </dependencies>",
+                "        <dependency>\n"
+                "            <groupId>org.springframework.boot</groupId>\n"
+                "            <artifactId>spring-boot-starter-web</artifactId>\n"
+                "        </dependency>\n"
+                "    </dependencies>",
+            ),
+            (
+                "service/task/task-rpc/src/main/resources/application.yml",
+                "spring:\n  application:\n"
+                "    # 对应 Go Name: task.rpc（Etcd.Key 也是 task.rpc ⇒ 服务发现名统一为 task-rpc）\n"
+                "    name: task-rpc\n",
+                "spring:\n  application:\n"
+                "    # 对应 Go Name: task.rpc（Etcd.Key 也是 task.rpc ⇒ 服务发现名统一为 task-rpc）\n"
+                "    name: task-rpc\n"
+                "  main:\n"
+                "    web-application-type: none\n",
+            ),
+        ],
+        "shape-green",
     ),
 ]
 
@@ -506,16 +568,28 @@ def mutation_test(root: str) -> int:
 
     failures = []
     for entry in MUTATIONS:
-        # 每条 5 元组：(说明, 文件, 旧串, 新串, 面)
-        desc, rel, old, new, kind = entry
+        # 每条 3 元组：(说明, edits=[(rel, old, new), ...], 面)
+        desc, edits, kind = entry
         mid = desc.split("：", 1)[0].split(" ", 1)[0]
         try:
-            shadow = _mutate(root, rel, old, new)
+            shadow = _mutate(root, edits)
         except Exception as exc:  # noqa: BLE001
             print(f"❌ {mid}：{desc} ⇒ 变异准备失败：{exc}")
             failures.append(mid)
             continue
         struct_hits, shape_hits = check(shadow)
+        if kind == "shape-green":
+            # ⚠️ **阴性对照**：这条变异**必须仍绿** ⇒ ⇒ 它证明的不是「判据会红」，
+            #    而是「判据**只**在该红的时候红」⇒ ⇒ 钉死某个条件**确实被消费**。
+            #    ⇒ ⇒ 若它红了 ⇒ ⇒ 说明那条条件**没被消费** ⇒ ⇒ 判据空转。
+            if struct_hits or shape_hits:
+                print(f"❌ {mid}：{desc} ⇒ 变异后**报红**（struct {len(struct_hits)} 条 /"
+                      f" shape {len(shape_hits)} 条）⇒ ⇒ 阴性对照失败 ⇒ ⇒ 被抵消掉的那个条件"
+                      f"**没被消费** ⇒ ⇒ 判据空转")
+                failures.append(mid)
+            else:
+                print(f"✅ {mid}：{desc} ⇒ 仍绿（阴性对照通过 ⇒ ⇒ 被抵消的条件**确实被消费**）")
+            continue
         caught = bool(struct_hits) if kind == "struct" else bool(shape_hits)
         if caught:
             print(f"✅ {mid}：{desc} ⇒ 被精确抓到（{kind} 面红）")
@@ -527,7 +601,7 @@ def mutation_test(root: str) -> int:
     if failures:
         print(f"⇒ ❌ 变异测试失败（{len(failures)} 条）")
         return 1
-    print("⇒ ✅ 变异测试全部精确命中（本守门的判据非空转）")
+    print("⇒ ✅ 变异测试全部精确命中（含阴性对照 ⇒ ⇒ 本守门的判据非空转、且不误报）")
     return 0
 
 

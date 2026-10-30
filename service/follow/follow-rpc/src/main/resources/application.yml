@@ -190,6 +190,41 @@ follow:
     #    经 clampFanout（helper.go:140-147）夹到 (0,200]
     max-fanout: 50
 
+# =============================================================================
+# 进程形态：rpc 侧（`rag.side: rpc`）
+# =============================================================================
+# 🔴 **这一行是「共享层 api 侧中间件」的闸门**（2026-10-30 · G1 lane）
+#
+# 【Go 出处】Go 的 rpc 进程**一个 rest 中间件都没挂**（全部 `zrpc.MustNewServer`）
+#   ⇒ ⇒ rpc 侧不存在任何 servlet 过滤器 ⇒ ⇒ RAG 的 rpc 域也**不得**挂 Go 侧没有的中间件。
+#
+# 【机制】共享层用 `@ConditionalOnApiSide`
+#   （= `@ConditionalOnProperty(name="rag.side", havingValue="api", matchIfMissing=true)`）
+#   挡住 api 侧那 **13 个类**（11 个带 `@ConditionalOnWebApplication(SERVLET)` ＋
+#   `HttpMiddlewareFilter`（无条件 `@Component`）＋ `GoStyleJsonBodyConverterConfig`（`@Configuration`））：
+#   `GoStyleCpuSheddingFilter` / `GoStyleMaxConnsFilter` / `GoStyleMaxBytesFilter`
+#   / `GoStyleBreakerFilter` + 路由模板 / `GoStyleTraceparentFilter` / `HttpMiddlewareFilter`
+#   / `GoStyleFormLimitWebMvcConfig` / `GoStyleFormValueLimitInterceptor`
+#   / `GoStyleJsonBodyConverterConfig` / `GoStyleJsonContentTypeAdvice`
+#   / `GoStylePathNormalizingAutoConfiguration` / `GoStyleTomcatParameterLimitCustomizer`
+#   ⇒ ⇒ 其中**会「拒请求」的只有两个**：`GoStyleCpuSheddingFilter`（CPU 高负载）
+#   与 `GoStyleMaxConnsFilter`（连接数超限）⇒ ⇒ 抓取请求可能被自己域的中间件挡掉。
+#   ⚠️ **`matchIfMissing=true` ⇒ 默认就是 api 侧** ⇒ ⇒ rpc 域**必须显式写这一行**。
+#
+# 【⚠️ 本模块与另外两个 rpc 域不同 —— 载体**已经在**】
+#   本模块 2026-10-29 落地 `DRIFT-FOLLOW-006` 时就加了 `spring-boot-starter-web`
+#   （pom 第 5 段）＋ `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}`（下面）
+#   ⇒ ⇒ **本模块的主上下文就是 servlet web 应用** ⇒ ⇒ 若不写这一行
+#   ⇒ ⇒ 那 13 个 api 侧 Bean 会挂到 **16065 的抓取口**上 ⇒ ⇒ 其中
+#   ⇒ ⇒ **`GoStyleCpuSheddingFilter` 在 CPU 高负载时会拒掉抓取请求**
+#   ⇒ ⇒ 而 Go 侧 rpc 域一个中间件都没挂 ⇒ ⇒ **与 Go 不同形**
+#   ⇒ ⇒ ⇒ 即：载体的目的（抓得到 `/actuator/prometheus`）会被自己的中间件挡掉。
+#
+# ⚠️ **诚实边界**：共享层的 `ConditionalOnApiSide` **在本分支基线上尚未落库**
+#   ⇒ ⇒ **本行在共享层那笔进来之前是死配置**（没有类读它）⇒ ⇒ 效果随共享层那笔生效。
+rag:
+  side: rpc
+
 management:
   endpoints:
     web:
