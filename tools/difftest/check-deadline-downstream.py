@@ -10,9 +10,11 @@
 
    ① **两侧都真的跑过** ⇒ 各产出 1 条 `PROBE|` 行
       （PIT-GLOBAL「退出码 0 ≠ 脚本真跑过」⇒ 必须自证）
-   ② **parity 键**（sql_carrier）两侧**相等**
-      ⇒ 它证明「SQL 路径两侧同款」⇒ 漂移**不在** SQL 上
-   ③ **drift 键**（failed_fast / code / outgoing_carrier）是**已登记的漂移形态**
+   ② **parity 键**（sql_carrier · outgoing_carrier）两侧**相等**
+      ⇒ 它证明「SQL 路径两侧同款」＋「**出向载体在位**」（`outgoing_carrier`
+      于 2026-10-30 由 drift 键升为 parity 键 ⇒ 判据比原先更强）
+      ⇒ 漂移**不在**这两键上
+   ③ **drift 键**（failed_fast / code）是**已登记的漂移形态**
       ⇒ 漂移还在 ⇒ 绿；形态变了（被修好 / 前提变了）⇒ **红**
 
 【为什么要有第 ③ 层】
@@ -42,10 +44,13 @@ PROBE = 'tools/semantic-probe/deadline-downstream/run-deadline-downstream-parity
 EXPECTED_DRIFT = {
     'failed_fast': ('true', 'false'),
     'code': ('4', '0'),
-    'outgoing_carrier': ('present_expired', 'absent'),
 }
 # ── 必须两侧相等的键 ─────────────────────────────────────────────────────
-PARITY_KEYS = ('sql_carrier',)
+# ⚠️ 2026-10-30（合并收口轮）：`outgoing_carrier` **从 drift 键升为 parity 键**
+#    —— G4 波次把 `GoStyleRequestDeadline` 绑进了 `RpcInterceptor.onHalfClose`
+#    ⇒ 出向载体在位 ⇒ 实测 RAG 侧 = `present_expired` ⇒ **与 Go 一致**
+#    ⇒ 该键的漂移**已闭合** ⇒ 移出 drift 名单（不是把期望值改成两侧相等来蒙混）。
+PARITY_KEYS = ('sql_carrier', 'outgoing_carrier')
 
 
 def parse_side(out, label):

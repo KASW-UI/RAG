@@ -43,7 +43,10 @@
         71
       ],
       "dst": "docs/DRIFT/like/rpc.md",
-      "label": "§0 like-rpc 事实投递链路跨三个仓库"
+      "label": "§0 like-rpc 事实投递链路跨三个仓库",
+      "sha256": "fd95df82f9e01cffef17b1b4edfd6f265187fddd3db06898a10e94925f272770",
+      "sha256_lines": 15,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -51,7 +54,10 @@
         101
       ],
       "dst": "docs/DRIFT/message/rpc.md",
-      "label": "§0 message-rpc 3 项 P0 + 3 项新挖出缺陷"
+      "label": "§0 message-rpc 3 项 P0 + 3 项新挖出缺陷",
+      "sha256": "656498e26a15d62ae8c506bf6527fb43459ea3cd4c1ebb4e9da2991c57d4036e",
+      "sha256_lines": 30,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -59,7 +65,10 @@
         420
       ],
       "dst": "docs/DRIFT/message/api.md",
-      "label": "§0 message-api 落地与 3 处请求解析层漂移 + 请求保护层 + client 熔断"
+      "label": "§0 message-api 落地与 3 处请求解析层漂移 + 请求保护层 + client 熔断",
+      "sha256": "f1b952d7d3603c201812998ab19fb7fc5073170ba881c996996acf58a52fa72b",
+      "sha256_lines": 319,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -67,7 +76,10 @@
         483
       ],
       "dst": "docs/DRIFT/_cross/message-domain-wide.md",
-      "label": "§0 message 全域第二轮语义验证"
+      "label": "§0 message 全域第二轮语义验证",
+      "sha256": "18e1bc946ff9affbd37b1c8b4fc67616b61f8b5d59199eda8daf587e41aa9f9c",
+      "sha256_lines": 63,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -75,7 +87,10 @@
         590
       ],
       "dst": "docs/DRIFT/like/api.md",
-      "label": "§0 like-api 2 条 HIGH 漂移"
+      "label": "§0 like-api 2 条 HIGH 漂移",
+      "sha256": "05920e898ba61c202c3908e995fd51763927db6fc79d5da495f73606af3e58fa",
+      "sha256_lines": 107,
+      "sha256_from": "git:69e3262a91f7f5f60bf566886ac3de940ae0946d:docs/DRIFT/like/api.md"
     },
     {
       "src": [
@@ -83,7 +98,10 @@
         733
       ],
       "dst": "docs/DRIFT/common/protection.md",
-      "label": "§0 请求保护层下沉到 service/common"
+      "label": "§0 请求保护层下沉到 service/common",
+      "sha256": "6b602fa7fec6f56ed3f9203de62e7739955787d6077adb3776603b009c65967e",
+      "sha256_lines": 143,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -91,7 +109,10 @@
         827
       ],
       "dst": "docs/DRIFT/like/api.md",
-      "label": "§0 404/405 字节级对齐 DRIFT-LIKEAPI-007/-008/-011"
+      "label": "§0 404/405 字节级对齐 DRIFT-LIKEAPI-007/-008/-011",
+      "sha256": "ef1c04876dcf54e07bd0d9907115eb0311fbc92f102fab762628590e8e4a9e60",
+      "sha256_lines": 94,
+      "sha256_from": "git:69e3262a91f7f5f60bf566886ac3de940ae0946d:docs/DRIFT/like/api.md"
     },
     {
       "src": [
@@ -99,7 +120,10 @@
         927
       ],
       "dst": "docs/DRIFT/common/deadline.md",
-      "label": "§0 HTTP 超时取消语义（池加界 + deadline 透传）"
+      "label": "§0 HTTP 超时取消语义（池加界 + deadline 透传）",
+      "sha256": "81480eede602bc487c20c58ff1f609005116b4e7fde40232d1fae9e2ace6c35f",
+      "sha256_lines": 100,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -107,7 +131,10 @@
         1088
       ],
       "dst": "docs/DRIFT/common/http.md",
-      "label": "§0 DRIFT-006 请求体 Content-Type 判据"
+      "label": "§0 DRIFT-006 请求体 Content-Type 判据",
+      "sha256": "6a94b68ab46f2ab0017681bccf6710390c26d6c5bc454ed06e25b9abff88cc75",
+      "sha256_lines": 161,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -115,7 +142,10 @@
         1142
       ],
       "dst": "docs/DRIFT/users/_shared.md",
-      "label": "§0 补网：admin-api / user-api 继承共享组件却无测试"
+      "label": "§0 补网：admin-api / user-api 继承共享组件却无测试",
+      "sha256": "48d56964dd077027bd27e947db1fbed10078ea35f4d9233c591027c4e5d4ef66",
+      "sha256_lines": 54,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -123,7 +153,10 @@
         1342
       ],
       "dst": "docs/DRIFT/like/rpc.md",
-      "label": "§0 like-rpc 12 条漂移"
+      "label": "§0 like-rpc 12 条漂移",
+      "sha256": "c55195a520e3cbe3644cb78de70cf0269b24d20886effab66eda1a8b4b57019e",
+      "sha256_lines": 200,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -131,7 +164,10 @@
         1391
       ],
       "dst": "docs/DRIFT/hot/common.md",
-      "label": "§0 hot-common 双侧对拍"
+      "label": "§0 hot-common 双侧对拍",
+      "sha256": "95e35cdf242a697dc01e02f8abe72c6259b5049e58cde607203df3e317b109c7",
+      "sha256_lines": 49,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -139,7 +175,10 @@
         1443
       ],
       "dst": "docs/DRIFT/hot/rpc.md",
-      "label": "§0 hot-rpc 首次实现"
+      "label": "§0 hot-rpc 首次实现",
+      "sha256": "408836946bfb12f5e45b109c1a054f7cee72aa68d67141084523642a195a662c",
+      "sha256_lines": 52,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -147,7 +186,10 @@
         1534
       ],
       "dst": "docs/DRIFT/article/common.md",
-      "label": "§0 article-common 双侧对拍"
+      "label": "§0 article-common 双侧对拍",
+      "sha256": "ec8dc629a26d6b52d44f1e65f2addaf583910115f5134aa440d25c57b1479079",
+      "sha256_lines": 91,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -155,7 +197,10 @@
         1888
       ],
       "dst": "docs/Intentional_Deviations/_cross/signed-deviations.md",
-      "label": "§3.4 已知偏离主表（N-1..N-5）"
+      "label": "§3.4 已知偏离主表（N-1..N-5）",
+      "sha256": "67a7197dc4a03af09d9f6985419e1351be8fe66316823d6bc58a488e3936b139",
+      "sha256_lines": 25,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -163,7 +208,10 @@
         1924
       ],
       "dst": "docs/DRIFT/users/user/api.md",
-      "label": "§3.4.2 service/users 语义审计后两条新增留档"
+      "label": "§3.4.2 service/users 语义审计后两条新增留档",
+      "sha256": "68c48263faeaf1a1ded688cff8e5037b4c30e94b8030933433975a9e7a8ba76e",
+      "sha256_lines": 36,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -171,7 +219,10 @@
         1977
       ],
       "dst": "docs/DRIFT/users/admin/_shared.md",
-      "label": "§3.4.3 service/users/admin 审计后三条新增留档"
+      "label": "§3.4.3 service/users/admin 审计后三条新增留档",
+      "sha256": "a1d970e42c44f5fdb63c5dd2a72c56900557f3c4aaa7b9fb5be98bcf299a36a0",
+      "sha256_lines": 53,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -179,7 +230,10 @@
         2066
       ],
       "dst": "docs/DRIFT/users/_shared.md",
-      "label": "§3.4.4 service/users 基础组件审计后新增留档"
+      "label": "§3.4.4 service/users 基础组件审计后新增留档",
+      "sha256": "a8164d212687cde470255578e702b2c46bd8d8ce7da550a81432ecad0eabb971",
+      "sha256_lines": 89,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -187,7 +241,10 @@
         2191
       ],
       "dst": "docs/DRIFT/users/_shared.md",
-      "label": "§3.4.5 DTO 边界矩阵产出差异 R1~R5"
+      "label": "§3.4.5 DTO 边界矩阵产出差异 R1~R5",
+      "sha256": "e287f3434059afae85540123b3ca2664c4f23016d1626b365f4edae3d67d3ba6",
+      "sha256_lines": 125,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -195,7 +252,10 @@
         2331
       ],
       "dst": "docs/Intentional_Deviations/common/_signed-deviations.md",
-      "label": "§3.4.1 service/common 的 Java 端差异"
+      "label": "§3.4.1 service/common 的 Java 端差异",
+      "sha256": "5402e737b2c8089b55e270da73359267b4e5b04abdbbbe6660862db1c2840e8a",
+      "sha256_lines": 140,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -203,7 +263,10 @@
         2409
       ],
       "dst": "docs/DRIFT/users/user/api.md",
-      "label": "§6.1 service/users 行为一致性审计已完成"
+      "label": "§6.1 service/users 行为一致性审计已完成",
+      "sha256": "3f17b2002ec4812385b30423d0175776ce0d5f0f036d463a68c04c65f50830b0",
+      "sha256_lines": 23,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -211,7 +274,10 @@
         2442
       ],
       "dst": "docs/DRIFT/_cross/open-items.md",
-      "label": "§6.2 已知未修（按优先级）"
+      "label": "§6.2 已知未修（按优先级）",
+      "sha256": "ab14112135cf4e8e6ea40449ef5f9d4699c4e95a85ee42cc5b2368a6fdf7ffef",
+      "sha256_lines": 33,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -219,7 +285,10 @@
         2481
       ],
       "dst": "docs/DRIFT/users/admin/api.md",
-      "label": "§6.2.4① Go 对空 body 的三段取证（admin-api）"
+      "label": "§6.2.4① Go 对空 body 的三段取证（admin-api）",
+      "sha256": "460ed415a2aaf4487bc92c8a1f3fea33522803ed751b6e1cfe3663edbb3ccd75",
+      "sha256_lines": 39,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -227,7 +296,10 @@
         2522
       ],
       "dst": "docs/DRIFT/message/rpc.md",
-      "label": "§6.2.4② NotificationEntity.isRead 运行期致命（实为 message-rpc）"
+      "label": "§6.2.4② NotificationEntity.isRead 运行期致命（实为 message-rpc）",
+      "sha256": "ea92daccaf403adfabf042a2de719e2050bf37730b071a27e4256b448b099776",
+      "sha256_lines": 41,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -235,7 +307,10 @@
         2585
       ],
       "dst": "docs/DRIFT/users/admin/_shared.md",
-      "label": "§6.2.2 users/admin 语义审计修复清单 #71186443"
+      "label": "§6.2.2 users/admin 语义审计修复清单 #71186443",
+      "sha256": "2c68b9c42177a2b0058a747ad69120292359e6f21a0738ca434e021be2d727a2",
+      "sha256_lines": 63,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -243,7 +318,10 @@
         2611
       ],
       "dst": "docs/DRIFT/users/admin/_shared.md",
-      "label": "§6.2.3 users/admin 的 UNRESOLVED"
+      "label": "§6.2.3 users/admin 的 UNRESOLVED",
+      "sha256": "e1c438f333328eb6bc18885a9eb60b8a4a7bc63d32cfd94628682f8b9f12d895",
+      "sha256_lines": 26,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -251,7 +329,10 @@
         2899
       ],
       "dst": "docs/DRIFT/users/_shared.md",
-      "label": "§6.2.5 tools/difftest 产出（users 全域）"
+      "label": "§6.2.5 tools/difftest 产出（users 全域）",
+      "sha256": "541c3dc6e95f4b59fb763362be99e259c98e27425b03fab591925430ad69a455",
+      "sha256_lines": 288,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -259,7 +340,10 @@
         2909
       ],
       "dst": "docs/DRIFT/_cross/open-items.md",
-      "label": "§6.2.1 本次从本表移出"
+      "label": "§6.2.1 本次从本表移出",
+      "sha256": "0fceae5c2aeaeb9a1246af01b705b3490958c22b2976fb443db2f02f31d6a7a2",
+      "sha256_lines": 10,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -267,7 +351,10 @@
         3054
       ],
       "dst": "docs/DRIFT/users/_shared.md",
-      "label": "§6.2.6 service/users 证据边界台账 E-1~E-6"
+      "label": "§6.2.6 service/users 证据边界台账 E-1~E-6",
+      "sha256": "373527b5cb891898cbf05431f224e3b57b107ffda13c004b6a203c66bfd543a0",
+      "sha256_lines": 145,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -275,7 +362,10 @@
         3256
       ],
       "dst": "docs/DRIFT/common/audit.md",
-      "label": "§6.5 service/common 语义一致性审计与修复"
+      "label": "§6.5 service/common 语义一致性审计与修复",
+      "sha256": "f66ddd87353395762f208977354e1e78f251a0c5b7b738dc709ca133956609bc",
+      "sha256_lines": 99,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -283,7 +373,10 @@
         3574
       ],
       "dst": "docs/DRIFT/message/rpc.md",
-      "label": "§6.6 message-rpc 审计 + 修复"
+      "label": "§6.6 message-rpc 审计 + 修复",
+      "sha256": "6f154b530ef9301c7ac2507e703c686cc7cfbf5e044744376cbf6a5c9f853797",
+      "sha256_lines": 318,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -291,7 +384,10 @@
         3933
       ],
       "dst": "docs/DRIFT/_cross/message-domain-wide.md",
-      "label": "§6.7 service/message 全域语义一致性验证"
+      "label": "§6.7 service/message 全域语义一致性验证",
+      "sha256": "83cc5de8e508860d893558e494254e627e656057f1d9662e393a303de5af84e6",
+      "sha256_lines": 359,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -299,7 +395,10 @@
         4057
       ],
       "dst": "docs/DRIFT/hot/rpc.md",
-      "label": "§6.8 hot-rpc 首次实现 L1~L3"
+      "label": "§6.8 hot-rpc 首次实现 L1~L3",
+      "sha256": "ec9744e3f1cfb717745ea01df17a9176ae861519a0a3f3aeab0facd033a32bcc",
+      "sha256_lines": 124,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -307,7 +406,10 @@
         1706
       ],
       "dst": "docs/Pitfalls/users/_shared.md",
-      "label": "§3.3.3 第四类完整经过：mybatis 前缀写错，注入静默归零（B-1 实验）"
+      "label": "§3.3.3 第四类完整经过：mybatis 前缀写错，注入静默归零（B-1 实验）",
+      "sha256": "9fc52b4361372341ce6c84efb2cb4a07a3e22b1713dad7b2fd8975657fb5e610",
+      "sha256_lines": 15,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -315,7 +417,10 @@
         1753
       ],
       "dst": "docs/Pitfalls/common/http.md",
-      "label": "§3.3.3 E-1 案例：text/plain 400 丢 Content-Type —— 「代码里写了」≠「客户端收到」"
+      "label": "§3.3.3 E-1 案例：text/plain 400 丢 Content-Type —— 「代码里写了」≠「客户端收到」",
+      "sha256": "2b3adeb7c77cd0930ad7e7969f15b63667f4d8a78354fd729b5825dac5789766",
+      "sha256_lines": 35,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -323,7 +428,10 @@
         1769
       ],
       "dst": "docs/Pitfalls/_cross/testing-pitfalls.md",
-      "label": "§3.3.3 元教训：把没看过的东西变成看过了"
+      "label": "§3.3.3 元教训：把没看过的东西变成看过了",
+      "sha256": "6a9c16f111fe1a67288f02a159208eda698e4b1104cd4972d3c70184e2552234",
+      "sha256_lines": 15,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -331,7 +439,10 @@
         1785
       ],
       "dst": "docs/Pitfalls/_cross/testing-pitfalls.md",
-      "label": "§3.3.3 H2 案例：断言「Bean 存在」≠ 断言「机制生效」"
+      "label": "§3.3.3 H2 案例：断言「Bean 存在」≠ 断言「机制生效」",
+      "sha256": "1067c17fde1dad847c618d934b501241c4c2a4e0b94dab163c5dc8507d2b2cc1",
+      "sha256_lines": 13,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -339,7 +450,10 @@
         1811
       ],
       "dst": "docs/Pitfalls/users/_shared.md",
-      "label": "§3.3.3 46 处批量插入：为什么必须配守恒断言"
+      "label": "§3.3.3 46 处批量插入：为什么必须配守恒断言",
+      "sha256": "c16bad5158118167a6fcd01b0a9517cebd83d28069f482be06a5e666b875abe7",
+      "sha256_lines": 22,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -347,7 +461,10 @@
         1855
       ],
       "dst": "docs/Pitfalls/like/rpc.md",
-      "label": "§3.3.3 Boot 4 把 Kafka 自动配置搬出 autoconfigure ⇒ @KafkaListener 静默失效"
+      "label": "§3.3.3 Boot 4 把 Kafka 自动配置搬出 autoconfigure ⇒ @KafkaListener 静默失效",
+      "sha256": "9f3cd96978660827cb3bf86d6daa370eccef38750efe7fced4690e699e19b388",
+      "sha256_lines": 15,
+      "sha256_from": "current"
     },
     {
       "src": [
@@ -356,7 +473,12 @@
       ],
       "dst": "docs/DRIFT/_cross/fix-round-2026-10-23.md",
       "label": "2026-10-23 修复轮逐组件记录（含仍未修清单）",
-      "note": "元教训部分另入 docs/Pitfalls/_cross/fix-round-lessons.md"
+      "note": "元教训部分另入 docs/Pitfalls/_cross/fix-round-lessons.md",
+      "sentinel_label": "§「2026-10-23 修复轮」 · 第一轮开修的逐组件记录",
+      "sentinel_note": "哨兵是**手写**的，措辞与本表自动抽出的 label 不同 ⇒ ⇒ 显式登记真实文本 ⇒ 不靠猜",
+      "sha256": "f653db96f8405cce991c2a57ebb1398e5820405cc8044f81101a49c88cdeb446",
+      "sha256_lines": 42,
+      "sha256_from": "current"
     }
   ],
   "_kept_in_agents_md": [
