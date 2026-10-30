@@ -1,5 +1,6 @@
 package com.rag.common.http;
 
+import com.rag.common.web.ConditionalOnApiSide;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
@@ -59,9 +60,13 @@ import org.springframework.web.servlet.HandlerInterceptor;
  * Go 返 <b>401</b>、RAG 返 <b>400/5001</b>。
  * <br>⚠️ 这是<b>本条修之前就存在</b>的差异（article 的同名 filter 一直跑在鉴权之前），
  * 本轮<b>刻意不</b>改（避免扩大 scope）⇒ 记为有界残留，见台账。
+ * <p>⚠️ <b>2026-10-30 · G4 lane：本类属 api 侧 rest 中间件 ⇒ 已挂 {@link com.rag.common.web.ConditionalOnApiSide}</b>
+ * ⇒ ⇒ 此前「rpc 域不注册本类」的依据是<b>域侧不扫 {@code com.rag.common} 这道约定</b>（不是本类的条件）
+ * ⇒ ⇒ 现由共享层自己兜住 ⇒ ⇒ Go 出处与语义等价论证见该注解。
  */
 @Component
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
+@ConditionalOnApiSide
 public class GoStyleFormValueLimitInterceptor implements HandlerInterceptor {
 
     private final GoStyleFormLimitMode.Mode mode;

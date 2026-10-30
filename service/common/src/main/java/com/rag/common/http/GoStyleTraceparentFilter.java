@@ -1,5 +1,6 @@
 package com.rag.common.http;
 
+import com.rag.common.web.ConditionalOnApiSide;
 import io.opentelemetry.api.baggage.propagation.W3CBaggagePropagator;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
@@ -184,10 +185,14 @@ import java.util.Collections;
  * <p>⚠️ 但 favorite 也**同吃 T-12**（共享层 ⇒ 全 10 个 api 一致生效）
  * ⇒ 即「方法不匹配」那个出口多带一个 {@code Traceparent} ⇒ 同样<b>不是</b>给 favorite
  * 新造的漂移（Go 的 favorite 在该出口同样不带）⇒ 只是**两边的出口层级不同**而已。
+ * <p>⚠️ <b>2026-10-30 · G4 lane：本类属 api 侧 rest 中间件 ⇒ 已挂 {@link com.rag.common.web.ConditionalOnApiSide}</b>
+ * ⇒ ⇒ 此前「rpc 域不注册本类」的依据是<b>域侧不扫 {@code com.rag.common} 这道约定</b>（不是本类的条件）
+ * ⇒ ⇒ 现由共享层自己兜住 ⇒ ⇒ Go 出处与语义等价论证见该注解。
  */
 @Component
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @Order(Ordered.HIGHEST_PRECEDENCE + 3)
+@ConditionalOnApiSide
 public class GoStyleTraceparentFilter implements Filter {
 
     /**

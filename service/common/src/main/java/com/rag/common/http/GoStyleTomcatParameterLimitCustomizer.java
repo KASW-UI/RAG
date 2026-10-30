@@ -1,5 +1,6 @@
 package com.rag.common.http;
 
+import com.rag.common.web.ConditionalOnApiSide;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
@@ -154,11 +155,15 @@ import org.springframework.stereotype.Component;
  * 本类的 10001 <b>不是</b>复刻 Go 的某个常量，而是<b>为了把「判定权」交还给应用层</b>
  * 而设的一个边界：它必须 ≥ Go 的段数上限 + 1（这样 filter 才有机会先按 Go 的语义拒），
  * 同时必须<b>有限</b>（不能比 Go 的 DoS 闸门更松）。
+ * <p>⚠️ <b>2026-10-30 · G4 lane：本类属 api 侧 rest 中间件 ⇒ 已挂 {@link com.rag.common.web.ConditionalOnApiSide}</b>
+ * ⇒ ⇒ 此前「rpc 域不注册本类」的依据是<b>域侧不扫 {@code com.rag.common} 这道约定</b>（不是本类的条件）
+ * ⇒ ⇒ 现由共享层自己兜住 ⇒ ⇒ Go 出处与语义等价论证见该注解。
  */
 @Component
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @ConditionalOnClass(name = "org.springframework.boot.tomcat.ConfigurableTomcatWebServerFactory")
 @Order(Ordered.LOWEST_PRECEDENCE)
+@ConditionalOnApiSide
 public class GoStyleTomcatParameterLimitCustomizer implements WebServerFactoryCustomizer<WebServerFactory> {
 
     /**

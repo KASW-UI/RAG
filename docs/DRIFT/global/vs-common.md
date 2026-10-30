@@ -5415,8 +5415,8 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
   | message | 27 | 221 |
 
   ⇒ ⇒ ⇒ **任何 lane 在自己域台账里插一行 ⇒ 跨文件指针就偏一格** ⇒ ⇒ ⇒ **这是「12 条跨组件不变量」之外的一条跨域机制面**。
-- **⚠️ 当前是否已有被打歪的指针？本层做了一次有界排查（结论：未发现已确认的真缺陷）**：把 `docs/RoundPlan/_unresolved.md` ＋ `docs/DRIFT/_cross/grading/*` 里指向 `.md` 台账的**行号指针**全量抽出（本轮实测 **1112 处**）⇒ ⇒ 逐处比对「引用行上下文提到的编号」与「目标行实际落点」⇒ ⇒ **9 处疑似对不上** ⇒ ⇒ **抽查 3 处 ⇒ 3/3 是启发式误报**（例：`_unresolved.md:121` 引 `vs-common.md:33` = 「未修 28 项」行 = `DEP-01` 本身所指；`grading/W9.md:9` 引 `article/vs-common.md:27` = 「编号撞号」提示**故意**指向那条已改号的旧行）⇒ ⇒ ⇒ **结论 = 「风险真实存在（本轮自造一次），但仓内当前没有已确认被打歪的指针」** ⇒ ⇒ **不写成「已发现真缺陷」**。
-- **修法方向与归属**：① 派生层改成**按标题 / 锚点定位**而不是按行号（要改 `tools/ledger-derive/derive-stage1.py`）；② 或把跨文件指针从「行号」升级为「行号 + 标题锚点」，派生层按锚点解析（同样要改派生层）；③ 或每次台账加行后跑一次「指针复位」脚本（也要新增共享面脚本）⇒ ⇒ ⇒ **三条落点全部在共享面（`tools/**` ＋ `docs/RoundPlan/**`）⇒ 无 lane 拥有 ⇒ 转主线** ⇒ ⇒ **本层只登记事实 ＋ 给修法方向，不落码**。
+- **⚠️ 当前是否已有被打歪的指针？本层做了一次有界排查（结论：未发现已确认的真缺陷）**：把 `docs/RoundPlan/_unresolved.md` ＋ `docs/DRIFT/_cross/grading/*` 里指向 `.md` 台账的**行号指针**全量抽出（本轮实测 **1112 处**）⇒ ⇒ 逐处比对「引用行上下文提到的编号」与「目标行实际落点」⇒ ⇒ **9 处疑似对不上** ⇒ ⇒ **抽查 3 处 ⇒ 3/3 是启发式误报**（例：`_unresolved.md:121` 引 `vs-common.md:33` = 「未修 28 项」行 = `DEP-01` 本身所指；`grading/W9.md:9` 引 `article/vs-common.md:27` = 「编号撞号」提示**故意**指向那条已改号的旧行）⇒ ⇒ ⇒ **结论 = 「风险真实存在（本轮自造一次），但仓内当前没有已确认被打歪的指针」** ⇒ ⇒ **不写成「已发现真缺陷」**。〔**【订正 · 见 §4.19.13】本条的「1112 处」是**旧口径 ＋ 旧时点**的数 ⇒ ⇒ 现在任何变体都复现不出**（实测：`PTR_RE` 口径 = 1563 · 只算 `.md` = 472 · **派生层自己的 `DOC_PTR_RE` 口径 = 385**）⇒ ⇒ **已订正为新口径**：口径 = 「`docs/RoundPlan/_unresolved.md` ＋ `docs/DRIFT/_cross/grading/**` 这 35 个文件里、用**派生层自己的** `DOC_PTR_RE` 抽出的指向台账的行号指针」＝ **385 处**（可复算）⇒ ⇒ ⚠️ **与全仓口径不可比**（合并收口执行者用 `DOC_PTR_RE` 全仓实测；他报 3308 · 本层实测 3309 ⇒ ⇒ **口径仍未对齐**）⇒ ⇒ ⇒ **两个数不互相引用为佐证**⇒ ⇒ ⇒ ⚠️ **但本条的结论不依赖那个数**（「仓内当前没有已确认被打歪的指针」）⇒ ⇒ **数字订正不改变结论**。〕
+- **修法方向与归属**：① 派生层改成**按标题 / 锚点定位**而不是按行号（要改 `tools/ledger-derive/derive-stage1.py`）；② 或把跨文件指针从「行号」升级为「行号 + 标题锚点」，派生层按锚点解析（同样要改派生层）；③ 或每次台账加行后跑一次「指针复位」脚本（也要新增共享面脚本）⇒ ⇒ ⇒ **三条落点全部在共享面（`tools/**` ＋ `docs/RoundPlan/**`）⇒ 无 lane 拥有 ⇒ 转主线** ⇒ ⇒ **本层只登记事实 ＋ 给修法方向，不落码**。〔**【订正 · 见 §4.19.13】第 ④ 条方向已落地**：**棘轮守门已落**（`tools/ledger-derive/check-pointer-consistency.py` · commit `83969be7`）⇒ ⇒ 判据 = 「解析出的编号」应当出现在「**指针所在那一行**写的编号」里 ⇒ ⇒ 两者**独立算出** ⇒ ⇒ **零基线**（基线 = 存量 **237** 条例外）⇒ ⇒ ⇒ **只有新增漂移才红**（变异测试 5/5）⇒ ⇒ ⇒ **⇒ 「本层只登记事实、不落码」这句对 ①~③ 仍成立、对 ④ 已过期** ⇒ ⇒ 根治三条方向（① 按标题/锚点定位 ② 指针升级为「行号 ＋ 锚点」③ 指针复位脚本）仍待做 ⇒ ⇒ **落点全在共享面 ⇒ 合并窗口统一做**（已进 M 清单 **M-9**）。〕
 
 ### 4.19.9 ⚫🔴 本层第四次自查订正（2026-10-30 16:9x · G4 lane）—— **🔴【本节已被 §4.19.10 反转】它的核心前提被真源探针实测推翻**
 
@@ -5777,9 +5777,9 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 
 ⇒ ⇒ **「CPU 降载 Filter 会拒掉抓取请求」这个担忧不成立**：它是 `@Component` ⇒ 靠组件扫描 ⇒ 而**各 rpc 域的 `@SpringBootApplication` 刻意不扫 `com.rag.common`**（`article-rpc` 的 Application 注释点名 `HttpMiddlewareFilter` 作为「不扫」的理由）⇒ ⇒ **不会成为候选** ⇒ ⇒ 且**即便主 context 变 servlet，实测名单里也没有它**。
 
-⇒ ⇒ **真正会激活的只有 2 条**（它们在 `AutoConfiguration.imports` 里 ⇒ **不靠扫描**）：`GoStylePathNormalizingAutoConfiguration`（→ 路径归一 Filter）＋ `GoStyleJsonContentTypeAdvice`（→ `ResponseBodyAdvice`）。
+⇒ ⇒ **真正会激活的只有 2 条**（它们在 `AutoConfiguration.imports` 里 ⇒ **不靠扫描**）：`GoStylePathNormalizingAutoConfiguration`（→ 路径归一 Filter）＋ `GoStyleJsonContentTypeAdvice`（→ `ResponseBodyAdvice`）。〔**【订正 · 见 §4.19.13】本句是**第六轮当时的覆盖面** ⇒ ⇒ 第九次订正实测：自动配置面其实有 **3 个**（**漏了** `GoStyleBreakerRouteTemplateAutoConfiguration` → `GoStyleRouteTemplateResolver`）⇒ ⇒ 且**扫描面 10 个此前毫无自保**（只靠「域侧不扫 `com.rag.common`」这道约定）⇒ ⇒ ⇒ **现全部 13 个挂 `@ConditionalOnApiSide`**。〕
 
-**落码（已在本 lane 写权面内完成）**：给这 2 条加 **`rag.side=api` 限定**（`@ConditionalOnProperty(name = "rag.side", havingValue = "api", matchIfMissing = true)`）⇒ ⇒ **默认 `api` ⇒ 零回归**；⇒ ⇒ **rpc 域设 `rag.side=rpc` 即不挂** ⇒ ⇒ 与 Go 同形。
+**落码（已在本 lane 写权面内完成）**：给这 2 条加 **`rag.side=api` 限定**（`@ConditionalOnProperty(name = "rag.side", havingValue = "api", matchIfMissing = true)`）⇒ ⇒ **默认 `api` ⇒ 零回归**；⇒ ⇒ **rpc 域设 `rag.side=rpc` 即不挂** ⇒ ⇒ 与 Go 同形。〔**【订正 · 见 §4.19.13】覆盖面已从 2 个扩到 13 个** ⇒ ⇒ 且「api 侧中间件」这个语义已收成**单一真源注解** `com.rag.common.web.ConditionalOnApiSide`（元注解形式）⇒ ⇒ 守门已从 3 格扩到 **5 格**（断言**全部 13 个** Bean）⇒ ⇒ 详见 §4.19.13。〕
 
 ⇒ ⇒ **守门**：`GoStyleApiSideMiddlewareActivationGateTest`（4 格 = 上述四形态，真起进程）。
 ⇒ ⇒ **⚠️ 本轮被守门抓到的自己的错**：第一版写成 `@ConditionalOnProperty(prefix = "rag.side", name = "side", …)` ⇒ ⇒ **prefix 与 name 会被 `.` 连接 ⇒ 属性名变成 `rag.side.side`** ⇒ ⇒ 条件恒成立（形态④ 红）⇒ ⇒ **判据有牙的自证**。
@@ -5788,8 +5788,8 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 
 | 事项 | 落点 | 归属 |
 |---|---|---|
-| 各 rpc 域的 `application.yml` 加 `rag.side=rpc` | 各域 yml | **合并收口执行者**（合并窗口统一加） |
-| 「rpc 域必须继续不扫 `com.rag.common`」的护栏（跨域静态检查） | `tools/difftest/check-*.py` | **合并收口执行者**（`tools/**` 不在 G4 白名单） |
+| 各 rpc 域的 `application.yml` 加 `rag.side=rpc` | 各域 yml（**域内文件**） | **各域 lane（G1 / G2 / G3）**（【订正 · 见 §4.19.13】原写「合并收口执行者」**会死锁** ⇒ ⇒ 域内 yml **不在**合并收口执行者的写权面（机器口径：`tools/difftest/check-wave-lane-ownership.py` 断言 2 的共享面清单里**没有**域内 yml）⇒ ⇒ 合并收口执行者**不能写**、本 lane 也不能写 ⇒ ⇒ **只能由各域 lane 加**；已由合并收口执行者分别派给 G1/G2/G3） |
+| 「rpc 域必须继续不扫 `com.rag.common`」的护栏（跨域静态检查） | `tools/difftest/check-*.py` | **合并收口执行者**（`tools/**` 不在 G4 白名单）（【订正 · 见 §4.19.13】第九次订正后 **`rag.side=rpc` 已能挡住全部 13 个 api 侧 web Bean** ⇒ ⇒ 这条护栏从「唯一防线」降为「**双保险**」⇒ ⇒ 但仍值得做 ⇒ ⇒ 归属不变） |
 | `check-plaintext400-headers.sh` 的陈旧注释 ＋ 全 SKIP 仍 `exit 0` 的假绿 | `tools/difftest/**` | **合并收口执行者** |
 | `check-deadline-downstream.py` 的 `outgoing_carrier` 口径 ＋ `mutate-deadline-downstream.py:56` 的 M1 锚点失效 | `tools/difftest/**` | **合并收口执行者**（须与代码同批） |
 | 派生层产物（`docs/DRIFT/_cross/stage1-derivation.md` / `.tsv`）随本节重新生成 | `docs/DRIFT/_cross/**` | **合并收口执行者**（`docs/DRIFT/_cross/**` 不在 G4 写权面） |
@@ -5837,3 +5837,63 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 - **`slow_handler` 对照组的作用**：它证明「1015 是主体形态」不是因为探针写错了 ⇒ ⇒ 但它**不**证明「只有 1015」。
 
 （**本节编号：§4.19.12** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
+
+### 共享层 · api 侧中间件的覆盖面收口（第九次订正 · 2026-10-30 · G4 lane）
+
+> **本节追加在文件末尾 ⇒ 零行位移 ⇒ 不影响 `_unresolved.md` 与 `grading/*` 的硬编码行号指针。**
+> **本节不写状态标记、不以编号 token 作标题 ⇒ 不触发派生层自噬。**
+
+#### 一 · 触发：合并收口执行者的反馈（三条）＋ 本层逐条复核
+
+
+> 📌 **本轮这条合并收口执行者的反馈，在其 M 清单里记作 **M-7**（M-7 反馈轮）** ⇒ ⇒ 本节即 M-7 的落码与订正记录。
+- ① **「形态④ 只断言了 2 个类，却下了『api 侧中间件不注册』的全局结论 ⇒ 判据覆盖面 < 结论覆盖面 ⇒ 假绿灯」** ⇒ ⇒ **成立**；
+- ② **「其余 12 个 web Bean 仍不受门管 ⇒ 补载体后它们在 rpc 域全部活起来」** ⇒ ⇒ **部分成立**：本层实测（按**装配面**分类，剥注释后读真注解）⇒ ⇒ 真正会**自动**激活的是**自动配置面**那 3 个（其中 2 个已受管、**第 3 个漏了**）⇒ ⇒ 而**扫描面那 10 个在 rpc 域根本不会被扫描注册**（10 个 rpc 域的 `@SpringBootApplication` 实参实测均为空 ⇒ 都不扫 `com.rag.common`）⇒ ⇒ ⇒ 它们的问题不是「不受门管」，而是「**毫无自保**」⇒ ⇒ **这个区别决定了修法不同**；
+- ③ **「台账把域侧 yml 那一行派给合并收口执行者 ⇒ 会死锁」** ⇒ ⇒ **成立**（域内 yml 不在其写权面 ⇒ ⇒ 机器口径 `tools/difftest/check-wave-lane-ownership.py` 断言 2 的共享面清单里**没有**域内 yml）⇒ ⇒ 已就地改（`:5791` / `:5792`）。
+
+#### 二 · 13 个 api 侧 web Bean ＝ 两个装配面（本层实测分类）
+
+| 装配面 | 成员 | 在 rpc 域会不会活 | 依据 |
+|---|---|---|---|
+| **自动配置面**（`AutoConfiguration.imports` ⇒ 不靠扫描） | `GoStylePathNormalizingFilter` · `GoStyleJsonContentTypeAdvice` · `GoStyleRouteTemplateResolver` | **会** —— 只要该进程是 servlet 形态（载体补上 HTTP 容器后即是） | 自动配置清单 ＋ `@ConditionalOnWebApplication(SERVLET)` |
+| **扫描面**（`@Component` / `@Configuration` ⇒ 靠组件扫描） | `GoStyleCpuSheddingFilter` · `GoStyleMaxConnsFilter` · `GoStyleMaxBytesFilter` · `GoStyleBreakerFilter` · `GoStyleTraceparentFilter` · `GoStyleTomcatParameterLimitCustomizer` · `HttpMiddlewareFilter` · `GoStyleFormValueLimitInterceptor` · `GoStyleFormLimitWebMvcConfig` · `GoStyleJsonBodyConverterConfig` | 此前**不会** —— 但依据是**域侧约定**（10 个 rpc 域的 Application 实测都不扫 `com.rag.common`），**不是这些类自己的条件** | 实测 10 个 rpc 域的 `@SpringBootApplication` |
+
+⇒ ⇒ **两条结论**：① 自动配置面**原来漏了 1 个**（`GoStyleBreakerRouteTemplateAutoConfiguration` → `GoStyleRouteTemplateResolver`）⇒ ⇒ **已补**；② **扫描面那 10 个此前毫无自保** ⇒ ⇒ 一旦某个 rpc 域把 `com.rag.common` 加进 `scanBasePackages`，它们会**全部活起来**，而 `rag.side=rpc` **救不了**（它们不看那个属性）⇒ ⇒ ⇒ **护栏必须从「域侧自觉」收回「共享层自己兜住」**。
+
+#### 三 · 落码：`@ConditionalOnApiSide` 单一真源 ＋ 13 个类全挂
+
+- **新建** `com.rag.common.web.ConditionalOnApiSide`（**元注解**形式：`@ConditionalOnProperty(name = "rag.side", havingValue = "api", matchIfMissing = true)`）⇒ ⇒ 「api 侧」这个语义**收成一处** ⇒ ⇒ 13 个类各挂一行 ⇒ ⇒ **Go 出处与语义等价论证只写一遍**（Go 的 rpc 侧 = `zrpc.MustNewServer` ⇒ 零 rest 中间件；`rest.With*` 全在 api 侧）。
+- **13 个类**：自动配置面 3 个 ＋ 扫描面 10 个（上表逐个点名）⇒ ⇒ 上一版的 2 个裸 `@ConditionalOnProperty` 已**收敛**到该注解 ⇒ ⇒ 全仓 `service/common` 里**再无第二处** `rag.side` 条件 ⇒ ⇒ **单一真源**。
+- ⚠️ **`matchIfMissing=true` 保留**（合并收口执行者认可）⇒ ⇒ **默认 = api** ⇒ ⇒ **10 个 api 域零改动**（实测全仓 yml **无人设** `rag.side`）⇒ ⇒ 域波不受影响；⇒ ⇒ **rpc 域必须显式写 `rag.side: rpc`**（域侧 yml ⇒ **各域 lane 加**，见 `:5791`）。
+
+#### 四 · 守门：5 形态 ＋ 双向变异（`GoStyleApiSideMiddlewareActivationGateTest`）
+
+| 形态 | 主 context | 扫描面 10 个是否显式 `@Import` | `rag.side` | 自动配置面 3 个 | 扫描面 10 个 |
+|---|---|---|---|---|---|
+| ① | non-web（rpc 现状） | 否 | — | 全不在 | 全不在 |
+| ② | servlet | 否 | 未设 | **全在** | 全不在 |
+| ③ | servlet | **是** | 未设 | **全在** | **全在** |
+| ④ | servlet | 否 | **rpc** | 全不在 | 全不在 |
+| ⑤ | servlet | **是** | **rpc** | 全不在 | **全不在** |
+
+⇒ ⇒ **形态③ ⇒ 形态⑤ 只差 `rag.side` 一个变量** ⇒ ⇒ 差异被隔离到该变量 ⇒ ⇒ **证明 `rag.side=rpc` 真的挡住了扫描面** ⇒ ⇒ 同时是**元注解真生效**的运行证据（AGENTS.md §3.3：注解存在 ≠ 机制生效）。
+⇒ ⇒ **双向变异**（各还原后 `diff -q` 通过）：**M1**（拿掉扫描面一类的限定）⇒ **形态⑤ 红**；**M2**（拿掉自动配置面一类的限定）⇒ **形态④ ＋ 形态⑤ 红** ⇒ ⇒ **两条不重叠** ⇒ ⇒ 守门对**两个装配面**都有牙。
+
+#### 五 · 统计口径（本轮踩到的一个新坑）
+
+- 本轮全量回归的 **maven 汇总** = **437**，而按 `TEST-*.xml` 的 `tests=` 全量求和 = **441** ⇒ ⇒ **差 4 条** ⇒ ⇒ 逐个查：**多出来的 4 条来自 `surefire-reports/` 里的陈旧报告**（`TempDiagnoseTest` 1 条 @17:24 ＋ `GoStyleApiSideMiddlewareActivationProbeTest` 3 条 @17:41 —— 这两个**源文件都已不存在**）⇒ ⇒ ⇒ **⇒ 「按 XML 统计」本身还不够 ⇒ 必须只算本次运行写出的报告**（或先 `mvn clean`）⇒ ⇒ 否则**被删掉的测试类的历史报告会留在目录里、把总数永久抬高** ⇒ ⇒ **⇒ 本条的权威数 = 437**（clean 回归复核过）⇒ ⇒ 与已知那个「`.txt` 写 0 / XML 写 21」是**同族但方向相反**的坑（那一个少算，这一个多算）。
+
+#### 六 · 指针计数口径订正 ＋ 域侧归属订正（均已就地改）
+
+- **指针计数**：`:5418` 的「**1112 处**」是**旧口径 ＋ 旧时点**的数 ⇒ ⇒ 现在任何变体都复现不出（`PTR_RE` = 1563 · 只算 `.md` = 472 · 派生层自己的 `DOC_PTR_RE` = **385**）⇒ ⇒ **已订正为 385 并写明口径**（`_unresolved.md` ＋ `_cross/grading/**` 这 35 个文件里的 `DOC_PTR_RE` 命中数）⇒ ⇒ ⚠️ **与全仓口径不可比**（合并收口执行者报 3308 · 本层实测 3309 ⇒ ⇒ **口径仍未对齐**）⇒ ⇒ ⇒ **两个数不互相引用为佐证** ⇒ ⇒ ⇒ ⚠️ **但本条的结论不依赖那个数**（「仓内当前没有已确认被打歪的指针」）⇒ ⇒ **数字订正不改变结论**。
+- **棘轮守门已落**：`:5419` 的第 ④ 条方向已由 `tools/ledger-derive/check-pointer-consistency.py`（commit `83969be7`）覆盖（零基线 ＋ 存量 237 条例外 ＋ 只有新增漂移才红）⇒ ⇒ 「本层只登记事实、不落码」这句对 ①~③ 仍成立、对 ④ 已过期；根治三条方向仍待做（已进 M 清单 **M-9**）。
+- **域侧归属**：`:5791` 的「各 rpc 域 yml 加 `rag.side: rpc`」由「合并收口执行者」改为「**各域 lane（G1 / G2 / G3）**」⇒ ⇒ 原写法**会死锁**（域内 yml 谁都写不了）⇒ ⇒ `:5792` 的「rpc 域不扫 `com.rag.common`」护栏**归属不变**，但因本次扩门**从「唯一防线」降为「双保险」**。
+
+#### 七 · 诚实边界
+
+- 本轮**仍未跑任何 Go↔RAG 双侧活体对拍**；⇒ 「与 Go 同形」在 api 侧中间件这一格 = **两侧的机制面同形**（Go 的 rpc 侧 `zrpc.MustNewServer` ⇒ 零 rest 中间件），**不是**两侧跑起来逐字节对拍出来的。
+- 守门用**合成应用**复刻 rpc 形态 ⇒ ⇒ **不覆盖**「某个 rpc 域真把 `com.rag.common` 加进 `scanBasePackages`」时的逐类行为 ⇒ ⇒ 但那种情形下 `rag.side=rpc` **仍会挡住全部 13 个**（形态⑤ 即其等价形态）⇒ ⇒ ⇒ **护栏不再依赖域侧自觉**。
+- 形态③/⑤ 用**显式 `@Import`** 代表「扫描面」⇒ ⇒ 它与组件扫描**等价**（两者都产生同一条 Bean 定义 ⇒ 都走同一套 `@Conditional` 判定）。
+- **载体形态本身未定**：本轮只保证「**如果** rpc 域走 servlet 载体 ⇒ 它必须显式设 `rag.side: rpc`」⇒ ⇒ 载体选型（独立 management 端口 vs 主应用变 servlet）**仍是 P2 的运维决策**，未落。
+
+（**本节编号：§4.19.13** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）

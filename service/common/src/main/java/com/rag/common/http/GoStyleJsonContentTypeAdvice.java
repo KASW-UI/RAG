@@ -1,5 +1,6 @@
 package com.rag.common.http;
 
+import com.rag.common.web.ConditionalOnApiSide;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
@@ -90,14 +91,14 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
  * ＋ 显式 {@code text/plain}）<b>两条都不满足</b> ⇒ <b>不会被误伤</b>。
  *
  * @see GoStyleJsonContentTypeCharsetTomcatTest 真 Tomcat 守门（裸 socket 逐字节比对）
+ * <p>⚠️ <b>2026-10-30 · G4 lane：本类属 api 侧 rest 中间件 ⇒ 已挂 {@link com.rag.common.web.ConditionalOnApiSide}</b>
+ * ⇒ ⇒ 此前「rpc 域不注册本类」的依据是<b>域侧不扫 {@code com.rag.common} 这道约定</b>（不是本类的条件）
+ * ⇒ ⇒ 现由共享层自己兜住 ⇒ ⇒ Go 出处与语义等价论证见该注解。
  */
 @AutoConfiguration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-@ConditionalOnProperty(
-        name = "rag.side",
-        havingValue = "api",
-        matchIfMissing = true)
 @RestControllerAdvice
+@ConditionalOnApiSide
 public class GoStyleJsonContentTypeAdvice implements ResponseBodyAdvice<Object> {
 
     /**

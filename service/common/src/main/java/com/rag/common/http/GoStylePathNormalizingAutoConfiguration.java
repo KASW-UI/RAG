@@ -1,5 +1,6 @@
 package com.rag.common.http;
 
+import com.rag.common.web.ConditionalOnApiSide;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -47,13 +48,13 @@ import org.springframework.context.annotation.Bean;
  * ⇒ ⇒ 且 <b>类名（simple name）与 Bean 名都与旧副本一致</b>
  * ⇒ ⇒ article-api 既有的「精确 9 项 Filter 链序」守门（{@code ArticleApiAssemblyWiringTest}）
  * <b>不需要任何改动</b>就继续成立。
+ * <p>⚠️ <b>2026-10-30 · G4 lane：本类属 api 侧 rest 中间件 ⇒ 已挂 {@link com.rag.common.web.ConditionalOnApiSide}</b>
+ * ⇒ ⇒ 此前「rpc 域不注册本类」的依据是<b>域侧不扫 {@code com.rag.common} 这道约定</b>（不是本类的条件）
+ * ⇒ ⇒ 现由共享层自己兜住 ⇒ ⇒ Go 出处与语义等价论证见该注解。
  */
 @AutoConfiguration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
-@ConditionalOnProperty(
-        name = "rag.side",
-        havingValue = "api",
-        matchIfMissing = true)
+@ConditionalOnApiSide
 public class GoStylePathNormalizingAutoConfiguration {
 
     /**
