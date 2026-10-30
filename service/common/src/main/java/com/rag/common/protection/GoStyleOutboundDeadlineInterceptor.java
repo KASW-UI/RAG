@@ -74,6 +74,14 @@ import java.util.concurrent.TimeUnit;
  * ⇒ ⇒ <b>装配面</b>见 {@link GoStyleOutboundDeadlineConfiguration}。
  * ⚠️ <b>Bean 存在 ≠ 机制生效</b>（AGENTS.md §3.3）⇒ 锁定用例 =
  * {@code GoStyleOutboundDeadlineRpcAssemblyTest}（断言它在 starter 自己的 registry 里）。
+ * <p>🔴 <b>2026-10-30 订正（第十一次）·「registry 里有」仍只是<b>装配链的推断</b></b>：
+ * devh 把全局拦截器接在 <b>channel</b> 上 ⇒ ⇒ 凡建在 devh channel 上的 stub
+ * —— <b>哪怕是「裸」写法、不调 {@code applyTo}</b> —— 都经过拦截器链
+ * ⇒ ⇒ 「<b>域侧不用改一行</b>」这条才是真的。
+ * ⇒ ⇒ 因此补一条<b>运行期</b>锁定用例 {@code GoStyleDevhOutboundDeadlineAssemblyGateTest}
+ * （真 devh 上下文 ＋ 真 {@code @GrpcClient} stub ＋ <b>不调 {@code applyTo}</b>
+ * ⇒ ⇒ 断言出向调用在请求预算处失败；负控＝裸 channel 挂满 ⇒ ⇒ 变异＝去掉
+ * {@code @GrpcGlobalClientInterceptor} ⇒ ⇒ 该守门<b>精确转红</b>）。
  *
  * <h2>效力边界（诚实声明）</h2>
  * <ol>
