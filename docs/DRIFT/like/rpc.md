@@ -2782,12 +2782,61 @@ RAG 侧**实测**（2026-10-30 20:07 · 真 fat jar ＋ 不设 `POSTGRES_PASSWOR
 **本轮只读实测（2026-10-30 · 未把 `tools/` 文件合入本分支 —— `tools/**` 是 G4 写权面）**
 
 - 守门在本分支上 **EXIT=0**：结构面 ✅（10 个 rpc 域都没有扫 `com.rag.common`）；
-  形态面 ✅（`like-rpc` / `message-rpc` 已显式 `rag.side: rpc` ⇒ 白名单那两条已 stale ⇒ 可剪枝）。
+  形态面 ✅（`like-rpc` / `message-rpc` 已显式 `rag.side: rpc`）。【订正 · 见文末「主干实况复判」小节】：「白名单那两条已 stale ⇒ 可剪枝」这个措辞**不准** ⇒ ⇒ 那两条本就是**假命中**（守门漏剥 pom 注释）⇒ ⇒ 已由主干 `a0d6ef13` 修判据并把白名单 **5→1**。
 - 🔴 **新发现（共享面缺口 · 登记给 G4）**：守门的 `_module_has_web_starter()` 是**纯文本正则**、**不剥 XML 注释**
   ⇒ ⇒ 它把 pom **注释里**那句「本模块不引 `spring-boot-starter-web`」当成了**真依赖**
   ⇒ ⇒ `task-rpc`（`service/task/task-rpc/pom.xml:57` 注释）被**误判**成 servlet 形态
   ⇒ ⇒ 白名单里「task-rpc · G2 面 · 已派单（载体波次内一并加）」那条**前提不成立**
   ⇒ ⇒ **task-rpc 不需要 `rag.side: rpc`**（它**无 servlet 容器** ⇒ 那一行是**死配置**）
-  ⇒ ⇒ **本域不给 task-rpc 加这一行**（不写死配置、不制造「配置存在但无载体」的假象）。
+  ⇒ ⇒ **本域不给 task-rpc 加这一行**（不写死配置、不制造「配置存在但无载体」的假象）。【订正 · 见文末「主干实况复判」小节】：**立场不变**，且已由主干修好的守门 ＋ 依赖树实测**双重印证**。
 - ⇒ ⇒ 修法在**共享面**：`_module_has_web_starter()` 应先剥 XML 注释
-  （与该脚本对 Java 侧 `strip_comments()` 的做法**对称**）⇒ 修后 `task-rpc` 形态面自动不命中 ⇒ 白名单那条即可剪枝。
+  （与该脚本对 Java 侧 `strip_comments()` 的做法**对称**）⇒ 修后 `task-rpc` 形态面自动不命中 ⇒ 白名单那条即可剪枝。【订正 · 见文末「主干实况复判」小节】：**该修法已落** —— 主干 `a0d6ef13`「跨域静态门 pom 判定漏剥 XML 注释 ⇒ 假违例 + 假豁免 + 派错工单 ⇒ 修判据 + 剪白名单 5→1」。
+
+### 【复判 · 2026-10-30 晚些时候 · G2 lane】主干实况复判：三域零活偏离 ⇒ **不需要加急 cherry-pick**
+
+**触发**：合并收口执行者 2026-10-30 晚些时候发来**加急**派单：「主干上 like/message/task-rpc 三个域
+**今天就挂着 api 侧中间件** ⇒ 请单独提交一笔只含 `rag.side: rpc` 的 commit」。
+
+**复判结论**：该前提**已被主干自己落地的修复推翻** ⇒ ⇒ **主干上这三个域零活偏离**
+⇒ ⇒ **不需要加急 cherry-pick**（三条依据，逐条带证据）。
+
+**依据一 · 主干的守门已修好（`a0d6ef13`）**
+
+- 主干 HEAD = `a0d6ef13`「fix(守门): 跨域静态门 pom 判定漏剥 XML 注释 ⇒ 假违例 + 假豁免 + 派错工单
+  ⇒ 修判据 + 剪白名单 5→1」⇒ ⇒ **本节上文那条「新发现（共享面缺口）」已经落地修掉** ⇒ ⇒ 白名单 **5→1**。
+- 在该主干树上实跑 `tools/difftest/check-rpc-common-scan-exclusion.py` ⇒ **EXIT=0**；
+  形态面只剩 **1 条** = **follow-rpc**（**真活偏离** · 载体 2026-10-29 已落主干 ⇒ 它**真**有 web starter
+  ⇒ 13 个 api 侧类会挂到 16065 观测口 ⇒ **G1 面**，不在本域写权面）。
+  ⇒ ⇒ **like-rpc / message-rpc / task-rpc 在修好的守门下既不是「形态面违例」，也不是「白名单命中」**。
+
+**依据二 · 依赖树实测（主干真实树，不是 pom 文本）**
+
+- 主干 `service/task/task-rpc`：`mvn -o -pl service/task/task-rpc dependency:tree` ⇒ web 相关**只有**
+  `org.springframework.boot:spring-boot-web-server:4.0.8` ⇒ **无** `spring-boot-starter-web` ·
+  **无** `spring-boot-starter-tomcat` · **无** `tomcat-embed-core` · **无** `jakarta.servlet-api`。
+- 主干 `service/like/like-rpc` · `service/message/message-rpc`：同样**只有** `spring-boot-web-server`
+  （另有 `tomcat-embed-el` = **EL 表达式库**，**不含 servlet API** ⇒ 不构成容器）。
+- ⇒ ⇒ **运行时类路径上没有 servlet-api** ⇒ ⇒ Boot 的 `WebApplicationType.deduceFromClasspath()` 判 **NONE**
+  ⇒ ⇒ 那 13 个 api 侧 web 类**全部带 `@ConditionalOnWebApplication(SERVLET)`** ⇒ ⇒ **一个都不可能注册**
+  ⇒ ⇒ **「api 侧中间件挂在这些 rpc 进程上」这件事在主干上不成立**。
+- 对照：`favorite-rpc` / `comment-rpc` 之所以需要 `web-application-type: none`，正是因为它们**有**
+  `jakarta.servlet`（provided 作用域）⇒ Boot 会误判 SERVLET ⇒ **那才是真需要挡的形态**。
+
+**依据三 · 本域的载体与声明是**同一笔** ⇒ ⇒ 没有「中间窗口」**
+
+- 本分支 `48e48b93` 里，`like-rpc` / `message-rpc` 的 **`spring-boot-starter-web`（载体）
+  与 `rag: side: rpc`（形态声明）在同一笔提交** ⇒ ⇒ 它们成为 servlet 形态的那一刻，声明**同时**到位
+  ⇒ ⇒ **不需要提前 cherry-pick 一笔声明**。
+- 反过来：单独 cherry-pick 一笔声明到主干 ⇒ ① 当前**不生效**（那三域在主干上没有 servlet 容器）；
+  ② 本分支那笔合并时会造成 **add/add** ⇒ ⇒ **零功能收益 ＋ 合并摩擦** ⇒ ⇒ **不做**。
+- `task-rpc`：**不需要** `rag.side: rpc` —— 它**永不是** servlet 形态（Go 侧 `task-rpc` 无观测端口）
+  ⇒ ⇒ 那一行是**死配置** ⇒ ⇒ **本域不给它加**（立场不变，已由依据一、二**双重印证**）。
+
+**⇒ ⇒ 对合并收口执行者的正式答复**：加急派单的前提（主干三域今天就挂着 api 侧中间件）
+**已被主干自己的 `a0d6ef13` 修复推翻** ⇒ ⇒ **不产出**那笔 cherry-pick commit；**本域不需要任何新代码**。
+⇒ ⇒ 唯一剩下的**真活偏离**是 **follow-rpc**（G1 面）⇒ ⇒ 白名单那 1 条是**如实登记的已知未修项**，不是 G2 的活。
+
+**本节与上文的关系**：上文三处措辞已**就地**加【订正】括注（零行位移）——
+①「白名单那两条已 stale ⇒ 可剪枝」⇒ 那两条本就是**假命中**，已由 `a0d6ef13` 剪掉；
+②「task-rpc 不需要 `rag.side: rpc`」⇒ **立场不变**，现由依据一、二**双重印证**；
+③「修法在共享面：`_module_has_web_starter()` 应先剥 XML 注释」⇒ **该修法已落**（`a0d6ef13`）。
