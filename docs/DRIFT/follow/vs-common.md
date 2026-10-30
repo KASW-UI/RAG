@@ -1530,3 +1530,29 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时（`service/users/user/
 - `docs/DRIFT/follow/rpc.md:273` 的「8 个 rpc / 0/8」⇒ 订正为「**10 个 rpc / 载体层 1/10 有 / 9/10 无**」＋ 补两层口径与判据来源。
 - `docs/DRIFT/follow/stage1-admission.md:79` 的「`favorite-rpc` / `message-rpc` / `like-rpc` / `user-user-rpc` **均已补上** ⇒ 出口已开」⇒ **被本轮实测证伪**（这 4 个模块的依赖树里都没有 web starter/tomcat）⇒ 已订正。
 - ✅ **users 域 `user/rpc.md:280` 的「指标可抓取性」改判（OBSERVABLE DIFFERENCE）成立且更强** —— 已补载体层证据（`user-rpc` 依赖树只有 actuator、无 tomcat）⇒ ⇒ **不是 users 域孤例，是 9/10 的通例** ⇒ ⇒ **该改判不撤**。
+
+### 🔴 订正小节：follow-rpc 的 `rag.side: rpc` —— 这不是防御性的一行，**它现在就是闸门**（2026-10-30 · G1 lane）
+
+> ⚠️ **本小节标题刻意不含任何编号 token** ⇒ 派生层不把它当条目候选 ⇒ 也不劫持任何既有编号的 `domain` / `wave` / `basis`。
+
+**一、为什么 follow 域这一行与另外两个 rpc 域不同（关键区别）**
+
+- `DRIFT-FOLLOW-006` 的载体 **2026-10-29 就落地了**（commit `573cf08f`）：`service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web`（给 Actuator 一个 servlet 载体）＋ `…/application.yml:141-142` = `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}`（与 Go 侧 `follow.yaml:23` = `DevServer.Port: 16065` **一字不差**）＋ `:123` = `register-enabled: false`（关掉 Nacos 自动注册 ⇒ 防「同一服务名下出现两个端口的实例」）。
+- ⇒ ⇒ **本模块的主上下文就是 servlet web 应用** ⇒ ⇒ 共享层那 13 个 api 侧 web Bean **会挂到 16065 的抓取口上**（主干上 `@ConditionalOnApiSide` 的 `matchIfMissing=true` ⇒ 没写 `rag.side` 就按 api 侧注册）。
+- ⇒ ⇒ 其中 **`GoStyleCpuSheddingFilter` 在 CPU 高负载时会拒掉抓取请求** ⇒ ⇒ 而 Go 的 rpc 域**一个 rest 中间件都没挂**（全部 `zrpc.MustNewServer`）⇒ ⇒ **与 Go 不同形** ⇒ ⇒ ⇒ 即：**载体的目的（抓得到 `/actuator/prometheus`）会被自己域的中间件挡掉**。
+
+**二、落码**
+
+- `service/follow/follow-rpc/src/main/resources/application.yml` ⇒ 加顶层 `rag:` / `side: rpc`。
+- **Go 出处**：Go 侧 rpc 进程零 rest 中间件 ⇒ ⇒ RAG 的 rpc 域不得挂 Go 侧没有的中间件。
+- **机制**：共享层 `@ConditionalOnApiSide`（`@ConditionalOnProperty(name="rag.side", havingValue="api", matchIfMissing=true)`）挡住 api 侧那 **13 个类**（11 个带 `@ConditionalOnWebApplication(SERVLET)` ＋ `HttpMiddlewareFilter`（无条件 `@Component`）＋ `GoStyleJsonBodyConverterConfig`（`@Configuration`）—— 清单见 users 域同款小节，两域共用同一份）⇒ ⇒ 其中**会「拒请求」的只有 `GoStyleCpuSheddingFilter`（CPU 高负载）与 `GoStyleMaxConnsFilter`（连接数超限）**⇒ ⇒ **默认 = api 侧** ⇒ ⇒ rpc 域必须显式写这一行。
+
+**三、诚实边界（本轮不写「已封住」）**
+
+- ⚠️ **共享层的 `ConditionalOnApiSide` 在本分支基线上尚未落库** ⇒ ⇒ **本行在共享层那笔进来之前是死配置**（没有类读它）⇒ ⇒ 效果随共享层那笔生效 ⇒ ⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」。
+- ⚠️ **运行期守门本轮未落**：收口执行者要求配一条**运行期**断言（起 rpc 形态的 context ＋ `rag.side=rpc` ⇒ ⇒ 断言那 13 个**带门的类**不在容器里）⇒ ⇒ **这条断言在本分支基线上必然红**（条件注解类还没进我的树 ⇒ 那 13 个 Bean 此刻不受任何保护 ⇒ 断言「不在容器里」= 断言「门生效了」）⇒ ⇒ 写它只会得到一个**恒红**的守门 ⇒ ⇒ **等共享层那笔进来后由域侧补**（该守门要断的 13 个类名已写在上面第二段里）。
+
+**四、与既有结论的关系**
+
+- 本节**不改** `DRIFT-FOLLOW-006` / `S1-FOLLOW-001` 的既有结论（载体已落地、端口与 Go 一字不差、双侧 series 集合逐条一致 —— 那是**指标面**的结论）。
+- 本节说的是**另一个面**：**载体上挂着的中间件集合** ⇒ ⇒ Go 的 rpc 域零中间件 ⇒ ⇒ RAG 的观测口上**曾经**会多出 13 个 ⇒ ⇒ 这一行就是用来对齐**这个面**的 ⇒ ⇒ **两条不矛盾，是两个面**。
