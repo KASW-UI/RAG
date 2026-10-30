@@ -19,6 +19,7 @@
 # 格式：`<编号A>	<域A>	<编号B>	<域B>	<关系>	<来源>`
 #      关系 ∈ `同编号跨域`（A 与 B 同号）/ `别名同源`（A 与 B 不同号，长/短编号别名）
 
+ADJ-01	users	V-002	users	别名同源	blindspot:_samesrc-blindspot.md:19 ← DRIFT/users/user/rpc.md:995
 C-3	global	C-3	comment	同编号跨域	W19:_samesrc-W19.md:16 ← DRIFT/comment/vs-common.md:59
 CF-001	common	DRIFT-CF-001	common	别名同源	W16:_samesrc-W16.md:20 ← DRIFT/common/alignment-2026-10-23.md:375
 CF-002	common	DRIFT-CF-002	common	别名同源	W16:_samesrc-W16.md:21 ← DRIFT/common/alignment-2026-10-23.md:376
@@ -31,6 +32,7 @@ CF-014	common	DRIFT-CF-014	common	别名同源	W16:_samesrc-W16.md:27 ← DRIFT/
 CF-015	common	DRIFT-CF-015	common	别名同源	W16:_samesrc-W16.md:28 ← DRIFT/common/alignment-2026-10-23.md:391
 CF-017	common	DRIFT-CF-017	common	别名同源	W16:_samesrc-W16.md:29 ← DRIFT/common/alignment-2026-10-23.md:392
 DRIFT-018	users	DRIFT-018	global	同编号跨域	W18:_samesrc-W18.md:16 ← DRIFT/global/lanes/L9-interrupt.md:260
+DRIFT-ARPC-008	users	ADJ-01	users	别名同源	blindspot:_samesrc-blindspot.md:17 ← DRIFT/users/_shared.md:965
 DRIFT-CF-001	common	CF-001	common	别名同源	W15:_samesrc-W15.md:26 ← DRIFT/common/alignment-2026-10-23.md:834
 DRIFT-CF-002	common	CF-002	common	别名同源	W15:_samesrc-W15.md:27 ← DRIFT/common/alignment-2026-10-23.md:835
 DRIFT-CF-003	common	CF-003	common	别名同源	W15:_samesrc-W15.md:28 ← DRIFT/common/alignment-2026-10-23.md:836
@@ -115,8 +117,12 @@ S1-FOLLOW-009	users	S1-FOLLOW-009	follow	同编号跨域	W18:_samesrc-W18.md:8 �
 S1-FOLLOW-013	follow	S1-FOLLOW-013	users	同编号跨域	W21:_samesrc-W21.md:11 ← DRIFT/users/stage1-admission.md:530
 SD-2026-10-24-10	like	SD-2026-10-24-10	global	同编号跨域	W24:_samesrc-W24.md:6 ← DRIFT/global/common-tails.md:547
 SD-2026-10-25-CAND-10	hot	SD-2026-10-25-CAND-10	global	同编号跨域	W23:_samesrc-W23.md:8 ← DRIFT/global/lanes/L5-signoff.md:245
+SD-2026-10-25-CAND-15	global	T-12	global	别名同源	blindspot:_samesrc-blindspot.md:20 ← DRIFT/global/common-tails.md:519
+SD-2026-10-25-CAND-17	users	ADJ-01	users	别名同源	blindspot:_samesrc-blindspot.md:18 ← DRIFT/users/_shared.md:965
 SD-HOT-API-006	global	SD-HOT-API-006	hot	同编号跨域	W19:_samesrc-W19.md:27 ← Intentional_Deviations/hot/api.md:189
 SF-002	common	DRIFT-SF-002	common	别名同源	W16:_samesrc-W16.md:35 ← DRIFT/common/alignment-2026-10-23.md:421
 SF-003	common	DRIFT-SF-003	common	别名同源	W16:_samesrc-W16.md:36 ← DRIFT/common/alignment-2026-10-23.md:422
+T-12	global	SD-2026-10-25-CAND-15	global	别名同源	blindspot:_samesrc-blindspot.md:21 ← Intentional_Deviations/global/common-tails.md:510
 T-6	global	T-6	common	同编号跨域	W19:_samesrc-W19.md:11 ← DRIFT/common/alignment-2026-10-23.md:693
 T-7	global	T-7	common	同编号跨域	W19:_samesrc-W19.md:12 ← DRIFT/common/alignment-2026-10-23.md:694
+V-002	users	ADJ-01	users	别名同源	blindspot:_samesrc-blindspot.md:16 ← DRIFT/users/_shared.md:965

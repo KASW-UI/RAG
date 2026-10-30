@@ -110,6 +110,22 @@ LEDGER_DIRS = ("DRIFT", "Pitfalls", "Intentional_Deviations")
 #   ⇒ 产物路径必须**显式排除**，且这个排除要**写在代码里**（不是靠「生成后再过滤」）。
 SELF_ARTIFACTS = ("docs/DRIFT/_cross/stage1-derivation.md",)
 
+# ⚠️ **2026-10-30 新增 · 索引文件自噬防护** ——
+#   `docs/<台账目录>/_INDEX.md` 是**索引/导航文档**，不是台账条目本体。
+#   ⇒ 它**引用**真实条目（表格里列编号 + 状态）⇒ 被 `scan_ledgers` 扫进去
+#      ⇒ **同一个编号在真域已登记、又以伪域 `_INDEX.md` 登记一次**
+#      ⇒ 因为合并键是 **(编号, 域)** ⇒ 两行的域不同 ⇒ **不会合并** ⇒ **幽灵行**。
+#   ⇒ 实测（HEAD 状态）：`docs/DRIFT/_INDEX.md` 贡献 **8 条幽灵行**
+#      （`SD-2026-10-23-01/04/05/06/07/08` + `SD-2026-10-24-01/02`）
+#      —— 这 8 个编号在 `docs/Intentional_Deviations/<域>/` 下**本来就有真登记**
+#      ⇒ 排除后**不丢条目**，只**去掉重复面**。
+#   ⇒ **触发场景（本轮实测踩到）**：在 `_INDEX.md` 里写一张「逐条判定表」
+#      （首格 = 编号 + 带 🔴/🟡 状态）⇒ **8 行全部被扫成新条目**
+#      ⇒ 域名竟成了 `_INDEX.md` ⇒ **虚增 3 条 A/B 真缺口 + 1 条「未定级且开放」**。
+#      ⇒ ⇒ **在共享索引里写台账式表格 ⇒ 会污染施工单**（索引是**汇总面**，不是条目面）。
+#   ⇒ ⚠️ 域目录的 `_README.md`（如 `docs/DRIFT/global/_README.md`）**是真台账** ⇒ **不排除**。
+SELF_ARTIFACT_INDEX_FILES = tuple(f"docs/{d}/_INDEX.md" for d in LEDGER_DIRS)
+
 # ⚠️ **2026-10-30 扩展** —— 「显式定级叠加层」目录也必须挡：
 #   `docs/DRIFT/_cross/grading/*.md` 是**本轮人工定级**的落地处（U5-O 的输入），
 #   它**长得像台账**（Markdown 表格、编号列）⇒ 若被 `scan_ledgers` 扫进去
@@ -529,6 +545,8 @@ def scan_ledgers(exclusions: dict[str, str]):
             continue
         if f"docs/{rel}" in SELF_ARTIFACTS:
             continue          # ⚠️ 自噬防护（见 SELF_ARTIFACTS 注释）
+        if f"docs/{rel}" in SELF_ARTIFACT_INDEX_FILES:
+            continue          # ⚠️ 自噬防护 · 索引文件（`_INDEX.md` = 汇总面，非条目面）
         if any(f"docs/{rel}".startswith(d) for d in SELF_ARTIFACT_DIRS):
             continue          # ⚠️ 自噬防护 · 目录级（U5-O 叠加层）
         dom = rel.parts[1] if len(rel.parts) > 1 else "_root"
