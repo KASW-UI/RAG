@@ -1855,3 +1855,64 @@ git diff --stat -- service/ # ⇒ 0 行
 | `SD-2026-10-23-09`（§⑥-D 复核行） | Go `service/like/api/**` 内 `maxConns`/`Semaphore`/`worker` 命中 = **0** ⇒ Go 侧**无 worker 池概念** vs RAG `HttpMiddleware.java:154` `MAX_HTTP_WORKERS = 512` ＋ `:369` `catch (RejectedExecutionException saturated)` | ✅ **前提成立**（行为仍在）⇒ 但两侧「过载 ⇒ 拒绝」**大方向同向** ⇒ RAG 多的是**载体与形状** ⇒ **不改回去 ⇒ 不属 DRIFT** ⇒ 按 §10 **按问题本身定级 = C**（未签字候选**不得自动归 D**）⇒ **不推拍板** |
 | `DRIFT-MSG-V-032`（§⑥-E 复核行） | Go `service/common/observability/observability.go:41` = `func SlowThreshold() time.Duration`（阈值真源）＋ `service/message/rpc/message.go:44` = `s.AddUnaryInterceptors(observability.NewUnaryServerInterceptor(rpcTimeout, observability.SlowThreshold()))`（打标唯一装配点）⇒ **Go 侧无任何对应测试** ⇒ **本条不是 Go↔RAG 行为差异** vs RAG 守门 `MessageRpcSlowThresholdGateTest.java:280`（用例仍在）＋ `:324`（`warmUp()` —— ⚠️ **台账记的 `:318` 已漂移**）＋ `:349`（`callAndGetSpan` —— 仍准） | ✅ **缺口真实存在**（`:340-346` warm-up「发一次就 `shutdownNow()`」＋ **无重试**）⇒ **落码加固**（域内可自修）⇒ **落点 = `service/message/message-rpc/src/test/**`** |
 | `SD-2026-10-23-09` | C（阶段 2 最终工程建设项 · 未签字候选 ⇒ **不得自动归 D**） | P2 | 否 | Go `service/like/api/**` 树内 `maxConns`／`MaxConns`／`Semaphore`／`worker` 命中数 = **0**（2026-10-30 G2 实测 `grep -rn`）⇒ Go 侧每请求一个 goroutine（初始栈 2KB）、**无上限** ⇒ **不存在**「worker 池饱和」这个事件；⚠️ 对照：Go 侧**确实有**「过载 ⇒ 拒绝」这条语义，只是载体不同（go-zero `rest.WithMiddlewares` 的限流/熔断中间件拒绝，**不是**线程池饱和）。RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:154`（`static final int MAX_HTTP_WORKERS = 512`）＋ `:181`（池按 512 建）＋ `:193`（注释「饱和 ⇒ 抛 `RejectedExecutionException`，由调用点转成**裸 503**」）＋ `:369`（`catch (RejectedExecutionException saturated)` ⇒ 容量拒绝路径）⇒ ⇒ **差异仍成立**（RAG 侧存在 Go 侧**结构上不存在**的「worker 池饱和 ⇒ 裸 503（无 body、无 Content-Type、无业务码、无 envelope）」这个可观察面）；⚠️ **但两侧的「过载 ⇒ 拒绝」大方向同向** ⇒ RAG 多出来的是**拒绝的载体与形状**，不是「Go 会接受而 RAG 会拒绝」⇒ ⇒ **不改回去 ⇒ 不属 DRIFT**（§5.3b 判据）⇒ 按 §10 **按问题本身定级**：本条在 `docs/Intentional_Deviations/like/api.md` 里仍是 **⏳ 未签字候选**（核对日期 2026-10-29）⇒ **尚未成为决策** ⇒ 按纪律 5「已签字偏离 ⇒ 是决策不是缺陷」的**反面** ⇒ **不得自动归 D** ⇒ 归 **C**；**P2**（只在「高并发 ＋ 下游卡死」这个窄窗口可观察；触发窗口窄 —— 512 远大于 Tomcat 默认 `max-threads`（200）⇒ 正常流量不该触发；且**不影响任何业务判定**、不涉及数据一致性或安全边界 ⇒ **不命中阶段一 P0 九条** ⇒ **不阻断阶段一**）；**处置 = 阶段二走签字登记**（把它从「候选」升为「决策」）⇒ **本轮不推拍板、不改代码**（§5.3b「登记的**登记**本身就是交付物」⇒ 不把已登记条目打包推给用户逐条拍板） | 2026-10-30 |
+
+---
+
+## 开工前置回执（2026-10-30 轮 · rpc 域指标抓取载体）
+
+> ⚠️ **本轮性质**：**派工指定的载体补齐**（Jason 2026-10-30 明示批准「这波就补载体」）⇒ **④ 已由调度方转达满足**；但 **①②③ 仍须本 lane 自己做完**（AGENTS.md §5.3b-0）⇒ **回执人不得自批**。
+
+### ① 本轮任务界定（定任务）
+
+| 项 | 内容 |
+|---|---|
+| 派工来源 | 调度会话 `mvs_d218b18e499340d9b6f31e2097e0e420` 转达 · Jason 2026-10-30 明示批准「这波就补载体」 |
+| 任务本体 | 给 **rpc 域补「指标抓取载体」**：Go 侧 `DevServer` 起**独立端口**出 Prometheus 文本；RAG 侧对应的载体能力（`spring-boot-starter-web` ＋ Actuator ＋ `server.port`）在 message-rpc / like-rpc **缺席** ⇒ **指标注册了但抓不到** |
+| 端口口径 | `message-rpc` = **16067**（Go `service/message/rpc/etc/message.yaml:22`）· `like-rpc` = **9098**（Go `service/like/rpc/etc/like.yaml:22`）· `task-rpc` = **不补**（Go 侧 `service/task/rpc/etc/task.yaml` **无 `DevServer` 段** ⇒ 两侧同形 ⇒ 补了反而是**偏离**） |
+| 模板 | `service/follow/follow-rpc/pom.xml:165-217` ＋ `service/follow/follow-rpc/src/main/resources/application.yml`（**照抄，不自创**）⇒ 该域 2026-10-29 已落地同款载体（台账 `docs/DRIFT/follow/rpc.md:351-488`） |
+| 本波不做 | ① **共享层 `service/common/**` 一行不碰**（G4 写权面）② **不加任何 opt-out 属性**（共享层正在裁「rpc 域观测口要不要挂 Go 的 rest 中间件」⇒ 合并窗口由收口执行者统一加）③ 不碰其它域 ④ 不 push / 不开 PR ⑤ `like-api` / `message-api` / `task-api` **不在本波**（派工只点了两个 rpc 组件） |
+
+### ② 已读四档（本 lane 面）
+
+| 档 | 路径 | 读到的关键结论（可核） |
+|---|---|---|
+| `docs/DRIFT/` | `message/{api,rpc,common,proto}.md` | `message/rpc.md`：**`DRIFT-MSG-V-032` 已于上一轮落码销号**；`-010`/`-011`/`-013` 落点共享层 ⇒ 已在 `docs/DRIFT/message/feedback-to-g4.md` 转派 G4；`-012` 属容器层框架限制**不可修**；**本轮新增关注面 = 指标抓取出口**（`message/rpc.md:873`「与 Go 的 `prometheus` 客户端**不是同一套** ⇒ 属产品能力」） |
+| | `like/{api,rpc,proto}.md` | `like/rpc.md` §12：`DRIFT-LIKE-003` 拆三段 = A 投递链路已闭环 ＋ B 权威读语义 Java 化 ＋ **C 暴露形态待拍板**（**注意：C 段讲的是「事实权威读的 HTTP 暴露形态」，与本轮「Actuator 观测口」是**不同轴**，不冲突**）；**`U-06`**（Go `DevServer` 端点形态：端口 / 路径 / pprof 三层都不同）**已在 `like/api.md:1744` 定级为 C / P2**，其「全仓统一方案」结论指向 G4 ⇒ **本波只做 rpc 两个组件** |
+| | `task/{api,rpc,proto}.md` | `task/rpc.md`：`DRIFT-TASK-RPC-008` 已落码；**Go 侧 `service/task/rpc/etc/task.yaml` 无 `DevServer` 段** ⇒ **本波明确不补**（同形 ⇒ 补了才是偏离） |
+| `docs/Intentional_Deviations/`（**最危险的一档：漏读会把签字偏离当新回归「顺手修回 Go 行为」**） | `message/{api,rpc}.md` | `message/rpc.md`：**7 条**（`SD-07` 已撤销）= `-01` 索引名不同 · `-02` 直方图桶零交集 · `-03` `errors.As` vs `instanceof` · `-04` 6 个 `DEFAULT CURRENT_TIMESTAMP` 是 RAG 侧多出来的 · `SD-2026-10-23-08` CPU 采样 fail-open · `SD-2026-10-23-06` 索引列数 1 vs 2 ⇒ ⇒ **这 6 条见到「不一致」不得当新回归去修** |
+| | `like/{api,proto,rpc}.md` | `like/proto.md`：**`SD-2026-10-23-05`**（proto `package` 由 `pb` 归一为 `like`，**wire 层可见**）；`like/api.md`：**`SD-2026-10-23-08` 已失效·已撤销** ＋ **`SD-2026-10-23-09` 仍成立·⏳ 未签字**（裸 503，**上一轮已定级 C**）＋ `SD-2026-10-24-10` ＋ `SD-2026-10-24-11`；`like/rpc.md`：**`SD-2026-10-23-06`**（业务码迁到 trailer，**框架限制**）· **`SD-2026-10-23-07`**（Nacos 注册失败**不退出**）⇒ ⇒ **不得「顺手改回 Go 行为」** |
+| | `task/rpc.md` | **`SD-2026-10-23-TASK-01`**（Go 30 **纳秒** → RAG 30 分钟；Go 侧是**笔误不是设计**）· **`SD-2026-10-24-TASK-01`**（topic 缺失时 Go 进程退出 vs RAG 存活）＋ 4 项「不是偏离、但容易被误当成偏离」 |
+| `docs/PhaseGoal/` | `g2.md` ＋ `PhaseGoal-judge.md` | `g2.md:21-31` = 11 组件矩阵（10 ✅ ＋ `like-rpc` 🟡）⇒ **机器生成**，权威源是 judge；`g2.md:41`（§2.1 自修清单）＝ **本 lane 自修项只有 `like-rpc` 一条**；`g2.md:47`（§2.2 转派 G4）＝ message-api `-010`/`-011`/`-013`；`g2.md:57-62`（P0 分摊）＝ **P0-1 本 lane 主责** · **P0-6** 全量回归 ⇒ **必须带 `clean`**；`g2.md:73-83`（矩阵 C）＝ **X-10**「落仓静态守门只覆盖 4/10」 |
+| `docs/twoStage.md` | §4（`:258-313`）· §5.3（`:359-380`）· §5.4（`:381-398`）· **§十**（`:941-976`）· 维度 8（`:754-768`） | §5.3 = 差异与暂缓项**每项至少 11 条**（**不得只写「后续优化」**）；§5.4 = 每次改造记录 **9 条**（**必须实际修改项目，而不是只输出建议**）；**§十 = P0–P3 是严重程度、A–D 是阶段归属，两者不能互相替代**；每问题必含 12 项；**必须区分已确认缺陷与待验证风险**；**维度 8**（日志/指标/追踪）明写「**仅发现依赖或监控面板模板不能证明可观测性完整**」⇒ ⇒ **本轮「补载体」正落这一条** |
+| `docs/Pitfalls/` | `message/{api,rpc}.md` | `PIT-MESSAGE-01`（同组件同形态**第二次**「绿测试守卫错误答案」）· `-02`（Jackson `FAIL_ON_NULL_FOR_PRIMITIVES` 默认 true）· `-09`（「**测试全绿**」与「**一次没起过**」可同时成立）· `-10`（「断言 Bean 存在」≠「断言机制生效」）· `-12`（注释里的**默认行为**必须读到**消费点**）· **`-37`（上一轮新登记：回执小节被派生层当成条目 ⇒ 凭空多出条目）** |
+| | `like/{api,rpc}.md` | `PIT-LIKE-01`（go-zero 解析层**不对称**，只学一半必然漏）· `-05`（「**应用入口类的 javadoc**」是最高杠杆的错误传播点）· `-06`（**同一个文件里会自相矛盾**）· `-13`（「**『错误断言已清理』这句话，本身也是一条需要被核的断言**」）· `-14`（共享组件 javadoc 与各域 javadoc **可以互相矛盾**） |
+| | `task/{api,rpc,proto}.md` | `PIT-TASK-01`（`@EnabledIfDockerAvailable` 把「拉不到镜像」压成「Docker 不可用」⇒ **静默全跳**）· `-06`（Go `Pipeline()` 不是事务、Spring `executePipelined` 也不开 MULTI ⇒ **两边都理解错了**）· `-07`（**零真 Redis** 覆盖 ⇒「跑绿」证明不了 Redis 路径）· `-11`（方法签名对了 ≠ 方法会被调到，**调用时机**更致命） |
+| | `_cross/`（**四棵都要读**） | `testing-pitfalls.md`（证据分级 E0–E5 · **变异测试是另一半**）· `fix-round-lessons.md`（「**跑绿 ≠ 判据活着**」· 修漂移**先改/删错误断言再改实现**）· `flyway-ledger-collision.md`（**共享层修法 ⇒ G4 落码**）· `signed-deviations.md`（**签字偏离不得当新发现再修一遍**）· `framework-mechanism-evidence.md`（**框架机制必须验证实际生效**） |
+| `docs/DRIFT/_cross/`（**四棵都要读**） | `stage1-derivation.md` ＋ `.tsv` · `component-coverage-matrix.md` · `cross-domain-coupling.md` · `domain-common-lanes.md` · `grading/W*.md` | 派生层产物 = **派工面**（`wave` 列 G1~G4）⇒ 本波条目落 **`wave=G2`**；**共享层写权规则**（`service/common` ＋ `users-common` **只有 G4 能写**）⇒ ⇒ **本波一律只读**；`grading/W28.md`（follow 域 `E2` 定级 **D** ⇒「**同款 5 处（favorite-rpc / message-rpc / like-rpc / user-rpc / admin-rpc）属别的域，各域各判**」）＋ `grading/W1.md`（follow 域 `E31` 定级 **D**）⇒ ⇒ **本波按「各域各判」办，只判 message-rpc / like-rpc** |
+| `docs/DRIFT/follow/`（**模板参照域**） | `follow/rpc.md:351-488` ＋ `follow/rpc.md:20` | **落码清单 4 行**（starter-web ＋ `server.port` ＋ `register-enabled: false` ＋ 桶边界）＋ **残余 5 条全部 P3 / D 类**（暴露路径不同 · 载体不同 · `le` 文本 · `_max` 增项 · **Go 有 `/debug/pprof/*` 而 RAG 无**）⇒ ⇒ **本波沿用同一口径登记残余项，不新造偏离** |
+
+### ③ 待批准项
+
+1. **无**（本轮范围已由 Jason 明示批准「这波就补载体」⇒ 无需额外拍板）。
+   ⚠️ **本轮刻意不做、留给收口执行者或阶段二的**：① **共享层「rpc 域观测口要不要挂 Go 的 rest 中间件」的取舍**（共享层 3 个 `@ConditionalOnWebApplication(SERVLET)` 自动配置会因本波补载体而**首次在 rpc 进程激活** ⇒ 属共享层 ⇒ **G4 / 收口执行者**；**本波不加任何 opt-out 属性**）② `DRIFT-LIKE-003-C`（like 域事实权威读的**暴露形态**，**不同轴**）③ `D-7`（like 域 status 错误 ⇒ 业务码映射与 Go 不同类）④ `SD-2026-10-23-09` 的**签字**（只定级为 C，**不推拍板**）⑤ **Go 侧 `/debug/pprof/*` 的对应物**（RAG Actuator 无 pprof endpoint ⇒ 按 follow 域口径列 **P3 / D** ⇒ 不修）。
+
+### ④ 等批准 ⇒ 批准后才开工
+
+### ⑤ 批准记录：Jason · 2026-10-30 · 批准范围：**给 `message-rpc`（16067）与 `like-rpc`（9098）补「指标抓取载体」**（`task-rpc` 不补）—— 依据：调度会话转达 Jason 2026-10-30 明示批准「这波就补载体」**　← 由**调度员代填**（**代填 ≠ 代批准**；回执人不得自批）**
+
+### ⑥ 本轮 §3.3 回源复核的实测记录（**派工前按 `basis` 抽查，不照抄标题**）
+
+| 回源对象 | 本轮自读实测 | 结论 |
+|---|---|---|
+| Go 侧 yaml（message） | `service/message/rpc/etc/message.yaml:19-26` = `DevServer: {Enabled: true, Host: 0.0.0.0, Port: 16067, MetricsPath: /metrics, HealthPath: /healthz, EnableMetrics: true, EnablePprof: true}` | 端口 **16067** 确认（**一字不差**） |
+| Go 侧 yaml（like） | `service/like/rpc/etc/like.yaml:19-26` = 同款，`Port: 9098` | 端口 **9098** 确认（**一字不差**） |
+| Go 侧 yaml（task） | `service/task/rpc/etc/task.yaml`（实测 1-40 行）= `Name` / `ListenOn` / `Etcd` / `Telemetry` / `Kafka` / `LikeRedis` … ⇒ **无 `DevServer` 段** | ⇒ **`task-rpc` 不补载体**（两侧同形；补了才是**偏离**） |
+| Go 侧**消费点**（不是声明点） | `go-zero@v1.10.2/zrpc/config.go:39` = `RpcServerConf struct { service.ServiceConf ... }` ⇒ rpc 侧内嵌 `ServiceConf` ⇒ `go-zero@v1.10.2/core/service/serviceconf.go:40` = `DevServer DevServerConfig \`json:",optional"\`` ⇒ ⇒ `go-zero@v1.10.2/zrpc/server.go:63` = `if err = c.SetUp(); err != nil {` ⇒ ⇒ `go-zero@v1.10.2/core/service/serviceconf.go:77` = `devserver.StartAgent(sc.DevServer)` | **rpc 侧确实会起 DevServer** ⇒ **不是死配置**（消费点在框架内、仓内 grep 不到读取点） |
+| Go 侧起法细节 | `go-zero@v1.10.2/internal/devserver/server.go:79-81` = `StartAgent` → `if !c.Enabled { return }`；`:82-86` = `once.Do(...)`（**进程内只起一次**）；`:44` = `HealthPath`；`:47-50` = `EnableMetrics` ⇒ `prometheus.Enable()` ＋ `handleFunc(MetricsPath, promhttp.Handler().ServeHTTP)`；`:53-59` = pprof 五条路由；`:67-76` = `StartAsync` ⇒ **`:73` = `http.ListenAndServe(addr, s.server)`** ⇒ **独立端口、不是主端口**；`internal/devserver/config.go:5-13` = `Port` 默认 6060 / `MetricsPath` 默认 `/metrics` / `HealthPath` 默认 `/healthz` | 端口与路径**默认值**与真源 yaml 一致 ⇒ RAG 侧取同端口、只改路径 |
+| RAG 侧现状（message-rpc） | `service/message/message-rpc/pom.xml:171-179` = 第 5 段**已有** `spring-boot-starter-actuator` ＋ `micrometer-registry-prometheus`，**无** `spring-boot-starter-web`；`service/message/message-rpc/src/main/resources/application.yml:185-205` **已有** `management.endpoints.web.exposure.include: health,info,prometheus,metrics` ＋ `endpoint.prometheus.enabled: true` ＋ `prometheus.metrics.export.enabled: true`；**全文件无 `server.port`** | ⇒ **`management.*` 是死配置**（classpath 无 `jakarta.servlet.Servlet` ⇒ `WebApplicationType=NONE` ⇒ 那一族自动配置**根本不加载**，**不报错**）⇒ 与 follow 域**同款缺陷、同款修法** |
+| RAG 侧现状（like-rpc） | `service/like/like-rpc/pom.xml:229-237` = 第 7 段**已有** actuator ＋ micrometer-prometheus，**无** starter-web；`service/like/like-rpc/src/main/resources/application.yml:302-320` **已有** 同款 `management.*`；**全文件无 `server.port`** | 同上 |
+| 🔴 **补 web starter 的连带风险（本轮自读发现 · follow 域已踩过）** | `service/message/message-rpc/src/main/resources/application.yml:107-114` ＋ `service/like/like-rpc/src/main/resources/application.yml:197-201` = `spring.cloud.nacos.discovery` 段**均无** `register-enabled: false`（而 `service/follow/follow-rpc/src/main/resources/application.yml:112` **有**）⇒ 补上 servlet 容器后，`NacosAutoServiceRegistration` 会注册**观测口**（16067 / 9098）⇒ 同一服务名下出现**两个端口的实例** ⇒ 调用方按 Nacos 给的地址连到一个只提供 `/actuator/` 的 HTTP 口 ⇒ **gRPC 链路直接断**（业务码塌成 1015） | ⇒ **必须同时补 `register-enabled: false`**（本域 yml 改动 ⇒ **在 G2 写权内**）⇒ 本模块注册是**手写**的（`bootstrap/NacosRegistration.java` 用 `GrpcServerProperties.getPort()`）⇒ 与 Go `zrpc.MustNewServer` 注册 `ListenOn` 的语义一致 |
+| 共享层激活面（**只读 · G4 写权面**） | `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports` = 6 行 ⇒ 其中 **3 行是 `@ConditionalOnWebApplication(SERVLET)`**：`GoStyleJsonContentTypeAdvice` · `GoStylePathNormalizingAutoConfiguration` · `GoStyleBreakerRouteTemplateAutoConfiguration` ⇒ ⇒ 补 servlet 容器后它们**在 rpc 进程首次激活** | ⇒ **Go 的 rpc 侧 `zrpc.MustNewServer` 一个 rest 中间件都没挂** ⇒ **「rpc 域观测口要不要挂 Go 的 rest 中间件」是共享层决策** ⇒ ⇒ **本波只登记、不加任何 opt-out 属性**（合并窗口由收口执行者统一加） |
+| 共享层激活面的**实际影响**（本轮自读） | `service/common/src/main/java/com/rag/common/http/GoStylePathNormalizingFilter.java` 的 `doFilter`：**已 Clean 的路径直接 `chain.doFilter(request, resp)` 原样下传**（`/actuator/prometheus` 本身已 Clean）⇒ **不影响**该端点；`GoStyleJsonContentTypeAdvice` 只在「响应体是 JSON」时改 Content-Type ⇒ Prometheus 文本（`text/plain; version=0.0.4`）**不受影响** | ⇒ 本波补载体**不会**因这两个自动配置而抓不到指标 ⇒ **实测以守门为准**（§3.3：推演不算证据） |
+
+**⇒ 本轮结论（④ 之外的部分）**：**① 已定任务** · **② 四档已读** · **③ 无待批准项** · **⑥ 回源已逐条自读**（Go 侧 yaml + go-zero 框架消费点 + RAG 侧现状 + 共享层激活面）⇒ ⇒ **可以落码**。

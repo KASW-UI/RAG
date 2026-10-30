@@ -206,8 +206,12 @@ class MessageRpcArtifactClasspathGateTest {
     /**
      * 取本模块的 fat jar；<b>缺失或比源码 / 共享层旧时由本类自己构建</b>
      * （构建产物必须与<b>当轮</b>源码一致 —— 否则断言的是上一轮的字节）。
+     *
+     * <p>⚠️ <b>包级可见（不是 private）</b>：{@link MessageRpcMetricsCarrierGateTest}
+     * 复用本方法拿同一份 fat jar ⇒ ⇒ 「产物构建」这件事<b>只有一份实现</b>，
+     * 不会出现「两个守门各建各的、其中一个建的是旧字节」。
      */
-    private static Path fatJar() throws Exception {
+    static Path fatJar() throws Exception {
         Path moduleDir = repoRoot().resolve(MODULE_PATH);
         Path target = moduleDir.resolve("target");
         Path jar = newestFatJar(target);

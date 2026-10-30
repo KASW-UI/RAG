@@ -79,7 +79,18 @@
         <!--
             spring-cloud-starter-alibaba-nacos-discovery 通过反射引用
             org.springframework.boot.web.server.context.WebServerInitializedEvent。
-            message-rpc 不引 spring-boot-starter-web，但 spring-boot-web-server 含这个类 + 抽象接口。
+            ⚠️ **本段原注释写「message-rpc 不引 spring-boot-starter-web」—— 2026-10-30 起不再成立**：
+            本模块已补 `spring-boot-starter-web`（见第 5 段）⇒ 目的是**给 Actuator 一个 servlet 载体**。
+            ⚠️ **但 servlet 容器**（Tomcat）**与 Nacos 自动注册是两件事**，别混：
+              · `spring-boot-web-server`（本段）＝ **抽象**（`WebServerInitializedEvent` + 抽象接口），
+                **不带** Tomcat 实现 ⇒ 只满足 nacos-discovery 的反射引用；
+              · `spring-boot-starter-web`（第 5 段）＝ **真容器**（starter-tomcat + webmvc + http-converter），
+                ⇒ 它才是「有 web server ⇒ `WebApplicationType=SERVLET`」的开关。
+            ⇒ 正因为真容器被引入了，**Nacos 自动注册必须显式关掉**（见 application.yml 的
+               `spring.cloud.nacos.discovery.register-enabled: false`）—— 否则自动注册会把
+               **观测口**（16067）注册成 `message-rpc` ⇒ 调用方连到一个只提供 `/actuator/` 的 HTTP 口
+               ⇒ **gRPC 链路直接断**。
+            同款说明见 service/follow/follow-rpc/pom.xml:79-95 与 :175-217。
         -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -176,6 +187,60 @@
         <dependency>
             <groupId>io.micrometer</groupId>
             <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+        <!--
+            🔴 spring-boot-starter-web：**只为给 Actuator 一个 servlet 载体**
+            ⇒ 让 `management.endpoints.web.exposure.include: prometheus` 真正有出口
+            （2026-10-30 落地 · 端口 16067 与 Go 的 DevServer.Port 一字不差）。
+
+            【为什么以前「有 actuator 却抓不到」】—— AGENTS.md §3.3 的典型形态：
+            `spring-boot-starter-actuator` 只提供 **endpoint + 自动配置**，
+            **不提供 servlet 容器** ⇒ classpath 上没有 jakarta.servlet.Servlet
+            ⇒ `WebApplicationType` 推导出 NONE ⇒ 没有 web server
+            ⇒ `management.endpoints.web.*` 这一族配置**根本不加载**（不是报错，是静默无效）。
+            ⇒ 本模块的 yml 早就写了 exposure.include（2026-10-24 加的），
+              但它一直是**死配置** ⇒ **指标注册了、抓不到**（Go 侧 `metrics.InitMetrics()`
+              注册进默认 registry 后由 DevServer 的 `/metrics` 直接出）。
+
+            【Go 出处（真源 · 消费点）】
+              service/message/rpc/etc/message.yaml:19-26
+                  DevServer: {Enabled: true, Host: 0.0.0.0, Port: 16067,
+                              MetricsPath: /metrics, HealthPath: /healthz,
+                              EnableMetrics: true, EnablePprof: true}
+              ⇒ go-zero@v1.10.2/zrpc/config.go:39  `RpcServerConf struct { service.ServiceConf ... }`
+                 （rpc 侧内嵌 ⇒ 也有 DevServer）
+              ⇒ ⇒ go-zero@v1.10.2/zrpc/server.go:63  `if err = c.SetUp(); err != nil {`
+              ⇒ ⇒ go-zero@v1.10.2/core/service/serviceconf.go:40
+                    `DevServer DevServerConfig `json:",optional"``
+              ⇒ ⇒ go-zero@v1.10.2/core/service/serviceconf.go:77  `devserver.StartAgent(sc.DevServer)`
+              ⇒ ⇒ go-zero@v1.10.2/internal/devserver/server.go:47-50
+                    `if s.config.EnableMetrics { prometheus.Enable(); s.handleFunc(s.config.MetricsPath, promhttp.Handler().ServeHTTP) }`
+              ⇒ ⇒ go-zero@v1.10.2/internal/devserver/server.go:73
+                    **独立端口** `http.ListenAndServe(addr, s.server)`（不是主端口）
+
+            【Boot 4 拆模块纪律（AGENTS.md §3.3 · 先确认能力还在不在，再决定补哪个模块）】
+              - `WebEndpointAutoConfiguration`（actuator 的 servlet web endpoint 映射）
+                **仍在** `spring-boot-actuator-autoconfigure` ✔（已在 classpath 上）
+              - `PrometheusScrapeEndpoint` + `PrometheusMetricsExportAutoConfiguration`
+                在 **`spring-boot-micrometer-metrics`**（`spring-boot-starter-actuator` 传递引入）✔
+              - Boot 4 的 `spring-boot-starter-web` 传的是 **`spring-boot-starter-jackson`（Jackson 3）**
+                ⇒ **不会**与本模块 `com.fasterxml.jackson`（Jackson 2）冲突
+                （本模块的 `JsonbMapTypeHandler` 用的是自建 `new ObjectMapper()`，不是 Spring Bean）
+              ⇒ **唯一缺的就是 servlet 容器 + Spring MVC**
+              ⇒ 补 `spring-boot-starter-web`（Boot 4 里它 = starter-tomcat + webmvc + http-converter）
+                 **版本由 spring-boot-dependencies BOM 管 ⇒ 不写 `<version>`**。
+
+            【⚠️ 进程形态变了 —— 这是「暴露形态差异」，已按 twoStage.md §10 登记为 D 类】
+            Go 侧是 `http.ListenAndServe` 的**小 server**（无 servlet、无业务路由）；
+            RAG 侧是 **Tomcat**（有 servlet 容器，但**没有任何业务 HTTP 路由**）。
+            ⇒ 两者的**对外可观测面**（独立端口 + Prometheus 文本）一致，
+              载体不同 ⇒ 登记为**残余差异（不修）**。
+
+            【模板】照抄 service/follow/follow-rpc/pom.xml:165-217（该域 2026-10-29 已落地同款载体）
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
         <!-- ============== 6. 测试 ============== -->
