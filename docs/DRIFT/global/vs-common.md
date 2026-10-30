@@ -4917,7 +4917,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 | **G4-14d** | 各域 `application.yml`（`grpc.client.*` 的**上界**配置） | 客户端硬上界（Go 的 `Timeout`）本轮**未启用** | `go-zero@v1.10.2/zrpc/config.go:31`（default=2000）＋ 真源 `service/article/api/etc/article-api.yaml:12`（**70000** ⇒ api→article-rpc 的**客户端**上界）；⚠️ `service/article/rpc/etc/article.yaml:3` 的 70000 是**服务端**超时、同文件 `:90` 的 10000 才是客户端 | 共享层能力已具备（`rag.protection.outbound-deadline.cap-millis`），**默认 0 = 不启用** | E1 | 逐域按 Go 的 yaml 值启用；⚠️ devh `3.1.0.RELEASE` **没有** `grpc.client.*.deadline` 属性 ⇒ **不能靠那个键配** | 10 个 rpc ＋ 9 个 api 组件 | 否（**这一轴仍是漂移**） |
 | **G4-15a** | `docs/Intentional_Deviations/`（**共享面，不在 G4 写权面**） | 【订正 · 见 §4.19.5】原写的现象「反馈单 2/3 的落码让 RAG 的 Redis 命令**比 Go 更严**」**不成立** ⇒ ⇒ 本行**整条作废**，不要按「有意偏离」去登记 | ①（**派发前 · 决定性**）`go-redis/v9@v9.20.0/internal/pool/pool.go:1098-1104`（`ConnPool.waitTurn` fast path **无条件先查 `ctx.Done()`** ⇒ `ctx.Err()` ⇒ **命令根本不下发**）②（socket 层）`go-redis/v9@v9.20.0/redis.go:1024-1032`（`baseClient.context(ctx)` ⇒ ctx 变 `context.Background()`）＋ `internal/pool/conn.go:961-991`（socket deadline = 固定 3s） | 共享层已落「预算耗尽 ⇒ 不再下发命令」⇒ **落码后与 Go ① 同形**（**不是更严**）；② 本层不动 ⇒ 仍同形 | E1（本层实测 · 逐行读过 · 完整调用链见 §4.19.5） | **不登记有意偏离**（前提已不成立）⇒ 若要继续做 `G4-15d` 的「socket 层收紧」⇒ **那才是比 Go 更严** ⇒ 需**另立一条**并签字 | 全仓用 Redis 的 8 个域 | 否（**但按原行去登记 = 会造一条假偏离**） |
 | **G4-15b** | 共享层 `RpcInterceptor` 的 Stat 落点（**链层位置**） | Go 的 Stat 层在 **breaker/shedding 之外** ⇒ 它量到的耗时**含**降载/熔断开销；RAG 的在最内层 ⇒ **不含** | `go-zero@v1.10.2/zrpc/server.go:151-153`（Stat 注册点）＋ `:157-163`（Breaker/Shedding 在其外） | 本层已落慢调用日志（在 `RpcInterceptor` 内 ⇒ 最内层） | E1 | 若要严格对齐 ⇒ 在 `GoStyleRpcProtectionChain` **新增一层** ⇒ ⇒ 改 `Composition` record ⇒ **破坏 3 个域级守门测试的编译** ⇒ ⇒ **跨域** ⇒ 转主线/全量回归波 | 10 个 rpc 组件 | 否（但**口径差异要签字**） |
-| **G4-15c** | 共享层 `GoStyleRpcProtectionChain` ＋ `service/common/pom.xml` | Stat 的 **Info 分支**（Go 每个请求打全量 body）**刻意不落**；Prometheus 两层 ＋ `stat.Metrics` 周期报告（qps/median/t99）**未落** | `go-zero@v1.10.2/zrpc/internal/serverinterceptors/statinterceptor.go:94`（Info 分支）＋ `:54-56`/`:120-181`（`stat.Metrics` 聚合）＋ `zrpc/server.go:154-156`（Prometheus 层） | RAG 侧：慢调用日志**已落**；Info 分支**有意不落**；周期报告**未落**；Prometheus **未落** | E1 | Prometheus 需给 `service/common/pom.xml` 加 `micrometer-core`（该模块现在零 micrometer）＋ **「出口口径」是运维决策**（Go 侧只有 article-rpc/hot-rpc 配了 `Prometheus.Host`，其余 8/10 个 `prometheus.Enabled()==false` ⇒ 配了也不产观测值）⇒ ⇒ 整包转主线 | 10 个 rpc ＋ 9 个 api 组件 | 否（命中 `docs/PhasedGoal.md` P1 面） |
+| **G4-15c** | 共享层 `GoStyleRpcProtectionChain` ＋ `service/common/pom.xml` | Stat 的 **Info 分支**（Go 每个请求打全量 body）**刻意不落**；Prometheus 两层 ＋ `stat.Metrics` 周期报告（qps/median/t99）**未落** | `go-zero@v1.10.2/zrpc/internal/serverinterceptors/statinterceptor.go:94`（Info 分支）＋ `:54-56`/`:120-181`（`stat.Metrics` 聚合）＋ `zrpc/server.go:154-156`（Prometheus 层） | RAG 侧：慢调用日志**已落**；Info 分支**有意不落**；周期报告**未落**；Prometheus **未落** | E1 | Prometheus 需给 `service/common/pom.xml` 加 `micrometer-core`（该模块现在零 micrometer）＋ **「出口口径」是运维决策**（【订正 · 见 §4.19.6】原写「Go 侧只有 article-rpc/hot-rpc 配了 `Prometheus.Host`，其余 8/10 个 `prometheus.Enabled()==false` ⇒ 配了也不产观测值」**是错的** —— 那段推理只看了「push agent」一条出口，**漏了 DevServer 的 `/metrics`** 会调 `prometheus.Enable()` ⇒ ⇒ **订正后：8/10 照产**（6 个靠 DevServer 的 `/metrics` ＋ 2 个靠 push agent），**2 个不产**（`comment-rpc` / `task-rpc`）⇒ ⇒ **「出口」是逐域三态、不是全局有/无**）⇒ ⇒ 整包转主线 | 10 个 rpc ＋ 9 个 api 组件 | 否（命中 `docs/PhasedGoal.md` P1 面） |
 | **G4-15d** | 共享层 Redis 能力面的**严格模式** | 「命令等待不超过剩余预算」本轮**不落** | —— | 共享层只落了「预算耗尽 ⇒ 不再下发命令」；【订正 · 见 §4.19.5】原写「命令级 socket 超时随预算收紧」在公开 API 上不可达 ⇒ **是错的** ⇒ ⇒ **那条路线是可达的**：lettuce `TimeoutOptions$TimeoutSource`（public abstract · `getTimeout(RedisCommand)`）＋ `TimeoutOptions$Builder.timeoutSource(…)` ＋ `ClientOptions$Builder.timeoutOptions(…)` ＋ Boot 4 的 `LettuceClientOptionsBuilderCustomizer`（实测 `LettuceConnectionConfiguration.createClientOptions` 字节码：customizer 在硬编码 `timeoutOptions` **之后** ⇒ **可覆盖**）⇒ ⇒ **本轮不落的理由从「不可达」改为「会造成新的有意偏离（比 Go 严）⇒ 需另立一条并签字」** | E1（javap + 字节码实测 · §4.19.5） | ① 若要做「socket 超时随剩余预算收紧」⇒ 走 `TimeoutSource` 路线 ⇒ **先登记为有意偏离并签字**（Go 的 socket 层**不**收紧）；② 若要做「命令等待不超过剩余预算」⇒ 需把命令丢到另一线程再 `Future.get(remaining)` ⇒ 与**事务绑定**（ThreadLocal 事务连接在调用线程上）和线程亲和冲突 ⇒ ⇒ 另立一轮专项 | 8 个用 Redis 的域 | 否 |
 
 ### 4.19.3 🟡 本节的**诚实边界**（AGENTS.md §0：「已改」≠「已验证」）
@@ -5193,6 +5193,80 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
   ⇒ ⇒ **订正**：那两行的订正文字**改用「【订正 · 见 §4.19.5】」这种无标记写法** ⇒ ⇒ 两行回到「只计数、不进施工单」⇒ ⇒ **机器层 TSV 回到基线**。
   ⇒ ⇒ **纪律**：**转派单的行内不得写状态标记**（状态标记只属于「差异条目」）；要标订正就写「【订正 · 见 §x.y】」。
 - ⚠️ **取证口径**：本节 ⑨ 的复算方法是 **备份 → 真正执行 `derive-stage1.py` → diff → 逐字节还原**（**不是** `--report` 只读模式；理由见 §4.19.3 第 5 条的取证教训）⇒ ⇒ 本轮**正是靠它**才发现上面这两个坑 ⇒ ⇒ 否则这两处会一路带到合并收口执行者的主干上。
+
+### 4.19.6 🟡 G1 反馈单 3/3（第二版 · 2026-10-30 15:5x）的回源核验：**三条断言成立** ＋ **三条订正**（其中一条是本层自己的）＋ **本单不产生新的共享层落码需求**
+
+> 📌 **纪律**：本小节**只追加**，不改 §4.19.1~§4.19.4 的任何既有结论；凡与上文冲突处，**以本小节为准**，并在下文明写「上文哪一行要按本小节读」。
+> ⚠️ 本小节的**表格首格用小写域名**（不是编号）⇒ ⇒ 派生层不把它当条目候选（同款纪律，§4.19.4 ⑤ / ⑦ / §4.19.5 第十条）。
+> ⚠️ **本轮零代码改动** ⇒ ⇒ §4.19.4 ⑦ 的回归结果（`service/common` 424 条 / 全仓 3312 条）**继续有效**。
+> ⚠️ **本节要按本节读的上文行**：§4.19.2 的 `G4-15c` 行（已就地标注）· §4.19.4 ⑤ 二 的第三条「落点约束③」（原写「Go 侧 8/10 个 rpc 服务『拦截器挂着、但一个观测值都不产生』」）· §4.19.5 第五节的 `G4-15c` 口径。
+
+**一、G1 本单的三条断言 ⇒ 本层逐条自读后：三条成立**
+
+- **① Go 的 zrpc 默认装 Stat + Prometheus 两层** ⇒ ✅ 成立：
+  - `go-zero@v1.10.2/zrpc/server.go:152` = `svr.AddUnaryInterceptors(serverinterceptors.UnaryStatInterceptor(metrics, c.Middlewares.StatConf))`；
+  - `:155` = `svr.AddUnaryInterceptors(serverinterceptors.UnaryPrometheusInterceptor)`；
+  - `go-zero@v1.10.2/zrpc/internal/config.go:20-25` = `ServerMiddlewaresConf{Trace / Recover / Stat / Prometheus / Breaker}` **全部 `default=true`** ⇒ ⇒ **5 层默认全装**（G1 给的三个坐标**逐字核对无误**）。
+- **② RAG 侧 `compose()` 只产 3 层** ⇒ ✅ 成立：`service/common/src/main/java/com/rag/common/protection/GoStyleRpcProtectionChain.java:126-131` = `new Composition(true, breaker, shedding)`（recover + breaker + shedding）⇒ ⇒ **Stat 与 Prometheus 不在链里**；G1 给的 `:158` = `build()` 亦对。
+- **③ Go 侧 DevServer 会起 `/metrics` + `/healthz`** ⇒ ✅ 成立（**但只对 yaml 里写了 `DevServer` 段的域成立**，见第四节）：
+  - `go-zero@v1.10.2/core/service/serviceconf.go:77` = `devserver.StartAgent(sc.DevServer)`（**无条件**调用；`:83-89` 的 `initMode()` **不门控**它）；
+  - `go-zero@v1.10.2/zrpc/server.go:62-64` = `MustNewServer` 内 `c.SetUp()` ⇒ ⇒ `ServiceConf.SetUp()` 会被执行；
+  - `go-zero@v1.10.2/internal/devserver/server.go` 的 `StartAgent` = `if !c.Enabled { return }` ＋ `once.Do(...)`；`addRoutes` 在 `EnableMetrics` 为真时**挂 `/metrics`（`promhttp.Handler()`）并调用 `prometheus.Enable()`** ⇒ ⇒ **「出口」与「全局开关」两件事一起到位**。
+
+**二、🔴 订正一（本层自己的错误断言）：「Go 侧 8/10 个 rpc 服务『拦截器挂着、但一个观测值都不产生』」⇒ 错**
+
+- **原写**（§4.19.4 ⑤ 二 的「落点约束③」＋ §4.19.2 `G4-15c` 行，两处同一句）：「Go 侧只有 article-rpc/hot-rpc 配了 `Prometheus.Host` ⇒ `core/prometheus/agent.go:30-45` 的 `StartAgent` **早退** ⇒ `core/metric/metric.go:14-20` 的 `update()` 因 `prometheus.Enabled()==false` **直接 return** ⇒ ⇒ **Go 侧 8/10 个 rpc 服务『拦截器挂着、但一个观测值都不产生』**」。
+- **错在哪**：那段推理**只看了「push agent」这一条出口**，**漏了 DevServer 的 `/metrics`** ⇒ ⇒ **DevServer 的 `addRoutes` 在 `EnableMetrics: true` 时会调 `prometheus.Enable()`** ⇒ ⇒ **全局开关照样被打开** ⇒ ⇒ **那 8 个域照产观测值**，只是出口在 DevServer 端口而非 9091。
+- **订正后的口径（本层实测清点 · 10 个在范围内的 rpc 域）**：
+
+| rpc 域 | 域自建向量 | Go 的 `/metrics` 出口 | go-zero 拦截器指标 | RAG 的抓取出口 |
+|---|---|---|---|---|
+| article-rpc | — | push agent `:9092` | ✅ 产 | ✅ 有（主端口 `/actuator/prometheus`） |
+| hot-rpc | — | **自建** `:9091`（`hot/rpc/internal/metrics/metrics.go:19`）＋ push agent `:19091` | ✅ 产 | ❌ 无 |
+| comment-rpc | 5（`comment/rpc/internal/metrics/metrics.go`） | **自建** `:9091`（`comment/rpc/comment.go:39`） | ❌ **不产** | ✅ 有 |
+| favorite-rpc | 4 | DevServer `:16062` | ✅ 产 | ✅ 有 |
+| follow-rpc | 5 | DevServer `:16065` | ✅ 产 | ✅ 有 |
+| like-rpc | — | DevServer `:9098` | ✅ 产 | ✅ 有 |
+| message-rpc | 5 | DevServer `:16067` | ✅ 产 | ✅ 有 |
+| task-rpc | — | ❌ 无 | ❌ **不产** | ✅ 有 |
+| admin-rpc | — | DevServer `:9097` | ✅ 产 | ❌ 无 |
+| user-rpc | — | DevServer `:9094` | ✅ 产 | ❌ 无 |
+
+⇒ ⇒ **正确口径：8/10 产、2/10 不产（`comment-rpc` / `task-rpc`）** ⇒ ⇒ 原文「8/10 不产」**数字与结论都错** ⇒ ⇒ 已在 `G4-15c` 行就地标注（用无标记写法，避免那行被派生层提升进派工面）。
+
+**三、🔴 订正二（G1 的断言过宽）：「RAG 零出口」⇒ 实为 3/10 零出口**
+
+- G1 的说法：「RAG 侧 `management.server.port:-1` ＋ `endpoint.prometheus.enabled:false` ⇒ **零抓取出口**」⇒ ⇒ **该结论只对 `admin-rpc` 成立**。
+- **本层逐域实测（RAG 各 rpc 域的 `management:` 段）**：
+  - ❌ **零出口（3 个）**：`users/admin/admin-rpc`（`server.port:-1` ＋ `endpoints.enabled-by-default:false` ＋ `endpoint.prometheus.enabled:false`）· `users/user/user-rpc`（同上）· `hot/hot-rpc`（`server.port:-1` ＋ `endpoints.enabled-by-default:false` ＋ `prometheus.enabled:false`）⇒ ⇒ **三处都双重关闭** ⇒ ⇒ 无论 `management.server.port:-1` 的语义如何，**结论都成立**；
+  - ✅ **有出口（7 个）**：`follow-rpc` · `like-rpc` · `message-rpc` · `task-rpc` · `article-rpc` · `comment-rpc` · `favorite-rpc` ⇒ ⇒ 全部是 `endpoints.web.exposure.include: health,info,prometheus,metrics` ＋ `endpoint.prometheus.enabled: true` ⇒ ⇒ **`/actuator/prometheus` 在主端口可达**。
+- ⇒ ⇒ **真正的轴是「三态」，不是「有 vs 无」**：
+  ① **Go 有 / RAG 无** = `admin-rpc` · `user-rpc` · `hot-rpc`（3 个）⇒ ⇒ **G1 对 `docs/DRIFT/users/user/rpc.md:280` 的改判（EQUIVALENT → OBSERVABLE DIFFERENCE）在 `user-rpc` 这一域成立** ✔（Go 的 `user.yaml` 有 DevServer `:9094`；RAG 的 `user-rpc` 三重关闭）；
+  ② **两侧都有、但路径与端口都不同** = `article-rpc` · `favorite-rpc` · `follow-rpc` · `like-rpc` · `message-rpc`（5 个）⇒ ⇒ Go 是 `/metrics`@DevServer/push 端口，RAG 是 `/actuator/prometheus`@主端口 ⇒ ⇒ **抓取配置要改路径 ＋ 改端口**（`follow/follow-rpc/application.yml:203-207` 的注释**早已写过这条**，且注明是 2026-10-24 双侧活体对拍实测）；
+  ③ **Go 无 / RAG 有**（**反向差异，G1 本单没提**）= `comment-rpc` · `task-rpc`（2 个）⇒ ⇒ Go 的 go-zero 拦截器指标在这两个域**不产** ⇒ ⇒ **RAG 反而多一个可观测面** ⇒ ⇒ 这两个域的「对齐」方向与另外 8 个**相反**。
+- ⚠️ **顺带查出 RAG 侧一条注释错误（域侧文件 ⇒ 转派）**：`comment/comment-rpc/application.yml:298-300` 的注释写「Go `metrics.go:42-43` 主动注销了 collectors ⇒ 即 **Go 的 `:9091`** 只暴露 5 个 `comment_*` 向量」⇒ ⇒ **`:9091` 在真源里的归属写错了**：真源 comment 域的出口是 `comment/rpc/comment.go:38-41` **域自建**的 `:9091`（不是 go-zero 的 agent）⇒ ⇒ 结论（只暴露 5 个向量）**成立**，归属**不成立** ⇒ ⇒ 落点 `service/comment/comment-rpc/.../application.yml`（**域侧写权 ⇒ 不归 G4**）⇒ 转派。
+
+**四、🔴 订正三（本轮新增的实测事实）：Go 的 DevServer 在 yaml 缺整段时**不启动****
+
+- G1 的事实「Go 生产就有 `/metrics`」⇒ ⇒ **只对 yaml 里写了 `DevServer:` 段的 7 个域成立**（favorite / follow / like / message / admin / user / points）。
+- **本层写了 Go 探针，直接跑 go-zero 自己的 `conf.Load`（`go-zero@v1.10.2` + 真源 `go.mod` 的依赖 pin）⇒ 实测**：
+  - `go-zero@v1.10.2/core/service/serviceconf.go:39` = `DevServer  DevServerConfig   `json:",optional"`` ⇒ ⇒ **整个 `DevServer` 段在 yaml 里缺失 ⇒ 保持零值 ⇒ `Enabled=false` ⇒ DevServer 不起**；
+  - `go-zero@v1.10.2/internal/devserver/config.go` = `Enabled bool `json:",default=true"`` ⇒ ⇒ **默认值只在「字段存在但没给值」时生效**；**段整个缺失时不生效**（因为外层字段带 `optional`）；
+  - ⇒ ⇒ **无 `DevServer` 段的域（`article-rpc` / `comment-rpc` / `hot-rpc` / `task-rpc` / `security-rpc`）⇒ 不起 DevServer** ⇒ ⇒ **Go 侧只有 7 个域靠 DevServer 出 `/metrics`**。
+- ⚠️ **本轮踩到并已登记的探针坑（可复用）**：**复刻 Go 的配置结构体做探针时，漏复刻一个 `json:",optional"` 标签 ⇒ 结论直接翻转** —— 实测 A（本地复刻结构体**不带** `optional`）⇒ `Enabled=true` / `Port=6060` / `EnableMetrics=true`；B（**带** `optional`）⇒ `Enabled=false` / `Port=0` / `EnableMetrics=false`；C（**真类型** `zrpc.RpcServerConf`，嵌套深度与真源一致）⇒ `Enabled=false` ⇒ ⇒ **同一个 yaml、只差一个标签 ⇒ 两个相反的结论** ⇒ ⇒ 第一版探针据此得出了**错误的**「DevServer 默认全开」⇒ ⇒ **纪律：复刻结构体做探针 ⇒ tag 必须逐字对齐（`optional` / `default` / `inherit`），否则探针测的是另一个结构体**。
+
+**五、本单的处置 ⇒ 不产生新的共享层落码需求（三块都已被既有处置覆盖）**
+
+- **Stat 层**：① 慢调用日志 ⇒ **本 lane 已落**（`RpcInterceptor` 的 close 路径，500ms 阈值，2 条守门）✔；② 按 method 记 latency ⇒ **已有**（`RpcInterceptor.java:358` ＋ `Observability.java:138-149` ⇒ 写 OTel span 属性）⚠️ **不是 Prometheus 指标**；③ 剩下的是 `stat.Metrics` 的**周期聚合报告**（qps/median/t99）⇒ **未落** ⇒ 已在 `G4-15c` 转派单里。
+- **Prometheus 拦截器层**：**未落** ⇒ `G4-15c` ⇒ ⚠️ **超出 Jason 2026-10-30 的既有批准**（他批的是「**只落 Stat 的慢调用日志**」＋「**不动 `Composition`**」）⇒ ⇒ 若要落 ⇒ **需要新的批准**（且 `Composition` record 改字段 ⇒ 破坏 3 个域级守门测试编译 ⇒ 跨域）。
+- **抓取出口**：**逐域三态**（见第三节）⇒ ⇒ 落点是**各域 yml**（域侧写权）⇒ ⇒ **不归 G4**；G1 自己也把它划给「全仓 rpc 层指标出口统一方案」交主会话拍板 ⇒ ⇒ **转派**。
+- ⇒ ⇒ **本层本轮零代码改动** ⇒ ⇒ **不需要新的批准** ⇒ ⇒ 只登记 ＋ 回执。
+
+**六、本节的诚实边界**
+
+1. **仍是源码级证据（E1）** —— 本轮**没有任何一侧的活体对拍**（没有真起 Go 进程抓 `/metrics`、没有真起 RAG 进程打 `/actuator/prometheus`）⇒ ⇒ 「Go 产 / RAG 不产」这类断言一律读作「**按配置与源码推导**」，**不得**外推为「已实测」。
+2. **Go 侧结论来自「读源码 ＋ 一个 `conf.Load` 行为探针」** ⇒ ⇒ 探针验证的是**配置填充语义**，**不是**「进程真的起了 :9091」⇒ ⇒ 出口是否真可达，仍需活体验证。
+3. **RAG 侧「有出口」的结论来自 yml 文本** ⇒ ⇒ 未验证「`/actuator/prometheus` 在真进程里真的可达」（那要看依赖与容器条件）⇒ ⇒ 同上，读作配置面。
 
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
