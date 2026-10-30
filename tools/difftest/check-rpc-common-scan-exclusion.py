@@ -176,6 +176,19 @@ def scan_scan_base_packages(root: str) -> list[tuple[str, str, int]]:
 
 WEB_STARTER_RE = re.compile(r"spring-boot-starter-web\b")
 
+
+def strip_xml_comments(text: str) -> str:
+    """剥掉 XML 注释 ⇒ ⇒ pom **注释里**提到的 `spring-boot-starter-web` 不算真依赖。
+
+    ⚠️ **2026-10-30 · G2 纠正面触发的第三类假信号**：本函数原先用**纯文本正则**直接扫 pom ⇒ ⇒
+    把 pom **注释**里那句「本模块不引 `spring-boot-starter-web`」当成了**真依赖** ⇒ ⇒
+    ⇒ `task-rpc` / `user-rpc` / `like-rpc` / `message-rpc` **被误判成 servlet 形态** ⇒ ⇒
+    ⇒ 后果有三重：① 形态面**假违例**（它们其实没有 servlet 容器）② 白名单变成**假豁免**
+    ⇒ ③ 连带**派错工单**（让 G2 给 task-rpc 加一行**死配置**）⇒ ⇒ ⇒ **判据必须对称**：
+    ⇒ Java 侧早就剥了注释（`strip_comments()`）⇒ ⇒ pom 侧现在也剥 ⇒ ⇒ 两边口径一致。
+    """
+    return re.sub(r"<!--.*?-->", "", text, flags=re.S)
+
 # 「rag.side = rpc」的**两种 YAML 写法**都要认（实测：G3 用嵌套形态，G1 派单口径是平铺形态）：
 #   ① 平铺：`rag.side: rpc`
 #   ② 嵌套：`rag:` + 缩进一级的 `side: rpc`
@@ -200,7 +213,28 @@ def _module_has_web_starter(root: str, module: str) -> tuple[bool, str]:
             txt = open(os.path.join(root, rel), encoding="utf-8", errors="replace").read()
         except OSError:
             continue
-        if WEB_STARTER_RE.search(txt):
+        if WEB_STARTER_RE.search(strip_xml_comments(txt)):
+            return True, rel
+    return False, ""
+
+
+def _module_pom_comment_only_hit(root: str, module: str) -> tuple[bool, str]:
+    """pom 文本里命中 `spring-boot-starter-web`，但**剥掉注释后不命中** ⇒ ⇒ 注释里的假依赖。
+
+    ⇒ 本函数是**守门自带的自检**：形态面判定若仍把这种域当成 servlet 形态 ⇒ ⇒
+    ⇒ **判据没剥注释** ⇒ ⇒ 直接让守门报红（而不是静默放过）。
+    """
+    for rel in _list_files(root):
+        if not rel.endswith("pom.xml"):
+            continue
+        parts = rel.split("/")
+        if len(parts) < 2 or parts[-2] != module:
+            continue
+        try:
+            txt = open(os.path.join(root, rel), encoding="utf-8", errors="replace").read()
+        except OSError:
+            continue
+        if WEB_STARTER_RE.search(txt) and not WEB_STARTER_RE.search(strip_xml_comments(txt)):
             return True, rel
     return False, ""
 
@@ -254,6 +288,14 @@ def scan_rag_side(root: str) -> list[tuple[str, str, str]]:
     problems: list[tuple[str, str, str]] = []
     for module in find_rpc_modules(root):
         is_servlet, ref = _is_servlet_shape(root, module)
+        # ⚠️ **守门自带的自检**：pom 里只有**注释**提到 web starter 的域 ⇒ ⇒ 必须被判成
+        #    **非 servlet 形态** ⇒ ⇒ 若这里判成 servlet ⇒ ⇒ 说明判据没剥注释 ⇒ ⇒ 报红。
+        comment_only, pom_co = _module_pom_comment_only_hit(root, module)
+        if comment_only and is_servlet:
+            problems.append((module, pom_co,
+                             "pom 注释里的 `spring-boot-starter-web` 被当成了真依赖 ⇒ 形态面误判"
+                             "（该域**没有 servlet 容器** ⇒ 不需要 `rag.side` ⇒ 把它加进白名单 = 假豁免）"))
+            continue
         if not is_servlet:
             continue  # 非 servlet 形态 ⇒ 自动配置面那 3 个不会注册 ⇒ 本断言不适用
         yml = _module_yml(root, module)
@@ -433,6 +475,22 @@ MUTATIONS = [
         "service/comment/comment-rpc/src/main/resources/application.yml",
         "    web-application-type: none",
         "    web-application-type: servlet",
+        "shape",
+    ),
+    (
+        "M4 形态面：给一个**非** servlet 形态的 rpc 域的 pom 加**真依赖** `spring-boot-starter-web`"
+        " ⇒ 它没有 `rag.side` ⇒ 必须被抓住"
+        " ⇒ 与 M2/M3 互补：M2/M3 测的是「yml 侧」，本条测的是「**pom 真依赖侧**」"
+        " ⇒ ⇒ 堵住「pom 判定根本没被测到」的缺口"
+        " ⇒（背景：该判定原先用**纯文本正则不剥 XML 注释** ⇒ 把 pom **注释**里的"
+        " `spring-boot-starter-web` 当成真依赖 ⇒ 四个域被误判 ⇒ ⇒ **假违例 + 假豁免 + 派错工单**）",
+        "service/task/task-rpc/pom.xml",
+        "    </dependencies>",
+        "        <dependency>\n"
+        "            <groupId>org.springframework.boot</groupId>\n"
+        "            <artifactId>spring-boot-starter-web</artifactId>\n"
+        "        </dependency>\n"
+        "    </dependencies>",
         "shape",
     ),
 ]
