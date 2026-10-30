@@ -84,6 +84,14 @@ import org.springframework.dao.QueryTimeoutException;
  * <h2>与 Go 的差异方向</h2>
  * <p>①（派发前）：<b>本类落码后与 Go 同形</b>（Go 查、RAG 也查）⇒ <b>不产生新的有意偏离</b>。
  * <p>②（socket 层固定超时）：<b>本类不动</b> ⇒ 仍与 Go 同形（两侧都是固定 3s）⇒ <b>不产生新的有意偏离</b>。
+ * <p>③（<b>检查点的位置</b> · 2026-10-30 16:2x 订正）：<b>仍差一段 ⇒ 「完全同形」不成立</b> ——
+ *     Go 的 ctx 检查点<b>更靠后</b>（客户端层：{@code waitTurn} 的 fast path 先查 {@code ctx.Done()}
+ *     ⇒ ctx 已 Done ⇒ <b>命令根本不下发</b>；且拨号也绑 ctx ⇒ 拨号期间过期 ⇒ 拨号被取消 ⇒ 也不写），
+ *     而本类的检查点<b>更靠前</b>（连接代理 ⇒ 在<b>取连接之前</b>）⇒ ⇒ ⇒
+ *     <b>残余方向 = RAG 更宽</b>：deadline 在<b>「取连接 / 拨号窗口」</b>内过期 ⇒
+ *     <b>Go 不写（拨号被 ctx 取消）／RAG 照写（Lettuce 取连接不受 ctx 约束）</b>
+ *     ⇒ ⇒ ⇒ <b>「派发前检查」这一层已同形，但「完全同形」不成立</b>
+ *     ⇒ ⇒ 逐条证据见 {@code docs/DRIFT/global/vs-common.md} §4.19.7 第三节。
  * <p>⚠️ <b>由此带来的登记变化</b>：本层此前按「Redis 比 Go 更严」登记的那条有意偏离候选
  * ⇒ ⇒ <b>前提已被订正（E66 是真漂移）⇒ 该登记作废</b> ⇒ 改按「补齐漂移」处理。
  * ⇒ ⇒ 订正全过程（证据链 ＋ 对转派单口径的影响）见
@@ -122,8 +130,28 @@ public final class GoStyleRedisDeadline {
      *
      * <p>⚠️ <b>为什么抛 {@link QueryTimeoutException} 而不是自定义异常</b>：
      * 它是 Spring 的<b>标准</b>超时异常（{@code org.springframework.dao}）⇒
-     * 域侧现有的 {@code catch (Exception e)} 逻辑<b>不用改一行</b>就能接住
-     * ⇒ ⇒ 对外错误面（错误码 / 错误文案）与 Go 侧<b>保持一致</b>。
+     * 域侧现有的 {@code catch (Exception e)} 逻辑<b>不用改一行</b>就能接住。
+     *
+     * <p>🔴 <b>「对外错误面」必须分两层说</b>
+     * （2026-10-30 16:2x 订正 ⇒ 原写「错误码 / 错误文案与 Go 侧保持一致」是<b>过强断言</b>）：
+     * <ul>
+     *   <li><b>① 客户端可见码 = 1015（DEADLINE_EXCEEDED）⇒ 与 Go 侧一致</b>：
+     *       由 {@code RpcInterceptor} 的<b>首次</b> {@code close(...)} 决定
+     *       （预算已耗尽 ⇒ 超时调度器立即 fire ⇒ 首次 close 即 DEADLINE_EXCEEDED）⇒ ⇒
+     *       <b>Go 侧也拿 1015</b> —— Go 的 {@code codes.Internal}
+     *       （{@code logoutlogic.go:41}）在 ctx 已 Done 时<b>到不了客户端</b>：
+     *       {@code service/common/observability/rpc.go:55-75} 的 select 里，
+     *       <b>done 分支要先拿锁</b>（那把锁被 handler 整个执行期持有），
+     *       而 <b>timeout 分支不拿锁</b> ⇒ <b>超时分支先就绪</b>
+     *       ⇒ ⇒ <b>两侧客户端可见码逐字一致 ⇒ 不是 wire 级漂移</b>。</li>
+     *   <li><b>② handler 级业务码 = 域侧 {@code catch (Exception e)} 映射的 {@code Status.INTERNAL}（5001）</b>
+     *       ＋ 文案「注销失败,Redis写入异常」⇒ ⇒ 那正是 Go 的 handler 级码
+     *       （{@code logoutlogic.go:41}）；⚠️ <b>但带域侧抢先 {@code checkDeadline()} 的路径
+     *       根本走不到这里</b>（域侧检查先触发 ⇒ handler 级是 1015）⇒ ⇒ ⇒
+     *       <b>该路径的 handler 级业务码与 Go 的 5001 不同</b>
+     *       ⇒ ⇒ 完全同形需域侧去掉那处抢先检查 ⇒ <b>users 域写权 ⇒ 归 G1</b>
+     *       ⇒ ⇒ 逐条证据见 {@code docs/DRIFT/global/vs-common.md} §4.19.7 第二节。</li>
+     * </ul>
      *
      * @param operation 被拦下的操作名（进消息，便于排查）
      */
