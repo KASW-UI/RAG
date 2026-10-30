@@ -2695,6 +2695,137 @@ bash tools/api-full-parity-probe/article/mutate-parity.sh          # ⇒ EXIT=0 
 - ⇒ RAG 侧原先的 `${POSTGRES_PASSWORD:password}`（走 Spring 的 `:default`）⇒ 缺变量时会用默认值连上去 ⇒ **RAG 比 Go 松** ⇒ 属**真漂移**，**不是**「更严的有意偏离」⇒ ⇒ 本轮**取消兜底**（本文件两处：数据源那段与 `article-rpc.postgres` 那段）。
 - ⚠️ **残余差异（失败时刻不同）**：Go = **启动成功、连库时**失败；RAG = **启动即失败**（Spring 解析不到占位符 ⇒ DataSource bean 创建失败）⇒ ⇒ 属「RAG 更严」的一侧 ⇒ 由**合并收口执行者**在合并窗口统一登记。
 
+## 📌 追加 · ✅ **出向 gRPC 缺 Go 的 2s 客户端上界（零期限）→ 已修**（2026-10-31 · G3 第八轮）
+
+> **一句话**：本域 `article-rpc` 的出向出口 `MessageRpcClient` 用**裸 stub** 发起调用
+> ⇒ ⇒ **出向调用完全没有期限**（既无 2s 客户端封顶，且因跑在 Kafka consumer 线程上
+> ⇒ 载体 ThreadLocal **不可见** ⇒ 连「继承入向 deadline」也不成立）
+> ⇒ ⇒ 而 Go 侧同款出口**有** 2000ms 客户端封顶 ⇒ ⇒ **可观察行为分叉**（下游挂死时 Go 2s 返回、RAG 一直等）。
+
+### 缺口本体
+
+| 项 | 证据（`文件:行号`） |
+|---|---|
+| RAG 调用点 | `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/client/MessageRpcClient.java` ⇒ `stub.sendNotification(req.build())` ⇒ **裸 stub，零 deadline** |
+| RAG 调用链 | `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mq/ArticleSyncResultConsumer.java:213`（`messageRpcClient.sendArticlePublished(…)`）⇒ 该类 `:80` 是 `@KafkaListener` ⇒ ⇒ **Kafka consumer 线程** |
+| 载体可见性 | ⇒ consumer 线程 ⇒ 共享层 `RpcInterceptor.onHalfClose` 绑的 ThreadLocal **不可见** ⇒ ⇒ 连「继承入向 deadline」都**不成立** |
+| Go 对照 | `service/article/rpc/internal/mqs/article_sync_result_consumer.go:197`（`l.svcCtx.MessageRpc.SendNotification(ctx, …)`）⇒ **同一形态**（Kafka 消费 ctx，无 deadline）⇒ ⇒ Go 侧该出口**只有客户端 2s 封顶** ⇒ ⇒ **两侧差的就是这 2s** |
+
+**Go 侧证据（消费点，不是声明点）**
+- `go-zero@v1.10.2/zrpc/internal/client.go:113-117`：`if c.middlewares.Timeout { interceptors = append(interceptors, clientinterceptors.TimeoutInterceptor(timeout)) }` ⇒ **客户端无条件**装超时拦截器。
+- `go-zero@v1.10.2/zrpc/internal/config.go:15`：`Timeout bool json:",default=true"` ⇒ 中间件开关**默认开**。
+- `go-zero@v1.10.2/zrpc/config.go:31`：`Timeout int64 json:",default=2000"` ⇒ **2000ms**。
+- `go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25`：`ctx, cancel := context.WithTimeout(ctx, t)` ⇒ 父 ctx 更早则**先到者生效**。
+
+**🔴 为什么「2s 客户端上界」这一半**只能**由域侧提供**
+- 共享层的 `GoStyleOutboundDeadlineInterceptor.effectiveCallOptions` 算的是
+  `min(请求载体剩余纳秒, 客户端硬上界 capMillis, 调用点自带 deadline)`
+  ⇒ 而 `GoStyleProtectionProperties.OutboundDeadline#capMillis` **默认 0 = 不启用**
+  ⇒ 且全仓 `service/<域>/<组件>/src/main/resources/*.yml` 的 `outbound-deadline` **零配置**
+  ⇒ ⇒ **拦截器层根本不提供 Go 的 2000ms 客户端上界**
+  ⇒ ⇒ 那一半**只在域侧调用点** ⇒ ⇒ **域侧漏了就是真漂移**（RAG 比 Go 松）。
+
+### 🔴 Go 侧 zrpc client `Timeout` **真值表**（必须逐域读 yaml · 不能一律按 2000 补）
+
+| 域 / 方向 | Go 侧 yaml 真值 | RAG 侧现状 | 判定 |
+|---|---|---|---|
+| `article-rpc` → `message-rpc` | `service/article/rpc/etc/article.yaml` 的 `MessageRpc:` 段**没写 `Timeout`** ⇒ **default 2000ms** | **零期限** | 🔴 **真漂移（本条）** |
+| `article-api` → `article-rpc` | `service/article/api/etc/article-api.yaml:12` **`ArticleRpcConf.Timeout = 70000`**（显式写） | `GoStyleRequestDeadline.applyTo(stub)` ⇒ 继承 HTTP 顶层 `Timeout: 70000`（`article-api.yaml:4`）⇒ ≈ **70s** | ✅ **一致 —— 不是缺口** |
+| `article-rpc` → `security-rpc` | `service/article/rpc/etc/article.yaml:90` `SecurityConf.Timeout = 10000` | 骨架未实现（`SecurityRpcClient` 是占位） | N/A |
+| `hot` / `favorite` / `comment` 三域的出向 | 各自 yaml 里**零 `Timeout:` 行** ⇒ 全部 **default 2000ms** | 各自已有 2s 上界 | ✅ 一致 |
+
+⚠️ **本表为什么必须存在**：Go 的 2000ms 是 **`default` 而不是普遍真值**
+⇒ ⇒ `article-api` 就是反例（**70000ms**）⇒ ⇒ **任何域补「2s 客户端上界」都必须先读自己那份 yaml**
+⇒ ⇒ **硬编码 2000 会把 70000 的域改严 35 倍**（Go 侧 70s ⇒ RAG 侧 2s ⇒ RAG 更严 ⇒ 同样是漂移）。
+（共享层 `GoStyleOutboundDeadlineInterceptor` 的类 javadoc 已就 `article-api.yaml:12` 记过这条警告 ⇒ 此处是**域侧实测核对**。）
+
+### 影响（可观察行为分叉）
+
+- 下游 `message-rpc` 挂死时：**Go 侧 2s 就返回**（`DEADLINE_EXCEEDED` ⇒ 按调用方口径折叠）；
+  **RAG 侧一路等到底** ⇒ ⇒ **调用耗时 + 失败时机都不同** ⇒ ⇒ 属**真漂移**，不是表达层差异。
+- ⚠️ 该调用点**吞掉异常**（`catch (StatusRuntimeException)` ⇒ 只记日志、返回 false）
+  ⇒ ⇒ 失败**时机**的差异不会向上冒泡 ⇒ ⇒ 表现为「消费变慢」而非「报错」⇒ **更难被发现**。
+
+### 证据强度与处置建议
+
+| 项 | 结论 |
+|---|---|
+| 证据强度（**修前**） | **L2 源码级**（逐字读了裸 stub 调用、调用链、`@KafkaListener` 注解、Go 侧同款调用）⇒ ⚠️ **未**做活体计时 |
+| **实际修法（已落码）** | 照抄**本仓现成正确实现**（不发明第三种写法 · AGENTS.md §3.2）：**comment 域** `service/comment/comment-rpc/.../client/GoStyleClientCallTimeout.java` 的**两段式**（`capByClientTimeout(applyTo(stub))`）—— ⚠️ 本出口在 consumer 线程上 ⇒ `applyTo` 会**原样返回**（载体不可见）⇒ 实际效果 = **2s 封顶**（与 Go 同形）<br>⚠️ **封顶值必须先读本域 yaml**：本域 `MessageRpc:` 段**没写 `Timeout`** ⇒ 取 **default 2000ms** ⇒ ⇒ 与 comment / favorite 两域同款（那两份 yaml 也都没写）⇒ ⇒ **硬编码 2000 在本域成立**；但**不可推广**（`article-api` 是 70000）<br>⇒ **落点**：① 新增 `service/article/article-rpc/.../client/GoStyleClientCallTimeout.java`（照抄 favorite 域那份，package-private 工具类）② `MessageRpcClient` 新增私有方法 `messageRpc()` ＝ `GoStyleClientCallTimeout.capByClientTimeout(GoStyleRequestDeadline.applyTo(stub))`，调用点由裸 stub 改为走它 |
+| 状态 | ✅ **已修**（2026-10-31 · Jason 拍板「修」· G3 域侧自修 · 落点在本域）⇒ 修法与证据见上一行；守门网见下一段 |
+
+## 📌 追加 · 🟡 **共享层演进 ⇒ 本域「载体守门」的正向对照参照物失效（已改用测试自带探针）**（2026-10-31 · G3 第八轮）
+
+> **一句话**：2026-10-31 的回归（**带工作树共享层**跑）里，`ArticleRpcSharedLayerWebBeanGateTest` 的第 ② 条
+> 「**正向对照**：共享层那个带 servlet 条件的自动配置确实在容器里」**转红**
+> ⇒ ⇒ **根因不是载体漂移，而是共享层演进把这个守门的「参照物前提」改掉了** ⇒ ⇒ 已就地改用**测试自带探针**。
+
+### 现象与根因
+
+| 项 | 内容 |
+|---|---|
+| 现象 | `ArticleRpcSharedLayerWebBeanGateTest#servletConditionHoldsInThisContext` 红：`GoStyleJsonContentTypeAdvice` 不在容器里 |
+| 根因 | 共享层 `53bc05ec`（G4 lane · 2026-10-30）把一批 web Bean 从「**只有** `@ConditionalOnWebApplication(SERVLET)`」改成「servlet 条件 **+** api 侧条件（`ConditionalOnApiSide`）」⇒ ⇒ **`GoStyleJsonContentTypeAdvice` 现在是 api 侧 Bean** ⇒ ⇒ 在 rpc 容器里**本就不该在** ⇒ ⇒ **守门红得对，但守门本身的前提已过期** |
+| 为什么以前是绿的 | 此前回归**没带 `-am`** ⇒ 用的是 m2 里 **2026-10-29 08:08 的旧** `com.rag:common` jar ⇒ 那份共享层里这些 Bean 还只有 servlet 条件 ⇒ ⇒ 在 MOCK 上下文里都在 ⇒ 绿 |
+| 修法（已落码） | 改用**本类自带的探针** `ServletContextProbeConfiguration`（**只**带 `@ConditionalOnWebApplication(SERVLET)`、**不带** api 侧条件）⇒ ⇒ **实测踩了两个坑（逐个定位，不是猜的）**：<br>① **注册面**：探针最初做成**类的嵌套** `@TestConfiguration` ⇒ 实测**根本没被自动注册**（探针始终不在容器里）⇒ ⇒ 而上下文底账实测为 `ctx=GenericWebApplicationContext` / `env=ApplicationServletEnvironment` / `session` scope 已注册 ⇒ ⇒ **条件是匹配的 ⇒ 问题在「注册」不在「条件」** ⇒ ⇒ 最终改成**文件顶层（包私有）`@Configuration` ＋ 测试类上显式 `@Import`** ⇒ 注册不再依赖任何自动探测机制；<br>② **编译面**：`@Import(Xxx.class)` 写在**类自身的注解**上时，javac 按 JLS 作用域规则**解析不到本类的嵌套成员类型**（嵌套类型的作用域是「类体内部」，而类声明上的注解在类体之外）⇒ ⇒ 编译报「找不到符号」⇒ ⇒ 搬到文件顶层后 `@Import` 可解析（**这是必须搬文件顶层的第二个独立理由**）；<br>③ **追加一条不依赖任何 bean 条件的直接断言**：`context instanceof WebApplicationContext` ⇒ ⇒ 直接读「前提事实」本身 ⇒ **不依赖共享层任何 Bean 的条件组合** ⇒ ⇒ 与探针那条**成对**（探针验「servlet 条件机制真的匹配」，直接断言验「上下文真的是 servlet web app」） |
+
+### 为什么必须留这一条（别当噪音删掉）
+
+- 第 ③ 条断言的是「api 侧那 5 个 web Bean **一个都不在** rpc 容器里」
+  ⇒ ⇒ 若本上下文**压根不是 servlet web app**，那 5 个 Bean 自然不在 ⇒ ⇒ **第 ③ 条就是空断言**（无鉴别力）
+  ⇒ ⇒ 第 ② 条的**正向对照**是第 ③ 条的前提 ⇒ ⇒ 两者必须成对维护。
+- ⚠️ 本条同时是一个**方法学提醒**：守门里「拿共享层某个 Bean 当参照物」的做法
+  ⇒ ⇒ **会随共享层演进而失效** ⇒ ⇒ 判据应当**自带参照物**。
+
+## 📌 追加 · ✅ **出向 deadline 的 2s 客户端封顶已落码 + 守门网已补（L4 活体 · 变异转红）**（2026-10-31 · G3 第九轮）
+
+> **一句话**：上一段的缺口（`article-rpc` → `message-rpc` 出向**零期限**）已按 Jason 拍板「修」**落码**
+> ⇒ ⇒ 落点是**域内**（`service/article/article-rpc/**`）⇒ ⇒ **两侧同形**（Go 2s 封顶 / RAG 2s 封顶）
+> ⇒ ⇒ 另补一条 **5 例守门**（L4 活体）⇒ ⇒ **三个语义维度各有专属判据**（变异矩阵实测精确转红）。
+
+### 落码（两处，都在域内）
+
+| 项 | 证据（`文件:行号`） |
+|---|---|
+| 新增工具类 | `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/client/GoStyleClientCallTimeout.java`（package-private；**照抄 favorite 域同款**，不发明第三种写法 · AGENTS.md §3.2）⇒ `capByClientTimeout` ＝ `min(载体剩余纳秒, 2s)`，常量 `CLIENT_TIMEOUT_MILLIS = 2000` |
+| 调用点改造 | `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/client/MessageRpcClient.java` ⇒ 新增私有方法 `messageRpc()` ＝ `GoStyleClientCallTimeout.capByClientTimeout(GoStyleRequestDeadline.applyTo(stub))`；原裸 stub 调用 `stub.sendNotification(req.build())` 改为 `messageRpc().sendNotification(req.build())` |
+| 封顶值的来源 | Go `service/article/rpc/etc/article.yaml` 的 `MessageRpc:` 段**无 `Timeout` 行** ⇒ 取 `zrpc/config.go:31` 的 `json:",default=2000"` ⇒ ⇒ **不是拍脑袋的数**；⚠️ 同仓 `service/article/api/etc/article-api.yaml:12` ＝ **70000** 是反例 ⇒ ⇒ **不可推广**（硬编码 2000 到别的域会把 70000 的域改严 35 倍） |
+
+### 🔴 本出口在生产上落在「**无载体**」那一档（必须说清楚）
+
+- 调用链：`service/article/article-rpc/src/main/java/com/rag/article/article/rpc/mq/ArticleSyncResultConsumer.java:213` ⇒ 该类 `:80` 是 `@KafkaListener` ⇒ ⇒ **Kafka consumer 线程**
+- ⇒ ⇒ 共享层 `RpcInterceptor.onHalfClose` 绑的 ThreadLocal 载体**在该线程不可见**
+- ⇒ ⇒ 第一段 `applyTo` **原样返回 stub** ⇒ ⇒ 净效果 = **恰好 2s 封顶**
+- ⇒ ⇒ 与 Go 侧**同形**（Go 的 `service/article/rpc/internal/mqs/article_sync_result_consumer.go:197` 传的也是 Kafka 消费 ctx ⇒ 同样无 deadline ⇒ 同样只有 2s 封顶）
+
+### 守门网（5 例 · `ArticleOutboundDeadlineCarrierGateTest`）
+
+| 用例 | 专属判别维度 |
+|---|---|
+| `carrierIsReallyBoundOnHandlerThreadOverRealWire` | 真 wire + 真共享层 `RpcInterceptor` ⇒ 证「载体在 gRPC handler 线程**真的绑上了**」＋「客户端 deadline **真的穿过 wire** 到了服务端」（⇒ 把证据从 L2 源码级升到 **L4 活体**） |
+| `outboundIsCappedAtTwoSecondsWhenInboundBudgetIsLonger` | 入向预算 **> 2s** ⇒ 证「2s 客户端封顶**真的生效**」（专治「不压任何 deadline」） |
+| `outboundInheritsInboundBudgetWhenItIsShorter` | 入向预算 **< 2s** ⇒ 证「出向上界**真的继承了**入向剩余」（专治「无脑套 2s」） |
+| `outboundBudgetKeepsNanosecondPrecision` | 手动绑定**已知绝对纳秒**（10.9ms）⇒ 证「域内计算点**不截断亚毫秒**」（可确定性分辨毫秒版） |
+| `noCarrierStillGetsTwoSecondClientCap` | **无载体** ⇒ 证 2s 封顶**无条件**在 ⇒ ⇒ **这一条才是本域生产出口真正落的那一档** |
+
+### 🔴 变异矩阵（守门非假绿 · 2026-10-31 实测）
+
+| 注入的变异 | 转红的用例（实测） | 读数 |
+|---|---|---|
+| 纳秒 → 毫秒截断（旧实现语义） | `outboundBudgetKeepsNanosecondPrecision` | 5 tests / **1 failure** |
+| 完全不压 2s 封顶（原样返回 stub） | `noCarrierStillGetsTwoSecondClientCap` ＋ `outboundIsCappedAtTwoSecondsWhenInboundBudgetIsLonger` | 5 tests / **2 failures** |
+| 无视入向预算，永远只套 2s | `outboundBudgetKeepsNanosecondPrecision` ＋ `outboundInheritsInboundBudgetWhenItIsShorter` | 5 tests / **2 failures** |
+| （基线 / 还原后） | — | 5 tests / **0 failure** |
+
+⇒ ⇒ **三个语义维度（纳秒精度 / 2s 封顶 / 继承入向）各有专属判据** ⇒ ⇒ 本守门**对被测差异有判别力**，不是「错误答案的守卫」。
+⇒ 三个变异均已还原（仓内残留锚点检查 = **0**）；还原后复跑全绿。
+
+### ⚠️ 本守门**证什么 / 不证什么**（别过度解读）
+
+- ✅ **证**：「载体可见时 ⇒ 出向上界 = min(载体剩余, 2s)」这个**计算点本身**是对的（纳秒精度 + 无条件 2s 封顶）。
+- ❌ **不证**：「生产装配面（真 `@GrpcClient` ⇒ devh 拦截器链）真的把 deadline 给到了」⇒ ⇒ 本守门是**域侧计算点**的证据，不是**装配面**的证据。
+- ⚠️ 生产出口落在「无载体」那一档 ⇒ ⇒ 本守门的**第 ⑤ 条**才是与生产同形的那一条；第 ①②③④ 条证的是**同一段代码**的另一半（用来排除「写死 2s、完全不看载体」的假实现 ⇒ 否则第 ⑤ 条会成假绿）。
+
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
 > 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。

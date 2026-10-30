@@ -1,5 +1,6 @@
 package com.rag.article.article.rpc.client;
 
+import com.rag.common.observability.GoStyleRequestDeadline;
 import com.rag.message.message.proto.MessageServiceGrpc;
 import com.rag.message.message.proto.NotificationKind;
 import com.rag.message.message.proto.SendNotificationReq;
@@ -91,7 +92,7 @@ public class MessageRpcClient {
                 .putExtra("author_id", authorId);
 
         try {
-            stub.sendNotification(req.build());
+            messageRpc().sendNotification(req.build());
             return true;
         } catch (StatusRuntimeException e) {
             // Go: logger.LogBusinessErr(..., errmsg.ErrorServerCommon, ...) —— 吞掉，不影响发布结果
@@ -99,5 +100,49 @@ public class MessageRpcClient {
                     articleId, recipientId, e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * 🔴 <b>出向调用必须带 2s 客户端封顶</b>（2026-10-31 · G3 域侧自修 · Jason 拍板「修」）。
+     *
+     * <p><b>Go 出处</b>：{@code service/article/rpc/internal/mqs/article_sync_result_consumer.go:197}
+     * 的 {@code l.svcCtx.MessageRpc.SendNotification(ctx, …)}
+     * ⇒ ⇒ Go 侧 {@code zrpc.MustNewClient(c.MessageRpc)} 的客户端<b>无条件</b>装
+     * {@code TimeoutInterceptor}（{@code zrpc/internal/client.go:113-117} ＋
+     * {@code zrpc/internal/config.go:15} 的 {@code default=true}）
+     * ⇒ ⇒ 每次调用都有 <b>2000ms</b> 上限（{@code zrpc/config.go:31} 的 {@code json:",default=2000"}）；
+     * ⚠️ 本域 {@code service/article/rpc/etc/article.yaml} 的 {@code MessageRpc} 段
+     * <b>没写 Timeout</b> ⇒ 取的就是这个 default ⇒ ⇒ <b>不是</b>我拍脑袋定的数。
+     *
+     * <p><b>修前的可观察分叉</b>：本类原先<b>直接用注入的 stub 发起调用</b> ⇒ <b>零期限</b>
+     * ⇒ ⇒ 下游 {@code message-rpc} 挂死时 Go 2s 就返回、RAG <b>一路等到底</b>
+     * ⇒ ⇒ 而本调用点<b>吞掉异常</b>（只记日志、返回 false）⇒ ⇒ 失败<b>时机</b>的差异不会向上冒泡
+     * ⇒ ⇒ 表现为「消费变慢」而非「报错」⇒ ⇒ 更难被发现；
+     * ⇒ ⇒ 更糟的是本调用点在 <b>Kafka consumer 线程</b>上
+     * （调用点 {@code service/article/article/rpc/mq/ArticleSyncResultConsumer.java:213}，
+     * 该类 {@code :80} 是 {@code @KafkaListener}）⇒ ⇒ 无限期阻塞会把<b>消费线程占死</b>
+     * ⇒ ⇒ 该 partition 不再推进 ⇒ ⇒ 「文章发布成功」通知这条链路<b>整条停摆</b>。
+     *
+     * <p><b>🔴 为什么是「两段式」而不是只套 2s</b>：
+     * <ul>
+     *   <li><b>第一段 {@code GoStyleRequestDeadline.applyTo(stub)}</b>：把<b>入向</b> deadline 的
+     *       剩余预算挂到出向 stub 上（父 deadline 参与 min）；
+     *       ⚠️ <b>本出口跑在 Kafka consumer 线程上</b> ⇒ 共享层 {@code RpcInterceptor.onHalfClose}
+     *       绑的 ThreadLocal 载体<b>在本线程不可见</b> ⇒ ⇒ 第一段在本出口<b>原样返回 stub</b>
+     *       （不挂 deadline）⇒ ⇒ 净效果 = <b>恰好 2s 封顶</b>
+     *       ⇒ ⇒ 与 Go 侧<b>同形</b>（Go 的 {@code article_sync_result_consumer.go:197} 传的
+     *       也是 <b>Kafka 消费 ctx（无 deadline）</b> ⇒ 同样只有 2s 封顶）；</li>
+     *   <li><b>第二段 {@code GoStyleClientCallTimeout.capByClientTimeout(…)}</b>：算
+     *       {@code min(请求剩余, 2s)} ⇒ ⇒ <b>这一半是本域必须自己给的</b>
+     *       （共享层拦截器层的 {@code GoStyleProtectionProperties.OutboundDeadline#capMillis}
+     *       <b>默认 0 = 不启用</b>，全仓 {@code service/<域>/<组件>/src/main/resources/*.yml}
+     *       的 {@code outbound-deadline} <b>零配置</b>）⇒ ⇒ 域侧漏了就是真漂移（RAG 比 Go 松）。</li>
+     * </ul>
+     *
+     * <p>⚠️ <b>不要把返回值缓存到字段上</b>：{@code withDeadlineAfter} 每次返回新实例。
+     */
+    private MessageServiceGrpc.MessageServiceBlockingStub messageRpc() {
+        return GoStyleClientCallTimeout.capByClientTimeout(
+                GoStyleRequestDeadline.applyTo(stub));
     }
 }
