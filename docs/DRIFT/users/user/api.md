@@ -3844,6 +3844,7 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
   - `io.grpc.NameResolverRegistry.getDefaultRegistry().getDefaultScheme()` ⇒ **`discovery`**（不是 `dns`）
   - `…getProviderForScheme("discovery")` ⇒ **`DiscoveryClientResolverFactory [scheme=discovery, discoveryClient=org.springframework.cloud.client.discovery.composite.CompositeDiscoveryClient@…]`** ⇒ ⇒ **provider 已注册**
   - `…getProviderForScheme("dns")` ⇒ `io.grpc.internal.DnsNameResolverProvider@…` ⇒ ⇒ grpc 自带 DNS resolver 也在，但**默认 scheme 已被 priority=6 的 discovery provider 夺走**
+  - ⚠️ **同一次探针还读了「该上下文里到底有没有 `DiscoveryClient` bean」** ⇒ `beanNamesForTypeIncludingAncestors(ctx, DiscoveryClient.class)` = **`[compositeDiscoveryClient, simpleDiscoveryClient]`** ⇒ ⇒ **没有 `nacosDiscoveryClient`**（该测试显式 `spring.cloud.nacos.discovery.enabled=false` ⇒ Nacos 那套自动配置未生效）⇒ ⇒ 而 provider **在位** ⇒ ⇒ ⇒ **「依赖树里有 nacos-discovery」不是决定性变量** —— user-rpc / admin-rpc 侧实测 bean 列表里**明明有** `nacosDiscoveryClient`，provider 却**未注册** ⇒ ⇒ 决定性变量是 **devh 的 `@ConditionalOnBean(DiscoveryClient.class)` 在该上下文的自动配置处理顺序下是否命中** ⇒ ⇒ 命中与否**随上下文而变**
 - **⇒ 两侧对照（同一把尺）**：
   - **user-api（本条）**：`defaultScheme=discovery` ⇒ **provider 在位** ⇒ ⇒ 无 scheme 的 target 必被接管 ⇒ ⇒ **实测可复现的活雷**（回落 target ⇒ `UNAVAILABLE: No servers found for 127.0.0.1:22200`）
   - **user-rpc / admin-rpc**：`defaultScheme=dns` + `discoveryProvider=null` ⇒ **provider 从未注册** ⇒ ⇒ 不被接管 ⇒ ⇒ 那 4 处属**预防性**（探针 + 装置正确的配对实验读数见对应域台账）

@@ -3033,6 +3033,7 @@ span 状态恒为 **`Unset`** ⇒ ⇒ **RAG 侧多置一个 `ERROR`** 就是**�
   - `io.grpc.NameResolverRegistry.getDefaultRegistry().getDefaultScheme()` ⇒ **`dns`**
   - `…getProviderForScheme("discovery")` ⇒ **`null`** ⇒ ⇒ **devh 的 discovery provider 根本没注册进这个 JVM**
   - `…getProviderForScheme("dns")` ⇒ `io.grpc.internal.DnsNameResolverProvider@…` ⇒ ⇒ 默认 scheme 仍是 grpc 自带 DNS resolver ⇒ ⇒ 无 scheme 的 target 走 DNS ⇒ ⇒ 不被接管
+  - ⚠️ **同一次探针还读了「该上下文里到底有没有 `DiscoveryClient` bean」** ⇒ `beanNamesForTypeIncludingAncestors(ctx, DiscoveryClient.class)` = **`[nacosDiscoveryClient, compositeDiscoveryClient, simpleDiscoveryClient]`** ⇒ ⇒ **Nacos 的 bean 明明在**（依赖树里也有 `nacos-discovery`）⇒ ⇒ **provider 仍未注册** ⇒ ⇒ ⇒ **「模块依赖树里有 nacos-discovery」不是决定性变量** ⇒ ⇒ 决定性变量是 **devh 的 `@ConditionalOnBean(DiscoveryClient.class)` 在该上下文的自动配置处理顺序下是否命中** ⇒ ⇒ 命中与否**随上下文而变**（两侧实测对照见下）
 - **配对实验（装置正确：触发源先跑）**：`mvn … -pl service/users/user/user-rpc test -Dsurefire.runOrder=alphabetical -Dtest='UserRpcLogoutClientVisibleGrpcStatusTest,UserRpcGrpcInterceptorWiringTest,UserRpcContainerWiringTest'`
   - 执行顺序**实测**：`UserRpcGrpcInterceptorWiringTest`（devh 用得最重的一类）**先跑** → `UserRpcLogoutClientVisibleGrpcStatusTest` → `UserRpcContainerWiringTest`
   - 触发源先跑之后，logout 那条的探针**仍然是** `defaultScheme=dns` / `discoveryProvider=null` ⇒ ⇒ **无接管**
