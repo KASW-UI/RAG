@@ -744,7 +744,7 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
 | 形态 | Go（真源） | RAG **修前** | RAG **修后** |
 |---|---|---|---|
 | **① 请求到达下游、业务挂死** | 客户端 2s 收口 ⇒ `helper.go:84-89` ⇒ **`INTERNAL` + 5001** | **服务端** 2s 收口 ⇒ `DEADLINE_EXCEEDED` ⇒ `FollowUserExistenceService.java:86-91` 分支② ⇒ **`INTERNAL` + 5001** | 同左 ⇒ **与 Go 同形** |
-| **② 请求没到达下游**（进程不可达 / 网络黑洞 / 连接建好但无响应） | 客户端 2s 收口 ⇒ **`INTERNAL` + 5001** | **无任何客户端收口** ⇒ 只能等**服务端**兜底（`service/follow/follow-rpc/src/main/resources/application.yml:247` = `rpc-timeout: 2s`，管的是**入站**调用）⇒ ⇒ **形态②才是差异** | 客户端 2s 收口 ⇒ **`INTERNAL` + 5001** ⇒ **与 Go 同形** |
+| **② 请求没到达下游**（进程不可达 / 网络黑洞 / 连接建好但无响应） | 客户端 2s 收口 ⇒ **`INTERNAL` + 5001** | **无任何客户端收口** ⇒ 只能等**服务端**兜底（`service/follow/follow-rpc/src/main/resources/application.yml:308` = `rpc-timeout: 2s`，管的是**入站**调用）⇒ ⇒ **形态②才是差异** | 客户端 2s 收口 ⇒ **`INTERNAL` + 5001** ⇒ **与 Go 同形** |
 
 ⇒ ⇒ **本条要修的是形态②**（下游看到的 status 与业务码都不同），**不是**形态①。
 
@@ -784,7 +784,7 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
 > ⇒ ⇒ 纪律：**新增内容一律放文件末尾**；要改中部 ⇒ 用「**就地替换**」（行数不变）而不是「插入新行」。
 > ⇒ ⇒ 判据：`python3 tools/ledger-derive/check-pointer-consistency.py`（派生层输入完整性棘轮）。
 
-| DRIFT-FOLLOW-014 | 出向 user-rpc **缺 2s 客户端超时** ⇒ 失败只能由**服务端**兜底 ⇒ 失败**归因**与**收口时刻**与 Go 不同 | **可观察（失败归因）** | ✅ **已修（2026-10-30 · G1 lane · 域侧自修）** —— 客户端侧 2s deadline 已补（`service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java:75`）⇒ 守门 `UserRpcClientDeadlineCapTest`（**3 条**，含**真发一次调用**）＋ **变异 M4 实测红**（拿掉 cap ⇒ 挂死 ⇒ `@Timeout` 触发）⇒ 证据强度 **L3**（未做双侧活体对拍 ⇒ **不是 L4**）⇒ 详见下方 §「DRIFT-FOLLOW-014」|
+| DRIFT-FOLLOW-014 | 出向 user-rpc **缺 2s 客户端超时** ⇒ 失败只能由**服务端**兜底 ⇒ 失败**归因**与**收口时刻**与 Go 不同 | **可观察（失败归因）** | ✅ **已修（2026-10-30 · G1 lane · 域侧自修）** —— 客户端侧 2s deadline 已补（`service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java:75`）⇒ 守门 `UserRpcClientDeadlineCapTest`（**3 条**，含**真发一次调用**）＋ **变异 M4 实测红**（拿掉 cap ⇒ 挂死 ⇒ `@Timeout` 触发）⇒ 证据强度 **L3**（未做双侧活体对拍 ⇒ **不是 L4**）<br>**【2026-10-31 二次订正 · 客户端硬上界 · 域侧那半落码】** ① **上界的承担者换了**：域侧私有副本（`capByClientTimeout`）**已删** ⇒ 封顶改由**共享层唯一实现**承担（`service/common/src/main/java/com/rag/common/protection/GoStyleOutboundDeadlineInterceptor.java` 的 `@GrpcGlobalClientInterceptor` ⇒ 装在**每个**出向 devh 调用上 ⇒ 与调用点无关）⇒ 域侧**只配参数** `rag.protection.outbound-deadline.cap-millis` （`service/follow/follow-rpc/src/main/resources/application.yml` 的 `rag.protection` 段）＝ `${FOLLOW_RPC_OUTBOUND_DEADLINE_CAP_MILLIS:2000}` ⇒ **默认 2000ms ＋ env 可覆盖** ⇒ 常量 `CLIENT_TIMEOUT_MILLIS`（`:75`）保留但语义改为**断言用期望值**（真实值由 yml 持有）② **守门扩到 5 条**（配置面 · 绑定面 · 运行期默认 2000 · 运行期 env 覆盖**放宽** · 域内不得有第二份写死上界）＋ **变异实测**：**M-A**（cap 改成 0 ⇒ **3 条红** = 配置面/绑定面/运行期，且运行期那条是**干净断言红**）＋ **M-D**（加回写死 2000ms 的副本 ⇒ **2 条精确红** = env 覆盖被架空那条 + 形态面那条，实测耗时 2005ms）⇒ 证据强度 **L3**（未做双侧活体对拍 ⇒ **不是 L4**）③ **自查订正一处**：先前一轮写「副本会让 env 覆盖**完全**失效」**不准确** ⇒ ⇒ 准确表述 = `min` **只压小不压大** ⇒ ⇒ 失效只发生在「**放宽**」方向 ⇒ ⇒ 判据必须用放宽方向才抓得住副本 ⇒ ⇒ 本轮第 ④ 条即按此设计⇒ 详见下方 §「DRIFT-FOLLOW-014」|
 
 ## 载体守门补网（2026-10-31 · G1 lane）
 
@@ -941,3 +941,63 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
 - 本轮**真容器启动 35 次**（`postgres:16-alpine` / `redis:7-alpine`）⇒ ⇒ 三域含容器的用例**本轮真跑且全绿**（此前是「Docker 停 ⇒ 类级 error ⇒ 折叠」）
 - ⚠️ **仍未覆盖（不得写成已闭环）**：① 域侧「logout 走的是共享层那个 Redis 期限代理」的**装配接线**（域侧 `AdminLogoutDeadlineHandoffTest` 用 **Mockito 替换数据层** ⇒ ⇒ **只证控制流，不证代理接线**）② **handler 级码集合面的 RAG↔Go 双侧活体对拍** ⚠️ **【2026-10-31 订正】** 原列的 ②「真 Redis 上『**预算耗尽 ⇒ 写不发生**』的**活体**行为（共享层的 `GoStyleRedisDeadlineLiveRedisWriteFaceGateTest` 本轮 **3 条全 skipped** ⇒ ⇒ 需要外部 Redis 地址）」**已过期** —— 该守门在主干 **2026-10-31 03:23 真跑通过**（surefire `TEST-com.rag.common.redis.GoStyleRedisDeadlineLiveRedisWriteFaceGateTest.xml` ⇒ `tests=3 · failures=0 · errors=0 · skipped=0` ⇒ **不是 SKIP**）⇒ ⇒ 且它正是「**独立通道读回仍是基线值** ⇒ 命令真的没落进 Redis」那一格 ⇒ ⇒ **这一件已达成** ⇒ ⇒ **残余从三件收敛到两件**（① 装配接线 · ② 双侧活体对拍）⚠️ **【2026-10-31 再订正】** ② 的**写面那一半**已由 **Go 半边活体探针**补齐（`tools/semantic-probe/redis-deadline/run-redis-deadline-parity.sh` ⇒ 本轮实跑 **EXIT=0** · Go/RAG 两侧 PROBE 行**逐键相等**：`form=exhausted|write_applied=false|err_is_deadline=true|value_after=baseline` 两侧相同）⇒ ⇒ **「预算耗尽 ⇒ 命令不下发」两侧活体同形已坐实** ⇒ ⇒ **② 现只指 handler 级码集合面**（客户端可见码 {1015, 5001} 的**活体**对拍 ⇒ 探针测的是写面、不是 handler 级码 ⇒ 仍未做）
 - ⇒ ⇒ 故 **E66 那格（admin 域）仍是「机制已落 · 活体验证未做」** ⇒ ⇒ **不改**
+
+## 客户端硬上界 · 域侧落码记录（2026-10-31 · G1 lane）
+
+> ⚠️ **本小节标题刻意不含任何编号 token** ⇒ 派生层不把它当条目候选 ⇒ 也不劫持任何既有编号的 `domain` / `wave` / `basis`。
+> ⚠️ **本小节只登记「客户端硬上界（Go 侧 2000ms）」这一个议题** ⇒ **不新登记条目** ⇒ 销账看 `DRIFT-FOLLOW-014`。
+> ⚠️ **本小节用列表而非表格** ⇒ 派生层不把列表行当条目候选。
+> ⚠️ **本小节在文件末尾** ⇒ 零行位移 ⇒ 不影响任何既有 `文件:行号` 指针。
+
+**一、形态 = 共享层唯一实现 ＋ 域侧只配参数（派工面 P2-T04 的域侧那半）**
+
+- **共享层（唯一实现）**：`service/common/src/main/java/com/rag/common/protection/GoStyleOutboundDeadlineInterceptor.java`
+  ⇒ 带 devh 的 `@GrpcGlobalClientInterceptor` ⇒ 装在**每个**出向 devh 调用上 ⇒ ⇒ **与调用点无关**。
+- **域侧（只配参数）**：`service/follow/follow-rpc/src/main/resources/application.yml` 的
+  `rag.protection.outbound-deadline.cap-millis` = `${FOLLOW_RPC_OUTBOUND_DEADLINE_CAP_MILLIS:2000}`
+  ⇒ ⇒ **默认 2000ms ＋ env 可覆盖**（各域独立 ⇒ 与 Go 的 `RpcClientConf.Timeout` 是域级字段同形）。
+- **Go 出处**：`go-zero@v1.10.2/zrpc/config.go:31` = `Timeout int64 json:",default=2000"`（**默认值**）；
+  Go 侧 `service/follow/rpc/etc/follow.yaml:37-41` 的 `UserRpc:` 段**无显式 Timeout** ⇒ ⇒ 本域**恒 2000ms**。
+- **删掉的东西**：`service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java`
+  的 `capByClientTimeout` 私有副本 ⇒ ⇒ 域侧出向调用**不再自己设 deadline**。
+  - 常量 `CLIENT_TIMEOUT_MILLIS` **保留在 `:75`** ⇒ 语义改为**断言用期望值**（真实值由 yml 持有）⇒ ⇒ 守门核对「yml 绑出的值 == 本常量 == 2000」。
+  - ⚠️ **删副本的原因要说准**：`min` **只压小、不压大** ⇒ ⇒ 副本把上界写死 2000ms ⇒ ⇒
+    **「想放宽上界」会被压回去** ⇒ ⇒ env 覆盖在**放宽方向**上被架空 ⇒ ⇒ 副本必删。
+    - ⚠️ **附带第二处（旧副本更严重的一面）**：旧副本用 `withDeadlineAfter`（**覆盖**语义）⇒ ⇒
+      会把**入站预算**放宽到 2000ms ⇒ ⇒ 与 Go 的 `context.WithTimeout(ctx, 2s)`（**取更早者**）**方向相反**。
+    - ⚠️ **本轮自查订正**：先前一轮写「副本会让 env 覆盖**完全**失效」**不准确** ⇒ ⇒
+      准确表述 = 失效只发生在「**放宽**」方向 ⇒ ⇒ **判据必须用放宽方向**才抓得住副本。
+
+**二、守门（`service/follow/follow-rpc/src/test/java/.../UserRpcClientDeadlineCapTest.java` · 5 条）**
+
+1. **配置面**：本域 `application.yml` 必须声明 `rag.protection.outbound-deadline.cap-millis`，
+   且值是 `${ENV:2000}` 形态（⇒ **env 可覆盖**）；默认值必须是 2000（Go 的默认值）。
+2. **绑定面**：用本域 yml 绑出 `GoStyleProtectionProperties` ⇒
+   `getOutboundDeadline().getCapMillis() == 2000`（⇒ 键名写对、**真的有人读**）⇒ 且 == 域内常量。
+3. **运行期（默认）**：**不绑任何入向 deadline** ⇒ 真 in-process 下游挂起 ⇒ **真发一次调用** ⇒
+   必须在 **≤2000ms** 处 `DEADLINE_EXCEEDED`（Go 侧 ctx 到期同样是 `DeadlineExceeded`）。
+4. **运行期（env 覆盖**放宽**）**：env 把 cap 覆盖到 **4000ms** ⇒ 出向必须**跟着放宽**（≥3000ms）
+   ⇒ ⇒ **这条专抓「写死 2000ms 的副本」**（副本存在 ⇒ 实测会停在 2000ms）。
+5. **形态面**：本域 `src/main/java` 里**不得**出现 `withDeadlineAfter` 的**代码行**
+   （javadoc / 行注释不算）⇒ ⇒ 抓「第二份写死上界的实现」。
+
+**三、变异实测（判据是否真活）**
+
+- **M-A（把三域 yml 的 cap 改成 0）**：三域各 **4 条 / 3 红** = 配置面 + 绑定面 + 运行期；
+  运行期那条是**干净断言红**（下游 8s 后正常返回 ⇒ 「没有异常抛出」）⇒ ⇒ **不是**靠 `@Timeout` 包装出来的红。
+  - 第 ④ 条**不命中** ⇒ 因为它走 **env 覆盖路径**、与 yml 默认值独立 ⇒ ⇒ 属**设计如此**，不是漏网。
+- **M-D（把写死 2000ms 的副本加回 follow-rpc）**：**精确 2 条红** = 第 ④ 条（实测耗时 **2005ms** ⇒
+  坐实「想放宽却被压回 2000」）＋ 第 ⑤ 条；配置面 / 绑定面 / 运行期默认三条**仍绿**。
+- ⚠️ **M-A 第一轮暴露的装置缺陷（已修）**：下游原先「挂起 5s 后既不响应也不结束」⇒ ⇒
+  cap 失效时调用**永久挂起** ⇒ ⇒ 判据只能报 `@Timeout` ⇒ ⇒ **把被测物的问题包装成「测试超时」**
+  ⇒ ⇒ 改成「挂起 8s 后**正常返回**」⇒ ⇒ 判据才能干净分辨「有上界 / 没上界」。
+
+**四、本域【未做】的（残余，不静默留着）**
+
+- **`follow-api` 的副本仍在**：`service/follow/follow-api/src/main/java/com/rag/follow/follow/api/client/FollowRpcClient.java`
+  的 `capByClientTimeout`（`:230` 调用 / `:247` 定义）⇒ ⇒ 仍写死 2000ms ⇒ ⇒ 仍**不可 env 覆盖**。
+  - **本轮【不做】的三条理由**：① 派工面点名的三个类**不含**它（点名的 = `follow-rpc` / `user-api` / `admin-api`）；
+    ② 它**不是**「零 deadline 的类」（它已有 2000ms 上界）⇒ ⇒ 不在完成条件「零 deadline 的类 = 0」里；
+    ③ 它的常量行 `:164` 被 **`docs/Pitfalls/follow/api.md:481` / `:509`** 指着做「**触发条件仍在**」的证据
+    ⇒ ⇒ 删副本会让那两条 Pitfall 记录**悬空** ⇒ ⇒ 而 **`docs/Pitfalls/` 不在本 lane 写权面**
+    ⇒ ⇒ 需收口执行者 / G4 协调后再动 ⇒ ⇒ **登记为残余轴**。

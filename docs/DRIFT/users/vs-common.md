@@ -5426,7 +5426,7 @@ git diff --stat -- service/ # ⇒ 0 行
 |---|---|
 | **现象** | rpc handler 路径上的**出向 gRPC 调用**不继承请求 deadline ⇒ deadline 到点后**出向调用照跑不误**（下游挂住） |
 | **Go 侧 `文件:行号`** | ① `Sea-RideTheWind_golang/service/follow/rpc/internal/logic/helper.go:82` —— `resp, err := svcCtx.UserRpc.GetUser(ctx, &userservice.GetUserReq{Uid: userID})` ⇒ **直接透传 handler 的 ctx**（**无** `depCtx`、**无** otel ⇒ 继承父 deadline） ② `service/favorite/rpc/internal/logic/helper.go:93` / `:98` / `:127` / `:133` —— `depCtx, span := otel.Tracer("favorite-rpc").Start(ctx, …)` ⇒ 原生 `go.opentelemetry.io/otel` 的 `ContextWithSpan` = `context.WithValue(parent, …)` ⇒ **保父 deadline**（⚠️ **全仓 `depCtx` 只在 favorite 域**） ③ `go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25` —— `context.WithTimeout(ctx, t)` ⇒ **min 语义**（父 deadline 更早则**保留父的** ⇒ **继承**） ④ `go-zero@v1.10.2/zrpc/client.go:70-71` —— `WithTimeout(time.Duration(c.Timeout)*time.Millisecond)`（默认 **2000ms**，`zrpc/config.go:31`）**只是默认超时、不覆盖**父 deadline ⑤ `grpc-go@v1.81.1/internal/transport/http2_client.go:600-607` —— client 把 `ctx.Deadline()` 写进 **`grpc-timeout`**（`:604-606` 已过期 ⇒ 立刻 `DeadlineExceeded`） ⑥ `grpc-go@v1.81.1/internal/transport/http2_server.go:521-522` —— server 把 `grpc-timeout` 解析成 `context.WithTimeout(ctx, timeout)` ⇒ **入站 deadline 真进了 ctx** ⑦ `go-zero@v1.10.2/zrpc/internal/serverinterceptors/timeoutinterceptor.go:34` + `:53` —— 服务端再 min 一次自己的超时，`handler(ctx, req)` 拿到的 ctx 带 deadline |
-| **RAG 侧现状** | ① **共享层** `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` 的 `onHalfClose` **只绑 `DeadlineState`**、**从不绑** `GoStyleRequestDeadline` ⇒ `GoStyleRequestDeadline.applyTo`（`service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java:110`）在 gRPC 路径是 **no-op** ② **域内裸 stub**：`service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java:50`（注释明说「**没有**在此处设 deadline」） |
+| **RAG 侧现状** | ① **共享层** `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` 的 `onHalfClose` **只绑 `DeadlineState`**、**从不绑** `GoStyleRequestDeadline` ⇒ `GoStyleRequestDeadline.applyTo`（`service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java:110`）在 gRPC 路径是 **no-op** ② **域内裸 stub**：`service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java:88`（**2026-10-31 订正**：原写的 `:50` **落点一直是错的**（空 javadoc 行）⇒ ⇒ 已改指真实的出向调用点）⇒ **客户端硬上界已于 2026-10-31 由共享层承担**（域侧只配 `rag.protection.outbound-deadline.cap-millis=2000`） |
 | **证据强度** | **L4**（运行时双侧活体）—— ✅ **双侧活体探针已坐实**（`tools/semantic-probe/deadline-downstream/`，2026-10-26 第四十六轮）：Go `failed_fast=true` / `code=4` / `outgoing_carrier=present_expired` ⇔ RAG `failed_fast=false` / `code=0` / `outgoing_carrier=absent`；2026-10-29 复跑 `tools/difftest/check-deadline-downstream.py` ⇒ **EXIT=0**（**漂移形态门** ⇒ PASS ⇒ **漂移仍在**）⇒ ⚠️ **本轮未重新实测**（沿用上述活体证据） |
 | **建议修法** | **共享层**在 `onHalfClose` 里把有效期限也绑进 `GoStyleRequestDeadline`（⇒ `applyTo` 立刻生效）**＋ 各域裸 stub 调用点改用 `applyTo`** ⇒ **不需要架构级改造、不需要 interrupt** ⇒ 与 Go 的 ctx 传播**同构**<br>⚠️ **min 语义（2026-10-30 由 G4 独立复核补的约束，本轮已逐条复验）**：Go 的出向 deadline = **min(入站请求剩余, 客户端默认超时 2000ms / 该域 yaml 的 `Timeout`)** ⇒ ⇒ RAG 侧若只注入「入站剩余」⇒ **比 Go 宽松最多 2000ms**（少了一次与客户端默认超时的 min）⇒ ⇒ 实现要**取更早者**，且保留「**无入站 deadline ⇒ 不注入**」这条路径（对齐 Go `context.WithTimeout` 在无父 deadline 时的行为） |
 | **影响面** | **共享层 `service/common`** ＋ 各域裸 stub 调用点（**follow 域那一半 = `follow-rpc/client/UserRpcClient.java:50`**）⇒ ⚠️ 修法**同时涉及共享层与域内代码** ⇒ `AGENTS.md` §3c「**必须同一次提交**（否则留下半截）」⇒ ⇒ **G1 不能单独改 follow-rpc 的裸 stub** ⇒ ⇒ **整条转 G4** |
@@ -5952,3 +5952,59 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
 3. **handler 级码集合面的 RAG↔Go 双侧活体对拍**（同请求、同 ctx 形态 ⇒ 比抓到的码集合）⇒ ⇒ ⚠️ **写面那一半已于 2026-10-31 双侧活体闭合**（Go 半边探针实跑 EXIT=0）⇒ ⇒ **本条现只指 handler 级码集合面**（探针测的是写面、不是 handler 级码）
 
 ⇒ ⇒ **E66 那格维持「机制已落 · 活体验证未做」**（**理由已收敛**：原「三件未做」⇒ 现为「① 装配接线 + ② 双侧活体对拍」两件；真 Redis 活体那一件已于 2026-10-31 达成，且**写面已双侧活体闭合**（Go 半边探针实跑 EXIT=0）⇒ ⇒ **② 只指 handler 级码集合面**）⇒ ⇒ **不改**
+
+## 客户端硬上界 · 域侧落码记录（2026-10-31 · G1 lane）
+
+> ⚠️ **本小节标题刻意不含任何编号 token** ⇒ 派生层不把它当条目候选 ⇒ 也不劫持任何既有编号的 `domain` / `wave` / `basis`。
+> ⚠️ **本小节只登记「客户端硬上界（Go 侧 2000ms）」这一个议题** ⇒ **不新登记条目** ⇒ 销账看 `DRIFT-FOLLOW-014`。
+> ⚠️ **本小节用列表而非表格** ⇒ 派生层不把列表行当条目候选。
+> ⚠️ **本小节在文件末尾** ⇒ 零行位移 ⇒ 不影响任何既有 `文件:行号` 指针。
+
+**一、users 域两个 api 组件的落码（派工面 P2-T04 的域侧那半）**
+
+- **形态**：**共享层唯一实现 ＋ 域侧只配参数** ⇒ 域侧**不再**自己写客户端上界。
+  - 共享层：`service/common/src/main/java/com/rag/common/protection/GoStyleOutboundDeadlineInterceptor.java`
+    ⇒ 带 devh 的 `@GrpcGlobalClientInterceptor` ⇒ 装在**每个**出向 devh 调用上 ⇒ ⇒ **与调用点无关**。
+  - ⚠️ **api 侧的装配路径与 rpc 侧不同、但结论同形**：
+    rpc 侧靠启动类 `@Import(GoStyleProtectionConfiguration.class)`；
+    api 侧靠 `@SpringBootApplication(scanBasePackages = {…, "com.rag.common"})` 的**扫描**
+    （`UserApiApplication` / `AdminApiApplication` 两者都含 `com.rag.common`）
+    ⇒ ⇒ **共享层出向拦截器在 api 侧是在位的** ⇒ ⇒ 配 `cap-millis` 即生效 ⇒ ⇒ **不需要改启动类**。
+  - 域侧参数：`rag.protection.outbound-deadline.cap-millis`
+    - `service/users/user/user-api/src/main/resources/application.yml` = `${USER_API_OUTBOUND_DEADLINE_CAP_MILLIS:2000}`
+    - `service/users/admin/admin-api/src/main/resources/application.yml` = `${ADMIN_API_OUTBOUND_DEADLINE_CAP_MILLIS:2000}`
+- **Go 出处**：`go-zero@v1.10.2/zrpc/config.go:31` = `Timeout int64 json:",default=2000"`（**默认值**）；
+  Go 侧 `service/user/user/api/etc/usercenter.yaml:37-41` 的 `UserRpc:` 段 与
+  `service/user/admin/api/etc/admincenter.yaml:35-39` 的 `AdminRpc:` 段 **均无显式 Timeout** ⇒ ⇒ 两域**恒 2000ms**。
+- **删掉的东西**：两个 client 类里的 `capByClientTimeout` 私有副本
+  （`UserRpcClient` / `AdminRpcClient`）⇒ ⇒ 域侧出向调用**不再自己设 deadline**；
+  常量 `CLIENT_TIMEOUT_MILLIS` 保留 ⇒ 语义改为**断言用期望值**。
+  - ⚠️ **删副本的原因要说准**：`min` **只压小、不压大** ⇒ ⇒ 副本把上界写死 2000ms ⇒ ⇒
+    **「想放宽上界」会被压回去** ⇒ ⇒ env 覆盖在**放宽方向**上被架空 ⇒ ⇒ 副本必删。
+    - ⚠️ **本轮自查订正**：先前一轮写「副本会让 env 覆盖**完全**失效」**不准确** ⇒ ⇒
+      准确表述 = 失效只发生在「**放宽**」方向 ⇒ ⇒ **判据必须用放宽方向**才抓得住副本。
+
+**二、守门（各 5 条 · `*DeadlineCapTest`）**
+
+1. **配置面**：本域 `application.yml` 必须声明 `rag.protection.outbound-deadline.cap-millis`，且是 `${ENV:2000}` 形态。
+2. **绑定面**：用本域 yml 绑出 `GoStyleProtectionProperties` ⇒ `getCapMillis() == 2000` ⇒ 且 == 域内常量。
+3. **运行期（默认）**：**不绑任何入向 deadline** ⇒ 真 in-process 下游挂起 ⇒ **真发一次调用** ⇒
+   必须在 **≤2000ms** 处 `DEADLINE_EXCEEDED`。
+4. **运行期（env 覆盖**放宽**）**：env 把 cap 覆盖到 **4000ms** ⇒ 出向必须**跟着放宽**（≥3000ms）⇒ ⇒ 专抓「写死 2000ms 的副本」。
+5. **形态面**：本域 `src/main/java` 里**不得**出现 `withDeadlineAfter` 的**代码行**（javadoc / 行注释不算）。
+
+**三、变异实测**
+
+- **M-A（两个 api 的 yml cap 改成 0）**：各 **4 条 / 3 红**（配置面 + 绑定面 + 运行期）⇒ 运行期那条是**干净断言红**。
+- **M-D（在 follow-rpc 加回写死 2000ms 的副本）**：**精确 2 条红** = 第 ④ 条（实测 **2005ms**）+ 第 ⑤ 条。
+- ⚠️ **M-A 第一轮暴露的装置缺陷（已修）**：下游原先「挂起 5s 后既不响应也不结束」⇒ ⇒ cap 失效时调用**永久挂起**
+  ⇒ ⇒ 判据只能报 `@Timeout`（**把被测物的问题包装成「测试超时」**）⇒ ⇒ 改成「挂起 8s 后**正常返回**」。
+
+**四、共享面【已过期】的登记（转收口执行者）**
+
+- `docs/DRIFT/global/vs-common.md:46` 里「**零上界的 11 个类**」的枚举 **⑤ `user-api/.../UserRpcClient.java:144`**
+  与 **⑥ `admin-api/.../AdminRpcClient.java:174`** ⇒ ⇒ 这两个类**已不再零上界**（本轮已配 2000ms）⇒ ⇒ 该格**已过期**。
+  - ⚠️ **那一格是共享面** ⇒ ⇒ **本 lane 不能改** ⇒ ⇒ **转收口执行者订正**（不要让它继续当「X-6 仍红」的依据）。
+- ⚠️ 另：④ `follow-rpc/.../UserRpcClient.java:50` 的**落点也一直是错的**（`:50` 是空 javadoc 行）⇒ ⇒ 本 lane 已在
+  `docs/DRIFT/follow/vs-common.md` / `docs/DRIFT/users/vs-common.md` 内就地改指真实调用点；
+  共享面那一处**同样转收口执行者**。
