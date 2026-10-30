@@ -101,8 +101,19 @@ final class CapturingClientInterceptor implements ClientInterceptor {
     /**
      * 造一个「永远不会连上任何东西」的 channel —— 真正的调用被上面那个拦截器截断，
      * channel 从不被使用。端口 1 保证即便漏掉拦截器也不会误连到别的服务。
+     *
+     * <p>⚠️ <b>必须显式写 {@code dns:///} scheme，不能用 {@code forAddress(...)}
+     * （2026-10-31 实测踩坑 · 与 comment / hot-rpc / favorite-rpc / article-rpc 同款）</b>：
+     * <br>devh 的 Nacos discovery 在<b>进程级全局</b> {@code io.grpc.NameResolverRegistry}
+     * 里注册了高优先级 provider（{@code discovery} scheme）⇒ ⇒ 任何<b>无 scheme</b> 的 target
+     * 都会被它当成 serviceId 去 Nacos 拉实例 ⇒ ⇒ channel 根本连不上想去的地方。
+     * <br>⇒ 这里虽然<b>channel 从不被使用</b>（resolver 被接管也无害 ⇒ 惰性点），
+     * 但机器守门 {@code tools/difftest/check-grpc-channel-target-scheme.py}
+     * 按<b>代码态</b>扫 {@code forAddress(} ⇒ ⇒ 惰性点会变成<b>永久例外</b>
+     * ⇒ ⇒ 例外集就剪不到 0 ⇒ ⇒ 改成显式 scheme（<b>零语义变化</b>：仍是 127.0.0.1:1，
+     * 仍连不上任何东西）。
      */
     static ManagedChannel unusedChannel() {
-        return ManagedChannelBuilder.forAddress("127.0.0.1", 1).usePlaintext().build();
+        return ManagedChannelBuilder.forTarget("dns:///127.0.0.1:1").usePlaintext().build();
     }
 }
