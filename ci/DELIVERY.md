@@ -231,15 +231,52 @@ canonical 流水线指向 `https://github.com/KASW-UI/RAG.git` 的 `do-my-own-gh
     <groupId>com.rag</groupId>
     <artifactId>service</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <relativePath>../../pom.xml</relativePath>   <!-- service/pom.xml -->
+    <relativePath>../../../pom.xml</relativePath>   <!-- service/pom.xml -->
 </parent>
 ```
 
-**全仓扫描结论**：52 个 pom 里**只有这 1 处**真缺陷（根 pom 那条命中是外部
-`spring-boot-starter-parent` 父 POM，属扫描误报）。
+⚠️ **路径必须逐层数对（这个坑本 PR 自己踩过一次）** ——
+`admin-api` 的目录是 `service/users/admin/admin-api/`，往上数三层才是 `service/`：
 
-✅ **已随本 PR 修复**（单独一笔 commit：`fix(admin-api): 补父 POM 的 relativePath`）——
+| relativePath | 解析到 | artifactId | 判定 |
+|---|---|---|---|
+| `../pom.xml`（Maven 默认） | `service/users/admin/pom.xml` | `admin` | ❌ 坐标不符 ⇒ 原始缺陷 |
+| `../../pom.xml` | `service/users/pom.xml` | `users` | ❌ **坐标仍不符** ⇒ 本 PR 第一版就写成了这样 |
+| `../../../pom.xml` | `service/pom.xml` | `service` | ✅ |
+
+⇒ **"离得更近的那份 pom" ≠ "坐标对的那份 pom"**；
+⇒ 判断依据只有一条：**那份文件的 groupId/artifactId 是否等于声明的 parent**。
+
+**全仓扫描结论**：52 个 pom 里**只有这 1 处**真缺陷
+（根 pom 那条命中是外部 `spring-boot-starter-parent` 父 POM，且它的
+`<relativePath></relativePath>` 是**空串** ⇒ Maven 跳过本地查找 ⇒ 合法，不是缺陷）。
+
+✅ **已随本 PR 修复**（commit `fix(pom): admin-api 父 POM relativePath 改为 ../../../pom.xml`）——
 坐标与继承内容都不变 ⇒ 语义等价；不改它 ⇒ **所有域的 CI 都会红**。
+
+### 6.2 为此新增的第 9 道静态守门
+
+`ci/scripts/check-pom-parent-relativepath.py` —— **离线**扫全仓 pom，
+按 Maven 的实际规则判定每个 `<parent>` 能否被本地 `relativePath` 正确解析：
+
+| 情形 | Maven 行为 | 守门判定 |
+|---|---|---|
+| `<relativePath>` 缺省 | 默认 `../pom.xml` | 按 `../pom.xml` 判定 |
+| `<relativePath></relativePath>`（空串） | **跳过本地查找**，从仓库解析 | **合法，不判失败** |
+| relativePath 解析到目录 | 追加 `pom.xml` | 同 Maven |
+| 目标文件不存在 | 回落仓库解析 | 不致命 ⇒ 只告警 |
+| 目标文件坐标与声明的 parent 不符 | **致命**：`parent.relativePath points at wrong local POM` | **判失败** |
+
+**变异验证**（证明它不是假绿）：
+
+| 树上的状态 | 守门退出码 |
+|---|---|
+| 修复后（`../../../pom.xml`） | `0` ✅ |
+| 变异成 `../../pom.xml`（本 PR 的第一版错解） | `1` ✅ 抓住 |
+| 删掉 `relativePath`（回到 Maven 默认） | `1` ✅ 抓住 |
+
+⇒ 它**同时**能抓住原始缺陷和"修错"的修复 ⇒ 值这道门。
+住 `ci/scripts/` 而不是 `tools/difftest/` ⇒ 不写别人 lane 的共享面。
 
 ---
 

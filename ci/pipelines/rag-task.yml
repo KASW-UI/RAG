@@ -197,6 +197,11 @@ jobs:
       #      check-datasource-password-form.py / check-tomcat-limits.py /
       #      check-grpc-interceptor-wiring.py / check-grpc-runtime-classpath.py /
       #      check-flyway-ledger.py  +  产物级 check-jar-executable.sh
+      #      + 🆕 check-pom-parent-relativepath.py（住 ci/scripts/）
+      #        —— 2026-10-31 由本 CI 实测抓出仓内 pom 拓扑缺陷后补的：
+      #        admin-api 的 <parent> 坐标与默认 relativePath 指向的文件对不上
+      #        ⇒ 干净环境构建必炸 ⇒ 且根聚合 pom 被完整解析 ⇒ **连累全域一起红**
+      #        ⇒ 必须离线拦住，不能等 build 才炸。
       #   ❌ 不纳入（写成"已跑"就是虚构）：
       #      · check-ddl-static.py            → 需要活体 PG 容器
       #      · check-proto-static.sh /
