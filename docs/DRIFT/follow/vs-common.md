@@ -1477,7 +1477,7 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时（`service/users/user/
 
 **（4）对我域台账的两处影响（已同步）**
 
-- `docs/DRIFT/follow/rpc.md:273` 的「8 个 rpc / 0/8」⇒ 订正为「**10 个 rpc / 载体层 8/10 有 / 2/10 无**」＋ 补两层口径与判据来源（⚠️ **2026-10-31 再订正**：原写的「1/10 有 / 9/10 无」**已被依赖树实测推翻** ⇒ ⇒ 有载体 8 个 · 无载体 2 个（comment-rpc / task-rpc））。
+- `docs/DRIFT/follow/rpc.md:273` 的「8 个 rpc / 0/8」⇒ 订正为「**10 个 rpc / 载体层 8/10 有 / 2/10 无**」＋ 补两层口径与判据来源（⚠️ **2026-10-31 再订正**：原写的「1/10 有 / 9/10 无」**已被推翻** ⇒ ⇒ 有载体 8 个 · 无载体 2 个（comment-rpc / task-rpc）⇒ ⇒ ⚠️ **归因也改了**：不是「依赖树实测推翻」（**那个判据本身已被判不成立** —— 依赖树里有 `tomcat-embed-core` 只是三条件之一）⇒ ⇒ 现在的口径 = **`docs/DRIFT/global/vs-common.md` §4.19.23 的三层判据**（配置面 10/10 · 载体面 8/10 · 可抓取面 8/10））。
 - `docs/DRIFT/follow/stage1-admission.md:79` 的「`favorite-rpc` / `message-rpc` / `like-rpc` / `user-user-rpc` **均已补上** ⇒ 出口已开」⇒ **被本轮实测证伪**（这 4 个模块的依赖树里都没有 web starter/tomcat）⇒ 已订正。
 - ✅ **users 域 `user/rpc.md:280` 的「指标可抓取性」改判（OBSERVABLE DIFFERENCE）成立且更强** —— 已补载体层证据（`user-rpc` 依赖树只有 actuator、无 tomcat）⇒ ⇒ **不是 users 域孤例，是 9/10 的通例** ⇒ ⇒ **该改判不撤**。
 
