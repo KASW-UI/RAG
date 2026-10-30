@@ -5878,7 +5878,7 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
 |---|---|---|
 | 取连接 / 拨号 | `GoStyleRedisDeadlineConnectionFactory.java:57-59` | 已覆盖（预算耗尽 ⇒ 连都不拨） |
 | 命令下发前 | `GoStyleRedisDeadlineConnection.java:75-78` | 已覆盖 |
-| 命令已在 socket 上传输途中 | ——（检查点在**下发前** ⇒ 已下发的写无法撤回） | **盖不住**（Lettuce 写超时与 grpc deadline 无关 ⇒ 可能落库） |
+| 命令已在 socket 上传输途中、预算耗尽 | ——（检查点在**下发前** ⇒ 已下发的写无法撤回） | **盖不住**（Lettuce 写超时与 grpc deadline 无关 ⇒ 可能落库） |
 
 ⇒ ⇒ **E66 维持 OPEN**（理由 = 上表第三行；方向 = **RAG 更宽** ⇒ **框架限制** ⇒ **不追**）⇒ ⇒ **域侧仍零动作**（handler 级码那一环由命令前的检查覆盖）。
 
