@@ -1,6 +1,5 @@
 package com.rag.like.like.rpc;
 
-import com.rag.common.http.GoStylePathNormalizingAutoConfiguration;
 import com.rag.like.like.proto.LikeActionReq;
 import com.rag.like.like.proto.LikeServiceGrpc;
 import io.grpc.ManagedChannel;
@@ -10,8 +9,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.env.PropertySource;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.util.ClassUtils;
 import org.springframework.util.PropertyPlaceholderHelper;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -293,9 +294,9 @@ class LikeRpcMetricsCarrierGateTest {
      * ⇒ 只要有 servlet 容器就注册 ⇒ ⇒ 必须由共享层的 {@code rag.side} 门来关。
      */
     private static final List<String> API_SIDE_SIDE_GATED_AUTO_CONFIGURATIONS = List.of(
-            "GoStylePathNormalizingAutoConfiguration",
-            "GoStyleJsonContentTypeAdvice",
-            "GoStyleBreakerRouteTemplateAutoConfiguration");
+            "com.rag.common.http.GoStylePathNormalizingAutoConfiguration",
+            "com.rag.common.http.GoStyleJsonContentTypeAdvice",
+            "com.rag.common.protection.GoStyleBreakerRouteTemplateAutoConfiguration");
 
     @Test
     @DisplayName("rpc 形态 ⇒ Go 侧不存在的 api 侧 HTTP 中间件（CPU 降载等）一个都不许在 rpc 容器里")
@@ -347,17 +348,31 @@ class LikeRpcMetricsCarrierGateTest {
     void apiSideAutoConfigurationsMustNotRegisterWhenSideIsRpc() throws Exception {
         if (!sharedLayerHasSideGate()) {
             Assumptions.assumeTrue(false,
-                    "共享层尚未落 `rag.side` 门（那是 G4 的共享层写权面，落码在 `align/g4-service-common:e8cb769a`，"
-                            + "未合入本分支）⇒ ⇒ 本断言**暂不适用**（skip ≠ 通过）"
-                            + " ⇒ 已登记在 `docs/DRIFT/like/rpc.md` 的「跨 lane 依赖」小节。");
+                    "共享层的 `rag.side` 门不在本分支的类路径上（那是 G4 的共享层写权面）"
+                            + " ⇒ ⇒ 本断言**暂不适用**（**skip ≠ 通过**）"
+                            + " ⇒ 已登记在 `docs/DRIFT/like/rpc.md` 的「跨 lane 依赖」小节。"
+                            + " ⚠️ 2026-10-30 实测：rebase 到主干（门已合入）后本条**仍曾 skip** ⇒ 根因 = 探针用 JDK 的"
+                            + " `Class#getAnnotation` **不穿透元注解** ⇒ 已改用 `AnnotatedElementUtils.findMergedAnnotation`。");
             return;
+        }
+        // ---- 机制面：共享层的门必须**真的挂在那 3 个** api 侧自动配置上（合并注解读 ⇒ 认元注解）----
+        for (String fqcn : API_SIDE_SIDE_GATED_AUTO_CONFIGURATIONS) {
+            Class<?> clazz = ClassUtils.forName(fqcn, classLoader());
+            ConditionalOnProperty cond = AnnotatedElementUtils.findMergedAnnotation(clazz, ConditionalOnProperty.class);
+            assertNotNull(cond,
+                    "🔴 共享层的门存在（`com.rag.common.web.ConditionalOnApiSide`），但 " + simpleName(fqcn)
+                            + " 上**读不到** `@ConditionalOnProperty` ⇒ ⇒ 该自动配置**不受门控**"
+                            + " ⇒ ⇒ 它在 servlet 形态的 rpc 进程里**一定会注册** ⇒ ⇒ 本模块的 `rag.side: rpc` 挡不住它。");
+            assertTrue(List.of(cond.name()).contains("rag.side"),
+                    "🔴 " + simpleName(fqcn) + " 上的条件不是按 `rag.side` 判的（实际 name = " + List.of(cond.name())
+                            + "）⇒ ⇒ 本模块的 `rag.side: rpc` 对它无效。");
         }
         Carrier carrier = bootCarrier(true);
         try {
             HttpResponse<String> beans = awaitEndpoint(carrier.mgmtPort, "/actuator/beans", carrier.process, 120);
             assertEquals(200, beans.statusCode(), "/actuator/beans 返回 " + beans.statusCode());
             List<String> present = API_SIDE_SIDE_GATED_AUTO_CONFIGURATIONS.stream()
-                    .filter(name -> beans.body().contains(name))
+                    .filter(fqcn -> beans.body().contains(simpleName(fqcn)))
                     .toList();
             assertTrue(present.isEmpty(),
                     "🔴 共享层已落 `rag.side` 门，但本模块的 rpc 容器里**仍注册**了 api 侧自动配置：" + present
@@ -373,13 +388,37 @@ class LikeRpcMetricsCarrierGateTest {
      * <p>⚠️ 为什么用反射判定而不是「直接断言」：共享层是 <b>G4 的写权面</b>
      * ⇒ 本分支上**还没有**那个门 ⇒ 若直接断言「自动配置不注册」，本分支的守门会**恒红**
      * ⇒ ⇒ 而恒红的守门等于没有守门。
-     * ⇒ ⇒ 这里的做法是：**先判机制在不在**（反射读 {@code @ConditionalOnProperty}）
-     * ⇒ 机制在 ⇒ 断言必须成立（真断言）；机制不在 ⇒ <b>显式 skip 并写明原因</b>
-     * ⇒ ⇒ 机制落进本分支的那一刻起，这条断言自动变成强制判据。
+     * ⇒ ⇒ 这里的做法是：**先判机制在不在** ⇒ 机制在 ⇒ 断言必须成立（真断言）；
+     * 机制不在 ⇒ <b>显式 skip 并写明原因</b> ⇒ ⇒ 机制落进本分支的那一刻起，这条断言自动变成强制判据。
+     *
+     * <h2>🔴 2026-10-30 实测踩出来的坑：<b>JDK 的 {@code getAnnotation} 不穿透元注解</b></h2>
+     * <p>共享层的门是**元注解** {@code com.rag.common.web.ConditionalOnApiSide}
+     * （**它自己**才带 {@code @ConditionalOnProperty}）⇒ ⇒
+     * {@code Xxx.class.getAnnotation(ConditionalOnProperty.class)} <b>读不到</b>
+     * ⇒ ⇒ 探针恒判「机制不在」⇒ ⇒ <b>rebase 到主干（门已合入）之后仍然 skip</b>
+     * ⇒ ⇒ 「skip 会自动转强制判据」这句话<b>当时是假的</b>。
+     * ⇒ ⇒ 修法：用 Spring 的<b>合并注解</b>查找 {@code AnnotatedElementUtils.findMergedAnnotation}
+     * ⇒ ⇒ 它<b>会</b>沿元注解链上溯（与 Spring 自己的条件求值路径一致）。
+     * ⇒ ⇒ 这正是 AGENTS.md §3.3.2 的那类陷阱：<b>注解在不在 ≠ 机制在不在</b>
+     * ⇒ ⇒ 判据必须读「<b>合并后</b>的注解」⇒ ⇒ 才是真正生效的那一层。
+     *
+     * <p>⚠️ 判「机制在不在」用<b>反射按名字</b>查共享层的<b>单一真源</b>
+     * {@code com.rag.common.web.ConditionalOnApiSide}
+     * ⇒ ⇒ <b>不用编译期引用</b> ⇒ ⇒ 机制尚未合入时本测试仍能编译
+     * （否则「探针」本身会变成对共享层的编译期依赖 ⇒ 探针就失去了意义）。
      */
     private static boolean sharedLayerHasSideGate() {
-        ConditionalOnProperty cond = GoStylePathNormalizingAutoConfiguration.class
-                .getAnnotation(ConditionalOnProperty.class);
+        ClassLoader cl = classLoader();
+        if (!ClassUtils.isPresent(SIDE_GATE_META_ANNOTATION, cl)) {
+            return false;
+        }
+        Class<?> meta;
+        try {
+            meta = ClassUtils.forName(SIDE_GATE_META_ANNOTATION, cl);
+        } catch (ClassNotFoundException | LinkageError e) {
+            return false;
+        }
+        ConditionalOnProperty cond = AnnotatedElementUtils.findMergedAnnotation(meta, ConditionalOnProperty.class);
         if (cond == null) {
             return false;
         }
@@ -389,6 +428,17 @@ class LikeRpcMetricsCarrierGateTest {
             }
         }
         return false;
+    }
+
+    /** 共享层 `rag.side` 门的**单一真源**（元注解）的全限定名。 */
+    private static final String SIDE_GATE_META_ANNOTATION = "com.rag.common.web.ConditionalOnApiSide";
+
+    private static ClassLoader classLoader() {
+        return LikeRpcMetricsCarrierGateTest.class.getClassLoader();
+    }
+
+    private static String simpleName(String fqcn) {
+        return fqcn.substring(fqcn.lastIndexOf('.') + 1);
     }
 
     // ==================================================================
