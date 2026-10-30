@@ -223,7 +223,10 @@ class GoStyleGrpcClientBreakerTargetKeyTest {
      * （实测）⇒ 多个 in-process channel 身份会塌缩 ⇒ 无法用于身份断言。
      */
     private static Channel realChannel(int port) {
-        Channel c = ManagedChannelBuilder.forAddress("127.0.0.1", port)
+        // ⚠️ **必须显式写 dns:/// scheme**：Nacos discovery 在全局 NameResolverRegistry 里
+        //    注册了一个高优先级 provider，会把任何无 scheme 的 target 当作 serviceId 去 Nacos 拉实例。
+        //    本测试要的是**直连**的裸 channel，显式 scheme 即可绕开服务发现。
+        Channel c = ManagedChannelBuilder.forTarget("dns:///127.0.0.1:" + port)
                 .usePlaintext()
                 .build();
         OPENED_CHANNELS.add(c);

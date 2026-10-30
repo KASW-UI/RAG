@@ -6457,3 +6457,75 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 4. ⚠️ **本节作废的旧数**：`1/10`（只有 `follow-rpc` 有载体）· `3/10`（follow ＋ user-user-rpc ＋ user-admin-rpc）·
    `配置面 8/10` ⇒ ⇒ **三个都作废** ⇒ ⇒ 现口径 = **配置面 10/10 · 载体面 8/10 · 可抓取面 8/10** ⇒ ⇒
    上文凡引用这三个数的行**均已就地订正**（零行位移）⇒ ⇒ **本节是唯一的口径源**。
+### Redis 期限面口径定案 ＋ 出向 deadline 摘要表引信拔除（第二十次订正 · 2026-10-31 · G4 lane）
+
+> **本节追加在文件末尾 ⇒ 零行位移 ⇒ 不影响任何硬编码行号指针。**
+> ⚠️ **标题刻意不含 E 编号 token** ⇒ ⇒ 不新增派生层登记点（派生层按**标题里的编号 token**建条目 ⇒ 标题带编号 = 自造一个登记点）。
+
+**一、摘要表第二条登记点（`:46`）—— 引信拔除**
+
+- **问题形态**：派生层 `entry_stage_decl`（`tools/ledger-derive/derive-stage1.py`）**只在含「定级 / 阶段归属」的行上**用 `CLASS_RE = ([ABCD])\s*类` 取类 ⇒ ⇒ 取的是**整行里最早**的那处命中 ⇒ ⇒ 该行上**两处**「A 类」（@6785 历史快照「升级为 🔴 A 类」· @7249「定级 = 🔴 A 类」）**任一留着**，本行仍被读成 stage='A' ⇒ ⇒ 只改后一处 = **引信没拔掉**。
+- **改法**：两处都改成**不带「类」字但仍读作「升级为 🔴 A（阶段一准入阻断项）」/「定级 = 🔴 A（阶段一准入阻断项 · 依据 …）」** ⇒ ⇒ **历史语义完整保留**（仍是那条「升级为 A 级阻断」的历史快照）⇒ ⇒ **不依赖免责词表**（词表式规则在下一轮措辞变化时必然失效 ⇒ 造出假安全感）。
+- **验收判据**：`entry_stage_decl` 对 `DRIFT/global/vs-common.md:46` 返回**空串**（原 `'A'`）⇒ **实测通过**；同组其余 3 个 global 登记点（`_README.md:430` / `_README.md:500` / `vs-common.md:30`）本就返回空串。
+- **跨域转派**：该编号同源组 **9 个登记点**里**只有这一处触发** ⇒ ⇒ **不需要跨域转派**（`favorite/rpc.md:3376` 的 2 处「C 类」与 `global/_README.md:430` 的 4 处「A 类」因**所在行不含「定级/阶段归属」**而不触发）。
+- ⚠️ **不加新核对日期**（加日期会改同源组仲裁胜者）⇒ ⇒ 该行日期仍为 **2026-10-30**。
+
+**二、Redis 期限面（`:31` 摘要表行 ＋ 四处复判记录）—— 口径定案**
+
+- **残余三条（最终口径源 = 合并收口执行者）**：① **handler 级码集合面**（Go 侧集合 = `{1015, 5001}` · RAG 侧仅机制推导 · 尚未双侧活体对拍 ⇒ **G1 面**）② **资源层窄窗口**（拨号窗口内过期 ⇒ RAG 仍把连接拨出来、Go 取消拨号 ⇒ 归 §4.19.7 ⇒ **本层写权面**）③ **域侧装配面断言**（comment 域已有容器面活体守门 · users 域待补 ⇒ **G1 面**）。
+- **`:31`（摘要表行）**：原尾句「本条的状态销账归 G3」**只对 comment 域的「缓存读写面」成立** ⇒ 改写为 global 面**仍 🔴 未闭合** ＋ **写入三条残余** ＋ **写面已同形但不得据此销整条**（已闭合的**那半**只算**写面**：`tools/semantic-probe/redis-deadline/run-redis-deadline-parity.sh` 双侧 PROBE 行逐键相等 ⇒ `exhausted` ⇒ `write_applied=false` / 读回仍是基线值 ⇒ 命令根本没下发；`alive` 负控 ⇒ `write_applied=true`）。
+  ⇒ ⇒ **加「现行态 = 🔴 未闭合」是刻意的**：`status_authority` 读到显式现行态 ⇒ 权威度 = **3（最高）**⇒ ⇒ 即便 G3 那格以「🔴→✅ 已销账」合入（同日期 · 权威度 2），**global 面仍是同源组胜者** ⇒ ⇒ 残余留在派工面上（与合并收口执行者在 `_README.md:431` 用的手法**同款**，但那是**另一个登记点** ⇒ 两格都要写、互不重复）。
+- **四处复判记录（`:4989` / `:5462` / `:6206` / `:6344`）**：统一改用上面三条口径；`:6344` 的两条旧残余（① user 域抢先闸门仍在 · ② 缺 Go 侧活体探针那一半）**均已过期**（`adf02e14` / `1da8075b` 均已在主干）⇒ 订正为「当前残余 = 三条」。
+- **消除矛盾**：`:4989` 原句「残余窗口已被主干 `53bc05ec` 闭掉」**过度乐观** —— `53bc05ec` 只把预算检查**前移到拨号之前** ⇒ 「**拨号过程中**过期那一瞬」仍未被盖住 ⇒ ⇒ 就地加订正括注（历史读数保留，不抹掉）⇒ ⇒ 与 `:5462` 那句不再互相矛盾。
+
+**三、本轮交付与读数**
+
+| 项 | 读数 |
+|---|---|
+| 提交 | 3 笔（`d8608d6a` 下游订正 7 处 · `e103b5fe` 引信改写 · `8d007952` 口径订正 6 处）＋ 1 笔合并主干（`c7dae2f3`）⇒ **本地，未 push**（按 Jason 拍板：G4 留本地，等 G1/G2/G3 合批后一起开 PR） |
+| 派生层 | 逐列 diff = **0/0/0**（条目数 1174 不变 · 新增 0 · 消失 0 · 改列 0）＋ 产物 MD **逐字节一致**（干净 HEAD 基线对照） |
+| 派生层读数 | 本编号 = **🔴 未闭合 · A 活体·绿(0) · stage C · blocking 否 · prio P1**；出向 deadline 那一编号 = **✅ 已一致 · A 活体·绿(0) · stage — · blocking 否 · prio P3** |
+| 指针棘轮 | 存量 237 == 当前 237 ⇒ **新增 0** |
+| 机器守门 | 11 项全绿（台账结构/自检/计数/文档链接/AGENTS 预算 · 波次写权/角色措辞/对外契约面/阶段一基线/per-lane 矩阵/global 历史写权） |
+
+**四、本轮诚实边界**
+
+- **只登记、不代复判**：Redis 期限面（global 域）的销账归 G3（`comment/rpc.md:290`）与合并收口执行者（`docs/DRIFT/_cross/grading/W6.md`）；本层只在自己的写权面内写清 global 面仍未闭合。
+- ⚠️ **G3 那格的销账目前只在 G3 工作树的未提交改动里**（实测：主干与 `align/g3-article-comment-favorite-hot` 的 `comment/rpc.md:290` 都还是「🔴 D9」＋「🟡 未修」）⇒ ⇒ 「同日期 · 权威度 2 压过来」的那个情形**当前还不会发生** ⇒ ⇒ 但「现行态」写法对**两种情形都安全**。
+- **本轮零生产码改动** ⇒ ⇒ 未跑回归（上一轮 442 条仍适用）· 本轮只改台账。
+- **派生层产物未由本层提交**（`docs/DRIFT/_cross/**` 不在本层写权面 ⇒ 每次取证后 `git checkout --` 还原）。
+
+（**本节编号：§4.19.24** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
+### gRPC channel target 的 scheme 显式化（共享层那 1 处 · 第二十一次订正 · 2026-10-31 · G4 lane）
+
+> **本节追加在文件末尾 ⇒ 零行位移 ⇒ 不影响任何硬编码行号指针。**
+
+**一、落的那 1 处**（`service/common` 写权面内）
+
+- `service/common/src/test/java/com/rag/common/protection/GoStyleGrpcClientBreakerTargetKeyTest.java:226`
+  ⇒ `ManagedChannelBuilder.forAddress("127.0.0.1", port)` ⇒ `ManagedChannelBuilder.forTarget("dns:///127.0.0.1:" + port)`
+  ⇒ 附**主干既有 14 处先例的同款注释**（`// ⚠️ **必须显式写 dns:/// scheme**：Nacos discovery 在全局 NameResolverRegistry 里 …`）⇒ **显式 scheme 直接选定 grpc-java 自带的 DNS resolver ⇒ 不受 devh 注册影响**。
+- ⚠️ 用 `dns:///`（grpc-java 自带）**而不是** devh 的 `static://` ⇒ 前者不依赖 devh 是否注册。
+- **语义等价论证**：authority 不变 —— `forAddress(host, port)` 与 `forTarget("dns:///" + host + ":" + port)` 的 authority 都是 `host:port`（本类 javadoc「直连地址 ⇒ authority = host:port」自述该口径）⇒ ⇒ 该类断言的「两个真实 channel ⇒ 两份独立 breaker」语义**不变**；且该类只调 `interceptCall`、**不发 RPC** ⇒ 不引入新的网络等待。
+
+**二、⚠️ 必须写清的限定：这处在本模块内是「潜在引信」，不是「正在起火的红项」**
+
+- **机制**（合并收口执行者 javap 实测）：devh `GrpcClientAutoConfiguration.grpcNameResolverRegistration(List<NameResolverProvider>)` ⇒ `io.grpc.NameResolverRegistry.getDefaultRegistry()`（**进程级全局**）⇒ `DiscoveryClientResolverFactory.getDefaultScheme()` = `"discovery"` ⇒ ⇒ **无显式 scheme 的 target** 被接管去 Nacos 查服务名 ⇒ `UNAVAILABLE` ⇒ 「单跑绿、同跑红」。
+- ⚠️ **限定之二（与下一条**独立**）：`service/common` 的依赖树里没有 `nacos-discovery`**（本层实测：`mvn -o -pl service/common dependency:tree` ⇒ **无 `nacos*` / 无 `spring-cloud*` / 无 `*discovery*`**）⇒ ⇒ 本模块**没有** `DiscoveryClientResolverFactory` 这个 `NameResolverProvider`（它要 spring-cloud 的 `DiscoveryClient`）⇒ ⇒ `grpcNameResolverRegistration` 注入的是**空列表** ⇒ ⇒ **本模块内不存在接管者**。
+- ⇒ ⇒ **实测（本层 2026-10-31）**：同一 JVM 里先跑 `@SpringBootTest`（`GoStyleGrpcClientBreakerRpcAssemblyTest` · `@ImportAutoConfiguration(GrpcClientAutoConfiguration.class)`）再跑本类 ⇒ **改前（`forAddress`）与改后（`forTarget("dns:///…")`）都是 9/9 全绿** ⇒ ⇒ ⇒ **⚠️ 这只证明「这条路径压根没触发」，不是「机制不成立」**（合并收口执行者 2026-10-31 纠正）—— 本类的 channel **只用来取 `authority()`**（同文件 javadoc 自证）⇒ ⇒ `authority()` 是**本地计算**的 ⇒ ⇒ **不触发 channel 解析** ⇒ ⇒ **无论有没有被 devh 接管它都绿** ⇒ ⇒ ⇒ 所以「同跑红」在**本模块复现不出来** = **惰性点**，**不是「安全」**。
+- ⇒ ⇒ **机制本身成立**（合并收口执行者 2026-10-31 核）：G3 在 **hot-rpc 的真发 RPC 那处**采到实测日志（`Failed to resolve name … serviceId: 127.0.0.1:22101` ＋ `Can not get hosts from nacos server`）⇒ ⇒ 9 个点位的定性：**真发 RPC 的是活雷**（users 域 4 个 logout 测试 ＋ user-api 的 `UserApiGrpcNegotiationTest` ⇒ 归 **G1**）· **不真发的是惰性点**（共享层这处 ＋ hot-api 的 `CapturingClientInterceptor`）⇒ ⇒ ⇒ **本处改动 = 按静态守门口径的预防性消歧**（不是修一个可观察的红）。改它的理由是**守门**：`tools/difftest/check-grpc-channel-target-scheme.py` 的判据 = 扫 `service/**/*.java` 的**代码态** `forAddress(`，**不区分模块有没有 Nacos** ⇒ ⇒ 不改就得登记例外 ⇒ 而例外集的目标是「**剪到 0 ⇒ 零豁免**」⇒ ⇒ **改代码是唯一出路**；且共享层将来若引入 discovery（依赖面一变）这处即刻变成真陷阱。
+
+**三、验证**
+
+| 项 | 读数 |
+|---|---|
+| 目标测试类 | **6 条 / 0 失败** |
+| `service/common` 全量回归 | **476 条 / 0 失败 / 0 错误 / 0 跳过 · BUILD SUCCESS · 01:16** |
+| 静态守门（改完） | 报 **E2（例外已失效）** ⇒ 那条例外在 `tools/**` = 合并收口执行者的面 |
+| 静态守门（临时剪例外后 · 本层本地复跑） | **EXIT=0（基线绿）** ＋ `--mutation-test` **5/5 全部按预期被捕获**（M1 点位级精度 · M2 未登记文件 · M3 注释不误报 · M4 字符串字面量不误报 · M5 例外失效检测）⇒ ⇒ 随后已 `git checkout --` **还原检查器**（`tools/**` 非本层写权面）⇒ ⇒ **待合并收口执行者剪掉那条例外**（剪完即 EXIT=0） |
+
+**四、诚实边界**
+
+- **本层只改了 `service/common/**` 写权面内的这 1 处**；其余 8 条例外分属 comment / hot / users 三域（各域 lane 的面）⇒ ⇒ **不代改**。
+- 静态守门是**词法级**判据（剥注释与字符串字面量）⇒ 它拦的是**形态**，不是运行时行为 ⇒ ⇒ 「本模块无 Nacos ⇒ 这处不会被接管」这条限定**静态守门看不出来**（只能靠本节的依赖树实测）⇒ ⇒ **别把「守门绿」读成「运行时同形已证」**。
+- ⚠️ **「同跑红」的真实现场在「真发 RPC」的那几处** ⇒ ⇒ users 域 4 个 logout 测试 ＋ user-api 的 `UserApiGrpcNegotiationTest`（**接收者是 `NettyChannelBuilder`** ⇒ 它也继承 `ManagedChannelBuilder` ⇒ **改法同形**）⇒ ⇒ 归 **G1**；comment-rpc ＋ hot-rpc 那两处 G3 已修 ⇒ ⇒ **本节这条「惰性点」限定只对共享层这一处成立** ⇒ ⇒ **别把它外推成「这类形态都不必改」**。
