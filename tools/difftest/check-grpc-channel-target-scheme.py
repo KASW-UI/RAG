@@ -134,7 +134,10 @@ EXCEPTIONS: dict[str, list[tuple[str, str]]] = {
     "GoStyleGrpcClientBreakerTargetKeyTest.java": [
         (
             'Channel c = ManagedChannelBuilder.forAddress("127.0.0.1", port)',
-            "共享层（service/common）⇒ 写权归 G4；G3 lane 已提反馈单，待 G4 落码后删本条。",
+            "共享层（service/common）⇒ 写权归 G4；G3 lane 已提反馈单，待 G4 落码后删本条。"
+            "⚠️ **该 channel 只用于取 `authority()`（本地计算）⇒ 从不做 RPC ⇒ 属惰性点**"
+            "（同文件 `realChannel()` 的 javadoc 自证）⇒ ⇒ 即便被接管也不报错 ⇒ ⇒ "
+            "**但仍要改**：① 与全仓 14 处同形态修法保持一致 ② 它一旦有人加一次真调用就变成活雷。",
         ),
     ],
     "service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotRpcFailurePathMatrixTest.java": [
@@ -157,40 +160,47 @@ EXCEPTIONS: dict[str, list[tuple[str, str]]] = {
     "AdminRpcLogoutClientVisibleGrpcStatusTest.java": [
         (
             '.forAddress("127.0.0.1", GRPC_PORT)',
-            "users 域（G1 写权面）⇒ 活体 RPC 测试 ⇒ 会被 discovery resolver 接管"
-            " ⇒ 待 G1 落码后删本条。",
+            "users 域（G1 写权面）⇒ 🔴 **活雷**：该 channel **真发 RPC**"
+            " ⇒ ⇒ 同 JVM 里跑过任意 `@SpringBootTest` 之后 ⇒ ⇒ 被 discovery resolver 接管"
+            " ⇒ ⇒ `UNAVAILABLE` ⇒ ⇒ 待 G1 落码后删本条。",
         ),
     ],
     "service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/"
     "AdminRpcLogoutClientVisibleGrpcStatusDefaultBehaviorTest.java": [
         (
             '.forAddress("127.0.0.1", GRPC_PORT)',
-            "users 域（G1 写权面）⇒ 活体 RPC 测试 ⇒ 会被 discovery resolver 接管"
-            " ⇒ 待 G1 落码后删本条。",
+            "users 域（G1 写权面）⇒ 🔴 **活雷**：该 channel **真发 RPC**"
+            " ⇒ ⇒ 同 JVM 里跑过任意 `@SpringBootTest` 之后 ⇒ ⇒ 被 discovery resolver 接管"
+            " ⇒ ⇒ `UNAVAILABLE` ⇒ ⇒ 待 G1 落码后删本条。",
         ),
     ],
     "service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/"
     "UserRpcLogoutClientVisibleGrpcStatusTest.java": [
         (
             '.forAddress("127.0.0.1", GRPC_PORT)',
-            "users 域（G1 写权面）⇒ 活体 RPC 测试 ⇒ 会被 discovery resolver 接管"
-            " ⇒ 待 G1 落码后 delete 本条。",
+            "users 域（G1 写权面）⇒ 🔴 **活雷**：该 channel **真发 RPC**"
+            " ⇒ ⇒ 同 JVM 里跑过任意 `@SpringBootTest` 之后 ⇒ ⇒ 被 discovery resolver 接管"
+            " ⇒ ⇒ `UNAVAILABLE` ⇒ ⇒ 待 G1 落码后删本条。",
         ),
     ],
     "service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/"
     "UserRpcLogoutClientVisibleGrpcStatusDefaultBehaviorTest.java": [
         (
             '.forAddress("127.0.0.1", GRPC_PORT)',
-            "users 域（G1 写权面）⇒ 活体 RPC 测试 ⇒ 会被 discovery resolver 接管"
-            " ⇒ 待 G1 落码后删本条。",
+            "users 域（G1 写权面）⇒ 🔴 **活雷**：该 channel **真发 RPC**"
+            " ⇒ ⇒ 同 JVM 里跑过任意 `@SpringBootTest` 之后 ⇒ ⇒ 被 discovery resolver 接管"
+            " ⇒ ⇒ `UNAVAILABLE` ⇒ ⇒ 待 G1 落码后删本条。",
         ),
     ],
     "service/users/user/user-api/src/test/java/com/rag/users/user/api/"
     "UserApiGrpcNegotiationTest.java": [
         (
             '.forAddress("127.0.0.1", PORT)',
-            "users 域（G1 写权面）⇒ 活体 RPC 测试 ⇒ 会被 discovery resolver 接管"
-            " ⇒ 待 G1 落码后删本条。",
+            "users 域（G1 写权面）⇒ 🔴 **活雷**：该 channel **真发 RPC**"
+            " ⇒ ⇒ 同 JVM 里跑过任意 `@SpringBootTest` 之后 ⇒ ⇒ 被 discovery resolver 接管"
+            " ⇒ ⇒ `UNAVAILABLE` ⇒ ⇒ 待 G1 落码后删本条。"
+            "⚠️ 此处是 **`NettyChannelBuilder.forAddress`**（不是 `ManagedChannelBuilder`）"
+            " ⇒ ⇒ 同一形态的另一个入口 ⇒ ⇒ 守门按**标记**判（不看接收者）⇒ ⇒ 抓得到。",
         ),
     ],
 }
