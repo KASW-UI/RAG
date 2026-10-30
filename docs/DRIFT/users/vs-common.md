@@ -5454,9 +5454,9 @@ git diff --stat -- service/ # ⇒ 0 行
 
 | 7 项 | 内容 |
 |---|---|
-| **现象** | admin 域 `logout` 的 Redis 写**不绑 deadline** ⇒ deadline 到点后写**照跑不误** ⇒ **观测面**把超时记成「Redis 挂了」（客户端可见面两侧逐字一致） |
+| **现象** | admin 域 `logout` 的 Redis 写**不绑 deadline** ⇒ deadline 到点后写**照跑不误** ⇒ **观测面**把超时记成「Redis 挂了」（⚠️ **2026-10-31 订正**：客户端可见码要**读集合**，Go 侧集合 = {1015, 5001}（探针活体实测 200000 轮）⇒ ⇒ **「两侧都是 1015」那个单点读法是错的**；本域删掉抢先 `checkDeadline()` 后 RAG 同集合 ⇒ 同形） |
 | **Go 侧 `文件:行号`** | `Sea-RideTheWind_golang/service/user/admin/rpc/internal/logic/logoutlogic.go:38`（`l.svcCtx.BizRedis.SetexCtx(l.ctx, blackListKey, "banned", int(expireTime))` ⇒ **写绑 ctx** ⇒ deadline 到点立即失败）＋ `:41`（`status.Error(codes.Internal, "注销失败,Redis写入异常")`） |
-| **RAG 侧现状** | `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminDomainService.java:267`（`stringRedisTemplate.opsForValue().set(key, "banned", Duration.ofSeconds(ttlSeconds));` ⇒ **不绑 deadline**）＋ `:274`（`Status.INTERNAL.withDescription("注销失败,Redis写入异常")`）⇒ **wire 面两侧逐字一致** ⇒ 差异只在**观测面**（RAG 的日志归因晚于客户端） |
+| **RAG 侧现状** | `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/service/AdminDomainService.java:290`（`stringRedisTemplate.opsForValue().set(key, "banned", Duration.ofSeconds(ttlSeconds));` ⇒ **不绑 deadline**）＋ `:302`（`Status.INTERNAL.withDescription("注销失败,Redis写入异常")`）⇒ **wire 面两侧逐字一致** ⇒ 差异只在**观测面**（RAG 的日志归因晚于客户端）<br>⚠️ **2026-10-31 订正**：原写 `:267` / `:274` **已过期**（行号随「删掉域侧抢先 `checkDeadline()`」那笔位移 ⇒ 现行 = `:290` / `:302`）；且「客户端可见面」那一格已改为**集合**读法（Go = {1015, 5001}）⇒ 详见本文件末尾的集合口径订正小节 |
 | **证据强度** | **L1**（源码对照；⚠️ **非 L3/L4** —— 本轮**未实测**）—— 两侧的**消费点**均已定位到行 · ⚠️ global 2026-10-29 复核**未重新实测 Redis 侧** ⇒ **不写「已复测」** ⇒ 按 AGENTS.md §0 读作「**在该证据强度下一致**」 |
 | **建议修法** | 与 `E65` **同源**（同一个根因：RAG 没有 ctx 传播）⇒ **共享层加一个统一的「请求期限载体」**，Redis 调用点查它（现 `DeadlineState` / `GoStyleRequestDeadline` **都不覆盖 Redis**）⇒ ⇒ **建议与 `E65` 一起立项** |
 | **影响面** | **共享层 `service/common`** ＋ 各域 Redis 调用点（comment / like / hot / task ＋ **users/admin 的 `logout`**）⇒ **跨域** |
@@ -5888,3 +5888,39 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
 - G1 自读复核 = **同意**：约束的**唯一理由**是「代理不在位时，域侧撤闸门 ⇒ 该方法无期限感知 ⇒ RAG 写、Go 不写」⇒ ⇒ 代理**在位**且**检查在拨号之前** ⇒ ⇒ 该理由不再成立 ⇒ ⇒ **约束取消**。
 - ✅ 且主干 `53bc05ec` 已把**共享层半边 + 域侧半边放在同一提交** ⇒ ⇒ 现状本就是约束要求的形态 ⇒ ⇒ **无回退动作**。
 - ⚠️ **G4 回执里「域侧零落码 ⇒ `checkDeadline()` 保留 ⇒ 你那一行不用落」与主干现状冲突**（主干已撤）⇒ ⇒ **本域不擅自回退**：① 客户端可见面**两侧都是 1015**（Go 的 `service/common/observability/rpc.go:68-71` 的 `case <-timeoutCtx.Done():` ⇒ `:69` `codes.DeadlineExceeded`；RAG 的 `RpcInterceptor.java:361-363` 首次 close 定 status）⇒ ⇒ **回退与否对客户端不可见**；② handler 级码 = `INTERNAL`「注销失败,Redis写入异常」= Go 的 `service/user/admin/rpc/internal/logic/logoutlogic.go:39-42` **逐字同形** ⇒ ⇒ **撤闸门这一侧更贴 Go**；③ 按 G4 自己 §五 的更正标准（「不可观察的差异不是漂移」），②这一层**本就不可观察** ⇒ ⇒ **回退无收益、维持现状亦无损失** ⇒ ⇒ **维持现状，交收口执行者知情**。
+
+## 客户端可见码按集合读（2026-10-31 · G1 lane）
+
+> ⚠️ **本小节标题刻意不含任何编号 token** ⇒ 派生层不把它当条目候选 ⇒ 也不劫持任何既有编号的 `domain` / `wave` / `basis`。
+> ⚠️ **本小节不重登记** ⇒ 本体仍是既有的 `DRIFT-ARPC-010`（= `E66`）⇒ ⇒ **销账时不要当新条目**。
+
+**一、订正的核心（一句）**
+> **「客户端可见码两侧都是 1015」这个单点读法是错的** ⇒ ⇒ **比较必须用集合**：Go 侧客户端可见码**集合 = {1015, 5001}**。
+
+**二、证据（可复算）**
+- 探针：主干 commit `1c6bcda6` 落的 `tools/semantic-probe/client-visible-code/`（Go 半边**直调真源** `observability.NewUnaryServerInterceptor` ＋ 真 ctx，**已过期**）⇒ N = 200000 轮
+- 实测数：`fast_handler` ⇒ `code_4`（1015）= 199978 · `code_13`（5001）= **22**（≈ 0.011%）⇒ 码集合 **{4, 13}**；`slow_handler`（对照组，handler 跑满 50ms）⇒ 码集合 **{4}**
+- ⇒ ⇒ 「Go 侧客户端可见码恒 1015」是错的（是「≈99.99% 是 1015」）⇒ ⇒ **命中比例不是判据**（受调度竞争影响）⇒ ⇒ 探针的断言只认「集合里有没有 13」
+- 机制（真源逐行）：`service/common/observability/rpc.go:38` ⇒ `timeoutCtx` 一创建就是到期的（父 ctx 已过期 ⇒ `Done()` 立即闭）· `:47-57` ⇒ handler 拿的是 `timeoutCtx` ⇒ ctx-aware 的出向 I/O 立刻失败 ⇒ handler 立刻返回 `codes.Internal` · `:53-54` handler goroutine **全程持锁** · `:56` `close(done)` · `:54` 的 `defer lock.Unlock()` **在 `close(done)` 之后立即释放锁** ⇒ ⇒ `:63-67` 的 `done` 分支等得到那把锁 ⇒ ⇒ `:59` 的 `select` 在两分支同时就绪时**随机选** ⇒ ⇒ **5001 确实能到客户端**
+
+**三、⇒ 两条形态必须分开写（本次订正的实际后果）**
+- RAG **保留**域侧抢先 `checkDeadline()` ⇒ 客户端可见码**集合 = {1015}** ⇒ ⇒ 是 Go 集合 {1015, 5001} 的**真子集** ⇒ ⇒ 「RAG 更确定的一侧」⇒ ⇒ **需登记为有意偏离候选并签字**
+- RAG **删掉**域侧抢先检查（**本域已于 2026-10-30 删除**）⇒ 客户端可见码**集合 = {1015, 5001}**（handler 的 5001 与调度器的 1015 抢同一个「第一次 close」）⇒ ⇒ **与 Go 同集合 ⇒ 同形**
+
+**四、⚠️ 边界（写台账时不越）**
+- 探针跑的是 **Go 半边**（直调真源拦截器 ＋ 真 ctx）⇒ ⇒ **Go 侧集合是活体实测**；**RAG 侧仍是读出来的** ⇒ ⇒ **RAG↔Go 双侧活体对拍仍未做** ⇒ ⇒ 「同集合」只能读作「两侧**机制**同形」，**不能写成「两侧活体一致」**
+- 本次订正**只覆盖 `E66` / `DRIFT-ARPC-010` 这条链**（admin 域 `logout` 的 Redis 写）⇒ ⇒ **不外推**到本域其它 DB 路径（`getSelf` / `createAdmin` / `updateSelf` / …）的同类表述 ⇒ ⇒ 那些地方已把措辞改成「**按集合读、本条只主张集合里有 1015**」（**不是**「两侧都是 1015」），**但其集合值未复核** ⇒ ⇒ **列为待复核项**（见第七段）
+
+**五、M-6 合批三要素（现状）**
+① 共享层代理的预算检查已在 `delegate.getConnection()` **之前**（G4 commit `e8cb769a` ＋ L1/L2/L3 三层守门 ＋ 双向变异）② Go 侧集合 = {1015, 5001}（`1c6bcda6`）③ **域侧删掉抢先 `checkDeadline()`**（本域已落码）⇒ ⇒ **那一个原子 commit 的三要素齐了** ⇒ ⇒ 交合并收口执行者做
+
+**六、就地订正清单（本轮，零行位移）**
+- 本文件 `:5457` —— 反馈单「现象」列的「客户端可见面两侧逐字一致」→ 改为集合读法
+- 本文件 `:5459` —— `AdminDomainService.java:267` / `:274` **已过期** → 现行 `:290` / `:302`
+- `docs/DRIFT/users/admin/rpc.md:4499` —— `AdminDomainService.java:259` 的 `checkDeadline()` **已删** → 改为「保留守卫时的现状」＋ 现行 `logout` 在 `:282-305`
+- `docs/DRIFT/users/admin/rpc.md:3127` —— 小节标题「两侧都是 1015」→ 改为「按集合读」
+- `service/users/admin/admin-rpc/.../AdminDomainService.java` —— **29 处**「两侧都是 1015」措辞（类级 javadoc 结论 1 处 ＋ B-1 注释 28 处）改为集合读法 ⇒ ⇒ **行数 1373 → 1373 不变**（该文件有跨文件行号指针 ⇒ 必须行数中性）
+
+**七、待复核项（不外推）**
+- 本域 DB 路径（`getSelf` / `createAdmin` / `updateSelf` / …）的**客户端可见码集合值**未复核 ⇒ ⇒ 其 B-1 注释已改措辞但**未换结论** ⇒ ⇒ 复核触发点 = 需要一个覆盖 DB 路径的 Go 半边探针
+- RAG 侧与 Go 侧的**双侧活体对拍**（同请求、同 ctx 形态 ⇒ 比抓到的码集合）仍未做
