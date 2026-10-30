@@ -6,10 +6,13 @@
 #   本仓 tools/difftest/ 下已有一批**纯静态**（不连活体、不连 Go 仓库）的守门脚本。
 #   它们是本仓已有的质量资产，CI 的职责是**让它们每次改动都真的跑一遍**，
 #   而不是再造一套新检查。
+#   ⚠️ 例外：**第 9 道门**（check-pom-parent-relativepath.py）是 CI 自己在实战中
+#      抓到缺陷后补的 ⇒ 它守的是**本仓 pom 拓扑**，tools/difftest/ 下没有对应物。
+#      它住在 ci/scripts/ 而不是 tools/difftest/ ⇒ 避免动别人 lane 的共享面。
 #
 # 【为什么不把全部守门都塞进来】
 #   实测分类（2026-10-30）：
-#     ✅ 纯静态、无外部依赖 → 纳入（下列 7 个 + 产物级 1 个）
+#     ✅ 纯静态、无外部依赖 → 纳入（tools/difftest/ 7 个 + 产物级 1 个 + ci 自带 1 个 = 9 道）
 #     ❌ 需要**活体 PG 容器**   → check-ddl-static.py（--container / --go-db / --rag-db）
 #     ❌ 需要 **Go 真源仓库**   → check-proto-static.sh / check-surface-parity.py
 #                               / check-phasegoal-consistency.py
@@ -18,7 +21,7 @@
 #
 # 【域级 vs 仓库级】
 #   check-jar-executable.sh 支持按模块目录传参 ⇒ 按域收敛（只查本域的 jar）。
-#   其余 7 个是全仓扫描（docs/service/tools）⇒ 每个域流水线都跑一遍。
+#   其余 8 个是全仓扫描（docs/service/tools/仓内 pom 拓扑）⇒ 每个域流水线都跑一遍。
 #   单次成本实测在秒级，相对于 Maven + Testcontainers 的分钟级可以忽略；
 #   换来的是「任何一次改动都能拿到全仓静态结论」。
 #
@@ -88,6 +91,14 @@ run_gate check-grpc-runtime-classpath.py \
   python3 tools/difftest/check-grpc-runtime-classpath.py
 run_gate check-flyway-ledger.py \
   python3 tools/difftest/check-flyway-ledger.py
+# 仓内自带的第 9 道门（住 ci/scripts/，因为它守的是**本仓 pom 拓扑**）：
+# 每个 pom 的 <parent> 能否被本地 relativePath 正确解析。
+# ⚠️ 这道门是 **2026-10-31 由本 CI 实测抓出缺陷后**补的：
+#   service/users/admin/admin-api 的父 POM 坐标与默认 relativePath 指向的文件对不上
+#   ⇒ 干净环境构建必炸 ⇒ 且**连累全域**（根聚合 pom 被完整解析 ⇒ 所有域一起红）。
+#   ⇒ 这类缺陷必须离线拦住，不能等 build 才炸。
+run_gate check-pom-parent-relativepath.py \
+  python3 ci/scripts/check-pom-parent-relativepath.py
 
 if [ -n "$JAR_MODULES" ]; then
   # shellcheck disable=SC2086
