@@ -752,7 +752,7 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
 
 | | 修前 | 修后（2026-10-30 · G1 lane） |
 |---|---|---|
-| 出向 stub | `devh` 注入的裸 stub ⇒ **无 call deadline** | `capByClientTimeout(stub)` ⇒ **2s 客户端 deadline** |
+| 出向 stub | `devh` 注入的裸 stub ⇒ **无 call deadline** | `capByClientTimeout(stub)` ⇒ **2s 客户端 deadline**<br>⚠️ **2026-10-31 订正 · 两半分工（别读成「applyTo 是冗余」）**：出向 deadline = min(**请求剩余**, **2s 客户端上界**) —— 「请求剩余」那半由**共享层** `GoStyleOutboundDeadlineInterceptor` 提供（它是 `@GrpcGlobalClientInterceptor` ⇒ 接在 devh channel 上 ⇒ **裸 stub 也继承**）⇒ ⇒ 本域的 `capByClientTimeout(stub)` 刻意**只**做「2s 客户端上界」那半（**不调** `applyTo`）⇒ ⇒ ⇒ 两半叠加 = min(请求剩余, 2s) ⇒ 与 Go 的 `context.WithTimeout(ctx, 2s)` 同形 ⇒ ⇒ ⇒ **域侧这处不是冗余**（共享层「客户端硬上界」**默认不启用**：`GoStyleProtectionProperties.OutboundDeadline#getCapMillis()` **默认 0**） |
 | 旧注释 | `UserRpcClient` 的 javadoc 写「**没有**在此处设 deadline ⇒ 与 Go 一致：Go 的 `zrpc.MustNewClient` 也只靠 client interceptor 兜底」⇒ ⇒ **只说对了一半**（漏了「那个 client interceptor **就是** 2s 客户端超时」这一半） | **已订正**（原文保留在类注释里，标注「已订正」并给出完整论证） |
 | 落码 | — | `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java`（新增 `CLIENT_TIMEOUT_MILLIS = 2000L` ＋ 包可见 `capByClientTimeout` ＋ `getUser` 改走它） |
 
