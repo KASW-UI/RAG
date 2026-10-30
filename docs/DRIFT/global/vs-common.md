@@ -5380,6 +5380,12 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 
 ### 附 · 二 · 独立核验的 Go 侧证据链（**取代派单那一组坐标**）
 
+> ⚠️⚠️ **使用须知（2026-10-30 15:5x 补记）—— 本表是「按轴平铺」的清单 ⇒ 抄坐标前先看轴**
+> 🔴 **本表全部条目属「E65 · 出向 gRPC」轴**（含 `service/common/observability/rpc.go:19-25`/`:38` —— 那几行是**项目级 gRPC 服务端拦截器**，它只说明「**ctx 带 deadline**」⇒ ⇒ **撑不起 Redis 结论**）。
+> ⇒ ⇒ **Redis（E66）轴的锚点不在本表** ⇒ 在 **§4.19.5 第二节**（`pool.go:1098-1104` ＋ `:807-837` ＋ `logoutlogic.go:38` ＋ `redis.go:1024-1032`）。
+> ⇒ ⇒ **判据**：**行号对 ＋ 机制对 ≠ 轴对** —— 同一个 `文件:行号` 抄到**另一条轴**的行里，**行号与机制逐字都能核对通过 ⇒ 下游不会起疑 ⇒ 静默错位**。
+> ⇒ ⇒ **实证（2026-10-30）**：本层给 G1 的 1/3 回执里给了这张**平铺清单**（未标轴）⇒ ⇒ G1 把 `observability/rpc.go:38`（gRPC 服务端轴）抄进了它的 **E66/Redis 行** ⇒ ⇒ **行号与机制都对，但轴错了** ⇒ ⇒ 由主线收口执行者核出并已单独告知 G1。⇒ ⇒ **纪律：凡把坐标清单交给下游，必须按轴分组，并写明每组不能用在别的轴上。**
+
 | Go 事实 | 出处 | 对 RAG 的含义 |
 |---|---|---|
 | 出向 deadline = **min(父 deadline, go-zero 客户端默认 2000ms)** | `go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25`（`context.WithTimeout` ⇒ min 语义）＋ `zrpc/client.go:70-71` ＋ `zrpc/config.go:31`（default=2000） | RAG 侧**必须取更早者**，**不得覆盖** |
