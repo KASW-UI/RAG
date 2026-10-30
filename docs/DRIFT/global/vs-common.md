@@ -4986,7 +4986,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
   ⇒ **Go 的 Redis 命令由固定 3s 兜底，与请求 deadline 无关。**
 - **RAG 侧**：`spring.data.redis.timeout: 3s`（9 个域 yml 同值）⇒ **与 Go 的固定 3s 同形**。
 - ⇒ ⇒ **E66 不是漂移**；若给 RAG 的 Redis 挂上「请求期限载体」⇒ 变成 **RAG 比 Go 更严** ⇒ **新造一条漂移** ⇒ ⇒ **不建议落码**（`service/common/.../redis/GoStyleRedisClientAutoConfiguration.java` 的 javadoc `:87-94` 早已把这条记为「属另一条，需要另立一轮」）。
-- **两条残留（另立条目，不挂 E66）**：① Go `MaxRetries=3` ⇒ 慢 Redis 下最坏 ≈12s，而**请求 deadline 缩不了它**；Lettuce 无自动重试 ⇒ RAG ≈3s ⇒ **RAG 比 Go 快 4 倍**（方向与 E66 主张相反）；② 🔴 **（方向已于 2026-10-30 16:2x 订正 ⇒ 逐条证据见 §4.19.7 第三节）**：原写「Go 的 `logoutlogic.go`（admin `:31-45` / user `:30-43`）**没有 `ctx.Done()` 预检** ⇒ deadline 已过期仍**写黑名单**；RAG 的 `AdminDomainService.java:259` / `UserDomainService.java:899` 有 `checkDeadline()` ⇒ 过期即返 `DEADLINE_EXCEEDED`、**不写** ⇒ 副作用分歧」⇒ ⇒ **方向反了** —— **Go 侧在客户端层有 ctx 检查**（`pool.go:1099-1104` `waitTurn` fast path 先查 `ctx.Done()` ⇒ 命令根本不下发；`pool.go:589-591` 拨号也绑 ctx）⇒ ⇒ **Go 在 deadline 已过期时从不写** ⇒ ⇒ ⇒ **真实残余方向相反 = RAG 更宽**（deadline 在「取连接 / 拨号窗口」内过期 ⇒ Go 拨号被 ctx 取消 ⇒ 不写；RAG 的 Lettuce 取连接不受 ctx 约束 ⇒ 照写）⇒ ⇒ 另有**一处 handler 级业务码差异**（Go 5001 vs RAG 1015 ⇒ 域侧面 ⇒ 归 G1）。
+- **两条残留（另立条目，不挂 E66）**：① Go `MaxRetries=3` ⇒ 慢 Redis 下最坏 ≈12s，而**请求 deadline 缩不了它**；Lettuce 无自动重试 ⇒ RAG ≈3s ⇒ **RAG 比 Go 快 4 倍**（方向与 E66 主张相反）；② 🔴 **（方向已于 2026-10-30 16:2x 订正 ⇒ 逐条证据见 §4.19.7 第三节）**：原写「Go 的 `logoutlogic.go`（admin `:31-45` / user `:30-43`）**没有 `ctx.Done()` 预检** ⇒ deadline 已过期仍**写黑名单**；RAG 的 `AdminDomainService.java:259` / `UserDomainService.java:899` 有 `checkDeadline()` ⇒ 过期即返 `DEADLINE_EXCEEDED`、**不写** ⇒ 副作用分歧」⇒ ⇒ **方向反了** —— **Go 侧在客户端层有 ctx 检查**（`pool.go:1099-1104` `waitTurn` fast path 先查 `ctx.Done()` ⇒ 命令根本不下发；`pool.go:589-591` 拨号也绑 ctx）⇒ ⇒ **Go 在 deadline 已过期时从不写** ⇒ ⇒ ⇒ **真实残余方向相反 = RAG 更宽**（deadline 在「取连接 / 拨号窗口」内过期 ⇒ Go 拨号被 ctx 取消 ⇒ 不写；RAG 的 Lettuce 取连接不受 ctx 约束 ⇒ 照写）〔**【2026-10-30 订正 · G4 lane · 第十五次】残余窗口已被主干闭掉 ⇒ 本条残余口径收窄**：① `GoStyleRedisDeadlineConnectionFactory`（`getConnection`）**在拨号之前**就查预算（`GoStyleRedisDeadline.assertNotExhausted("getConnection")` ⇒ 才 `delegate.getConnection()`）⇒ ⇒ **「取连接 / 拨号窗口」已被盖住**；② `GoStyleRedisDeadlineConnection.wrap` 的命令代理**在调用 delegate 之前**查预算（`assertNotExhausted(method.getName())` ⇒ 才 `invoke`）⇒ ⇒ **「命令下发前」已被盖住**⇒ ⇒ ⇒ **真正盖不住的只剩「命令已在 socket 上传输途中、预算耗尽」** —— 而那一瞬**两侧同形**（Go 的 `waitTurn` 只在**下发前**查 ctx ⇒ 已下发的写无法撤回 ⇒ Go 也会写）⇒ ⇒ ⇒ ⇒ **⇒ 「RAG 更宽」这个残余窗口已被主干 `53bc05ec` 闭掉** ⇒ ⇒ ⇒ ⚠️ **但本层不下「E66 可闭合」的结论**：那是**定级复判**、且残余**机制**仍不同形（RAG ＝ 代理拦截 · Go ＝ 客户端层 ctx 绑定）⇒ ⇒ ⇒ 归调度员复判 ⇒ ⇒ ⇒ ⚠️ **另一处坐标已过时**：`AdminDomainService.java:259` 那处**已被撤**（主干 `logout` 实测无 `checkDeadline`）⇒ ⇒ 而 `UserDomainService.java:899` **仍在** ⇒ ⇒ ⇒ **⇒ 这构成一条域内不同构 ⇒ ⇒ 转派 G1（见 §4.19.19）**〕
 
 **二、反馈单 3/3（缺 go-zero 框架级 Stat + Prometheus 两层）⇒ 🟡 派单的**两处前提**需要订正，且**不能纯 G4 落**
 
@@ -5333,7 +5333,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 1. **仍是源码级证据（E1）** —— 本节**没有任何一侧的活体对拍** ⇒ ⇒ 「两侧同形 / 不同形」一律读作「**在源码调用链上同形**」⇒ ⇒ **不得**外推为「已用活体验证的行为等价」。
 2. **「残余 = RAG 更宽」的那条窗口**（取连接 / 拨号）**未实测** ⇒ ⇒ 它的**可达性**依赖「需要新建连接」且「连接获取耗时 > 剩余预算」⇒ ⇒ 只作**源码级论证**。
 3. **本节未核的一处**：Go 侧 `MaxRetries=3` 的**重试分支**在 ctx 已 Done 时是否还会再取一次连接（`redis.go:830` 之后的重试逻辑本层**未逐行读完**）⇒ ⇒ 若会，则重试层可能另有一处 ctx 感知点 ⇒ ⇒ **留作下一轮**，本节**不下结论**。
-4. ✅ **【补 · 见 §4.19.10】第二节那句「handler 级差异 ⇒ 归 G1」带一个前置事实** —— 若 Go 侧 `timeout <= 0`，`rpc.go:32-36` 会走 **pass-through**（handler 直接同步执行 ⇒ 它的错误码就能到客户端）⇒ ⇒ **那个判定就不成立** ⇒ ⇒ 本层用**真源 `conf.Load` 探针**实测了 admin.yaml ⇒ **`Timeout = 2000` ⇒ `timeout > 0` ⇒ 竞速分支生效** ⇒ ⇒ ⇒ **该前置事实已坐实**；🔴 **但 §4.19.9 在此基础上又推出「客户端必然 1015」⇒ 那一步被真源拦截器探针推翻（5/20000）** ⇒ ⇒ ⇒ **⇒ 见 §4.19.10**。
+4. ✅ **【补 · 见 §4.19.10】第二节那句「handler 级差异 ⇒ 归 G1」带一个前置事实** —— 若 Go 侧 `timeout <= 0`，`rpc.go:32-36` 会走 **pass-through**（handler 直接同步执行 ⇒ 它的错误码就能到客户端）⇒ ⇒ **那个判定就不成立** ⇒ ⇒ 本层用**真源 `conf.Load` 探针**实测了 admin.yaml ⇒ **`Timeout = 2000` ⇒ `timeout > 0` ⇒ 竞速分支生效**〔**【2026-10-30 订正 · G4 lane · 第十五次】措辞收窄**：`admin.yaml` **全文未设 `Timeout` 键** ⇒ ⇒ 这个 2000 是 **go-zero 的默认值**（`v1.10.2` 的 `zrpc/config.go:31` `json:",default=2000"`）⇒ ⇒ 结论不变、措辞更准〕 ⇒ ⇒ ⇒ **该前置事实已坐实**；🔴 **但 §4.19.9 在此基础上又推出「客户端必然 1015」⇒ 那一步被真源拦截器探针推翻（5/20000）** ⇒ ⇒ ⇒ **⇒ 见 §4.19.10**。
 
 ### 4.19.8 🔴 指标抓取出口必须分两层：「配置层」＋「载体层」（G1 16:7x 回执的补层 · 本层独立复算）
 
@@ -5430,7 +5430,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 
 - **为什么这是前置事实**：Go 的 `service/common/observability/rpc.go:30-36` 有**两条分支** —— `if timeout <= 0 { resp, err = handler(ctx, req); return resp, err }`（**pass-through**：handler 同步执行 ⇒ **它返回的错误码能到客户端**）vs `:38-72` 的**竞速分支**（handler 丢进 goroutine，`:59-72` 的 select 决定返回谁）⇒ ⇒ ⇒ **只有 `timeout > 0` 时，「handler 级码不可观察」才成立** ⇒ ⇒ **不坐实这一条，就不能接受撤回**。
 - **本层的探针（真源 `conf.Load` ＋ 真源 `zrpc.RpcServerConf`，离线跑）**：
-  - **A（真源 yaml）**：`service/user/admin/rpc/etc/admin.yaml` ⇒ **加载到的 `Timeout = 2000`** ⇒ ⇒ `DisableNativeRpcTimeout`（`rpc.go:19-23`）⇒ **返回 `2s`** ⇒ ⇒ **`timeout > 0` ⇒ 竞速分支生效** ✔
+  - **A（真源 yaml）**：`service/user/admin/rpc/etc/admin.yaml` ⇒ **加载到的 `Timeout = 2000`**〔**【2026-10-30 订正 · G4 lane · 第十五次】措辞收窄**：**`admin.yaml` 全文并未设 `Timeout` 键**（已 cat 全文逐行核过）⇒ ⇒ 该 2000 来自 **go-zero 的默认值**⇒ ⇒ 真源 `go.mod:17` 锁 `github.com/zeromicro/go-zero v1.10.2` ⇒ ⇒ **默认值声明点 = `zrpc/config.go:31`** `Timeout int64 json:",default=2000"` ⇒ ⇒ ⇒ **别写成「真源 admin.yaml 里是 2000」**（会读成 yaml 写了它）〕 ⇒ ⇒ `DisableNativeRpcTimeout`（`rpc.go:19-23`）⇒ **返回 `2s`** ⇒ ⇒ **`timeout > 0` ⇒ 竞速分支生效** ✔
   - **B（对照组 · 显式 `Timeout: 5000`）** ⇒ 加载到 **5000** ⇒ 返回 **5s** ✔
   - **C（对照组 · 显式 `Timeout: 0`）** ⇒ 加载到 **0** ⇒ 返回 **0s** ⇒ ⇒ **`timeout == 0` ⇒ 会走 pass-through 分支** ✔
   - ⇒ ⇒ **A/B/C 判据自检通过（同一个 yaml 只改一个变量 ⇒ 差异被隔离到那一个字段）** ⇒ ⇒ **A 的结论可靠**。
@@ -5457,7 +5457,7 @@ mvn -o -B -DargLine=-Xmx2g -DfailIfNoTests=false --fail-at-end \
 **四、⇒ ⇒ 对排期的影响（好消息：G4 的落码面不变，且约束解除）**
 
 - **共享层**：**不变**（`3d5b4924` 那半边照旧）⇒ ⇒ **E66 的「派发前检查」这一层由本层的连接代理闭合** ⇒ ⇒ ⇒ **共享层半边已足**。
-- **域侧（users）**：**零落码** ⇒ ⇒ `AdminDomainService.java:259` 的 `checkDeadline()` **保留**（它更早、且**不阻止**代理在派发前检查 ⇒ ⇒ **不违反 E66**）⇒ ⇒ ⇒ `AdminDomainServiceDeadlineTest.java:41-42` 的 `GUARDED` 清单**不动**（那是 DRIFT-018 的回归网）。
+- **域侧（users）**：**零落码** ⇒ ⇒ `AdminDomainService.java:259` 的 `checkDeadline()` **保留**（它更早、且**不阻止**代理在派发前检查 ⇒ ⇒ **不违反 E66**）⇒ ⇒ ⇒ `AdminDomainServiceDeadlineTest.java:41-42` 的 `GUARDED` 清单**不动**（那是 DRIFT-018 的回归网）。〔**【2026-10-30 订正 · G4 lane · 第十五次】本段是「合并前的状态描述」⇒ 不得当作主干现状读**：主干 `53bc05ec`（M-6 原子提交）**已撤掉 admin 域** `AdminDomainService.logout` 的抢先闸门（实测：主干 `service/users/admin/admin-rpc/.../AdminDomainService.java` 的 `logout`（`:282` 起）**已无** `checkDeadline`；且 `AdminDomainServiceDeadlineTest` 的 `GUARDED` 清单已由 13 项收为 12 项、另新增 `AdminLogoutDeadlineHandoffTest` 回归网）⇒ ⇒ **且本节整节已被 §4.19.10 反转**（见本节开头的反转通知）⇒ ⇒ ⇒ **本行只保留作历史现场记录**⇒ ⇒ ⇒ ⚠️ **别据此以为「域侧闸门还在」** ⇒ ⇒ ⚠️ **真实现状见本文件 §4.19.19**（且那里还记了一条**本层当时不知道**的域内不一致）〕
 - **⇒ 「必须同一次提交」的约束取消** ⇒ ⇒ **G1 那一行不用落** ⇒ ⇒ **合并计划变简单**：**G4 的共享层那半边可以独立成提交** ⇒ ⇒ **不再需要「收口执行者在主干合成一个提交」这一步**（合并时只需注意：域侧**不要**去删那道抢先检查）。
 - **仍然成立的残余**（G1 自己也点名了）：**取连接 / 拨号窗口内过期 ⇒ RAG 写、Go 不写（方向 = RAG 更宽）** ⇒ ⇒ **E66 同形化不可完全闭合 = 框架限制**（Lettuce 取连接无 ctx 语义）⇒ ⇒ **不追、如实登记** ⇒ ⇒ **§4.19.7 第三节的结论不变**。
 
@@ -6165,3 +6165,44 @@ func (p *ConnPool) waitTurn(ctx context.Context) error {
 - **生产码零改动**（本轮只改 `docs/`）· **未跑回归**（本轮无生产码改动 ⇒ ⇒ 上一轮的 442 条仍适用）。
 
 （**本节编号：§4.19.18** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
+
+---
+
+### 三条措辞订正 ＋ 一条域内不同构的发现（第十五次订正 · 2026-10-30 · G4 lane）
+
+#### 一 · 触发源
+
+- G1 lane 就本层台账给出**三条措辞订正** ＋ **一条「不执行」** ＋ **一条残余窗口收窄建议** ⇒ ⇒ 本层**逐条自己打开源文件重核**（AGENTS.md §3.1「不采信转述」）⇒ ⇒ ⇒ **五条的结论全部成立** ⇒ ⇒ ⇒ 已在台账**就地订正 4 处**（零行位移）⇒ ⇒ ⇒ 本节只记「**核了什么**」与「**据此推出什么新事**」。
+
+#### 二 · 本层逐条核了什么（不采信转述）
+
+- **① 「真源 admin.yaml 里是 2000」这个措辞不准确** ⇒ ⇒ **已核**：`service/user/admin/rpc/etc/admin.yaml` **全文 cat 过** ⇒ ⇒ **没有任何 `Timeout` 键** ⇒ ⇒ 真源 `go.mod:17` 锁 `github.com/zeromicro/go-zero v1.10.2` ⇒ ⇒ **默认值声明点 = `zrpc/config.go:31`** `Timeout int64 json:",default=2000"` ⇒ ⇒ **结论不变、措辞收窄** ⇒ ⇒ 已就地订正（§4.19.7 补注 ＋ §4.19.10 的 A 项各一处）。
+- **② 「主干已撤掉那道闸门」** ⇒ ⇒ **已核**：`53bc05ec` 的 diff 里确有 `- checkDeadline();`（admin 域 `AdminDomainService.logout`）⇒ ⇒ 主干 `service/users/admin/admin-rpc/.../AdminDomainService.java` 的 `logout`（`:282` 起）**实测无 `checkDeadline`** ⇒ ⇒ 且 `AdminDomainServiceDeadlineTest` 的 `GUARDED` 清单已由 **13 项收为 12 项** ＋ 新增 `AdminLogoutDeadlineHandoffTest` 回归网 ⇒ ⇒ ⇒ **本层台账里那句「域侧零落码 ⇒ 闸门保留」是「合并前的状态描述」⇒ 已就地标注作废**（那一句所在整节本就被 §4.19.10 反转 ⇒ ⇒ 两重作废）。
+- **③ 「残余窗口已被两处检查覆盖」** ⇒ ⇒ **已核**：`GoStyleRedisDeadlineConnectionFactory` 在 `delegate.getConnection()`（**拨号**）**之前**查预算（`assertNotExhausted("getConnection")`）⇒ ⇒ `GoStyleRedisDeadlineConnection.wrap` 的命令代理在 `invoke`（**下发**）**之前**查预算 ⇒ ⇒ ⇒ **「取连接 / 拨号窗口」与「命令下发前」两处都已盖住** ⇒ ⇒ ⇒ **真正盖不住的只剩「命令已在 socket 上传输途中」** ⇒ ⇒ ⇒ 而那一瞬**两侧同形**（Go 的 `waitTurn` 只在**下发前**查 ctx ⇒ 已下发的写无法撤回）⇒ ⇒ ⇒ ⇒ **⇒ 「RAG 更宽」那个残余窗口已被主干闭掉** ⇒ ⇒ ⇒ 已就地订正。
+- **④ 「必须同一次提交」约束取消** ⇒ ⇒ 本层核为 **「已由 M-6 原子提交履行」**（措辞差别：不是「取消」，是 `53bc05ec` 已把「共享层代理 ＋ 域侧撤闸门」放进**同一提交** ⇒ ⇒ 现在不需要再绑）⇒ ⇒ **结论一致**。
+
+#### 三 · 🔴 据此推出的新事：域内不同构（本层此前不知道）
+
+- **Go 侧 user 的 `logoutlogic.go`（全文 44 行 · 本层 cat 过）**：`:31` token 空检查 ⇒ `:35` 黑名单 key 拼法 ⇒ `:36` `UserAuth.AccessExpire` ⇒ **`:37` `SetexCtx(l.ctx, …)` ⇒ ctx 传进 Redis** ⇒ ⇒ ctx 已过期时 go-redis 的 `waitTurn` **不下发** ⇒ ⇒ **不写** ⇒ ⇒ `:38-40` 失败 ⇒ `codes.Internal`「注销失败,Redis写入异常」⇒ ⇒ ⇒ **全文无 `ctx.Done()` 预检** ⇒ ⇒ ⇒ **与 admin 侧 `logoutlogic.go` 同构**。
+- ⇒ ⇒ **Go 侧两个域的 logout 都没有域内抢先预检** ⇒ ⇒ ⇒ **RAG 侧两个域就都该不设闸门**。
+- ⚠️ **但主干只撤了 admin 一侧** ⇒ ⇒ **user 侧仍在**：`service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/service/UserDomainService.java` 的 `logout`（`:898`）入口 `:899 checkDeadline();` ⇒ ⇒ Redis 写在 `:909` ⇒ ⇒ **仍是「抢先」的那一处** ⇒ ⇒ ⇒ **⇒ 域内不同构**（admin 已撤 · user 未撤）。
+- ⇒ ⇒ **可观察后果**：user 域 logout 在「请求 deadline 已过期」时 ⇒ ⇒ RAG **handler 级码 = 1015**（抢先抛）⇒ ⇒ 而 Go 侧 handler 级码 = **5001**（`codes.Internal`）⇒ ⇒ ⇒ **⇒ user 域这一面仍与 Go 不同构** ⇒ ⇒ ⇒ 客户端可见码那一面仍是 {1015} ⊊ {1015, 5001}（真子集）⇒ ⇒ ⇒ ⇒ **仍是真漂移**。
+- ⇒ ⇒ **副作用面（写不写）两侧仍同形**：admin 撤闸门后靠共享层代理在**命令下发前**拦（不写）⇒ 与 Go 的 `waitTurn` 不下发同形；user 侧现在的抢先闸门**恰好也**不写 ⇒ ⇒ ⇒ **所以两域的副作用面同、handler 级码不同** ⇒ ⇒ ⇒ ⇒ **⇒ 差异被隔离到「handler 级业务码」这一个面上**（可观察，但只在 handler 级）。
+
+#### 四 · 转派单（归 G1 · users 域写权面 · 本层不代改）
+
+- **现象**：user 域 logout 入口的抢先 deadline 闸门仍在 ⇒ ⇒ 而 admin 域同款已由主干 `53bc05ec` 撤掉 ⇒ ⇒ **域内不同构** ＋ **与 Go 的 handler 级码不同构**。
+- **Go 侧出处**：`service/user/user/rpc/internal/logic/logoutlogic.go`（全文 44 行）—— `:37` `SetexCtx(l.ctx, …)` · `:38-40` 失败 ⇒ `codes.Internal`「注销失败,Redis写入异常」· ⇒ **全文无 ctx 预检**。
+- **RAG 侧现状**：`service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/service/UserDomainService.java` `:898` `logout` → `:899` `checkDeadline();` → `:909` Redis 写。
+- **建议修法**（与 admin 侧同款）：撤 user 域 logout 入口那处抢先闸门 ⇒ ⇒ 调整 `UserDomainServiceDeadlineTest` 的 `GUARDED` 清单（logout 出列）⇒ ⇒ 另加一条对齐 admin 侧 `AdminLogoutDeadlineHandoffTest` 的 **handoff 回归网**（断言「期限已耗尽时 logout 仍**调用到** Redis 写、但**写不进**」）。
+- **证据强度**：**L1 源码级 ＋ Go 侧原文逐行核对**（本层 cat 过两个 `logoutlogic.go` 全文 ＋ 主干 `UserDomainService.java` / `AdminDomainService.java` 逐行核过）⇒ ⇒ **未跑活体对拍** ⇒ ⇒ 「handler 级码 1015 vs 5001」那一句**未活体验证**（但两侧源码的返回路径已逐行读过）。
+- **是否阻塞本波**：**否**（与 E65 的 X-6 复判无关）⇒ ⇒ 但它**落在 E66 的「handler 级业务码」那一面** ⇒ ⇒ ⇒ **E66 仍 OPEN 时这一面就还没闭合** ⇒ ⇒ ⇒ 建议**本波内**处理（改动小、与 admin 侧同款、且有现成的 admin 侧参照实现）。
+- **归属**：**G1**（`service/users/**` = G1 写权面）⇒ ⇒ 本层**不代改**。
+
+#### 五 · 诚实边界
+
+- 本轮**只改台账**（`docs/DRIFT/global/vs-common.md`）⇒ ⇒ **生产码零改动** ⇒ ⇒ 未跑回归（上一轮的 442 条仍适用）。
+- 本层**未跑任何 Go↔RAG 双侧活体对拍** ⇒ ⇒ 本节的「handler 级码 1015 vs 5001」是**源码级**结论，不是活体实测。
+- 「残余窗口已被闭掉」是**源码级**结论（两处检查点实测存在）⇒ ⇒ **不等于「E66 可闭合」** ⇒ ⇒ 那需要调度员的定级复判 ＋ 一条活体对拍。
+
+（**本节编号：§4.19.19** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
