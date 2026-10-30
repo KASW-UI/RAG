@@ -7,6 +7,14 @@
         <groupId>com.rag</groupId>
         <artifactId>service</artifactId>
         <version>0.0.1-SNAPSHOT</version>
+        <!-- ⚠️ 必须显式指向 service/pom.xml：
+             Maven 的默认 relativePath 是 ../pom.xml ⇒ 会指到 service/users/admin/pom.xml
+             （坐标是 admin ≠ service）⇒ Maven 判 "parent.relativePath points at wrong local POM"
+             ⇒ 回落仓库找 com.rag:service:pom ⇒ 本仓没有制品仓库 ⇒ **干净环境构建必炸**
+             （开发机不报错是因为 ~/.m2 里躺着旧的已安装 service pom，把问题掩盖了）。
+             这里只改"去哪里找父 POM"，坐标与继承内容都不变 ⇒ 语义等价。
+             由 CI（干净 checkout）发现，见 ci/DELIVERY.md §六。 -->
+        <relativePath>../../pom.xml</relativePath>
     </parent>
 
     <artifactId>admin-api</artifactId>
