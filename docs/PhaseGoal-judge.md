@@ -122,11 +122,11 @@
 | `article` | `article-rpc` | `service/article/rpc/internal/logic/` + `internal/svc/`（6 rpc） | `service/article/article-rpc/`（`impl/ArticleServiceGrpcImpl.java`） | 39 / 8,737 | 199 |
 | `article` | `article-common` | `service/article/common/errmsg/errmsg.go`（45 行） | `service/article/article-common/…/errmsg/ErrorCode.java` | 1 / 257 | 15 |
 | `article` | `article-proto` | `proto/article.proto` | `service/article/article-proto/src/main/proto/article.proto` | —（生成） | 0 |
-| `comment` | `comment-api` | `service/comment/api/internal/handler/routes.go` + `internal/logic/`（7） | `service/comment/comment-api/`（`controller/CommentController.java`） | 37 / 3,479 | 62 |
+| `comment` | `comment-api` | `service/comment/api/internal/handler/routes.go` + `internal/logic/`（7） | `service/comment/comment-api/`（`controller/CommentController.java`） | 37 / 3,479 | 66 |
 | `comment` | `comment-rpc` | `service/comment/rpc/internal/logic/`（7） | `service/comment/comment-rpc/`（`impl/CommentServiceGrpcImpl.java`） | 43 / 8,656 | 146 |
 | `comment` | `comment-common` | `service/comment/common/errmsg/errmsg.go` | `service/comment/comment-common/…/errmsg/`（4 类） | 4 / 567 | 27 |
 | `comment` | `comment-proto` | `proto/comment.proto`（245 行） | `service/comment/comment-proto/src/main/proto/comment.proto` | —（生成） | 0 |
-| `favorite` | `favorite-api` | `service/favorite/api/internal/handler/routes.go` + `internal/logic/`（7） | `service/favorite/favorite-api/`（`controller/`） | 36 / 3,885 | 155 |
+| `favorite` | `favorite-api` | `service/favorite/api/internal/handler/routes.go` + `internal/logic/`（7） | `service/favorite/favorite-api/`（`controller/`） | 36 / 3,885 | 158 |
 | `favorite` | `favorite-rpc` | `service/favorite/rpc/internal/logic/`（7） | `service/favorite/favorite-rpc/`（`impl/FavoriteServiceGrpcImpl.java`） | 36 / 7,950 | 143 |
 | `favorite` | `favorite-common` | `service/favorite/common/errmsg.go` | `service/favorite/favorite-common/…/errmsg/`（4 类） | 4 / 875 | 29 |
 | `favorite` | `favorite-proto` | `proto/favorite.proto`（107 行） | `service/favorite/favorite-proto/src/main/proto/favorite.proto` | —（生成） | 0 |
@@ -134,7 +134,7 @@
 | `follow` | `follow-rpc` | `service/follow/rpc/internal/logic/`（8） | `service/follow/follow-rpc/`（`impl/FollowServiceGrpcImpl.java`） | 16 / 2,717 | 99 |
 | `follow` | `follow-common` | `service/follow/common/errmsg.go` | `service/follow/follow-common/…/errmsg/`（4 类） | 4 / 562 | 37 |
 | `follow` | `follow-proto` | `proto/follow.proto`（52 行） | `service/follow/follow-proto/src/main/proto/follow.proto` | —（生成） | 0 |
-| `hot` | `hot-api` | `service/hot/api/internal/handler/routes.go`（1） | `service/hot/hot-api/`（`controller/HotArticleController.java`） | 17 / 2,452 | 109 |
+| `hot` | `hot-api` | `service/hot/api/internal/handler/routes.go`（1） | `service/hot/hot-api/`（`controller/HotArticleController.java`） | 17 / 2,452 | 116 |
 | `hot` | `hot-rpc` | `service/hot/rpc/internal/logic/`（5） | `service/hot/hot-rpc/`（`impl/HotServiceGrpcImpl.java`） | 15 / 2,535 | 135 |
 | `hot` | `hot-common` | `service/hot/common/errmsg.go`（121 行） | `service/hot/hot-common/…/errmsg/`（2 类） | 2 / 172 | 14 |
 | `hot` | `hot-proto` | `proto/hot.proto` | `service/hot/hot-proto/src/main/proto/hot.proto` | —（生成） | 0 |
