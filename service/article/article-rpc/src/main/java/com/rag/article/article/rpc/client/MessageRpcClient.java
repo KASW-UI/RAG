@@ -1,6 +1,5 @@
 package com.rag.article.article.rpc.client;
 
-import com.rag.common.observability.GoStyleRequestDeadline;
 import com.rag.message.message.proto.MessageServiceGrpc;
 import com.rag.message.message.proto.NotificationKind;
 import com.rag.message.message.proto.SendNotificationReq;
@@ -103,7 +102,8 @@ public class MessageRpcClient {
     }
 
     /**
-     * 🔴 <b>出向调用必须带 2s 客户端封顶</b>（2026-10-31 · G3 域侧自修 · Jason 拍板「修」）。
+     * 🔴 <b>出向调用必须带 2s 客户端封顶</b>（2026-10-31 · G3 域侧自修 · Jason 拍板「修」；
+     * <b>2026-10-31 第十一轮改由共享层统一施加</b>）。
      *
      * <p><b>Go 出处</b>：{@code service/article/rpc/internal/mqs/article_sync_result_consumer.go:197}
      * 的 {@code l.svcCtx.MessageRpc.SendNotification(ctx, …)}
@@ -123,26 +123,28 @@ public class MessageRpcClient {
      * 该类 {@code :80} 是 {@code @KafkaListener}）⇒ ⇒ 无限期阻塞会把<b>消费线程占死</b>
      * ⇒ ⇒ 该 partition 不再推进 ⇒ ⇒ 「文章发布成功」通知这条链路<b>整条停摆</b>。
      *
-     * <p><b>🔴 为什么是「两段式」而不是只套 2s</b>：
+     * <p><b>🔴 为什么现在是「共享层拦截器级」而不是「域内两段式」</b>：
      * <ul>
-     *   <li><b>第一段 {@code GoStyleRequestDeadline.applyTo(stub)}</b>：把<b>入向</b> deadline 的
-     *       剩余预算挂到出向 stub 上（父 deadline 参与 min）；
-     *       ⚠️ <b>本出口跑在 Kafka consumer 线程上</b> ⇒ 共享层 {@code RpcInterceptor.onHalfClose}
-     *       绑的 ThreadLocal 载体<b>在本线程不可见</b> ⇒ ⇒ 第一段在本出口<b>原样返回 stub</b>
-     *       （不挂 deadline）⇒ ⇒ 净效果 = <b>恰好 2s 封顶</b>
+     *   <li>Go 的客户端超时是<b>拦截器级别</b>的 ⇒ ⇒ RAG 侧同形也应是拦截器级
+     *       ⇒ ⇒ 共享层 {@code GoStyleOutboundDeadlineInterceptor}
+     *       （devh 的 {@code @GrpcGlobalClientInterceptor} ⇒ 装在<b>每个</b>出向 devh 调用上
+     *       ⇒ ⇒ 连<b>裸 stub</b> 都过链）统一算一次
+     *       {@code min(入向剩余预算, 2s 客户端封顶, 调用点自带)}；</li>
+     *   <li>本域<b>只配参数</b>：{@code rag.protection.outbound-deadline.cap-millis=2000}
+     *       （见本组件 {@code application.yml}）⇒ ⇒ 共享层默认 {@code capMillis=0} = 不启用
+     *       ⇒ ⇒ <b>不配这一行 = 出向零期限 = 比 Go 松</b>（这正是域内副本存在的理由，
+     *       本轮由共享层补上）；</li>
+     *   <li>⚠️ <b>本出口跑在 Kafka consumer 线程上</b> ⇒ 共享层 {@code RpcInterceptor.onHalfClose}
+     *       绑的 ThreadLocal 载体<b>在本线程不可见</b> ⇒ ⇒ 出向只剩 <b>2s 客户端封顶</b>
      *       ⇒ ⇒ 与 Go 侧<b>同形</b>（Go 的 {@code article_sync_result_consumer.go:197} 传的
-     *       也是 <b>Kafka 消费 ctx（无 deadline）</b> ⇒ 同样只有 2s 封顶）；</li>
-     *   <li><b>第二段 {@code GoStyleClientCallTimeout.capByClientTimeout(…)}</b>：算
-     *       {@code min(请求剩余, 2s)} ⇒ ⇒ <b>这一半是本域必须自己给的</b>
-     *       （共享层拦截器层的 {@code GoStyleProtectionProperties.OutboundDeadline#capMillis}
-     *       <b>默认 0 = 不启用</b>，全仓 {@code service/<域>/<组件>/src/main/resources/*.yml}
-     *       的 {@code outbound-deadline} <b>零配置</b>）⇒ ⇒ 域侧漏了就是真漂移（RAG 比 Go 松）。</li>
+     *       也是 <b>Kafka 消费 ctx（无 deadline）</b> ⇒ 同样只有 2s 封顶）。</li>
      * </ul>
      *
-     * <p>⚠️ <b>不要把返回值缓存到字段上</b>：{@code withDeadlineAfter} 每次返回新实例。
+     * <p>⚠️ <b>域内私有副本 {@code GoStyleClientCallTimeout} 已删除</b>（本轮）：
+     * <b>副本数 = 漂移面</b> ⇒ ⇒ 共享层守门 {@code GoStyleClientCallTimeoutSingleSourceGateTest}
+     * 的终态口径 = 「域侧 0 份，只配参数」。
      */
     private MessageServiceGrpc.MessageServiceBlockingStub messageRpc() {
-        return GoStyleClientCallTimeout.capByClientTimeout(
-                GoStyleRequestDeadline.applyTo(stub));
+        return stub;
     }
 }

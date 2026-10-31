@@ -189,6 +189,20 @@ rag:
   #   `matchIfMissing=true` ⇒ **不写 = 默认 api 侧** ⇒ 共享层的 api 侧 web Bean 会挂上来。
   side: rpc
 
+  # 🔴 **客户端硬上界（Go 侧 zrpc client 的 `Timeout`）** —— 2026-10-31 · G3 第十一轮
+  #   Go 出处（消费点，不是声明点）：
+  #     go-zero@v1.10.2/zrpc/config.go:31          `Timeout int64 \`json:",default=2000"\``
+  #     go-zero@v1.10.2/zrpc/internal/config.go:15 `Timeout bool \`json:",default=true"\``
+  #     go-zero@v1.10.2/zrpc/internal/client.go:113-117（**无条件**装 TimeoutInterceptor）
+  #   本域 Go 侧 `etc/article.yaml` 的 `MessageRpc:` 段**没写 `Timeout`** ⇒ ⇒ 走默认值 **2000ms**
+  #   （该文件的 `Timeout: 70000` 是**服务端**方法超时、`SecurityConf.Timeout: 10000` 是安全客户端
+  #     ⇒ 而 RAG 侧安全客户端是**骨架占位、无真实调用** ⇒ 不在本封顶面里）
+  #   ⚠️ 共享层 `GoStyleProtectionProperties.OutboundDeadline#capMillis` **默认 0 = 不启用**
+  #     ⇒ ⇒ **不配这一行 = 出向零期限 = 比 Go 松** ⇒ ⇒ 域侧副本已于本轮删除（改由共享层统一施加）
+  protection:
+    outbound-deadline:
+      cap-millis: 2000
+
 # =============================================================================
 # gRPC server（devh）
 # =============================================================================

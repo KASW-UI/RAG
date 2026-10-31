@@ -6,7 +6,16 @@ import com.rag.article.article.proto.GetArticleResponse;
 import com.rag.article.article.rpc.support.RealGrpcPort;
 import com.rag.common.observability.GoStyleRequestDeadline;
 import com.rag.common.observability.RpcInterceptor;
+import com.rag.common.protection.GoStyleOutboundDeadlineInterceptor;
+import com.rag.common.protection.GoStyleProtectionProperties;
 import com.rag.message.message.proto.MessageServiceGrpc;
+import io.grpc.CallOptions;
+import io.grpc.Channel;
+import io.grpc.ClientCall;
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
+import io.grpc.Metadata;
+import io.grpc.MethodDescriptor;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.Server;
@@ -15,14 +24,26 @@ import io.grpc.ServerInterceptors;
 import io.grpc.ServerServiceDefinition;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
-import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.stub.ServerCalls;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import org.yaml.snakeyaml.Yaml;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.env.MutablePropertySources;
+import org.springframework.core.env.PropertySource;
+import org.springframework.core.io.ClassPathResource;
+
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -32,6 +53,23 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 🔴 <b>域侧守门</b>：本域出向出口（{@code MessageRpcClient} → {@code message-rpc}）的
  * <b>2s 客户端封顶真的生效</b>，且计算精度是<b>纳秒</b>（不是毫秒）。
  *
+ *
+ * <h2>🔴 2026-10-31 第十一轮 · 判据主体换成<b>共享层的全局客户端拦截器</b></h2>
+ * <p>本类此前测的是<b>域内私有副本</b> {@code GoStyleClientCallTimeout}
+ * （{@code capByClientTimeout(applyTo(stub))}）的算术 ⇒ ⇒ 本轮那份副本<b>已删除</b>
+ * （<b>副本数 = 漂移面</b>：每份副本各自实现一遍「取 min」语义 ⇒ 极易有的取 min、
+ * 有的写成覆盖 ⇒ ⇒ 共享层守门 {@code GoStyleClientCallTimeoutSingleSourceGateTest}
+ * 的终态口径 = 「域侧 0 份，只配参数」）。
+ * <br>⇒ ⇒ 本类现在测的是<b>生产同款</b>的施加上界的那一层：
+ * <ul>
+ *   <li><b>共享层</b> {@code GoStyleOutboundDeadlineInterceptor}
+ *       （devh 的 {@code @GrpcGlobalClientInterceptor} ⇒ 装在<b>每个</b>出向 devh 调用上
+ *       ⇒ ⇒ 连<b>裸 stub</b> 都过链）⇒ 上界 =
+ *       {@code min(入向剩余预算, 客户端硬上界, 调用点自带)}；</li>
+ *   <li><b>本域</b> 只配参数：{@code rag.protection.outbound-deadline.cap-millis=2000}
+ *       （共享层默认 {@code capMillis=0} = <b>不启用</b> ⇒ ⇒ 不配 = 出向零期限 = 比 Go 松）
+ *       ⇒ ⇒ 「配置面」那条用例把<b>配置面</b>也钉住（直接读本域 {@code application.yml}）。</li>
+ * </ul>
  * <h2>🔴 为什么必须新写这一条（2026-10-31 · G3 域侧自修）</h2>
  * <p>本域此前的出向出口是<b>裸 stub 调用</b>（{@code stub.sendNotification(req.build())}）
  * ⇒ ⇒ <b>零期限</b>：既无 2s 客户端封顶，又因跑在 Kafka consumer 线程上、
@@ -164,9 +202,36 @@ class ArticleOutboundDeadlineCarrierGateTest {
     private static final AtomicReference<Long> carrierRemainingNanos = new AtomicReference<>();
     private static final AtomicReference<Long> outboundRemainingNanos = new AtomicReference<>();
 
+    /**
+     * 本域配置的客户端硬上界（毫秒）—— <b>必须等于 Go 侧的 {@code zrpc} client Timeout</b>。
+     *
+     * <p>⚠️ <b>这条常量与本域 {@code application.yml} 的
+     * {@code rag.protection.outbound-deadline.cap-millis} 是同一个数的两处写法</b>
+     * ⇒ ⇒ 「配置面」那条用例专门直接读 yml ⇒ ⇒ 两者不会悄悄分叉。
+     */
+    private static final long CONFIGURED_CAP_MILLIS = 2_000L;
+
+    /**
+     * 共享层的出向 deadline 拦截器（<b>生产同款类</b>）。
+     *
+     * <p>⚠️ <b>为什么这里直接 new 而不是从 Spring 上下文里取</b>：本类要测的是
+     * <b>「这个拦截器 + 这条配置值 ⇒ 算出什么上界」</b> ⇒ ⇒ 用<b>同一个类</b> +
+     * <b>同一个配置键的值</b>构造即可 ⇒ ⇒ 而「它真的被装配进 devh 的 registry 并装到
+     * 每个 channel 上」那半由<b>共享层</b>的守门负责
+     * （{@code GoStyleOutboundDeadlineRpcAssemblyTest} + 主干
+     * {@code GoStyleDevhOutboundDeadlineAssemblyGateTest}）⇒ ⇒ 两边合起来才是完整证据链。
+     */
+    private static GoStyleOutboundDeadlineInterceptor sharedInterceptor;
+
     @BeforeAll
     static void startServer() throws Exception {
         int port = RealGrpcPort.pick();
+
+        // 🔴 共享层的出向拦截器：**用本域配置的那个值**（2000ms）构造
+        //    ⇒ ⇒ 「域侧只配参数」这条纪律在测试里也成立（不是另写一份算术）。
+        GoStyleProtectionProperties props = new GoStyleProtectionProperties();
+        props.getOutboundDeadline().setCapMillis(CONFIGURED_CAP_MILLIS);
+        sharedInterceptor = new GoStyleOutboundDeadlineInterceptor(props);
 
         // ⚠️ 这里**只给 service name**（不给 `getServiceDescriptor()`）：
         //    带 descriptor 构造 ⇒ grpc-java 会要求「descriptor 里的每个方法都必须被绑定」
@@ -181,15 +246,12 @@ class ArticleOutboundDeadlineCarrierGateTest {
                             carrierPresent.set(GoStyleRequestDeadline.isPresent());
                             carrierRemainingNanos.set(GoStyleRequestDeadline.remainingNanos());
 
-                            // 域内真实消费点：与 `MessageRpcClient.messageRpc()` **同一个调用形态**
-                            // （第一段 applyTo 挂入向预算，第二段压 2s 客户端封顶），
-                            // 且出向下游类型也一致（`message-rpc`）。
-                            MessageServiceGrpc.MessageServiceBlockingStub stub =
-                                    MessageServiceGrpc.newBlockingStub(channel);
-                            MessageServiceGrpc.MessageServiceBlockingStub capped =
-                                    GoStyleClientCallTimeout.capByClientTimeout(
-                                            GoStyleRequestDeadline.applyTo(stub));
-                            io.grpc.Deadline deadline = capped.getCallOptions().getDeadline();
+                            // 域内真实消费点：**共享层拦截器算出来的那个出向上界**
+                            //（生产同款：devh 把 `@GrpcGlobalClientInterceptor` 装到**每个**
+                            //  出向 channel 上 ⇒ 连裸 stub 都过链 ⇒ 域侧调用点不再自己套 deadline）
+                            // ⇒ 这里用**同一个拦截器** + 一个「只记 CallOptions、不真发」的假 channel
+                            //    取它的产物（真发会打回本服务 ⇒ 递归）。
+                            io.grpc.Deadline deadline = sharedOutboundDeadline();
                             outboundRemainingNanos.set(deadline == null
                                     ? -1L
                                     : deadline.timeRemaining(TimeUnit.NANOSECONDS));
@@ -217,6 +279,71 @@ class ArticleOutboundDeadlineCarrierGateTest {
         //    单独跑本类 ⇒ 5/5 全绿 ⇒ ⇒ **「单跑绿、同跑红」＝ 上下文污染，不是判据问题**。
         //    ⇒ 显式 `dns:///` 直接选定 grpc-java 自带的 DNS resolver ⇒ 不受 devh 注册影响。
         channel = ManagedChannelBuilder.forTarget("dns:///127.0.0.1:" + port).usePlaintext().build();
+    }
+
+
+    /**
+     * 取「<b>共享层拦截器</b>算出来的那个出向 deadline」—— 生产同款。
+     *
+     * <p>⚠️ <b>为什么用假 channel 而不是真发一次</b>：拦截器在 {@code interceptCall} 里就把
+     * deadline 算好并交给 {@code next.newCall(...)} ⇒ ⇒ 只要 {@code next} 是「只记不真发」，
+     * 就能取到<b>真正落到 wire 的那个</b> {@code CallOptions}
+     * ⇒ ⇒ 既不用起第二个服务、也不会自递归。
+     */
+    private static io.grpc.Deadline sharedOutboundDeadline() {
+        RecordingChannel recorder = new RecordingChannel();
+        sharedInterceptor.interceptCall(MessageServiceGrpc.getSendNotificationMethod(), CallOptions.DEFAULT, recorder);
+        CallOptions captured = recorder.captured();
+        return captured == null ? null : captured.getDeadline();
+    }
+
+    /**
+     * 只记 {@code CallOptions} 的假 channel（取拦截器产物用）。
+     *
+     * <p>⚠️ {@code Channel#newCall} 的 {@code next} 语义：拦截器算完 deadline 后
+     * 调 {@code next.newCall(method, effectiveOptions)} ⇒ ⇒ 这里收到的就是
+     * <b>真正会落到 wire 的那份 options</b>。
+     */
+    private static final class RecordingChannel extends Channel {
+
+        private final AtomicReference<CallOptions> captured = new AtomicReference<>();
+
+        @Override
+        public <ReqT, RespT> ClientCall<ReqT, RespT> newCall(
+                MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions) {
+            captured.set(callOptions);
+            return new ClientCall<ReqT, RespT>() {
+                @Override
+                public void start(Listener<RespT> responseListener, Metadata headers) {
+                    // 本守门只取 CallOptions ⇒ 不真发 ⇒ 什么都不做
+                }
+
+                @Override
+                public void request(int numMessages) {
+                }
+
+                @Override
+                public void cancel(String message, Throwable cause) {
+                }
+
+                @Override
+                public void halfClose() {
+                }
+
+                @Override
+                public void sendMessage(ReqT message) {
+                }
+            };
+        }
+
+        @Override
+        public String authority() {
+            return "recording-channel";
+        }
+
+        CallOptions captured() {
+            return captured.get();
+        }
     }
 
     @AfterAll
@@ -320,7 +447,7 @@ class ArticleOutboundDeadlineCarrierGateTest {
                         LONG_CLIENT_DEADLINE_MILLIS)
                 .isGreaterThan(TimeUnit.MILLISECONDS.toNanos(LONG_CLIENT_DEADLINE_MILLIS) - 300_000_000L);
 
-        long twoSeconds = TimeUnit.MILLISECONDS.toNanos(GoStyleClientCallTimeout.CLIENT_TIMEOUT_MILLIS);
+        long twoSeconds = TimeUnit.MILLISECONDS.toNanos(CONFIGURED_CAP_MILLIS);
         assertThat(o.outboundRemainingNanos)
                 .as("🔴 入向预算（%dms）> 2s ⇒ 出向上界必须是 **2s 客户端封顶**"
                         + "（若等于入向预算 ⇒ 说明「根本没压 2s」）", LONG_CLIENT_DEADLINE_MILLIS)
@@ -354,45 +481,34 @@ class ArticleOutboundDeadlineCarrierGateTest {
     @Test
     @DisplayName("🔴 域内出向计算点按**纳秒**取预算（毫秒版会把 10.9ms 砍成 10ms ⇒ 本条转红）")
     void outboundBudgetKeepsNanosecondPrecision() {
-        ManagedChannel local = InProcessChannelBuilder.forName("article-precision-only")
-                .directExecutor().build();
-        try {
-            MessageServiceGrpc.MessageServiceBlockingStub stub =
-                    MessageServiceGrpc.newBlockingStub(local);
+        long carrierNow;
+        long outbound;
+        long budgetNanos = KNOWN_BUDGET_NANOS;
 
-            long carrierNow;
-            long outbound;
-            long budgetNanos = KNOWN_BUDGET_NANOS;
+        // 🔴🔴 **必须先热身**：整条路径（`bindAbsoluteNanos` → 拦截器读载体 →
+        //    `Deadline.after` → `timeRemaining`）第一次跑要付
+        //    **类加载 + JIT** 的钱（本机实测 ≈ 0.15ms）⇒ ⇒ 那笔钱会**混进 loss**
+        //    ⇒ ⇒ 不热身就会读到「loss ≈ 0.15ms」而误判成精度损失。
+        //    ⇒ 热身跑的是**同一条路径**（同样在 scope 内、同样带载体）。
+        try (GoStyleRequestDeadline.Scope ignored = GoStyleRequestDeadline.bindAbsoluteNanos(
+                System.nanoTime() + budgetNanos)) {
+            sharedOutboundDeadline();
+        }
 
-            // 🔴🔴 **必须先热身**：整条路径（`bindAbsoluteNanos` → `applyTo` →
-            //    `capByClientTimeout` → `Deadline.after` → `timeRemaining`）第一次跑要付
-            //    **类加载 + JIT** 的钱（本机实测 ≈ 0.15ms）⇒ ⇒ 那笔钱会**混进 loss**
-            //    ⇒ ⇒ 不热身就会读到「loss ≈ 0.15ms」而误判成精度损失。
-            //    ⇒ 热身跑的是**同一条路径**（同样在 scope 内、同样带载体）。
-            try (GoStyleRequestDeadline.Scope ignored = GoStyleRequestDeadline.bindAbsoluteNanos(
-                    System.nanoTime() + budgetNanos)) {
-                GoStyleClientCallTimeout.capByClientTimeout(
-                                GoStyleRequestDeadline.applyTo(stub))
-                        .getCallOptions().getDeadline();
-            }
+        try (GoStyleRequestDeadline.Scope ignored = GoStyleRequestDeadline.bindAbsoluteNanos(
+                System.nanoTime() + budgetNanos)) {
+            // 🔴 **基线**：此刻载体自己还剩多少（在同一线程、同一载体上直接读）。
+            //    之所以要拿它当基线，是因为「两次 nanoTime 调用之间的机器开销」
+            //    （本机实测约 0.3–0.5ms：类加载 + JIT）会**混进**绝对值里
+            //    ⇒ ⇒ 判据必须测**相对损失**（出向比载体窄了多少），
+            //    而不是测绝对剩余值（那会把测量开销误读成精度损失）。
+            carrierNow = GoStyleRequestDeadline.remainingNanos();
 
-            try (GoStyleRequestDeadline.Scope ignored = GoStyleRequestDeadline.bindAbsoluteNanos(
-                    System.nanoTime() + budgetNanos)) {
-                // 🔴 **基线**：此刻载体自己还剩多少（在同一线程、同一载体上直接读）。
-                //    之所以要拿它当基线，是因为「两次 nanoTime 调用之间的机器开销」
-                //    （本机实测约 0.3–0.5ms：类加载 + JIT）会**混进**绝对值里
-                //    ⇒ ⇒ 判据必须测**相对损失**（出向比载体窄了多少），
-                //    而不是测绝对剩余值（那会把测量开销误读成精度损失）。
-                carrierNow = GoStyleRequestDeadline.remainingNanos();
+            io.grpc.Deadline deadline = sharedOutboundDeadline();
+            outbound = deadline == null ? -1L : deadline.timeRemaining(TimeUnit.NANOSECONDS);
+        }
 
-                MessageServiceGrpc.MessageServiceBlockingStub capped =
-                        GoStyleClientCallTimeout.capByClientTimeout(
-                                GoStyleRequestDeadline.applyTo(stub));
-                io.grpc.Deadline deadline = capped.getCallOptions().getDeadline();
-                outbound = deadline == null ? -1L : deadline.timeRemaining(TimeUnit.NANOSECONDS);
-            }
-
-            assertThat(outbound)
+        assertThat(outbound)
                     .as("出向必须拿到 deadline（无 deadline = 出向完全没上限 ⇒ 与 Go 相反）")
                     .isPositive();
             assertThat(outbound)
@@ -406,9 +522,6 @@ class ArticleOutboundDeadlineCarrierGateTest {
                             + " ⇒ 旧实现（读 remainingMillis）会转红",
                             PRECISION_LOSS_TOLERANCE_NANOS, budgetNanos, 900_000L)
                     .isLessThan(PRECISION_LOSS_TOLERANCE_NANOS);
-        } finally {
-            local.shutdownNow();
-        }
     }
 
     // ====================================================================================
@@ -419,36 +532,110 @@ class ArticleOutboundDeadlineCarrierGateTest {
     @Test
     @DisplayName("🔴 线程上没有载体 ⇒ 出向仍套 2s 客户端封顶（Go 侧 TimeoutInterceptor 是拦截器级别的）")
     void noCarrierStillGetsTwoSecondClientCap() {
-        ManagedChannel local = InProcessChannelBuilder.forName("article-no-carrier")
-                .directExecutor().build();
-        try {
-            MessageServiceGrpc.MessageServiceBlockingStub stub =
-                    MessageServiceGrpc.newBlockingStub(local);
-
-            assertThat(GoStyleRequestDeadline.isPresent())
+        assertThat(GoStyleRequestDeadline.isPresent())
                     .as("本用例的前提：当前线程**没有**载体（否则测的就不是「无预算」这条路径）"
                             + "；本域生产出口正是在 Kafka consumer 线程上 ⇒ 落的就是这一档")
                     .isFalse();
 
-            MessageServiceGrpc.MessageServiceBlockingStub capped =
-                    GoStyleClientCallTimeout.capByClientTimeout(
-                            GoStyleRequestDeadline.applyTo(stub));
-            io.grpc.Deadline deadline = capped.getCallOptions().getDeadline();
+        io.grpc.Deadline deadline = sharedOutboundDeadline();
 
-            assertThat(deadline)
-                    .as("🔴 没有请求预算时**也必须**有 deadline（否则出向调用完全没有上限 ⇒ 与 Go 相反）")
+    assertThat(deadline)
+                .as("🔴 没有请求预算时**也必须**有 deadline（否则出向调用完全没有上限 ⇒ 与 Go 相反）")
+                .isNotNull();
+
+        long remaining = deadline.timeRemaining(TimeUnit.NANOSECONDS);
+        long twoSeconds = TimeUnit.MILLISECONDS.toNanos(CONFIGURED_CAP_MILLIS);
+        assertThat(remaining)
+                .as("出向上界必须是 2s 封顶（%d ns）", twoSeconds)
+                .isLessThanOrEqualTo(twoSeconds);
+        assertThat(remaining)
+                .as("出向上界必须贴近 2s（不能是别的数）")
+                .isGreaterThan(twoSeconds - 100_000_000L);
+    }
+
+    // ====================================================================================
+    // ④ 配置面：域侧只配参数（共享层默认 0 = 不启用 ⇒ 不配 = 出向零期限 = 比 Go 松）
+    // ====================================================================================
+
+    @Test
+    @DisplayName("🔴 本域 yml 配了 `rag.protection.outbound-deadline.cap-millis=2000`（不配 = 共享层机制没开）")
+    @SuppressWarnings("unchecked")
+    void domainConfiguresTheSharedTwoSecondCap() throws Exception {
+        try (InputStream in = getClass().getResourceAsStream("/application.yml")) {
+            assertThat(in)
+                    .as("本域 `application.yml` 必须在测试类路径上（src/main/resources）")
                     .isNotNull();
 
-            long remaining = deadline.timeRemaining(TimeUnit.NANOSECONDS);
-            long twoSeconds = TimeUnit.MILLISECONDS.toNanos(GoStyleClientCallTimeout.CLIENT_TIMEOUT_MILLIS);
-            assertThat(remaining)
-                    .as("出向上界必须是 2s 封顶（%d ns）", twoSeconds)
-                    .isLessThanOrEqualTo(twoSeconds);
-            assertThat(remaining)
-                    .as("出向上界必须贴近 2s（不能是别的数）")
-                    .isGreaterThan(twoSeconds - 100_000_000L);
-        } finally {
-            local.shutdownNow();
+            Map<String, Object> root = new Yaml().load(in);
+            assertThat(root).as("`application.yml` 必须能解析成 Map").isNotNull();
+
+            Map<String, Object> rag = (Map<String, Object>) root.get("rag");
+            assertThat(rag).as("🔴 `rag:` 段必须存在").isNotNull();
+
+            Map<String, Object> protection = (Map<String, Object>) rag.get("protection");
+            assertThat(protection).as("🔴 `rag.protection:` 段必须存在（共享层属性前缀）").isNotNull();
+
+            Map<String, Object> outboundDeadline = (Map<String, Object>) protection.get("outbound-deadline");
+            assertThat(outboundDeadline).as("🔴 `rag.protection.outbound-deadline:` 段必须存在").isNotNull();
+
+            assertThat(outboundDeadline.get("cap-millis"))
+                    .as("🔴 客户端硬上界必须是 **2000**（Go 侧 `zrpc/config.go:31` 的 "
+                            + "`Timeout int64 json:\",default=2000\"`；本域 Go 侧 `etc/article.yaml` 的 `MessageRpc:` 段**没写** `Timeout` ⇒ 走这个默认值）"
+                            + "；⚠️ 共享层默认 `capMillis=0` = 不启用 ⇒ 漏配 = 出向零期限 = 比 Go 松")
+                    .isEqualTo(2000);
         }
+    }
+
+    // ====================================================================================
+    // ⑤ 无副本：域侧不得再有第二份「客户端硬上界」实现（副本数 = 漂移面）
+    // ====================================================================================
+
+    @Test
+    @DisplayName("🔴 本域不得再有「客户端硬上界」的私有副本（终态 = 域侧 0 份，只配参数）")
+    void noDomainSidePrivateCopyOfTheClientCap() {
+        Path copy = Path.of("service/article/article-rpc/src/main/java/com/rag/article/article/rpc/client/GoStyleClientCallTimeout.java");
+
+        assertThat(Files.exists(copy))
+                .as("🔴 域内又出现了 `GoStyleClientCallTimeout` 私有副本 ⇒ ⇒ **副本数 = 漂移面** ⇒ ⇒ "
+                        + "正确形态 = **共享层给唯一实现**"
+                        + "（`service/common/src/main/java/com/rag/common/protection/"
+                        + "GoStyleOutboundDeadlineInterceptor.java`）**＋ 域侧只配参数**"
+                        + "（`rag.protection.outbound-deadline.cap-millis`）⇒ ⇒ 请改成配参数，别再复制一份逻辑")
+                .isFalse();
+    }
+
+    // ====================================================================================
+    // ④ 配置面**真绑定**：不是「yml 文本里写了」，而是「真能绑进共享层读的那个对象」
+    // ====================================================================================
+
+    @Test
+    @DisplayName("🔴 本域 yml 的 `cap-millis` 真的能绑定进共享层拦截器读的那个属性对象")
+    void domainYamlBindsIntoSharedProtectionProperties() throws Exception {
+        YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
+        java.util.List<PropertySource<?>> sources =
+                loader.load("application", new ClassPathResource("application.yml"));
+        assertThat(sources)
+                .as("本域 `application.yml` 必须能被 Spring 的 yml 加载器读成 PropertySource")
+                .isNotEmpty();
+
+        MutablePropertySources mutable = new MutablePropertySources();
+        sources.forEach(mutable::addLast);
+
+        GoStyleProtectionProperties props = new Binder(ConfigurationPropertySources.from(mutable))
+                .bind("rag.protection", GoStyleProtectionProperties.class)
+                .orElseThrow(() -> new IllegalStateException("`rag.protection` 段没绑上"));
+
+        assertThat(props.getOutboundDeadline().getCapMillis())
+                .as("🔴 域侧 yml 的 `rag.protection.outbound-deadline.cap-millis` 必须真的绑定进共享层的 "
+                        + "`GoStyleProtectionProperties.OutboundDeadline#capMillis`"
+                        + "（共享层 `GoStyleOutboundDeadlineInterceptor` 的构造器读的就是它）"
+                        + "；⚠️ 默认 0 = 不启用 ⇒ 绑不上 = 出向零期限 = 比 Go 松")
+                .isEqualTo(2000L);
+
+        assertThat(props.getOutboundDeadline().isEnabled())
+                .as("🔴 出向 deadline 传播开关必须仍是**开**（共享层默认 `enabled=true`；"
+                        + "Go 侧 `zrpc/internal/config.go:15` 的 `Timeout bool json:\",default=true\"`）"
+                        + "⇒ ⇒ 本域不得把它关掉 ⇒ 否则 = 出向零期限 = 比 Go 松")
+                .isTrue();
     }
 }

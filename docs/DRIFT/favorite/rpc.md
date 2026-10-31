@@ -4245,9 +4245,9 @@ EXIT=0
   （`ctx, cancel = context.WithTimeout(ctx, t)` ⇒ **在已有 ctx 之上再套一层**）
   ⇒ 有效预算 = **`min(入向剩余, 2000ms)`**（`zrpc/config.go:31` 的 `json:",default=2000"`）。
 - **RAG 侧**：`client/UserRpcClient.java:55-57` ＝
-  `GoStyleClientCallTimeout.capByClientTimeout(GoStyleRequestDeadline.applyTo(userServiceBlockingStub))`
+  `GoStyleClientCallTimeout.capByClientTimeout(GoStyleRequestDeadline.applyTo(userServiceBlockingStub))` （**2026-10-31 第十一轮：该域内私有副本 `GoStyleClientCallTimeout` **已删除** ⇒ 形态 = 共享层 `GoStyleOutboundDeadlineInterceptor`（devh `@GrpcGlobalClientInterceptor`）统一施加 ＋ 域侧只配 `rag.protection.outbound-deadline.cap-millis=2000`**）
   ⇒ `applyTo` 继承（`service/common/.../GoStyleRequestDeadline.java:192-201`）
-  ⇒ `capByClientTimeout` 2s 封顶（`client/GoStyleClientCallTimeout.java:89-96`）⇒ 同样是 **`min(入向剩余, 2s)`**。
+  ⇒ `capByClientTimeout` 2s 封顶（`client/GoStyleClientCallTimeout.java:89-96`）⇒ 同样是 **`min(入向剩余, 2s)`**。 （**2026-10-31 第十一轮：该域内私有副本 `GoStyleClientCallTimeout` **已删除** ⇒ 形态 = 共享层 `GoStyleOutboundDeadlineInterceptor`（devh `@GrpcGlobalClientInterceptor`）统一施加 ＋ 域侧只配 `rag.protection.outbound-deadline.cap-millis=2000`**）
 - ⇒ ⇒ **两侧同形** ⇒ ⇒ **这是补上一处旧偏离，不是新偏离** —— 旧口径「rpc 进程 ⇒ ThreadLocal 恒 null ⇒
   恒 no-op ⇒ 实际零 deadline」**已过期**（与 global 在 `docs/DRIFT/global/vs-common.md` B-05 行的就地订正一致）。
 
@@ -4328,7 +4328,7 @@ EXIT=0
 | 面 | 谁提供 | 域侧显式 `applyTo` 是否冗余 |
 |---|---|---|
 | **继承请求 deadline** | devh 全局客户端拦截器链（`enabled` **默认 true**） | **冗余**（拦截器也会给） |
-| **2s 客户端上界**（Go 的 `TimeoutInterceptor(2000ms)`） | **只在域侧**（`GoStyleClientCallTimeout`）—— 拦截器层 `capMillis` **默认 0 = 不启用**，全仓 `service/*/*/src/main/resources/*.yml` 的 `outbound-deadline` **零配置** | **不冗余** |
+| **2s 客户端上界**（Go 的 `TimeoutInterceptor(2000ms)`） | **2026-10-31 第十一轮：已从「只在域侧」改为「共享层唯一实现 ＋ 域侧只配参数」** —— 共享层 `GoStyleOutboundDeadlineInterceptor`（读 `rag.protection.outbound-deadline.cap-millis`）＋ 本域 `application.yml` 显式配 `cap-millis: 2000`；⚠️ 共享层默认 `capMillis=0` **仍然不启用** ⇒ **其它域若不配 = 出向零期限** | **不再冗余**（域内副本已删） |
 
 ⇒ ⇒ 且域侧那份 `applyTo` **不可去**：域侧要算「`min(请求剩余, 2s)`」就得先有「请求剩余」
 ⇒ ⇒ `applyTo` 正是把载体剩余挂到 stub 上的那一步 ⇒ **它是域侧 2s 上界计算的输入**。

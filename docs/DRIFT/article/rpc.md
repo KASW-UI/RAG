@@ -2751,7 +2751,7 @@ bash tools/api-full-parity-probe/article/mutate-parity.sh          # ⇒ EXIT=0 
 | 项 | 结论 |
 |---|---|
 | 证据强度（**修前**） | **L2 源码级**（逐字读了裸 stub 调用、调用链、`@KafkaListener` 注解、Go 侧同款调用）⇒ ⚠️ **未**做活体计时 |
-| **实际修法（已落码）** | 照抄**本仓现成正确实现**（不发明第三种写法 · AGENTS.md §3.2）：**comment 域** `service/comment/comment-rpc/.../client/GoStyleClientCallTimeout.java` 的**两段式**（`capByClientTimeout(applyTo(stub))`）—— ⚠️ 本出口在 consumer 线程上 ⇒ `applyTo` 会**原样返回**（载体不可见）⇒ 实际效果 = **2s 封顶**（与 Go 同形）<br>⚠️ **封顶值必须先读本域 yaml**：本域 `MessageRpc:` 段**没写 `Timeout`** ⇒ 取 **default 2000ms** ⇒ ⇒ 与 comment / favorite 两域同款（那两份 yaml 也都没写）⇒ ⇒ **硬编码 2000 在本域成立**；但**不可推广**（`article-api` 是 70000）<br>⇒ **落点**：① 新增 `service/article/article-rpc/.../client/GoStyleClientCallTimeout.java`（照抄 favorite 域那份，package-private 工具类）② `MessageRpcClient` 新增私有方法 `messageRpc()` ＝ `GoStyleClientCallTimeout.capByClientTimeout(GoStyleRequestDeadline.applyTo(stub))`，调用点由裸 stub 改为走它 |
+| **实际修法（已落码）** | 照抄**本仓现成正确实现**（不发明第三种写法 · AGENTS.md §3.2）：**comment 域** `service/comment/comment-rpc/.../client/GoStyleClientCallTimeout.java` 的**两段式**（`capByClientTimeout(applyTo(stub))`）—— ⚠️ 本出口在 consumer 线程上 ⇒ `applyTo` 会**原样返回**（载体不可见）⇒ 实际效果 = **2s 封顶**（与 Go 同形）<br>⚠️ **封顶值必须先读本域 yaml**：本域 `MessageRpc:` 段**没写 `Timeout`** ⇒ 取 **default 2000ms** ⇒ ⇒ 与 comment / favorite 两域同款（那两份 yaml 也都没写）⇒ ⇒ **硬编码 2000 在本域成立**；但**不可推广**（`article-api` 是 70000）<br>⇒ **落点**：① 新增 `service/article/article-rpc/.../client/GoStyleClientCallTimeout.java`（照抄 favorite 域那份，package-private 工具类）② `MessageRpcClient` 新增私有方法 `messageRpc()` ＝ `GoStyleClientCallTimeout.capByClientTimeout(GoStyleRequestDeadline.applyTo(stub))`，调用点由裸 stub 改为走它 （**2026-10-31 第十一轮：该域内私有副本 `GoStyleClientCallTimeout` **已删除** ⇒ 形态 = 共享层 `GoStyleOutboundDeadlineInterceptor`（devh `@GrpcGlobalClientInterceptor`）统一施加 ＋ 域侧只配 `rag.protection.outbound-deadline.cap-millis=2000`**） |
 | 状态 | ✅ **已修**（2026-10-31 · Jason 拍板「修」· G3 域侧自修 · 落点在本域）⇒ 修法与证据见上一行；守门网见下一段 |
 
 ## 📌 追加 · 🟡 **共享层演进 ⇒ 本域「载体守门」的正向对照参照物失效（已改用测试自带探针）**（2026-10-31 · G3 第八轮）
@@ -2787,8 +2787,8 @@ bash tools/api-full-parity-probe/article/mutate-parity.sh          # ⇒ EXIT=0 
 
 | 项 | 证据（`文件:行号`） |
 |---|---|
-| 新增工具类 | `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/client/GoStyleClientCallTimeout.java`（package-private；**照抄 favorite 域同款**，不发明第三种写法 · AGENTS.md §3.2）⇒ `capByClientTimeout` ＝ `min(载体剩余纳秒, 2s)`，常量 `CLIENT_TIMEOUT_MILLIS = 2000` |
-| 调用点改造 | `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/client/MessageRpcClient.java` ⇒ 新增私有方法 `messageRpc()` ＝ `GoStyleClientCallTimeout.capByClientTimeout(GoStyleRequestDeadline.applyTo(stub))`；原裸 stub 调用 `stub.sendNotification(req.build())` 改为 `messageRpc().sendNotification(req.build())` |
+| 新增工具类 | `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/client/GoStyleClientCallTimeout.java`（package-private；**照抄 favorite 域同款**，不发明第三种写法 · AGENTS.md §3.2）⇒ `capByClientTimeout` ＝ `min(载体剩余纳秒, 2s)`，常量 `CLIENT_TIMEOUT_MILLIS = 2000` （**2026-10-31 第十一轮：该域内私有副本 `GoStyleClientCallTimeout` **已删除** ⇒ 形态 = 共享层 `GoStyleOutboundDeadlineInterceptor`（devh `@GrpcGlobalClientInterceptor`）统一施加 ＋ 域侧只配 `rag.protection.outbound-deadline.cap-millis=2000`**） |
+| 调用点改造 | `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/client/MessageRpcClient.java` ⇒ 新增私有方法 `messageRpc()` ＝ `GoStyleClientCallTimeout.capByClientTimeout(GoStyleRequestDeadline.applyTo(stub))`；原裸 stub 调用 `stub.sendNotification(req.build())` 改为 `messageRpc().sendNotification(req.build())` （**2026-10-31 第十一轮：该域内私有副本 `GoStyleClientCallTimeout` **已删除** ⇒ 形态 = 共享层 `GoStyleOutboundDeadlineInterceptor`（devh `@GrpcGlobalClientInterceptor`）统一施加 ＋ 域侧只配 `rag.protection.outbound-deadline.cap-millis=2000`**） |
 | 封顶值的来源 | Go `service/article/rpc/etc/article.yaml` 的 `MessageRpc:` 段**无 `Timeout` 行** ⇒ 取 `zrpc/config.go:31` 的 `json:",default=2000"` ⇒ ⇒ **不是拍脑袋的数**；⚠️ 同仓 `service/article/api/etc/article-api.yaml:12` ＝ **70000** 是反例 ⇒ ⇒ **不可推广**（硬编码 2000 到别的域会把 70000 的域改严 35 倍） |
 
 ### 🔴 本出口在生产上落在「**无载体**」那一档（必须说清楚）
@@ -2826,9 +2826,9 @@ bash tools/api-full-parity-probe/article/mutate-parity.sh          # ⇒ EXIT=0 
 - ❌ **不证**：「生产装配面（真 `@GrpcClient` ⇒ devh 拦截器链）真的把 deadline 给到了」⇒ ⇒ 本守门是**域侧计算点**的证据，不是**装配面**的证据。
 - ⚠️ 生产出口落在「无载体」那一档 ⇒ ⇒ 本守门的**第 ⑤ 条**才是与生产同形的那一条；第 ①②③④ 条证的是**同一段代码**的另一半（用来排除「写死 2s、完全不看载体」的假实现 ⇒ 否则第 ⑤ 条会成假绿）。
 
-## 📌 追加 · 🟡 **本域新增了第三份 `GoStyleClientCallTimeout` 私有副本 ⇒ 「副本数 = 漂移面」的收敛面是 3 份**（2026-10-31 · G3 第九轮）
+## 📌 追加 · ✅ **「副本数 = 漂移面」的收敛面已从 3 份归零**（2026-10-31 · G3 第九轮登记 · **第十一轮闭合**：域侧三份私有副本**全部删除** ⇒ 形态 = 共享层唯一实现 ＋ 域侧只配 `rag.protection.outbound-deadline.cap-millis=2000`）
 
-> **一句话**：上一段落的落码让本域多了一份 `GoStyleClientCallTimeout` 私有副本
+> **一句话**：上一段落的落码让本域多了一份 `GoStyleClientCallTimeout` 私有副本（**2026-10-31 第十一轮：三份域内副本已全部删除 ⇒ 收敛面 = 0 份**）
 > ⇒ ⇒ 全仓私有副本从 **2 份**变成 **3 份**（article-rpc / comment-rpc / favorite-rpc，**全在 G3 域内**）
 > ⇒ ⇒ 合并收口执行者的「副本收敛到共享层」派工单**其前提已被本轮改变**（已发纠正面）
 > ⇒ ⇒ 收敛的必要性**更强**，但**不是**本域单方面能做的（共享层是 G4 写权）。
@@ -2837,9 +2837,9 @@ bash tools/api-full-parity-probe/article/mutate-parity.sh          # ⇒ EXIT=0 
 
 | 副本 | 归属 | 总行 | 代码行（去 javadoc） | 封顶值来源 |
 |---|---|---|---|---|
-| `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/client/GoStyleClientCallTimeout.java` | 本域（**本轮新增**） | 132 | 21 | Go `service/article/rpc/etc/article.yaml` 的 `MessageRpc:` 段（`:92`）**没写 `Timeout`** ⇒ default **2000** |
-| `service/comment/comment-rpc/.../client/GoStyleClientCallTimeout.java` | G3 域 | 139 | 21 | `comment.yaml` 的 `MessageRpc:` / `ArticleRpc:` 两段都没写 ⇒ **2000** |
-| `service/favorite/favorite-rpc/.../client/GoStyleClientCallTimeout.java` | G3 域 | 121 | 21 | `favorite.yaml` 的 `UserRpc:` / `ArticleRpc:` 两段都没写 ⇒ **2000** |
+| `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/client/GoStyleClientCallTimeout.java` | 本域（**本轮新增**） | 132 | 21 | Go `service/article/rpc/etc/article.yaml` 的 `MessageRpc:` 段（`:92`）**没写 `Timeout`** ⇒ default **2000**（**2026-10-31 第十一轮：该副本已删除** ⇒ 改由共享层 `GoStyleOutboundDeadlineInterceptor` ＋ 域侧 `cap-millis=2000`） |
+| `service/comment/comment-rpc/.../client/GoStyleClientCallTimeout.java` | G3 域 | 139 | 21 | `comment.yaml` 的 `MessageRpc:` / `ArticleRpc:` 两段都没写 ⇒ **2000**（**2026-10-31 第十一轮：该副本已删除** ⇒ 改由共享层 `GoStyleOutboundDeadlineInterceptor` ＋ 域侧 `cap-millis=2000`） |
+| `service/favorite/favorite-rpc/.../client/GoStyleClientCallTimeout.java` | G3 域 | 121 | 21 | `favorite.yaml` 的 `UserRpc:` / `ArticleRpc:` 两段都没写 ⇒ **2000**（**2026-10-31 第十一轮：该副本已删除** ⇒ 改由共享层 `GoStyleOutboundDeadlineInterceptor` ＋ 域侧 `cap-millis=2000`） |
 
 ⇒ **三份的代码体除 `package` 行外逐字一致**（逐行 diff 只差 package）⇒ ⇒ **三份是纯复制**，收敛时可直接取任一份改 package ⇒ ⇒ 差别只在 javadoc。
 
@@ -2872,7 +2872,7 @@ bash tools/api-full-parity-probe/article/mutate-parity.sh          # ⇒ EXIT=0 
 ### ⚠️ 收敛的**必做配套**（别漏）
 
 三域那 5 例守门（**5 例 × 3 域**、变异矩阵已验精确转红）**依赖域侧常量**
-`GoStyleClientCallTimeout.CLIENT_TIMEOUT_MILLIS` ⇒ ⇒ 若收敛后改成读 `capMillis` 配置项
+`GoStyleClientCallTimeout.CLIENT_TIMEOUT_MILLIS` ⇒ ⇒ 若收敛后改成读 `capMillis` 配置项（**2026-10-31 第十一轮：已按此收敛** —— 域侧副本删除 ⇒ 域侧 yml 配 `rag.protection.outbound-deadline.cap-millis=2000`）
 ⇒ ⇒ **三份守门的判据必须同步改**（否则它们直接红）⇒ ⇒ 这是收敛的**配套改动**。
 
 ### 当前处置
