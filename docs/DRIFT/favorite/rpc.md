@@ -3373,7 +3373,7 @@ global 的改动**未合回主仓** ⇒ **本分支现在跑出来是「秒级�
 4. 🔴 **「结论不变的真正理由」也是结论的一部分** ⇒ 机制变了，理由要跟着变
    ⇒ 否则台账会拿一个**冗余理由**继续挡着（且让人以为那条理由在起作用）。
 
-## 37. 2026-10-26 第二十八轮（`align/favorite` 工作树 · 承 `686a057`）—— 🔴 **核验 global 第四十六轮的 E65：favorite-rpc 的出向 gRPC 调用不继承请求 deadline**
+## 37. 2026-10-26 第二十八轮（`align/favorite` 工作树 · 承 `686a057`）—— ✅ **核验 global 第四十六轮的 E65：favorite-rpc 的出向 gRPC 调用不继承请求 deadline**（**2026-10-31 订正：本条已销账** —— **本体面已由 global 销账**（`docs/DRIFT/global/vs-common.md:30` · 四键逐键相等）⇒ ⇒ **现行态 = ✅ 已闭合** ⇒ ⇒ **下列记述为历史核验记录，不是现行结论**）
 
 > **来源**：`global` 第四十六轮（`96d94db`，origin + upstream 已推）⇒ §5.3b 通知：
 > **新登记 E65**，**直接命中 favorite-rpc** ⇒ 落点 `service/common` ⇒ **global 单写权**。
@@ -4138,7 +4138,7 @@ EXIT=0
 | **帧层原始字节**（HPACK / 帧序 / WINDOW_UPDATE / PING） | 🔴 **不做** | 由 gRPC 库决定，客户端不可观测（与 `tools/grpc-contract-probe/favorite/` 同一取舍） |
 | **NULL 的 `title` / `cover`** | 🔴 **未验** | 种子**一律给非 NULL**（Go `toProtoItem` 直接塞 `string`，RAG 走 `nullToEmpty` ⇒ NULL 列在两边的扫描语义不同）⇒ 显式排除 |
 | **写后再读**（`update_time` 推进后的读） | ⬜ **有意不做** | 改名会推进 `update_time` ⇒ 之后的读拿到「本次运行的时刻」⇒ 冻结值必假红 ⇒ 读用例全部排在写用例之前 |
-| **`E65`（出向 gRPC 不继承 deadline）** | 🔴 **仍 OPEN** | 本探针**不测** deadline 传播 ⇒ **不构成对该条的反驳或销案** ⇒ 仍以 [`vs-common.md`](vs-common.md) §1 的 `E65` 行为准 |
+| **`E65`（出向 gRPC 不继承 deadline）** | ✅ **已闭合**（2026-10-31 · 本体面已由 global 销账 ⇒ 四键逐键相等） | 本探针**不测** deadline 传播 ⇒ **不构成对该条的反证**；该条的销账依据见 [`vs-common.md`](vs-common.md) §1 的 `E65` 行 |
 
 ### ⑥ 变异验证（`mutate-parity.sh` · AGENTS.md §3.3.3）
 
@@ -4441,7 +4441,7 @@ EXIT=0
 | 帧层原始字节（HPACK / 帧序 / WINDOW_UPDATE） | 🔴 **不做** | 由 gRPC 库决定，客户端不可观测（与第二条链同一取舍） |
 | NULL 的 `title` / `cover` | 🔴 **未验** | 种子一律给非 NULL（Go `toProtoItem` 直接塞 `string` vs RAG `nullToEmpty` ⇒ 两侧扫描语义不同）⇒ 探针**显式排除** |
 | 写后再读（`update_time` 推进后的读） | ⬜ **有意不做** | 冻结值必假红 ⇒ 读用例全部排在写用例之前 |
-| `E65`（出向 gRPC 不继承 deadline） | 🔴 **仍 OPEN** | **本探针不测 deadline 传播 ⇒ 不构成对该条的反驳或销账** ⇒ 仍以 [`vs-common.md`](vs-common.md) 的 `E65` 行为准（**归 `global`**） |
+| `E65`（出向 gRPC 不继承 deadline） | ✅ **已闭合**（2026-10-31 · 本体面已由 global 销账 ⇒ 四键逐键相等） | **本探针不测 deadline 传播 ⇒ 不构成对该条的反证**；该条的销账依据见 [`vs-common.md`](vs-common.md) 的 `E65` 行（**归 `global`**） |
 
 ### ④ 一条**不能**据此下的结论
 
