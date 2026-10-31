@@ -58,7 +58,7 @@
 | **任务 ID** | `P2-T01` |
 | **原始编号** | `E65` · `E38②` · `X-6` · `P0 #4` |
 | **来源** | `docs/DRIFT/global/vs-common.md:30`/`:46`/`:63` · `docs/DRIFT/global/_README.md:391` · `docs/DRIFT/_cross/domain-common-lanes.md:131` · `docs/DRIFT/comment/rpc.md:179`（`D8`）· `docs/DRIFT/like/rpc.md`（`U15`） |
-| **当前状态** | 🔴 台账数字**被订正过两次**，不可信 ⇒ 需重数 |
+| **当前状态** | ✅ **2026-10-31 已产出**（**合并收口执行者**补齐本任务的两项缺失交付物 —— 原状态下本目录只有 `README.md`，脚本与落点表**都不存在** ⇒ ⇒ 派工面「验收命令」**照抄执行会直接失败** ⇒ G2 在 `docs/DRIFT/message/vs-common.md` 登记后转派到本面）—— 脚本 [`count-outbound-stubs.py`](count-outbound-stubs.py) ＋ 落点表 [`outbound-stub-inventory.md`](outbound-stub-inventory.md) ⇒ ⇒ 实测 = **21 个出向 stub 提供者**（三态 ① 8 / ② 4 / ③ 9 · 自检 ①+②+③ == 总数 ✅）· **真零上界 = 1 个类**（`article/article-api` 的 `article-rpc` 方向 · Go 显式 `Timeout: 70000`）⇒ ⇒ ⚠️ 原写的「**11 个类**」与「**零上界 = comment-api / hot-api**」**两个数都已作废** ⇒ ⇒ 订正见 [`docs/DRIFT/global/vs-common.md`](../../DRIFT/global/vs-common.md) `:46` |
 | **执行目的** | 改造面是**跨 5 个模块的 21 个类 / 30 个调用点** ⇒ 不先精确落表，就会漏改（漏一个 = 该条路径仍然挂住） |
 | **具体操作** | ① 全仓扫**出向 stub 提供者**（`@GrpcClient` 注入的 stub 字段 + `newStub`/`build` 出来的 stub）② 对每个 stub 判定三态：**① 走 `applyTo(stub)`**（有上限但 gRPC 路径 no-op）· **② 走 `remainingMillis()` 手搓** · **③ 裸 stub（零 deadline、无上界）** ③ 对每个调用点记录：`文件:行号` · 所属模块 · 当前形态 ④ 逐条给出 **Go 对照**（Go 侧对应调用点 + 上下文是否带 ctx）⑤ 标出 **Go 的 2000ms 硬上界出处**（`zrpc/config.go:31`）⑥ **必须自证计数**（脚本输出 + 人工抽查 ≥3 条） |
 | **具体落点** | 新建 `docs/RoundPlan/round-02/outbound-stub-inventory.md` |
@@ -66,11 +66,11 @@
 | **前置条件** | 无 |
 | **并行关系** | 与 `P1-T01` **可并行**；本轮其余任务**都依赖它** ⇒ **必须最先完成** |
 | **写权限** | 只写 `docs/RoundPlan/round-02/**` ⇒ **不改任何产品代码** |
-| **验收命令** | ```bash# ① 计数可复算（脚本自带，且必须打印 Δ_start/Δ_end）\npython3 docs/RoundPlan/round-02/count-outbound-stubs.py\n# ② 与 Go 对照表逐条抽查 ≥3 条（人工）\n# ③ 三态分类的总和 == 总数（脚本自检）``` |
+| **验收命令** | ```bash# ① 计数可复算（脚本自带，且必须打印 Δ_start/Δ_end）\npython3 docs/RoundPlan/round-02/count-outbound-stubs.py\n# ② 与 Go 对照表逐条抽查 ≥3 条（人工）\n# ③ 三态分类的总和 == 总数（脚本自检）\n# ④ 落点表与本次扫描逐字节一致（棘轮 · 不一致 ⇒ exit 1）\npython3 docs/RoundPlan/round-02/count-outbound-stubs.py --check-inventory``` |
 | **验收证据** | ① 表内**每条**有 `文件:行号` + 三态归类 + Go 对照 ② 三态计数之和 = 总数（脚本自检打印）③ ⚠️ **零 deadline 的类数**单独列出并与 Go 的 2000ms 上界逐条对照 |
 | **完成条件** | **零 deadline 的类逐个有名字**（不是「约 11 个」）＋ 表可被 `P2-T02`~`P2-T04` 直接当工作单用 |
 | **失败处理** | 扫不全（拿不准某个 stub 算不算出向）⇒ **按「保守包含」原则全部列入**，宁可多改不可漏改 ⇒ 并在表里标「待人工判定」 |
-| **状态更新** | `docs/DRIFT/global/vs-common.md` 的 E65 行**本轮不改**（G4 面，但账要在 Round 3 统一回填）⇒ 落表先行 |
+| **状态更新** | `docs/DRIFT/global/vs-common.md` 的 E65 行**本轮不改**（G4 面，但账要在 Round 3 统一回填）⇒ 落表先行 ｜ **2026-10-31 实补**：本任务产出的实测数**已就地回填** `docs/DRIFT/global/vs-common.md:46`（零上界 2 → **1**，且对象改为 `article/article-api` 的 `article-rpc` 方向）⇒ ⇒ 派生层 diff = **0 行**（E65 的 title 列取前 160 字符 ⇒ 改动段不在其中 ⇒ 派工面未被扰动） |
 | **后续任务** | `P2-T02` · `P2-T03` · `P2-T04` |
 
 ### P2-T02 · 共享层：把服务端有效期限绑进出向载体（G4 单写权）
@@ -133,7 +133,7 @@
 | **前置条件** | `P2-T01` |
 | **并行关系** | 与 `P2-T03` **同域同提交**（同一批文件）⇒ 不可拆 |
 | **写权限** | `service/<域>/**` = 各域 lane（**共享层那半** = `service/common/**` = **G4**） |
-| **验收命令** | ```bash# ① 零上界类归零（脚本判定）\npython3 docs/RoundPlan/round-02/count-outbound-stubs.py --assert-no-zero-deadline\n# ② 域级测试 0F/0E\nmvn -o -B -DargLine=-Xmx2g -pl service/<域>/<域>-rpc -am test``` |
+| **验收命令** | ```bash# ① 零上界类归零（脚本判定）\npython3 docs/RoundPlan/round-02/count-outbound-stubs.py --assert-no-zero-deadline\n# ② 域级测试 0F/0E\nmvn -o -B -DargLine=-Xmx2g -pl service/<域>/<域>-rpc -am test``` ｜ **2026-10-31 实读：① 当前 exit 1（零上界类数 = 1，不是 0）** ⇒ ⇒ 唯一那条 = **`article/article-api` 的 `article-rpc` 方向**（`ArticleRpcClient.articleRpc()` 只 `applyTo` ⇒ 只注入入向预算、**无硬上界**）⇒ ⇒ Go 侧该方向是**显式** `Timeout: 70000`（`service/article/api/etc/article-api.yaml:12`）⇒ ⇒ **这是真漂移**（Go 装 70s 上界、RAG 这次 min 缺失）⇒ ⇒ ⚠️ **修法不是配组件级 `cap-millis=2000`**（`article-api` 的另一方向 `user-rpc` = 2000 ⇒ 组件级 cap 表达不了 70000 / 2000 两方向 ⇒ 会把 70000 改严 35 倍）⇒ ⇒ 需要**共享层支持 per-direction cap** ⇒ ⇒ 属**共享层能力缺口**（`service/common/**` = G4 写权面） |
 | **验收证据** | ① 「零上界类数」= **0** ② 每个类有断言断「即使无入向 deadline，出向也带 ≤2000ms」③ 变异必红（把上界去掉 ⇒ 断言红） |
 | **完成条件** | **零 deadline 的类 = 0**（这是本轮最硬的一条量化判据） |
 | **失败处理** | 某个类的 stub 由框架代管、改不了 ⇒ **上报**，并把该类**显式登记**为「零上界残留」⇒ 不得静默放过 |
@@ -224,7 +224,7 @@ python3 tools/difftest/scan-bash-legacy-vars.py
 | # | 判据 | 怎么判 |
 |---|---|---|
 | 1 | 落点表齐全 | `outbound-stub-inventory.md` 每条有 `文件:行号` + 三态 + Go 对照；**三态之和 = 总数** |
-| 2 | **零 deadline 类 = 0** | `count-outbound-stubs.py --assert-no-zero-deadline` ⇒ **0** |
+| 2 | **零 deadline 类 = 0** | `count-outbound-stubs.py --assert-no-zero-deadline` ⇒ **0** ｜ **2026-10-31 实读 = 1 ⇒ 本条当前 🔴 未达成**（唯一那条 = `article/article-api` 的 `article-rpc` 方向；Go 侧显式 70000ms ⇒ 真漂移 ⇒ 修法需**共享层 per-direction cap** ⇒ 不是域侧能自修的 ⇒ 归**共享层能力缺口**） |
 | 3 | 出向 stub 只有一种载体 | `grep -rn 'remainingMillis()' service/*/*/src/main/java --include='*Client.java'` ⇒ **0 命中**（`HotArticleQueryService` 除外） |
 | 4 | **两侧 `failed_fast` / `code` / `outgoing_carrier` 相等** | 双侧活体探针输出**逐项相等**（Go 为基准） |
 | 5 | 守门与「X-6 成立」同义 | 等值门 EXIT=0；**变异 2/2 精确转红** |
