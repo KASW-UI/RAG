@@ -476,6 +476,24 @@ python3 ci/generate-pipelines.py --check  # 校验（应为 EXIT=0）
 `ci/**` 在触发面里 ⇒ 11 条流水线会全部重跑。
 若改了 `ci/tasks/*.yml`，**必须**重跑生成器（task 配置是内联进 pipeline 的）。
 
+### 7.3b 🆕 改了「目标要求清单」或「契约基准」之后
+
+| 改了什么 | 必须再跑 | 为什么 |
+|---|---|---|
+| `ci/requirements/requirements.json` | `python3 ci/scripts/check-requirements.py` + `check-requirements-mutations.py` | 清单的结构与六态口径由守门保证；变异测试保证**守门不是假绿** |
+| `ci/contracts/errmsg/*.txt` | `bash ci/scripts/check-errmsg-contract.sh` + `check-errmsg-contract-mutations.py` | 基准变了 ⇒ 必须重判差异四态 |
+| `ci/contracts/schema/*.json` | `python3 ci/scripts/check-schema-contract.py --all` + `check-schema-contract-mutations.py` | 同上 |
+| `ci/contracts/proto/*.proto` | `python3 ci/scripts/check-proto-contract.py --baseline ci/contracts/proto` | 同上 |
+| `ci/scripts/dind-run.sh`（改了内层阶段编排） | `bash ci/verify-triggers-server.sh` | 触发面是**服务端**性质 ⇒ 只做静态检查不够 |
+| `ci/pipelines/*.yml`（或 pom 依赖） | `python3 ci/generate-pipelines.py --check` + `bash ci/verify-triggers.sh --static` | 生成器与**意图集合**必须一致 |
+
+> ⚠️ **签字流程（唯一的「让红变绿」的正当途径）**：
+> 差异要转正 ⇒ **先**在 `docs/Intentional_Deviations/` 登记并签字 ⇒ **再**把基准文件里对应那条
+> `DEVIATION|…` 的状态从 `pending` 改成 `approved` 并填上依据 id ⇒ **再**把清单里该要求的
+> 状态改成 `APPROVED_DIFFERENCE` 并填 `deviation.id` ⇒ 守门会**机器回指**该 id（查不到 ⇒ FAIL）。
+> ⇒ ⛔ **不要**为了让 build 变绿而改 Java 业务代码；⛔ **不要**自行把 `pending` 改成 `approved`
+> 而不签字 —— 守门会拦（变异测试 M7/M8 就是专门测这个）。
+
 ### 7.4 常见故障与定位
 
 | 症状 | 先查 |
@@ -483,9 +501,14 @@ python3 ci/generate-pipelines.py --check  # 校验（应为 EXIT=0）
 | task 报 `repo/ci/scripts/... not found` | 触发面缺 `ci/**` ⇒ 取到的 commit 里没有 `ci/` |
 | 内层 daemon 拉镜像 `connection refused` | 内层 dockerd 的 bridge 与外层同网段 ⇒ 查 `--bip` |
 | 内层 daemon 拉镜像 404 | registry 里仓库路径不对（`library/postgres` vs `apache/kafka`） |
+| **R6 报「查镜像失败」** | `docker_api.image_exists` 丢了 tag ⇒ daemon 按 `:latest` 解析 ⇒ 查 registry 里有没有该 tag（§4.4 B2） |
+| **R6 迁移卡住 / exec 一直 Running** | exec-with-stdin 的**线格式**不对 ⇒ daemon 不消费 stdin ⇒ 必须照抄 docker CLI 的写法（§4.4 B3） |
+| **R5 报 `python3: command not found`** | CI 的 maven 镜像**没有 python3** ⇒ 必须走**两个内层阶段**（§4.4 B4） |
+| **R5 某域报 `Could not find artifact com.rag:…`** | `dependency:build-classpath` 单独跑 ⇒ 上游模块没编译 ⇒ 必须与 `compile` 同一次 mvn 调用（§4.4 B5） |
 | `fly set-pipeline` 报变量未定义 | `registry` / `maven_mirror` 两个 var 都要给（`ci/deploy.sh` 会给） |
 | 构建报 `Non-resolvable parent POM` | 仓内 pom 的 `relativePath` 缺陷（§六） |
 | git 资源 check 反复失败 | 看 GitHub 链路带宽（§五）⇒ 换本地 git 服务 |
+| **build 永远 pending** | 流水线或 job 被暂停 ⇒ `fly unpause-pipeline` / `fly unpause-job`（**暂停的 job 不会产生 build**，连资源检测都不做 ⇒ 触发面会完全不可观测） |
 
 ### 7.5 边界声明
 

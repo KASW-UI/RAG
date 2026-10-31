@@ -464,6 +464,17 @@ PASS = 23（只计 VERIFIED）｜ 不计入 PASS 的缺口 = 19
 
 > ⚠️ **Java 侧 585 个测试不构成上述任何一条的证据** —— 测试数量回答不了「目标是否达成」。
 
+**契约类要求的证据层级已升到 B 层（2026-10-31 · Concourse Task 内实跑）**
+
+| 要求族 | 证据 | 读数 |
+|---|---|---|
+| R4 proto 契约（10 条） | 静态守门第 10 道门（真实 CI 镜像内实测） | PASS 10 / FAIL 0 / BLOCKED 0 |
+| R5 errmsg 契约 | `rag-contract-errmsg` **build 7**（Task 内两阶段） | PASS 7 / FAIL 0 / BLOCKED 0 / **PENDING 2** ⇒ EXIT=3（有意为红） |
+| R6 schema 契约（8 条） | `rag-contract-schema` **build 5 = succeeded** | PASS 8 / FAIL 0 / BLOCKED 0 / NOT_RUN 1[hot] |
+
+> ⇒ 这三族**已从「本地脚本跑通」升到「在 CI 里真跑通」** ⇒ 但**仍不等于**「目标全部达成」：
+> `pending` 的 8 条差异 ⇒ 相关要求在清单里判 `NOT_VERIFIED`（**保守口径**，与门禁不冲突）。
+
 
 ---
 

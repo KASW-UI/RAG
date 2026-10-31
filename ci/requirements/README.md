@@ -172,6 +172,21 @@
 > ℹ️ 第 6~8 条与 like 域**已签字**的 `SD-2026-10-23-06`（grpc 业务码载体迁移 · 框架限制）**同族**
 > ⇒ 若你签字该族，这 3 条可一并转正 ⇒ `comment` 域即可从 `NOT_VERIFIED` 升为 `VERIFIED`。
 
+**这 8 条在 CI 里长什么样（2026-10-31 · Concourse Task 内实跑）**
+
+| 门 | 读数 | 退出码 | build 状态 |
+|---|---|---|---|
+| `rag-contract-errmsg`（R5） | PASS 7 / FAIL 0 / BLOCKED 0 / **PENDING 2**（域 `comment`·`like`） | **3** | 🔴 **红 —— 有意为之** |
+
+> ⚠️ **这个红是设计语义，不是回归**：R5 契约门对「已登记但**未签字**」的差异判 `PENDING`（退出码 3）⇒
+> **不计入 PASS** ⇒ build 变红 ⇒ **逼出签字动作**（否则这 8 条会一直躺在那儿没人看见）。
+> ⇒ **不要**为了让 build 变绿而改 Java 业务代码，也**不要**自行把差异改成 `approved`。
+> ⇒ 签字方式：在 `docs/Intentional_Deviations/` 里登记并签字 ⇒ 再把基准文件里对应那条
+> `DEVIATION|…` 的状态从 `pending` 改成 `approved` + 填上依据 id ⇒
+> 守门会**机器回指**该 id（查不到 ⇒ FAIL ⇒ 自证豁免被拦）。
+> ⚠️ **同理**：清单里 `FAIL 1`（`REQ-ERRMSG-LIKE-001`）与 `NOT_VERIFIED 19` ⇒ **PASS 只 = 23** ⇒
+> 「CI 全绿」**不等于**「目标全部达成」。
+
 ---
 
 ## 九、已知未登记的缺口（`coverage.unregistered_gap_ledgers`）

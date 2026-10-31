@@ -15,7 +15,7 @@
 ## 快速开始
 
 ```bash
-# 一次性：本地 Concourse 起流（load 镜像 tar → 起环境 → 注册 11 条流水线）
+# 一次性：本地 Concourse 起流（load 镜像 tar → 起环境 → 注册 13 条流水线 = 11 日常 + 2 契约）
 bash ci/local-up.sh                 # 公网镜像源
 bash ci/local-up.sh --registry      # 额外起本地 registry（公网源不稳时用）
 bash ci/local-up.sh --trigger rag-task   # 注册完顺带触发一条并跟踪日志
@@ -118,10 +118,10 @@ Concourse 的 `git` 资源**原生支持 `paths` 过滤**（官方 monorepo 指�
 | `service/article/article-proto/**` | `rag-article` + `rag-comment` + `rag-favorite` + `rag-hot` |
 | `service/users/user/user-proto/**` | `rag-users-user` + `rag-users-admin` + `rag-article` + `rag-favorite` + `rag-follow` + `rag-message` |
 | `service/users/admin/admin-proto/**` | `rag-users-admin` + `rag-message` |
-| `service/common/**` | **全部 11 条** |
+| `service/common/**` | **全部 11 条日常流水线**（⚠️ **两条契约流水线不触发** —— 它们只听 `ci/contracts/**` 与各域 `errmsg`/`db/migration` 路径 ⇒ 这条性质已被**服务端实跑断言**） |
 | `service/users/users-common/**` | 除 `rag-task`、`rag-hot` 外的 **9 条**（这俩不用它） |
-| `pom.xml` / `service/pom.xml` / `mvnw` / `.mvn/**` | **全部 11 条**（工具链变更 = 全量重跑） |
-| **`ci/**`** | **全部 11 条**（CI 自身脚本变更 = 全量重跑） |
+| `pom.xml` / `service/pom.xml` / `mvnw` / `.mvn/**` | **全部 11 条日常**（工具链变更 = 全量重跑） |
+| **`ci/**`** | **全部 13 条**（含两条契约流水线：CI 自身脚本变更 = 全量重跑） |
 
 ⚠️ **`ci/**` 必须在触发面里，而且它不只是"顺带加上"**（实测 2026-10-30 命中）：
 git 资源的 `paths` 决定"**取哪个 commit 的树**"。若 `ci/**` 不在 paths 里，
@@ -261,7 +261,7 @@ fly -t concourse trigger-job -j rag-contract-schema/contract-check --watch
 
 | 文件 | 职责 |
 |---|---|
-| `ci/pipelines/rag-*.yml`（11 个） | 各域流水线定义。**由生成器产出**，不要手改 |
+| `ci/pipelines/rag-*.yml`（13 个 = 11 日常 + 2 契约） | 流水线定义。**由生成器产出**，不要手改 |
 | `ci/tasks/maven-build.yml` | 构建阶段的 task 配置（**唯一真源**） |
 | `ci/tasks/maven-test.yml` | 测试阶段的 task 配置 |
 | `ci/tasks/static-gates.yml` | 静态守门阶段的 task 配置 |
@@ -305,7 +305,7 @@ fly -t concourse trigger-job -j rag-contract-schema/contract-check --watch
 > Concourse 的 pipeline step **必须**带 `file:` 或 `config:` 二选一，
 > 不能引用独立的任务文件（实测 `fly validate-pipeline` 报
 > `must specify either 'file:' or 'config:'`）。
-> ⇒ `ci/tasks/*.yml` 是**唯一真源**，由生成器**内联**进 11 条 pipeline ⇒ 不会两份漂移。
+> ⇒ `ci/tasks/*.yml` 是**唯一真源**，由生成器**内联**进 13 条 pipeline ⇒ 不会两份漂移。
 > ⇒ 这些文件同时也是 `fly execute -c ci/tasks/maven-build.yml` 一次性调试用的。
 
 ---
@@ -367,7 +367,7 @@ python3 ci/generate-pipelines.py --check  # 校验（CI 也跑这一条）
 | 构建命令正确性 | ✅ | 宿主机实测：`mvn -o -pl service/article/article-api,service/article/article-rpc -am -DskipTests package` → BUILD SUCCESS（14 模块 / 8.6s）；`mvn -o -pl service/common -am clean test` → 405/405 全绿（1:12） |
 | **静态守门在真实 task 镜像内** | ✅ | `docker run python:3.12-bookworm sh ci/scripts/run-static-gates.sh` → **8/8 全绿**；加入第 9 道门后为 **9/9**，且已在**真 CI 容器**内实测通过 |
 | **Concourse 服务端落地** | ✅ | 本地 **8.3.2** 起流成功（`/api/v1/info` → `{"version":"8.3.2","worker_version":"3.0"}`）；worker `22f904bc9cc6 running 3.0` 已注册 |
-| **11 条流水线注册** | ✅ | `ci/deploy.sh` 跑完；`fly pipelines` 列出 11 条 `rag-*`（配置已按最新生成物重新部署）|
+| **13 条流水线注册** | ✅ | `ci/deploy.sh` 跑完；`fly pipelines` 列出 13 条 `rag-*`（11 日常 + 2 契约；配置已按最新生成物重新部署）|
 | **canonical 流水线当前是 paused** | 📌 | 本 PR **合并前**它们必须 pause：`ci/` 还没进 `do-my-own-gh` ⇒ 别的 lane 一推 commit 就会触发 build 并在第一步就红（`repo/ci/scripts/dind-run.sh: No such file`）⇒ 是噪声不是信号。**合并后**一条命令恢复：`for p in $(fly -t concourse pipelines -a \| awk 'NR>1 && $2=="no" {print $1}'); do fly -t concourse unpause-pipeline -p $p; done` |
 | **worker 从本地 registry 拉镜像** | ✅ | 探针流水线 **21s 成功**，层下载进度可见 ⇒ **containerd 走 HTTP 拉本地 registry 可行**（Concourse 8 的 containerd 2.4.2 不接受根级 `[registry]` 段，但 Concourse 自身的拉取路径能处理 HTTP registry） |
 | **task 容器出网** | ✅ | 探针：DNS(8.8.8.8 / 223.5.5.5) OK、`github.com:443` OK、`172.17.0.1:5010`（本地 registry）OK；`10.80.0.1:5010` FAIL（预期，网关无此服务） |
