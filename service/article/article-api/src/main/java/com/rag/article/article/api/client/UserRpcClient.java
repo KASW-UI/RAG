@@ -1,11 +1,8 @@
 package com.rag.article.article.api.client;
 
-import com.rag.common.observability.GoStyleRequestDeadline;
 import com.rag.users.user.proto.UserServiceGrpc;
 import net.devh.boot.grpc.client.inject.GrpcClient;
 import org.springframework.stereotype.Component;
-
-import java.util.concurrent.TimeUnit;
 
 /**
  * user-rpc gRPC client —— 持有 {@code UserServiceBlockingStub}。
@@ -28,62 +25,80 @@ import java.util.concurrent.TimeUnit;
  *
  * <p><b>⚠️ retry / breaker 与 {@code ArticleRpcClient} 同款</b>：Go 侧无 retry；
  * breaker 由 {@code com.rag.common.protection} 统一提供，不在此重复实现。
+ *
+ * <h2>🆕 2026-11-02 · G3 lane：域侧内联副本<b>已剪除</b>（上界改由共享层承担）</h2>
+ * <p>本类此前<b>自带</b>一份「客户端硬上界」副本：{@code min(请求剩余预算, 2s)}
+ * + 一个域侧私有常量 ⇒ ⇒ 那是<b>第二个上界来源</b> ⇒ ⇒ 与共享层「唯一实现」
+ * 的形态冲突（共享层棘轮 {@code GoStyleClientCallTimeoutSingleSourceGateTest}
+ * 判据 ④：cap 的来源必须是共享层参数，域侧私有常量 = 违规）
+ * ⇒ ⇒ <b>副本数 = 漂移面</b> ⇒ ⇒ 本轮剪掉。
+ *
+ * <h3>剪掉之后，2s 上界去哪了 —— <b>零行为变化</b>的逐项论证</h3>
+ * <p><b>Go 侧的真相</b>（逐条回 Go 真源核对，非转述）：
+ * <ul>
+ *   <li>{@code go-zero@v1.10.2/zrpc/config.go:31} ——
+ *       {@code Timeout int64 `json:",default=2000"`} ⇒ <b>默认 2000ms</b>；</li>
+ *   <li>{@code service/article/api/etc/article-api.yaml:20-24} 的
+ *       {@code UserRpcConf:} 段<b>没有</b>显式 {@code Timeout}
+ *       ⇒ ⇒ user-rpc 方向 = <b>2000ms</b>；</li>
+ *   <li>{@code go-zero@v1.10.2/zrpc/client.go:70-71} ——
+ *       {@code if c.Timeout > 0 { opts = append(opts, WithTimeout(...)) }}；</li>
+ *   <li>{@code go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25} ——
+ *       {@code ctx, cancel := context.WithTimeout(ctx, t)} ⇒ <b>取父子 deadline 中较早者</b>。</li>
+ * </ul>
+ *
+ * <h3>现在由谁承担 —— <b>共享层唯一实现</b>（域侧只配参数）</h3>
+ * <ul>
+ *   <li><b>实现</b>：{@code com.rag.common.protection.GoStyleOutboundDeadlineInterceptor}
+ *       （带 devh 的 {@code @GrpcGlobalClientInterceptor}
+ *       ⇒ ⇒ 进全局客户端拦截器 registry
+ *       ⇒ ⇒ devh 的 {@code AbstractChannelFactory#createChannel} 最后一步是
+ *       {@code ClientInterceptors.interceptForward(channel, interceptors)}
+ *       ⇒ ⇒ 拦截器装在 <b>channel</b> 上 ⇒ ⇒ <b>裸 stub 同样经过</b>）；</li>
+ *   <li><b>参数</b>：本域 {@code application.yml} 的
+ *       {@code rag.protection.outbound-deadline.cap-millis-by-service.user.UserService: 2000}
+ *       ⇒ ⇒ <b>域侧零代码改动</b>。</li>
+ * </ul>
+ *
+ * <h3>为什么<b>算术</b>完全等价（不是「差不多」）</h3>
+ * <table border="1">
+ *   <caption>剪除前后的算术对照</caption>
+ *   <tr><th>场景</th><th>剪除前（域侧内联）</th><th>剪除后（共享层）</th><th>结论</th></tr>
+ *   <tr><td>请求预算不可读</td><td>2s</td><td>min(∞, 2s) = 2s</td><td>同值</td></tr>
+ *   <tr><td>请求预算 &gt; 2s</td><td>min(预算, 2s) = 2s</td><td>min(预算, 2s) = 2s</td><td>同值</td></tr>
+ *   <tr><td>请求预算 &lt; 2s</td><td>min(预算, 2s) = 预算</td><td>min(预算, 2s) = 预算</td><td>同值</td></tr>
+ *   <tr><td>请求预算已耗尽</td><td>立即到期</td><td>立即到期（1ns）</td><td>同值</td></tr>
+ * </table>
+ * ⇒ ⇒ <b>请求预算的载体是同一个</b>（{@code GoStyleRequestDeadline} 的 ThreadLocal）
+ * ⇒ ⇒ 传播<b>没有丢</b>，只是从域侧搬到了共享层。
+ *
+ * <p>⚠️ <b>唯一的精度差</b>：剪除前用毫秒（{@code remainingMillis()}），
+ * 剪除后用纳秒（{@code remainingNanos()}）⇒ ⇒ 差 <b>&lt; 1ms</b>，且两者都取
+ * <b>更早者</b> ⇒ ⇒ 只可能<b>更严</b>、不可能更长 ⇒ ⇒ 不构成行为差异。
+ *
+ * <p>⚠️ <b>返回值现在是字段本身</b>（不再每次 new 一个带 deadline 的副本）：
+ * grpc-java 的 {@code AbstractStub} 是<b>不可变</b>的 ⇒ ⇒ 共享同一个实例是安全的
+ * ⇒ ⇒ 原 javadoc 那句「不要把返回值缓存到字段上」的告诫<b>已不再适用</b>
+ * —— 它的前提是「返回值带每次都不同的 deadline」，现在没有了。
  */
 @Component
 public class UserRpcClient {
-
-    /**
-     * Go 的 <b>per-client 单次调用上限</b> —— 2000ms。
-     *
-     * <p>⚠️ <b>这是 struct tag 里的默认值，yaml 里看不到</b>（AGENTS.md §3.3.1 点名的形态）：
-     * <pre>
-     * // go-zero v1.10.2 · zrpc/config.go:31（声明点）
-     *   Timeout int64 `json:",default=2000"`
-     *
-     * // service/article/api/etc/article-api.yaml:20-24 —— UserRpcConf **没有** Timeout 字段
-     *   UserRpcConf:
-     *     Etcd: { Hosts: [etcd:2379], Key: user.rpc }
-     *   ⇒ 走 tag 默认 = 2000ms
-     *
-     * // zrpc/client.go:70-71（消费点）
-     *   if c.Timeout > 0 { opts = append(opts, WithTimeout(time.Duration(c.Timeout)*time.Millisecond)) }
-     *
-     * // zrpc/internal/client.go:83 → buildUnaryInterceptors(cliOpts.Timeout)
-     * // zrpc/internal/clientinterceptors/timeoutinterceptor.go:25（真正的执行点）
-     *   ctx, cancel := context.WithTimeout(ctx, t)
-     * </pre>
-     * ⚠️ 同一份 yaml 里 {@code ArticleRpcConf.Timeout} 是<b>显式</b> 70000 —— 两个 client 的预算
-     * <b>差 35 倍</b>，而逐字段对 yaml 时<b>看不出</b>这个差别。
-     */
-    private static final long CLIENT_TIMEOUT_MILLIS = 2000L;
 
     @GrpcClient("user-rpc")
     private UserServiceGrpc.UserServiceBlockingStub userServiceBlockingStub;
 
     /**
-     * 返回<b>已套上双重预算</b>的 stub：<b>min(HTTP 剩余预算, 2s)</b>。
+     * 返回<b>裸 stub</b>（不带任何 deadline）。
      *
-     * <p>理由与 {@code ArticleRpcClient#articleRpc()} 的「请求级 deadline」是同一套，
-     * 但这里<b>多一层 2s 的硬上限</b>（Go 侧由 {@code TimeoutInterceptor} 提供）。
+     * <p>⚠️ <b>不要在这里加 deadline</b>：出向的「客户端硬上界」与「请求预算传播」
+     * <b>全部</b>由共享层的 {@code GoStyleOutboundDeadlineInterceptor} 承担
+     * （channel 级 ⇒ 裸 stub 同样经过）⇒ ⇒ 域侧再加一份就是<b>第二个上界来源</b>
+     * ⇒ ⇒ 共享层棘轮判据 ④ 会判红。
      *
-     * <h2>⚠️ 为什么必须自己算 min，不能链式 {@code withDeadlineAfter}</h2>
-     * <pre>
-     * // grpc-java io.grpc.CallOptions.withDeadline（1.66.0，字节码实测）：
-     *   builder.deadline = deadline;        // ← **直接覆盖**，不是取最小
-     * </pre>
-     * ⇒ {@code applyTo(stub).withDeadlineAfter(2, SECONDS)} 会把 HTTP 剩余预算
-     * <b>顶掉</b>（剩 0.5s 时反而给 2s）⇒ 请求可能超出 HTTP 总预算。
-     * <p>Go 侧 {@code context.WithTimeout(ctx, 2s)} 的语义是<b>取父子 deadline 中较早的</b>
-     * ⇒ Java 侧必须显式算出 {@code min}，不能依赖框架替你合并。
-     *
-     * <p>⚠️ <b>不要把返回值缓存到字段上</b>：{@code withDeadlineAfter} 每次返回新实例，
-     * 缓存会把「第一次调用时的预算」固化下来，之后每个请求都带着过期 deadline。
+     * <p>本域的上界参数在 {@code application.yml}：
+     * {@code rag.protection.outbound-deadline.cap-millis-by-service.user.UserService: 2000}。
      */
     public UserServiceGrpc.UserServiceBlockingStub userRpc() {
-        long remaining = GoStyleRequestDeadline.remainingMillis();
-        long effective = remaining < 0L
-                ? CLIENT_TIMEOUT_MILLIS
-                : Math.min(remaining, CLIENT_TIMEOUT_MILLIS);
-        return userServiceBlockingStub.withDeadlineAfter(effective, TimeUnit.MILLISECONDS);
+        return userServiceBlockingStub;
     }
 }
