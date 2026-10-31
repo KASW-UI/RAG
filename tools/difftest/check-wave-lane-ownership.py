@@ -225,6 +225,26 @@ SHARED = [
     "docs/DRIFT/global/cycle-deps.md",
     "docs/Worktree.md",
     "tools/difftest/README.md",
+    # ---- 🆕 2026-11-01 收官轮 · 「阶段一判定基线」整族（原先**无主**）----
+    # ⚠️ **为什么这 5 个文件原先无主** —— 四条 lane 白名单里含 `PhaseGoal` 的条目 = **0 条**
+    #    ⇒ ⇒ `docs/PhaseGoal-judge.md` + `docs/PhaseGoal/g{1..4}.md` **既不属于任何 lane，
+    #    也不在 `SHARED` 里** ⇒ ⇒ **没有任何写权门能拦**（G1 与 G4 两棵 lane 各自独立发现此洞）。
+    # ⚠️ **为什么不能归给某个 lane** —— 这 4 份 `g<N>.md` 的文件头自述：
+    #    「⚠️ **本文件是机器生成的 —— 不要手改**」＋「生成器 `check-phasegoal-lanes.py --write`」
+    #    ＋「**唯一数据源**：`docs/PhaseGoal-judge.md`」⇒ ⇒ 它们是 **judge 的派生物**，
+    #    **不是各 lane 的面** ⇒ ⇒ 归 lane 就会有人手改 ⇒ 立刻与基线分叉 ⇒ 门禁红。
+    # ⇒ ⇒ 落法 = 归**合并收口执行者**（与其它 `SHARED` 面同一条）。
+    "docs/PhaseGoal-judge.md",
+    "docs/PhaseGoal/g1.md",
+    "docs/PhaseGoal/g2.md",
+    "docs/PhaseGoal/g3.md",
+    "docs/PhaseGoal/g4.md",
+    # ---- 🆕 2026-11-01 收官轮 · 「派生层与定级层」整族（原先**无主**）----
+    # ⚠️ `docs/DRIFT/_cross/**` 按 AGENTS.md §5.3 本来就是**合并收口执行者**的写权面
+    #    （派生层产物 `stage1-derivation.{md,tsv}` ＋ 定级层 `grading/*.md` ＋ 各种 `_cross` 台账）
+    #    ⇒ ⇒ 但它**原先不在 `SHARED` 里** ⇒ ⇒ 实测被新加的断言 9 判成「**无主面**」
+    #    ⇒ ⇒ 现在显式登记 ⇒ ⇒ lane 碰它时报「**越权写共享面**」（比「无主面」更准）。
+    "docs/DRIFT/_cross/**",
 ]
 
 # ---------------------------------------------------------------- 排他归属
@@ -388,13 +408,21 @@ def main() -> int:
                 )
 
     # ---- 2. 共享文件无人拥有 -------------------------------------------
+    # ⚠️ **必须按「展开后的文件集合」比**（2026-11-01 修）—— 原式拿 `SHARED` 的**原始字符串**
+    #    去撞 `expanded[lane]`（展开后的**文件路径**集合）⇒ ⇒ 一旦 `SHARED` 里放了 **glob 形式**
+    #    （如 `docs/DRIFT/_cross/**`）⇒ **永远撞不上** ⇒ ⇒ 断言 2 对 glob 形式**恒绿**（假绿）。
+    shared_expanded_2: set[str] = set()
+    for pat in SHARED:
+        shared_expanded_2 |= expand(pat)
     for lane in names:
-        for shared in SHARED:
-            if shared in expanded[lane]:
-                failures.append(
-                    f"🔴 共享文件被 lane 占用：`{lane}` 声明了 `{shared}`"
-                    " ⇒ 共享文件只能由合并收口执行者在合并后统一更新"
-                )
+        clash = sorted(expanded[lane] & shared_expanded_2)
+        if clash:
+            failures.append(
+                f"🔴 共享文件被 lane 占用：`{lane}` 的白名单命中了 {len(clash)} 个共享文件"
+                " ⇒ 共享文件只能由合并收口执行者在合并后统一更新\n"
+                + "\n".join(f"     · {p}" for p in clash[:10])
+                + ("\n     …" if len(clash) > 10 else "")
+            )
 
     # ---- 3/4. 排他归属 --------------------------------------------------
     for owner, owned, why in EXCLUSIVE:
@@ -495,6 +523,86 @@ def main() -> int:
                     f" ⇒ R2 的该项还没落仓（判据见 `docs/RoundPlan/Round-2.md`）"
                 )
 
+    # ---- 9. 🆕 无主面检测（2026-11-01 收官轮 · G1 与 G4 各自独立发现同一洞）------
+    # ⚠️ **本条补的是上面所有断言都盖不住的盲区**：前面 1~8 条判的都是
+    #    「**声明**层面的冲突」（白名单两两重叠 / 声明了 SHARED / 排他面被占），
+    #    ⇒ ⇒ **「某个 lane 实际写了一个谁都不拥有的文件」这件事，一条都判不到**。
+    # ⚠️ **为什么它是真洞**：2026-11-01 实测 —— 四条 lane 白名单里含 `PhaseGoal` 的条目 = **0 条**
+    #    ⇒ ⇒ `docs/PhaseGoal-judge.md` + `docs/PhaseGoal/g{1..4}.md` **无主**
+    #    ⇒ ⇒ 实测有 **4 笔不同范围的 commit**（文件集规模 = 1 / 8 / 12 / 7 个）改写过它
+    #    ⇒ ⇒ 而这些 commit 的 **author 字段全部相同** ⇒ ⇒ **「是谁改的」不可考** ⇒ ⇒ 没人管。
+    #    ⇒ ⇒ 归 `SHARED`（= 合并收口执行者专写）后，至少**归属变成可查的**，
+    #    且任何 lane 再声明它 ⇒ 立刻被断言 2 拦下。
+    #
+    # ⚠️ **判据**：对每棵**看得到 ref 的** lane，取它**尚未合入主干的 commit**实际改过的
+    #    `docs/**` 文件 ⇒ 逐个判归属：
+    #      ① 命中**该 lane 自己**的白名单 ⇒ 正常；
+    #      ② 命中**别的 lane** 的白名单 ⇒ 🔴 越权写别域的面；
+    #      ③ 命中 `SHARED` ⇒ 🔴 越权写共享面（共享面只由合并收口执行者更新）；
+    #      ④ **谁都不命中** ⇒ 🔴 **无主面**（本条要抓的就是这个）。
+    # ⚠️ **口径写死**：① 只看**未合入主干**的 commit ⇒ 用 **`main..ref`（单边）**
+    #    ⇒ `git log` 的 `A...B` 是**对称差集**（两侧独有都算）⇒ **不是本条要的**；
+    #    ② 只看 `docs/**`（代码面由 `EXCLUSIVE` + 白名单两两不重叠管）；
+    #    ③ 取的是「**该 lane 自己的 commit 改过的文件**」⇒ 与「判某 lane 改了什么」用
+    #    **三点 diff** 是**两个不同的量**（后者 = merge-base→branch 的内容差集）
+    #    ⇒ ⇒ 本条用前者（因为要抓的是「这棵 lane 动手写了什么」）。
+    main_ref = None
+    for cand in ("refs/heads/do-my-own-gh", "refs/remotes/upstream/do-my-own-gh",
+                 "refs/remotes/origin/do-my-own-gh"):
+        r = subprocess.run(["git", "show-ref", "--verify", "--quiet", cand],
+                           cwd=REPO, capture_output=True)
+        if r.returncode == 0:
+            main_ref = cand
+            break
+    ownerless_checked = 0
+    if main_ref is None:
+        print("ℹ️ 第 9 条（无主面检测）**不适用**：找不到主干 ref ⇒ 无法取「未合入主干的 commit」")
+        print("   ⇒ 本条记为 NOT_RUN，不计入失败。")
+    else:
+        shared_expanded: set[str] = set()
+        for pat in SHARED:
+            shared_expanded |= expand(pat)
+        for lane in names:
+            for ref in (f"refs/heads/align/{lane}",
+                        f"refs/remotes/upstream/align/{lane}",
+                        f"refs/remotes/origin/align/{lane}"):
+                r = subprocess.run(["git", "show-ref", "--verify", "--quiet", ref],
+                                   cwd=REPO, capture_output=True)
+                if r.returncode != 0:
+                    continue
+                r = subprocess.run(
+                    ["git", "log", f"{main_ref}..{ref}", "--name-only", "--format=",
+                     "--diff-filter=AM"],
+                    cwd=REPO, capture_output=True, text=True,
+                )
+                touched = sorted({ln.strip() for ln in r.stdout.splitlines()
+                                  if ln.strip().startswith("docs/")})
+                if not touched:
+                    break
+                ownerless_checked += len(touched)
+                for fpath in touched:
+                    if fpath in expanded[lane]:
+                        continue                      # ① 自己域内 ⇒ 正常
+                    others = [o for o in names if o != lane and fpath in expanded[o]]
+                    if others:
+                        failures.append(
+                            f"🔴 越权写别域的面：lane `{lane}` 实际改了 `{fpath}`"
+                            f" ⇒ 该文件属于 `{others[0]}` 的白名单"
+                        )
+                    elif fpath in shared_expanded:
+                        failures.append(
+                            f"🔴 越权写共享面：lane `{lane}` 实际改了 `{fpath}`"
+                            " ⇒ 共享面只由合并收口执行者在合并后统一更新"
+                        )
+                    else:
+                        failures.append(
+                            f"🔴 **无主面**：lane `{lane}` 实际改了 `{fpath}`"
+                            " ⇒ 该文件**既不在任何 lane 的白名单、也不在 `SHARED`**"
+                            " ⇒ ⇒ 没有任何写权门能拦它 ⇒ 要么补进该 lane 的白名单"
+                            " ⇒ 要么归 `SHARED`（合并收口执行者专写）"
+                        )
+                break
+
     # ---- 输出 -----------------------------------------------------------
     print("波次 lane 写权守门（G1~G4）")
     print("=" * 60)
@@ -525,6 +633,12 @@ def main() -> int:
     else:
         print("  · ⚠️ lane 分支存在性：**NOT_RUN**（无 lane 上下文 ⇒ 本条不适用）")
     print(f"  · 域内探针写权按域判（{len(seen_domains)} 个域 · {len(PROBE_REQUIRED)} 个域本波要求落仓）")
+    # ⚠️ 第 9 条（无主面检测）的结论也必须**如实反映**它到底跑没跑 ——
+    #   「没跑」不能打印成「查过且通过」⇒ 零命中被当成通过（假绿表述）。
+    if main_ref is None:
+        print("  · ⚠️ 无主面检测：**NOT_RUN**（找不到主干 ref ⇒ 本条不适用）")
+    else:
+        print(f"  · 无主面检测：已判定 {ownerless_checked} 个 lane 实际改过的 `docs/**` 文件")
     return 0
 
 
