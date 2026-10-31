@@ -735,7 +735,7 @@ G4 那张「逐组件实测表」是**在 G4 自己的树上解析 YAML** 得出
 
 | 族 | 写法 | follow 域处数 | 位置 |
 |---|---|---|---|
-| A | `forPort(0)` | **2** | `FollowGrpcInterceptorWiringTest.java:110` · `FollowRpcSlowThresholdGateTest.java:269` |
+| A | `forPort(0)` | **2** | `FollowGrpcInterceptorWiringTest.java:111` · `FollowRpcSlowThresholdGateTest.java:270` |
 | C | `new ServerSocket(0)` | **1** | `FollowApiStartupFailFastTest.java:87`（`findClosedPort()`） |
 | D | `RANDOM_PORT` | **0** | 🆕 **2026-10-29 `T11` 订正**：本域**已有**真 Tomcat 测试（`FollowApiFailurePathMatrixTest`）⇒ **仍然 0** ⇒ 它用的是 **`DEFINED_PORT` + `RealTomcatPort.pick()`** ⇒ **不引入 `RANDOM_PORT`** |
 | B | `grpc.server.port=0` | 若干 | **无人连接** ⇒ 不落码（口径见 §65.2） |
@@ -1334,7 +1334,7 @@ git diff --stat -- service/ # ⇒ 0 行
 
 | 编号 | follow 域的落点 | 共享层根因 | 本轮动作 |
 |---|---|---|---|
-| ✅ **`E65`**（**本体已闭合** · 2026-10-30 双侧活体逐键相等）⚠️ **【2026-10-31 订正】** 原判「**A 类**」**已过期**（权威行 = `docs/DRIFT/global/_README.md:430`「**E65 已闭合**」；另见主干 `5fc15de6`「把挂靠点从已闭合的 E65 解绑、改挂 `X-6` 轴②」）⇒ ⇒ **本域不因 E65 领新条目**；另有一条**独立**残余轴 = 客户端硬上界 2000ms ⇒ 归 `P2-T04`（域侧 yml）⇒ ⇒ **不与 E65 并回** | `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java:88` —— `userStub.getUser(...)`（**裸 stub** ⇒ 本类**不再**自己套客户端上界）⇒ 客户端硬上界改由**共享层**的出向 deadline 拦截器承担 ⇒ 域侧**只配参数** `rag.protection.outbound-deadline.cap-millis=2000`（**2026-10-31 · G1 lane · 域侧那半落码**）<br>⚠️ **【2026-10-31 订正】** 原写的 `:50` **落点一直是错的**（`:50` 是空 javadoc 行，复核者按它定位会落到 javadoc）⇒ ⇒ 已改指真实的出向调用点 `:88`<br>**Go 侧对应锚点（2026-10-30 实测订正）**：`service/follow/rpc/internal/logic/helper.go:82` = `resp, err := svcCtx.UserRpc.GetUser(ctx, &userservice.GetUserReq{Uid: userID})` ⇒ **直接透传 handler 的 ctx** ⇒ 继承父 deadline | `service/common/.../RpcInterceptor.java` 的 `onHalfClose` **只绑 `DeadlineState`**、**从不绑** `GoStyleRequestDeadline` ⇒ `GoStyleRequestDeadline.applyTo`（`:110`）在 gRPC 路径是 **no-op** | 📤 **转 G4 反馈单**（**E65 本体已闭合 ⇒ 本单 2026-10-31 结案**；残余轴 = `P2-T04`，转 `docs/PhaseGoal/` 派工面）（7 项格式见 [`users/vs-common.md`](../users/vs-common.md) §3.1）⇒ ⚠️ **修法同时涉及共享层与域内代码 ⇒ `AGENTS.md` §3c「必须同一次提交」⇒ G1 不能单独改 follow-rpc 的裸 stub（会留半截）** |
+| ✅ **`E65`**（**本体已闭合** · 2026-10-30 双侧活体逐键相等）⚠️ **【2026-10-31 订正】** 原判「**A 类**」**已过期**（权威行 = `docs/DRIFT/global/_README.md:430`「**E65 已闭合**」；另见主干 `5fc15de6`「把挂靠点从已闭合的 E65 解绑、改挂 `X-6` 轴②」）⇒ ⇒ **本域不因 E65 领新条目**；另有一条**独立**残余轴 = 客户端硬上界 2000ms ⇒ 归 `P2-T04`（域侧 yml）⇒ ⇒ **不与 E65 并回** | `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java:89-90` —— `userStub.getUser(...)`（**裸 stub** ⇒ 本类**不再**自己套客户端上界）⇒ 客户端硬上界改由**共享层**的出向 deadline 拦截器承担 ⇒ 域侧**只配参数** `rag.protection.outbound-deadline.cap-millis=2000`（**2026-10-31 · G1 lane · 域侧那半落码**）<br>⚠️ **【2026-10-31 订正】** 原写的 `:50` **落点一直是错的**（`:50` 是空 javadoc 行，复核者按它定位会落到 javadoc）⇒ ⇒ 已改指真实的出向调用点 `:89-90`（`:88` 是方法签名行；`6d04dc19` 删掉内联副本后，调用体上移到 `:89-90`）<br>**Go 侧对应锚点（2026-10-30 实测订正）**：`service/follow/rpc/internal/logic/helper.go:82` = `resp, err := svcCtx.UserRpc.GetUser(ctx, &userservice.GetUserReq{Uid: userID})` ⇒ **直接透传 handler 的 ctx** ⇒ 继承父 deadline | `service/common/.../RpcInterceptor.java` 的 `onHalfClose` **只绑 `DeadlineState`**、**从不绑** `GoStyleRequestDeadline` ⇒ `GoStyleRequestDeadline.applyTo`（`:110`）在 gRPC 路径是 **no-op** | 📤 **转 G4 反馈单**（**E65 本体已闭合 ⇒ 本单 2026-10-31 结案**；残余轴 = `P2-T04`，转 `docs/PhaseGoal/` 派工面）（7 项格式见 [`users/vs-common.md`](../users/vs-common.md) §3.1）⇒ ⚠️ **修法同时涉及共享层与域内代码 ⇒ `AGENTS.md` §3c「必须同一次提交」⇒ G1 不能单独改 follow-rpc 的裸 stub（会留半截）** |
 | 🟡 **`E66`**（= `DRIFT-ARPC-010`） | follow 域的 Redis 调用点（与 comment / like / hot / task 同型） | 同上（`DeadlineState` / `GoStyleRequestDeadline` **都不覆盖 Redis**）⇒ **与 E65 同源** | 📤 **转 G4**（同上文件 §3.2）· **建议与 `E65` 一起立项** |
 | 🟡 **`DRIFT-ARPC-009` 残留** | follow-rpc 的拦截器链（`GoStyleRpcProtectionChain.build(...)` ⇒ 只装 recover + breaker + shedding） | `service/common/.../GoStyleRpcProtectionChain.java:126-131` 的 `compose()` **缺 Stat + Prometheus 两层** ⇒ Go zrpc 框架级**默认全装**（`zrpc/internal/config.go:20-25`） | 📤 **转 G4**（同上文件 §3.3）⇒ **落点必在共享层**（10 个 rpc 域共用）⇒ **域侧不可自修**<br>✅ **2026-10-30 14:4x · G4 已落共享层半边**（Jason 裁定「**只落 Stat 的慢调用日志**」⇒ `RpcInterceptor` 的 close 路径一行 ＋ 两个私有辅助方法，**零新依赖、不动 `Composition`** ＋ 守门 `GoStyleSlowCallLogGateTest` 真 in-process gRPC 捕获 ⇒ 变异精确转红）⇒ ⇒ **follow-rpc 一并受益（零改动）** ⇒ **Prometheus 那层按 Jason 裁定不做** ⇒ ⇒ 残留 = ① Go 的 **Info 分支**（每请求打全量 body）**刻意不落** ② Go 的 Stat 装在 **breaker/shedding 之外**、RAG 在**最内层** ⇒ **慢调用判定口径有差异** ⇒ 转派单 `G4-15b`/`G4-15c`<br>🔴 **两处前提偏差订正**：Stat **不走** Prometheus（`core/stat/metrics.go:3-18` 无 prometheus 依赖 ⇒ 进程内聚合器）＋ 慢阈值 500ms **不是** `StatConf.SlowThreshold`（真源所有 yaml 无 `Middlewares:` 块 ⇒ 恒零值 ⇒ 走全局兜底）⇒ **数值等价、机制不同** |
 
@@ -1590,7 +1590,7 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时（`service/users/user/
   ⇒ ⇒ 本域这一类**已不再零上界**（本轮已配 2000ms）⇒ ⇒ 该格**已过期**。
   - ⚠️ **那一格是共享面** ⇒ ⇒ **本 lane 不能改** ⇒ ⇒ **转收口执行者订正**。
   - ⚠️ 顺带：④ 的**落点** `:50` **一直是错的**（`:50` 是空 javadoc 行 ⇒ 复核者按它定位会落到 javadoc）
-    ⇒ ⇒ 本 lane 已在**本文件**与 `docs/DRIFT/users/vs-common.md` 内就地改指真实调用点 `:88`；共享面那一处**同样转收口执行者**。
+    ⇒ ⇒ 本 lane 已在**本文件**与 `docs/DRIFT/users/vs-common.md` 内就地改指真实调用点 `:89-90`；共享面那一处**同样转收口执行者**。
 
 **三、本域【未做】的（残余）—— 本轮已清空（唯一一项 = follow-api 的内联副本）**
 
@@ -1607,3 +1607,48 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时（`service/users/user/
 - **本轮新增的域侧守门**：`FollowRpcClientDeadlineCapTest`（**5 条**）⇒ ⇒ 形态面第 ⑤ 条（本域 `src/main/java` 不得出现 `withDeadlineAfter` 的代码行）**补上了共享层单源棘轮的已知盲区**（`GoStyleClientCallTimeoutSingleSourceGateTest` 按类名识别 ⇒ 覆盖不到 api 侧内联形态）⇒ ⇒ **根治（把棘轮扩到内联形态）属共享层写权面 ⇒ 转 G4**
 - **已知残余（shared 面，本轮不动）**：`docs/Pitfalls/_cross/testing-pitfalls.md:489` 按**方法名**提到 `FollowRpcClient.capByClientTimeout` ⇒ ⇒ 本轮删掉该方法后，那一行**按名指向一个已不存在的方法** ⇒ ⇒ 语义悬空（不是行号悬空）⇒ ⇒ **该文件不在本 lane 写权面 ⇒ 转收口执行者 / G4 订正**
 - **指针状态**：`:164`（常量行，被 `docs/Pitfalls/follow/api.md:481/:509` 指着）⇒ **行号不变**；`:230`（调用点）⇒ **行号不变**；`docs/DRIFT/follow/vs-common.md` 内指向 `:230` 的那一条**仍然有效**（已就地改指真实形态）
+---
+
+## 指针漂移订正 —— 删副本引起的行号位移（2026-10-31 · G1 lane）
+
+- **本轮订正 4 处落点**（全部**就地替换、行数不变** ⇒ 派生层关键数字逐项零变化 ⇒ 派生层产物校验和不变）：
+  - **出向调用点**：裸 stub 调用点由 `:88` 改指 **`:89-90`**（2 处 = 本文件「出向调用是否继承请求 deadline」那一行 ＋「共享面【已过期】的登记」里的嵌套引用）。
+    ⇒ ⇒ **成因**：`6d04dc19` 删掉内联 `capByClientTimeout` 方法（该方法原占 `:91-105`）⇒ `getUser` 的调用体整体上移；
+    同时常量行由 `:75` 移到 `:76`（其 javadoc 多 1 行）⇒ ⇒ **删除前 `:88` = `return capByClientTimeout(userStub)`（带 cap，**不是**裸 stub）**，
+    **删除后 `:88` = 方法签名行** ⇒ ⇒ **两种状态下 `:88` 都不是「裸 stub 出向调用点」** ⇒ ⇒ 真实落点只能是 `:89-90`。
+  - **两处测试文件**：`FollowGrpcInterceptorWiringTest` 的 `:110` ⇒ **`:111`**、`FollowRpcSlowThresholdGateTest` 的 `:269` ⇒ **`:270`**
+    ⇒ ⇒ 原落点是**空行**，真实落点是那条「⚠️ 不能用 `forPort(0)`」注释 ⇒ ⇒ **差 1 行**。
+- **⚠️ 上一笔提交的一处判断，本轮被实测推翻**：那笔提交的说明写「独立 verifier 另报的 `:88` 漂移**不成立** —— `:88` 正是出向调用语句首行」
+  ⇒ ⇒ **该判断不成立**（`:88` 是方法签名行）⇒ ⇒ **连带**：`6d04dc19` 的提交说明写「三个 client 文件的既有指针行全部守住（follow-rpc `:34`／`:50`／`:75` …）」
+  ⇒ ⇒ **实测 `:75` 没守住（⇒ `:76`）· `:50` 的落点也变了（空 javadoc 行 ⇒「Go 的出向 deadline = min(…)」那行）**
+  ⇒ ⇒ **教训**：「零行位移」的自证**不能只凭 diff hunk 的起点对齐**，必须做「删除前／删除后**同一行号的内容对比**」。
+- **共享面【转收口执行者 / G4】**（本 lane 无写权，记在此处免得丢）：
+  - `docs/DRIFT/global/vs-common.md` 的枚举 ④ 已被订正为 `:88` ⇒ ⇒ **那个 `:88` 在 `6d04dc19` 落地后同样悬空**（`capByClientTimeout` 已不存在 ⇒ `:88` 是方法签名行）⇒ ⇒ 真实落点同样是 `:89-90`。
+  - 同一格的枚举 ⑤／⑥ 也因删副本而位移 ⇒ ⇒ `user-api` 的 `userRpc()` 由 `:194-196` 上移到 `:208-210`；
+    `admin-api` 的 `adminRpc()` 由 `:219-221` 上移到 `:235-237` ⇒ ⇒ 且三处 `withDeadlineAfter` 副本**已不存在** ⇒ ⇒ 请一并订正。
+  - shared 面的踩坑档有一条**按方法名**提到 `FollowRpcClient.capByClientTimeout` ⇒ ⇒ 本轮删掉该方法后那一行**语义悬空**（不是行号悬空）⇒ ⇒ 一并转。
+---
+
+## 删副本的语义口径订正 —— 本域这一侧是「覆盖」还是「取 min」（2026-10-31 · G1 lane）
+
+- **本轮实测旧副本的实现，取证来源 = 删除前的源码**（`git show 6d04dc19^:<file>`，不是转述）：
+  - **follow-rpc 的旧副本 = 纯覆盖**：`return stub.withDeadlineAfter(capNanos, NANOSECONDS);` ⇒ **不看入站剩余**
+    ⇒ ⇒ 与 Go 的 `context.WithTimeout(ctx, 2s)`（**取更早者**）**方向相反**
+    ⇒ ⇒ ⇒ **删副本在本域这一侧 = 修漂移（把「覆盖」改成「取 min」），不是「行为等价」**
+    ⇒ ⇒ ⇒ 在「入站预算 < 2000ms」这一形态上：删前按 2000ms 走、删后按 min 走 ⇒ ⇒ **这是本轮唯一一处「行为变了」的形态**
+  - **共享层那份 = 取 min**：出向拦截器的 `budgetNanos` = min(入向剩余 · cap · 既有 CallOptions 剩余)
+    ⇒ ⇒ 与 Go 的 `context.WithTimeout` **逐字同形** ⇒ ⇒ 且 `capMillis = 0` = **不启用**（⇒ 「cap=0 负控」的语义是确定的，不是歧义）
+  - **覆盖面没扩大**：follow-rpc 只有 **1 个**出向 stub（`@GrpcClient("user-rpc")` 一个注入点）⇒ ⇒ 共享层的 channel 级拦截器覆盖的**正是**旧副本覆盖的那一个 ⇒ ⇒ 「承担者换了」这半成立
+- **⚠️ 口径订正（承 G4 之问）**：「**上界一直都在，变的只是由谁承担**」这句 ——
+  **在 user-api / admin-api 上成立**（那两处的旧副本**自带** `Math.min(remainingNanos, capNanos)` ⇒ 本来就是 min），
+  **在本域（follow-rpc）不成立**（旧副本是纯覆盖）⇒ ⇒ **引用该措辞时须逐域限定**，不要写成跨域通则。
+- **⚠️ 域侧第 ⑤ 条与共享层判据的口径差异（承 G4 之问，本 lane 的取舍）**：
+  - **两者判的不是同一件事**：域侧第 ⑤ 条判「本域 `src/main/java` 不得出现 `withDeadlineAfter` **代码行**」；
+    共享层那条例外失效检测判的是**三条件**（代码态 ＋ 该文件**自带 cap** ＋ 不是读共享层参数）⇒ ⇒ **域侧那条更严**。
+  - **本 lane 的决定 = 不改域侧第 ⑤ 条** ⇒ ⇒ 理由：**主干已把同形态的域侧门确立为全仓范式**
+    （like-rpc / like-api / message-rpc / message-api / task-api / article-rpc / comment-rpc / favorite-rpc 的
+    对应那一条措辞几乎逐字相同）⇒ ⇒ 域侧口径**统一**比「与共享层口径统一」更要紧 ⇒ ⇒ 且**当前不冲突**
+    （本域 `src/main/java` 零命中；共享层那 3 条来自删副本的失效例外待共享层剪）。
+  - **口径差异的后果（登记）**：若将来某域做「**纯预算传播**」（合法形态，但代码里仍出现 `withDeadlineAfter`）
+    ⇒ ⇒ 域侧第 ⑤ 条会红、共享层三条件判据会绿 ⇒ ⇒ **两侧会给出不同结论** ⇒ ⇒ **该分叉由共享层判据统一收口**
+    （共享层写权面）⇒ ⇒ **本 lane 不代改共享层判据，也不改域侧范式**。
