@@ -245,7 +245,10 @@ users/admin  ──▶ users/user
 ### R3 集成测试的活体依赖（服务级 · 🟢 已有 · ⚠️ 有一处 Linux-only 缺陷）
 
 - **Go 出处**：G7 —— 基础设施是真容器。
-- **Java 现状**：**126 个测试文件**（`src/test/**` 里引用 testcontainers 的文件数）直接 `new PostgreSQLContainer/GenericContainer` 且**不探测 Docker 可用性**；
+- **Java 现状**：**126 个测试文件**直接 `new PostgreSQLContainer/GenericContainer` 且**不探测 Docker 可用性**
+  （口径 = `grep -rlE 'new (PostgreSQLContainer|GenericContainer)' --include=*.java service/ | grep '/src/test/'`，
+  实测 2026-10-31 = **126**；⚠️ 相邻口径数值不同 ⇒ **别混用**：「src/test 下任意提及 `testcontainers`」= **125**、
+  「提及 `org.testcontainers`」= **124**、「含 `@Testcontainers`/`@Container`」= **114**）；
   镜像为裸名（`postgres:16-alpine` / `redis:7-alpine` / `apache/kafka:3.7.2`）。
 - **判定标准**：CI 提供**Docker API 可达**的守护进程（DinD）+ **固定端口段**（避免与 OS 临时端口段 49152–65535 相撞）
   + 镜像可从镜像源拉到。

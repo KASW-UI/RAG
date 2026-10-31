@@ -151,7 +151,7 @@ get repo (trigger: true)   ← git 资源，paths 过滤 ⇒ 只在相关改动�
 |---|---|---|
 | 源码获取 | 从 `https://github.com/KASW-UI/RAG.git` 的 `do-my-own-gh` 分支取代码 | 公开 HTTPS ⇒ **YAML 里零密钥**；`paths` 过滤 ⇒ 版本明确（每个资源版本 = 一个 commit） |
 | 变更判断 | 由 `git` 资源的 `paths` 在**资源层**完成 ⇒ 不触发的域连 build 都不排 | 不是"进 job 再判断"，是"根本不产生版本" |
-| 环境准备 | DinD：任务容器（privileged）里起内层 `dockerd` ⇒ 再在内层 daemon 上跑嵌套构建容器 | 本仓 128 个测试文件直接起 Testcontainers 容器，任务容器里必须有 Docker；而 Concourse 8 的 task 配置**没有**挂载声明项 ⇒ wormhole 走不通 ⇒ 只能用 DinD |
+| 环境准备 | DinD：任务容器（privileged）里起内层 `dockerd` ⇒ 再在内层 daemon 上跑嵌套构建容器 | 本仓 **126** 个测试文件直接起 Testcontainers 容器（口径 = `grep -rlE 'new (PostgreSQLContainer\|GenericContainer)' --include=*.java service/ \| grep '/src/test/'`，实测 2026-10-31），任务容器里必须有 Docker；而 Concourse 8 的 task 配置**没有**挂载声明项 ⇒ wormhole 走不通 ⇒ 只能用 DinD |
 | 构建 | `mvn -pl <本域模块> -am -DskipTests package` | `-am` **必须带**：跨模块依赖是 reactor 内 SNAPSHOT，不带 `-am` 会拿到 `~/.m2` 里的**陈旧** jar（本仓 `*SharedLayerArtifactFreshnessGateTest` 就在守这条） |
 | 测试 | `mvn -pl <本域模块> -am test` | 同上；`-am` 会连带跑依赖模块的测试 —— 已知代价，理由见 `ci/scripts/test.sh` |
 | 静态守门 | 9 个复用本仓已有资产（`tools/difftest/`）+ 1 个 CI 自带（`ci/scripts/check-pom-parent-relativepath.py`）+ **1 个契约门**（`ci/scripts/check-proto-contract.py`，R4）+ `check-jar-executable.sh`（按域传模块目录） | 前 9 个不新造检查；第 9 个是 CI 实战抓出缺陷后补的（见 `ci/DELIVERY.md` §六.2）；**R4 契约门**是纯文本秒级 ⇒ 属快速门禁 ⇒ 每条域流水线都跑一遍 |
