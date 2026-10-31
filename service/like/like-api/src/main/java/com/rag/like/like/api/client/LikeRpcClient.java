@@ -1,12 +1,9 @@
 package com.rag.like.like.api.client;
 
-import com.rag.common.observability.GoStyleRequestDeadline;
-import com.rag.like.like.api.config.LikeApiProperties;
 import com.rag.like.like.proto.LikeServiceGrpc;
 import net.devh.boot.grpc.client.inject.GrpcClient;
 import org.springframework.stereotype.Component;
 
-import java.util.concurrent.TimeUnit;
 
 /**
  * like-rpc gRPC client —— 持有 {@code LikeServiceBlockingStub}。
@@ -80,85 +77,51 @@ public class LikeRpcClient {
     @GrpcClient("like-rpc")
     private LikeServiceGrpc.LikeServiceBlockingStub likeServiceBlockingStub;
 
-    private final LikeApiProperties properties;
-
-    public LikeRpcClient(LikeApiProperties properties) {
-        this.properties = properties;
+    public LikeRpcClient() {
+        // ⚠️ 2026-10-31（P2-T04 · G2 lane）：域侧**不再自己算**客户端上界
+        // ⇒ ⇒ 不再需要 LikeApiProperties（cap 真值由 yml 的
+        // rag.protection.outbound-deadline.cap-millis 持有 ⇒ 见 likeRpc() 的 javadoc）
     }
 
     /**
-     * 返回<b>已套上「单次调用上界 + 请求级剩余预算」双重 deadline</b> 的 stub。
+     * 返回<b>出向 stub</b>（<b>本类不再自己套 deadline</b>）。
      *
-     * <p>⚠️ 刻意在<b>这个出口</b>统一套，而不是让 6 个 Service 各写一次：
-     * Go 侧靠 {@code r.WithContext(ctx)}（timeouthandler.go:68）把 deadline 传进
-     * <b>全部</b>下游调用，RAG 侧唯一等价的位置就是这个 getter ——
-     * 所有调用点都经由 {@code likeRpc()}，改一处即全覆盖，漏一处就是一个「有时有 deadline、
-     * 有时没有」的不一致（§3.3）。
+     * <h2>🔴 2026-10-31（P2-T04 · G2 lane）：单次调用上界已下沉共享层</h2>
+     * <p>原先本 getter 自己算 {@code min(单次上界 2000ms, HTTP 剩余预算)} 并套到 stub 上
+     * ⇒ ⇒ 那是<b>域侧的第二份上界实现</b>（副本）⇒ ⇒ 现在<b>删掉</b>，理由两条：
+     * <ul>
+     *   <li><b>副本把上界写死在 {@code CallOptions} 里</b> ⇒ 共享层再对它取 min
+     *       ⇒ ⇒ <b>min 只压小、不压大</b> ⇒ ⇒ 「想放宽上界」会被副本压回 2000ms
+     *       ⇒ ⇒ 「上界可 env 覆盖」在<b>放宽方向</b>上被架空；</li>
+     *   <li><b>共享层已在同一个位置做同样的事</b>：{@code GoStyleOutboundDeadlineInterceptor}
+     *       带 devh 的 {@code @GrpcGlobalClientInterceptor} ⇒ ⇒ 装在<b>每个</b>出向 devh 调用上
+     *       ⇒ ⇒ 与调用点无关 ⇒ ⇒ 其 {@code effectiveCallOptions} 取
+     *       <b>min(入向剩余纳秒, 客户端硬上界 cap-millis, 调用点自带 deadline)</b>
+     *       ⇒ ⇒ <b>入向预算的传播一并由它承担</b> ⇒ ⇒ 删掉本方法的内联后<b>传播不丢</b>
+     *       （且它用<b>纳秒</b>精度，比原先域侧的毫秒精度更贴近 Go 的 ctx）。</li>
+     * </ul>
      *
-     * <h2>🔴 为什么是 {@code min(单次上界, HTTP 剩余预算)}（DRIFT-LIKEAPI-017）</h2>
+     * <p>⇒ ⇒ <b>Go 出处（形态同构）</b>：{@code go-zero@v1.10.2/zrpc/config.go:31}
+     * {@code Timeout int64 json:",default=2000"} ⇒ {@code go-zero@v1.10.2/zrpc/client.go:70-71}
+     * {@code if c.Timeout > 0 { opts = append(opts, WithTimeout(2000ms)) }}
+     * ⇒ ⇒ Go 把上界加在<b>client 的 CallOptions</b> 上（⇒ 每个出向调用都带）
+     * ⇒ ⇒ 与共享层拦截器<b>同位置同语义</b>。
+     * <p>⇒ ⇒ 本域只配参数：{@code rag.protection.outbound-deadline.cap-millis=2000}
+     * （{@code service/like/like-api/src/main/resources/application.yml} 的 {@code rag.protection} 段）
+     * ⇒ ⇒ env 可覆盖，且各域独立（与 Go 的 {@code RpcClientConf.Timeout} 同为域级字段）。
      *
-     * <p>Go 侧有<b>两个独立旋钮</b>，缺一不可：
-     * <ol>
-     *   <li><b>HTTP 总预算 3000ms</b> ——
-     *       {@code service/common/observability/http.go:53}
-     *       {@code ctx, cancel := context.WithTimeout(r.Context(), timeout)}（timeout 来自
-     *       {@code rest/config.go:55} 的 {@code Timeout int64 json:",default=3000"}）。
-     *       RAG 侧的等价物是 {@link GoStyleRequestDeadline}（ThreadLocal 载体）。</li>
-     *   <li><b>单次 RPC 上界 2000ms</b> ——
-     *       {@code zrpc/config.go:31} {@code Timeout int64 json:",default=2000"}
-     *       → {@code zrpc/client.go:70-71} {@code WithTimeout(2000ms)}
-     *       → {@code zrpc/internal/clientinterceptors/timeoutinterceptor.go:25}
-     *       {@code ctx, cancel := context.WithTimeout(ctx, t)}。</li>
-     * </ol>
+     * <h2>为什么「所有调用点都经由 {@code likeRpc()}」这件事仍然重要</h2>
+     * <p>Go 侧靠 {@code r.WithContext(ctx)}（timeouthandler.go:68）把 deadline 传进
+     * <b>全部</b>下游调用；RAG 侧的等价位置现在就是<b>共享层拦截器</b>（装在 channel 上 ⇒ 覆盖全部调用点）
+     * ⇒ ⇒ 本 getter 的职责退化为「<b>取 stub</b>」，deadline 由通道统一施加
+     * ⇒ ⇒ 漏一处调用点的风险从「有时有 deadline、有时没有」降为「<b>不可能</b>漏」。
      *
-     * <p>Go 的 {@code context.WithTimeout(parent, 2s)} 在「父 ctx 已有更早 deadline」时
-     * <b>取更早者</b>（Go {@code WithDeadline} 语义）⇒ 实际有效值 =
-     * {@code min(2000ms, 3000ms − 已耗时)}。
-     *
-     * <p>⚠️ <b>修之前的漂移</b>：RAG 只套了第 ① 个旋钮（HTTP 剩余预算，≤3000ms），
-     * <b>第 ② 个旋钮完全缺失</b> ⇒ 下游耗时落在 <b>2s ~ 3s</b> 这一段时
-     * Go 返 {@code DEADLINE_EXCEEDED}（⇒ {@code 200 + 5001}）而 RAG <b>成功返回</b>。
-     * 另外「无 HTTP 预算」时 Go 的有效值仍是<b>纯 2s</b>，而 RAG 原来是<b>完全没有 deadline</b> ——
-     * 那是同一处缺陷的第二个面。
-     *
-     * <h2>⚠️ 为什么不再用 {@link GoStyleRequestDeadline#applyTo}</h2>
-     *
-     * <p>{@code applyTo(stub)} 的语义是「把<b>当前线程的剩余预算</b>原样套到 stub 上」，
-     * 它<b>没有「上界」这个概念</b> ⇒ 用它就拿不到 {@code min} 的第二个操作数。
-     * 而 {@code GoStyleRequestDeadline} 的<b>公开</b> API 已经有
-     * {@link GoStyleRequestDeadline#isPresent()} 与
-     * {@link GoStyleRequestDeadline#remainingMillis()} ⇒
-     * <b>只读</b>这两个方法就能拿到剩余预算，<b>不需要改 common</b>
-     * （2026-10-23 第五轮更正了台账里「需连带审 common 的 deadline 组件」的错误断言）。
-     *
-     * <h2>⚠️ 两处精度取舍（必须随结论一起读）</h2>
-     * <ol>
-     *   <li><b>ms 粒度</b>：{@code remainingMillis()} 是毫秒精度（Go 的 ctx 是纳秒）。
-     *       ⇒ 有效值与 Go 最多差 <b>&lt; 1ms</b>，两侧在同一个毫秒窗口内都会以
-     *       {@code DEADLINE_EXCEEDED} 收场 ⇒ <b>不可观察</b>。</li>
-     *   <li><b>1ns 下限</b>：预算耗尽时 {@code remainingMillis()} 返回 {@code 0}，
-     *       这里取 {@code max(1ns, …)} ⇒ 与 {@code GoStyleRequestDeadline.applyTo}
-     *       的「预算耗尽 ⇒ 给 1 纳秒而不是原样返回」<b>同款</b>：
-     *       Go 侧 ctx 到期时下游调用会立刻失败，若此刻「原样返回」（= 没有 deadline）
-     *       就会变成一次「没有 deadline 的慢调用」—— 那正是要修的那个漂移。</li>
-     * </ol>
-     *
-     * <p>⚠️ <b>不要把返回值缓存到字段上</b>：{@code withDeadlineAfter} 每次返回新实例，
-     * 缓存会把「第一次调用时的预算」固化下来，之后每个请求都带着过期 deadline。
+     * <p>⚠️ <b>不要把返回值缓存到字段上</b>：stub 每次取都应是<b>当前</b>实例
+     * （缓存会把「第一次调用时的状态」固化下来）。
      */
     public LikeServiceGrpc.LikeServiceBlockingStub likeRpc() {
-        // 旋钮②：单次调用上界（Go: zrpc/config.go:31 的 struct tag 默认 2000）
-        long capMillis = properties.getLikeRpc().getTimeout().toMillis();
-
-        // 旋钮①：HTTP 总预算的剩余量；-1 表示「当前线程没有请求级 deadline」
-        long remainingMillis = GoStyleRequestDeadline.remainingMillis();
-
-        // Go: context.WithTimeout(parent, 2s) 在父 deadline 更早时取更早者 ⇒ min
-        long effectiveMillis = (remainingMillis < 0L) ? capMillis : Math.min(capMillis, remainingMillis);
-
-        // 1ns 下限：预算耗尽时也要「立刻到期」，不能退化成「没有 deadline」
-        long effectiveNanos = Math.max(1L, effectiveMillis * 1_000_000L);
-
-        return likeServiceBlockingStub.withDeadlineAfter(effectiveNanos, TimeUnit.NANOSECONDS);
+        // ⚠️ 刻意**不再**在这里套 deadline ⇒ 上界与入向传播都由共享层拦截器承担
+        // （见本方法 javadoc 的「单次调用上界已下沉共享层」一节）
+        return likeServiceBlockingStub;
     }
 }

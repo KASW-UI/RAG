@@ -1,11 +1,9 @@
 package com.rag.task.task.api.client;
 
 import com.rag.task.task.proto.TaskServiceGrpc;
-import io.grpc.stub.AbstractStub;
 import net.devh.boot.grpc.client.inject.GrpcClient;
 import org.springframework.stereotype.Component;
 
-import java.util.concurrent.TimeUnit;
 
 /**
  * task-rpc gRPC client —— 对应 Go {@code api/internal/svc/servicecontext.go:22-32}：
@@ -37,6 +35,28 @@ import java.util.concurrent.TimeUnit;
  *       实现（扫到 {@code com.rag.common} 即生效）。<b>不要</b>在这里再加一个拦截器。</li>
  * </ul>
  *
+ * <h2>🔴 2026-10-31（P2-T04 · G2 lane）：单次调用上界已下沉共享层</h2>
+ * <p>原先本类自己算 {@code min(单次上界 2000ms, 请求剩余预算)} 并套到 stub 上
+ * ⇒ ⇒ 那是<b>域侧的第二份上界实现</b>（副本）⇒ ⇒ 现在<b>删掉</b>：
+ * <ul>
+ *   <li><b>副本把上界写死在 {@code CallOptions} 里</b> ⇒ 共享层再对它取 min
+ *       ⇒ ⇒ <b>min 只压小、不压大</b> ⇒ ⇒ 「想放宽上界」会被副本压回 2000ms
+ *       ⇒ ⇒ 「上界可 env 覆盖」在<b>放宽方向</b>上被架空；</li>
+ *   <li><b>共享层已在同一个位置做同样的事</b>：{@code GoStyleOutboundDeadlineInterceptor}
+ *       带 devh 的 {@code @GrpcGlobalClientInterceptor} ⇒ ⇒ 装在<b>每个</b>出向 devh 调用上
+ *       ⇒ ⇒ 与调用点无关 ⇒ ⇒ 其 {@code effectiveCallOptions} 取
+ *       <b>min(入向剩余纳秒, 客户端硬上界 cap-millis, 调用点自带 deadline)</b>
+ *       ⇒ ⇒ <b>入向预算的传播一并由它承担</b> ⇒ ⇒ 删掉后<b>传播不丢</b>
+ *       （且它用<b>纳秒</b>精度，比原先域侧的毫秒精度更贴近 Go 的 ctx）。</li>
+ * </ul>
+ * <p>⇒ ⇒ <b>Go 出处（形态同构）</b>：{@code go-zero@v1.10.2/zrpc/config.go:31}
+ * {@code Timeout int64 json:",default=2000"} ⇒ {@code go-zero@v1.10.2/zrpc/client.go:70-71}
+ * {@code if c.Timeout > 0 { opts = append(opts, WithTimeout(2000ms)) }}
+ * ⇒ ⇒ Go 把上界加在<b>client 的 CallOptions</b> 上（⇒ 每个出向调用都带）
+ * ⇒ ⇒ 与共享层拦截器<b>同位置同语义</b>。
+ * <p>⇒ ⇒ 本域只配参数：{@code rag.protection.outbound-deadline.cap-millis=2000}
+ * （{@code service/task/task-api/src/main/resources/application.yml} 的 {@code rag.protection} 段）。
+ *
  * <h2>⚠️ retry：Go 侧没有，禁止加</h2>
  * {@code zrpc.RpcClientConf}（{@code zrpc/config.go:24-35}）<b>没有 {@code Retries} 字段</b>
  * （注意别与 {@code zrpc.ClientConf} 混淆，后者有 Retries，但本模块用的是前者）。
@@ -62,6 +82,11 @@ public class TaskRpcClient {
 
     /**
      * Go {@code zrpc/config.go:31} 的 {@code json:",default=2000"} → 2000ms。
+     *
+     * <p>⚠️ <b>2026-10-31（P2-T04 · G2 lane）：本常量不再是运行时上界</b> ——
+     * 运行时上界由共享层的 {@code GoStyleOutboundDeadlineInterceptor} 承担
+     * （本域只配参数 {@code rag.protection.outbound-deadline.cap-millis=2000}）。
+     * ⇒ ⇒ <b>本常量仍在</b>：它是<b>断言用的期望值</b>（守门核对「yml 绑出的值 == 本常量 == 2000」）。
      */
     static final long DEFAULT_CALL_TIMEOUT_MILLIS = 2000L;
 
@@ -88,26 +113,8 @@ public class TaskRpcClient {
         com.rag.task.task.proto.GetTaskReq request = com.rag.task.task.proto.GetTaskReq.newBuilder()
                 .setUserId(userId)
                 .build();
-        return withDeadline(taskServiceBlockingStub).getTask(request);
-    }
-
-    /**
-     * 套上「min(2s, 请求剩余预算)」的 deadline。
-     *
-     * <p>⚠️ <b>返回值不可缓存到字段</b>：{@code withDeadlineAfter} 每次返回新实例，
-     * 缓存会把「第一次调用时的预算」固化下来，之后每个请求都带着过期 deadline。
-     *
-     * <p>⚠️ 预算已耗尽时给 <b>1ms</b>：Go 侧 ctx 一旦到期，下游调用<b>立即失败</b>；
-     * 原样返回等于发起一个「没有 deadline 的慢调用」，那正是本方法要避免的漂移。
-     *
-     * @param stub 任意 grpc blocking stub
-     */
-    static <T extends AbstractStub<T>> T withDeadline(T stub) {
-        long remaining = com.rag.common.observability.GoStyleRequestDeadline.remainingMillis();
-        long budget = remaining < 0
-                ? DEFAULT_CALL_TIMEOUT_MILLIS
-                : Math.min(DEFAULT_CALL_TIMEOUT_MILLIS, remaining);
-        return stub.withDeadlineAfter(Math.max(1L, budget), TimeUnit.MILLISECONDS);
+        // ⚠️ 刻意**不再**在这里套 deadline ⇒ 上界与入向传播都由共享层拦截器承担
+        return taskServiceBlockingStub.getTask(request);
     }
 
     /** 仅供测试注入捕获型 stub（package-private，非生产 API）。 */
