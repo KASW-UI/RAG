@@ -26,7 +26,7 @@ import org.springframework.stereotype.Component;
  * <p><b>⚠️ retry / breaker 与 {@code ArticleRpcClient} 同款</b>：Go 侧无 retry；
  * breaker 由 {@code com.rag.common.protection} 统一提供，不在此重复实现。
  *
- * <h2>🆕 2026-11-02 · G3 lane：域侧内联副本<b>已剪除</b>（上界改由共享层承担）</h2>
+ * <h2>🆕 2026-11-01 · G3 lane：域侧内联副本<b>已剪除</b>（上界改由共享层承担）</h2>
  * <p>本类此前<b>自带</b>一份「客户端硬上界」副本：{@code min(请求剩余预算, 2s)}
  * + 一个域侧私有常量 ⇒ ⇒ 那是<b>第二个上界来源</b> ⇒ ⇒ 与共享层「唯一实现」
  * 的形态冲突（共享层棘轮 {@code GoStyleClientCallTimeoutSingleSourceGateTest}
