@@ -66,10 +66,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   <tr><td>共享层唯一实现</td><td>{@code getOutboundDeadline().getCapMillis()}（共享层参数）</td><td>✅ 合法</td></tr>
  *   <tr><td>纯预算传播</td><td><b>无 cap</b></td><td>✅ 合法</td></tr>
  * </table>
- * ⇒ ⇒ <b>为什么不能按「有没有 cap」判</b>：实测 <b>api 侧的 5 处「合法传播」（article-api / comment-api /
- * hot-api / like-api / task-api）其实也自算 cap</b>（{@code Math.min(DEFAULT_CALL_TIMEOUT_MILLIS, remaining)}）
+ * ⇒ ⇒ <b>为什么不能按「有没有 cap」判</b>：实测 <b>api 侧那些「合法传播」点位其实也自算 cap</b>
+ * （{@code Math.min(DEFAULT_CALL_TIMEOUT_MILLIS, remaining)}）—— 逐点清单见下方<b>点位级例外集</b>
  * ⇒ ⇒ 它们与「副本」在<b>形态上同形</b> ⇒ ⇒ 唯一能分开的是<b>cap 的来源</b> ⇒ ⇒
- * <b>⚠️ 但「来源」判据本身有代价</b>：那 5 处拿到的是<b>域侧私有常量</b> ⇒ ⇒ 它们<b>也会被 ④ 判红</b>
+ * <b>⚠️ 但「来源」判据本身有代价</b>：那些点位拿到的是<b>域侧私有常量</b> ⇒ ⇒ 它们<b>也会被 ④ 判红</b>
  * ⇒ ⇒ 本守门按<b>棘轮</b>形态处理（<b>点位级</b>例外集，见下）。
  *
  * <h3>④ 的例外集为什么是<b>点位级</b>（不是文件级）</h3>
