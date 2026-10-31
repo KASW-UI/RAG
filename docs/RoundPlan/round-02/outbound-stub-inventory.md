@@ -6,15 +6,15 @@
 
 - **出向 stub 提供者** = **21 个类**
 - **三态分布** = ① 走统一载体 **7** · ② 手搓 remaining **1** · ③ 裸 stub **13**（自检：①+②+③ == 总数 ⇒ ✅）
-- **零上界类** = **1**（service/article/article-api/src/main/java/com/rag/article/article/api/client/ArticleRpcClient.java:18）
+- **零上界类** = **0**
 - ⚠️ **形态轴 ≠ 上界轴**：形态①（走 `applyTo`）**只注入入向预算**，**不含** Go 的 2s 客户端上界 ⇒ ⇒ 一个类可以「有载体」却**零上界**。
 
 ## 一、全表
 
 | # | 模块 | 文件:行号 | `@GrpcClient` 目标 | 形态 | 硬上界来源 | 硬上界? | 调用点数 | Go 对照（Timeout） |
 |---|---|---|---|---|---|---|---|---|
-| 1 | `article/article-api` | `service/article/article-api/src/main/java/com/rag/article/article/api/client/ArticleRpcClient.java:18` | `article-rpc` | ① 走统一载体 | **无** | 🔴 否 | 9 | `article-rpc` = **70000ms**（service/article/api/etc/article-api.yaml:12） |
-| 2 | `article/article-api` | `service/article/article-api/src/main/java/com/rag/article/article/api/client/UserRpcClient.java:60` | `user-rpc` | ② 手搓 remaining | 本地 min cap | ✅ | 1 | `user-rpc` = **2000ms**（go-zero@v1.10.0/zrpc/config.go:31（Go yaml 无 `UserRpcConf` 段 ⇒ 走默认）） |
+| 1 | `article/article-api` | `service/article/article-api/src/main/java/com/rag/article/article/api/client/ArticleRpcClient.java:18` | `article-rpc` | ① 走统一载体 | 共享层 per-service cap（按下游服务分档 · article.ArticleService=70000ms） | ✅ | 9 | `article-rpc` = **70000ms**（service/article/api/etc/article-api.yaml:12） |
+| 2 | `article/article-api` | `service/article/article-api/src/main/java/com/rag/article/article/api/client/UserRpcClient.java:60` | `user-rpc` | ② 手搓 remaining | 本地 min cap · 共享层 per-service cap（按下游服务分档 · user.UserService=2000ms） | ✅ | 1 | `user-rpc` = **2000ms**（go-zero@v1.10.0/zrpc/config.go:31（Go yaml 无 `UserRpcConf` 段 ⇒ 走默认）） |
 | 3 | `article/article-rpc` | `service/article/article-rpc/src/main/java/com/rag/article/article/rpc/client/MessageRpcClient.java:53` | `message-rpc` | ③ 裸 stub | 共享层 cap-millis=2000 | ✅ | 0 | `message-rpc` = **2000ms**（go-zero@v1.10.0/zrpc/config.go:31（Go yaml 无 `MessageRpcConf` 段 ⇒ 走默认）） |
 | 4 | `comment/comment-api` | `service/comment/comment-api/src/main/java/com/rag/comment/comment/api/client/CommentRpcClient.java:23` | `comment-rpc` | ③ 裸 stub | 共享层 cap-millis=${COMMENT_API_OUTBOUND_DEADLINE_CAP_MILLIS:2000} | ✅ | 7 | `comment-rpc` = **2000ms**（go-zero@v1.10.0/zrpc/config.go:31（Go yaml 无 `CommentRpcConf` 段 ⇒ 走默认）） |
 | 5 | `comment/comment-rpc` | `service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/client/ArticleRpcClient.java:53` | `article-rpc` | ③ 裸 stub | 共享层 cap-millis=2000 | ✅ | 0 | `article-rpc` = **2000ms**（go-zero@v1.10.0/zrpc/config.go:31（Go yaml 无 `ArticleRpcConf` 段 ⇒ 走默认）） |
@@ -37,9 +37,7 @@
 
 ## 二、零上界类清单（硬上界三个来源全无）
 
-| 文件:行号 | 模块 | 形态 | Go 侧真值 | 差 |
-|---|---|---|---|---|
-| `service/article/article-api/src/main/java/com/rag/article/article/api/client/ArticleRpcClient.java:18` | `article/article-api` | ① 走统一载体 | `article-rpc` = 70000ms（service/article/api/etc/article-api.yaml:12） | Go 侧有客户端硬上界（显式或默认 2000ms）⇒ RAG 侧无 ⇒ **少了一次 min** |
+**（无）** ⇒ 全仓出向 stub 提供者均有硬上界。
 
 ## 三、Go 对照口径
 
