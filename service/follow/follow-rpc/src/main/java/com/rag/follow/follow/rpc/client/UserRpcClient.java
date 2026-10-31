@@ -61,8 +61,8 @@ public class UserRpcClient {
      * ⇒ ⇒ <b>「想放宽上界」会被副本压回 2000ms</b>（{@code FOLLOW_RPC_OUTBOUND_DEADLINE_CAP_MILLIS} 配得比 2000 大也不生效）
      * ⇒ ⇒ 动作②「上界可 env 覆盖」在<b>放宽方向</b>上被架空 ⇒ ⇒ 副本必删（棘轮
      * {@code GoStyleClientCallTimeoutSingleSourceGateTest}：域侧<b>只配参数</b>）。
-     * ⇒ ⇒ <b>本常量仍在</b>：它现在是<b>断言用的期望值</b>（真实值由上面的 yml 持有），守门
-     * {@code UserRpcClientDeadlineCapTest} 核对「yml 绑出的值 == 本常量 == 2000」。
+     * ⇒ ⇒ <b>本常量只是【Go 默认值的文档锚点】</b>（真实值由上面的 yml 持有）⇒ ⇒ 它<b>不参与任何行为</b>
+     * ⇒ ⇒ ⇒ 守门<b>不</b>断言它（断言一个不参与行为的数字 = 恒绿的形式断言）⇒ ⇒ 守门只断言「yml 绑出的 cap == Go 默认 2000ms」＋「出向 deadline 开关开着」。
      * <p><b>⚠️ 差异的准确边界（不要读宽）</b>：RAG 侧下游 {@code user-rpc} <b>自己</b>带服务端 2s 超时
      * （{@code service/users/user/user-rpc/src/main/resources/application.yaml:209} = {@code rpc-timeout: 2s}；
      * 接线在位由 {@code check-grpc-interceptor-wiring.py} = EXIT=0 实测确认）

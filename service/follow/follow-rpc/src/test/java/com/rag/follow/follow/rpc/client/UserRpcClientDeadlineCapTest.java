@@ -176,17 +176,17 @@ class UserRpcClientDeadlineCapTest {
     // ────────────────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("② 域 yml 绑出的 cap 必须 == Go 默认 2000ms == 域内常量（双源一致）")
-    void capBindsToGoDefaultAndMatchesDomainConstant() {
+    @DisplayName("② 域 yml 绑出的 cap 必须 == Go 默认 2000ms（绑定面）＋ 出向 deadline 开关开着")
+    void capBindsToGoDefaultAndSwitchIsOn() {
         GoStyleProtectionProperties props = domainProperties(null);
 
         assertEquals(GO_DEFAULT_CAP_MILLIS, props.getOutboundDeadline().getCapMillis(),
                 "🔴 域 yml 的 rag.protection.outbound-deadline.cap-millis 必须真的绑定到"
                         + " GoStyleProtectionProperties.OutboundDeadline#capMillis"
                         + "⇒ ⇒ 键名写错就是【配了不生效】（AGENTS.md §3.3.1）。");
-        assertEquals(GO_DEFAULT_CAP_MILLIS, UserRpcClient.CLIENT_TIMEOUT_MILLIS,
-                "🔴 域内常量（断言用期望值）与 yml 的真实值必须一致"
-                        + "⇒ ⇒ 两处必须同时改，否则就是一处漂移。");
+        // ⚠️ 2026-10-31（承 G4 反馈单）：**不再断言域内常量** ⇒ ⇒ 域侧副本已删
+        //   ⇒ 该常量**不参与任何行为** ⇒ ⇒ 断言它 = 「两个数字相等」的形式断言（恒绿）
+        //   ⇒ ⇒ 判据② 只保留真断言：yml 绑出的 cap == Go 默认 2000ms ＋ 出向 deadline 开关开着。
         assertTrue(props.getOutboundDeadline().isEnabled(),
                 "🔴 出向 deadline 传播开关默认开（Go 侧 zrpc/internal/config.go:15 的 Timeout 默认 true）"
                         + "⇒ ⇒ 本域不得把它关掉。");

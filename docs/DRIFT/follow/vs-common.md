@@ -1397,7 +1397,7 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时（`service/users/user/
 
 #### 6.4 守门 ＋ 变异实测（AGENTS.md §3.3.3）
 
-- **守门**：`service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/client/UserRpcClientDeadlineCapTest.java`（**3 条**）
+- **守门**：`service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/client/UserRpcClientDeadlineCapTest.java`（**5 条** —— 实测 `@DisplayName` 计数；原写「3 条」是扩到 5 条前的残留）
   - `clientTimeoutConstantMatchesGoDefault` —— 常量 == 2000ms（对齐 ①）
   - `capProducesRealTwoSecondDeadline` —— **真**构造 stub ＋ **真**读回 `CallOptions.getDeadline()`
   - `downstreamHangs_clientTimesOutOnItsOwnDeadline` —— **真发一次调用**：起 **in-process 真实 gRPC server**，其 `GetUser` **故意不响应** ⇒ 客户端**真的阻塞** ⇒ 只能靠**自己套的 2s deadline** 收口 ⇒ 断言 **`DEADLINE_EXCEEDED`** ＋ 耗时 ≈2s（防「秒失败」被误判成「超时生效」）＋ `@Timeout(30s)`（防变异时挂死）
@@ -1657,3 +1657,23 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时（`service/users/user/
     ⇒ ⇒ 否则那一步就会造出**真零上界**（不是「零 per-call 载体」，是**客户端硬上界没配**）。
   - **本域现状（实测）**：follow-rpc **1 个**出向 stub（`@GrpcClient("user-rpc")`）· follow-api **1 个**（`@GrpcClient("follow-rpc")`）
     ⇒ ⇒ **两个域的 yml 都已配 `cap-millis` = 2000（env 可覆盖）** ⇒ ⇒ **本域「真零上界」= 0** ⇒ ⇒ **当前合规**。
+- **🆕 判据② 的语义修复：不再断言「域内常量」**（承共享层 lane 反馈单 · 2026-10-31 · G1 lane 域侧自修）：
+  - **问题**：域侧副本删除后，`CLIENT_TIMEOUT_MILLIS` 在**生产代码已无消费者**（只剩守门判据② 引用它）
+    ⇒ ⇒ 判据② 里那条「域内常量 == yml 绑出的值」实际断言的是「**两个数字相等**」⇒ ⇒ **恒绿的形式断言**
+    ⇒ ⇒ 即「**绿测试保护了一个不参与行为的数字**」。
+  - **修法（选「保留常量 + 改判据②」，不删常量）**：判据② 去掉对域内常量的比对 ⇒ ⇒ 只保留两条**真断言**
+    （**yml 绑出的 cap == Go 默认 2000ms** ＋ **出向 deadline 开关开着**）
+    ⇒ ⇒ **常量保留**的理由：它是 **public ＋ javadoc 化**的「Go 默认值文档锚点」⇒ ⇒ 它**不参与行为**
+    ⇒ ⇒ **不该有守门断言它**；⇒ ⇒ 且**它漂移无害**（不影响行为）⇒ ⇒ 不需要守卫。
+  - **为什么不走「删常量」那条修法**：删常量会**整段行位移**（本域 2 个 client 文件各 −1 行）
+    ⇒ ⇒ 会打断**共享面**的指针 ⇒ ⇒ **跨 lane 乒乓** ⇒ ⇒ 本轮选**零位移**解法。
+  - **变异实测（follow-api，两个方向 · 直接证据）**：
+    · **M-1（yml 的 cap 默认值 2000 → 1999）** ⇒ ⇒ **2 红** = 判据②（expected 2000 but was 1999）
+      ＋ 判据①（占位符默认值必须是 2000）⇒ ⇒ **判据② 仍守行为**（配置漂移抓得住）
+    · **M-2（域内常量 2000L → 1999L）** ⇒ ⇒ **仍绿**（退出码 0）⇒ ⇒ **证明该常量已脱离断言**
+    ⇒ ⇒ 这一对变异 = 「判据② 守的是**行为**、不是那个数字」的完整证据。
+  - **本域落点**：follow-api 与 follow-rpc 两个 `*DeadlineCapTest` 的判据②（DisplayName ＋ 方法名 ＋ 断言）同步改
+    ＋ 两个 client 的常量 javadoc 同步改成「文档锚点」口径 ⇒ ⇒ **4 个文件行数全中性**
+    （`FollowRpcClient.java` 232 · follow-rpc `UserRpcClient.java` 109 · 两个测试 414 / 400）⇒ ⇒ **既有指针全部守住**。
+  - **附带订正**：`docs/DRIFT/follow/rpc.md` ＋ `docs/DRIFT/follow/vs-common.md` 里 follow-rpc 那条门
+    原写「**3 条**」⇒ ⇒ 实测 `@DisplayName` 计数 = **5 条**（扩到 5 条前的残留）⇒ ⇒ 已就地订正。

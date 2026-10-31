@@ -217,7 +217,7 @@ public class AdminRpcClient implements InitializingBean {
      * Go 由<b>客户端</b> 2s 收口（= min(剩余 3s ctx, 2s)，3s 预算见
      * {@code service/common/observability/http.go:30-34} ＋ {@code :53-56}）⇒ 200 + 1015；
      * RAG 修前<b>无客户端收口</b> ⇒ 只能等 3s HTTP 预算 ⇒ 503
-     * ⇒ ⇒ <b>形态②才是本条要修的可观察差异</b>。
+     * ⇒ ⇒ <b>形态②才是本条要修的可观察差异</b>。<p>⚠️ <b>2026-10-31 起本常量只是【Go 默认值的文档锚点】</b>：出向封顶由共享层唯一实现承担 ⇒ ⇒ 本常量<b>不参与任何行为</b> ⇒ ⇒ 守门<b>不</b>断言它（断言一个不参与行为的数字 = 恒绿的形式断言）。
      */
     public static final long CLIENT_TIMEOUT_MILLIS = 2000L;
 
