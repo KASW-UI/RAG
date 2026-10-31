@@ -473,6 +473,7 @@ mvn -o -B -DargLine=-Xmx2g --fail-at-end clean test
 ### §13.6 本轮**未做**的事（据实留档）
 
 · **未 push、未开 PR**（用户指令未授权）⇒ `upstream/do-my-own-gh` 领先 **87** 笔 · `origin` 落后 **1,139** 笔。
+  ⚠️ **【2026-11-01 05:44 实测订正 · 本层据实留档】本条已被事实取代**：`refs/remotes/upstream/do-my-own-gh` 的 reflog 出现 **`eba4e5a4 … update by push`（2026-11-01 05:44:00）** ⇒ ⇒ **upstream 已含本层的 `eba4e5a4`**（§5.2 那笔）⇒ ⇒ 本层当时的「领先 87 笔」**已过期**；**该次 push 不是本层执行的**（本层全程未运行 `git push`；`.git/hooks/` **无自定义 hook** ⇒ 非自动 hook）⇒ **推送者是外部（用户侧）**，本层**不代认领**。**PR 未开**（`gh pr list` 只有 10 月的两个历史 PR）。当前领先数 = **24 笔**（= 22 笔 `align/g4-service-common` 的旧分支 commit + 本层 `ed8cdde7` 合并笔 + `b64abd67` 台账笔）⇒ ⇒ **这两笔尚未推送** ⇒ 落点见 §13.8。
 · **未合任何新分支**（五棵 lane 内容级零待落；`g4-service-common` 裁定不合）⇒ ⇒ **「合并工作树」这一项的结论 = 零新增合并笔**。
   ⚠️ **本条已被 §13.7 取代**（用户指令「合并所有工作树」）⇒ ⇒ `g4-service-common` 已于 `ed8cdde7` 以 **`-s ours`** 记录为祖先 ⇒ **六棵全部 ahead=0** ⇒ **树逐字节零变更**。
 · **§五 的终态回归读数**：本节落笔时**协调会话那轮全量回归仍在跑**（PID 71260）⇒ ⇒ 读数见 §五（**不写预估、不写转述**）。
@@ -510,3 +511,20 @@ mvn -o -B -DargLine=-Xmx2g --fail-at-end clean test
 | **六棵工作树** | `g1` / `g2` / `g3` / `g4-ledger-close` / `ci-concourse` / **`g4-service-common`** ⇒ **全部 ahead = 0** ⇒ **零待合** |
 | ⚠️ **诚实边界** | `git diff do-my-own-gh...align/g4-service-common` **仍非空** ⇒ ⇒ **「祖先级已合」≠「该分支的旧形态内容进了主干」** ⇒ 本条的准确表述 = 「**其内容级早已被吸收 ⇒ 记录祖先关系即可，不必回退主干**」⇒ ⇒ **不得被读成「该分支的内容已被合入」** |
 | ⚠️ **留下的副作用** | 该分支的 22 笔在 `git log --first-parent` 上**不可见**（只出现在第二父链）⇒ ⇒ **审计时要用 `git log --merges` 或 `git rev-list --ancestry-path` 才看得到它** ⇒ 已在 commit message 里写明 |
+
+### §13.8 📌 推送状态的事实订正（**外部 push · 本层不代认领**）
+
+> **触发**：§13.1~§13.7 落码后实测「领先 upstream」从 **89** 掉到 **24** ⇒ ⇒ **加祖先只可能让这个数变大** ⇒ ⇒ 只能是 **upstream 那边被推了** ⇒ ⇒ 本层据实留档。
+
+| 项 | 实测 |
+|---|---|
+| **upstream ref** | `eba4e5a4`（= 本层 §5.2 那笔）· reflog = **`eba4e5a4 refs/remotes/upstream/do-my-own-gh@{2026-11-01 05:44:00}: update by push`** |
+| **本地 tip** | `b64abd67` |
+| **领先 upstream** | **24 笔** = **22**（`align/g4-service-common` 的旧分支 commit）＋ `ed8cdde7`（`-s ours` 合并笔）＋ `b64abd67`（台账笔） |
+| **PR** | **未开**（`gh pr list` 只有 10 月的两个历史 PR） |
+| **`origin`（CodeArts 镜像）** | 落后 **1,139** 笔 ⇒ **未推** |
+| **推送者** | ⚠️ **不是本层** —— 本层全程**未运行 `git push`**；`.git/hooks/` **无自定义 hook** ⇒ **非自动 hook** ⇒ ⇒ **外部（用户侧）** ⇒ **本层不代认领** |
+
+⇒ ⇒ **本层不执行 push**（「推送只在 Jason 明示时做」）⇒ ⇒ 剩余 **2 笔**留在本地 `do-my-own-gh`（`ed8cdde7` + `b64abd67`）⇒ ⇒ 需要时由 Jason 明示即可（**fast-forward 推送**，无历史改写）。
+
+⚠️ **一条通用判据（本轮新得）**：**reflog 的「update by push」只记「远端 ref 被更新」这件事，不记「是谁执行的」** ⇒ ⇒ 看到远端 ref 前进时 ⇒ ⇒ **先查本地分支 reflog（本层本轮 6 笔全是 `commit:` / `merge:`，无 `push`）+ `git reflog show upstream/…` + `.git/hooks/` 三处，再归因** ⇒ ⇒ 本层正是靠这三处定位到「不是我推的」⇒ ⇒ **别默认「远端动了 = 我推的」**。
