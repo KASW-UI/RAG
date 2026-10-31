@@ -49,7 +49,9 @@ import org.springframework.stereotype.Component;
  * </ul>
  *
  * <h2>超时 / 熔断 / retry</h2>
- * 与 {@link HotRpcClient} 同源：2s 调用 deadline 由 {@link GoStyleGrpcCallDeadline} 施加；
+ * 与 {@link HotRpcClient} 同源：<b>请求预算</b>由 {@link GoStyleGrpcCallDeadline} 传播（纯传播，不封顶），
+ * 2s 的<b>客户端上界</b>由共享层 {@code GoStyleOutboundDeadlineInterceptor} 按本域 yml 的
+ * {@code rag.protection.outbound-deadline.cap-millis} 施加；
  * client 熔断由 {@code com.rag.common.protection} 的全局拦截器承担；<b>不</b>加 retry（Go 无 Retries）。
  */
 @Component

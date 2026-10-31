@@ -198,6 +198,20 @@ rag:
     breaker:
       # Go rest/config.go:15 Middlewares.Breaker
       enabled: true
+    # ⚠️⚠️ **本组件刻意【不配】 `outbound-deadline.cap-millis`**（2026-10-31 · G3 lane 第十三轮）
+    #   ⇒ 理由 = **组件级上界表达不了本组件的两个出向方向**（Go 真值不同）：
+    #     · article-rpc 方向：Go `service/article/api/etc/article-api.yaml:12`
+    #       `ArticleRpcConf.Timeout: 70000`（**显式**）⇒ 70s
+    #     · user-rpc   方向：Go 同文件 `:20-24` 的 `UserRpcConf` 段**没有** Timeout
+    #       ⇒ 走 zrpc 的 struct tag 默认 `json:",default=2000"` ⇒ 2s
+    #   ⇒ ⇒ 共享层的 `cap-millis` 是**组件级一个值**（`@GrpcGlobalClientInterceptor`
+    #     ⇒ 装在**每个**出向调用上）⇒ ⇒ 配 2000 会把 article-rpc 方向从 70s **改严 35 倍**；
+    #     配 70000 会把 user-rpc 方向从 2s **放宽 35 倍** ⇒ ⇒ **两个值都不对**。
+    #   ⇒ ⇒ 因此本组件**保留域侧 per-direction 内联**（`UserRpcClient` 的 2000ms；
+    #     article-rpc 方向靠 `ArticleRpcClient` 继承 HTTP 70s 预算 ⇒ 与 Go 的 70000 同形）
+    #     ⇒ ⇒ **这是「组件级 cap 表达不了 per-client 真值」的已知缺口**，待共享层加
+    #     `per-client` 上界参数后再收敛（G4 反馈单 · 共享层模型缺口）。
+    #   ⇒ ⇒ ⚠️ **别在这里补一行 cap-millis: 2000**（那是把一条真漂移"配"进产品）。
 
 # =============================================================================
 # Metrics / Observability 端点

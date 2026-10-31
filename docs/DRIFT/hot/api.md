@@ -89,7 +89,7 @@ AGENTS.md §3.1 明确警告：**「不要拿『现有 RAG 代码』当对照基
 | 15 | **fatal vs best-effort 的不对称** | `logic:65-69` vs `logic:137-142` | `HotArticleQueryService.fetchTopK` / `Hydrator` | ✅ 同一套夹具双向对照 |
 | 16 | 并发窗口 **8**、按下标保序 | `logic:93,108` | 每请求 `Semaphore(8)` + 下标数组 | ✅ 并发峰值断言 `==8`；30 条乱序完成仍保序 |
 | 17 | `PublicOnly=true` / `IncrView=false` / 不带 `RequesterId` | `logic:132-136` + `_test.go:35-37` | `ArticleRpcClient` facade 硬编码 | ✅ **捕获型拦截器读真实下发的请求**（非 mock 数据层） |
-| 18 | gRPC **2s** per-call deadline | `zrpc/config.go:31` → `timeoutinterceptor.go:20-25` | `GoStyleGrpcCallDeadline`（min(2s, 请求剩余预算)） | ✅ 读真实 `CallOptions.getDeadline()` |
+| 18 | gRPC **2s** per-call deadline | `zrpc/config.go:31` → `timeoutinterceptor.go:20-25` | ⚠️ **2026-10-31 第十三轮**：上界改由**共享层** `GoStyleOutboundDeadlineInterceptor` 承担（域 yml 的 `rag.protection.outbound-deadline.cap-millis: 2000`）；域侧 `GoStyleGrpcCallDeadline` **只保留「请求预算传播」**（worker 线程看不到载体 ⇒ 必须显式传）⇒ 二者合起来 = min(2s, 请求剩余预算) | ✅ 真发调用（in-process server 挂起 ⇒ 断「有上界」与「没上界」）＋ 真 `CallOptions.getDeadline()` |
 | 19 | **不加 retry** | `zrpc.RpcClientConf` 无 `Retries` 字段 | 无 retry 配置 | ✅ 读到配置定义 |
 | 20 | client 熔断默认开启 | `zrpc/internal/config.go:14` | `com.rag.common.protection` 全局拦截器 | 🟥 **已升级为活体（第十轮）**：装配层 3 例 + **行为层 E2E**（内嵌恒返 INTERNAL 的 gRPC server ⇒ 判据是「**下游调用次数停止增长**」）⇒ 熔断**真的打开**已被坐实；变异验证变红 ✅ |
 | 21 | HTTP **3s** 超时 | `rest/config.go:55`（tag 默认，yaml 未写） | `observability.http-timeout: 3s` | 🟥 **已升级为活体（第五轮 CASE-21）**：article-rpc 睡 30s 把请求拖过 3s ⇒ 两侧**都**产出 `503 + "Request Timeout\n"`（body 逐字节同），**只差 `nosniff`**（= D14，跨域 common） |
@@ -309,7 +309,7 @@ Processing:
  8. slice：total = 过滤后长度；paginate 用 int 复现 int32 溢出
  9. GlobalResponseAdvice.beforeBodyWrite 包一层（body==null / instanceof Response 放行）
 
-External Calls: 同 Go，但 deadline 由 GoStyleGrpcCallDeadline 显式施加（ThreadLocal 不跨线程池）
+External Calls: 同 Go，但 deadline 分两段：请求预算由 GoStyleGrpcCallDeadline 显式传播（ThreadLocal 不跨线程池），2s 上界由共享层拦截器施加（2026-10-31 第十三轮）
 Result:         200 + 信封
 State Change:   无
 Side Effects:   同 5 个 Micrometer meter（名称/标签 1:1，分桶 = prometheus.DefBuckets）
@@ -394,7 +394,7 @@ Failure:    Go rpcErr != nil → FATAL；Java StatusRuntimeException → FATAL
 Does Failure Block Operation: 是（整包 5001）。article-rpc 相反：不阻断
 Side Effect: rpc_error_total{callee="hot_rpc_get_hot_articles"}
 Timeout:     Go 2s（zrpc/config.go:31 tag 默认 → timeoutinterceptor.go:25）
-             Java min(2s, 请求剩余预算)（GoStyleGrpcCallDeadline）
+             Java min(2s, 请求剩余预算) = 共享层上界（cap-millis=2000）⊗ 域侧传播（GoStyleGrpcCallDeadline，2026-10-31 第十三轮）
 Retry:       无
 ⚠️ 依赖前提：TopK=100 被下游如何解释（是否封顶、items 是否按热度降序）
    属 hot-rpc 组件，必须与 hot/rpc.md 合并判读 → 见 U7
@@ -2430,6 +2430,85 @@ java.lang.IllegalArgumentException: Request header is too large
 ⇒ 属**框架限制**（不是「RAG 偷懒」）⇒ 建议登记为**签字偏离候选**
 （`SD-2026-10-25-CAND-10`，**未签字**，见 [`docs/Intentional_Deviations/_INDEX.md`](../../Intentional_Deviations/_INDEX.md)）。
 ⚠️ 触发条件是「请求行 > 1 MiB + 4 KiB」⇒ **病态输入**，正常客户端不会碰到。
+
+## 附录 · 🔴 api 侧「客户端硬上界」：上界交给共享层，**请求预算仍由域侧传播**（2026-10-31 · G3 第十三轮）
+
+### 一、这次改了什么（**域侧**，只动本域）
+
+| 落点 | 变更前 | 变更后 |
+|---|---|---|
+| 域内传播类 `GoStyleGrpcCallDeadline` | `min(2s, 请求剩余预算)` ⇒ **自带封顶**（域侧私有常量 `DEFAULT_CALL_TIMEOUT_MILLIS`）⇒ 那是**第二个上界来源** | **只传播、不封顶**：无预算 ⇒ 原样返回；有预算 ⇒ 按剩余预算传播；预算耗尽 ⇒ 1ns（即时失败） |
+| 域 yml 的 `rag.protection.outbound-deadline` 段 | **不存在** ⇒ 共享层 `capMillis` 取默认 0 ＝ **不启用** | `cap-millis: ${HOT_API_OUTBOUND_DEADLINE_CAP_MILLIS:2000}` |
+| 域内守门 | **不存在** | **新增** `HotApiOutboundDeadlineCapGateTest`（**7 例**：配置面 2 ＋ 行为面 3 ＋ 形态面 2） |
+
+### 二、⚠️ 为什么本组件**仍需**域侧显式传播（**收敛不是「全删」**）
+
+- 本组件的补全跑在**线程池 worker**上，而 `GoStyleRequestDeadline` 是 **ThreadLocal**
+  （由 `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:324` 设在跑业务的 worker 线程上）
+  ⇒ ⇒ worker 上**读不到**载体 ⇒ ⇒ 共享层拦截器在那里**看不到**请求预算
+  ⇒ ⇒ 预算必须在**请求线程**上取一次（`HotArticleHydrator#remainingBudgetMs`，把请求的**绝对** deadline 折算成剩余毫秒）
+  ⇒ ⇒ **显式**传进来 ⇒ ⇒ 所以 `GoStyleGrpcCallDeadline` **保留**（职责收窄为「纯传播」）
+- ⇒ ⇒ 二者合起来仍是 Go 的公式：min(now+2s, 请求 deadline)
+  （Go：`service/hot/api/internal/logic/hot/getHotArticlesLogic.go:132` 的 `l.svcCtx.ArticleRpc.GetArticle(l.ctx, …)`
+  ⇒ ctx 随 goroutine 传下去 ⇒ 每次调用各自按发起时刻重算）
+- ⇒ ⇒ 该类里剩下的两条 `withDeadlineAfter` 代码行（预算耗尽 ⇒ 1ns ／ 按剩余预算传播）
+  是**同一个传播方法的两个分支** ⇒ 属共享层棘轮判据 ④ 认可的「**纯预算传播**」形态（**不是** cap）
+
+### 二、Go 侧真值（**逐条读源码**，不采信转述）
+
+| 环节 | 出处 | 内容 |
+|---|---|---|
+| 声明点 | `go-zero@v1.10.2/zrpc/config.go:31` | `Timeout int64 `json:",default=2000"`` ⇒ **默认 2000ms**（挂在 `zrpc.RpcClientConf` 上 ⇒ **按 client** 生效，不是全局一个数） |
+| 消费点 | `go-zero@v1.10.2/zrpc/client.go:70-71` | `if c.Timeout > 0 { opts = append(opts, WithTimeout(time.Duration(c.Timeout)*time.Millisecond)) }` ⇒ **每个 client 各自**取自己的 yaml／tag 值 |
+| 装配点 | `go-zero@v1.10.2/zrpc/internal/client.go:113-117` | 无条件装 `TimeoutInterceptor`（⇒ 出向调用**恒**有客户端超时，与有没有 HTTP 预算无关） |
+| 开关默认值 | `go-zero@v1.10.2/zrpc/internal/config.go:15` | `Timeout bool `json:",default=true"`` |
+| 执行点 | `go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25` | `ctx, cancel := context.WithTimeout(ctx, t)` ⇒ **取更早者**（min 语义） |
+
+### 三、装配面（**为什么域侧删掉自己那份之后，上界仍然兜得住**）
+
+- devh `grpc-client-spring-boot-starter 3.1.0.RELEASE` 的
+  `net/devh/boot/grpc/client/interceptor/AnnotationGlobalClientInterceptorConfigurer.java`
+  ⇒ `getClientInterceptorBeans()` = `applicationContext.getBeansWithAnnotation(GrpcGlobalClientInterceptor.class)`
+  ⇒ ⇒ **按 Bean 注解收集**（**不是**类路径扫描）⇒ ⇒ 共享层
+  `GoStyleOutboundDeadlineConfiguration` 产出的那个 `@Bean` 会被收进 registry ✔
+- 本域 `HotApiApplication.java:69-72`：`@SpringBootApplication(scanBasePackages = {"com.rag.hot.hot.api", "com.rag.common"})`
+  ⇒ ⇒ `com.rag.common.protection.GoStyleOutboundDeadlineConfiguration` 被扫到 ⇒ **Bean 在位** ✔
+- devh 的 channel factory 建 channel 的最后一步是 `ClientInterceptors.interceptForward(channel, interceptors)`
+  ⇒ ⇒ 全局拦截器装在 **channel** 上 ⇒ ⇒ **裸 stub 也经过它**（不需要域侧逐个调用点改造）
+- 共享层 `GoStyleOutboundDeadlineInterceptor#effectiveCallOptions`（`service/common/.../protection/GoStyleOutboundDeadlineInterceptor.java:187-220`）
+  = min(① 请求载体剩余（可见时）② `capMillis` ③ 调用点自带 deadline)
+  ⇒ ⇒ **cap 与载体无关**（`if (capMillis > 0L)` 独立成立）⇒ ⇒ 域侧那份删掉后，**上界仍由共享层兜住** ✔
+  ⇒ ⇒ 且与 Go 的 `context.WithTimeout(ctx, t)` **同形**（取更早者）
+
+### 四、本域的 Go yaml 真值（**两个方向都零 `Timeout:` 行** ⇒ 组件级上界表达得了）
+
+- `service/hot/api/etc/hotcenter.yaml:25-35` ⇒ `HotRpcConf:` 与 `ArticleRpcConf:` 两段**都**只有 `Etcd.{Hosts,Key}` ⇒ **都没有 `Timeout`**
+  ⇒ ⇒ 两个方向的生效值**都是** 2000ms ⇒ ⇒ **组件级一个 cap 表达得了**（与 `article-api` 的「两方向真值不同」正相反）
+
+### 五、守门证据（**实测**，含变异）
+
+- 绿读数：`mvn -o -B -pl service/common,service/hot/hot-api -am test -Dtest='HotApiOutboundDeadlineCapGateTest'`
+  ⇒ **7/7 绿**
+- 变异（**共享层**：把 `GoStyleOutboundDeadlineInterceptor` 的 `capMillis` 写死 0）⇒ ⇒ 本域 **2 条**转红
+  ⇒ ⇒ 症状 = 调用挂满 8s 后**返回 OK**（而不是在 2s 处 `DEADLINE_EXCEEDED`）
+  ⇒ ⇒ ⚠️ 该变异**必须带 `-am`**（否则链 `~/.m2` 旧快照 jar ⇒ 变异进不了被测链路）
+- 本域用例 ④（显式预算 300ms < cap 2000ms ⇒ 出向死在 ~300ms）⇒ ⇒ **钉的是 min，不是覆盖**
+  ⇒ ⇒ 那条同时证明「域侧那份**传播**在删掉封顶之后**仍然生效**」（= 本轮收敛没有把请求预算弄丢）
+- 🧹 **本域既有的 `ArticleRpcClientTest` 两条旧断言已改写**（它们锁的是**已删除**的域侧上界）：
+  「域 client 会自带 2s 上界」⇒ 改为「域 client **不再自带**上界（无请求预算时**不挂** deadline）＋ **两个 client 的请求预算传播规则一致**」
+  ⇒ ⇒ 「**上界**真的存在」那一半由 `HotApiOutboundDeadlineCapGateTest`（真发调用）承担 ⇒ ⇒ 两半合起来把这条轴钉住
+
+### 六、与共享层的关系（**转派 G4**）
+
+- 共享层棘轮 `service/common/src/test/java/com/rag/common/protection/GoStyleClientCallTimeoutSingleSourceGateTest.java`
+  的**点位级例外集**（`KNOWN_INLINE_CAP_CALL_SITES`）里挂着本域那一条
+  ⇒ ⇒ 本轮删除后该条目**失效** ⇒ ⇒ 按「**棘轮只能变紧，不能变松**」⇒ ⇒ 需 G4 剪掉它
+  ⇒ ⇒ ⚠️ **剪例外集与删内联必须落在同一次提交**（否则主线会红一次）
+  ⇒ ⇒ 建议 G4 把本分支合进他们分支、在同一个 merge commit 里剪 ⇒ 主线**零红窗**
+- 共享层**模型缺口**（本轮再次登记）：`cap-millis` 是**组件级一个值**
+  ⇒ ⇒ 对「同一组件内各 client 真值不同」的域（如 `article-api`：`70000` vs `2000`）**表达不了**
+  ⇒ ⇒ 建议共享层加 `rag.protection.outbound-deadline.per-client.<client-name>`
+  ⇒ ⇒ 详见 `docs/DRIFT/article/api.md` 的同款登记
 
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 

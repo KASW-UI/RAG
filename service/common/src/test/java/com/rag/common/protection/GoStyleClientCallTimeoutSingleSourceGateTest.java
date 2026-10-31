@@ -122,22 +122,17 @@ class GoStyleClientCallTimeoutSingleSourceGateTest {
             // ── 🔴 不可收敛 · 1 条（article-api · 组件内两方向真值不同 ⇒ per-direction 内联**必需** ⇒ **不许剪**）──
             //      Go article-api.yaml：ArticleRpcConf.Timeout=70000（显式）· UserRpcConf 段无 Timeout ⇒ 2000（默认）
             //      ⇒ 组件级 cap 表达不了（取 2000 ⇒ article-rpc 方向改严 35 倍；取 70000 ⇒ user-rpc 方向放宽 35 倍）
-            // ── 🟡 可收敛 · 6 条（组件内各出向方向真值相同 = 2000 ⇒ 组件级 cap 表达得了 ⇒ 域侧只配参数）──
+            // ── 🟡 可收敛 · 2 条（组件内各出向方向真值相同 = 2000 ⇒ 组件级 cap 表达得了 ⇒ 域侧只配参数）──
             //      收敛动作 = 先配 cap-millis=2000 ＋ 再删内联（**两步必须同一次提交** ⇒ 先删后忘配 = 取消上界）
+            //      ⚠️ **2026-10-31 · 已剪 4 条**（comment-api 1 · hot-api 1 · favorite-api 2）—— 域侧已收敛落码
+            //      ⇒ ⇒ **同一次提交**里「配 cap-millis ＋ 删内联 + 剪例外集」⇒ ⇒ 主线零红窗。
+            //      ⚠️ **余下 2 条（like-api / task-api）待 G2 的域侧收敛落码后剪** ⇒ ⇒ 那一次同样是「零红窗批剪」。
             "service/article/article-api/src/main/java/com/rag/article/article/api/client/"
                     + "UserRpcClient.java:withDeadlineAfter(effective, TimeUnit.MILLISECONDS);",
-            "service/comment/comment-api/src/main/java/com/rag/comment/comment/api/client/"
-                    + "CommentRpcClient.java:withDeadlineAfter(Math.max(1L, budget), TimeUnit.MILLISECONDS);",
-            "service/hot/hot-api/src/main/java/com/rag/hot/hot/api/client/"
-                    + "GoStyleGrpcCallDeadline.java:withDeadlineAfter(Math.max(1L, budget), TimeUnit.MILLISECONDS);",
             "service/like/like-api/src/main/java/com/rag/like/like/api/client/"
                     + "LikeRpcClient.java:withDeadlineAfter(effectiveNanos, TimeUnit.NANOSECONDS);",
             "service/task/task-api/src/main/java/com/rag/task/task/api/client/"
-                    + "TaskRpcClient.java:withDeadlineAfter(Math.max(1L, budget), TimeUnit.MILLISECONDS);",
-            "service/favorite/favorite-api/src/main/java/com/rag/favorite/favorite/api/client/"
-                    + "FavoriteRpcClient.java:withDeadlineAfter(1L, TimeUnit.NANOSECONDS);",
-            "service/favorite/favorite-api/src/main/java/com/rag/favorite/favorite/api/client/"
-                    + "FavoriteRpcClient.java:withDeadlineAfter(Math.min(remainingNanos, capNanos), TimeUnit.NANOSECONDS);");
+                    + "TaskRpcClient.java:withDeadlineAfter(Math.max(1L, budget), TimeUnit.MILLISECONDS);");
 
     /**
      * <b>域侧私有 cap 的两种来源形态</b>（代码态 ⇒ 注释与字符串字面量不算）。
