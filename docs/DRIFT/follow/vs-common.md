@@ -1334,7 +1334,7 @@ git diff --stat -- service/ # ⇒ 0 行
 
 | 编号 | follow 域的落点 | 共享层根因 | 本轮动作 |
 |---|---|---|---|
-| ✅ **`E65`**（**本体已闭合** · 2026-10-30 双侧活体逐键相等）⚠️ **【2026-10-31 订正】** 原判「**A 类**」**已过期**（权威行 = `docs/DRIFT/global/_README.md:430`「**E65 已闭合**」；另见主干 `5fc15de6`「把挂靠点从已闭合的 E65 解绑、改挂 `X-6` 轴②」）⇒ ⇒ **本域不因 E65 领新条目**；另有一条**独立**残余轴 = 客户端硬上界 2000ms ⇒ 归 `P2-T04`（域侧 yml）⇒ ⇒ **不与 E65 并回** | `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java:89-90` —— `userStub.getUser(...)`（**裸 stub** ⇒ 本类**不再**自己套客户端上界）⇒ 客户端硬上界改由**共享层**的出向 deadline 拦截器承担 ⇒ 域侧**只配参数** `rag.protection.outbound-deadline.cap-millis=2000`（**2026-10-31 · G1 lane · 域侧那半落码**）<br>⚠️ **【2026-10-31 订正】** 原写的 `:50` **落点一直是错的**（`:50` 是空 javadoc 行，复核者按它定位会落到 javadoc）⇒ ⇒ 已改指真实的出向调用点 `:89-90`（`:88` 是方法签名行；`6d04dc19` 删掉内联副本后，调用体上移到 `:89-90`）<br>**Go 侧对应锚点（2026-10-30 实测订正）**：`service/follow/rpc/internal/logic/helper.go:82` = `resp, err := svcCtx.UserRpc.GetUser(ctx, &userservice.GetUserReq{Uid: userID})` ⇒ **直接透传 handler 的 ctx** ⇒ 继承父 deadline | `service/common/.../RpcInterceptor.java` 的 `onHalfClose` **只绑 `DeadlineState`**、**从不绑** `GoStyleRequestDeadline` ⇒ `GoStyleRequestDeadline.applyTo`（`:110`）在 gRPC 路径是 **no-op** | 📤 **转 G4 反馈单**（**E65 本体已闭合 ⇒ 本单 2026-10-31 结案**；残余轴 = `P2-T04`，转 `docs/PhaseGoal/` 派工面）（7 项格式见 [`users/vs-common.md`](../users/vs-common.md) §3.1）⇒ ⚠️ **修法同时涉及共享层与域内代码 ⇒ `AGENTS.md` §3c「必须同一次提交」⇒ G1 不能单独改 follow-rpc 的裸 stub（会留半截）** |
+| ✅ **`E65`**（**本体已闭合** · 2026-10-30 双侧活体逐键相等）⚠️ **【2026-10-31 订正】** 原判「**A 类**」**已过期**（权威行 = `docs/DRIFT/global/_README.md:430`「**E65 已闭合**」；另见主干 `5fc15de6`「把挂靠点从已闭合的 E65 解绑、改挂 `X-6` 轴②」）⇒ ⇒ **本域不因 E65 领新条目**；另有一条**独立**残余轴 = 客户端硬上界 2000ms ⇒ 归 `P2-T04`（域侧 yml）⇒ ⇒ **不与 E65 并回** | `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java:89-90` —— `userStub.getUser(...)`（**裸 stub** ⇒ 本类**不再**自己套客户端上界）⇒ 客户端硬上界改由**共享层**的出向 deadline 拦截器承担 ⇒ 域侧**只配参数** `rag.protection.outbound-deadline.cap-millis=2000`（**2026-10-31 · G1 lane · 域侧那半落码**）<br>⚠️ **【2026-10-31 订正】** 原写的 `:50` **落点一直是错的**（**原写那版** `:50` 是空 javadoc 行 ⇒ 现已变成「Go 的出向 deadline = min(…)」那行 ⇒ 复核者按它定位会落到 javadoc）⇒ ⇒ 已改指真实的出向调用点 `:89-90`（`:88` 是方法签名行；`6d04dc19` 删掉内联副本后，调用体上移到 `:89-90`）<br>**Go 侧对应锚点（2026-10-30 实测订正）**：`service/follow/rpc/internal/logic/helper.go:82` = `resp, err := svcCtx.UserRpc.GetUser(ctx, &userservice.GetUserReq{Uid: userID})` ⇒ **直接透传 handler 的 ctx** ⇒ 继承父 deadline | `service/common/.../RpcInterceptor.java` 的 `onHalfClose` **只绑 `DeadlineState`**、**从不绑** `GoStyleRequestDeadline` ⇒ `GoStyleRequestDeadline.applyTo`（`:110`）在 gRPC 路径是 **no-op** | 📤 **转 G4 反馈单**（**E65 本体已闭合 ⇒ 本单 2026-10-31 结案**；残余轴 = `P2-T04`，转 `docs/PhaseGoal/` 派工面）（7 项格式见 [`users/vs-common.md`](../users/vs-common.md) §3.1）⇒ ⚠️ **修法同时涉及共享层与域内代码 ⇒ `AGENTS.md` §3c「必须同一次提交」⇒ G1 不能单独改 follow-rpc 的裸 stub（会留半截）** |
 | 🟡 **`E66`**（= `DRIFT-ARPC-010`） | follow 域的 Redis 调用点（与 comment / like / hot / task 同型） | 同上（`DeadlineState` / `GoStyleRequestDeadline` **都不覆盖 Redis**）⇒ **与 E65 同源** | 📤 **转 G4**（同上文件 §3.2）· **建议与 `E65` 一起立项** |
 | 🟡 **`DRIFT-ARPC-009` 残留** | follow-rpc 的拦截器链（`GoStyleRpcProtectionChain.build(...)` ⇒ 只装 recover + breaker + shedding） | `service/common/.../GoStyleRpcProtectionChain.java:126-131` 的 `compose()` **缺 Stat + Prometheus 两层** ⇒ Go zrpc 框架级**默认全装**（`zrpc/internal/config.go:20-25`） | 📤 **转 G4**（同上文件 §3.3）⇒ **落点必在共享层**（10 个 rpc 域共用）⇒ **域侧不可自修**<br>✅ **2026-10-30 14:4x · G4 已落共享层半边**（Jason 裁定「**只落 Stat 的慢调用日志**」⇒ `RpcInterceptor` 的 close 路径一行 ＋ 两个私有辅助方法，**零新依赖、不动 `Composition`** ＋ 守门 `GoStyleSlowCallLogGateTest` 真 in-process gRPC 捕获 ⇒ 变异精确转红）⇒ ⇒ **follow-rpc 一并受益（零改动）** ⇒ **Prometheus 那层按 Jason 裁定不做** ⇒ ⇒ 残留 = ① Go 的 **Info 分支**（每请求打全量 body）**刻意不落** ② Go 的 Stat 装在 **breaker/shedding 之外**、RAG 在**最内层** ⇒ **慢调用判定口径有差异** ⇒ 转派单 `G4-15b`/`G4-15c`<br>🔴 **两处前提偏差订正**：Stat **不走** Prometheus（`core/stat/metrics.go:3-18` 无 prometheus 依赖 ⇒ 进程内聚合器）＋ 慢阈值 500ms **不是** `StatConf.SlowThreshold`（真源所有 yaml 无 `Middlewares:` 块 ⇒ 恒零值 ⇒ 走全局兜底）⇒ **数值等价、机制不同** |
 
@@ -1589,7 +1589,7 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时（`service/users/user/
 - `docs/DRIFT/global/vs-common.md:46` 里「**零上界的 11 个类**」的枚举 **④ `follow-rpc/.../UserRpcClient.java:88`**（共享面原写 `:50` ⇒ 已订正为 `:88`；⚠️ 而 `:88` **又因 `6d04dc19` 删副本而悬空** —— `:88` 现是方法签名行 ⇒ ⇒ 真实落点 `:89-90` ⇒ ⇒ **再转收口执行者**）
   ⇒ ⇒ 本域这一类**已不再零上界**（本轮已配 2000ms）⇒ ⇒ 该格**已过期**。
   - ⚠️ **那一格是共享面** ⇒ ⇒ **本 lane 不能改** ⇒ ⇒ **转收口执行者订正**。
-  - ⚠️ 顺带：④ 的**落点** `:50` **一直是错的**（`:50` 是空 javadoc 行 ⇒ 复核者按它定位会落到 javadoc）
+  - ⚠️ 顺带：④ 的**落点** `:50` **一直是错的**（**原写那版** `:50` 是空 javadoc 行 ⇒ 现已变成「Go 的出向 deadline = min(…)」那行 ⇒ 复核者按它定位会落到 javadoc）
     ⇒ ⇒ 本 lane 已在**本文件**与 `docs/DRIFT/users/vs-common.md` 内就地改指真实调用点 `:89-90`；共享面那一处**同样转收口执行者**。
 
 **三、本域【未做】的（残余）—— 本轮已清空（唯一一项 = follow-api 的内联副本）**
@@ -1684,3 +1684,18 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时（`service/users/user/
   ⇒ ⇒ **零上界类数 = 1 = `article-api`（G3 面）⇒ ⇒ 本域 4 个全部 ✅**
   ⇒ ⇒ ⇒ 且**本域每个组件只有 1 个出向方向** ⇒ ⇒ **组件级 cap 表达得了**
   ⇒ ⇒ ⇒ ⇒ 「共享层缺 per-direction cap」这条**不落本域**。
+- **🆕 指针订正的判定纪律（本轮被共享层 lane 的纠正面反向印证）**：
+  - **两种形态必须分开写**：① **原写当时成立 · 事后位移**（例：follow-rpc 的常量行 `:75` ⇒ `:76`
+    ⇒ ⇒ **原写那版常量确在 `:75`** ⇒ ⇒ 是 `6d04dc19` 删副本时其 javadoc 多 1 行才下移）
+    ② **原写就错**（例：④ 枚举指的 `:50` ⇒ ⇒ **原写那版**（台账落笔那版）`:50` 就是**空 javadoc 行**
+    ⇒ ⇒ 落点从未指到目标内容）
+    ⇒ ⇒ **写「原写就错」而不核历史版本 ⇒ 就是在造一条假断言**；⇒ ⇒ 写「位移」而原写本就错 ⇒ ⇒ 又会掩盖真相。
+  - **核法**：`git show <台账落笔那版>:<file>` 取**落笔当时**的行内容 ⇒ ⇒ 再与现行文件比 ⇒ ⇒ **两版都比过才能定性**。
+- **🆕 常量保留是【显式取舍】，不是遗漏**（共享层 lane 已销「判据② 退化」那笔账，但「死代码」这个事实仍在 ⇒ ⇒ 这里把取舍写清）：
+  - **删除代价是量化的**：删常量必须**连带删掉它上面那段 Go 出处 + 语义等价论证记录块** ⇒ ⇒ 实测块长
+    **follow-api 12 行 · follow-rpc 38 行 · user-api 51 行 · admin-api 49 行** ⇒ ⇒ **行位移面 = 12~51 行 × 4 个文件**
+    ⇒ ⇒ 且那些块**下方**的共享面指针（`docs/DRIFT/global/**` 里刚被订正过的 `:89-90` / `:208-210` / `:235-237`）**全部跟着位移**
+    ⇒ ⇒ ⇒ **代价与收益完全不成比例**（收益 = 少 4 个无人消费的常量；代价 = 删 3 段 Go 出处记录 ＋ 跨 lane 指针位移）。
+  - **保留的收益**：那 4 段 javadoc 就是本域「Go 侧 zrpc 客户端超时 = 2000ms」的**唯一出处记录**（AGENTS.md §3.2 的 Go 出处留痕）
+    ⇒ ⇒ 保留它 = 保留出处；⇒ ⇒ 且它 **public ＋ javadoc 化** ⇒ ⇒ 读者一眼能看到「Go 默认 2000」与「域侧只配 cap-millis」。
+  - **现状口径**：常量**不参与任何行为**（生产消费者 = 0）⇒ ⇒ 守门**不**断言它 ⇒ ⇒ 它的漂移**无害**（不影响行为）⇒ ⇒ 不需要守卫。
