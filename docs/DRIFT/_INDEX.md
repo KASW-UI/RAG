@@ -624,3 +624,8 @@ service/task/task-rpc/…/TaskProgressUpsertParityTest
 python3 tools/ledger-derive/derive-stage1.py            # stdout 即本列读数
 python3 tools/ledger-derive/derive-stage1.py --check     # 产物与源台账同步（须 EXIT=0）
 ```
+
+⇒ 📌 **本轮（2026-11-01 收官轮）的合并记录** = [`_cross/merge-round-2026-11-01.md`](./_cross/merge-round-2026-11-01.md)
+（**四棵 lane G1~G4 + CI 的收官台账**：合并清单与实际 commit 集合 · lane 终态与核销 · 守门逐道读数 ·
+全量回归读数 · 派生层读数 · **阶段一结论**（四选项逐字对上 `docs/twoStage.md` §5.6）·
+剩余未闭合项分档（A/B/C/D ＋ 证据缺口）· 本轮三处自我订正 · 未决项清单）。
