@@ -3644,7 +3644,7 @@ RAG 侧的完整机制链（**消费点**）：
 | A/C 族（`forPort(0)` ／ `new ServerSocket(0)` 探针） | `UserApiGrpcNegotiationTest.java:101` | 已改 |
 | D 族（`RANDOM_PORT` ⇒ `DEFINED_PORT` ＋ 固定口） | `GoStyleGrpcClientBreakerE2ETest.java:123` | 已改 |
 | D 族（`RANDOM_PORT` ⇒ `DEFINED_PORT` ＋ 固定口） | `GoStyleGrpcClientBreakerE2ETest.java:123` | 已改 |
-
+> ⚠️ **本表的行号指本组件（user-api）自有那份同名测试类**（全仓 **3 份同名**：message-api · user-api · hot-api ⇒ **行号互不相同** ⇒ 裸文件名形态**不可寻址**）⇒ ⇒ 2026-11-01 逐字复核：D 族那行**至今仍精确指向 `r.add("server.port", RealTomcatPort::pick);` 本体** ⇒ ⇒ ⚠️ **别拿 message-api 那份副本算出的行号来订正这里**。
 - **危害**：`forPort(0)` / `new ServerSocket(0)` / `RANDOM_PORT` 三种写法都是**让 OS 从临时端口段（49152–65535）里盲选** ⇒ ⇒ 与 Docker 随机发布口**同段**
   ⇒ ⇒ 邻居占**更具体地址** `127.0.0.1:P` 时我方**通配绑定照样成功**（实测：两个监听者并存）⇒ ⇒ 客户端被抢 ⇒ **静默假红**（看着像被测代码炸了，其实压根没被请求到）。
 - **修法**：全部改走**域内私有** `support/RealGrpcPort`（`support/RealTomcatPort`）⇒ **段**：gRPC `22200–22209` ／ Tomcat `22210–22219`（users 域段 22200–22299 的子段）⇒ 段内挑口 ＋ **双地址 bind 探针**（只探通配**检不出**「更具体的占用者」）。
@@ -3791,3 +3791,11 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
 - **订正 1 处**：上文那条「user-rpc 的事务／并发语义不在本组件职责内」的记录里，`RAG Evidence` 写的 `UserRpcClient.java:18`
   ⇒ ⇒ **`:18` 不是那一行**（`:18` = `框架职责:`）⇒ ⇒ 真实落点 = **`:24`**（`Phase 2b 填肉阶段：可加 retry / circuit breaker / deadline propagation（DRIFT-018）`）
   ⇒ ⇒ **该行自 2026-10-19 起就在 `:24`**（`git blame` 实测 ⇒ 写台账时就指错了，**不是**后来位移的）⇒ ⇒ 已就地订正（行数不变）。
+
+### 2026-11-01 附记：「OS 盲选口」族表格的行号逐字复核（G1 lane）
+
+- **复核对象**：上面那张表里的 **D 族**那一行（`RANDOM_PORT` ⇒ `DEFINED_PORT` ＋ 固定口）。
+- **复核方法**：全仓扫同名测试类 ⇒ 定位**本组件（user-api）自有那一份** ⇒ 读该副本的对应行 ⇒ 与本表登记内容**逐字对照**。
+- **结果**：登记内容 = `r.add("server.port", RealTomcatPort::pick);` ⇒ ⇒ **至今精确成立**（2026-11-01 实测）⇒ ⇒ **本表行号不需要订正**。
+- **他域的一处订正建议不采纳**：G2 lane 的「行号位移」清单把本表列为「待就地订正」（建议减 1）⇒ ⇒ 但那个位移是在**message-api 的另一份同名副本**上算出来的（两份同名 ⇒ 行号互不相同）⇒ ⇒ **跨域同名副本串位** ⇒ ⇒ 不采纳；已在表下方写死「本表行号指 user-api 自有副本」。
+- **附带的可寻址性缺陷**：裸文件名形态 `xxxTest.java:行号` 在本仓**不可寻址**（同名多份）⇒ ⇒ 建议他域台账改用**带目录的全路径**形态（本表暂不改：改路径会动指针，属表达层微调）。

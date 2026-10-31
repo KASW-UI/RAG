@@ -268,7 +268,7 @@ Jackson 对溢出字面量**不报错**，直接按 IEEE 754 给无穷。
 > **旧号**：`PIT-LIKEAPI-008` ⇒ **新号**：`PIT-LIKE-08`
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**否** —— 「单次调用上界」已实现为 `min(固定 2000ms, 剩余预算)`，两个旋钮都在 ⇒ 触发条件消除；本轮只改 `docs/**`。
-> **依据**：`service/like/like-api/src/main/java/com/rag/like/like/api/client/LikeRpcClient.java:157`（`Math.min(capMillis, remainingMillis)`）+ `:151`（`capMillis` 取自 `properties.getLikeRpc().getTimeout()`）· 守门 `service/like/like-api/src/test/java/com/rag/like/like/api/LikeRpcTimeoutCapTest.java:233-238` ⇒ **证据强度：源码行号 + 守门在仓**。
+> **依据**：`service/like/like-api/src/main/java/com/rag/like/like/api/client/LikeRpcClient.java:157`（`Math.min(capMillis, remainingMillis)`）+ `:151`（`capMillis` 取自 `properties.getLikeRpc().getTimeout()`）· 守门 `service/like/like-api/src/test/java/com/rag/like/like/api/LikeRpcTimeoutCapTest.java:231-236` ⇒ **证据强度：源码行号 + 守门在仓**。
 
 **现象**
 「单次下游调用超时」：Go 是**固定 2000ms**，RAG 是**HTTP 超时的剩余预算（≤3000ms）**。
@@ -517,7 +517,7 @@ javap -cp <jar> <类名>                                        # 再看构造�
 > **旧号**：`PIT-LIKEAPI-015` ⇒ **新号**：`PIT-LIKE-15`
 > **核对日期**：2026-10-29
 > **是否影响当前轮次**：**是** —— `io.grpc.Deadline` 不可变、`timeRemaining(...)` 是「调用那一刻」才求值 —— **grpc-java 语义不变** ⇒ 仍生效；本轮若给 like 域写任何「服务端观测到的 deadline」断言，仍须在观测点当场取值。
-> **依据**：本域守门 `service/like/like-api/src/test/java/com/rag/like/like/api/LikeRpcTimeoutCapTest.java:233`（在观测点当场取 `remainingMillis`）⇒ **证据强度：守门在仓**。
+> **依据**：本域守门 `service/like/like-api/src/test/java/com/rag/like/like/api/LikeRpcTimeoutCapTest.java:231`（在观测点当场取 `remainingMillis`）⇒ **证据强度：守门在仓**。
 
 ### 现象
 
@@ -596,3 +596,22 @@ serverObservedRemainingMillis.set(remaining);
 
 ⇒ 这也是 §3.3.3「先改/删错误断言，再改实现」在**台账层面**的同一条纪律：
 台账里的错误断言，同样会让下一轮**重复已修项**或**跳过可修项**。
+
+---
+
+## 🆕 2026-11-01 收官轮 · 「守门行号指针」会因**上游删 import** 而集体前移（自踩自证）
+
+**现象** —— 本文件 `:271` / `:520` 的依据指针写着 `LikeRpcTimeoutCapTest.java:233` / `:233-238` ⇒ ⇒ 本轮实测该文件在 G2 lane「测试面 `import com.rag.common.*` → 全限定名」那笔落码后，**这两行已经前移到 `:231` / `:231-236`** ⇒ ⇒ **指针指向了错误的代码行**。
+
+**根因（两层）** ——
+① **直接根因** = **删 import ⇒ 其后所有行号前移** ⇒ ⇒ **凡是「按行号引用测试文件」的指针，都会在任何一次 import 清理后集体变旧**；
+② **为什么没人发现** = `check-pointer-consistency.py` 的指针正则只认**指向 `docs/{DRIFT,Pitfalls,Intentional_Deviations}/**.md`** 的指针 ⇒ ⇒ **指向 `service/**` 源码的行号指针**（本文件两处、Worktree.md 三处、grading/W29·W30 各一处…）**完全不在任何机器守门的覆盖面内** ⇒ ⇒ 只能靠人工逐条订正。
+
+**判定式（可复用）** ——
+① **按行号整体平移是错的** —— 同名测试文件在仓内常有多份拷贝（`GoStyleGrpcClientBreakerE2ETest.java` 有 **3 份**：message-api / user-api / hot-api）⇒ ⇒ 位移量**逐拷贝不同**（实测 −2 / −1 / 0）⇒ ⇒ 必须**先按内容锚点定位拷贝身份**，再在**该拷贝内**做旧→新映射；
+② **映射要逐行做内容级**（取旧版本该行内容 → 在当前文件里唯一定位），**不要按「删了几条 import」推算平移量**；
+③ **区间指针要两端都验**（本轮 `:291-310` → `:290-309` 的首尾行内容逐字比对通过才落笔）；
+④ ⇒ ⇒ **「回执说某指针要改」不等于「该指针真的指向那个文件」** —— 本轮 G2 报的 **3 处**经复核为**误报**（指向的是**未被改动**的 user-api 拷贝）⇒ ⇒ **先核拷贝身份，再改**。
+⑤ ⚠️ **「指针指向当前内容」这个前提本身要先验** —— 本层自己又踩了一次：把 `message-api` 拷贝的 U+FFFD 普查表行号按「删 import ⇒ 行号前移」改成 `:42` ⇒ ⇒ **G1 lane 独立否证并撤回** ⇒ ⇒ 实测该文件**当前 U+FFFD = 0**（坏字节**早已被 G2 修掉**）⇒ ⇒ 普查表记的是**扫描当时的历史原址** ⇒ ⇒ **这类指针不随代码平移** ⇒ ⇒ 改后的 `:42` 落在 `* </ul>`（一个**完全无关的行**）⇒ ⇒ **「按行号平移」的前提是「指针指当前内容」⇒ 而这个前提对历史快照表不成立**。
+
+**本轮处置** —— 本文件 `:271` / `:520` 两处已就地订正为 `:231-236` / `:231`（单行→单行 ⇒ 行数 **598 不变** ⇒ 零行位移）；⚠️ **全批净订正 = 5 处 · 不改 = 5 处**（G2 报 3 处 + 本层误订 2 处）⇒ ⇒ 完整清单见 [`docs/Worktree.md`](../Worktree.md) 的 **M-21**。

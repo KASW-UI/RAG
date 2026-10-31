@@ -391,7 +391,7 @@ python3 tools/difftest/check-wave-lane-ownership.py     # ⇒ EXIT=0 是收口�
 | **切法** | **按「叶子文件」切**，⛔ 不是按议题切 —— 议题会跨文件（`CD-4` 同时碰 like/comment/common），**文件才是不冲突的单位** |
 | **基线** | lane **从 `align/global` 的 HEAD 切**（⛔ 不是 `do-my-own-gh`）⇒ 否则看不到该域已完成的轮次，等于重做 |
 | **写权** | 每条 lane 只写自己任务书里的**白名单文件** ⇒ **文件级零重叠** ⇒ 永不冲突 |
-| **共享文件** | lane ⛔ 不写 `AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / 4 个规范台账文件 ⇒ **合并收口执行者在合并后统一更新** |
+| **共享文件** | lane ⛔ 不写 `AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / 4 个规范台账文件 / **`docs/PhaseGoal-judge.md` ＋ `docs/PhaseGoal/**`** ⇒ **合并收口执行者在合并后统一更新** |
 | **lane 台账** | lane 的论证写进 **`docs/DRIFT/global/lanes/<lane>.md`**（自足片段）⇒ 避免 5 个人抢 4 个大文件 |
 | **禁区** | **`favorite` 域对 `global` 零写权**（代码 + 配置 + 测试 + 台账，一律零改动） |
 
@@ -413,7 +413,7 @@ python3 tools/difftest/check-wave-lane-ownership.py     # ⇒ EXIT=0 是收口�
 | **写权** | ✅ 各自表里那个面；🔴 **`service/common/**` + `service/users/users-common/**` 只读** —— 只有 `align/g4-service-common` 能写 |
 | **顺序** | **域波 G1 → G2 → G3**（契约 DAG 定序 = **合并收口序**）—— ⚠️ 但 **G1/G2/G3 三棵是并行跑的，不是串行**；**G4 不在域波顺序里** —— 它是**常设的共享层执行者**，**随时**接收反馈单并落码，**并行、不阻塞** |
 | **lane 台账** | **`docs/DRIFT/<域>/vs-common.md`**（**按域各一份** ⇒ 跨树**文件级零重叠**，不必抢同一个大文件） |
-| **共享面** | 工作树 ⛔ 不写 `AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/Worktree.md` ⇒ **合并收口执行者在合并后统一更新** |
+| **共享面** | 工作树 ⛔ 不写 `AGENTS.md` / 三个 `_INDEX.md` / `_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/Worktree.md` / **`docs/PhaseGoal-judge.md` ＋ `docs/PhaseGoal/**`** ⇒ **合并收口执行者在合并后统一更新** |
 | **交付物** | **9 条机制面轴（A1~A9）**的**本域侧**逐轴结论（✅/🔴/🟡 ＋ **证据强度** ＋ **核对日期**）＋ **两侧同时跑**的探针（§3.3：只跑 RAG 的探针**不算数**） |
 | **派单** | 发现共享层缺陷 ⇒ 本域**只登记**（**反馈单 7 项**，§5.3e）⇒ **转派 G4**；**域侧能自修的域侧修** ⇒ 不甩单、不留半截 |
 | **G4 反馈链** | G1/G2/G3 遇到 **`users-common` / `service/common` 引起的问题** ⇒ **发消息给 G4**（**反馈单 7 项**）⇒ G4 **执行落码** + **回执**；🔴 **G1/G2/G3 三棵都没反馈 ⇒ G4 就没有活干**（standby 等单）⇒ ⚡ **G4 可开子会话并行加速，上限 10 个**（共享层落码**按文件切** ⇒ 零重叠；**先于 G1 就位 standby**、**落码窗口常开**） |
@@ -444,7 +444,7 @@ python3 tools/difftest/check-wave-lane-ownership.py     # ⇒ EXIT=0 是收口�
 
 | 角色 | 负责 | ⛔ 不负责 |
 |---|---|---|
-| **合并收口执行者** | 在**合并收口**这一步统一更新共享面：`AGENTS.md` / 三个 `_INDEX.md` / `docs/DRIFT/_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/Worktree.md` / `tools/difftest/README.md` | ——（**它是一个步骤，不是一个常驻会话** ⇒ **没有**任何一个会话长期占着这个位置） |
+| **合并收口执行者** | 在**合并收口**这一步统一更新共享面：`AGENTS.md` / 三个 `_INDEX.md` / `docs/DRIFT/_MANIFEST.json` / `docs/DRIFT/_cross/**` / `docs/Worktree.md` / `tools/difftest/README.md` / **`docs/PhaseGoal-judge.md` ＋ `docs/PhaseGoal/**`**（🆕 2026-11-01 收官轮补登记 —— 见下） | ——（**它是一个步骤，不是一个常驻会话** ⇒ **没有**任何一个会话长期占着这个位置） |
 | **G4**（`align/g4-service-common`） | **常设的共享层执行者** ⇒ `service/common/**` + `service/users/users-common/**` 的**代码**落码 + 接反馈单执行 | 共享索引类文件（那是合并收口执行者的） |
 | **域波 lane**（G1 / G2 / G3） | 自己域的 9 轴结论 + **域侧能自修的域侧修** | 共享层代码（**只登记反馈单转派 G4**）· 共享索引类文件 |
 | **运行时故障处置**（**临时角色**） | 只在 lane 出现 runtime 故障时解封：`agent configuration missing` / 队列暂停 / 会话卡 409 | **lane 的任务 · 落码 · 台账 · 跨 lane 协调 · 共享面内容 · 合并收口** |
@@ -560,6 +560,7 @@ Go 侧边界是 api→rpc，rpc 没验对就先验 api，产出的是「RAG api 
 | **M-18** | ✅ **G4 跨会话消息的核销：无需合并**（2026-10-31 合并收口执行者落码）—— 它报的「待叠 6 笔」**实测 7/7 全在主干** ⇒ ⇒ 零待叠 | ⚠️ **背景**：G4 lane 发来一条跨会话消息，报「本层已把主干合了两轮」＋「相对主干的独有 = `bd916837` ＋ `2691f847` ＋ `50ce795d` ＋ 3 个 merge commit ⇒ ⇒ 叠的时候注意 `:46` 那块」⇒ ⇒ **若照此去「补合并」⇒ ⇒ 会重复合并 / 造冲突** ⇒ ⇒ 故必须核销并留痕 | ✅ **已核（逐条自跑，不采信转述）**：① `git merge-base --is-ancestor` 逐个核 ⇒ **7/7 全部已在主干** ⇒ ⇒ **零待叠**；② `git worktree list` 实测 `g4-ledger-close` 的 HEAD = **`7d419ca0`**（16:22）⇒ ⇒ 它消息里的 HEAD（`50ce795d`）**已过期**；③ ⚠️ **`50ce795d` 的 message 自述是「G1 第二波落码」** ⇒ ⇒ **它把分支上 G1 的 commit 当成了自己的** ⇒ ⇒ 「**分支上有的 ≠ 本层产出的**」；④ **16:40 后该工作树无任何文件写入** ⇒ ⇒ **G4 已停摆** | **它消息里的实质内容全部已在主干**（逐条落到行号核过）：§4.19.31→§4.19.34 的重编号处置在 `:7086` · 「零上界」组件级 0 在 `:6868` · 方向级 1 在 `:7086` · 两口径并存标注在 `:7163` · per-direction 需求面收窄在 `:7437` ⇒ ⇒ **不重复登记**（明细见 `docs/DRIFT/global/vs-common.md` **§4.19.43**）⇒ ⇒ ⚠️ **「共享层缺 per-direction cap」仍待授权**（落点 `service/common/**` = G4 写权面 ⇒ 域侧无法自修） |
 | ⚠️ **它报的两个数字的口径订正**：① 「**11 项**机器守门全绿」⇒ ⇒ 本面**枚举口径 = 31 项** ⇒ ⇒ **手写小清单不可当「全仓全绿」**（M-15 同族）；② 「共享层全量 **480 条** / 0F / 0E / 0S」⇒ ⇒ 权威源声明测试方法数 = **481**（`check-source-test-decl-count.py` · 全仓 3,314）⇒ ⇒ **480 < 481** 而**执行条数应 ≥ 源声明数** ⇒ ⇒ **480 不可能是当前代码的执行读数** ⇒ ⇒ **口径未明 ⇒ 引用前须以 surefire XML 复核** ⇒ ⇒ 本项仍「待补读数」 |
 | ⚠️ **共享层全量卡住的根因已定位到类**：`service/common/src/test/` 里有 **2 个测试类**引用 `Testcontainers` / `GenericContainer` / `DockerCompose` / `@Container` ⇒ ⇒ **Docker daemon 僵死**（进程在、`docker ps` 挂起）⇒ ⇒ 这 2 类卡在容器连接超时 ⇒ ⇒ **Docker 恢复后即可跑通**（**不是代码问题**；**未擅自重启用户的 Docker**） |
+| **M-20** | ✅ **「无主面」写权洞已闭合**（2026-11-01 收官轮 · 合并收口执行者落码）—— 🆕 **机器守门新增断言 9「无主面检测」** ＋ **`SHARED` 补登记两族** ＋ 🐛 **修断言 2 的假绿** | ⚠️ **背景**：**G1 与 G4 两棵 lane 各自独立发现同一个洞** ⇒ ⇒ 「`docs/PhaseGoal-judge.md` ＋ `docs/PhaseGoal/g{1..4}.md` **无主**」—— 四条 lane 白名单里含 `PhaseGoal` 的条目 = **0 条** ⇒ ⇒ **既不在任何 lane 的白名单、也不在 `SHARED`** ⇒ ⇒ **没有任何写权门能拦**。⚠️ **两个洞叠加**：① **机器守门**（`check-wave-lane-ownership.py`）没有这 5 个文件 ⇒ ⇒ 原有 8 条断言**全部判不到**「某 lane 实际写了一个谁都不拥有的文件」；② **政策文本**（本表 §二「合并收口执行者」的共享面清单）**也没有**它们 ⇒ ⇒ **不是「机器漏跟上政策」，而是**两处同时漏**。⚠️ **为什么不能归给某个 lane**：这 4 份 `g<N>.md` 的文件头自述「⚠️ **本文件是机器生成的 —— 不要手改**」＋「生成器 `check-phasegoal-lanes.py --write`」＋「**唯一数据源**：`docs/PhaseGoal-judge.md`」⇒ ⇒ 它们是 **judge 的派生物**、**不是各 lane 的面** ⇒ ⇒ 归 lane 就会有人手改 ⇒ 立刻与基线分叉 ⇒ 门禁红。⚠️ **归因订正（勿再用 author 字段）**：G4 曾据「改它的几笔 commit 作者都是同一个 actor」推断「同一 actor 连续越界」⇒ ⇒ **不成立** —— 实测全仓最近 60 笔的 author **全部相同** ⇒ ⇒ **author 在本仓是零信息量字段** ⇒ ⇒ 准确表述 = 「**多笔不同范围的改写落在无主面上 ⇒ 没人管**」（可核痕迹 = 那些 commit 的**文件集规模各不相同** = 1 / 8 / 12 / 7 个） | ✅ **已落**：① **机器守门新增断言 9「无主面检测」**（`tools/difftest/check-wave-lane-ownership.py`）—— 对每棵**看得到 ref 的** lane，取它**未合入主干的 commit** 实际改过的 `docs/**` 文件 ⇒ 逐个判归属：**①** 命中自己白名单 = 正常 · **②** 命中别 lane 白名单 = 🔴 越权写别域的面 · **③** 命中 `SHARED` = 🔴 越权写共享面 · **④** **谁都不命中 = 🔴 无主面**；⚠️ **口径写死**：取 **`main..ref` 单边**范围（`git log` 的 `A...B` 是**对称差集** ⇒ 不是本条要的）+ `--name-only --diff-filter=AM` + 只看 `docs/**`；无 lane 上下文（CI 单 commit detached 检出）⇒ 记 **NOT_RUN** 并**打印出来** ⇒ 绝不把「没跑」印成「查过且通过」。② **`SHARED` 补登记**：`docs/PhaseGoal-judge.md` ＋ `docs/PhaseGoal/g{1..4}.md`（**5 个**）＋ `docs/DRIFT/_cross/**`（**整族** · 按 AGENTS.md §5.3 本就是合并收口执行者的面）⇒ ⇒ 共享面清单由 **13 → 19** 项。③ 🐛 **修断言 2 的假绿**：原式拿 `SHARED` 的**原始字符串**撞 `expanded[lane]`（**展开后的文件路径集合**）⇒ ⇒ 一旦 `SHARED` 里有 glob（如 `docs/DRIFT/_cross/**`）⇒ **永远撞不上** ⇒ ⇒ 断言 2 对 glob 形式**恒绿** ⇒ ⇒ 改为按**展开后的集合**求交。④ **政策文本同批补登记**（本表 §二 三处：合并收口执行者的共享面清单 / 「共享面」行 / 「共享文件」行）⇒ ⇒ **机器守门与政策文本两处同时闭合** | **验收**：**变异自证（三条子判据逐条验 · 判据打在真缺陷上）** —— ① 造「lane 写了谁都不拥有的文件」⇒ 门**精确转红**并点名该文件 ✅ · ② 造「lane 写了别域白名单里的文件」⇒ 报「**越权写别域的面**」并点名归属 lane ✅ · ③ 造「lane 写了 `SHARED` 里的文件」⇒ 报「**越权写共享面**」✅ · ④ 复原后门**转绿** ⇒ **变异可逆** ⇒ 判据不是恒红/恒绿。⚠️ **变异现场已彻底清理**：探针文件已删 · 探针分支已删 · `align/g3-*` ref 已回位（实测 `ddf98082` == 原值）· `docs/PhaseGoal-judge.md` **727 行无 diff**（变异过程中曾被 `printf` 覆盖 ⇒ 已 `git checkout --` 复原并核过）。⚠️ **一条自踩的坑（已修）**：第一次搭变异现场时用了 `git branch -f <scratch> <base>` ⇒ **它不切分支** ⇒ ⇒ 探针 commit 落到了**主干**上 ⇒ ⇒ `main..lane` 为空 ⇒ ⇒ 门**没红** ⇒ ⇒ 差点误判「判据没生效」⇒ ⇒ **教训**：`git branch -f` 不改变当前分支 ⇒ 造 commit 前必须**显式 `checkout -b`**（本轮第二次即按此重做 ⇒ 门精确转红）。|
 
 ---
 
@@ -743,7 +744,7 @@ git merge-base --is-ancestor align/g4-service-common do-my-own-gh && echo "已�
 ## 七、M-22：跨工作流分支合入 ＋ 写权越界裁决 ＋ 源声明数口径订正（2026-10-31 · 合并收口执行者）
 
 > ⚠️ **为什么追加在文末、而不是插进 §五 的 M-xx 表**：本文件**有硬行号指针** ——
-> `docs/DRIFT/users/user/rpc.md:3010` 引 `docs/Worktree.md:587` ·
+> `docs/DRIFT/users/user/rpc.md:3010` 引 `docs/Worktree.md:588` ·
 > `docs/CLOSEOUT-2026-10-29.md:117` 引 `:274` / `:108` ⇒ ⇒ 中段插一行 ⇒ **后面所有行号整体位移**
 > ⇒ ⇒ ⇒ 只能**文末追加**（零位移）。
 
@@ -1073,7 +1074,7 @@ git merge-base --is-ancestor align/g4-service-common do-my-own-gh && echo "已�
 
 ### ④ 它要落的第二处「两个 message 守门类 `import` → 全限定名」⇒ **无改动可做**
 
-实测 `MessageRpcOutboundDeadlineCapGateTest.java:427` / `:436` 与 `MessageApiOutboundDeadlineCapGateTest.java:383` **已经是全限定名**
+实测 `MessageRpcOutboundDeadlineCapGateTest.java:425` / `:434` 与 `MessageApiOutboundDeadlineCapGateTest.java:381` **已经是全限定名**
 ⇒ ⇒ 且**现在也不需要做** —— 辐射度判据**只扫生产面**（`service/**/src/main/java`）⇒ ⇒ **测试面根本不参与读数**
 ⇒ ⇒ G3 已独立得出同一结论并**放弃了路 A 的代码改动** ⇒ ⇒ ⇒ **「用改写法绕开判据盲区」这条路已不需要**（盲区已根治）。
 
@@ -1214,3 +1215,38 @@ git merge-base --is-ancestor align/g4-service-common do-my-own-gh && echo "已�
 ⇒ ⇒ **已销案**：`§4.19.6` 重判（①）· `entry_stage_decl` 口径（②）
 ⇒ ⇒ **另有一项**（G3 回执 3 报的「域面 yml 死配置」）本面复核后**核销为「已定性 = 保留 ⇒ 不是待办」**
 （`docs/DRIFT/article/rpc.md:2919` 明写「保留 + 加注不生效」· 全仓实测确实只有 `article-rpc` 那 2 处）。
+
+---
+
+## 🆕 M-21 · 2026-11-01 收官轮 · G2 落码引发的**行号位移指针**订正（合并收口执行者落码）
+
+**背景** —— G2 lane 收工轮把**测试面**的 `import com.rag.common.*` 改写成**全限定名**（删 **37 条 import**）⇒ ⇒ **每删 1 条 import，其后的所有行号前移 1** ⇒ ⇒ 指向这些测试文件的**行号指针**随之变旧。
+
+⚠️ **这类指针不会被现有守门抓到** —— `check-pointer-consistency.py` 的正则只认指向 `docs/{DRIFT,Pitfalls,Intentional_Deviations}/**.md` 的指针 ⇒ ⇒ **指向 `service/**` 源码的行号指针无任何机器守门** ⇒ ⇒ 只能靠**人工逐条订正**。
+
+**本轮的订正方法（内容级 · 不是按行号平移）** —— 同名测试文件在仓内有**多份拷贝**（如 `GoStyleGrpcClientBreakerE2ETest.java` 有 **3 份**：message-api / user-api / hot-api）⇒ ⇒ **按行号整体平移会改错文件** ⇒ ⇒ 本轮用「**旧版本该行的内容** → 在当前文件里唯一定位」建立**旧→新行号映射**，再逐条核对**文档里写的完整路径**。
+
+| 落点 | 原行号 | 新行号 | 依据 |
+|---|---|---|---|
+| `docs/Worktree.md:1077` | `MessageRpcOutboundDeadlineCapGateTest.java:427` | **`:425`** | message-rpc 拷贝 · 内容级映射 |
+| `docs/Worktree.md:1077` | `MessageRpcOutboundDeadlineCapGateTest.java:436` | **`:434`** | 同上 |
+| `docs/Worktree.md:1077` | `MessageApiOutboundDeadlineCapGateTest.java:383` | **`:381`** | message-api 拷贝 · 内容级映射 |
+| `docs/DRIFT/_cross/grading/W29.md:3` | `LikeA9GrpcSpanEndToEndTest.java:291-310` | **`:290-309`** | like-rpc 拷贝 · 区间两端逐字比对通过 |
+| `docs/DRIFT/_cross/grading/W30.md:3` | `LikeA9GrpcSpanEndToEndTest.java:314-331` | **`:313-330`** | 同上 |
+| `docs/DRIFT/global/vs-common.md:960` | `message-api/…/GoStyleGrpcClientBreakerE2ETest.java:43` | **`:43`（不改）** | ⚠️ **G1 已否证** —— 该行属 §4.10.10 的**全仓扫描快照** ⇒ 记的是**历史原址**；实测该文件**当前 U+FFFD = 0**（坏字节早已被 G2 修掉）⇒ ⇒ **行号不随代码平移** |
+| `docs/DRIFT/users/vs-common.md:1032` | `service/message/message-api/…/GoStyleGrpcClientBreakerE2ETest.java:43` | **`:43`（不改）** | 同上（§20.1 普查表第 4 行） |
+| `docs/Pitfalls/like/api.md:271` | `LikeRpcTimeoutCapTest.java:233-238` | **`:231-236`** | like-api 拷贝 |
+| `docs/Pitfalls/like/api.md:520` | `LikeRpcTimeoutCapTest.java:233` | **`:231`** | 同上 |
+
+⚠️ **G2 回执报了 3 处「也要改」⇒ 本面复核后判定为「不用改」（**误报**）** —— 三处指向的都是 **user-api 拷贝**，而该拷贝**本轮未被改动**（位移集合 = **{0}**）：
+
+| G2 报的落点 | 它指的是 | 实测 | 处置 |
+|---|---|---|---|
+| `docs/DRIFT/_cross/grading/W5.md:18` | `GoStyleGrpcClientBreakerE2ETest.java:123` | **user-api** 拷贝 · 含 `server.port` 的行**只在 user-api 拷贝的 :123**（message-api 在 :86 / hot-api 无）· 该拷贝位移 = **{0}** | **不改** |
+| `docs/DRIFT/users/user/api.md:3645` · `:3646` · `:3742` | 同上（`:123`） | 同上 | **不改** |
+| `docs/DRIFT/global/vs-common.md:68` · `:3768` | `GoStyleGrpcClientBreakerE2ETest.java:247,284`（断言 1015） | 含 `1015` 的行在 **:247 / :284** 的**只有 user-api 拷贝**（message-api 的 1015 在 :47/:161/:233 等、hot-api 在 :49/:235）· 该拷贝位移 = **{0}** | **不改** |
+| `docs/DRIFT/global/vs-common.md:960` | `message-api/…/GoStyleGrpcClientBreakerE2ETest.java:43`（U+FFFD **分派表**）| 该行属 §4.10.10 的**全仓扫描快照** ⇒ 记**历史原址**；实测该文件**当前 U+FFFD = 0**（坏字节早已被 G2 修掉）⇒ ⇒ **不随代码平移** | **不改**（G1 已否证） |
+| `docs/DRIFT/users/vs-common.md:1032` | `message-api/…/GoStyleGrpcClientBreakerE2ETest.java:43`（U+FFFD **普查表** 第 4 行）| 同上（§20.1） | **不改**（G1 已否证） |
+
+⇒ ⇒ **判定式（两条 · 本轮实踩）**：① **「同名文件有多份拷贝」⇒ 任何行号订正必须先用内容锚点定位拷贝身份** ⇒ ⇒ 否则会改错文件（**改了不该改的 = 引入新漂移**）；② ⚠️ **「指针指向当前内容」这个前提本身要先验** —— 本轮实测：`message-api` 拷贝**当前 U+FFFD = 0**（坏字节**早已被 G2 修掉**）⇒ ⇒ 普查表/分派表里的行号记的是**扫描当时的历史原址** ⇒ ⇒ **这类指针不随代码平移** ⇒ ⇒ **按行号平移会把它指到一个无关的行**（实测 `:42` 是 `* </ul>`）⇒ ⇒ **G1 lane 已独立否证本层的这两条订正并撤回**（本层**采纳**）。
+⇒ ⇒ **净订正 = 5 处**（本层自核后确认）· **不改 = 4 处**（G2 报 3 处 + 本层误订 2 处，其中 `users/user/api.md` 那 3 个落点已合并计 1 组）⇒ ⇒ **5 处订正全部是单行→单行替换 ⇒ 零行位移**。
