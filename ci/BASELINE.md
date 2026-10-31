@@ -312,7 +312,7 @@ users/admin  ──▶ users/user
   差异台账分列 approved 31 / closed 2 / technical 13 / **pending 8**。
 - **实测读数（2026-10-31 · 用户签字后 · 本机）**：**PASS 9 / FAIL 0 / BLOCKED 0 / PENDING 0** ⇒ **EXIT=0**（🟢 绿）；
   差异台账分列 approved **38** / closed **3** / technical 13 / **pending 0**。
-  ⚠️ **Task 内重跑尚未执行**：canonical 流水线指向 GitHub `do-my-own-gh` 且 **paused**，而本轮**不 push** ⇒ 重跑待合入 + 解暂停后补跑。
+  ⚠️ **Task 内重跑尚未执行，且「解暂停就能重跑」是错的**：canonical 的 git resource **pin 的是 branch（不是 commit）** ⇒ 跑的是**远端 tip**；实测**两个远端的 tip 都没有 `ci/` 目录**（`origin` = `a2820125`（10-27 02:35）· **`upstream` = `a3884104`（10-30 02:17）⇒ 流水线 canonical 实际 pin 的是 `upstream`**）⇒ **连 `ci/contracts/errmsg/` 目录都不存在** ⇒ ⇒ 现在解暂停重跑，R5 门**连基准都读不到** ⇒ 必然不是 PASS 9 ⇒ ⇒ 正确顺序：**先 push（需用户授权）→ 再解暂停 → 再重跑**。
   ⇒ 上面的 build 7 读数**保留原值**（那是实测记录，不因后续签字而改写）。
 - 🆕 **变异测试** `ci/scripts/check-errmsg-contract-mutations.py`（**11 条**，含「Java 侧真改一个文案」）：
   ⇒ **11/11 红在目标断言**，且**真源字节全部恢复**。
@@ -481,7 +481,7 @@ PASS = 23（只计 VERIFIED）｜ 不计入 PASS 的缺口 = 18
 | 要求族 | 证据 | 读数 |
 |---|---|---|
 | R4 proto 契约（10 条） | 静态守门第 10 道门（真实 CI 镜像内实测） | PASS 10 / FAIL 0 / BLOCKED 0 |
-| R5 errmsg 契约 | `rag-contract-errmsg` **build 7**（Task 内两阶段 · **签字前**） | PASS 7 / FAIL 0 / BLOCKED 0 / **PENDING 2** ⇒ EXIT=3（有意为红）<br>🆕 **签字后本机复跑**：PASS **9** / FAIL 0 / BLOCKED 0 / **PENDING 0** ⇒ **EXIT=0**（🟢 绿）· ⚠️ Task 内重跑待合入 + 解暂停后补跑 |
+| R5 errmsg 契约 | `rag-contract-errmsg` **build 7**（Task 内两阶段 · **签字前**） | PASS 7 / FAIL 0 / BLOCKED 0 / **PENDING 2** ⇒ EXIT=3（有意为红）<br>🆕 **签字后本机复跑**：PASS **9** / FAIL 0 / BLOCKED 0 / **PENDING 0** ⇒ **EXIT=0**（🟢 绿）· ⚠️ **Task 内重跑尚未执行，且「解暂停就能重跑」是错的**：canonical 的 git resource **pin 的是 branch（不是 commit）** ⇒ 跑的是**远端 tip**；实测**两个远端的 tip 都没有 `ci/` 目录**（`origin` = `a2820125`（10-27 02:35）· **`upstream` = `a3884104`（10-30 02:17）⇒ 流水线 canonical 实际 pin 的是 `upstream`**）⇒ **连 `ci/contracts/errmsg/` 目录都不存在** ⇒ ⇒ 现在解暂停重跑，R5 门**连基准都读不到** ⇒ 必然不是 PASS 9 ⇒ ⇒ 正确顺序：**先 push（需用户授权）→ 再解暂停 → 再重跑** |
 | R6 schema 契约（8 条） | `rag-contract-schema` **build 5 = succeeded** | PASS 8 / FAIL 0 / BLOCKED 0 / NOT_RUN 1[hot] |
 
 > ⇒ 这三族**已从「本地脚本跑通」升到「在 CI 里真跑通」** ⇒ 但**仍不等于**「目标全部达成」：
