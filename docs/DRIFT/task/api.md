@@ -614,3 +614,17 @@ wc -l "$G/service/task/api/internal/types/types.go"        # ⇒ 36
 sed -n '29,36p' "$G/service/task/api/internal/types/types.go"
 #   ⇒ :30-33 数字解析 / :34（空行）/ :35 return errors.New("id must be a string or integer")
 ```
+
+
+## 🆕 2026-10-31 · G2 lane · 出向客户端硬上界（cap）—— task-api 侧的落点
+
+> 与 [`vs-common.md`](vs-common.md) 的同名节是**同一件事的两面**：那里记**机制面**（A1 轴 · 跨域对账），这里记**组件面**（本组件的落地文件 · 守门 · 读数）。
+> ⚠️ **本节不声称**：端到端超时表现已做双侧活体对拍。
+
+| 项 | 内容 |
+|---|---|
+| **落点** | `service/task/task-api/src/main/resources/application.yml` 加 `rag.protection.outbound-deadline.cap-millis: ${TASK_API_OUTBOUND_DEADLINE_CAP_MILLIS:2000}` ⇒ 封顶逻辑仍**唯一**由共享层 `GoStyleOutboundDeadlineInterceptor` 承担（域侧只配参数，不造私有副本） |
+| **守门** | 新增 `TaskApiOutboundDeadlineCapGateTest`（**7** 条 / 0 failures / 0 errors / 0 skipped · surefire XML 口径）—— 六条判据 = 配置面 / 绑定面 / 运行期（**真 in-process gRPC server** · 下游**挂起 8s 后才正常返回** ⇒ 不靠 `@Timeout` 包装）/ env 覆盖 / min 语义（钉「取更早者」）/ 形态面（**点位级棘轮**） |
+| **变异** | 形态面变异（在本组件**已登记**的那一处旁**再注入**第二处写死上界）⇒ **1 红 / 7**，红在「命中分布 = `{TaskRpcClient.java=2}`，而已登记的基线 = `{TaskRpcClient.java=1}`」⇒ ⇒ **同文件内新增第二处也被抓住** ⇒ ⇒ 变异代码**已还原**（`git diff` 复核：生产代码零改动，只剩 yml 的配置） |
+| **域侧既有上界（第二来源 · 如实登记）** | `TaskRpcClient.java:66` `static final long DEFAULT_CALL_TIMEOUT_MILLIS = 2000L;` ＋ `:110` `stub.withDeadlineAfter(Math.max(1L, budget), TimeUnit.MILLISECONDS);` ⇒ ⇒ 域侧**既有**一套上界 ⇒ 本轮**不删**（零代码改动）⇒ ⇒ 「域侧无副本」这一维改由**形态面棘轮**承担；「**放宽**」方向在本组件**结构性不可测**（域侧副本会把放宽压回）⇒ ⇒ 待后续收敛（删域侧副本）后改回放宽方向取证 |
+| **`task-rpc` 为何不配（不是漏配）** | ① Go 侧 `service/task/rpc/etc/task.yaml` **零 `Rpc:` 段**（实测全文 1-40 行：`Name` / `ListenOn` / `Etcd` / `Telemetry` / `Kafka` / `LikeRedis` … ⇒ **没有任何出向客户端配置**）；② RAG 侧 `service/task/task-rpc/src/main/java` 里的 `@GrpcClient` **命中数 = 0**，且该 yml **无 `grpc.client` 段** ⇒ ⇒ **两侧都无出向 devh 调用** ⇒ ⇒ 配 cap 只会是一段**永远不被读取的死配置** ⇒ ⇒ 与本域既有立场（Go 侧无 `DevServer` 段 ⇒ RAG 侧不补载体）一致 |
