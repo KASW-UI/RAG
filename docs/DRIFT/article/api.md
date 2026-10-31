@@ -616,7 +616,7 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 | **Must Preserve** | `user-rpc` 单次调用预算 = 2s（`RpcClientConf.Timeout` tag 默认）。 |
 | **Risk** | **MEDIUM-HIGH** |
 | **Classification** | **SEMANTIC MISMATCH** |
-| **Evidence** | Go：`service/article/api/etc/article-api.yaml:20-24`（无 Timeout）、go-zero `zrpc/config.go:31`（声明点）、`zrpc/client.go:70-71` + `zrpc/internal/client.go:83`（**消费点**）；RAG：`UserRpcClient.java:48-50`、`GoStyleRequestDeadline.java:110-120`、`application.yml:188-189`。**证据强度：静态源码（已读到消费点）。**<br>⚠️ **2026-10-29 真实性复核（W-D lane · 指针订正）**：本行三处 RAG 侧指针中，**两处行号已过期**（本行记的是**修复前**的证据形态，行号随重构漂移）⇒ `UserRpcClient.java:48-50` ⇒ 实为 **`:82-87`**（`userRpc()` 的 `min(remaining, CLIENT_TIMEOUT_MILLIS)` 真实实现）；`application.yml:188-189` ⇒ 实为 **`:260`**（`http-timeout: 70s`）；`GoStyleRequestDeadline.java:110-120` ⇒ **仍准确**（`applyTo` 方法体）。⇒ **本条「已修」判定不变**（修法证据见 §F-2：`UserRpcClient.java:82-87` 显式算 min · 守门 `UserRpcClientDeadlineTest` **5 例**实测在册）。核对日期 2026-10-29。 |
+| **Evidence** | Go：`service/article/api/etc/article-api.yaml:20-24`（无 Timeout）、go-zero `zrpc/config.go:31`（声明点）、`zrpc/client.go:70-71` + `zrpc/internal/client.go:83`（**消费点**）；RAG：`UserRpcClient.java:48-50`、`GoStyleRequestDeadline.java:110-120`、`application.yml:188-189`。**证据强度：静态源码（已读到消费点）。**<br>⚠️ **2026-10-29 真实性复核（W-D lane · 指针订正）**：本行三处 RAG 侧指针中，**两处行号已过期**（本行记的是**修复前**的证据形态，行号随重构漂移）⇒ `UserRpcClient.java:48-50` ⇒ 实为 **`:82-87`**（`userRpc()` 的 `min(remaining, CLIENT_TIMEOUT_MILLIS)` 真实实现）；`application.yml:188-189` ⇒ 实为 **`:260`**（`http-timeout: 70s`）；`GoStyleRequestDeadline.java:110-120` ⇒ **仍准确**（`applyTo` 方法体）。⇒ **本条「已修」判定不变**（修法证据见 §F-2：`UserRpcClient.java:82-87` 显式算 min · 守门 `UserRpcClientDeadlineTest` **5 例**实测在册）。核对日期 2026-10-29。<br>⚠️ **2026-11-02 指针再订正（G3 第十四轮）**：上列 `:82-87` 那份**域侧内联副本已剪除**（`UserRpcClient.userRpc()` 现返回**裸 stub**；上界与请求预算传播改由共享层 `GoStyleOutboundDeadlineInterceptor` 承担 ＋ 域 yml `cap-millis-by-service.user.UserService: 2000`）⇒ ⇒ **该指针已失效** ⇒ ⇒ 本条的「修法」现落在**共享层机制 ＋ 域侧参数**上 ⇒ ⇒ 现行证据 = `service/article/article-api/src/main/resources/application.yml` 的 `rag.protection.outbound-deadline.cap-millis-by-service` 两键 ＋ 守门 `ArticleApiOutboundDeadlinePerServiceCapGateTest` **7 例**（裸 stub 真发调用 ＋ 服务端观测 deadline）⇒ ⇒ 「已修」判定**仍然成立**，但**修法形态已变** ⇒ ⇒ 详见文末追加节。核对日期 2026-11-02。 |
 
 ⚠️ 这正是 AGENTS.md §3.3.1 点名的形态：**「yaml 里没写」≠「没设」**。
 `UserRpcConf.Timeout` 就是一条藏在 struct tag 里、且**与 `ArticleRpcConf.Timeout`（显式 70000）不同**的默认值。
@@ -1287,7 +1287,7 @@ Risk        HIGH
 |---|---|---|---|---|---|
 | **F-1** | `DRIFT-ARTICLE-API-001` 上传失败恒 400 | ❌ 未修 | ✅ **已修** | `ArticleApiMvcPipelineTest` × 3 | ✅ **3/3 转红** |
 | **F-1b** | 🆕 **F-1 顺带发现**：熔断打开时 Go 400 / RAG **500** | — | ✅ **已修** | 同上 × 1 | ✅ 转红 |
-| **F-2** | `DRIFT-ARTICLE-API-002` `user-rpc` 超时 2s vs 70s | ❌ 未修 | ✅ **已修** | `UserRpcClientDeadlineTest` × 5 | ✅ **2/2 转红** |
+| **F-2** | `DRIFT-ARTICLE-API-002` `user-rpc` 超时 2s vs 70s | ❌ 未修 | ✅ **已修** | `UserRpcClientDeadlineTest` × 5 | ✅ **2/2 转红**（**2026-11-02**：修法**形态已变** —— 域侧内联副本**已剪除**，改由共享层 per-service 覆盖承担 ⇒ ⇒ 「已修」判定**不变**；守门扩为 `UserRpcClientDeadlineTest` × 5 ＋ `ArticleApiOutboundDeadlinePerServiceCapGateTest` × 7，两次变异测试精确转红） |
 | **F-3** | `DRIFT-ARTICLE-API-003` 重复 query key → 400 | ❌ 未修 | ✅ **已修** | `ArticleApiMvcPipelineTest` × 3 | ✅ **2/2 转红** |
 | **F-4** | `DRIFT-ARTICLE-API-004` 锁死错误答案的绿测试 | ❌ 未改 | ✅ **已改断言** | 随 F-1 | — |
 
@@ -1400,7 +1400,7 @@ return userServiceBlockingStub.withDeadlineAfter(effective, TimeUnit.MILLISECOND
 ```
 
 **守门网**：`UserRpcClientDeadlineTest` 5 条
-（无预算⇒2s / 预算 10s⇒仍 2s / 预算 500ms⇒500ms / 预算耗尽⇒立即到期 / 常量防漂移）。
+（无预算⇒2s / 预算 10s⇒仍 2s / 预算 500ms⇒500ms / 预算耗尽⇒立即到期 / 常量防漂移）。（**2026-11-02**：5 条**语义一条不减**，但【被观测的对象】从「stub 上自带的 deadline」换成「**真实出向调用**在服务端被观测到的 deadline」⇒ ⇒ 「常量防漂移」那条改为**钉域 yml 的 `cap-millis-by-service.user.UserService` 键** ⇒ ⇒ 另新增 `ArticleApiOutboundDeadlinePerServiceCapGateTest` **7 例**补「按方向分档 ＋ 形态棘轮」。）
 
 ---
 
@@ -1455,8 +1455,8 @@ return userServiceBlockingStub.withDeadlineAfter(effective, TimeUnit.MILLISECOND
 | 1 | `GoStyleGrpcStatusMapper.httpStatusOf` 恒返回 400 | ✅ **转红**（`expected:<500> but was:<400>`） |
 | 2 | `goErrorMessage` 改用 Java 的 `"X: Y"` 格式 | ✅ **转红** |
 | 3 | `ArticleUploadService` 不再接住 `GoStyleCircuitOpenException` | ✅ **转红**（`expected:<400> but was:<500>`） |
-| 4 | `UserRpcClient` 去掉 `min`（恒 2s）· 预算 500ms 场景 | ✅ **转红**（实际 1999ms） |
-| 5 | `UserRpcClient` 去掉 `min`（恒 2s）· 预算耗尽场景 | ✅ **转红**（实际 1999ms） |
+| 4 | `UserRpcClient` 去掉 `min`（恒 2s）· 预算 500ms 场景 | ✅ **转红**（实际 1999ms）**（2026-11-02：变异对象已不存在 —— 该域侧内联副本**已剪除** ⇒ ⇒ 本条转为【历史记录】；现行变异见文末追加节：删掉 yml 的 `user.UserService` 键 ⇒ ③「nothing was thrown」转红；把该键改成 30000 ⇒ 6 条转红）** |
+| 5 | `UserRpcClient` 去掉 `min`（恒 2s）· 预算耗尽场景 | ✅ **转红**（实际 1999ms）**（2026-11-02：同上 —— 变异对象已不存在 ⇒ ⇒ 转为【历史记录】）** |
 | 6 | `GoFormValues.first` 不丢空值（先取首再过滤） | ✅ **转红**（`expected:<2> but was:<1>`） |
 | 7 | `GoFormValues.first` 改成取**最后一个** | ✅ **转红**（`expected:<1> but was:<2>`） |
 
@@ -2737,17 +2737,17 @@ bash tools/api-full-parity-probe/favorite/run.sh   # 现成骨架
 
 > ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/favorite/run.sh` ⇒ **EXIT=0**（2026-10-30 03:28:29 · 48s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 两侧种子就绪 ⏐ ✅ 黑名单对照 token 就绪（Redis exists=1） ⏐ ✅ 两侧各产出 31 个 case ⏐ SAME 25 条 / SAME_CODE 1 条 / SAME_BODY 2 条 / SAME_STATUS 4 条 / OBS 0 条 / SKIP 0 条（共 32 个 case） ⏐ ✅ api 整域两侧一致（SAME 全等；SAME_CODE 业务码等；SAME_BODY body 等；SAME_。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
 
-## 附录 · 🔴 本组件**刻意不配**组件级「客户端硬上界」—— 组件级一个数**表达不了**本组件的两个方向（2026-10-31 · G3 第十三轮）
+## 附录 · 🔴 本组件**刻意不配**组件级「客户端硬上界」—— 组件级一个数**表达不了**本组件的两个方向（2026-10-31 · G3 第十三轮 · **2026-11-02 第十四轮就地订正：前提已被共享层 `cap-millis-by-service` 消解 ⇒ ⇒ 那条域侧 per-direction 内联已剪 ⇒ ⇒ 本节结论就地改写**）
 
-### 一、结论（**不许剪**那一条）
+### 一、结论（**2026-11-02 就地订正**：那一条**已剪**，见文末追加节）
 
-- 共享层棘轮的**点位级例外集**里挂着本域一条：
+- 共享层棘轮的**点位级例外集**里**曾**挂着本域一条（**2026-11-02 已剪**）：
   `service/article/article-api/src/main/java/com/rag/article/article/api/client/UserRpcClient.java`
-  ⇒ `withDeadlineAfter(effective, TimeUnit.MILLISECONDS);`
-- ⇒ ⇒ **不得收敛、不得剪**（理由见下）⇒ ⇒ 它**留在**共享层的例外集里
-  ⇒ ⇒ 本轮只做两件事：① 在域 yml 上留「为何不配」的钉子；② 在本台账登记论证
+  ⇒ `withDeadlineAfter(effective, TimeUnit.MILLISECONDS);`（**该点位已不存在** ⇒ 例外集里那一条**待 G4 同批剪除**）
+- ⇒ ⇒ **2026-11-02 · G3 第十四轮：这条内联已剪**（前提已被共享层的 `cap-millis-by-service` 消解 ⇒ 证据链见文末追加节）
+  ⇒ ⇒ ⚠️ **剪除与共享层例外集剪除必须同批合入**（判据 ④ 的「例外失效检测」会红 ⇒ 中间态不得单独进主干）
 
-### 二、为什么组件级 cap **表达不了**本组件（**逐条读 Go 真源**）
+### 二、为什么组件级 cap **表达不了**本组件（**逐条读 Go 真源** · **该论证仍然成立** ⇒ 共享层正是据此加了 per-service 覆盖**）
 
 | 出向方向 | Go 真源 | 生效值 | 来源 |
 |---|---|---|---|
@@ -2758,31 +2758,31 @@ bash tools/api-full-parity-probe/favorite/run.sh   # 现成骨架
 （`GoStyleOutboundDeadlineInterceptor` 带 devh 的 `@GrpcGlobalClientInterceptor` ⇒ 装在**每个**出向调用上）
 ⇒ ⇒ **配 2000** ⇒ 把 article-rpc 方向从 Go 的 70s **改严 35 倍**；
 **配 70000** ⇒ 把 user-rpc 方向从 Go 的 2s **放宽 35 倍** ⇒ ⇒ **两个值都不对**
-⇒ ⇒ ⇒ **组件级 cap 在本组件上无解** ⇒ ⇒ 域侧 **per-direction 内联是必需的**，不是「该收敛的副本」
+⇒ ⇒ ⇒ **组件级 cap 在本组件上无解**（**该结论仍然成立**）⇒ ⇒ ⇒ **解法 = 共享层的 per-service 覆盖**（`cap-millis-by-service`，按下游 gRPC 服务全名分档 ⇒ 键 = proto 的 `package.Service`）⇒ ⇒ ⇒ **域侧 per-direction 内联已于 2026-11-02 剪净**（它曾被登记为「不可收敛」⇒ ⇒ **该前提已被 per-service 覆盖消解**）
 
-### 三、当前两个方向的实现（**别动**）
+### 三、当前两个方向的实现（**2026-11-02 已更新**：user-rpc 方向的内联副本**已剪**，改由共享层 per-service 覆盖承担）
 
-- user-rpc 方向：`UserRpcClient#userRpc()` 自带 `min(2s, 请求剩余预算)`（域侧私有常量 `CLIENT_TIMEOUT_MILLIS`）
-  ⇒ ⇒ 与 Go 的 `UserRpcConf`（默认 2000）**同形** ✔
+- user-rpc 方向（**2026-11-02 起**）：`UserRpcClient#userRpc()` 返回**裸 stub**（**不再自带** `min(2s, 请求剩余预算)`，域侧私有常量 `CLIENT_TIMEOUT_MILLIS` **已删**）⇒ ⇒ 上界与请求预算传播**全部**由共享层 `GoStyleOutboundDeadlineInterceptor` 承担（channel 级 ⇒ 裸 stub 同样经过）⇒ ⇒ 域侧只配参数 `cap-millis-by-service.user.UserService: 2000`
+  ⇒ ⇒ 与 Go 的 `UserRpcConf`（默认 2000）**仍同形** ✔（守门：`UserRpcClientDeadlineTest` **5 例** ＋ `ArticleApiOutboundDeadlinePerServiceCapGateTest` **7 例**，两次变异测试均精确转红）
 - article-rpc 方向：`ArticleRpcClient` 靠 `GoStyleRequestDeadline.applyTo(stub)` 继承 HTTP 的 70s 预算
   ⇒ ⇒ 与 Go 的 `ArticleRpcConf.Timeout: 70000` **同形** ✔
 - ⇒ ⇒ 域 yml 的 `protection:` 段下已加一段注释，把上面这套论证**钉在配置面**
   ⇒ ⇒ ⚠️ **别在那里补一行 `cap-millis: 2000`**（那是把一条真漂移「配」进产品）
 
-### 四、共享层模型缺口（**转派 G4**，本轮第二次登记）
+### 四、共享层模型缺口（**转派 G4**，本轮第二次登记 · **2026-11-02：G4 已补，缺口已闭合** ⇒ 见下）
 
 - 共享层的 `cap-millis` 是**组件级一个值** ⇒ ⇒ 对「同一组件内各 client 真值不同」的域**表达不了**
   ⇒ ⇒ 建议共享层加 **per-client 上界**：`rag.protection.outbound-deadline.per-client.<client-name>`
   ⇒ ⇒ 加上之后，本组件就可以「user-rpc = 2000 / article-rpc = 70000」**逐 client** 配
-  ⇒ ⇒ 那时这条域侧内联才可以剪（⇒ 剪例外集与删内联同一次提交）
-- ⚠️ 在共享层加该参数**之前** ⇒ ⇒ 本域那条内联**必须保留** ⇒ ⇒ 剪它＝**制造一条真漂移**
+  ⇒ ⇒ 那时这条域侧内联才可以剪（⇒ 剪例外集与删内联同一次提交）**（2026-11-02：共享层已加 `cap-millis-by-service` ⇒ ⇒ 这条内联**已剪** ⇒ ⇒ 剪例外集与删内联**必须同批合入**）**
+- ⚠️ 在共享层加该参数**之前** ⇒ ⇒ 本域那条内联**必须保留** ⇒ ⇒ 剪它＝**制造一条真漂移**（**2026-11-02：该参数已加 ⇒ ⇒ 前提消失 ⇒ ⇒ 内联已剪，且已用【域内运行期证据】证明「剪后仍有网」**）
 
 ### 五、诚实边界
 
 - 本节**不**声称本组件的出向超时**已与 Go 完全对齐**：它声称的是「**当前两方向各自与 Go 同形**」
-  ＋「**组件级 cap 表达不了** ⇒ ⇒ 保持 per-direction 内联是**必需**而非将就」
+  ＋「**组件级 cap 表达不了** ⇒ ⇒ 分档表达（**2026-11-02 起 = 共享层 per-service 覆盖**）」
 - 证据强度 = **源码级逐条对照**（yaml 真值 ＋ zrpc 消费点）＋ **域内守门**（既有 `article-api` 装配/行为用例）
-  ⇒ ⇒ 未做「双侧活体对拍」⇒ ⇒ 不写成「已闭环」
+  ⇒ ⇒ 未做「双侧活体对拍」⇒ ⇒ 不写成「已闭环」**（2026-11-02 升级：剪除后新增【域内运行期证据】—— 裸 stub 真发调用 ＋ 服务端观测 deadline ＋ 两次变异测试精确转红 ⇒ ⇒ 但仍**不外推**到端到端链路）**
 
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
@@ -2813,3 +2813,137 @@ bash tools/api-full-parity-probe/favorite/run.sh   # 现成骨架
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
 |---|---|---|---|---|---|
 | DRIFT-ARTICLE-API-006 | D（经分析确认不实现 · 可观察契约四项一致、仅 body 文案不同） | P3 | 否 | Go `go-zero@v1.10.2/rest/httpx/requests.go:21`（`maxBodyLen = 8 << 20  // 8MB` ⇒ `io.LimitReader` **静默截断** ⇒ 解析器报 `unexpected EOF` ⇒ 400 + body `"unexpected EOF\n"`）vs RAG `service/article/article-api/src/main/java/com/rag/article/article/api/config/GoStyleJsonBodyLimitFilter.java:94`（`request.getContentLengthLong() > MAX_JSON_BODY_BYTES` ⇒ 显式拒绝）＋ `:96`（`writeGoStyleBadRequest(response, "request entity too large")` ⇒ body = `"request entity too large\n"`）＋ `:112-114`（`text/plain; charset=utf-8` + `nosniff` + 400）⇒ **差异仍成立**（**仅 body 文案**：状态码 / Content-Type / nosniff / 业务不执行 四项两侧一致）⇒ 但**经分析确认不实现**：台账 `docs/DRIFT/article/api.md:705` 已判「✅ 已确认 LOW OBSERVABLE DIFFERENCE，决定不修」＋ characterization test `service/article/article-api/src/test/java/com/rag/article/article/api/ArticleApiMvcPipelineTest.java:965`（`oversizedJsonBodyIsRejectedAtEightMiB`）锁住实测现状（含文案断言 + 变异验证）⇒ 一条差异 ≠ 一个缺陷 ⇒ 归 D；⚠️ `docs/Intentional_Deviations/article/api.md:26` 明写本条「**仍不是签字偏离**」⇒ 本行的 D **不是**「已签字偏离」，而是「经分析确认 LOW 不修」 | 2026-10-30 |
+---
+
+## 📌 追加 · 第十四轮（2026-11-02 · G3 lane）—— 🟢 **article-api 的 user-rpc 方向域侧内联副本已剪除**（上界改由共享层 per-service 覆盖承担）
+
+### 一、结论
+
+- **剪了什么**：`service/article/article-api/src/main/java/com/rag/article/article/api/client/UserRpcClient.java` 里的**域侧私有 cap 副本**（域侧私有常量 ＋ `min(请求剩余, 2s)` ＋ `withDeadlineAfter`）⇒ ⇒ `userRpc()` 现返回**裸 stub**。
+- **谁承担上界**：共享层 `GoStyleOutboundDeadlineInterceptor`（**唯一实现**）＋ 域侧**只配参数** `rag.protection.outbound-deadline.cap-millis-by-service.user.UserService: 2000`。
+- **为什么现在能剪**：2026-10-31 共享层加了**按下游 gRPC 服务全名分档**的 `cap-millis-by-service` ⇒ ⇒ 「组件级一个值表达不了两方向」这个**前提已被消解** ⇒ ⇒ 本文件上文（2026-10-31 第十三轮）登记的「**不得收敛、不得剪**」判定**就地作废**（那 5 处已在上文**就地订正**，未增行、未位移）。
+- **零行为变化**：**成立**（逐项论证见三 · 算术对照表；实测见五 · 逐类前后对比）。
+
+### 二、Go 侧真相（逐条回真源核对，**不采信转述**）
+
+| 事实 | Go 出处（`文件:行号`） | 值 |
+|---|---|---|
+| `UserRpcConf` 段**没有** `Timeout` 行 | `service/article/api/etc/article-api.yaml:20-24` | ⇒ 走 zrpc 默认 |
+| zrpc 的 per-client 默认超时 | `go-zero@v1.10.2/zrpc/config.go:31`（`Timeout int64 `json:",default=2000"``） | **2000ms** |
+| 默认值被**消费**（声明点≠生效点） | `go-zero@v1.10.2/zrpc/client.go:70-71`（`if c.Timeout > 0 { opts = append(opts, WithTimeout(...)) }`） | ⇒ 按 client 生效 |
+| 超时语义 = **取父子较早者** | `go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25`（`ctx, cancel := context.WithTimeout(ctx, t)`） | ⇒ Java 侧必须显式算 min |
+| 同组件另一方向 = 显式 70000 | `service/article/api/etc/article-api.yaml:12`（`ArticleRpcConf.Timeout: 70000`） | ⇒ 两方向差 35 倍 |
+| 下游 gRPC 服务全名（user） | `service/user/user/rpc/pb/user_grpc.pb.go:363`（`ServiceName: "user.UserService"`） | ⇒ per-service 键 |
+| 下游 gRPC 服务全名（article） | `service/article/rpc/pb/article_grpc.pb.go:285`（`ServiceName: "article.ArticleService"`） | ⇒ per-service 键 |
+
+### 三、RAG 侧证据链（**六环逐环实测**）＋ 零行为变化的算术对照
+
+| 环节 | 证据（`文件:行号`） | 结论 |
+|---|---|---|
+| ① 配置绑定 | 域 yml `rag.protection.outbound-deadline.cap-millis-by-service` 两键；`GoStyleProtectionProperties` 的 `@ConfigurationProperties(prefix="rag.protection")`（`:94`） | ✅ 绑得上 |
+| ② 键名逐字一致 | RAG `users.proto:3` `package user;` ＋ `:118` `service UserService`；`article.proto:3` `package article;` ＋ `:127` `service ArticleService`；拦截器取 `method.getServiceName()`（`GoStyleOutboundDeadlineInterceptor.java:205`） | ✅ 命中 |
+| ③ 算术 | `GoStyleOutboundDeadlineInterceptor.java:249-285` = `min(请求剩余纳秒, per-service 覆盖后的 cap, 调用点自带 deadline)`；per-service 是**覆盖**组件级（`:259-265`） | ✅ 与剪除前同值 |
+| ④ 装配 | `ArticleApiApplication.java:81-84`（`scanBasePackages` 含 `com.rag.common`）⇒ `GoStyleOutboundDeadlineConfiguration` 被扫到；devh `AbstractChannelFactory#createChannel` 最后一步 = `ClientInterceptors.interceptForward(channel, interceptors)`（**读 devh 3.1.0 sources jar 实测**）⇒ ⇒ 拦截器装在 **channel** 上 ⇒ ⇒ **裸 stub 同样经过** | ✅ 裸 stub 仍有网 |
+| ⑤ 生效 | 拦截器类带 `@GrpcGlobalClientInterceptor`；devh `AnnotationGlobalClientInterceptorConfigurer.getClientInterceptorBeans()` = `getBeansWithAnnotation(...)`（**按 Bean 注解收集** ⇒ 共享层 `@Bean` 产出的实例能被收进 registry） | ✅ 全局生效 |
+| ⑥ 开关 | `outbound-deadline.enabled` 默认 true | ✅ |
+
+**零行为变化的算术对照（请求预算不可读 / 更大 / 更小 / 已耗尽 四态）**
+
+| 场景 | 剪除前（域侧内联 `min(剩余, 2s)`） | 剪除后（共享层 `min(请求剩余, per-service cap)`） | 判定 |
+|---|---|---|---|
+| 请求预算不可读 | 2s | `min(∞, 2s)` = 2s | ✅ 同值 |
+| 请求预算 > 2s | 2s | `min(预算, 2s)` = 2s | ✅ 同值 |
+| 请求预算 < 2s | 请求预算 | `min(预算, 2s)` = 请求预算 | ✅ 同值 |
+| 请求预算已耗尽 | 立即到期 | 立即到期（1ns） | ✅ 同值 |
+
+⚠️ **唯一精度差**：剪除前用毫秒（`remainingMillis()`）、剪除后用纳秒（`remainingNanos()`）⇒ ⇒ 差 **< 1ms**，且两者都取**更早者** ⇒ ⇒ 只可能**更严**、不可能更长 ⇒ ⇒ **不构成行为差异**。
+⚠️ **请求预算的载体没变**：两侧读的都是同一个 `GoStyleRequestDeadline`（ThreadLocal）⇒ ⇒ 传播**没丢**，只是从域侧搬到了共享层。
+⚠️ **返回值形态变了**：剪除后 `userRpc()` 返回**字段本身**（grpc-java 的 `AbstractStub` **不可变** ⇒ 共享同一实例安全）⇒ ⇒ 原 javadoc 那句「不要把返回值缓存到字段上」的告诫**已不再适用**（它的前提是「返回值带每次都不同的 deadline」，现在没有了）。
+
+### 四、守门（**域内运行期证据** · 两次变异测试）
+
+| 守门 | 例数 | 覆盖 |
+|---|---|---|
+| 🆕 `ArticleApiOutboundDeadlinePerServiceCapGateTest` | **7** | ① 域 yml 声明两键 ＋ **组件级 `cap-millis` 仍然不配** ② 绑定面（**含点号的键不被 relaxed binding 拆坏**） ③ 运行期 user 方向（**裸 stub 真发调用** ⇒ ≤2000ms 处 `DEADLINE_EXCEEDED`） ④ 运行期 article 方向（**≈70000ms ⇒ 证明按方向分档，不是一刀切**） ⑤ 运行期 min 语义（请求预算 300ms ⇒ 生效值 300ms） ⑥ 形态面（域内不得再有自带 cap 的内联） ⑥ 之二（`userRpc()` 返回裸 stub ⇒ 自身不带 deadline） |
+| ♻️ `UserRpcClientDeadlineTest`（**原位重写**，语义一条不减） | **5** | 无预算⇒2s / 预算 10s⇒仍 2s / 预算 500ms⇒500ms / 预算耗尽⇒立即到期 / 「防改成 30s」（改为**钉域 yml 的 `cap-millis-by-service.user.UserService` 键**） |
+
+- **⚠️ 为什么必须用「裸 stub」**：若经 `UserRpcClient.userRpc()` 取 stub ⇒ ⇒ 观测到的 2000ms **可能**来自域侧内联副本 ⇒ ⇒ 守门成**假绿** ⇒ ⇒ 一律用 `UserServiceGrpc.newBlockingStub(capped)` ⇒ ⇒ 观测到的 deadline **只可能**来自共享层的 per-service 覆盖。
+- **⚠️ 为什么用「服务端观测」而不是干等**：article 方向的上界是 70s ⇒ 干等要 70 秒 ⇒ ⇒ 改为在服务端 handler 里读 `io.grpc.Context.current().getDeadline()`（gRPC 会把客户端 deadline 经 `grpc-timeout` 头传播到服务端）⇒ ⇒ 一眼读出客户端给的是 2000 还是 70000。
+
+**变异测试（两次，均精确转红）**
+
+| 变异 | 做法 | 实测转红 |
+|---|---|---|
+| 变异 A | 删掉域 yml 的 `user.UserService` 键 | 新守门 **5/7 红**（① 配置面 · ② 绑定面（绑出的表 = `{article.ArticleService=70000}`）· ③ 运行期报「**nothing was thrown**」⇒ user 方向真的失去上界 · ⑥ ⑥ 之二）⇒ ④⑤ **保持绿** ⇒ ⇒ ④ 有独立鉴别力 |
+| 变异 B | 把该键从 2000 改成 30000 | **12 条里 6 红**（既有 3 条 ＋ 新守门 3 条）⇒ ⚠️ 最关键：③ 报「**nothing was thrown**」⇒ 30000ms > 下游挂起 8s ⇒ ⇒ 客户端 8s 后**正常返回** ⇒ ⇒ **剪除后域侧在结构上不可能再私藏第二个上界** |
+
+### 五、回归读数（**逐类前后对比** · 零行为变更判据）
+
+| 读数 | 树 | 类数 | Tests | Failures | Errors | Skipped |
+|---|---|---|---|---|---|---|
+| 基线（**落码前**） | 隔离 worktree · 主干 `8c1dd6bb` | 11 | **216** | 0 | 0 | 0 |
+| 落码后 | G3 worktree | 12 | **223** | 0 | 0 | 0 |
+
+⚠️ **逐类逐条全等**：既有 **11 个类**逐类「条数 ＋ 失败数 ＋ 错误数」**全等**（`ArticleApiFailurePathMatrixTest` 104/0/0 · `ArticleApiMvcPipelineTest` 39/0/0 · `ArticleApiAssemblyWiringTest` 13/0/0 · `ArticleApiPropertiesSecretGuardTest` 10/0/0 · `ArticleApiFormParamLimitTest` 9/0/0 · `ArticleApiJwtVerificationScopeTest` 7/0/0 · `ArticleApiRouteAuthBoundaryTest` 17/0/0 · `ArticleGoStrconvQuoteParityTest` 6/0/0 · `UserRpcClientDeadlineTest` 5/0/0 · `ArticleApiJsonBodyLimitCaseTest` 3/0/0 · `ArticleApiJsonFieldOrderTest` 3/0/0）⇒ ⇒ 223 = 216 + **7**（新增守门那一类）⇒ ⇒ **零行为变更判据成立**。
+⚠️ 权威读数 = **surefire XML 求和**（不是控制台行数）。
+
+### 六、🔴 **红窗依赖：共享层例外集必须与本笔同批合入**（G4 写权面）
+
+- 现象：剪除后，共享层棘轮 `GoStyleClientCallTimeoutSingleSourceGateTest` 判据 ④ 的**「例外失效检测」**转红 ⇒ ⇒ `service/common` 模块 **488 条里 1 条红**（`noNewInlineDomainSideCap`）。
+- ⚠️ **影响不止「一条红」**：Maven 会**跳过依赖 common 的下游模块** ⇒ ⇒ `mvn -pl service/article/article-api -am test` 里 **article-api 被 SKIPPED**（实测）⇒ ⇒ **全仓回归会在 common 处中止** ⇒ ⇒ 必须同批剪。
+- 建议修法（**精确到行**，G4 写权）：`service/common/src/test/java/com/rag/common/protection/GoStyleClientCallTimeoutSingleSourceGateTest.java:121-135` ⇒ `KNOWN_INLINE_CAP_CALL_SITES` 里**那 1 条**（`UserRpcClient.java:withDeadlineAfter(effective, TimeUnit.MILLISECONDS);`）**整条剪掉**（⚠️ 该集合只有一个元素 ⇒ 剪完须写成 `Set.of()`，否则编译不过）＋ 同文件 `:122` 的「🔴 不可收敛 · **不许剪**」注释块**一并订正**（否则与本节并存两套口径）＋ `:125-133` 的收敛史补一句「第三批（G3 · article-api 1 条）已剪净 ⇒ 例外集 7 → 3 → 1 → **0**」。
+- ⚠️ **顺序不可颠倒**：判据 ④ 是**双向**检测 ⇒ ⇒ **先剪例外**（域侧落码未进主干）⇒ ⇒ 「新增点位」那条也会红 ⇒ ⇒ ⇒ **两笔必须同批合入**（同一次 merge ⇒ ⇒ 主干始终绿）。
+- ⚠️ **本节不越界**：`service/common/**` 是 G4 的写权面（AGENTS.md §5.3e）⇒ ⇒ 本域**只登记**，不代剪。
+
+### 七、诚实边界
+
+- 本节**不**声称「出向超时已与 Go 完全对齐」：它声称的是「**两个方向各自与 Go 同形** ＋ **上界只有一个来源**（共享层）＋ **域侧零代码改动**」。
+- 证据强度 = **源码级逐条对照**（Go yaml 真值 ＋ zrpc 消费点 ＋ proto 服务全名）＋ **L4 域内运行期证据**（裸 stub 真发调用 ＋ 服务端观测 deadline ＋ 两次变异测试精确转红）＋ **逐类前后回归全等** ⇒ ⇒ **未做「双侧活体对拍」** ⇒ ⇒ **不写成「已闭环」**。
+- 本节**不外推**到端到端生产链路（不证「整条链路的超时表现」）；「裸 stub 也经过全局拦截器」这一前提由**共享层**的装配面守门承担（devh `interceptForward` ＋ `getBeansWithAnnotation`）。
+- ⚠️ **新增的域侧依赖**：剪除后，本域**所有出向方向**的上界**完全**由 `cap-millis-by-service` 表决定 ⇒ ⇒ **该表必须覆盖本域全部出向方向**（当前 2 个：article / user）⇒ ⇒ **将来新增出向方向必须同步加键**，否则该方向**没有客户端硬上界** ⇒ ⇒ 这条依赖由本节新增守门 ① ② 兜住。
+### 八、补充（2026-11-02 · 同一轮）—— 🔴 **A-1 那一格是「源声明口径」：133 → 141**（**不是** 216 → 223）
+
+- ⚠️ **两个口径不可相减、不可互换**：
+  - 本节「五、回归读数」里的 **216 / 223** = **surefire 执行口径**（`@ParameterizedTest` 会被展开成 N 条 case）⇒ ⇒ **只用于「零行为变更」的逐类前后对比**；
+  - `docs/PhaseGoal-judge.md` 的 **A-1 `tests` 列** = **源声明测试方法数**（环境无关口径 · 2026-10-31 起 · **一个参数化方法算 1**）⇒ ⇒ **该列要改的是**：
+    - `article-api` 行：**133 → 141**（= 133 ＋ 本轮新增的 **8** 个 `@Test` 方法 ＝ 新守门类 **7** ＋ 装配面断言 **1**）
+    - 文档声明的「全仓源声明测试方法数」：**3330 → 3338**
+- ⇒ ⇒ ⚠️ **本节上面的 216 / 223 不能填进 A-1**（填了就等于把「覆盖面口径」当「执行口径」用 ⇒ ⇒ 下次复算必然对不上）。
+- 权威值 = 守门 `tools/difftest/check-source-test-decl-count.py` **自己打印的实测值**：`🔴 [M1] article-api 列= 133 源= 141 ← 不一致（差 +8）` ＋ `🔴 [M2] 文档声明「全仓源声明测试方法数」= 3330，实测 = 3338`。
+- ⚠️ **该文件与派生层产物（`docs/DRIFT/_cross/stage1-derivation.*`）都是别人的写权面** ⇒ ⇒ 本域**只登记不刷**（禁手面）⇒ ⇒ 已发更正回执给收口执行者。
+- ⚠️ **本轮本 lane 落码 commit 的 message 里，沿用了同一处措辞** ⇒ ⇒ **以本节为准**（历史不重写，按仓的「零行位移订正」惯例以追加节订正）。
+### 九、补充（2026-11-02 · 同一轮续）—— 🟢 **补上 article-api 域侧的「装配面守门」**（G4 lane 指派的域侧缺口）
+
+■ **缺口事实**（G4 lane §三 指派 · 本域只读检出）
+· 全仓扫描：`service/*/*-api/src/test/` 里命中 `GlobalClientInterceptorRegistry` 的域侧守门 = **7 个**（favorite · follow · hot · like · message · task），而 **`service/article/article-api/src/test/` 零命中**
+· ⇒ ⇒ 即 **四域都有、article-api 独缺** ⇒ ⇒ 而本域两个出向方向（`article-rpc` / `user-rpc`）的上界**全部**来自这个拦截器 ＋ 域 yml 的分档表 ⇒ ⇒ 缺这条 ⇒ ⇒ 「拦截器不在 registry」这个失效形态在本域**无人看守**
+
+■ **修法**（**域侧**：在本域自己的真上下文里加一条）
+· 落点：`service/article/article-api/src/test/java/com/rag/article/article/api/ArticleApiAssemblyWiringTest.java`（**真 `@SpringBootTest`（`ArticleApiApplication` ＋ RANDOM_PORT）＋ 刻意不 mock** ⇒ ⇒ 拿到的 registry 是**生产路径**上那一个，不是手工 new 的）
+· 新增 1 条：`outboundDeadlineInterceptorIsRegisteredWithTheStarter` ⇒ ⇒ 断言 devh 的 `GlobalClientInterceptorRegistry.getClientInterceptors()` **真名单**里含 `GoStyleOutboundDeadlineInterceptor`
+
+■ **⚠️ 判据为什么打在「真名单」上**（AGENTS.md §3.3）
+· 「上下文里有这个 Bean」**证不了**「它真被收集」⇒ ⇒ devh 认的是**类上的注解**（`@GrpcGlobalClientInterceptor`），而收集发生在 starter 的 `AnnotationGlobalClientInterceptorConfigurer`（= `getBeansWithAnnotation(...)`）⇒ ⇒ 只有**进了 registry** 的那些才会被 devh 的 `AbstractChannelFactory#createChannel` 最后一步 `ClientInterceptors.interceptForward(channel, interceptors)` 装到 channel 上 ⇒ ⇒ 漏了 ⇒ **出向调用没有任何客户端硬上界，且不报错**
+
+■ **变异验证**（**精确转红**）
+· 变异 = 临时把共享层 `GoStyleOutboundDeadlineInterceptor` 类上的 `@GrpcGlobalClientInterceptor` 摘掉（**只在本 lane 工作树内临时改 ⇒ 立即还原**）
+· 实测：**该条精确转红**，诊断行给出实测名单 = `[com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor@…]` ⇒ ⇒ **名单里只剩熔断拦截器** ⇒ ⇒ 出向 deadline 拦截器**确实不在** ⇒ ⇒ 判据有鉴别力
+· 还原后 `sha256sum` **逐字节一致**（`9d2378f8…`）＋ `git status service/common/` **为空**
+· ⚠️ 顺带佐证：变异态下名单里**本来就装着**带注解的熔断拦截器 ⇒ ⇒ devh 的收集机制**在正常工作** ⇒ ⇒ 这条判据不是空转
+
+■ **⚠️ 两处踩坑**（写下来免得再犯）
+· ① **同方法内多断言会互相遮蔽**：第一版把「静态：类上带注解」与「运行期：名单含它」放在**同一个**测试方法里 ⇒ ⇒ 变异后只有静态那条红、运行期那条「毫无反应」⇒ ⇒ 其实是**前一条断言失败 ⇒ 抛异常 ⇒ 后一条根本没执行** ⇒ ⇒ 读起来像「后一条判据不灵」⇒ ⇒ 修法 = 删掉**冗余**的静态断言（运行期那条**已隐含**它 ⇒ 同一根前提）⇒ ⇒ 只留运行期那条 ⇒ ⇒ 变异即刻精确命中
+· ② 「Bean 存在」≠「机制生效」：共享层自己有装配面守门（`GoStyleOutboundDeadlineApiAssemblyTest`），但那**证不了本域**（域侧缺口就是本域这一条）
+
+■ **回归读数**（**逐类前后对比** · 零行为变更判据仍成立）
+· 基线（隔离 worktree · 主干 `8c1dd6bb`）= 11 类 / **216** / 0F / 0E
+· 本轮之后 = 12 类 / **224** / 0F / 0E（= 216 ＋ 新守门 **7** ＋ 装配面断言 **1**）
+· 逐类：**除 `ArticleApiAssemblyWiringTest`（本轮**有意** ＋1 条断言：13 → 14）外，其余 10 类逐类「条数 ＋ 失败数 ＋ 错误数」全等** ⇒ ⇒ 零行为变更判据**成立**
+· 权威读数 = surefire XML 求和
+
+■ **🔴 A-1 的最终待改值**（**以本节为准** · 前面两版数字作废）
+· `article-api` 行：**133 → 141**
+· 文档声明的「全仓源声明测试方法数」：**3330 → 3338**
+· 权威实测：`🔴 [M1] article-api 列= 133 源= 141 ← 不一致（差 +8）` ＋ `🔴 [M2] 文档声明 = 3330，实测 = 3338`
+· ⚠️ **两个口径不可互换**：**216 / 224** 是 **surefire 执行口径**；**133 / 141** 是 **源声明口径**（A-1 那一列用的就是它）
+· ⚠️ `docs/PhaseGoal-judge.md` 与 `docs/DRIFT/_cross/stage1-derivation.*` 是**别人的写权面** ⇒ ⇒ 本域**只登记不刷** ⇒ ⇒ 已发回执给收口执行者

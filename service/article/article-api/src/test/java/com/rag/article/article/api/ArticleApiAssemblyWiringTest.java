@@ -141,6 +141,58 @@ class ArticleApiAssemblyWiringTest {
     }
 
     // =====================================================================
+    // 2-bis. 出向 deadline 拦截器：**真进** devh 的 GlobalClientInterceptorRegistry
+    //       （2026-11-02 · G3 lane 第十四轮 · 补 G4 lane 指出的本域缺口：
+    //        其他四域都有这条装配面守门，article-api 独缺）
+    // =====================================================================
+
+    /**
+     * 🔴 <b>装配面</b>：出向 deadline 拦截器（共享层）真被 devh 的
+     * {@code GlobalClientInterceptorRegistry} 收进<b>收集名单</b>。
+     *
+     * <h2>⚠️ 为什么「Bean 存在」<b>不够</b>（AGENTS.md §3.3）</h2>
+     * <p>devh 认的是<b>类上的注解</b>（{@code @GrpcGlobalClientInterceptor}），
+     * 而真正的收集发生在 starter 的 {@code AnnotationGlobalClientInterceptorConfigurer}
+     * （= {@code applicationContext.getBeansWithAnnotation(...)}）
+     * ⇒ ⇒ 「上下文里有这个 Bean」**证不了**「它真被收集」
+     * ⇒ ⇒ devh 的 {@code AbstractChannelFactory#createChannel} 最后一步是
+     * {@code ClientInterceptors.interceptForward(channel, interceptors)}
+     * ⇒ ⇒ <b>只有进了 registry 的那些</b>才会被装到 channel 上
+     * ⇒ ⇒ 漏了 ⇒ <b>出向调用没有任何客户端硬上界</b>，而<b>不报错</b>。
+     *
+     * <h2>为什么这条对 article-api 特别要紧</h2>
+     * <p>本域两个出向方向（{@code article-rpc} / {@code user-rpc}）的上界<b>全部</b>来自
+     * 这个拦截器 ＋ 域 yml 的
+     * {@code rag.protection.outbound-deadline.cap-millis-by-service} 分档表
+     * ⇒ ⇒ 拦截器不在 registry ⇒ ⇒ <b>两个方向同时失去上界</b>。
+     *
+     * <h2>⚠️ 本类<b>刻意不</b> mock 任何东西</h2>
+     * <p>所以这里的 registry 是<b>生产路径</b>上那一个（由 devh starter 的自动配置注册）
+     * ⇒ ⇒ <b>不是</b>手工 new 的。
+     */
+    @Test
+    @DisplayName("装配层：出向 deadline 拦截器真在 devh 的 GlobalClientInterceptorRegistry 名单里 ⇒ channel factory 会装配它")
+    void outboundDeadlineInterceptorIsRegisteredWithTheStarter() {
+        // ⚠️ **只保留这一条运行期判据**，不再另加「类上带 @GrpcGlobalClientInterceptor」的静态断言 ——
+        //    原因：静态断言与本条是**同一个前提**（devh 的收集器按**类上的注解**收集）⇒ ⇒ 加了就是冗余；
+        //    而**放在同一个测试方法里还会互相遮蔽**（前一条失败 ⇒ 后一条根本不执行 ⇒ ⇒ 变异命中不精确 ⇒
+        //    读起来像「后一条不灵」，实则是**短路**）。
+        //    ⇒ ⇒ 判据打在**真名单**上 ⇒ ⇒ 变异（把类上的收集注解摘掉）⇒ ⇒ 本条**必红**。
+        net.devh.boot.grpc.client.interceptor.GlobalClientInterceptorRegistry registry =
+                ctx.getBeanProvider(net.devh.boot.grpc.client.interceptor.GlobalClientInterceptorRegistry.class)
+                        .getIfAvailable();
+        assertNotNull(registry,
+                "🔴 本域上下文里必须有 devh 的 GlobalClientInterceptorRegistry（由 devh starter 的自动配置注册）"
+                        + "⇒ ⇒ 拿不到 ⇒ 说明 devh 客户端 starter 的装配面没起来 ⇒ ⇒ 本条判据失效");
+        List<io.grpc.ClientInterceptor> collected = registry.getClientInterceptors();
+        assertTrue(collected.stream()
+                        .anyMatch(i -> i instanceof com.rag.common.protection.GoStyleOutboundDeadlineInterceptor),
+                "🔴 devh 的 GlobalClientInterceptorRegistry 必须真收它（实测名单 = " + collected + "）"
+                        + "⇒ ⇒ 否则它只是个 Bean，channel factory 不会装它 ⇒ ⇒ "
+                        + "article-api 的两个出向方向（article-rpc / user-rpc）同时失去客户端硬上界。");
+    }
+
+    // =====================================================================
     // 3. UNRESOLVED-003：Filter 链的**实际生效顺序**
     // =====================================================================
 
