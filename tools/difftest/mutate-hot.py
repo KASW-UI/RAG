@@ -101,9 +101,23 @@ MUTATIONS = [
      "十进制解析：radix 改成 8 ⇒ \"010\" 变成 8 而不是 10",
      "getHotArticlesLogic.go:172-176（strconv.ParseInt(str, 10, 32)）"),
 
+    # ⚠️ **【2026-10-31 第二轮订正 · 合并收口执行者 · 第三波合并后】锚点再次重定基**：
+    #   原锚点 `": Math.min(DEFAULT_CALL_TIMEOUT_MILLIS, remainingBudgetMs);"` 在当前代码里
+    #   **命中 0 处** ⇒ ⇒ 该条变异**跑不起来**（「变异转红」这个证据拿不到）
+    #   ⇒ ⇒ 根因 = **G3 把本域的域侧自带封顶删了**（域侧上界统一收敛到共享层
+    #   `GoStyleOutboundDeadlineInterceptor` ＋ 域 yml 的 `cap-millis=2000`）
+    #   ⇒ ⇒ 本类现在的**唯一职责 = 「纯传播请求剩余预算」**（不再自带 cap）
+    #   ⇒ ⇒ 所以**不能**把锚点指向已删的那段域侧 cap ⇒ ⇒ 改指向**仍在**的传播语句。
+    #   ⚠️ **新漂移形态与本条原意同形**：把「请求剩余预算」换成常量 ⇒ 就是
+    #   「去掉『请求剩余预算』约束」⇒ ⇒ 单次调用可超出 HTTP 总预算（**原描述一字未改**）。
+    #   ⚠️ **新锚点的「new 串」必须命中 0 处** ⇒ 故不用 `return stub;`
+    #   （本类「无预算」分支**已经**有一句 `return stub;` ⇒ 会两边都命中 ⇒ 判据失效）。
+    #   ⇒ ⇒ **预期转红点**：hot-api 守门 `HotApiOutboundDeadlineCapGateTest` 的
+    #   ④「显式请求预算 300ms < cap 2000ms ⇒ 出向必须在【300ms】处失败」
+    #   ⇒ ⇒ 变异后实测耗时会落到 ~2000ms（cap）⇒ 落在断言的 `120~1200ms` 区间外 ⇒ **红**。
     ("M08", "hot-api", "client/GoStyleGrpcCallDeadline.java",
-     ": Math.min(DEFAULT_CALL_TIMEOUT_MILLIS, remainingBudgetMs);",
-     ": DEFAULT_CALL_TIMEOUT_MILLIS;",
+     "return stub.withDeadlineAfter(remainingBudgetMs, TimeUnit.MILLISECONDS);",
+     "return stub.withDeadlineAfter(Long.MAX_VALUE, TimeUnit.MILLISECONDS);",
      "gRPC deadline：去掉「请求剩余预算」约束 ⇒ 单次调用可能超出 HTTP 总预算",
      "zrpc/config.go:31（Timeout default=2000）+ ctx 剩余预算取 min"),
 

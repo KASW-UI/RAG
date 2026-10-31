@@ -124,9 +124,9 @@ task     →                            （Kafka ← like）
 
 | 跨域引用域数 | 类 |
 |---|---|
-| **9 域** | `GoStyleProtectionProperties` · `GoStyleRequestDeadline` · `LoggerFactoryBean` |
-| **8 域** | `GoStyleOutboundDeadlineInterceptor` · `GoStyleRouterErrorResponses` · `GoStyleRpcProtectionChain` · `ObservabilityProperties` · `Response` · `RpcServerInterceptorFactory` |
-| **7 域** | `AuthenticationException` · `BusinessException` · `DeadlineQueryTimeoutInjector` · `FatalError` · `GoStyleBreakerFilter` · `GoStyleCpuSheddingFilter` · `GoStyleGrpcClientBreakerInterceptor` · `GoStyleMaxBytesFilter` · `GoStyleMaxConnsFilter` · `GoStyleProtectionConfiguration` · `ObservabilityLifecycle` · `SqlTimeoutStatusTranslator` |
+| **9 域** | `GoStyleOutboundDeadlineInterceptor` · `GoStyleProtectionProperties` · `GoStyleRequestDeadline` · `LoggerFactoryBean` |
+| **8 域** | `GoStyleProtectionConfiguration` · `GoStyleRouterErrorResponses` · `GoStyleRpcProtectionChain` · `ObservabilityProperties` · `Response` · `RpcServerInterceptorFactory` |
+| **7 域** | `AuthenticationException` · `BusinessException` · `DeadlineQueryTimeoutInjector` · `FatalError` · `GoStyleBreakerFilter` · `GoStyleCpuSheddingFilter` · `GoStyleGrpcClientBreakerInterceptor` · `GoStyleMaxBytesFilter` · `GoStyleMaxConnsFilter` · `ObservabilityLifecycle` · `SqlTimeoutStatusTranslator` |
 | 6 域及以下 | 其余 **31** 类 |
 
 ⚠️ **订正（2026-10-27）**：早先记的「3 类被全部 10 个域引用」是**假阳性** ——
@@ -268,7 +268,7 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
 
 | 理由 | 实测依据 |
 |---|---|
-| **无裁决者** | `service/common` 63 类里 **2 类被 9 个域引用**、4 类跨 8 域、8 类跨 7 域（§1.4）⇒ 同一类的语义由三种理解分别修改 ⇒ 必然出现「谁都对但合起来不对」 |
+| **无裁决者** | `service/common` 88 类里 **4 类被 9 个域引用**、6 类跨 8 域、11 类跨 7 域（§1.4）⇒ 同一类的语义由三种理解分别修改 ⇒ 必然出现「谁都对但合起来不对」 |
 | **基线互毁** | 三组并发改 common ⇒ 组 A 的测试跑的是**旧 common**，组 B 跑的是**新 common** ⇒ 绿的可能是**过期基线** |
 | **破坏无网** | 行为级改动编译绿、无 API 兼容门禁（§1.6）⇒ 组 B 拿到的是「编译通过但行为已变」的 common ⇒ 回归结论不可信 |
 | **历史佐证** | 11 处历史回归**全部**是「无出处 idiomatization」—— 同一处语义被多人按各自理解改写（`AGENTS.md` §3.2 / §1.1） |
@@ -534,6 +534,7 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
       "comment",
       "favorite",
       "follow",
+      "hot",
       "like",
       "message",
       "task",
@@ -554,6 +555,7 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
       "follow",
       "hot",
       "like",
+      "message",
       "task",
       "users"
     ],
@@ -933,3 +935,35 @@ python3 tools/difftest/check-wave-role-model.py --mutation-test  # ⇒ 7/7 变�
 ⇒ ⇒ **验收**：`python3 tools/difftest/check-wave-coupling.py` ⇒ **EXIT=0 · 5 项断言全绿**（度数 / DAG / topic / 跨域引用 / 辐射度）。
 
 （**本节编号：§七** —— 为便于上文按「§七」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
+
+---
+
+## 八、🆕 快照刷新记录（第二轮 · 2026-10-31 · 合并收口执行者）—— 第三波 lane 落码 ⇒ `common_radiation` 再次过期
+
+### 8.1 触发与根因
+
+- **触发**：第三波 lane 合并后 `python3 tools/difftest/check-wave-coupling.py` ⇒ **EXIT=1 · 2 项漂移**（**仍全部落在 `common_radiation`**）：
+  - `GoStyleOutboundDeadlineInterceptor` —— 文档快照缺 `hot`（仓库现状已含）
+  - `GoStyleProtectionConfiguration` —— 文档快照缺 `message`（仓库现状已含）
+- **根因 = 事实变了、快照没跟**（**不是行为回归**）：第三波各域把共享层的**保护类 / 拦截器**接进本域
+  ⇒ ⇒ `service/common` 逐类**辐射度**快照过期 ⇒ ⇒ **只更新快照、不改任何生产代码**。
+- ⚠️ **其余四项逐项未变**（`pom_dependents` / `grpc_edges` / `cross_domain_topics` / `users_common_classes`）
+  ⇒ ⇒ **§二 分波方案的事实底座（DAG ＋ 编译期度数）仍未过期** ⇒ ⇒ **分波方案不必重排**。
+
+### 8.2 本轮做了什么（逐项可复算）
+
+| 项 | 改动 | 性质 |
+|---|---|---|
+| ① | §6.1 的 JSON 快照**整块刷新**（`--print` 重算值）⇒ 块内 **491 → 493 行**（+2 ＝ 两个类各多一个引用域） | 就地替换 |
+| ② | §1.4 的**分桶表就地订正**（**行数不变 ⇒ 零位移**）⇒ 9 域 **3 → 4** 类（`GoStyleOutboundDeadlineInterceptor` 升入）· 8 域 **6 类**（成员换血：`GoStyleProtectionConfiguration` 升入、`GoStyleOutboundDeadlineInterceptor` 升出）· 7 域 **12 → 11** 类 · ≤6 域 **31** 类不变 | 就地替换 |
+| ③ | ⚠️ **又一处「第二真相源」就地订正** ⇒ `:271` 的「`service/common` **63** 类里 **2** 类被 9 个域引用、4 类跨 8 域、8 类跨 7 域」**与 §1.4 脱节**（§1.4 自己写的是 88 / 3 / 6 / 12）⇒ ⇒ 本轮改为 **88 / 4 / 6 / 11**（与 §1.4 同源）⇒ ⇒ **不再有第二个真相源** | 就地替换 |
+| ④ | ⚠️ **块内两个被外部引用的行号再漂**（`:574 → :576` · `:653 → :655`）⇒ ⇒ **连带改指** `docs/DRIFT/_cross/grading/W4.md`（G4-9 行）＋ `docs/DRIFT/article/vs-common.md`（G4-9 行）⇒ ⇒ 否则 `check-pointer-consistency.py` 会红 | 就地替换 |
+| ⑤ | §七的**历史锚点表保持不动**（`:574` / `:653` 留在原处）⇒ ⇒ **不改写历史**；本节承担「当前落点」的权威 | 追加 |
+
+### 8.3 验收
+
+- `python3 tools/difftest/check-wave-coupling.py` ⇒ **EXIT=0 · 5 项断言全绿**（度数 / DAG / topic / 跨域引用 / 辐射度）
+- `python3 tools/ledger-derive/check-pointer-consistency.py` ⇒ **新增 0 条**指针漂移（存量例外 237 条**逐条不变**）
+
+（**本节编号：§八** —— 编号只写在此处正文 ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」；
+§八 的表格**首格是锚点名、不是编号** ⇒ ⇒ 不被派生层当成新登记点。）
