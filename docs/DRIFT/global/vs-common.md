@@ -8842,7 +8842,7 @@ G3 正在改 `tools/api-full-parity-probe/favorite-rpc/{README.md,expected.txt,j
 | 口径 | 读数 |
 |---|---|
 | **静态守门清单**（环境无关 · 快 · 不编译） | **13 项全绿** —— `check-ledger-tables` · `check-ledger-selfcheck` · `check-ledger-count` · `check-doc-links` · `check-agents-budget` · `check-wave-lane-ownership` · `check-wave-role-model` · `check-surface-parity` · `check-phasegoal-consistency` · `check-phasegoal-lanes` · `check-global-lane-ownership` · `check-source-test-decl-count` · `check-wave-coupling` |
-| **派生层** | **1,175 → 1,175**（新增 **0** / 消失 **0** / 改列 **0** · MD **逐字节一致**）⇒ ⇒ **新增 3 个台账文件未触发派生层新增条目** ✔ |
+| **派生层** | **1,175 → 1,175**（新增 **0** / 消失 **0** / 改列 **0** · MD **逐字节一致**）⇒ ⇒ **新增 3 个台账文件未触发派生层新增条目** ✔ ⚠️ **口径必须写死**：**1,175 = 可解析条目数**（TSV 首列为 key 的去重条目数）· **TSV 物理行数 = 1,285**（含表头）⇒ ⇒ **这两个数不是同一个量**（「条目数」vs「物理行数」）⇒ ⇒ **引用时必须标明是哪一个**，否则下一轮又会出现「两个数打架」 |
 | **指针棘轮** | **237 == 237**（新增 **0** · 已消失 **0**）⇒ ⇒ **无新增指针漂移** ✔ |
 | **运行期回归**（surefire · 要编译） | **`service/common` = BUILD SUCCESS · 92 个测试类 / 488 条用例 / 0F / 0E / 0S** ⚠️ **本层写权面单模块** ⇒ 本轮**零产品代码改动** ⇒ ⇒ 该读数验证的是「本轮新增的台账/脚本/清单**没有弄坏共享层**」⇒ ⇒ **不是**「本轮改了代码且回归绿」 |
 | **本文件不变式** | 行数 8,697 → **8,853**（末尾追加）· 末尾换行 **True** · 转义反引号 **6**（与基线一致 · 本轮新增内容里的 Go struct tag 引用已改写成不含嵌套反引号的措辞）· U+FFFD **0** |
