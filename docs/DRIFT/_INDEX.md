@@ -91,7 +91,7 @@
 
 ⚠️ **本轮查出的「台账自身写错」**（不是 RAG 的缺陷，是台账的错）—— 逐条回源才发现，**读台账读不出来**：
 
-- 🔴 **`D-7` 的 RAG 侧描述已过期**（`W30`）：台账写「`INTERNAL` 落 `default` ⇒ 1015、**熔断打开 ⇒ 也是 1015**」，
+- ✅ **`D-7` 的 RAG 侧描述已订正**（`W30` 查出 · **2026-10-31 已落地**）：原台账写「`INTERNAL` 落 `default` ⇒ 1015、**熔断打开 ⇒ 也是 1015**」（**该半句已被证伪**），
   但 like-api 的**真实消费路径**先过 `LikeApiSupport.rpcError`（`service/like/like-api/.../LikeApiSupport.java:177-186`）
   ⇒ 非 status 异常（含熔断打开的 `GoStyleCircuitOpenException`，普通 `RuntimeException`）**两侧同形落到 5001**（Go 侧 `ok==false` 分支也是 5001）
   ⇒ ⇒ 台账那半句**已不成立**；**残余差异面只在「status 错误 ⇒ 业务码」**（Go 必为 `int(st.Code())` 数值码 · RAG 恒 1015）。

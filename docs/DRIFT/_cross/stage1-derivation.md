@@ -194,7 +194,7 @@
 | 波次 | 条目（行） | **状态开放**（仍要干的） | 其中 A/B 类（阶段一范围） | 覆盖范围 |
 |---|---|---|---|---|
 | **G1** | 278 | **108** | 0 | `users`（**不含 users-common**）+ `follow` |
-| **G2** | 287 | **70** | 0 | `message` + `like` + `task` |
+| **G2** | 287 | **69** | 0 | `message` + `like` + `task` |
 | **G3** | 405 | **178** | 0 | `article` + `comment` + `favorite` + `hot` |
 | **G4** | 290 | **172** | 0 | **共享层** `service/common` + `service/users/users-common` + 收口域 `global`（**常设执行者 · 不在域波顺序里**） |
 | **G1+G4** | 7 | **5** | 0 | **跨派工面并集**（同源组跨域登记） |
@@ -430,7 +430,7 @@
 | `C-1` | comment = ✅ 已一致 ／ common = ✅ 仍成立 | 2 | 未判定 |
 | `D-4` | like = ✅ 已一致 ／ message = ✅ 已一致 | 2 | 不同的事 ／ 未判定 |
 | `D-6` | like = ✅ 已一致 ／ task = ✅ 已一致 | 2 | 不同的事 ／ 未判定 |
-| `D-7` | like = 🔴 未闭合 ／ task = ✅ 已一致 | 2 | 不同的事 ／ 未判定 |
+| `D-7` | like = ⚫ 已签字偏离 ／ task = ✅ 已一致 | 2 | 不同的事 ／ 未判定 |
 | `DRIFT-001` | article = 🔴 未闭合 ／ common = ✅ 已一致 | 2 | 未判定 |
 | `DRIFT-003` | common = ✅ 已一致 ／ users = 🟡 部分闭合 | 2 | 不同的事 ／ 未判定 |
 | `DRIFT-004` | article = ✅ 已一致 ／ users = ✅ 已一致 | 2 | 未判定 |
@@ -609,7 +609,7 @@
 | `DRIFT-LOG-007` | DRIF | common | **G4** | 🔴 未闭合 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/common/alignment-2026-10-23.md:419;DRIFT/common/alignment-2026-10-23.md:860` | — |
 | `DRIFT-SF-002` | DRIF | common | **G4** | 🔴 未闭合 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/common/alignment-2026-10-23.md:421;DRIFT/common/alignment-2026-10-23.md:867` | — |
 | `DRIFT-SF-003` | DRIF | common | **G4** | 🔴 未闭合 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/common/alignment-2026-10-23.md:422;DRIFT/common/alignment-2026-10-23.md:868` | — |
-| `D-7` | DRIF | like | **G2** | 🔴 未闭合 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | GAP-14 ｜ ⚠️已关闭指针:GAP-12 | 静态取证 · 缺活体对拍 | `DRIFT/like/vs-common.md:72` | Go `service/like/api/internal/logic/like/getlikecountlogic.go:41-46`（`st, ok := status.FromError(err)`；`ok` 为真 ⇒ `errmsg.NewErrCodeMsg(int(st.Code()),… |
+| `D-7` | DRIF | like | **G2** | ⚫ 已签字偏离 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | GAP-14 ｜ ⚠️已关闭指针:GAP-12 | — | `DRIFT/like/vs-common.md:72` | Go `service/like/api/internal/logic/like/getlikecountlogic.go:41-46`（`st, ok := status.FromError(err)`；`ok` 为真 ⇒ `errmsg.NewErrCodeMsg(int(st.Code()),… |
 | `FB-05` | DRIF | like | **G2** | 🔴 未闭合 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | P2-T02,P2-T06 ｜ ⚠️已关闭指针:GAP-12 | 静态取证 · 缺活体对拍 | `DRIFT/like/vs-common.md:109` | Go `service/like/rpc/internal/logic/getlikecountlogic.go:50`（`l.svcCtx.BizRedis.HmgetCtx(l.ctx, likeCountKey, in.TargetIds...)`）＋ `:56`（`l.svcCtx.BizR… |
 | `U-08` | DRIF | like | **G2** | 🟡 部分闭合 | A 活体 · 绿(0) | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 已定性 · 未排期 | `DRIFT/like/api.md:831;DRIFT/like/api.md:844` | Go `service/like/rpc/pb/like_grpc.pb.go:53`（`err := c.cc.Invoke(...)` ⇒ 把**原始 gRPC status 错误**原样返回）＋ `service/like/api/internal/logic/like/likeactionl… |
 | `UNRESOLVED-MSG-V-001` | DRIF | _cross | **G2** | 🟡 部分闭合 | A 活体 · 红(1) | P2 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 已定性 · 未排期 | `DRIFT/_cross/message-domain-wide.md:215;DRIFT/_cross/message-domain-wide.md:494` | Go `service/message/rpc/message.go:37`（`s := zrpc.MustNewServer(c.RpcServerConf, …)` ⇒ 注册到服务发现）＋ `go-zero@v1.10.2/zrpc/server.go:43`（`server, err = in… |

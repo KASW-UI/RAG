@@ -60,16 +60,16 @@ import org.springframework.stereotype.Component;
  * {@code LikeApiGrpcClientBreakerE2ETest} —— 真 in-process gRPC server ＋ 真 channel ＋ 真拦截器
  * ⇒ 断言「下游连续返 INTERNAL ⇒ 熔断打开 ⇒ <b>调用不再触达下游</b>」
  * ⇒ 证明的是<b>机制真在链上</b>。
- * ⚠️ 该守门<b>不用业务码做判别</b>：本域 {@code INTERNAL} 与「熔断打开」<b>都</b>映到 1015
- * ⇒ 码没有判别力 ⇒ 改用「下游有没有真被调用」。
- *
- * <p><b>⚠️ 已登记的 A4 差异（别把 1015 当成「两侧一致」）</b>：
- * 熔断打开时抛的 {@code GoStyleCircuitOpenException} 不是 gRPC status
- * ⇒ 落进 {@code LikeGrpcError#bizCodeFromError} 的兜底 ⇒ <b>业务码 1015</b>；
- * 而 Go 侧此时是 {@code status.FromError(err)} 返回 {@code ok=false} ⇒
- * {@code errmsg.NewErrCode(errmsg.ErrorServerCommon)} ⇒ <b>5001</b>。
- * ⇒ 两侧在<b>熔断打开</b>这一条路径上的业务码不同，已登记（见
- * {@code docs/DRIFT/like/vs-common.md} 的 A4 行）⇒ <b>不要在别处拿 1015 当「已对齐」来引用</b>。
+ * ⚠️ 该守门<b>不用业务码做判别</b>：本域 {@code INTERNAL} 经 {@code bizCodeFromError} 映到 1015，
+ * 而「熔断打开」在 <b>api 响应层</b>是 <b>5001</b>（见下）⇒ 两码<b>本有判别力</b>，但本守门改用
+ * 「下游有没有真被调用」⇒ ⇒ <b>不要拿业务码当本守门的判别依据</b>。
+ * <p><b>⚠️ 熔断打开这条路径：两侧业务码相同（都是 5001）</b>：
+ * 熔断打开时抛的 {@code GoStyleCircuitOpenException} 不是 gRPC status ⇒ 消费点
+ * {@code LikeApiSupport#rpcError} <b>先判 {@code status == null}</b> ⇒ 返回 {@code ERROR_SERVER_COMMON}
+ * ⇒ <b>5001</b>；Go 侧 {@code status.FromError(err)} 的 {@code ok=false} 分支同样是
+ * {@code errmsg.NewErrCode(errmsg.ErrorServerCommon)} ⇒ <b>5001</b> ⇒ ⇒ <b>两侧一致</b>。
+ * ⚠️ 真正的 A4/D-7 差异是<b>下游非本域 status 码</b>（Go 13/3/5/16 ⇒ Java 1015/2001/1015/1009）
+ * ⇒ 已于 2026-10-31 签字（{@code SD-2026-10-31-01}）⇒ <b>勿把两者混为一谈</b>。
  */
 @Component
 public class LikeRpcClient {
