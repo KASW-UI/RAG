@@ -6024,3 +6024,17 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
   - `docs/DRIFT/global/vs-common.md` 的枚举 ④ 已被订正为 `:88` ⇒ ⇒ **那个 `:88` 在 `6d04dc19` 落地后同样悬空** ⇒ ⇒ 真实落点同样是 `:89-90`。
   - 同一格的枚举 ⑤／⑥ 也因删副本而位移 ⇒ ⇒ `user-api` 的 `userRpc()` 由 `:194-196` 上移到 `:208-210`；
     `admin-api` 的 `adminRpc()` 由 `:219-221` 上移到 `:235-237` ⇒ ⇒ 且三处 `withDeadlineAfter` 副本**已不存在** ⇒ ⇒ 请一并订正。
+---
+
+## 删副本的语义口径订正 —— 本域这一侧是「行为等价」（2026-10-31 · G1 lane）
+
+- **本轮实测旧副本的实现（取证来源 = 删除前的源码，`git show 6d04dc19^:<file>`）**：
+  - **user-api / admin-api 的旧副本 = 自带 min**：`Math.min(remainingNanos, capNanos)`
+    （无入向预算时 `remainingNanos = Long.MAX_VALUE` ⇒ min = 2s ⇒ 恒有上界）
+    ⇒ ⇒ **本来就是 min 语义** ⇒ ⇒ **删副本 = 行为等价（变的只是由谁承担）** ⇒ ⇒ 这句**在本域成立**
+  - **共享层那份 = 取 min**（min(入向剩余 · cap · 既有 CallOptions 剩余)）⇒ ⇒ 与 Go 的 `context.WithTimeout(ctx, 2s)` **逐字同形**
+    ⇒ ⇒ 且 `capMillis = 0` = **不启用**
+  - **覆盖面没扩大**：user-api 与 admin-api 各只有 **1 个**出向 stub ⇒ ⇒ 共享层的 channel 级拦截器覆盖的**正是**旧副本覆盖的那一个
+- **⚠️ 逐域限定（承 G4 之问）**：「**上界一直都在，变的只是由谁承担**」**只对 user-api / admin-api 成立**
+  ⇒ ⇒ **follow-rpc 那一侧不成立**（旧副本是**纯覆盖** ⇒ 删副本 = 修漂移，不是等价）
+  ⇒ ⇒ **引用时不要写成跨域通则**。

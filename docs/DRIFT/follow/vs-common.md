@@ -1627,3 +1627,18 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时（`service/users/user/
   - 同一格的枚举 ⑤／⑥ 也因删副本而位移 ⇒ ⇒ `user-api` 的 `userRpc()` 由 `:194-196` 上移到 `:208-210`；
     `admin-api` 的 `adminRpc()` 由 `:219-221` 上移到 `:235-237` ⇒ ⇒ 且三处 `withDeadlineAfter` 副本**已不存在** ⇒ ⇒ 请一并订正。
   - shared 面的踩坑档有一条**按方法名**提到 `FollowRpcClient.capByClientTimeout` ⇒ ⇒ 本轮删掉该方法后那一行**语义悬空**（不是行号悬空）⇒ ⇒ 一并转。
+---
+
+## 删副本的语义口径订正 —— 本域这一侧是「覆盖」还是「取 min」（2026-10-31 · G1 lane）
+
+- **本轮实测旧副本的实现，取证来源 = 删除前的源码**（`git show 6d04dc19^:<file>`，不是转述）：
+  - **follow-rpc 的旧副本 = 纯覆盖**：`return stub.withDeadlineAfter(capNanos, NANOSECONDS);` ⇒ **不看入站剩余**
+    ⇒ ⇒ 与 Go 的 `context.WithTimeout(ctx, 2s)`（**取更早者**）**方向相反**
+    ⇒ ⇒ ⇒ **删副本在本域这一侧 = 修漂移（把「覆盖」改成「取 min」），不是「行为等价」**
+    ⇒ ⇒ ⇒ 在「入站预算 < 2000ms」这一形态上：删前按 2000ms 走、删后按 min 走 ⇒ ⇒ **这是本轮唯一一处「行为变了」的形态**
+  - **共享层那份 = 取 min**：出向拦截器的 `budgetNanos` = min(入向剩余 · cap · 既有 CallOptions 剩余)
+    ⇒ ⇒ 与 Go 的 `context.WithTimeout` **逐字同形** ⇒ ⇒ 且 `capMillis = 0` = **不启用**（⇒ 「cap=0 负控」的语义是确定的，不是歧义）
+  - **覆盖面没扩大**：follow-rpc 只有 **1 个**出向 stub（`@GrpcClient("user-rpc")` 一个注入点）⇒ ⇒ 共享层的 channel 级拦截器覆盖的**正是**旧副本覆盖的那一个 ⇒ ⇒ 「承担者换了」这半成立
+- **⚠️ 口径订正（承 G4 之问）**：「**上界一直都在，变的只是由谁承担**」这句 ——
+  **在 user-api / admin-api 上成立**（那两处的旧副本**自带** `Math.min(remainingNanos, capNanos)` ⇒ 本来就是 min），
+  **在本域（follow-rpc）不成立**（旧副本是纯覆盖）⇒ ⇒ **引用该措辞时须逐域限定**，不要写成跨域通则。
