@@ -8591,3 +8591,107 @@ G3 正在改 `tools/api-full-parity-probe/favorite-rpc/{README.md,expected.txt,j
   或本层改 `_samesrc-W19.md:8` 的第 5 列）⇒ ⇒ **本层门禁清单补上这条 `--check`**（修完转绿）。
 - ⚠️ **新坑**：M-36 ⇒ [`docs/Pitfalls/_cross/testing-pitfalls.md`](../../Pitfalls/_cross/testing-pitfalls.md)
   （「同一件事跨域登记」时，合并只比「日期 + 权威度」⇒ ⇒ 域侧的滞后投影会盖过本体面的销账结论）。
+
+### §4.19.53 · 第四十八次订正轮次（2026-10-31 · G4 lane）—— **本分支已全量并入主干后的残余订正**（`docs/DRIFT/common/protection.md` 两处过期口径）＋ 两条**证据补强**（主干已落码的「例外集剪到 1 条」）＋ ⚠️ **撤回上一轮草稿里的「两门红逐项归因」**
+
+**一、本轮状态（最重要的一条）：本分支相对主干【零差异】⇒ ⇒ 无须再合**
+
+- `git log --oneline do-my-own-gh..HEAD` = **空** · `git diff --stat do-my-own-gh...HEAD` = **空**
+  ⇒ ⇒ 本层的 5 笔（`99a1505b` / `6b848946` / `1e6244e7` / `3aa9accd` / `7d419ca0`）**全部已是主干祖先**（逐笔 `git merge-base --is-ancestor` 实测 ✅ 5/5）
+  ⇒ ⇒ ⇒ **本分支无须再合**（与合并收口执行者 `a4426ddc` 的「G4 分支 21 笔非合并提交 ⇒ **内容级**核验 ⇒ ⇒ **结论无须合入**」一致）。
+- ⚠️ **本轮期间发生的两件事（记录在此，避免下一个人重新踩）**：
+  · ① **本分支的未提交 merge 态被 `git reset` 清掉** —— `git reflog` 实测：`HEAD@{2026-10-31 19:29:44} reset: moving to HEAD`
+    ⇒ ⇒ 未提交产出（草稿 §4.19.42 ＋ `protection.md` 订正 ＋ 2 条例外的剪）**当场丢失**
+    ⇒ ⇒ **教训（可迁移）**：**`--no-commit` 的 merge 态在磁盘与会话层面都没有保护**
+    ⇒ ⇒ 长时间被阻塞的未提交 merge 态，**应当先落一个 WIP commit**，或至少把编辑结果存成**可复用的脚本**再等长任务
+    ⇒ ⇒ 本轮之所以能恢复，**全靠「编辑动作全部脚本化」** —— `/tmp/g4-41942.md` ＋ 4 份回执 ＋ 回归日志 ＋ 两份 `.bak` **全部幸存** ⇒ ⇒ 才有本节。
+  · ② **§4.19.42 这个号已被占用** ⇒ ⇒ 本层上一轮写的**同号草稿作废、不再合入**
+    ⇒ ⇒ 与 §4.19.42 footer 的「⚠️ **G4 lane 停摆前在自己的工作树里写过一份同号草稿**（未提交 · 未合入主干）⇒ ⇒ **本节不是它的复制** ⇒ ⇒ **勿再合入**」一致
+    ⇒ ⇒ **本节改用 §4.19.53**。
+
+**二、⚠️ 撤回：上一轮草稿里的「两门红的逐项归因」未采纳（收口执行者已独立复核并落码）⇒ ⇒ 本层不再主张**
+
+- 草稿把 `check-phasegoal-consistency` 的红归因为「A-1 的 `tests` 列差 **+14**（`comment-api` +4 / `favorite-api` +3 / `hot-api` +7）⇒ ⇒ 需更新 `docs/PhaseGoal-judge.md`」
+  ⇒ ⇒ **现已不成立**：主干已把 M2 总数**裁决到 3,323**（`670b92a4`）⇒ ⇒ **该门现为绿**（本层实测 ✅）。
+- 草稿把 `selfcheck` 层 0 阳性对照 ⑤″ 的红归因为「**位数不一致**」（`_off` 用 `--abbrev-commit` = **8 位** · `_repo_topo_order` 用 `h[:7]` = **7 位** ⇒ ⇒ `_n == _x` **永不成立** ⇒ ⇒ **只要分支落后主干就必红**）
+  ⇒ ⇒ **该归因成立**，且合并收口执行者**独立得出同一结论**并落码（§4.19.42 第二节 · 修法 `_x = _off[0][:7]`）⇒ ⇒ **本门现为绿**（本层实测 ✅）。
+  ⇒ ⇒ ⇒ **教训**：**同一道门被两个来源独立定位到同一个根因** ⇒ ⇒ 这是「**判据级缺陷**」而非「读数偶合」的**最强证据**。
+
+**三、`docs/DRIFT/common/protection.md:199-203` 两处过期口径就地订正（本层唯一剩下的活）**
+
+- 原写 ① 「**各域的 yml 一个都还没配** ⇒ ⇒ 「域侧只配参数」这条**尚未被任何域真正使用**」
+  ⇒ ⇒ **已过期** ⇒ ⇒ **2026-10-31 实测**：`comment-api` / `favorite-api` / `hot-api`（G3 批）＋ `like-api` / `task-api`（G2 批）
+  ⇒ ⇒ **五个域 api 都已配** `cap-millis` ⇒ ⇒ **残余面 = 只剩 `article-api` 一个组件**（同组件两方向 Go 真值不同 ⇒ 需共享层补 per-client cap）
+  ⇒ ⇒ 派工面 P2-T04 的残余 = **这 1 个**；
+- 原写 ② 「**api 侧另有内联形态的封顶**（`like-api` / `favorite-api` 在 client 类里直接算 min）⇒ ⇒ **不在这条守门的检测面**」
+  ⇒ ⇒ **已过期** ⇒ ⇒ **2026-10-31 已扩到检测面**（判据④ · 点位级棘轮）⇒ ⇒ 且 **6 个点位**的内联封顶**已全部删净**（域侧改配 `cap-millis`）
+  ⇒ ⇒ 例外集**只剩 1 条**（`article-api` · 不可收敛）；
+- ⚠️ **为什么这两条必须订正**：它们是**本层写权面内**（`docs/DRIFT/common/**`）且**主干上仍然错着**
+  ⇒ ⇒ 收口执行者代落码的 §4.19.42 只更新了同文件 `:187`-`:190` 那四行（断言数 · 例外集份数 · 判据④）
+  ⇒ ⇒ **这两条（`:199`-`:203`）没被带上** ⇒ ⇒ 本层补齐（**不是重复劳动** —— 落点不同、行号不同）。
+- **零位移**：5 行「单行 → 单行」就地替换（**行数 319 → 319 不变**）
+  ⇒ ⇒ 该文件**唯一被指着的行是 `:89`**（`DRIFT-003` 的派生层落点）⇒ ⇒ **`:89` 未动**（实测 `old[88] == new[88]`）✔
+
+**四、证据补强：主干已落码的「例外集剪到 1 条」的两条独立证据（本层复核过 · 主干记录里没有）**
+
+- **Go 侧逐段复核**（⚠️ **顶层 `Timeout` 是服务端方法超时、与 `*RpcConf.Timeout`（客户端上界）同名不同义**）：
+  · `service/comment/api/etc/commentservice.yaml` 的 `CommentRpc:` 段 ⇒ ⇒ **无 `Timeout`** ⇒ ⇒ 2000；
+  · `service/favorite/api/etc/favorite.yaml` 的 `FavoriteRpc:` 段 ⇒ ⇒ **无 `Timeout`** ⇒ ⇒ 2000；
+  · `service/hot/api/etc/hotcenter.yaml` 的 `HotRpcConf:` **与** `ArticleRpcConf:` **两段** ⇒ ⇒ **都无 `Timeout`** ⇒ ⇒ **两个方向都是 2000**；
+  · ⇒ ⇒ **全部 2000**（`go-zero@v1.10.2/zrpc/config.go:31` 的 `json:",default=2000"`）
+  ⇒ ⇒ ⇒ **组件级 `cap-millis` 表达得了** ⇒ ⇒ **剪得成立**
+  ⇒ ⇒ 对照保留的那条：`article-api` 的 `ArticleRpcConf.Timeout: 70000`（显式）· `UserRpcConf` 段无 ⇒ 2000
+  ⇒ ⇒ **两方向真值不同** ⇒ ⇒ 组件级表达不了（取 2000 ⇒ article-rpc 方向改严 35 倍；取 70000 ⇒ user-rpc 方向放宽 35 倍）⇒ ⇒ **不可收敛** ✔
+- **双向变异验证**（终态 = 1 条之后，守门**不是真空绿**）：
+  · **变异 A**（注入新域侧私有副本）⇒ ⇒ 守门 **红在「🔴 域侧又出现了新的『内联形态』私有 cap」**（**不是**「例外已失效」）⇒ ⇒ 判据仍有判别力；
+  · **变异 B**（临时删掉**唯一**那条例外）⇒ ⇒ 守门**也红** ⇒ ⇒ **红在「新增私有 cap」** ——
+    因为 `article-api` 那个调用点**本来就是真实的域侧私有 cap** ⇒ ⇒ 一旦撤掉登记，它就变成「未登记的新私有 cap」
+    ⇒ ⇒ ⇒ **判据的方向性被证明**：例外集**只许收、不许放**；
+  · 两次还原均**字节级一致** ✔
+
+**五、本轮的诚实边界（四条）**
+
+1. 本轮**唯一落码** = `docs/DRIFT/common/protection.md` 的 5 行就地订正（**零代码改动**）⇒ ⇒ 不需要升级为全量回归波。
+2. ⚠️ **上一轮那轮 surefire 全量回归被【磁盘满（ENOSPC）】掐断**
+   （收尾输出 = `cannot create temp file for here document: No space left on device`）
+   ⇒ ⇒ 那一轮读数里 `like-rpc` 的一批 `Errors: 1` **不是代码缺陷** —— 实测根因 = **Docker content store 缺 blob**
+   （`InternalServerErrorException: Status 500 ... blob sha256:16bc17c... expected at /var/lib/desktop-containerd/...`）
+   ⇒ ⇒ **磁盘释放后 Docker 已恢复**（实测 `docker run --rm postgres:16-alpine` 成功 ⇒ ⇒ 「有镜像」≠「镜像可用」这条判据仍然有效）
+   ⇒ ⇒ ⚠️ **「应该消失」不是「已消失」** ⇒ ⇒ **必须重跑取干净读数**（见第六节）。
+   ⇒ ⇒ **教训（与主干 §4.19.42 第四节同款）**：**「守门清单全绿」≠「测试全绿」** ⇒ ⇒ **两套口径必须分别跑**。
+3. 本层**未复核**主干上 `§4.19.43`~`§4.19.52` 这批「跨会话消息核销」的**内容正确性**
+   ⇒ ⇒ 只核了**与本层写权面直接相关**的那几条（`protection.md` 的残留口径）⇒ ⇒ 其余**既不采信也不质疑**。
+4. ⚠️ **「合并收口执行者代 G4 lane 落码」这件事本身本层未参与** ⇒ ⇒ 其 §4.19.42 的事实**本层只复核了与自己写权面相关的部分**
+   ⇒ ⇒ ⇒ **那部分以主干为准**（本层不另开一条改口径）。
+
+**六、回归读数（补跑 · surefire 层 —— 与静态守门清单是【两套口径】）**
+
+- **本轮补跑（2026-10-31 23:0x ~ 23:2x · 本工作树 · `mvn -o -B test -Dmaven.test.failure.ignore=true`）**：
+  · **模块**：`service/common` ＋ `like-api` / `like-rpc` / `task-api` / `message-api` / `message-rpc` /
+    `comment-api` / `favorite-api` / `hot-api` / `article-api`（**10 个**）
+  · **结果** = **BUILD SUCCESS** · **241 个测试类 / 1,711 条用例 / 0 失败 / 0 错误 / 1 跳过**
+    ⇒ ⇒ **上一轮那批红（`article-api` 的 `ArticleApiFormParamLimitTest`「expected 200 but was **103**」
+    ＋ `like-rpc` 的一批 `Errors: 1`）**全部消失** ⇒ ⇒ ⇒ **它们是 ENOSPC 窗口的环境产物，不是代码缺陷**
+    ⇒ ⇒ （`like-rpc` 那批的根因已定位到 **Docker content store 缺 blob**；`article-api` 那条是机器在该窗口
+    被挤压时 Tomcat 提前发了 **103 Early Hints** ⇒ ⇒ `rawGet` 只读首个状态行 ⇒ ⇒ 读成 103
+    ⇒ ⇒ **两条都不是断言写错**，是**环境把断言的前提抽走了**）
+  · **共享层单读数**：`service/common` = **92 个测试类 / 488 条用例 / 0F / 0E / 0S**
+  · **磁盘**：`/System/Volumes/Data` 133 Gi 可用 ⇒ ⇒ **磁盘是回归的前置条件**（与主干 §4.19.42 第四节同款）
+- **静态守门清单（另一套口径 · 环境无关 · 快）**：**13 项全绿**
+  （`check-ledger-tables` · `check-ledger-selfcheck` · `check-ledger-count` · `check-doc-links` ·
+  `check-agents-budget` · `check-wave-lane-ownership` · `check-wave-role-model` · `check-surface-parity` ·
+  `check-phasegoal-consistency` · `check-phasegoal-lanes` · `check-global-lane-ownership` ·
+  `check-source-test-decl-count` · `check-wave-coupling`）
+  · ⚠️ **其中两门在本层开始时还是红的**（`check-ledger-selfcheck` 的 ⑤″ 与 `check-phasegoal-consistency` 的 A-1）
+  ⇒ ⇒ **现均已绿** ⇒ ⇒ 归因与修法**都已被主干消化**（见第二节）。
+- **派生层**（**G1 的新判据下**）：**1,175 → 1,175**（新增 0 / 消失 0 / 改列 0 · MD 逐字节一致）
+  · **指针棘轮**：**237 == 237**（新增 0 · 已消失 0）⇒ ⇒ **无新增指针漂移** ✔
+
+
+**七、本轮落码范围**
+
+- `docs/DRIFT/common/protection.md` —— **`:199`-`:203` 五行就地订正**（零位移 · 行数 319 → 319 不变）。
+- `docs/DRIFT/global/vs-common.md` —— 末尾追加本节。
+- **零代码改动** ⇒ ⇒ 例外集、棘轮、守门**本轮一个字没动**（那两项已由主干落码）。
+
+（**本节编号：§4.19.53** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
