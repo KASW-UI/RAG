@@ -224,9 +224,13 @@ fly -t concourse trigger-job -j rag-contract-schema/contract-check --watch
 > ⇒ 两个内层容器**顺序执行、共用同一个 bind mount** ⇒ dump 在**同一次 build 内**交接 ⇒ 不会拿到上一次的 dump。
 > ⇒ dump 阶段**不记账**（还没比对 ⇒ 无从判 PASS/FAIL）⇒ 杜绝「没比对就当通过」。
 >
-> ⚠️ **R5 当前是「有意为红」**：`rag-contract-errmsg` 的 build 退出码 = **3（PENDING）**，
-> 因为存在 **8 条已登记但未签字**的差异 ⇒ **不计入 PASS** ⇒ 这是设计语义，**不是回归**。
-> ⇒ 签字入口见 `ci/requirements/README.md` §8.2。
+> 🆕 **R5 的「有意为红」已于 2026-10-31 解除**：8 条已登记未签字的差异**全部销项**
+> （4+3 条转 `approved` · 1 条转 `closed`）⇒ `rag-contract-errmsg` 退出码 = **0（PASS 9 / PENDING 0）**。
+> ⇒ **签字不是走过场**：它要求在 `docs/Intentional_Deviations/` 登记并签字，
+> 基准文件填上依据 id ⇒ 守门**机器回指**该 id（查不到 ⇒ FAIL ⇒ 自证豁免被拦）。
+> ⇒ 裁定与依据见 `ci/requirements/README.md` §8.2。
+> ⚠️ **但「R5 变绿」≠「目标全部达成」**：清单里那两条要求转成了 `APPROVED_DIFFERENCE`
+> ⇒ **不计入 PASS**（PASS 仍是 23 · 缺口 18）⇒ 签字 = **承认并接受**差异，不是**证明两侧一致**。
 
 **R10 目标要求清单的六态**（`ci/requirements/README.md`，**与契约门的五态不是一回事**）
 
@@ -375,7 +379,7 @@ python3 ci/generate-pipelines.py --check  # 校验（CI 也跑这一条）
 | **Testcontainers 在 DinD 里真跑** | ✅ | 真 CI 日志：`Container postgres:16-alpine is starting` → `started in PT5.21S` → `JDBC URL: jdbc:postgresql://10.250.0.1:32769/mp_probe` ⇒ 内层 daemon 起 PG + 嵌套容器按**内层 bridge 网关**连上 |
 | **完整 4 step build 跑绿** | ✅ | **共享层流水线演练 build #2：`succeeded`（3m40s）** ⇒ build ✅ / test ✅ / 静态守门 **8 过 0 挂** ✅ / 汇总 **484 条用例全通过**（service/common 445 + users-common 39；0 失败 0 错误 1 跳过）⇒ 详见 `ci/DELIVERY.md` §四.1（含 8 次演练逐次的卡点与根因） |
 | 🆕 **R6 Schema 契约门在 Task 内完整跑通** | ✅ | `rag-contract-schema` **build 5 = `succeeded`（1m6s）** ⇒ **PASS 8 / FAIL 0 / BLOCKED 0 / NOT_RUN 1**（`hot` = DDL 维度不适用 ⇒ **不是「已对齐」**）⇒ Java-only · 无 Go 仓 · 无 Go 工具链 |
-| 🆕 **R5 错误码契约门在 Task 内完整跑通** | 📌 **有意为红** | `rag-contract-errmsg` **build 7**：阶段① maven 出 dump **9/9 域成功** → 阶段② python 比对 ⇒ **PASS 7 / FAIL 0 / BLOCKED 0 / PENDING 2**（域 `comment`·`like`）⇒ 差异台账 **approved 31 / closed 2 / technical 13 / pending 8** ⇒ 退出码 **3** ⇒ **build 红是设计语义**（未签字差异不计入 PASS），**不是回归** |
+| 🆕 **R5 错误码契约门在 Task 内完整跑通** | ✅ **已转正** | `rag-contract-errmsg` **build 7**（**签字前**）：阶段① maven 出 dump **9/9 域成功** → 阶段② python 比对 ⇒ **PASS 7 / FAIL 0 / BLOCKED 0 / PENDING 2**（域 `comment`·`like`）⇒ 退出码 **3** ⇒ **build 红是设计语义**（未签字差异不计入 PASS），**不是回归**<br>🆕 **2026-10-31 用户签字后**：8 条差异全部销项（4+3 → `approved` · 1 → `closed`）⇒ **PASS 9 / FAIL 0 / BLOCKED 0 / PENDING 0** ⇒ 退出码 **0**（🟢 绿）⇒ 差异台账 approved 38 / closed 3 / technical 13 / **pending 0** · ⚠️ **Task 内重跑待合入 + 解暂停后补跑** |
 | 🆕 **静态守门 13 道（CI 镜像内）** | ✅ | `docker run -v <clone>:/build/repo -w /build python:3.12-bookworm sh repo/ci/scripts/run-static-gates.sh` ⇒ **12 道全绿 / 0 失败**（第 13 道 `check-jar-executable.sh` 需 `JAR_MODULES` ⇒ 无 jar 时不跑） |
 | 🆕 **触发面静态一致性** | ✅ | `bash ci/verify-triggers.sh --static` ⇒ **7/7 精确集合一致**（从生成器产出的 `paths` 算触发集合 vs 手工推导的意图集合） |
 | 🆕 **触发面服务端验证** | ✅ | `bash ci/verify-triggers-server.sh` ⇒ **7/7 精确集合一致（EXIT=0）** —— 真实 commit ⇒ 真实 build ⇒ 从服务端读出「哪些流水线真的产生了新 build」⇒ 与静态口径**逐条一致** |

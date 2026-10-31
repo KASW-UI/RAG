@@ -52,7 +52,8 @@ Schema 基准只记录**必须保持的约束**与**已批准的实现差异**�
 | `pending` | **未经批准 ⇒ 需用户拍板** | **不判 FAIL，但该域不计入 PASS**，且逐条显式报出 | —— |
 
 ⇒ 门禁**自证豁免**：`approved` 的依据 id 查不到 ⇒ **FAIL**（不许自行把差异列进豁免）。
-⇒ 实测（2026-10-31）：approved **31** / closed **2** / technical **13** / **pending 8**（pending 单列待拍板）。
+⇒ 实测（2026-10-31 · **用户签字后**）：approved **38** / closed **3** / technical **13** / **pending 0**
+（**签字前**读数 = approved 31 / closed 2 / technical 13 / **pending 8** ⇒ 该批 8 条已全部销项）。
 
 ## 三、基准的来源与审查
 
