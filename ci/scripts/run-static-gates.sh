@@ -148,6 +148,16 @@ run_gate check-pom-parent-relativepath.py \
 #   ⇒ 这是**安全方向**：未检查 ≠ 已通过（ci/contracts/README.md 第四节）。
 run_gate check-proto-contract.py \
   python3 ci/scripts/check-proto-contract.py --baseline ci/contracts/proto
+# 第 11 道门：**目标要求清单**（2026-10-31 方向纠正的产物）。
+# ⚠️ 这道门守的不是「代码风格」，而是「**CI 到底在替谁守什么**」：
+#   · 每条目标要求必须能回溯到 Go 原始依据（禁止以 Java 现状反向定义目标）；
+#   · APPROVED_DIFFERENCE 必须能**机器回指**到 docs/Intentional_Deviations/ 里**已签字**的条目
+#     ⇒ 杜绝「自行把差异列进豁免」；
+#   · NOT_IMPLEMENTED / NOT_VERIFIED / BLOCKED **一律不计入 PASS**（PASS 只 = VERIFIED）。
+#   ⇒ 本门退出 0 的含义是「无回归 + 结构合规」，**不等于「目标全部达成」**
+#     ⇒ 六态分列必须与 PASS 数同时打印（守门自己会打印）。
+run_gate check-requirements.py \
+  python3 ci/scripts/check-requirements.py
 
 if [ -n "$JAR_MODULES" ]; then
   # shellcheck disable=SC2086

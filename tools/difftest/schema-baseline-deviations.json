@@ -1,0 +1,330 @@
+{
+  "_README": {
+    "purpose": "**DDL 语义差异的人工裁定表** —— `tools/difftest/extract-schema-baseline.py` 的输入。",
+    "why_explicit_data_file": "理由同 tools/difftest/ddl-signed-exempt.txt：**不解析** docs/Intentional_Deviations/**.md（散文形态会随人手编辑漂移 ⇒ 解析器一脆，要么误豁免（真差异被洗成绿），要么误报（已签字的被报成新漂移））⇒ 弱兜底判据会把真缺陷洗成「0」。",
+    "key_format": "<表名>.<列名>#<维度>；表级用 table:<表名>",
+    "status_values": {
+      "approved": "✅ 已签字批准 ⇒ 归入基准的 approved_deviations（不判失败，但必须被看见）",
+      "unconfirmed": "⏳ 已登记但**未签字**（或尚未登记）⇒ 归入基准的 unconfirmed（**每次运行都必须显式报出**）"
+    },
+    "note": "⚠️ 本文件是**契约基准的输入**，不是台账 ⇒ 基准本身（ci/contracts/schema/*.json）已内嵌这些裁定 ⇒ CI 只读基准，不读本文件。"
+  },
+
+  "users": {
+    "deviations": [
+      {
+        "key": "users_user.status#nullable",
+        "id": "SD-2026-10-25-CAND-17@users",
+        "status": "unconfirmed",
+        "reason": "Go 侧 status 可空（gorm tag 无 not null）⇒ Go 落 NULL；RAG 侧 NOT NULL ⇒ **RAG 更严**。🔴 仍未修且被卡：admin-rpc 的 UserEntity.status 是 Long，MyBatis callSettersOnNulls=false ⇒ 读出 NULL 会被当成 0（「活跃」）⇒ 单独放开 NOT NULL 会立刻激活 admin 侧的缺陷 ⇒ 必须两侧一起裁决。",
+        "ledger": "docs/DRIFT/users/user/rpc.md（DRIFT-USERRPC-V-002）· docs/Intentional_Deviations/global/users-domain.md"
+      },
+      {
+        "key": "users_user.create_time#default",
+        "id": "SD-2026-10-25-CAND-16@users",
+        "status": "unconfirmed",
+        "reason": "Go 侧 create_time 无 DB 层 DEFAULT（gorm autoCreateTime 只在应用层赋值）⇒ 落 NULL；RAG 侧 DEFAULT CURRENT_TIMESTAMP ⇒ 漏传时被「入库时刻」掩盖。**未签字候选**。",
+        "ledger": "docs/DRIFT/users/user/rpc.md（DRIFT-USERRPC-V-011）· docs/Intentional_Deviations/global/users-domain.md"
+      },
+      {
+        "key": "users_user.update_time#default",
+        "id": "SD-2026-10-25-CAND-16@users",
+        "status": "unconfirmed",
+        "reason": "同 create_time（Go 无 DB 层 DEFAULT / RAG 有 DEFAULT CURRENT_TIMESTAMP）⇒ **未签字候选**。",
+        "ledger": "docs/DRIFT/users/user/rpc.md（DRIFT-USERRPC-V-011）· docs/Intentional_Deviations/global/users-domain.md"
+      },
+      {
+        "key": "users_user_avatar_history.create_time#default",
+        "id": "SD-2026-10-25-CAND-16@users",
+        "status": "unconfirmed",
+        "reason": "同 users 域时间列族（Go 无 DB 层 DEFAULT / RAG 有 DEFAULT CURRENT_TIMESTAMP）⇒ **未签字候选**。",
+        "ledger": "docs/DRIFT/users/user/rpc.md（DRIFT-USERRPC-V-011）· docs/Intentional_Deviations/global/users-domain.md"
+      },
+      {
+        "key": "users_user_avatar_history.update_time#default",
+        "id": "SD-2026-10-25-CAND-16@users",
+        "status": "unconfirmed",
+        "reason": "同 users 域时间列族（Go 无 DB 层 DEFAULT / RAG 有 DEFAULT CURRENT_TIMESTAMP）⇒ **未签字候选**。",
+        "ledger": "docs/DRIFT/users/user/rpc.md（DRIFT-USERRPC-V-011）· docs/Intentional_Deviations/global/users-domain.md"
+      },
+      {
+        "key": "admin_admin.create_time#default",
+        "id": "SD-2026-10-25-CAND-16@users",
+        "status": "unconfirmed",
+        "reason": "同 users 域时间列族（Go 无 DB 层 DEFAULT / RAG 有 DEFAULT CURRENT_TIMESTAMP）⇒ **未签字候选**。",
+        "ledger": "docs/DRIFT/users/user/rpc.md（DRIFT-USERRPC-V-011）· docs/Intentional_Deviations/global/users-domain.md"
+      },
+      {
+        "key": "admin_admin.update_time#default",
+        "id": "SD-2026-10-25-CAND-16@users",
+        "status": "unconfirmed",
+        "reason": "同 users 域时间列族（Go 无 DB 层 DEFAULT / RAG 有 DEFAULT CURRENT_TIMESTAMP）⇒ **未签字候选**。",
+        "ledger": "docs/DRIFT/users/user/rpc.md（DRIFT-USERRPC-V-011）· docs/Intentional_Deviations/global/users-domain.md"
+      },
+      {
+        "key": "admin_invite.create_time#default",
+        "id": "SD-2026-10-25-CAND-16@users",
+        "status": "unconfirmed",
+        "reason": "同 users 域时间列族（Go 无 DB 层 DEFAULT / RAG 有 DEFAULT CURRENT_TIMESTAMP）⇒ **未签字候选**。",
+        "ledger": "docs/DRIFT/users/user/rpc.md（DRIFT-USERRPC-V-011）· docs/Intentional_Deviations/global/users-domain.md"
+      },
+      {
+        "key": "admin_invite.update_time#default",
+        "id": "SD-2026-10-25-CAND-16@users",
+        "status": "unconfirmed",
+        "reason": "同 users 域时间列族（Go 无 DB 层 DEFAULT / RAG 有 DEFAULT CURRENT_TIMESTAMP）⇒ **未签字候选**。",
+        "ledger": "docs/DRIFT/users/user/rpc.md（DRIFT-USERRPC-V-011）· docs/Intentional_Deviations/global/users-domain.md"
+      }
+    ],
+    "known_residues": [
+      {
+        "scope": "3 条 Go 侧独有的**非唯一**普通索引（idx_admin_invites_expires_at / idx_admin_invites_inviter_uid / idx_user_avatar_history_is_current）",
+        "dim": "index_non_unique_existence",
+        "status": "unconfirmed",
+        "reason": "性能差异，**非行为差异**（PG 只用唯一索引/约束判唯一）⇒ 不进 must_match；但缺失仍在册。",
+        "ledger": "docs/DRIFT/_cross/ddl-type-divergences.md §2.3.1"
+      },
+      {
+        "scope": "4 条 RAG 侧独有的**非唯一**普通索引（idx_users_user_uid / idx_admin_admin_uid / idx_admin_invite_code / idx_users_user_avatar_history_uid_is_current）",
+        "dim": "index_non_unique_existence",
+        "status": "approved",
+        "reason": "EQUIVALENT（多不少）—— 对应列在 Go 侧都已有等价 UNIQUE 约束 ⇒ 语义等价，只多占一点写入成本 ⇒ 已建议不删。",
+        "ledger": "docs/DRIFT/_cross/ddl-type-divergences.md §2.3.2"
+      }
+    ]
+  },
+
+  "message": {
+    "deviations": [
+      {
+        "key": "message_notification.created_at#default",
+        "id": "SD-2026-10-24-04@message",
+        "status": "approved",
+        "reason": "Go 侧 created_at 无 DB 层 DEFAULT ⇒ 落 NULL；RAG 侧 DEFAULT CURRENT_TIMESTAMP。✅ **已签字**（保留理由：两侧所有 INSERT 都显式绑定该列 ⇒ 默认不触发；删掉对不可观测维度冒险不划算）。",
+        "ledger": "docs/Intentional_Deviations/message/rpc.md · docs/DRIFT/message/rpc.md（DRIFT-MSG-V-020）"
+      },
+      {
+        "key": "message_notification.updated_at#default",
+        "id": "SD-2026-10-24-04@message",
+        "status": "approved",
+        "reason": "同 message 域时间列族 ⇒ ✅ 已签字。",
+        "ledger": "docs/Intentional_Deviations/message/rpc.md · docs/DRIFT/message/rpc.md（DRIFT-MSG-V-020）"
+      },
+      {
+        "key": "message_conversation.created_at#default",
+        "id": "SD-2026-10-24-04@message",
+        "status": "approved",
+        "reason": "同 message 域时间列族 ⇒ ✅ 已签字。",
+        "ledger": "docs/Intentional_Deviations/message/rpc.md · docs/DRIFT/message/rpc.md（DRIFT-MSG-V-020）"
+      },
+      {
+        "key": "message_conversation.updated_at#default",
+        "id": "SD-2026-10-24-04@message",
+        "status": "approved",
+        "reason": "同 message 域时间列族 ⇒ ✅ 已签字。",
+        "ledger": "docs/Intentional_Deviations/message/rpc.md · docs/DRIFT/message/rpc.md（DRIFT-MSG-V-020）"
+      },
+      {
+        "key": "message_conversation.last_message_at#default",
+        "id": "SD-2026-10-24-04@message",
+        "status": "approved",
+        "reason": "同 message 域时间列族 ⇒ ✅ 已签字。",
+        "ledger": "docs/Intentional_Deviations/message/rpc.md · docs/DRIFT/message/rpc.md（DRIFT-MSG-V-020）"
+      },
+      {
+        "key": "message_conversation_message.created_at#default",
+        "id": "SD-2026-10-24-04@message",
+        "status": "approved",
+        "reason": "同 message 域时间列族 ⇒ ✅ 已签字。",
+        "ledger": "docs/Intentional_Deviations/message/rpc.md · docs/DRIFT/message/rpc.md（DRIFT-MSG-V-020）"
+      }
+    ],
+    "known_residues": [
+      {
+        "scope": "idx_notification_recipient_read（Go 1 列 / RAG 2 列）",
+        "dim": "index_shape",
+        "status": "approved",
+        "reason": "✅ 已签字的有意偏离（SD-2026-10-23-06@message）：真实过滤是 WHERE recipient_id=? AND is_read=false ⇒ RAG 的两列索引正好是前缀 ⇒ RAG 更优 ⇒ 不得为对拍变绿而改回单列。索引维度不进 must_match（本基准只保唯一性语义）。",
+        "ledger": "docs/Intentional_Deviations/message/rpc.md · docs/DRIFT/message/rpc.md（DRIFT-MSG-V-022）"
+      }
+    ]
+  },
+
+  "comment": {
+    "deviations": [
+      {
+        "key": "subject.created_at#nullable",
+        "id": "SD-2026-10-24-CAND-01@comment",
+        "status": "unconfirmed",
+        "reason": "Go 侧 gorm tag 只有 autoCreateTime/autoUpdateTime（无 not null）⇒ 落 NULL；RAG 侧 NOT NULL ⇒ **RAG 更严**。⏳ **未签字候选**（9 处中机器可比对的第 1 处）。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-01）· docs/DRIFT/comment/vs-common.md §9.4①"
+      },
+      {
+        "key": "subject.updated_at#nullable",
+        "id": "SD-2026-10-24-CAND-01@comment",
+        "status": "unconfirmed",
+        "reason": "同 subject 时间列族 ⇒ ⏳ 未签字候选。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-01）"
+      },
+      {
+        "key": "subject.created_at#default",
+        "id": "SD-2026-10-24-CAND-01@comment",
+        "status": "unconfirmed",
+        "reason": "Go 侧无 DB 层 DEFAULT；RAG 侧 DEFAULT CURRENT_TIMESTAMP ⇒ ⏳ 未签字候选。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-01）"
+      },
+      {
+        "key": "subject.updated_at#default",
+        "id": "SD-2026-10-24-CAND-01@comment",
+        "status": "unconfirmed",
+        "reason": "Go 侧无 DB 层 DEFAULT；RAG 侧 DEFAULT CURRENT_TIMESTAMP ⇒ ⏳ 未签字候选。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-01）"
+      },
+      {
+        "key": "comment_index.created_at#nullable",
+        "id": "SD-2026-10-24-CAND-01@comment",
+        "status": "unconfirmed",
+        "reason": "Go 侧 autoCreateTime 无 not null ⇒ 可空；RAG 侧 NOT NULL ⇒ ⏳ 未签字候选。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-01）"
+      },
+      {
+        "key": "comment_index.updated_at#nullable",
+        "id": "SD-2026-10-24-CAND-01@comment",
+        "status": "unconfirmed",
+        "reason": "同 comment_index 时间列族 ⇒ ⏳ 未签字候选。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-01）"
+      },
+      {
+        "key": "comment_index.created_at#default",
+        "id": "SD-2026-10-24-CAND-01@comment",
+        "status": "unconfirmed",
+        "reason": "Go 侧无 DB 层 DEFAULT；RAG 侧 DEFAULT CURRENT_TIMESTAMP ⇒ ⏳ 未签字候选。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-01）"
+      },
+      {
+        "key": "comment_index.updated_at#default",
+        "id": "SD-2026-10-24-CAND-01@comment",
+        "status": "unconfirmed",
+        "reason": "Go 侧无 DB 层 DEFAULT；RAG 侧 DEFAULT CURRENT_TIMESTAMP ⇒ ⏳ 未签字候选。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-01）"
+      },
+      {
+        "key": "comment_content.created_at#nullable",
+        "id": "SD-2026-10-24-CAND-01@comment",
+        "status": "unconfirmed",
+        "reason": "Go 侧 autoCreateTime 无 not null ⇒ 可空；RAG 侧 NOT NULL ⇒ ⏳ 未签字候选。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-01）"
+      },
+      {
+        "key": "comment_content.updated_at#nullable",
+        "id": "SD-2026-10-24-CAND-01@comment",
+        "status": "unconfirmed",
+        "reason": "同 comment_content 时间列族 ⇒ ⏳ 未签字候选。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-01）"
+      },
+      {
+        "key": "comment_content.created_at#default",
+        "id": "SD-2026-10-24-CAND-01@comment",
+        "status": "unconfirmed",
+        "reason": "Go 侧无 DB 层 DEFAULT；RAG 侧 DEFAULT CURRENT_TIMESTAMP ⇒ ⏳ 未签字候选。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-01）"
+      },
+      {
+        "key": "comment_content.updated_at#default",
+        "id": "SD-2026-10-24-CAND-01@comment",
+        "status": "unconfirmed",
+        "reason": "Go 侧无 DB 层 DEFAULT；RAG 侧 DEFAULT CURRENT_TIMESTAMP ⇒ ⏳ 未签字候选。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-01）"
+      },
+      {
+        "key": "comment_like.created_at#nullable",
+        "id": "SD-2026-10-24-CAND-01@comment",
+        "status": "unconfirmed",
+        "reason": "Go 侧 autoCreateTime 无 not null（Go 手写 001 迁移也写的是可空无默认）⇒ RAG 侧 NOT NULL ⇒ ⏳ 未签字候选。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-01）"
+      },
+      {
+        "key": "comment_like.updated_at#nullable",
+        "id": "SD-2026-10-24-CAND-01@comment",
+        "status": "unconfirmed",
+        "reason": "同 comment_like 时间列族 ⇒ ⏳ 未签字候选。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-01）"
+      },
+      {
+        "key": "comment_like.created_at#default",
+        "id": "SD-2026-10-24-CAND-01@comment",
+        "status": "unconfirmed",
+        "reason": "Go 侧无 DB 层 DEFAULT；RAG 侧 DEFAULT CURRENT_TIMESTAMP ⇒ ⏳ 未签字候选。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-01）"
+      },
+      {
+        "key": "comment_like.updated_at#default",
+        "id": "SD-2026-10-24-CAND-01@comment",
+        "status": "unconfirmed",
+        "reason": "Go 侧无 DB 层 DEFAULT；RAG 侧 DEFAULT CURRENT_TIMESTAMP ⇒ ⏳ 未签字候选。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-01）"
+      },
+      {
+        "key": "table:report_record",
+        "id": "SD-2026-10-24-CAND-02@comment",
+        "status": "approved",
+        "reason": "✅ **已签字**（2026-10-24 用户 Jason）：Go 侧 AutoMigrate 列表不含 &ReportRecord{} ⇒ Go 全新部署必然 5004；RAG 侧多一张表 ⇒ 举报功能可用 ⇒ **RAG 补上了 Go 的缺口**（不是「更严」，是「更全」）⇒ 保留。⚠️ 该表**无 Go 侧样本** ⇒ 列级只固化 Java 现状（不可比）。",
+        "ledger": "docs/Intentional_Deviations/comment/rpc.md（SD-2026-10-24-CAND-02）· tools/difftest/ddl-signed-exempt.txt"
+      }
+    ],
+    "known_residues": [
+      {
+        "scope": "2 条仅 RAG 侧有的 CHECK 约束",
+        "dim": "check_constraints",
+        "status": "unconfirmed",
+        "reason": "RAG 更严（约束层）⇒ ⏳ 未签字候选（SD-2026-10-24-CAND-09@comment）；本基准**不覆盖** CHECK 维度 ⇒ 只登记。",
+        "ledger": "docs/DRIFT/comment/vs-common.md §9.4 · docs/Intentional_Deviations/comment/rpc.md（CAND-09）"
+      },
+      {
+        "scope": "1 个仅 RAG 侧有的触发器（comment_domain_fact_outbox.comment_fact_identity_immutable）",
+        "dim": "triggers",
+        "status": "unconfirmed",
+        "reason": "RAG 更严（触发器层）⇒ 本基准**不覆盖**触发器维度 ⇒ 只登记。",
+        "ledger": "docs/DRIFT/comment/vs-common.md §9.4 · docs/Intentional_Deviations/comment/rpc.md（CAND-09）"
+      },
+      {
+        "scope": "2 条仅 RAG 侧有的普通索引",
+        "dim": "index_non_unique_existence",
+        "status": "approved",
+        "reason": "性能差异，非行为差异 ⇒ 不进 must_match。",
+        "ledger": "docs/DRIFT/comment/vs-common.md §9.4"
+      }
+    ]
+  },
+
+  "like": {
+    "deviations": [],
+    "known_residues": [
+      {
+        "scope": "2 条仅 RAG 侧有的普通索引 + 2 条仅 RAG 侧有的 CHECK + 1 个仅 RAG 侧有的触发器",
+        "dim": "index_non_unique_existence / check_constraints / triggers",
+        "status": "unconfirmed",
+        "reason": "⏳ **未签字候选**（本域无独立编号，引用须带「文件 + 域」）：两条索引是「性能非行为」；CHECK 与触发器是「RAG 更严」⇒ 本基准**不覆盖**这三个维度 ⇒ 只登记。",
+        "ledger": "docs/DRIFT/like/vs-common.md §L.4 · docs/DRIFT/global/lanes/L3-ddl.md §8.3"
+      }
+    ]
+  },
+
+  "favorite": {
+    "deviations": [],
+    "known_residues": [
+      {
+        "scope": "2 条仅 RAG 侧有的 CHECK 约束",
+        "dim": "check_constraints",
+        "status": "approved",
+        "reason": "✅ **已签字**（DEV-FAV-RPC-007，RAG 更严）⇒ 本基准**不覆盖** CHECK 维度 ⇒ 只登记。",
+        "ledger": "docs/Intentional_Deviations/favorite/rpc.md（DEV-FAV-RPC-007）· docs/DRIFT/favorite/vs-common.md"
+      }
+    ]
+  },
+
+  "article": { "deviations": [], "known_residues": [] },
+  "follow": { "deviations": [], "known_residues": [] },
+  "task": { "deviations": [], "known_residues": [] },
+  "hot": { "deviations": [], "known_residues": [] }
+}

@@ -99,6 +99,24 @@ RAG 那 4 份 `db/*.sql` 是照着**旧 JPA @Column** 写的,不是照着 Go 的
        统一拉起（容器名 `ddl-<域>-pg`，库名 `go_<域>_db` / `rag_<域>_db`）⇒
        一键复现：`bash tools/difftest/ddl-parity.sh <域>`。
 
+    ⭐ **2026-10-31 新增：R6 · CI 模式（`--rag-only` + `--semantic-baseline`）**
+       —— **纯 Java 侧**的 schema 契约门：
+         ./check-ddl-static.py --domain users --rag-only \
+             --semantic-baseline ci/contracts/schema/users.json \
+             --container <pg> --rag-db <db>
+       ⚠️ **`--rag-only` 下绝不读 Go 侧**（没有 Go 侧库也能跑）⇒
+          **CI 不需要 Go 仓、不需要 Go 工具链**（ci/contracts/README.md §一 办法 C）。
+       ⚠️ 比对口径**完全由基准里的 `must_match` 决定** ⇒ 改口径 = 改契约。
+       ⚠️ **跳过的维度逐条打印**（索引命名形态 / 序列名 / CHECK / 触发器 …）⇒
+          「不比对」必须**可见**，不能静默。
+       ⚠️ 基准里登记的「已批准差异」与「**未确认差异**」**每次运行都打印**
+          ⇒ 未确认的差异**不得默默当正常**。
+       ⚠️ **EXIT=3（N/A）保留**：`hot` 域两侧都没有业务表 ⇒ DDL 维度不适用
+          ⇒ 绝不能报成「已对齐」。
+       ⚠️ **EXIT=2（BLOCKED）保留**：库读不到 / 基准缺失 ⇒ 检查没做成。
+       ⚠️ 基准由 `tools/difftest/extract-schema-baseline.py` **一次性离线**生成
+          （**那个脚本需要 Go 真源仓与 Go 工具链 ⇒ 不是 CI 的一部分**）。
+
 ════════════════════════════════════════════════════════════════════════
 【退出码】
 ════════════════════════════════════════════════════════════════════════
@@ -110,6 +128,10 @@ RAG 那 4 份 `db/*.sql` 是照着**旧 JPA @Column** 写的,不是照着 Go 的
        schema 没初始化）、预期业务表缺失（`expected_tables` 闸门）
     3  本域**不适用（N/A）**：两侧都没有业务表（如 hot 域 —— 它根本没有数据库）
        ⇒ 「两侧都是 0 张表」**不是**「DDL 已对齐」
+
+    ⚠️ **`--rag-only` + `--semantic-baseline` 模式下语义不变，只是「一致」的
+       参照物从「Go 侧活库」换成「语义约束基准」**：
+       0 = 与基准一致 · 1 = 与基准不一致 · 2 = 检查没做成（BLOCKED）· 3 = N/A。
 
 ⚠️ **「命名形态差」不计为失败**（2026-10-25 改）：索引/约束**名字不同、但
    表 + 唯一性 + 列（约束则是 contype + 定义）完全等价** ⇒ PG 层面的唯一性判定、
@@ -123,6 +145,15 @@ import pathlib
 import re
 import subprocess
 import sys
+
+# ⚠️ **docker 传输层**：本机开发用 docker CLI；**CI 的嵌套构建容器里没有 CLI**
+#   （实测 2026-10-31，证据见 ci/scripts/testcontainers-env.sh）
+#   ⇒ 统一走 tools/difftest/docker_api.py 的「CLI 优先 / API 兜底」。
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import docker_api
+except ImportError:  # pragma: no cover —— 兜底：没有该模块时退化成纯 CLI
+    docker_api = None
 
 # 仓根（tools/difftest/check-ddl-static.py → 上溯三层）
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -416,11 +447,33 @@ def discover_rag_sql(domain: str) -> list[str]:
     return [os.path.join(d, f) for f in sorted(files, key=_key)]
 
 
+def _exec(container, argv, stdin_data=None):
+    """⇒ (rc, stdout, stderr) —— **docker exec** 的统一入口。
+
+    ⚠️ **CLI 优先 / Docker API 兜底**：CI 的嵌套构建容器里**没有 docker 客户端**
+       （实测 2026-10-31）⇒ 走 `tools/difftest/docker_api.py` 的 unix socket 通道。
+       ⇒ 本机（开发）走的仍是 CLI ⇒ **既有行为不变**。
+    """
+    if docker_api is None:
+        p = subprocess.run(["docker", "exec", "-i", container] + list(argv),
+                           input=stdin_data, capture_output=True, text=True)
+        return p.returncode, p.stdout, p.stderr
+    return docker_api.docker_exec(container, argv, stdin_data=stdin_data)
+
+
+def _exec_or_raise(container, argv, stdin_data=None):
+    """⇒ (stdout, stderr) —— 退出码非 0 ⇒ 抛 CalledProcessError
+    （保持既有调用方的 `except subprocess.CalledProcessError` 语义不变）。"""
+    rc, out, err = _exec(container, argv, stdin_data=stdin_data)
+    if rc != 0:
+        raise subprocess.CalledProcessError(rc, argv, output=out, stderr=err)
+    return out, err
+
+
 def _psql(container: str, db: str, user: str, sql: str):
-    return subprocess.run(
-        ["docker", "exec", "-i", container, "psql", "-U", user, "-d", db,
-         "-v", "ON_ERROR_STOP=1", "-t", "-A", "-c", sql],
-        capture_output=True, text=True)
+    """⇒ (rc, stdout, stderr) —— 跑一条 SQL（ON_ERROR_STOP=1）"""
+    return _exec(container, ["psql", "-U", user, "-d", db,
+                             "-v", "ON_ERROR_STOP=1", "-t", "-A", "-c", sql])
 
 
 def check_source_sync(domain, cfg, container, rag_db, pg_user, exclude_tables):
@@ -447,12 +500,14 @@ def check_source_sync(domain, cfg, container, rag_db, pg_user, exclude_tables):
 
     # ---- ① 建干净临时库 ------------------------------------------------
     try:
-        p = _psql(container, "postgres", pg_user, f"DROP DATABASE IF EXISTS {scratch};")
-        if p.returncode != 0:
-            return "error", 0, out + [f"  FATAL: 建临时库失败：{p.stderr.strip()}"]
-        p = _psql(container, "postgres", pg_user, f"CREATE DATABASE {scratch};")
-        if p.returncode != 0:
-            return "error", 0, out + [f"  FATAL: 建临时库失败：{p.stderr.strip()}"]
+        rc, _, err = _psql(container, "postgres", pg_user,
+                           f"DROP DATABASE IF EXISTS {scratch};")
+        if rc != 0:
+            return "error", 0, out + [f"  FATAL: 建临时库失败：{err.strip()}"]
+        rc, _, err = _psql(container, "postgres", pg_user,
+                           f"CREATE DATABASE {scratch};")
+        if rc != 0:
+            return "error", 0, out + [f"  FATAL: 建临时库失败：{err.strip()}"]
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         return "error", 0, out + [f"  FATAL: 连不上容器 {container}：{e}"]
 
@@ -462,16 +517,15 @@ def check_source_sync(domain, cfg, container, rag_db, pg_user, exclude_tables):
         with open(path, "rb") as f:
             data = f.read()
         try:
-            p = subprocess.run(
-                ["docker", "exec", "-i", container, "psql", "-U", pg_user,
-                 "-d", scratch, "-v", "ON_ERROR_STOP=1"],
-                input=data.decode("utf-8", errors="replace"),
-                capture_output=True, text=True)
+            rc, _, err = _exec(container,
+                               ["psql", "-U", pg_user, "-d", scratch,
+                                "-v", "ON_ERROR_STOP=1"],
+                               stdin_data=data.decode("utf-8", errors="replace"))
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
             return "error", 0, out + [f"  FATAL: 重放 {rel} 失败：{e}"]
-        if p.returncode != 0:
+        if rc != 0:
             out.append(f"  🔴 源码 .sql **在干净库上重放失败**：{rel}")
-            for line in (p.stderr or "").strip().splitlines()[:20]:
+            for line in (err or "").strip().splitlines()[:20]:
                 out.append(f"      {line}")
             out.append("     ⇒ 迁移脚本自身不可重放（既可能是源码缺陷，"
                        "也可能是环境缺前置；**这不是活库的差异**）")
@@ -629,10 +683,8 @@ _INDEXDEF_RE = re.compile(
 
 
 def load(container, db, table_map, query, exclude_tables=(), user="admin"):
-    out = subprocess.run(
-        ["docker", "exec", "-i", container, "psql", "-U", user, "-d", db,
-         "-t", "-A", "-c", query],
-        capture_output=True, text=True, check=True).stdout
+    out, _err = _exec_or_raise(container, ["psql", "-U", user, "-d", db,
+                         "-t", "-A", "-c", query])
     cols = {}
     for line in out.splitlines():
         if not line.strip():
@@ -649,10 +701,8 @@ def load(container, db, table_map, query, exclude_tables=(), user="admin"):
 
 def load_indexes(container, db, table_map, exclude_tables=(), user="admin"):
     """⇒ {索引名: (表名, 是否唯一, 列元组)}"""
-    out = subprocess.run(
-        ["docker", "exec", "-i", container, "psql", "-U", user, "-d", db,
-         "-t", "-A", "-c", QUERY_INDEX],
-        capture_output=True, text=True, check=True).stdout
+    out, _err = _exec_or_raise(container, ["psql", "-U", user, "-d", db,
+                         "-t", "-A", "-c", QUERY_INDEX])
     idx = {}
     for line in out.splitlines():
         if not line.strip():
@@ -672,10 +722,8 @@ def load_indexes(container, db, table_map, exclude_tables=(), user="admin"):
 
 def load_constraints(container, db, table_map, exclude_tables=(), user="admin"):
     """⇒ {(表名, 约束名): (contype, 定义)}"""
-    out = subprocess.run(
-        ["docker", "exec", "-i", container, "psql", "-U", user, "-d", db,
-         "-t", "-A", "-c", QUERY_CON],
-        capture_output=True, text=True, check=True).stdout
+    out, _err = _exec_or_raise(container, ["psql", "-U", user, "-d", db,
+                         "-t", "-A", "-c", QUERY_CON])
     cons = {}
     for line in out.splitlines():
         if not line.strip():
@@ -689,10 +737,8 @@ def load_constraints(container, db, table_map, exclude_tables=(), user="admin"):
 
 def load_triggers(container, db, table_map, exclude_tables=(), user="admin"):
     """⇒ {(表名, 触发器名): 触发器定义}"""
-    out = subprocess.run(
-        ["docker", "exec", "-i", container, "psql", "-U", user, "-d", db,
-         "-t", "-A", "-c", QUERY_TRIGGER],
-        capture_output=True, text=True, check=True).stdout
+    out, _err = _exec_or_raise(container, ["psql", "-U", user, "-d", db,
+                         "-t", "-A", "-c", QUERY_TRIGGER])
     trig = {}
     for line in out.splitlines():
         if not line.strip():
@@ -710,10 +756,8 @@ def load_trigger_funcs(container, db, table_map, exclude_tables=(), user="admin"
     ⚠️ 这是**函数体的结构化语义属性**，**不是函数体文本** ——
     逐字比 SQL 文本会把「写法不同但语义相同」报成差异（见 QUERY_TRIGGER_FUNC 注释）。
     """
-    out = subprocess.run(
-        ["docker", "exec", "-i", container, "psql", "-U", user, "-d", db,
-         "-t", "-A", "-c", QUERY_TRIGGER_FUNC],
-        capture_output=True, text=True, check=True).stdout
+    out, _err = _exec_or_raise(container, ["psql", "-U", user, "-d", db,
+                         "-t", "-A", "-c", QUERY_TRIGGER_FUNC])
     funcs = {}
     for line in out.splitlines():
         if not line.strip():
@@ -726,6 +770,196 @@ def load_trigger_funcs(container, db, table_map, exclude_tables=(), user="admin"
             continue
         funcs[(table_map.get(tbl, tbl), name)] = tuple(parts[2:])
     return funcs
+
+
+# ══════════════════════════════════════════════════════════════════════
+# R6 · **语义基准模式**（`--rag-only` + `--semantic-baseline`）
+# ══════════════════════════════════════════════════════════════════════
+#
+# 【为什么要有这个模式】
+#   上面的双侧模式**依赖 Go 侧活库** ⇒ CI 不得依赖 Go 仓 / Go 工具链
+#   （ci/contracts/README.md §一 办法 A/B 被否）。
+#   ⇒ 本模式**只读 RAG 侧**：把「Java 侧 Flyway 迁移重放后的实际 schema」
+#     与 `ci/contracts/schema/<domain>.json`（**离线一次性**从 Go 真源提取的
+#     语义约束基准）逐项比对 ⇒ **纯 Java 侧的 R6 门**。
+#
+# 【比对什么 / 不比对什么 —— 由基准里的 `must_match` 决定】
+#   比对：列类型 / 长度 / 可空性 / 关键 DEFAULT / 唯一约束（**列元组集合**）
+#   不比对：索引命名形态 · 序列名 · 非唯一索引的存在性 · CHECK · 触发器
+#          ⇒ 理由逐条写在基准的 `dimensions.skipped` 里（**不静默跳过**）。
+#
+# 【退出码（与本脚本既有口径一致）】
+#   0 PASS / 1 FAIL（与基准不一致）/ 2 BLOCKED（环境不满足 · 检查没做成）
+#   3 NOT_RUN（N/A：hot 域两侧都没有业务表 ⇒ **不是「已对齐」**）
+
+# IDENTITY 列（`GENERATED BY DEFAULT AS IDENTITY`）⇒ PG 的 column_default 是 NULL
+QUERY_IDENTITY = (
+    "select table_name || '.' || column_name || '|' || coalesce(is_identity, 'NO') "
+    "from information_schema.columns where table_schema='public' order by 1;")
+
+# 语义基准里「自动生成」的归一化哨兵（IDENTITY ↔ serial 载体不同、语义相同）
+AUTO_GENERATED = "<AUTO_GENERATED>"
+
+
+def load_identity(container, db, table_map, exclude_tables=(), user="admin"):
+    """⇒ {(表名, 列名): bool} —— 该列是不是 IDENTITY 列"""
+    out, _err = _exec_or_raise(container, ["psql", "-U", user, "-d", db,
+                         "-t", "-A", "-c", QUERY_IDENTITY])
+    ident = {}
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        key, flag = line.strip().split("|", 1)
+        tbl = key.split(".", 1)[0]
+        if any(tbl == x or tbl.startswith(x) for x in exclude_tables):
+            continue
+        ident[(table_map.get(tbl, tbl), key.split(".", 1)[1])] = (flag == "YES")
+    return ident
+
+
+def load_unique_tuples(container, db, table_map, exclude_tables=(), user="admin"):
+    """⇒ {(表名, 列元组)} —— **唯一约束 ∪ 唯一索引**
+
+    ⚠️ **载体无关**：Go 侧用唯一**索引**（`uni_users_email`）、RAG 侧用唯一**约束**
+       （`users_user_email_key`）⇒ 归一成「表 + 列元组」后两侧可直接比
+       ⇒ 命名形态差 / 载体差 **不算差异**。
+    """
+    out = set()
+    for (tbl, cols) in _unique_tuples_from_constraints(
+            container, db, table_map, exclude_tables, user):
+        out.add((tbl, cols))
+    for name, (tbl, uniq, cols) in load_indexes(
+            container, db, table_map, exclude_tables, user).items():
+        if uniq:
+            out.add((tbl, cols))
+    return out
+
+
+def _unique_tuples_from_constraints(container, db, table_map, exclude_tables, user):
+    out, _err = _exec_or_raise(container, ["psql", "-U", user, "-d", db,
+                         "-t", "-A", "-c", QUERY_CON])
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        tbl, name, ctype, cdef = line.strip().split("|", 3)
+        if any(tbl == x or tbl.startswith(x) for x in exclude_tables):
+            continue
+        if ctype != "u":
+            continue
+        cols = _con_cols(cdef)
+        if cols:
+            yield (table_map.get(tbl, tbl), cols)
+
+
+def norm_actual_default(default, is_identity):
+    """把实际的 DEFAULT 归一化（与基准里的写法同一口径）。
+
+    ⚠️ **序列名抹平**（技术栈差异）：Go `users_id_seq` ↔ Java `users_user_id_seq`
+       ⇒ 归一后都是 `nextval('<SEQ>'::regclass)` ⇒ 不算差异。
+    ⚠️ **IDENTITY ↔ serial 载体不同、语义相同**（自动生成）⇒ 归一成同一哨兵。
+    """
+    if is_identity:
+        return AUTO_GENERATED
+    if default is None:
+        return None
+    s = str(default).strip()
+    if not s or s == "<NULL>":
+        return None
+    return _norm_seq(s)
+
+
+def compare_against_baseline(baseline, rag, rag_c, rag_uniq, rag_ident):
+    """⇒ 逐项比对结果 dict
+
+    比对口径完全由基准里的 `must_match` 决定 ⇒ **基准改口径 = 改契约**。
+    """
+    failures = []
+    compared = {}          # 维度 → 比对次数
+    missing_tables, extra_tables = [], []
+    missing_cols, extra_cols = [], []
+
+    base_tables = baseline.get("tables", {})
+    base_extra = {t["name"]: t for t in baseline.get("extra_tables", [])}
+    rag_tables = {k.split(".", 1)[0] for k in rag}
+
+    for tbl, spec in base_tables.items():
+        if tbl not in rag_tables:
+            missing_tables.append(tbl)
+            failures.append(f"表 {tbl} **缺失**（基准要求存在）")
+            continue
+        base_cols = {c["name"]: c for c in spec.get("columns", [])}
+        rag_cols_of_tbl = {k.split(".", 1)[1]: v for k, v in rag.items()
+                           if k.split(".", 1)[0] == tbl}
+        for cname, c in base_cols.items():
+            if cname not in rag_cols_of_tbl:
+                missing_cols.append(f"{tbl}.{cname}")
+                failures.append(f"列 {tbl}.{cname} **缺失**（基准要求存在）")
+                continue
+            actual_type, actual_len = rag_cols_of_tbl[cname]
+            is_nullable, actual_def = rag_c.get(f"{tbl}.{cname}", ("<缺列>", ""))
+            ident = rag_ident.get((tbl, cname), False)
+            for dim in c.get("must_match", []):
+                compared[dim] = compared.get(dim, 0) + 1
+                if dim == "type":
+                    if actual_type != c.get("type"):
+                        failures.append(
+                            f"{tbl}.{cname} **类型不符**：基准={c.get('type')}  实际={actual_type}")
+                elif dim == "length":
+                    exp_len = c.get("max_length")
+                    act_len = int(actual_len) if actual_len else None
+                    if exp_len != act_len:
+                        failures.append(
+                            f"{tbl}.{cname} **长度上限不符**：基准={exp_len}  实际={act_len}")
+                elif dim == "nullable":
+                    exp_null = c.get("nullable")
+                    act_null = (is_nullable == "YES")
+                    if exp_null != act_null:
+                        failures.append(
+                            f"{tbl}.{cname} **可空性不符**：基准="
+                            f"{'可空' if exp_null else 'NOT NULL'}  实际="
+                            f"{'可空' if act_null else 'NOT NULL'}")
+                elif dim == "default":
+                    exp_def = c.get("default")
+                    act_def = norm_actual_default(actual_def, ident)
+                    if exp_def != act_def:
+                        failures.append(
+                            f"{tbl}.{cname} **DEFAULT 不符**：基准={exp_def!r}  实际={act_def!r}")
+                else:
+                    failures.append(f"{tbl}.{cname} 基准里的维度 {dim!r} **本工具不认识**")
+        # 多出来的列 ⇒ 契约变更（基准没更新）⇒ 判失败
+        for cname in sorted(rag_cols_of_tbl):
+            if cname not in base_cols:
+                extra_cols.append(f"{tbl}.{cname}")
+                failures.append(f"列 {tbl}.{cname} **基准里没有**（契约变更 ⇒ 需更新基准）")
+        # 唯一约束（列元组集合）
+        base_uniq = {tuple(u) for u in spec.get("unique_constraints", [])}
+        rag_uniq_of_tbl = {cols for (t, cols) in rag_uniq if t == tbl}
+        for u in sorted(base_uniq - rag_uniq_of_tbl):
+            failures.append(
+                f"表 {tbl} **缺唯一约束** {list(u)}（基准要求存在 ⇒ 码值唯一性不变量缺失）")
+        for u in sorted(rag_uniq_of_tbl - base_uniq):
+            failures.append(
+                f"表 {tbl} **多出唯一约束** {list(u)}（契约变更 ⇒ 需更新基准）")
+
+    # 基准里没登记、但 RAG 侧多出来的表 ⇒ 契约变更
+    for tbl in sorted(rag_tables - set(base_tables) - set(base_extra)):
+        extra_tables.append(tbl)
+        failures.append(f"表 {tbl} **基准里没有**（契约变更 ⇒ 需更新基准）")
+    # 基准登记的「Java 独有表」必须存在
+    for tbl in sorted(base_extra):
+        if tbl not in rag_tables:
+            missing_tables.append(tbl)
+            failures.append(f"表 {tbl} **缺失**（基准登记为 Java 侧独有表 ⇒ 必须存在）")
+
+    return {
+        "failures": failures,
+        "compared": compared,
+        "missing_tables": missing_tables,
+        "extra_tables": extra_tables,
+        "missing_columns": missing_cols,
+        "extra_columns": extra_cols,
+    }
+
 
 
 _TRIGGER_FORM_FIELDS = ("timing", "events", "粒度", "constraint", "WHEN")
@@ -927,9 +1161,154 @@ def compare_indexes(go_idx, rag_idx, allow):
     return diffs, waived, equiv
 
 
+def run_rag_only(args, cfg, container, rag_db, pg_user, exclude_tables, table_map):
+    """⇒ ⭐ **R6 · CI 模式**：只读 RAG 侧，与**语义约束基准**逐项比对。
+
+    ⚠️ **本函数绝不读 Go 侧**：没有 Go 侧库、没有 Go 侧容器也照样能跑
+       ⇒ **CI 不需要 Go 仓、不需要 Go 工具链**（ci/contracts/README.md §一 办法 C）。
+    """
+    domain = args.domain
+    print(f"== 域: {domain}  容器: {container}  RAG库: {rag_db}  "
+          f"（--rag-only：**不读 Go 侧**）==")
+
+    sqls = discover_rag_sql(domain)
+    print(f"迁移脚本 {len(sqls)} 份（目录扫描 ⇒ 不会落后于仓）：")
+    for rel in sqls:
+        print(f"  · {rel}")
+    if not sqls:
+        print("  （本域**没有迁移脚本**）")
+
+    # ---- ⓪ N/A 短路：**在读库之前** --------------------------------------
+    # ⚠️ **判据要两个都成立**：域预设**没有**预期业务表 **且** 仓里**没有**迁移脚本
+    #    （hot 域：Go 侧无 gorm、RAG 侧无 migration ⇒ DDL 维度不适用）
+    # ⇒ 结论「本域无对象可比」**不依赖数据库能不能读** ⇒ 即使 PG 挂了也判 N/A(3)，
+    #    而**不是** BLOCKED(2)（「检查没做成」是另一回事）。
+    # ⚠️ 将来谁给该域加了迁移（脚本出现 ⇒ has_sql 变真）⇒ 本短路自动失效。
+    expected = cfg.get("expected_tables")
+    if expected is not None and not expected and not sqls:
+        print("⚠️ 本域**没有业务表**（域预设无预期表 + 仓内无迁移脚本）"
+              "⇒ **DDL 维度不适用（N/A）**，不是「已对齐」。")
+        print(cfg["note"])
+        return 3
+
+    # ---- ① 读 RAG 侧（读不到 ⇒ 环境不满足 ⇒ 2）--------------------------
+    try:
+        rag = load(container, rag_db, table_map, QUERY, exclude_tables, pg_user)
+        rag_c = load(container, rag_db, table_map, QUERY_CONSTRAINT,
+                     exclude_tables, pg_user)
+        rag_uniq = load_unique_tuples(container, rag_db, table_map,
+                                       exclude_tables, pg_user)
+        rag_ident = load_identity(container, rag_db, table_map,
+                                   exclude_tables, pg_user)
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"FATAL: 读不到 {container} 里的库 —— {e}\n{cfg['prepare_hint']}")
+        return 2
+
+    rag_tables = {k.split(".", 1)[0] for k in rag}
+
+    # ---- ② N/A 闸门（读得到库、但库里也没有业务表）----------------------
+    if expected is not None and not expected and not rag_tables:
+        print("⚠️ 本域两侧都没有业务表 ⇒ **DDL 维度不适用（N/A）**，不是「已对齐」。")
+        print(cfg["note"])
+        return 3
+
+    # ---- ③ 基准比对 ------------------------------------------------------
+    if not args.semantic_baseline:
+        print("⚠️ --rag-only **没给 --semantic-baseline** ⇒ 只做了环境闸门检查，"
+              "**没有做任何 schema 比对** ⇒ 退出码 2（检查没做成，不是「通过」）")
+        return 2
+
+    import json
+    try:
+        with open(args.semantic_baseline, encoding="utf-8") as f:
+            baseline = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"FATAL: 读不出语义基准 {args.semantic_baseline} —— {e}")
+        print("     ⇒ 基准缺失 ⇒ 检查没做成 ⇒ 退出码 2（**不是**「通过」）")
+        return 2
+
+    if baseline.get("domain") != domain:
+        print(f"FATAL: 基准的 domain={baseline.get('domain')!r} 与本域 {domain!r} 不符")
+        return 2
+
+    res = compare_against_baseline(baseline, rag, rag_c, rag_uniq, rag_ident)
+
+    # ---- ④ 基准覆盖率交叉核（域预设期望的表，基准必须覆盖）--------------
+    uncovered = []
+    base_tables = set(baseline.get("tables", {}))
+    base_extra = {t["name"] for t in baseline.get("extra_tables", [])}
+    for t in (expected or ()):
+        if t not in base_tables and t not in base_extra:
+            uncovered.append(t)
+
+    # ---- ⑤ 报告 ----------------------------------------------------------
+    print(f"\n对照 · 语义约束基准（{os.path.basename(args.semantic_baseline)}，"
+          f"版本 {baseline.get('contract_version')}）")
+    print(f"  基准来源：{baseline.get('source', {}).get('go_model_dirs')}")
+    print(f"  Java 侧实际：{len(rag)} 列 / {len(rag_tables)} 张表 / "
+          f"{len(rag_uniq)} 组唯一约束")
+
+    dims = baseline.get("dimensions", {})
+    if dims.get("compared"):
+        print("  **本域比对的维度**（由基准的 must_match 决定）：")
+        for d in dims["compared"]:
+            print(f"    · {d}")
+    if dims.get("skipped"):
+        print("  **本域跳过的维度**（技术栈差异 / 别处已裁决 ⇒ **不判失败**，但**不静默**）：")
+        for s in dims["skipped"]:
+            why = s.get("why") if isinstance(s, dict) else str(s)
+            dim = s.get("dim") if isinstance(s, dict) else str(s)
+            print(f"    · {dim}: {why}")
+
+    if res["compared"]:
+        print("  逐项比对次数：" +
+              " · ".join(f"{k}={v}" for k, v in sorted(res["compared"].items())))
+
+    if res["failures"]:
+        print(f"\n  🔴 与基准不一致 **{len(res['failures'])} 处**：")
+        for f in res["failures"]:
+            print(f"    · {f}")
+    else:
+        print("  ✅ Java 侧实际 schema 与语义基准**逐项一致**"
+              "（类型 / 长度 / 可空性 / DEFAULT / 唯一约束 —— 基准指定的口径内）")
+
+    if uncovered:
+        print(f"\n  🔴 域预设期望的表**没有被基准覆盖** {len(uncovered)} 张 "
+              f"（⇒ 基准可能过期 ⇒ 检查不可信）：")
+        for t in uncovered:
+            print(f"    · {t}")
+
+    # ---- ⑥ 基准里登记的差异 ⇒ **每次都必须显式报出** ----------------------
+    approved = baseline.get("approved_deviations", [])
+    unconfirmed = baseline.get("unconfirmed", [])
+    residues = baseline.get("known_residues_not_enforced", [])
+    print(f"\n  基准登记的差异（**必须被看见**，不是「默默当正常」）：")
+    print(f"    · ✅ 已批准（签字）：{len(approved)} 处")
+    for a in approved:
+        print(f"        {a.get('id') or '(无编号)'} · {a.get('scope')} · "
+              f"维度 {a.get('dim')} · go={a.get('go_value')!r} java={a.get('java_value')!r}")
+        print(f"            理由：{a.get('reason')}")
+        print(f"            台账：{a.get('ledger')}")
+    print(f"    · ⏳ 未确认（**尚未裁定**）：{len(unconfirmed)} 处")
+    for u in unconfirmed:
+        print(f"        {u.get('id') or '(无编号 · 未登记)'} · {u.get('scope')} · "
+              f"维度 {u.get('dim')} · go={u.get('go_value')!r} java={u.get('java_value')!r}")
+        print(f"            理由：{u.get('reason')}")
+        print(f"            台账：{u.get('ledger')}")
+    if residues:
+        print(f"    · ⚪ **不进 must_match 的已知残留**（本基准不覆盖该维度）：{len(residues)} 条")
+        for r in residues:
+            print(f"        [{r.get('status')}] {r.get('scope')} · 维度 {r.get('dim')}")
+            print(f"            {r.get('reason')}")
+            print(f"            台账：{r.get('ledger')}")
+
+    failures = len(res["failures"]) + len(uncovered)
+    print(f"\n== 实质差异合计 {failures} 处 ⇒ 退出码 {1 if failures else 0} ==")
+    return 1 if failures else 0
+
+
 def load_signed_exempt(domain):
     """已签字的**表级**偏离豁免清单 ⇒ {表名: (签字条目号, 理由)}
-
     ⚠️ **清单是显式数据文件**（`ddl-signed-exempt.txt`，与本脚本同目录）
       —— **不解析** `docs/Intentional_Deviations/**.md`：
       散文形态会随人手编辑漂移 ⇒ 解析器一脆，要么**误豁免**（真差异被洗成绿），
@@ -981,6 +1360,14 @@ def main():
                     help="只打印本域的 RAG 侧迁移脚本清单（仓库相对路径，逐行一个）"
                          "然后退出 —— 供 tools/difftest/ddl-parity.sh 复用，"
                          "保证「清单」只有**一个**产生点")
+    ap.add_argument("--rag-only", action="store_true",
+                    help="⭐ **R6 · CI 模式**：**只读 RAG 侧**（容器 / 库里没有 Go 侧库也无所谓）"
+                         "—— 完全跳过 Go 侧读取与 Go↔RAG 列级对比 ⇒ "
+                         "**CI 不需要 Go 仓、不需要 Go 工具链**")
+    ap.add_argument("--semantic-baseline", default=None,
+                    help="语义约束基准 JSON（`ci/contracts/schema/<域>.json`）⇒ "
+                         "只比对基准里 `must_match` 列出的维度 + 唯一约束；"
+                         "**不比对**索引命名形态 / 序列名 / CHECK / 触发器")
     args = ap.parse_args()
 
     # ---- --print-rag-sql：不需要任何 DB ⇒ 必须在连库之前返回 -------------
@@ -998,6 +1385,12 @@ def main():
     # ⚠️ 不同容器的 PG 超级用户不一样（有的只有 postgres、有的有 admin）
     #   ⇒ 用户名必须**按域预设**走，不能写死。
     pg_user = cfg.get("pg_user", "admin")
+
+    # ---- ⭐ --rag-only：**完全不碰 Go 侧**（CI 模式）----------------------
+    if args.rag_only:
+        return run_rag_only(args, cfg, container, rag_db, pg_user,
+                            exclude_tables, table_map)
+
     allow = {x.strip() for x in args.allow_idx.split(",") if x.strip()}
     allow_default = {x.strip() for x in args.allow_default.split(",") if x.strip()}
 
