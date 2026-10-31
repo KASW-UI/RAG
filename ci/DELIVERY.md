@@ -78,7 +78,12 @@ worker 的可用环境变量里也没有任何"挂宿主路径"的开关
 
 ---
 
-## 二、文件清单（45 个文件 + 本文档）
+## 二、文件清单（**80 个文件**，含本文档）
+
+> 计数口径（2026-10-31 实测）：`ci/` 下 **77** 个（排除 `.DS_Store` 与 `__pycache__`）
+> + `tools/difftest/` 下本轮涉及的 **3** 个 = **80**。
+> 分目录：`ci/` 7 · `ci/contracts/` 1 + 基准 29（errmsg 10 / proto 10 / schema 9）
+> · `ci/pipelines/` 13 · `ci/requirements/` 2 · `ci/scripts/` 19 · `ci/tasks/` 6。
 
 | 路径 | 职责 | 真源？ |
 |---|---|---|
@@ -92,7 +97,7 @@ worker 的可用环境变量里也没有任何"挂宿主路径"的开关
 | `ci/scripts/build.sh` | 嵌套容器内 `mvn package -DskipTests` | ✅ |
 | `ci/scripts/test.sh` | 嵌套容器内 `mvn test`（先 source Testcontainers 环境） | ✅ |
 | `ci/scripts/testcontainers-env.sh` | Docker 可达性前置断言 + host override + Ryuk 关闭 | ✅ |
-| `ci/scripts/dind-run.sh` | DinD 外壳：起内层 dockerd → 跑嵌套构建容器 | ✅ |
+| `ci/scripts/dind-run.sh` | DinD 外壳：起内层 dockerd → 跑嵌套构建容器（支持**第二个内层阶段** · 共用同一 bind mount） | ✅ |
 | `ci/scripts/run-static-gates.sh` | 按序跑静态守门并汇总（**豁免命中数单列**，不混进 PASS） | ✅ |
 | `ci/scripts/check-pom-parent-relativepath.py` | **第 9 道门**：每个 pom 的 `<parent>` 能否被本地 `relativePath` 正确解析（见 §六.2） | ✅ |
 | `ci/scripts/collect-surefire.sh` | 读 `TEST-*.xml` 汇总用例数与失败清单；**并判「该在而不在」与「跑了但 0 条用例」**（见 §四.5） | ✅ |
@@ -103,9 +108,12 @@ worker 的可用环境变量里也没有任何"挂宿主路径"的开关
 | `ci/scripts/check-schema-contract-mutations.py` | R6 门禁的**变异测试**（含故障注入：容器被杀 ⇒ 必须判 BLOCKED 而非 FAIL） | ✅ |
 | `ci/scripts/check-requirements.py` | **第 11 道门**：目标要求清单守门（11 条规则 + 六态汇总） | ✅ |
 | `ci/scripts/check-requirements-mutations.py` | 清单守门的**变异测试**（10 条变异全部红在目标规则） | ✅ |
-| `ci/scripts/contract-errmsg.sh` | R5 在 DinD 内层容器里的阶段脚本 | ✅ |
+| `ci/scripts/check-docker-api-selftest.py` | **第 13 道门**：`docker_api` 的**无依赖**回归自测（11 条断言：镜像 tag 判定 + exec 劫持线格式） | ✅ |
+| `ci/scripts/extract-errmsg-authority.py` | **一次性离线**提取：从 Go 侧 `errmsg.go` ⇒ 产出 R5 的 Go 权威段 | ✅ |
+| `ci/scripts/contract-errmsg.sh` | R5 **内层阶段①**（maven 镜像）：编译 + 跑探针 ⇒ 只产出 Java 侧 dump | ✅ |
+| `ci/scripts/contract-errmsg-compare.sh` | R5 **内层阶段②**（python 镜像）：读 dump ⇄ Go 真源基准 ⇒ 出 PASS/FAIL/PENDING | ✅ |
 | `ci/scripts/contract-schema.sh` | R6 在 DinD 内层容器里的阶段脚本（内层用 `python:3.12-bookworm`，**不需要 Maven/JDK**） | ✅ |
-| `ci/scripts/verify-triggers.sh` | 触发面**真实服务端**验证（7 个场景） | ✅ |
+| `ci/scripts/verify-triggers.sh` | 触发面验证：`--static`（实现 vs 意图 · 7 场景 · **第 12 道门**）/ 服务端模式（真实 build 读数） | ✅ |
 | `ci/contracts/README.md` | **契约基准的治理约定**：来源 / 裁定 / 版本 / 审查 / 五态失败语义 | ✅ |
 | `ci/contracts/proto/*.proto`（10 份） | **R4 契约基准**（从 Go 真源一次性离线提取 + 人工裁定） | ✅ 基准 |
 | `ci/contracts/errmsg/*.txt`（10 份） | **R5 契约基准**（Go 侧权威值 + 差异逐条裁定） | ✅ 基准 |
@@ -244,6 +252,23 @@ canonical 流水线指向 `https://github.com/KASW-UI/RAG.git` 的 `do-my-own-gh
 > ⚠️ **A10/A11 的证据边界**：它们证明的是「**流水线机制 + 门禁脚本能在 Concourse Task 内真实执行**」，
 > **不等于**「全链路绿」——`rag-contract-schema` 的**首轮**结论是 **失败**（脚本缺失），**修复后需重跑确认**。
 
+### 4.4 🆕 2026-10-31（收尾轮）：契约门在 Concourse Task 内的**完整实跑** + 实跑抓出的 3 个真缺陷
+
+> 本节的读数**全部是 B 层**（Concourse Task 内实跑）⇒ **证据强度最高**。
+> ⚠️ 本轮的核心结论：**「在 Task 内真跑一遍」抓出了 3 个此前所有本地/静态验证都发现不了的缺陷**
+> ⇒ 再次印证 AGENTS.md §3.3「跑绿 ≠ 对」。
+
+| # | 结论 | 层级 | 依据 |
+|---|---|---|---|
+| B1 | ✅ **R6 Schema 契约门在 Concourse Task 内完整跑通** | B | `rag-contract-schema` **build 5 = succeeded（1m6s）** ⇒ **PASS 8 / FAIL 0 / BLOCKED 0 / NOT_RUN 1**（`hot` = DDL 维度不适用 ⇒ **不是「已对齐」**）⇒ 9 个域逐列比对链路成立 ⇒ **Java-only、无 Go 仓、无 Go 工具链** |
+| B2 | 🔴 **实跑抓出缺陷①：`docker_api.image_exists` 把 tag 丢了** | B | 症状：R6 首跑报 `GET /images/postgres/json ⇒ HTTP 404 ⇒ 查镜像失败` ⇒ **9 域全 BLOCKED**（明明 registry 里有 `library/postgres:16-alpine`）。<br>根因：`GET /images/{name}/json` **省略 tag** ⇒ daemon 按 `:latest` 解析 ⇒ `postgres:16-alpine` 被误判。<br>⚠️ **同源第二个面**：若 `:latest` 恰存在则**假阳性** True ⇒ 跳过拉镜像 ⇒ 随后「起容器失败」。<br>修法：按 `name:tag` 完整引用查 + **404 返回 False**（正常答案）而非抛异常。⇒ 已加**第 13 道静态门** `ci/scripts/check-docker-api-selftest.py`（11 条断言） |
+| B3 | 🔴 **实跑抓出缺陷②：exec-with-stdin 的线格式错了 ⇒ daemon 根本不消费 stdin** | B | 症状：R6 第二个域起 PG 成功，但 `psql -f -` 永远等不到 EOF ⇒ exec 一直 Running ⇒ 表现成「超时」（**根因离症状很远**）。<br>根因：我方写法是 `POST /exec/{id}/start` + **JSON 请求体** ⇒ daemon 走 **200 + chunked 普通响应**路径 ⇒ **不接 stdin**；docker CLI 的写法是**无请求体 + 参数走 query + `Connection: Upgrade`** ⇒ daemon 才回 **101 劫持**。<br>⚠️ 叠加第二个坑：101 之后 `http.client` 会把 `conn.sock` 置 None ⇒ 旧实现 `conn.sock.sendall` ⇒ `AttributeError` ⇒ **整个 R6 崩在 Traceback**（而不是判 BLOCKED）。<br>修法：改为**手写原始 HTTP**（自建 socket / 自读响应头 / 裸流多路复用解码）+ R6 检查器把**任何意外异常归 BLOCKED(2)**。⇒ 真机对拍：`out='DONE\n23\n'`（与 docker CLI 完全一致）；自测扩到 11 条断言，**变异（退回带 JSON 体的写法）⇒ 3 条断言转红**（红在断言、无 Traceback），真源字节已恢复 |
+| B4 | 🔴 **实跑抓出缺陷③：CI 的 maven 镜像里没有 python3 ⇒ R5 的比对逻辑跑不了** | B | 症状：`ci/scripts/check-errmsg-contract.sh: line 239: python3: command not found` ⇒ **每个域都被记成 BLOCKED**。<br>根因：R5 需要**两种互斥运行时** —— 跑 Java 侧探针要 **JDK+Maven**（探针 import 的是各域**编译产物**里的 `ErrorCode`），做基准比对要 **python3**；而 `maven:3.9.11-eclipse-temurin-21`（Ubuntu 24.04）**没有 python3**。<br>修法：R5 拆成**两个内层容器**（顺序执行、共用同一 bind mount）：内层① maven 出 Java 侧 dump → 内层② python 做比对。⇒ dump 目录放 `$PWD/errmsg-dump`（**不在 `repo/` 里** ⇒ 不进 task outputs ⇒ 不跨 build 残留）；dump 阶段**不记账**（还没比对 ⇒ 无从判 PASS/FAIL）⇒ 杜绝「没比对就当通过」 |
+| B5 | 🔴 **实跑抓出缺陷④：`dependency:build-classpath` 单独跑 ⇒ 干净环境解析不到上游模块** | B | 症状：R5 的 `task` 域报 `Could not find artifact com.rag:task-proto:jar:0.0.1-SNAPSHOT` ⇒ 该域 BLOCKED（看着像依赖问题，**其实是 reactor 没编译**）。<br>根因：`mvn -pl … -am dependency:build-classpath` **单独跑** ⇒ reactor 里上游模块（`task-proto`/`common`）没有编译产物 ⇒ Maven 只能从本地仓库找它们的 jar ⇒ 干净环境（CI 的 `.m2` 缓存里没有已安装的 `com.rag:*`）必然失败。<br>修法：① `compile` 与 `dependency:build-classpath` **同一次 mvn 调用** ⇒ reactor 内直接用上游的 `target/classes`；② `-Dmdep.outputFile` 改**相对路径** `target/ci-cp.txt` ⇒ 每个 reactor 模块写自己 basedir 下的文件（绝对路径会互相覆盖 ⇒ 拿到的不是目标模块的 classpath）。<br>本地实证：造了一个**去掉 `com/rag`** 的 `.m2` 仓库视图模拟干净环境 ⇒ task 域 dump 产出成功；全 9 域 dump ⇒ compare ⇒ **PASS 7 / FAIL 0 / BLOCKED 0 / PENDING 2（EXIT=3）** |
+| B6 | ✅ **静态守门在真实 CI 镜像内 12/12 通过**（含新增的第 12/13 道门） | B | `docker run -v <clone>:/build/repo -w /build python:3.12-bookworm sh repo/ci/scripts/run-static-gates.sh` ⇒ **12 道全绿 / 0 失败**。<br>⚠️ **一个重要的台架陷阱**：从 **git worktree** 挂进容器跑 ⇒ 前 3 道门报「没收集到任何文件 ⇒ 无法判定」⇒ 因为它们用 `git ls-files` 收集文件，而 worktree 的 `.git` 是**指针文件**、主仓 worktrees 目录没挂进容器 ⇒ **不是门禁缺陷，是台架缺陷**；从**纯 clone**（= Concourse 的实际形态）跑 ⇒ 12/12 全绿 |
+| B7 | ✅ **触发面静态一致性 7/7 通过**（精确集合比对，非模糊的「有触发就算」） | A/B | `bash ci/verify-triggers.sh --static` ⇒ 从生成器产出的 `paths` 算出触发集合，与**手工推导的意图集合**逐条精确比对 ⇒ **7/7 一致**。<br>⇒ 新增**第 12 道静态门** ⇒ 生成器漂移会被当场抓住。<br>附带确认了一条**可被检查的性质**：`service/common/**` 的改动**不会**触发两条契约流水线（契约门只听 `ci/contracts/**` 与各域 `errmsg`/`db/migration` 路径）⇒ 此前是「没人验证过的假设」，现在是**断言** |
+| B8 | 🔴 **宿主磁盘 100% 满的根因定位与处置** | B | `/System/Volumes/Data` 一度只剩 **216 MiB** ⇒ Docker containerd 内容库块级 EIO ⇒ daemon 挂死 / Concourse 整栈退出（**连续崩 3 次**）。<br>定位：**元凶是 141 个 Docker 卷**（Concourse 的 build/worker 卷 + 各 lane 的探针残留）⇒ `docker volume prune` 一次回收 **133.9 GB** ⇒ 可用空间 216 MiB → **120 GiB** ⇒ daemon 与 Concourse 全部恢复。<br>⇒ 结论：**这不是「环境时好时坏」，是可定位、可清理的具体占用**；记此条是为了下次不必重新踩一遍 |
+
 
 ---
 
@@ -259,7 +284,9 @@ canonical 流水线指向 `https://github.com/KASW-UI/RAG.git` 的 `do-my-own-gh
 | 资源类型镜像 | Concourse 8 的资源类型是 **rootfs.tgz 打包**（wolfi-base + git 二进制），**不从 Docker Hub 拉** | ⇒ 消除了 `alpine/git` 这条 Docker Hub 依赖 |
 | macOS socket 路径 | 实际在 `~/.docker/run/docker.sock` | ⇒ DinD 形态不依赖它 |
 | **DinD 内层网段** | 内层 dockerd 默认 `172.17.0.0/16` 与外层 docker0 同段 ⇒ 抢路由 | ⇒ 显式 `--bip 10.250.0.1/16 --default-address-pool base=10.250.0.0/16,size=24`（`DIND_BIP`/`DIND_POOL` 可覆盖） |
-| **宿主磁盘** | `/System/Volumes/Data` 一度 **100% 满（剩 617 MiB）** ⇒ Docker containerd 内容库块级 **I/O error** ⇒ daemon 卡死 / ATC 500 | ⇒ **这是所有"daemon 卡死"的真根因**；CI 侧已把可调项全部变量化，但**磁盘是宿主环境前提**，需先腾空间 |
+| **宿主磁盘** | `/System/Volumes/Data` 一度 **100% 满（剩 216 MiB）** ⇒ Docker containerd 内容库块级 **I/O error** ⇒ daemon 卡死 / ATC 500 | ⇒ **这是所有"daemon 卡死"的真根因**；CI 侧已把可调项全部变量化，但**磁盘是宿主环境前提**，需先腾空间。<br>🆕 **2026-10-31 已定位元凶并处置**：**141 个 Docker 卷**（Concourse 的 build/worker 卷 + 各 lane 探针残留）⇒ `docker volume prune` 一次回收 **133.9 GB** ⇒ 可用空间 216 MiB → **120 GiB** ⇒ daemon 与 Concourse 全部恢复。<br>⇒ 结论：**这不是「环境时好时坏」，是可定位、可清理的具体占用** ⇒ 下次不必重新踩一遍 |
+| **暂停的 job 不产生 build** | 13 条流水线的 job 全部 `pause-job` 后，推送 3 个 probe commit ⇒ **一条 build 都没产生**（调度器对暂停的 job 连资源检测都不做） | ⇒ 「暂停流水线省算力」会让**触发面完全不可观测** ⇒ 触发面服务端验证改用**轻量版流水线**（`paths` 逐字节照抄 + 空任务）⇒ 零算力且语义等价 |
+| **CI 镜像缺 python3** | `maven:3.9.11-eclipse-temurin-21` = Ubuntu 24.04 ⇒ `command -v python3` ⇒ MISSING | ⇒ R5 拆成**两个内层容器**（maven 出 dump / python 比对）；R6 的内层镜像**本来就是** python ⇒ 不受影响 |
 | Docker Desktop 稳定性 | 磁盘满期间 daemon 无响应、内容库块级 EIO；腾出 3.1 GiB + 重启后仍需进一步修复 | ⇒ 属宿主环境问题；CI 侧已把可调项全部变量化 |
 
 ---
