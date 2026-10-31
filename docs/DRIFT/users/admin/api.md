@@ -2233,7 +2233,7 @@ go-zero@v1.10.2/rest/server.go:222-233     WithMiddleware ⇒ middleware(route.H
 
 ---
 
-## 13. 🆕 `DRIFT-ADMINAPI-012` · Redis 断连 ⇒ 命令挂满 3s ⇒ **503**（Go 是 fail-open 200）—— **已修**（2026-10-27 · G1 lane）
+## 13. 🆕 `DRIFT-ADMINAPI-012` · Redis 断连 ⇒ 命令挂满 3s ⇒ **503**（Go 是 fail-open 200）—— **已修**（2026-10-27 · G1 lane） ｜ **现行态 = ✅ 已一致**
 
 > **元信息**：落码分支 `align/g1-users-follow` · **写权内**（`service/users/admin/admin-api/**`）·
 > **证据强度**：🟡 **RAG 腿 = L3 真容器活体**（真 Redis 容器 ＋ **可控 TCP 代理制造 FIN**）
@@ -2447,7 +2447,7 @@ Sea-RideTheWind_golang/service/common/observability/http.go:88  → http.Error(w
 
 ## 🔴 `DRIFT-ADMINAPI-013` · **「OS 盲选口」族** · 本组件 **3 处**（2026-10-28 · G1 lane）
 
-> 📌 **机制 / 本机实测（Q3·Q6·Q7·Q8）/ 守门细节 / 效力边界 ⇒ [`docs/DRIFT/users/vs-common.md` §65](../vs-common.md)**
+> 📌 **机制 / 本机实测（Q3·Q6·Q7·Q8）/ 守门细节 / 效力边界 ⇒ [`docs/DRIFT/users/vs-common.md` §65](../vs-common.md)** ｜ ⚠️ **本条新立时为 🔴**（2026-10-28 逐处已改完 · 表内逐处标「已改」） ⇒ **现行态 = ✅ 已一致**
 > ⇒ 本条只记**本组件那一份**（不抄机制表，避免两处漂移）。
 
 | 族 | 位置（**改造后**行号） | 状态 |
