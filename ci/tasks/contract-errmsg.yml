@@ -6,6 +6,12 @@
 #   ⇒ 复用同一份 ~/.m2 缓存、同一份 Maven 镜像源 settings.xml、同一套镜像源机制
 #   ⇒ **不新增任何 CI 机制**，只是多一个 STAGE。
 #
+# 【两个内层阶段（2026-10-31 实测后新增）】
+#   ① contract-errmsg（maven 镜像）          ⇒ 编译 + 跑探针 ⇒ 产出 Java 侧 dump
+#   ② contract-errmsg-compare（python 镜像） ⇒ 比对 dump ⇄ Go 真源基准
+#   ⇒ 两者共用同一个 bind mount（$PWD）⇒ dump 在同一次 build 内交接。
+#   ⚠️ 拆分根因：maven 镜像**没有 python3** ⇒ 单容器跑比对必然 `python3: command not found`。
+#
 # 【为什么独立成一条流水线，而不是塞进 11 条日常流水线】
 #   R5 要编译 9 个域的 `<域>-common` 并各跑一次 Java 半边探针（分钟级）
 #   ⇒ 无条件塞进 11 条日常流水线不可接受（任务书 §九.11）。
@@ -42,6 +48,17 @@ params:
   MAVEN_MIRROR_URL: ((maven_mirror))
   # 交给 ci/scripts/dind-run.sh 的阶段名
   STAGE: contract-errmsg
+  # 🆕 第二个内层阶段（2026-10-31 实测后新增）
+  #   R5 需要**两种互斥的运行时**：
+  #     · 跑 Java 侧探针 ⇒ JDK + Maven（探针 import 的是各域**编译产物**里的 ErrorCode）
+  #     · 做基准比对   ⇒ python3（解析两段式基准 / 反转义 / 四态分类 / 回指台账）
+  #   ⚠️ CI 的 maven 镜像里**没有 python3**（实测 Ubuntu 24.04 temurin ⇒ MISSING）
+  #   ⇒ 拆成两个内层容器，顺序执行，**共用同一个 bind mount**（$PWD）
+  #      内层① maven  ⇒ 产出 Java 侧 dump 到 $PWD/errmsg-dump
+  #      内层② python ⇒ 读同一目录做比对
+  #   ⇒ dump 在**同一次 build 内**交接 ⇒ 不会拿到上一次 build 的 dump。
+  IMAGE2: ((registry))/library/python:3.12-bookworm
+  STAGE2: contract-errmsg-compare
   # 目标域列表（留空 = 全部 9 个域）
   ERRSMSG_DOMAINS: ''
 

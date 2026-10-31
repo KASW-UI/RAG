@@ -33,6 +33,10 @@ set -eu
 
 IMAGE="${IMAGE:-}"
 STAGE="${STAGE:-build}"
+# 🆕 第二个内层阶段（可选）：R5 需要「maven 跑探针」+「python 做比对」两种运行时
+#    ⇒ 详见文件末尾【为什么要支持第二个内层阶段】。
+IMAGE2="${IMAGE2:-}"
+STAGE2="${STAGE2:-}"
 DIND_SOCK=/var/run/docker.sock
 
 if [ -z "$IMAGE" ]; then
@@ -200,15 +204,65 @@ fi
 #   而 build.sh / test.sh 内部第一行是 `cd repo` ⇒ 它们是**站在 repo 的父目录**执行的。
 #   ⇒ 嵌套容器里对应地要执行 repo/ci/scripts/<stage>.sh（实测 2026-10-30：
 #     写成 ci/scripts/<stage>.sh 会报 "cannot open ci/scripts/build.sh"）。
-exec docker -H "unix://${DIND_SOCK}" run --rm \
-  -v "$PWD:$PWD" \
-  -w "$PWD" \
-  -v "${DIND_SOCK}:${DIND_SOCK}" \
-  -v "$PWD/.m2:/root/.m2" \
-  -e DOCKER_HOST="unix://${DIND_SOCK}" \
-  -e TESTCONTAINERS_RYUK_DISABLED=true \
-  -e MODULES="${MODULES:-}" \
-  -e ERRSMSG_DOMAINS="${ERRSMSG_DOMAINS:-}" \
-  -e ERRSMSG_SKIP_COMPILE="${ERRSMSG_SKIP_COMPILE:-}" \
-  "$IMAGE" \
-  sh "repo/ci/scripts/${STAGE}.sh"
+#
+# 【为什么要支持第二个内层阶段（IMAGE2 / STAGE2）】
+#   2026-10-31 实测：R5 错误码契约门需要**两种互斥的运行时**——
+#     · 跑 Java 侧探针 ⇒ **JDK + Maven**（探针 import 的是各域**编译产物**里的 ErrorCode）
+#     · 做基准比对   ⇒ **python3**（解析两段式基准 / 反转义 / 四态分类 / 回指台账）
+#   而 CI 的 maven 镜像里**没有 python3**（实测 Ubuntu 24.04 temurin ⇒ `command -v python3` ⇒ MISSING）
+#   ⇒ 单容器跑不通 ⇒ 拆成**两个内层容器，顺序执行，共用同一个 bind mount**。
+#   ⇒ 内层① maven 镜像产出 dump 到 $PWD/errmsg-dump（**不在 repo/ 里** ⇒ 不进 task outputs）
+#   ⇒ 内层② python 镜像读同一目录做比对
+#   ⇒ 两者在**同一次 build 内**交接 ⇒ 不会拿到上一次 build 的 dump。
+#
+# 【退出码】
+#   阶段①的退出码是**前置条件**（dump 没产出 ⇒ 比对无从谈起）
+#   ⇒ 阶段①失败 ⇒ **不再跑阶段②**（没有 dump，比对必然 BLOCKED，跑了只是噪声）
+#   ⇒ 阶段②的退出码 = 最终结论（阶段②才是给 PASS/FAIL/PENDING 结论的那一步）
+set -eu
+
+# --- 4. 在内层 daemon 上跑嵌套构建容器 --------------------------------------
+# ⚠️ 阶段脚本的路径必须带 repo/ 前缀：
+#   任务容器的工作目录里，源码在 $PWD/repo（git 资源的输入目录），
+#   而 build.sh / test.sh 内部第一行是 `cd repo` ⇒ 它们是**站在 repo 的父目录**执行的。
+#   ⇒ 嵌套容器里对应地要执行 repo/ci/scripts/<stage>.sh（实测 2026-10-30：
+#     写成 ci/scripts/<stage>.sh 会报 "cannot open ci/scripts/build.sh"）。
+run_inner() {
+  # 用法：run_inner <镜像> <阶段脚本名>
+  docker -H "unix://${DIND_SOCK}" run --rm \
+    -v "$PWD:$PWD" \
+    -w "$PWD" \
+    -v "${DIND_SOCK}:${DIND_SOCK}" \
+    -v "$PWD/.m2:/root/.m2" \
+    -e DOCKER_HOST="unix://${DIND_SOCK}" \
+    -e TESTCONTAINERS_RYUK_DISABLED=true \
+    -e MODULES="${MODULES:-}" \
+    -e ERRSMSG_DOMAINS="${ERRSMSG_DOMAINS:-}" \
+    -e ERRSMSG_SKIP_COMPILE="${ERRSMSG_SKIP_COMPILE:-}" \
+    -e ERRSMSG_PHASE="${ERRSMSG_PHASE:-}" \
+    -e ERRSMSG_DUMP_DIR="${ERRSMSG_DUMP_DIR:-$PWD/errmsg-dump}" \
+    -e ERRSMSG_DUMP_OUT_DIR="${ERRSMSG_DUMP_OUT_DIR:-}" \
+    -e ERRSMSG_REPLAY_DUMP_DIR="${ERRSMSG_REPLAY_DUMP_DIR:-}" \
+    "$1" \
+    sh "repo/ci/scripts/$2"
+}
+
+rc=0
+run_inner "${IMAGE}" "${STAGE}" || rc=$?
+
+if [ -n "${IMAGE2}" ]; then
+  if [ -z "${STAGE2}" ]; then
+    echo "[ci] ❌ 配了 IMAGE2 却没配 STAGE2 ⇒ 无法执行第二内层阶段" >&2
+    exit 2
+  fi
+  if [ "$rc" -ne 0 ]; then
+    echo "[ci] ⚠️ 阶段①（${STAGE}）退出码 ${rc} ⇒ 阶段②（${STAGE2}）**不再执行**"
+    echo "[ci]    （没有 Java 侧 dump ⇒ 比对必然 BLOCKED ⇒ 跑了只是噪声）"
+    exit "$rc"
+  fi
+  echo "[ci] ➡️ 进入第二内层阶段：${STAGE2}（镜像 ${IMAGE2}）"
+  rc=0
+  run_inner "${IMAGE2}" "${STAGE2}" || rc=$?
+fi
+
+exit "$rc"
