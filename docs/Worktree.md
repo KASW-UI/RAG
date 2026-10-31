@@ -737,3 +737,106 @@ git merge-base --is-ancestor align/g4-service-common do-my-own-gh && echo "已�
 > ⚠️ **同名分支已存在时**（如旧的 `align/favorite` 仍被某个工作树占用）：
 > `git worktree add` 会报「branch already checked out」⇒ 先 `git worktree remove` + `git branch -D`
 > （**确认无独有提交、无未提交改动后再删**）。
+
+---
+
+## 七、M-22：跨工作流分支合入 ＋ 写权越界裁决 ＋ 源声明数口径订正（2026-10-31 · 合并收口执行者）
+
+> ⚠️ **为什么追加在文末、而不是插进 §五 的 M-xx 表**：本文件**有硬行号指针** ——
+> `docs/DRIFT/users/user/rpc.md:3010` 引 `docs/Worktree.md:587` ·
+> `docs/CLOSEOUT-2026-10-29.md:117` 引 `:274` / `:108` ⇒ ⇒ 中段插一行 ⇒ **后面所有行号整体位移**
+> ⇒ ⇒ ⇒ 只能**文末追加**（零位移）。
+
+### ① 背景：出现了**第五棵分支**（不在 G1~G4 波次表内）
+
+- 第三波收口后（HEAD `eba740e0`）清点工作树，发现 `align/ci-concourse`（**13 笔未合主干** ·
+  工作树 `RAG.worktrees/ci-concourse`）⇒ ⇒ 它来自**另一条协调线程**（Concourse CI 阶段一）⇒ ⇒
+  **不在 §二 的 G1~G4 波次表内 ⇒ 无 lane 写权**；同时 `align/g1-users-follow` 新增 1 笔（`f8438ee6`）。
+- ⇒ 两笔一并合入：`7e945722`（G1 · 纯末尾追加 84 行 ⇒ 零位移）＋ `4b4bb10e`（ci-concourse · 86 文件）。
+
+### ② 冲突裁决（1 处）：**主干侧是错的**
+
+- 冲突文件 = `service/users/admin/admin-api/pom.xml`：主干侧 `44b8b80b` 写 `<relativePath>../../pom.xml</relativePath>`，
+  分支侧写 `../../../pom.xml`。
+- **独立核坐标链**（**排除 `<parent>` 块后**取自身 artifactId）：`service/pom.xml`=`service` ·
+  `service/users/pom.xml`=`users` · `service/users/admin/pom.xml`=`admin`；而 `admin-api` 声明的父 artifactId=**`service`**
+  ⇒ ⇒ `../../pom.xml` 指向 artifactId=**`users`** ❌ · `../../../pom.xml` 指向 artifactId=**`service`** ✅
+  ⇒ ⇒ **判定：分支侧正确，主干侧是错层数的真缺陷**（干净 checkout 无制品仓库 ⇒ 父 POM 解析必炸；
+  开发机不报错是被 `~/.m2` 里旧的已安装 `service` pom 掩盖 ⇒ 属「配置存在但没生效」形态）⇒ ⇒ **取分支侧**。
+- **合并后复扫**：**51 个 `com.rag` 内父 POM 全部解析正确 · 0 错**（外部父 `spring-boot-starter-parent` 不计）
+  ⇒ ⇒ 与仓库自带守门 `ci/scripts/check-pom-parent-relativepath.py` **EXIT=0 一致** ⇒ ⇒ **互证**。
+- ⚠️ **取证时踩的坑**：第一次核对坐标链时用「取文件里**第一个** `<artifactId>`」⇒ ⇒ 拿到的是
+  **`<parent>` 块里的那个**（= 父的 artifactId）⇒ ⇒ 把 `service/pom.xml` 误读成 `Sea-RideTheWind_java`
+  ⇒ ⇒ **结论差点反过来** ⇒ ⇒ 判据必须**排除 `<parent>` 块**后取自身 artifactId。
+
+### ③ 写权裁决：越界登记，但**保留其改动**
+
+- `align/ci-concourse` 改了 `tools/difftest/check-wave-lane-ownership.py`（**写权机器口径** ⇒ 归本面）⇒ ⇒ **越界**。
+- 但它的改动本身是**改善**：第 7 条判据在「**无 lane 上下文**」（Concourse 的 git resource = 单 commit detached HEAD ⇒
+  `branch_exists()` 恒假 ⇒ 该条恒红 ⇒ 门根本进不了 CI）时改为 **NOT_RUN**，且**如实打印 NOT_RUN**
+  ⇒ ⇒ 修掉了「**跳过看起来像通过**」的假绿表述 ⇒ ⇒ **予以保留**（登记越界，不回退）。
+
+### ④ 守门清单口径：**第二次补全**（前两次分别是 M-15 / M-16）
+
+- 此前「31 绿」只枚举 `tools/**/check-*.py` ⇒ ⇒ **漏了 `tools/difftest/check-*.sh` 4 个**（`proto-static` /
+  `jar-executable` / `plaintext400-headers` / `flyway-concurrent`）⇒ ⇒ 又**新增了 `ci/scripts/check-*.py` 7 个** ⇒ ⇒
+  ⇒ 本轮把枚举扩到**全仓**（`.py` + `.sh` + `ci/scripts`）。
+- 实测：`ci/scripts` 7 道 = **5 绿 · 2 红**（红项当时是 **Docker 镜像 blob 损坏** ⇒ 环境性；
+  且 `check-schema-contract.py` **正确报 `BLOCKED` 而不是「通过」** ⇒ 门本身没假绿）⇒ ⇒ Docker 恢复后补跑：
+  **R6 Schema 契约门 8 域 PASS · 0 FAIL · 0 BLOCKED · 1 NOT_RUN（`hot` · DDL 维度不适用 · 门内明写「**不是「已对齐」**」）**
+  ＋ **R6 变异对照 9/9 精确转红** ⇒ ⇒ 该门**不是假绿**。
+
+### ⑤ Docker 病根定位：**daemon 是活的，坏的是 content store**
+
+- 此前记的「Docker daemon 僵死」（`docker ps` 挂起）**与本轮实测不符**：`docker version` 返回 **Server 29.2.1** ·
+  API 有响应 ⇒ ⇒ 真病根 = **content store 缺 blob**（镜像**元数据在、实体层被 GC**）⇒ ⇒ 建容器 HTTP 500
+  ⇒ ⇒ `docker pull` 补 blob 时**镜像代理断流 EOF** ⇒ ⇒ 本机当时无法自动修。
+- ⚠️ **本轮 Docker 已自愈**（外部重启）⇒ ⇒ ⇒ **两处被它阻塞的项已补跑**：
+  ① **共享层全量回归跑完**（此前 6 分钟无进展的 Testcontainers 类全部恢复）⇒ **surefire XML 权威读数
+  `tests=480 · skipped=0 · failures=0 · errors=0`**（90 个 XML · BUILD SUCCESS 1:19）；
+  ② **产物门**：全量 `mvn package`（58s · BUILD SUCCESS）后 `check-jar-executable.sh` ⇒ **20/20 个 api+rpc 模块的 jar 均可执行**。
+
+### ⑥ 源声明数口径订正：「480 vs 481」定案（真因是**计数口径**，不是少跑了一个测试）
+
+- 悬案：`service/common` 的**执行读数 480** vs **源声明数 481** ⇒ ⇒ 当时判「**口径未明**」。
+- **根因**：`check-source-test-decl-count.py` 用**全文 `findall`** 数测试注解 ⇒ ⇒ **注释 / javadoc 里提到的
+  `@Test` 文本也被算成一个测试方法** ⇒ ⇒ 定位到 `HttpShutdownProbeWithoutServlet` 的 javadoc 里
+  `{@code @Test}`（那个类**刻意不以 `Test` 结尾** ⇒ surefire 不会跑它）⇒ ⇒ **虚高 1**。
+- **修法**：守门加 `code_state_mask()`（注释 / 字符串 / 字符字面量 / 文本块 ⇒ **等长空格** ⇒ 行号不位移）
+  ＋ **M4 自证**（阳性 = 真实 `@Test` 一个不少；阴性 = javadoc 那处恰好少 1）⇒ ⇒ **只算代码态**。
+- **订正后的值**（**全仓 −7**）：`service/common` **481→480** · `follow-api` **101→99** ·
+  `user-api` **140→138** · `admin-api` **162→160** ⇒ ⇒ **全仓 3,314 → 3,307**。
+- ⇒ ⇒ **互证成立**：订正后**共享层源声明 = 480 == surefire 执行读数 480** ⇒ ⇒ 「480 vs 481」**已定案**。
+- ⚠️ **同一量不许有第二份实现**：`check-phasegoal-consistency.py` 里**抄了第二份**计数（口径不同 ⇒ 改完它立刻变红
+  ⇒ ⇒ 但它红的原因**不是「基线坏了」而是「第二份实现没跟着改」）⇒ ⇒ 改成 **import 同族的 `code_state_mask`**
+  ⇒ ⇒ 一个量一个实现。
+- ⚠️ **两次自踩**：① 我自己的**复扫脚本 glob 深度不够**（`service/*/*/src/test/java` 覆盖不到
+  `service/users/user/user-api` 三层深）⇒ ⇒ 算出 **−3 而真值是 −7** ⇒ ⇒ **是守门自己的组件映射表
+  （覆盖 39 个组件）抓出了全量** ⇒ ⇒ 「**扫描面决定结论**」；② 我第一次写的**自证谓词反了**
+  （把「掩码后还剩 ⇒ 是代码」写成「原始 > 掩码 ⇒ 是代码」）⇒ ⇒ 自证 FAIL ⇒ ⇒ **差点反着把判据改坏**
+  ⇒ ⇒ **自证失败时先怀疑自证**（读原始/掩码后的数字，别信自己写的 `if`）。
+
+### ⑦ U+FFFD 归因：**31 处 / 11 文件 ⇒ 28 处是存量**
+
+- 逐文件比对合并前后计数：**9 个文件合并前后计数不变**（存量）⇒ 含 `tools/ledger-derive/derive-stage1.py` 的 3 处
+  ⇒ ⇒ **全在注释里**（`derive-stage1.py:426` 那行注释首部的 3 个替换字符）⇒ ⇒ **不是**派生层 `entry_blocking_decl` 未解之谜的根因（谜底仍未查清）。
+- **本轮新引入 3 处** = `ci/scripts/check-requirements.py:270` 的**注释行** ⇒ ⇒ **不参与匹配 ⇒ 无功能影响**。
+
+### ⑧ 验收（本轮合并 + 订正后）
+
+- **静态守门**：`tools/**` **31 绿 · 0 红 · 2 用法门**（与订正前持平）＋ `ci/scripts` **7 道全绿**（Docker 恢复后）
+  ＋ `.sh` 守门：`check-proto-static.sh` **10/10 域 proto wire 契约逐字节一致** ✅ · `check-jar-executable.sh` **20/20** ✅
+  （另 2 个需真 Tomcat / 真 PG ⇒ 仍受环境制约）。
+- **派生层**：重生成 **md / tsv 逐字节零差异** · `derive-stage1.py --check` **PASS**。
+- **指针棘轮**：**3383 指针 · 存量例外 237 → 当前 237 · 新增 0 · 已消失 0** ✅。
+- **pom 父解析**：**51/51 正确 · 0 错**（独立复扫 ＋ 仓库自带门，互证）。
+- **零行位移**：`docs/PhaseGoal-judge.md` **727 行不变** · `docs/DRIFT/global/vs-common.md` **7957 行不变**。
+- **共享层全量回归**：`tests=480 · skipped=0 · failures=0 · errors=0` ✅。
+
+### ⑨ 遗留（下一轮接手须知）
+
+- ⚠️ **`align/ci-concourse` 工作树仍有未提交改动**（`ci/scripts/run-static-gates.sh` · `ci/verify-triggers.sh`
+  · 18:xx 写入）⇒ ⇒ **那条工作流还活着** ⇒ ⇒ 本面合入的是 **17:56 的快照** ⇒ ⇒ 它再提交后**需再合一次**。
+- ⚠️ **四棵 lane 配额仍耗尽**（G1/G2/G4 `42212` · G3 `50113`）⇒ ⇒ 本轮的所有「代落码」都是 §5.3f 的**例外路径**。
+- ⚠️ **本面未做**：push（**310+ 笔未推**）· per-client cap 落码（`article-api` 缺 70s 上界 · G4 写权面）
+  · 4 处域侧私有常量 + 判据②（users/follow 域面）· `entry_stage_decl` 口径 · `§4.19.6` 重判 · E66 定级复判。

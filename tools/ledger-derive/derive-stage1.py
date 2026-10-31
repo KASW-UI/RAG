@@ -423,7 +423,7 @@ TOOLREF_RE = re.compile(r"tools/[A-Za-z0-9_./-]+\.(?:sh|py)")
 
 DECOR = "🔴🟡🟢✅⚫❌⛔⏳🏷⚪⬜🟥⚠️❗️ "
 
-# ���─ U5 权威定级来源 ───────────────────────────────────────────────────────
+# ═─ U5 权威定级来源 ───────────────────────────────────────────────────────
 STAGE1_05 = ROOT / "docs/Stage1/05-差异与暂缓项清单.md"
 ALIGNMENT = ROOT / "docs/DRIFT/common/alignment-2026-10-23.md"
 TASK_UNIVERSE = ROOT / "docs/RoundPlan/_task-universe.md"

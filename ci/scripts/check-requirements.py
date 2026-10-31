@@ -267,7 +267,7 @@ def validate(data: dict, signed_ids: set, all_kinds: dict) -> tuple[list, list]:
                           f"「已知不一致」被藏起来了 ⇒ 必须写明证据与影响")
 
         # R8 —— VERIFIED 要求必须挂在**真实存在**的 pipeline / task 上
-        #      ⚠️ `task` 既可能是「ci/tasks/<name>.yml」也可能���「流水线里的 job 名」
+        #      ⚠️ `task` 既可能是「ci/tasks/<name>.yml」也可能是「流水线里的 job 名」
         #         （契约流水线的 job 叫 `contract-check`，task 文件叫 `contract-errmsg.yml`）
         #         ⇒ 两种都接受，但**必须真的存在** ⇒ 否则「要求写了但没人执行」抓不住。
         if st == "VERIFIED":

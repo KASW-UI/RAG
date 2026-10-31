@@ -6,6 +6,10 @@
 ------
 1. **A-1 的 `tests` 列 == 该模块 `src/test/java` 里的源声明测试方法数**（逐行）——
    ⚠️ **口径 = 方法声明数**：一个 `@ParameterizedTest` 算 **1**（不是 surefire 展开后的 N 条 case）。
+   ⚠️ **口径再收窄一格（2026-10-31 订正）**：**只算代码态** —— 注释 / javadoc 里提到的 `@Test`
+   **文本不算** ⇒ ⇒ 原口径把 `HttpShutdownProbeWithoutServlet` 的 javadoc `{@code @Test}`
+   算成了一个测试 ⇒ ⇒ 全仓虚高 **7**（`service/common` +1 · `follow-api` +2 · `user-api` +2 · `admin-api` +2）
+   ⇒ ⇒ 订正后**共享层源声明 480 == surefire 执行读数 480** ⇒ ⇒ 两个口径互证成立。
 2. **A-1 的 `tests` 列求和 == 文档声明的「全仓源声明测试方法数」**（§七 P0 #6 的声明行）。
 3. **A-1 的行数 == 39**（38 组件 + 1 共享层），且每个组件都有源声明数可对账。
 
@@ -34,7 +38,7 @@
 退出码
 ------
 0 = 通过（逐行一致 + 求和一致 + 行数 39）
-1 = 有不一致（打印 `M1` / `M2` / `M3`）
+1 = 有不一致（打印 `M1` / `M2` / `M3` / `M4`）
 """
 
 from __future__ import annotations
@@ -119,6 +123,108 @@ def strip_md(s: str) -> str:
     return s
 
 
+def code_state_mask(t: str) -> str:
+    """把**注释 / 字符串 / 字符字面量 / 文本块**替换成**等长空格**（换行保留）⇒ 行号不位移。
+
+    ⚠️ **为什么需要它**（2026-10-31 实测发现）：
+        原口径用 `_ANNOT_RE.findall(全文)` 数测试注解 ⇒ ⇒ **注释 / javadoc 里提到的
+        `@Test` 文本也被算成一个测试方法** ⇒ ⇒ 源声明数**虚高**：
+          · `service/common` **+1**（`HttpShutdownProbeWithoutServlet` 的 javadoc 里 `{@code @Test}`）
+          · `follow/follow-api` **+2**（类 javadoc + 行注释各一处）
+          · `users/user/user-api` **+2** · `users/admin/admin-api` **+2**（同形态）
+        ⇒ ⇒ 订正后**共享层源声明 = 480 == surefire 执行读数 480** ⇒ ⇒ **两个口径互证成立**
+        （订正前 481 vs 480 看着像「少跑了一个测试」，实为**计数口径噪声**）。
+    ⇒ ⇒ 与 `count-outbound-stubs.py` / `check-wave-coupling.py` **同一手法**（代码态判据）。
+    """
+    out = list(t)
+    i = 0
+    n = len(t)
+
+    def blank(a: int, b: int) -> None:
+        for k in range(a, min(b, n)):
+            if out[k] != "\n":
+                out[k] = " "
+
+    while i < n:
+        c = t[i]
+        if c == "/" and i + 1 < n and t[i + 1] == "/":
+            j = t.find("\n", i)
+            j = n if j < 0 else j
+            blank(i, j)
+            i = j
+            continue
+        if c == "/" and i + 1 < n and t[i + 1] == "*":
+            j = t.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            blank(i, j)
+            i = j
+            continue
+        if t.startswith('"""', i):
+            j = t.find('"""', i + 3)
+            j = n if j < 0 else j + 3
+            blank(i, j)
+            i = j
+            continue
+        if c == '"':
+            j = i + 1
+            while j < n:
+                if t[j] == "\\":
+                    j += 2
+                    continue
+                if t[j] == '"':
+                    j += 1
+                    break
+                if t[j] == "\n":
+                    break
+                j += 1
+            blank(i, j)
+            i = j
+            continue
+        if c == "'":
+            j = i + 1
+            while j < n:
+                if t[j] == "\\":
+                    j += 2
+                    continue
+                if t[j] == "'":
+                    j += 1
+                    break
+                if t[j] == "\n":
+                    break
+                j += 1
+            blank(i, j)
+            i = j
+            continue
+        i += 1
+    return "".join(out)
+
+
+def mask_selfcheck() -> tuple[bool, str]:
+    """**掩码器的自证**（阳性 + 阴性对照）⇒ 防「掩码器把真实测试也掩掉 ⇒ 读数偏小」。
+
+    · 阳性对照：`GoStylePrometheusSinkGateTest` 的真实 `@Test` ⇒ 掩码后**必须一个不少**
+    · 阴性对照：`HttpShutdownProbeWithoutServlet` 的 javadoc `{@code @Test}` ⇒ 掩码后**必须恰好少 1**
+    ⇒ ⇒ 两个对照都按**内容**定位（不按行号 ⇒ 行号位移不影响自证）。
+    """
+    pos_rel = "service/common/src/test/java/com/rag/common/observability/GoStylePrometheusSinkGateTest.java"
+    neg_rel = "service/common/src/test/java/com/rag/common/spring/HttpShutdownProbeWithoutServlet.java"
+    try:
+        pos = (REPO / pos_rel).read_text(encoding="utf-8", errors="ignore")
+        neg = (REPO / neg_rel).read_text(encoding="utf-8", errors="ignore")
+    except OSError as e:
+        return False, f"自证样本读不到：{e}"
+    pos_raw = len(_ANNOT_RE.findall(pos))
+    pos_masked = len(_ANNOT_RE.findall(code_state_mask(pos)))
+    neg_raw = len(_ANNOT_RE.findall(neg))
+    neg_masked = len(_ANNOT_RE.findall(code_state_mask(neg)))
+    ok = (pos_masked == pos_raw) and (neg_masked == neg_raw - 1)
+    detail = (
+        f"阳性 原始={pos_raw} 掩码后={pos_masked}（须相等）· "
+        f"阴性 原始={neg_raw} 掩码后={neg_masked}（须少 1）"
+    )
+    return ok, detail
+
+
 def source_decl_count(module_rel: str) -> int:
     """该模块 `src/test/java` 里的**源声明测试方法数**（参数化算 1）。"""
     tdir = REPO / module_rel / "src/test/java"
@@ -127,7 +233,9 @@ def source_decl_count(module_rel: str) -> int:
     n = 0
     for f in tdir.rglob("*.java"):
         try:
-            n += len(_ANNOT_RE.findall(f.read_text(encoding="utf-8", errors="ignore")))
+            # ⚠️ **只算代码态**（2026-10-31 订正）：注释 / javadoc 里提到的 `@Test` 文本**不算**
+            raw = f.read_text(encoding="utf-8", errors="ignore")
+            n += len(_ANNOT_RE.findall(code_state_mask(raw)))
         except OSError:
             continue
     return n
@@ -176,9 +284,18 @@ def main() -> int:
     print("=" * 78)
     print("  口径：src/test/java 里 @Test / @ParameterizedTest / @RepeatedTest /")
     print("        @TestFactory / @TestTemplate 的**方法声明数**（参数化算 1）")
+    print("        ⚠️ **只算代码态**：注释 / javadoc 里提到的 `@Test` **文本不算**")
     print("  ⚠️ 与 surefire 执行读数**两个口径、不可相减**（后者会被 Docker 状态")
     print("     与参数化展开双向扭曲 ⇒ 环境相关）")
     print()
+
+    # ── M4：掩码器自证（阳性 + 阴性对照）⇒ 防「掩码过头 ⇒ 读数偏小」────────
+    ok, detail = mask_selfcheck()
+    if not ok:
+        codes.append("M4")
+        print(f"🔴 [M4] 掩码器自证失败 ⇒ ⇒ 代码态计数不可信 ⇒ {detail}")
+    else:
+        print(f"  ✅ [M4] 掩码器自证通过（{detail}）")
 
     if len(rows) != A1_ROWS_EXPECTED:
         codes.append("M3")

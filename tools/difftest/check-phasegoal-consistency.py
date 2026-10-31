@@ -34,6 +34,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import importlib.util
 import pathlib
 import re
 import sys
@@ -142,6 +143,12 @@ def _source_decl_total() -> int | None:
 
     ⇒ ⇒ 与 `tools/difftest/check-source-test-decl-count.py` 的逐行对账同源
     （那个守门做逐行明细 + 行数 39 + proto 行 ⇒ 本函数只做求和级交叉校验）。
+
+    ⚠️ **口径已再收窄一格（2026-10-31 订正）**：**只算代码态** —— 注释 / javadoc 里提到的
+    `@Test` **文本不算** ⇒ ⇒ 全仓 **3,314 → 3,307**（`service/common` −1 · `follow-api` −2 ·
+    `user-api` −2 · `admin-api` −2 ⇒ 旧口径把 javadoc 的 `{@code @Test}` 算成了测试）。
+    ⇒ ⇒ **掩码器不在本文件另抄一份** ⇒ ⇒ **直接 import 同族守门里的 `code_state_mask`**
+    ⇒ ⇒ 同一个量**只有一个实现**（抄第二份 = 两个真相源 = 两个守门互相打架）。
     """
     svc = ROOT / "service"
     if not svc.is_dir():
@@ -162,15 +169,39 @@ def _source_decl_total() -> int | None:
     return total
 
 
+def _sibling_masker():
+    """**import 同族守门里的 `code_state_mask`**（单一真相源 ⇒ 不抄第二份）。
+
+    ⚠️ 文件名带 `-` ⇒ 不是合法模块名 ⇒ 用 `importlib.util.spec_from_file_location` 按路径加载。
+    ⚠️ 加载失败 ⇒ **直接抛**（不静默回落成本文件的第二份实现）⇒ ⇒ 否则两个守门会静默打架。
+    """
+    here = pathlib.Path(__file__).resolve().parent
+    src = here / "check-source-test-decl-count.py"
+    if not src.is_file():
+        raise FileNotFoundError(f"找不到同族掩码器实现：{src}")
+    spec = importlib.util.spec_from_file_location("_decl_count_gate", src)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"无法加载同族掩码器实现：{src}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    fn = getattr(mod, "code_state_mask", None)
+    if fn is None:
+        raise AttributeError(f"{src} 里没有 code_state_mask ⇒ ⇒ 口径无法对齐")
+    return fn
+
+
 def _count_in(tdir: pathlib.Path, ann: re.Pattern) -> int:
     n = 0
     try:
         files = list(tdir.rglob("*.java"))
     except OSError:
         return 0
+    mask = _sibling_masker()
     for f in files:
         try:
-            n += len(ann.findall(f.read_text(encoding="utf-8", errors="ignore")))
+            raw = f.read_text(encoding="utf-8", errors="ignore")
+            # ⚠️ **只算代码态**（与 `check-source-test-decl-count.py` 同一实现 ⇒ 同一口径）
+            n += len(ann.findall(mask(raw)))
         except OSError:
             continue
     return n
