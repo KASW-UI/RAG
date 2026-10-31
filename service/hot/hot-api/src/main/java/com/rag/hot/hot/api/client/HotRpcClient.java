@@ -41,6 +41,12 @@ import org.springframework.stereotype.Component;
  * 由 {@code HttpMiddleware} 设在跑业务的 worker 线程上；而本服务的补全跑在<b>线程池 worker</b>上，
  * 那里的 ThreadLocal 为空 ⇒ 在本类里读预算会静默得到「无限等待」。
  * 因此预算在请求线程上取一次后显式传入，见 {@link GoStyleGrpcCallDeadline}。
+ *
+ * <p>⚠️ <b>2s 的客户端上界不在本类</b>（🆕 2026-10-31 · G3 lane 第十三轮收敛）：
+ * 上界由共享层 {@code GoStyleOutboundDeadlineInterceptor} 按本域 yml 的
+ * {@code rag.protection.outbound-deadline.cap-millis} 施加
+ * ⇒ ⇒ 本类（连同 {@link GoStyleGrpcCallDeadline}）只负责<b>传播请求预算</b>，<b>不封顶</b>
+ * ⇒ ⇒ 二者合起来 = min(2s, 请求剩余预算) = Go 的 {@code context.WithTimeout(ctx, 2s)}。
  */
 @Component
 public class HotRpcClient {

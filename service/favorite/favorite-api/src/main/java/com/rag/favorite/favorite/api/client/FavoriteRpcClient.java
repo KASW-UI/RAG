@@ -4,8 +4,6 @@ import com.rag.favorite.favorite.proto.FavoriteServiceGrpc;
 import net.devh.boot.grpc.client.inject.GrpcClient;
 import org.springframework.stereotype.Component;
 
-import java.util.concurrent.TimeUnit;
-
 /**
  * favorite-rpc gRPC client —— 持有 {@code FavoriteServiceBlockingStub}。
  *
@@ -87,83 +85,47 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class FavoriteRpcClient {
 
-    /**
-     * gRPC <b>客户端</b>超时（毫秒）—— 对应 Go {@code zrpc/config.go:29} 的
-     * {@code RpcClientConf.Timeout int64 `json:",default=2000"`}。
-     *
-     * <p><b>⚠️ 这是 Go 的 struct 默认值，不是 yaml 字段</b>：
-     * {@code service/favorite/api/etc/favorite.yaml} 的 {@code FavoriteRpc} 段
-     * 只有 {@code Etcd.{Hosts,Key}}，<b>没有</b> {@code Timeout}
-     * ⇒ 实际生效值来自 go-zero 的 {@code default=2000}。
-     *
-     * <p>它与「HTTP 超时 3s」（{@code observability.http-timeout: 3s}，对应 Go
-     * {@code rest/config.go:55} 的 {@code Timeout default=3000}）是<b>两层</b>预算，
-     * <b>取更小的生效</b>：Go 侧下游挂死时是 <b>2s 先到</b> ⇒ api 返回
-     * <b>200 + 业务码 1015</b>；若只带 3s 的 ctx 预算，就会一路顶到 HTTP 超时分支
-     * ⇒ 返回 <b>503 "Request Timeout"</b>。
-     *
-     * <p>⚠️ <b>Go 侧是拦截器级别的，与有没有 HTTP 超时中间件无关</b>：
-     * {@code zrpc/internal/client.go:115-116} 在 {@code c.middlewares.Timeout}
-     * （{@code zrpc/internal/config.go:15} 的 {@code default=true}）时装
-     * {@code clientinterceptors.TimeoutInterceptor(timeout)} ⇒
-     * 「无 ctx 预算时也要套 2s」，否则就成了「有时有客户端超时、有时没有」的不一致。
-     */
-    static final long CLIENT_TIMEOUT_MILLIS = 2000L;
-
     @GrpcClient("favorite-rpc")
     private FavoriteServiceGrpc.FavoriteServiceBlockingStub favoriteServiceBlockingStub;
 
     /**
-     * 返回<b>已套上请求级 deadline</b>的 stub。
+     * 出向 stub（<b>不</b>带任何域侧 deadline）。
      *
-     * <p>⚠️ 刻意在<b>这个出口</b>统一套，而不是让 7 个 Service 各写一次：
-     * Go 侧靠 {@code r.WithContext(ctx)}（timeouthandler.go:68）把 deadline 传进
-     * <b>全部</b>下游调用，RAG 侧唯一等价的位置就是这个 getter ——
-     * 所有调用点都经由 {@code favoriteRpc()}，改一处即全覆盖，漏一处就是一个
-     * 「有时有 deadline、有时没有」的不一致（§3.3）。
+     * <p>🆕 <b>2026-10-31 · G3 lane 第十三轮收敛</b>：本类<b>原先</b>自带一份上界
+     * （{@code capByClientTimeout(...)} = min(2s, 请求剩余预算)）
+     * ⇒ ⇒ 那个 <b>2s</b> 是<b>第二个上界来源</b>
+     * ⇒ ⇒ 与共享层「唯一实现」的形态冲突（共享层棘轮
+     * {@code GoStyleClientCallTimeoutSingleSourceGateTest} 判据 ④：
+     * 「cap 的来源必须是共享层参数，域侧私有常量 = 违规」）。
      *
-     * <p>无 deadline 时（未启用 HTTP 超时 / 非超时路径）<b>原样返回</b>，
-     * 对应 Go「没装 TimeoutHandler 就没有 ctx deadline」。
+     * <p><b>Go 侧那个 2s 是哪来的</b>（读法不变，只是<b>承担者</b>变了）：
+     * <ul>
+     *   <li>{@code go-zero@v1.10.2/zrpc/config.go:31} ——
+     *       {@code RpcClientConf.Timeout int64 `json:",default=2000"`}
+     *       ⇒ <b>struct tag 默认值</b>，不是 yaml 字段；
+     *       {@code service/favorite/api/etc/favorite.yaml:34-38} 的
+     *       {@code FavoriteRpc} 段只有 {@code Etcd.{Hosts,Key}} ⇒ <b>没有</b>覆盖 ⇒ 走默认；</li>
+     *   <li>消费点：{@code zrpc/client.go:70-71} ⇒ {@code zrpc/internal/client.go:113-117}
+     *       ⇒ {@code zrpc/internal/clientinterceptors/timeoutinterceptor.go:25}
+     *       （{@code context.WithTimeout(ctx, t)} ⇒ <b>取更早者</b>）；</li>
+     *   <li>它与「HTTP 超时 3s」（{@code observability.http-timeout: 3s}，对应 Go
+     *       {@code rest/config.go:55} 的 {@code Timeout default=3000}）是<b>两层</b>预算，
+     *       <b>取更小的生效</b>：Go 侧下游挂死时是 <b>2s 先到</b> ⇒ api 返回
+     *       <b>200 + 业务码 1015</b>；若只带 3s 的 ctx 预算，就会一路顶到 HTTP 超时分支
+     *       ⇒ 返回 <b>503 "Request Timeout"</b>。</li>
+     * </ul>
      *
-     * <p>⚠️ <b>不要把返回值缓存到字段上</b>：{@code withDeadlineAfter} 每次返回新实例，
-     * 缓存会把「第一次调用时的预算」固化下来，之后每个请求都带着过期 deadline。
+     * <p><b>现在生效的那一行</b>：本域 {@code application.yml} 的
+     * {@code rag.protection.outbound-deadline.cap-millis: ${FAVORITE_API_OUTBOUND_DEADLINE_CAP_MILLIS:2000}}
+     * ⇒ ⇒ 由共享层 {@code GoStyleOutboundDeadlineInterceptor}（channel 级 ⇒ 装在<b>每个</b>出向调用上）
+     * 以 <b>min</b> 语义并入：min(入向剩余预算, 2000ms)
+     * ⇒ ⇒ 与 Go 侧 {@code context.WithTimeout(ctx, 2s)} 逐字同形。
      *
-     * <p>⚠️ <b>还要再压一层「客户端超时」（2s）—— 这一层不能省</b>，理由见
-     * {@link #CLIENT_TIMEOUT_MILLIS}。
+     * <p>⚠️ <b>不要再在本类写 {@code withDeadlineAfter}</b>：那会重新造出第二份上界
+     * ⇒ ⇒ 共享层棘轮会判红（点位级）⇒ ⇒ 详见
+     * {@code FavoriteRpcClientTimeoutTest}（本域 api 侧 cap 守门 · 7 例）。
      */
     public FavoriteServiceGrpc.FavoriteServiceBlockingStub favoriteRpc() {
-        return capByClientTimeout(
-                com.rag.common.observability.GoStyleRequestDeadline.applyTo(favoriteServiceBlockingStub));
-    }
-
-    /**
-     * 把 deadline 压到「ctx 预算」与「客户端超时」里的<b>较小者</b>。
-     *
-     * <p><b>语义</b>：Go 侧客户端拦截器
-     * {@code go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:17-27} 做的是
-     * {@code ctx, cancel := context.WithTimeout(ctx, c.Timeout)} ——
-     * 即「在已有 ctx 预算之上再套一层 2s」，<b>取更小的生效</b>。
-     *
-     * <p><b>⚠️ 没有 ctx 预算时也要套 2s</b>：Go 的客户端超时是
-     * <b>拦截器级别</b>的，与有没有 HTTP 超时中间件无关；
-     * 若此时原样返回，就等于「有时有客户端超时、有时没有」——
-     * 那正是 Go 的 ctx 语义里不存在的不一致。
-     *
-     * <p><b>包级可见（非 private）是为了可测</b>：
-     * {@code FavoriteRpcClientTimeoutTest} 用**真实的 in-process channel** 断言
-     * 压完之后的 deadline 确实 ≤ 2s（而不是靠读常量自证）。
-     */
-    static FavoriteServiceGrpc.FavoriteServiceBlockingStub capByClientTimeout(
-            FavoriteServiceGrpc.FavoriteServiceBlockingStub stub) {
-        io.grpc.Deadline deadline = stub.getCallOptions().getDeadline();
-        long remainingNanos = deadline == null
-                ? Long.MAX_VALUE
-                : deadline.timeRemaining(TimeUnit.NANOSECONDS);
-        long capNanos = TimeUnit.MILLISECONDS.toNanos(CLIENT_TIMEOUT_MILLIS);
-        if (remainingNanos <= 0L) {
-            // 预算已耗尽 ⇒ 立刻失败（Go 侧 ctx 到期同理）
-            return stub.withDeadlineAfter(1L, TimeUnit.NANOSECONDS);
-        }
-        return stub.withDeadlineAfter(Math.min(remainingNanos, capNanos), TimeUnit.NANOSECONDS);
+        return favoriteServiceBlockingStub;
     }
 }

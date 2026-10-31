@@ -2468,7 +2468,7 @@ Nacos 故意指向 `127.0.0.1:1` ⇒ 顺便证明「**注册中心不在也能�
 
 | | 是什么 | 决定谁 |
 |---|---|---|
-| `favorite-api` 的 `FavoriteRpcClient.capByClientTimeout`（`favorite-api/.../client/FavoriteRpcClient.java:156-168`） | **api → rpc** 那次 gRPC 调用的客户端 deadline = `min(ctx 剩余, 2s)` | **客户端超时语义**（这次调用还剩多久）⇒ **不决定** rpc 内部 SQL 的 R |
+| `favorite-api` 的**共享层拦截器**（`service/common/.../protection/GoStyleOutboundDeadlineInterceptor.java:187-220` ＋ 本域 yml 的 `rag.protection.outbound-deadline.cap-millis`）| **api → rpc** 那次 gRPC 调用的客户端 deadline = `min(ctx 剩余, 2000ms)`（⚠️ **2026-10-31 第十三轮**：域侧那份 `capByClientTimeout` **已删除** ⇒ 原指针 `favorite-api/.../client/FavoriteRpcClient.java:156-168` **已失效**）| **客户端超时语义**（这次调用还剩多久）⇒ **不决定** rpc 内部 SQL 的 R |
 | `favorite-rpc` 的 `RpcInterceptor`（`service/common/.../RpcInterceptor.java:170-172`） | **服务端**在**每次调用**上自己新绑 `deadlineEpochMs = now + timeout`（`rpc-timeout: 2s` ⇒ `application.yml:252`） | **SQL 注入器看到的 R** ⇒ `DeadlineState.bindToCurrent(deadlineEpochMs)`（同文件 `:281`） |
 
 ⇒ ⇒ **本分支（`align/favorite`）上正确的依据**：
@@ -3077,7 +3077,7 @@ M2（改名不推进 `update_time`）里 **L1 差异 = 0**，只有 **write_cols
 
 | | 是什么 | 决定谁 |
 |---|---|---|
-| `favorite-api` 的 `FavoriteRpcClient.capByClientTimeout`（`favorite-api/.../client/FavoriteRpcClient.java:156-168`） | **api → rpc** 那次 gRPC 调用的**客户端** deadline = `min(ctx 剩余, 2s)` | **客户端超时语义** ⇒ **不决定** rpc 内部 SQL 的 R |
+| `favorite-api` 的**共享层拦截器**（`service/common/.../protection/GoStyleOutboundDeadlineInterceptor.java:187-220` ＋ 本域 yml 的 `rag.protection.outbound-deadline.cap-millis`）| **api → rpc** 那次 gRPC 调用的**客户端** deadline = `min(ctx 剩余, 2000ms)`（⚠️ **2026-10-31 第十三轮**：域侧那份 `capByClientTimeout` **已删除** ⇒ 原指针 `favorite-api/.../client/FavoriteRpcClient.java:156-168` **已失效**）| **客户端超时语义** ⇒ **不决定** rpc 内部 SQL 的 R |
 | `favorite-rpc` 的 `RpcInterceptor`（`service/common/.../RpcInterceptor.java:170-172`） | **服务端每次调用自己新绑** `deadlineEpochMs = now + timeout`（`rpc-timeout: 2s` ⇒ `favorite-rpc/src/main/resources/application.yml:339`）⇒ 再由 `:281` 的 `DeadlineState.bindToCurrent(deadlineEpochMs)` 交给 SQL 注入器 | **SQL 预算 R** ✅ |
 
 ⇒ ⇒ **本分支上正确的依据**：
@@ -3104,7 +3104,7 @@ vs 本分支 `:170-172` 的服务端自绑）⇒ ⇒ **同一路径在两个分�
 
 | 项 | 结果 |
 |---|---|
-| **符号存在性核对** | ✅ `capByClientTimeout` 在**本分支**存在，但位于 **`favorite-api`**（`favorite-api/.../client/FavoriteRpcClient.java:156-168`）⇒ 与 rpc 侧 SQL 预算**无关** |
+| **符号存在性核对** | ⚠️ **2026-10-31 第十三轮**：`capByClientTimeout` **已全部删除**（域侧那半删除 ⇒ 客户端封顶改由共享层承担）⇒ ⇒ **结论不变**：api 侧的客户端封顶与 rpc 侧 SQL 预算**无关**（本条订正的判断仍成立）|
 | **本分支 R 的决定者** | ✅ `service/common/.../RpcInterceptor.java:170-172`（服务端每次调用新绑 `now + timeout`）+ `:281`（`bindToCurrent`）⇒ `rpc-timeout: 2s`（`application.yml:252`） |
 | **本轮性质** | ✅ **纯台账订正** ⇒ **产品代码零改动** · **共享面零改动** |
 

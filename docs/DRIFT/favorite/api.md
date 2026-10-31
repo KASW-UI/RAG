@@ -127,10 +127,10 @@ RAG `FavoriteFolder`：`getFolderId()` 返回 `String`、`getCreatedAt()` 返回
 | **Go 行为** | `zrpc/config.go:29` `RpcClientConf.Timeout int64 json:",default=2000"`；`zrpc/internal/client.go:115-116` 在 `c.middlewares.Timeout`（`zrpc/internal/config.go:15` `default=true`）时装 `clientinterceptors.TimeoutInterceptor(timeout)`。`etc/favorite.yaml:34-37` 的 `FavoriteRpc` 段**没有**覆盖 `Timeout` ⇒ 生效 **2000ms** |
 | **RAG 修复前** | `favoriteRpc()` 只套 `GoStyleRequestDeadline.applyTo(...)`（HTTP ctx 预算 3s）⇒ **没有 client 层 2s** |
 | **可观察差异** | 下游挂死时：Go 是 **2s 先到** ⇒ rpc error ⇒ api 返回 **HTTP 200 + 业务码 1015**；RAG 修复前一路顶到 HTTP 超时 ⇒ **503 "Request Timeout"**（且状态码与 body 不自洽） |
-| **修复** | `FavoriteRpcClient.capByClientTimeout` —— 把 deadline 压到 `min(ctx 预算, 2s)`；**无 ctx 预算时也要套 2s**（Go 的客户端超时是**拦截器级别**的，与有没有 HTTP 超时中间件无关） |
-| **回归网** | `FavoriteRpcClientTimeoutTest`（4 例）：用**真实 in-process channel** 断言压完后的 deadline ≤ 2s / 保留更短的 ctx 预算 / 无 ctx 预算时也套 —— 验**行为**不验数字 |
+| **修复** | ⚠️ **2026-10-31 第十三轮**：域侧那份 `FavoriteRpcClient.capByClientTimeout`（把 deadline 压到 `min(ctx 预算, 2s)`）**已删除** ⇒ 现行路径 = 共享层 `GoStyleOutboundDeadlineInterceptor` ＋ 本域 yml 的 `rag.protection.outbound-deadline.cap-millis: 2000`（**无 ctx 预算时也要套 2s** 仍成立 ⇒ Go 的客户端超时是**拦截器级别**的，与有没有 HTTP 超时中间件无关）⇒ 见本文件末尾附录 |
+| **回归网** | `FavoriteRpcClientTimeoutTest`（⚠️ **2026-10-31 第十三轮由 4 例扩到 7 例**，机制改为「**共享层拦截器 ＋ 域 yml 绑定**」）：配置面（yml 声明 env 可覆盖形态 / 绑出 2000）＋ 行为面（**真实 in-process channel** 真发调用：无入向预算 ⇒ ≤2s 处 `DEADLINE_EXCEEDED` / 域 client 出口不挂死 / env 收紧 ⇒ 跟着收紧 / 入向预算 300ms ⇒ 取更早者）＋ 形态面（本域 `withDeadlineAfter` 代码行 = 0）—— 验**行为**不验数字 |
 
-> ⚠️ 顺带对齐了 follow / task / hot / article / users 域的既有做法（同一份 `capByClientTimeout` 形态）。
+> ⚠️ 顺带对齐了 follow / task / hot / article / users 域的既有做法（同一份 `capByClientTimeout` 形态）。⚠️ **2026-10-31 第十三轮**：那份形态**已全部收敛到共享层参数**（域侧只配 `cap-millis`）⇒ 本行描述的是**历史落点**。
 
 ### D2 · 🔴 **javadoc 假断言**（AGENTS.md §3.3.2）：Go 的两条分支被说成一条
 
@@ -1740,3 +1740,69 @@ python3 tools/difftest/check-no-prod-secrets.py ; echo "EXIT=$?"
 | **4** | 🔴 **`message-api` / `follow-api` 之外的其它 api 组件**是否还有同类「只判空/空白」的守卫 | 各域 lane | 本轮**只**改了任务书指定的 4 个模块 ⇒ 未全仓普查（**不做「顺手清理」**） |
 
 > ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/favorite/run.sh` ⇒ **EXIT=0**（2026-10-30 03:28:29 · 48s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 两侧种子就绪 ⏐ ✅ 黑名单对照 token 就绪（Redis exists=1） ⏐ ✅ 两侧各产出 31 个 case ⏐ SAME 25 条 / SAME_CODE 1 条 / SAME_BODY 2 条 / SAME_STATUS 4 条 / OBS 0 条 / SKIP 0 条（共 32 个 case） ⏐ ✅ api 整域两侧一致（SAME 全等；SAME_CODE 业务码等；SAME_BODY body 等；SAME_。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
+
+## 附录 · 🔴 api 侧「客户端硬上界」：域侧自带副本 → 共享层参数（2026-10-31 · G3 第十三轮）
+
+### 一、这次改了什么（**域侧**，只动本域）
+
+| 落点 | 变更前 | 变更后 |
+|---|---|---|
+| 域 client 类 `FavoriteRpcClient` | 自带一份封顶：`capByClientTimeout(applyTo(stub))`（域侧私有常量 `CLIENT_TIMEOUT_MILLIS`）⇒ 那是**第二个上界来源** | **零 deadline 代码** ⇒ `favoriteRpc()` 直接返回 devh 注入的 stub |
+| 域 yml 的 `rag.protection.outbound-deadline` 段 | **不存在** ⇒ 共享层 `capMillis` 取默认 0 ＝ **不启用** | 本轮**新建** `rag:` 段（此前本模块**没有** `rag.protection.*` 任何配置）⇒ `cap-millis: ${FAVORITE_API_OUTBOUND_DEADLINE_CAP_MILLIS:2000}` |
+| 域内守门 `FavoriteRpcClientTimeoutTest` | 4 例（断的是**域侧**那份封顶） | **7 例**（配置面 2 ＋ 行为面 4 ＋ 形态面 1），且**全部改走共享层路径** |
+
+### 二、Go 侧真值（**逐条读源码**，不采信转述）
+
+| 环节 | 出处 | 内容 |
+|---|---|---|
+| 声明点 | `go-zero@v1.10.2/zrpc/config.go:31` | `Timeout int64 `json:",default=2000"`` ⇒ **默认 2000ms**（挂在 `zrpc.RpcClientConf` 上 ⇒ **按 client** 生效，不是全局一个数） |
+| 消费点 | `go-zero@v1.10.2/zrpc/client.go:70-71` | `if c.Timeout > 0 { opts = append(opts, WithTimeout(time.Duration(c.Timeout)*time.Millisecond)) }` ⇒ **每个 client 各自**取自己的 yaml／tag 值 |
+| 装配点 | `go-zero@v1.10.2/zrpc/internal/client.go:113-117` | 无条件装 `TimeoutInterceptor`（⇒ 出向调用**恒**有客户端超时，与有没有 HTTP 预算无关） |
+| 开关默认值 | `go-zero@v1.10.2/zrpc/internal/config.go:15` | `Timeout bool `json:",default=true"`` |
+| 执行点 | `go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25` | `ctx, cancel := context.WithTimeout(ctx, t)` ⇒ **取更早者**（min 语义） |
+
+### 三、装配面（**为什么域侧删掉自己那份之后，上界仍然兜得住**）
+
+- devh `grpc-client-spring-boot-starter 3.1.0.RELEASE` 的
+  `net/devh/boot/grpc/client/interceptor/AnnotationGlobalClientInterceptorConfigurer.java`
+  ⇒ `getClientInterceptorBeans()` = `applicationContext.getBeansWithAnnotation(GrpcGlobalClientInterceptor.class)`
+  ⇒ ⇒ **按 Bean 注解收集**（**不是**类路径扫描）⇒ ⇒ 共享层
+  `GoStyleOutboundDeadlineConfiguration` 产出的那个 `@Bean` 会被收进 registry ✔
+- 本域 `CommentApiApplication.java:68-71`：`@SpringBootApplication(scanBasePackages = {"com.rag.comment.comment.api", "com.rag.common"})`
+  ⇒ ⇒ `com.rag.common.protection.GoStyleOutboundDeadlineConfiguration` 被扫到 ⇒ **Bean 在位** ✔
+- devh 的 channel factory 建 channel 的最后一步是 `ClientInterceptors.interceptForward(channel, interceptors)`
+  ⇒ ⇒ 全局拦截器装在 **channel** 上 ⇒ ⇒ **裸 stub 也经过它**（不需要域侧逐个调用点改造）
+- 共享层 `GoStyleOutboundDeadlineInterceptor#effectiveCallOptions`（`service/common/.../protection/GoStyleOutboundDeadlineInterceptor.java:187-220`）
+  = min(① 请求载体剩余（可见时）② `capMillis` ③ 调用点自带 deadline)
+  ⇒ ⇒ **cap 与载体无关**（`if (capMillis > 0L)` 独立成立）⇒ ⇒ 域侧那份删掉后，**上界仍由共享层兜住** ✔
+  ⇒ ⇒ 且与 Go 的 `context.WithTimeout(ctx, t)` **同形**（取更早者）
+
+### 四、本域的 Go yaml 真值（**零 `Timeout:` 行**）
+
+- `service/favorite/api/etc/favorite.yaml:34-38` ⇒ `FavoriteRpc:` 段只有 `Etcd.{Hosts,Key}` ⇒ **没有 `Timeout`**
+  ⇒ ⇒ 生效值 = zrpc 的 struct tag 默认 **2000ms**
+- Go 侧 client 装配：`service/favorite/api/internal/svc/service_context.go:24`
+  ⇒ `favoriteservice.NewFavoriteService(zrpc.MustNewClient(c.FavoriteRpc))` ⇒ **只有一个出向 client**
+  ⇒ ⇒ 本域组件级上界表达得了（与 `hot-api` 的两个方向同值的情形一致）
+
+### 五、守门证据（**实测**，含变异）
+
+- 绿读数：`mvn -o -B -pl service/common,service/favorite/favorite-api -am test -Dtest='FavoriteRpcClientTimeoutTest'`
+  ⇒ **7/7 绿**
+- 变异（**共享层**：把 `GoStyleOutboundDeadlineInterceptor` 的 `capMillis` 写死 0）⇒ ⇒ 本域 **3 条**转红
+  （调用挂满 8s 后**返回 OK**，而不是在 2s 处 `DEADLINE_EXCEEDED`）⇒ ⇒ 守门不是假绿
+  ⇒ ⇒ ⚠️ 该变异**必须带 `-am`**（否则链 `~/.m2` 旧快照 jar ⇒ 变异进不了被测链路）
+- ⚠️ **本轮的用例 ⑤（min 语义）钉的是「取更早者」**：入向预算 300ms < cap 2000ms ⇒ 出向必须死在 ~300ms
+  ⇒ ⇒ 那条同时证明「共享层的 min 语义」与「域 yml 的键真被读到」两件事
+
+### 六、与共享层的关系（**转派 G4**）
+
+- 共享层棘轮 `service/common/src/test/java/com/rag/common/protection/GoStyleClientCallTimeoutSingleSourceGateTest.java`
+  的**点位级例外集**（`KNOWN_INLINE_CAP_CALL_SITES`）里挂着本域那一条
+  ⇒ ⇒ 本轮删除后该条目**失效** ⇒ ⇒ 按「**棘轮只能变紧，不能变松**」⇒ ⇒ 需 G4 剪掉它
+  ⇒ ⇒ ⚠️ **剪例外集与删内联必须落在同一次提交**（否则主线会红一次）
+  ⇒ ⇒ 建议 G4 把本分支合进他们分支、在同一个 merge commit 里剪 ⇒ 主线**零红窗**
+- 共享层**模型缺口**（本轮再次登记）：`cap-millis` 是**组件级一个值**
+  ⇒ ⇒ 对「同一组件内各 client 真值不同」的域（如 `article-api`：`70000` vs `2000`）**表达不了**
+  ⇒ ⇒ 建议共享层加 `rag.protection.outbound-deadline.per-client.<client-name>`
+  ⇒ ⇒ 详见 `docs/DRIFT/article/api.md` 的同款登记
