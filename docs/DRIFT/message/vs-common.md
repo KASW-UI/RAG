@@ -1801,7 +1801,11 @@ git diff --stat -- service/ # ⇒ 0 行
 
 **背景（一句话）**：辐射度判据曾以 **`import` 判定**统计「哪个域引用了共享层类」⇒ ⇒ **测试面的一条 `import` 会把测试文件所在域算成「生产依赖方」** ⇒ ⇒ 本轮把这类 import 全部改成全限定名（**零行为变更**）⇒ ⇒ 生产依赖面回到真实值。
 
-**口径（本域既有定案，非本轮自创）**：测试面 `import` 某共享层类 **且** 本域**生产面**对该类的引用**不是 import 形态**（全限定名或本无依赖）⇒ ⇒ 改全限定名；**生产面本来就是 import** ⇒ ⇒ **不改**。
+**口径（原值保留，本域既有定案，非本轮自创）**：测试面 `import` 某共享层类 **且** 本域**生产面**对该类的引用**不是 import 形态**（全限定名或本无依赖）⇒ ⇒ 改全限定名；**生产面本来就是 import** ⇒ ⇒ **不改**。
+🔴 **【订正 · 2026-11-01 · 本轮落码后自核发现的「上面那句判据表述过宽」】** —— **原句保留**（供追溯），**真实判据**是「**本域生产面【完全无引用】该类**」⇒ ⇒ **必要项 = 生产面零引用** ⇒ ⇒ 测试面那条 import 才是旧口径（只认 import）的**假阳性来源** ⇒ ⇒ **必改**；**生产面已有引用**（import **或** FQN）⇒ ⇒ 本域**本来就该**在该类的辐射域列表里 ⇒ ⇒ 测试面 import **不产生假阳性** ⇒ ⇒ **改与不改都成立** ⇒ ⇒ 本轮对这类**顺带**按上文定案 ④ 取了「**两种口径下都成立**」的 FQN 写法（零语义变化 ⇒ ⇒ **不回退**）⇒ ⇒ **本域拆账**：**必要项 11 对（域×类）/ 12 对（文件×类）**（`GoStyleFormLimitMode` · `GoStyleFormValueLimitInterceptor` · `GoStylePathNormalizingFilter` · `GoStyleRecoverInterceptor` · `GoStyleBreakerFilter` · `GoStyleCpuSheddingFilter` · `GoStyleMaxBytesFilter` · `GoStyleMaxConnsFilter` · `GoStyleOutboundDeadlineInterceptor` · `GoStyleRpcBreakerInterceptor` · `GoStyleRpcSheddingInterceptor`）＋ **稳健项 2 对 / 4 对**（`GoStyleRequestDeadline` · `GoStyleGrpcClientBreakerInterceptor`）⇒ ⇒ **合计 13 对（域×类）/ 16 对（文件×类）/ 16 条 import**。
+⚠️ **为什么值得单列「必要 / 稳健」两档**：原句把「生产面是 FQN」也写成「改」⇒ ⇒ 读起来像「生产面有引用就改」⇒ ⇒ 与上文定案 ⑤（「生产面本来就 import ⇒ 测试面的 import 不产生假阳性 ⇒ 无需改写」）**读起来打架** ⇒ ⇒ **以本条订正为准**（定案 ⑤ 说的是「不产生假阳性 ⇒ 无需改写」，**不是**「不许写 FQN」）。
+
+🟢 **反向守恒（落码面完整性 · 残留面必须都有生产面引用支撑）** —— 落码后**残留**的测试面 `import com.rag.common.*` 共 **9** 条（本域）⇒ ⇒ 逐条核「**本域生产面有没有引用该类**（import **或** FQN **或** 嵌套类外层）」⇒ ⇒ **9/9 全部有生产面引用支撑** ⇒ ⇒ **旧口径下不产生假阳性** ⇒ ⇒ **无遗漏**（⇒ 若有一条生产面零引用 ⇒ 那条才是真缺口 ⇒ ⇒ 必须补改）⇒ ⇒ 与上面的「必要项 / 稳健项」拆账**互相印证**。
 ⚠️ **本域有一处必须单列**：`GoStyleProtectionConfiguration` 在 message 域**测试面 2 处 / 生产面 1 处**⇒ ⇒ **生产面那处本来就不是 import 形态** ⇒ ⇒ 按口径**测试面那两处要改**；但本轮实测这两处**代码里本来就是全限定名**（`imports.contains(com.rag.common.protection.GoStyleProtectionConfiguration.class)` / `ctx.register(com.rag.common.protection.GoStyleProtectionConfiguration.class)` ⇒ ⇒ **零 import 可删**）⇒ ⇒ **本类在本域无需改动**（与上文「生产面 1 处不改」一致）。
 
 **分母（写死 · 便于复算）**：全波次 **30 对（域 × 类）/ 37 对（文件 × 类）/ 20 个测试文件**（like **5** 类 · message **13** 类 · task **12** 类 = 30）⇒ ⇒ ⚠️ **报数必须带分母** —— 只写「37 处」会被读成「37 个类」。
@@ -1866,3 +1870,8 @@ git diff --stat -- service/ # ⇒ 0 行
 | `docs/DRIFT/like/rpc.md:1669` · `docs/DRIFT/like/vs-common.md:514` | `GoStyleGrpcClientBreakerE2ETest.java:43` → `:42` | G2（like 域 · 本 lane 同面 · 已在本域台账记） |
 
 ⚠️ **这些指针是「指向 `service/**` 的行号」** ⇒ ⇒ 它们**不是**派生层的「证据指针」（派生层只认指向 `docs/{DRIFT,Pitfalls,Intentional_Deviations}/**.md` 的指针）⇒ ⇒ **不会造成派生层漂移、不会让指针棘轮转红**（实测：`check-pointer-consistency.py` ⇒ **新增 0 条**）⇒ ⇒ **但行号会变旧** ⇒ ⇒ 上表是**待各面就地订正的清单**（本 lane 只报告、不改）。
+
+### 🟢 第七轮追加（2026-11-01 · G2 补记）· 两处读数的口径 / 归属订正（纯追加 · 零行位移）
+
+🟢 **订正一 · 派生层派工面「281 条」是【哪棵树的读数】，且它被写下它的那笔自己改掉了** —— 上文那句「按派生层施工单 `wave=G2` 派工面（281 条）取本 lane 可动的部分」里的 **281** = **写下时那棵树的派工面快照**（实测：该笔的**父提交** `c6c0d7d8^` 的派生层产物里 `wave=G2` = **281 行**）⇒ ⇒ ⚠️ **写下它的同一笔 `c6c0d7d8` 自身就把该数变成了 282**（实测该笔的产物：`wave=G2` = **282 行**）⇒ ⇒ ⇒ **自指漂移**：**台账里引用的派生层数字，会被台账自己的编辑改掉** ⇒ ⇒ ⇒ **这是「总数会过期」的第三个来源**（前两个是「别的 lane 加测试」与「守门口径变更」⇒ 见本域 M2 那条纪律）⇒ ⇒ ⇒ **故**：任何派生层数字都必须标明「**哪棵树的读数**」，且**一律不得当常量搬走**。
+⚠️ **现值（实测，非转述 · 本轮）**：派生层产物里 `wave=G2` = **287 行** · TSV **数据行** = **1,284** · TSV **物理行**（含表头）= **1,285** ⇒ ⇒ ⚠️ **这三个不是同一个量**（另有派生层的「**可解析条目数**」是第四个量）⇒ ⇒ **引用时必须标明是哪一个** ⇒ ⇒ **别把其中任何一个当另一个用**。
