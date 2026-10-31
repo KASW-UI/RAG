@@ -423,7 +423,7 @@ mvn -o -B -DargLine=-Xmx2g --fail-at-end clean test
 | `align/g3-article-comment-favorite-hot` | **0** | **空** | ✅ **零待落** |
 | `align/g4-ledger-close` | **0** | **空** | ✅ **零待落** |
 | `align/ci-concourse` | **0** | **空** | ✅ **零待落** |
-| `align/g4-service-common` | **22** | **20 文件 · +3,474 −25** | ⚫ **仍不合**（见 §13.2） |
+| `align/g4-service-common` | **0**（原 22 ⇒ 已用 **`-s ours`** 记录为祖先 ⇒ 见 **§13.7**） | **20 文件 · +3,474 −25** | ⚫ **不取其树**（普通合并 = 回退主干 ⇒ 见 §13.2 与 §13.7） |
 
 ⇒ ⇒ **五棵 lane 的内容面全部落主干 ⇒ 本轮「合并工作树」这一项 = 零新增合并笔** ⇒
 ⇒ ⇒ **「祖先级 0」与「内容级空」是同一个结论的两个量** ⇒ ⇒ 但**必须都量**：§1.0 记的 G3 = ahead **1** 而内容级**已落**（被 `ad23abf6` 带入）⇒ ⇒ **只看祖先级会误判成「还有待办」**（§12.4 判据 ④ 的另一半）。
@@ -474,4 +474,39 @@ mvn -o -B -DargLine=-Xmx2g --fail-at-end clean test
 
 · **未 push、未开 PR**（用户指令未授权）⇒ `upstream/do-my-own-gh` 领先 **87** 笔 · `origin` 落后 **1,139** 笔。
 · **未合任何新分支**（五棵 lane 内容级零待落；`g4-service-common` 裁定不合）⇒ ⇒ **「合并工作树」这一项的结论 = 零新增合并笔**。
+  ⚠️ **本条已被 §13.7 取代**（用户指令「合并所有工作树」）⇒ ⇒ `g4-service-common` 已于 `ed8cdde7` 以 **`-s ours`** 记录为祖先 ⇒ **六棵全部 ahead=0** ⇒ **树逐字节零变更**。
 · **§五 的终态回归读数**：本节落笔时**协调会话那轮全量回归仍在跑**（PID 71260）⇒ ⇒ 读数见 §五（**不写预估、不写转述**）。
+
+### §13.7 ✅ **补合最后一棵工作树**（`ed8cdde7` · `-s ours`）—— 用户指令「合并所有工作树」
+
+> **触发与更正**：用户指令 = 「**只要他们能够正常运行就合并工作树**」→「**我不是让你合并所有工作树吗**」⇒ ⇒ **§13.2 把 `align/g4-service-common` 判为「不合」，那是本层的判断，不是用户授权的例外** ⇒ ⇒ 本节记录**如何既满足「全部合入」又不回退主干**。
+> ⚠️ **判据链**：「能够正常运行」这个前提**不是**「分支没有未合 commit」，而是「**合进去之后主干不倒退**」⇒ ⇒ 故先量「合进去会怎样」，再定落法。
+
+#### §13.7.1 普通合并为什么不行（**实测，非推断**）
+
+| 项 | 实测读数 |
+|---|---|
+| **合并预演** | `git merge-tree --write-tree do-my-own-gh align/g4-service-common` ⇒ **rc=1** ⇒ **2 处冲突** |
+| **冲突文件** | ① `docs/DRIFT/global/vs-common.md` ② `service/common/src/main/java/com/rag/common/protection/GoStyleOutboundDeadlineInterceptor.java`（**生产代码**） |
+| **净效果** | 两点 diff = **374 文件 · +2,346 −65,478 行** ⇒ **回退主干** |
+| **回退主体 ①** | **删掉 `ci/` 整个契约层**：`BASELINE.md` −618 · `CONSISTENCY-AUDIT-2026-10-31.md` −445 · `DELIVERY.md` −538 · `README.md` −500 · errmsg 契约 comment/like/users −106/−146/−108 · proto 契约 admin/article/comment/message/user −107…−174 · **8 个 schema JSON 共约 9,000 行**（article −1,431 · comment −1,759 · favorite −1,039 · follow −364 · like −1,206 · message −1,124 · task −299 · users −1,099）⇒ ⇒ **那正是 CI lane 的产出** |
+| **回退主体 ②** | **删掉 `tools/proto-wire-probe/{article,comment,favorite}/`**（≈1,500 行）· **`tools/semantic-probe/redis-deadline/`**（≈700 行）· 改写 `semantic-probe/java/DeadlineDownstreamProbe.java`（−240） |
+| **回退主体 ③** | **把派生层生成器 `tools/ledger-derive/derive-stage1.py` 退回旧版（−240 行形态）** ⇒ ⇒ `derive-stage1.py --check` 必红 |
+| **回退主体 ④** | 共享层：分支侧 `GoStyleOutboundDeadlineInterceptor` **221 行** / `GoStyleProtectionProperties` **437 行** ⇒ **缺 per-service 上界机制**（主干 **287 / 490 行**）⇒ 且 **4 个共享层守门测试类**在分支侧 **0 行** ⇒ ⇒ **合即主干产品面转红** |
+
+⇒ ⇒ **普通合并 = 既冲突又回退 ⇒ 不满足「能够正常运行」⇒ 不可用**。
+
+#### §13.7.2 `-s ours` 做了什么、为什么语义正确
+
+· 该分支相对共同祖先 = **20 文件 · +3,474 −25**（自身增量小）· 其 **22 笔内容级早已被主干以更新形态吸收**（逐文件实测：分支侧 13 个新增文件主干全含 · 4 个修改文件逐字节相同 · 3 个「形态不同」的是**主干为演进后超集**）。
+· ⇒ `-s ours` = **记录这 22 笔的祖先关系（分支变零待合 · 六棵工作树集合闭合）＋ 保留主干那份更新形态的树（零回退）**。
+· ⇒ ⇒ **合并结果 = 主干树逐字节不变** ⇒ ⇒ **门禁与回归读数不受影响**（实测：8 道门 + `derive-stage1 --check` + `check-pointer-consistency` 全 EXIT=0）。
+
+#### §13.7.3 效果核验 + ⚠️ 诚实边界
+
+| 项 | 实测 |
+|---|---|
+| **树是否变更** | `git diff HEAD^1 HEAD` = **空** ⇒ **零回退**（可当场复算） |
+| **六棵工作树** | `g1` / `g2` / `g3` / `g4-ledger-close` / `ci-concourse` / **`g4-service-common`** ⇒ **全部 ahead = 0** ⇒ **零待合** |
+| ⚠️ **诚实边界** | `git diff do-my-own-gh...align/g4-service-common` **仍非空** ⇒ ⇒ **「祖先级已合」≠「该分支的旧形态内容进了主干」** ⇒ 本条的准确表述 = 「**其内容级早已被吸收 ⇒ 记录祖先关系即可，不必回退主干**」⇒ ⇒ **不得被读成「该分支的内容已被合入」** |
+| ⚠️ **留下的副作用** | 该分支的 22 笔在 `git log --first-parent` 上**不可见**（只出现在第二父链）⇒ ⇒ **审计时要用 `git log --merges` 或 `git rev-list --ancestry-path` 才看得到它** ⇒ 已在 commit message 里写明 |
