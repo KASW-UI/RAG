@@ -330,7 +330,19 @@ def main():
                     continue
 
             log(f"\n===== 域 {domain} =====")
-            status, lines, db = replay_domain(client, cid, domain)
+            # ⚠️ **任何意外异常都归 BLOCKED**，绝不崩在 Traceback 上：
+            #   「检查没做成」与「检查做成且发现漂移」是**两回事**
+            #   ⇒ 崩掉 ⇒ 退出码非 0 ⇒ 读数会被误判成 FAIL（契约漂移）⇒ 假红。
+            #   ⇒ 这里显式兜住 ⇒ 判 BLOCKED（退出码 2）⇒ 不计入 PASS。
+            try:
+                status, lines, db = replay_domain(client, cid, domain)
+            except Exception as exc:  # noqa: BLE001
+                log(f"[r6] 🔴 本域执行时抛异常 ⇒ **BLOCKED**（环境/工具层问题，不是契约漂移）")
+                log(f"    {type(exc).__name__}: {exc}")
+                results.append({"domain": domain, "verdict": "BLOCKED",
+                                "exit_code": 2,
+                                "reason": f"执行时抛异常（{type(exc).__name__}）"})
+                continue
             for ln in lines:
                 log(ln)
             if status != "ok":
@@ -341,7 +353,15 @@ def main():
                                 "reason": "迁移执行失败（环境或迁移本身坏）"})
                 continue
 
-            rc, out = run_checker(domain, current_container, db, baseline)
+            try:
+                rc, out = run_checker(domain, current_container, db, baseline)
+            except Exception as exc:  # noqa: BLE001
+                log(f"[r6] 🔴 比对引擎抛异常 ⇒ **BLOCKED**（不是契约漂移）")
+                log(f"    {type(exc).__name__}: {exc}")
+                results.append({"domain": domain, "verdict": "BLOCKED",
+                                "exit_code": 2,
+                                "reason": f"比对引擎抛异常（{type(exc).__name__}）"})
+                continue
             log(out.rstrip())
             verdict = VERDICT.get(rc, "BLOCKED")
             reason = first_failure_reason(out) if rc == 1 else ""

@@ -29,6 +29,7 @@
 # 【退出码】0 = PASS / 1 = FAIL
 # =============================================================================
 import os
+import socket
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -62,6 +63,42 @@ class FakeDaemon:
         if self.resolve(ref) in self.images:
             return 200, b'{"Id":"sha256:x"}'
         return 404, b'{"message":"No such image: ' + ref.encode() + b'"}'
+
+
+class FakeSocket:
+    """记录被写出的字节，并按剧本回一段响应（模拟 daemon 的 101 劫持）。
+
+    ⚠️ 剧本必须**照抄 Docker 的真实行为**：
+       · docker CLI 的 exec start 请求**不带请求体**（参数走 query）
+       · daemon 回 `101 UPGRADED` + `application/vnd.docker.multiplexed-stream`
+       · 之后的字节是**多路复用帧**：[type(1), 0,0,0, size(4 BE)] + payload
+    """
+
+    def __init__(self, response_head: bytes, response_body: bytes = b""):
+        self.sent = b""
+        self.shutdown_mode = None
+        self.closed = False
+        self._head = response_head
+        self._body = response_body
+        self._stage = 0
+
+    def sendall(self, data: bytes):
+        self.sent += data
+
+    def shutdown(self, mode):
+        self.shutdown_mode = mode
+
+    def close(self):
+        self.closed = True
+
+    def recv(self, size: int) -> bytes:
+        if self._stage == 0:
+            self._stage = 1
+            return self._head
+        if self._stage == 1:
+            self._stage = 2
+            return self._body
+        return b""
 
 
 class FakeClient(docker_api.DockerClient):
@@ -104,6 +141,63 @@ def safe_exists(client, image):
         return client.image_exists(image), None
     except Exception as e:  # noqa: BLE001 —— 任何异常都要变成可读的断言失败
         return None, e
+
+
+class HijackClient(docker_api.DockerClient):
+    """把 `_raw_socket` 换成假 socket ⇒ 可断言**发出去的线格式**。"""
+
+    def __init__(self, sock):
+        super().__init__(host="unix:///dev/null")
+        self.sock = sock
+
+    def _raw_socket(self):
+        return self.sock
+
+    def _json(self, method, path, body=None):
+        if path.startswith("/exec/"):
+            return {"ExitCode": 0}
+        return super()._json(method, path, body)
+
+
+def check_hijack_wire_format() -> None:
+    """断言 exec-with-stdin 的**线格式**（照抄 docker CLI）。
+
+    ⚠️ 实测 2026-10-31（R6 在 Concourse Task 内）：用「常规 API 调用」的写法
+       （**带 JSON 请求体**）⇒ daemon 走 **200 + chunked** 普通响应路径
+       ⇒ **根本不消费 stdin** ⇒ 容器里的 `cat` 永远等不到 EOF
+       ⇒ exec 一直 Running ⇒ 表现成「超时」，且根因离症状很远。
+    ⇒ 因此必须断言：**请求体为空** + 参数走 query + 带 Upgrade 头。
+    """
+    head = (b"HTTP/1.1 101 UPGRADED\r\n"
+            b"Content-Type: application/vnd.docker.multiplexed-stream\r\n"
+            b"Connection: Upgrade\r\n\r\n")
+    body = (b"\x01\x00\x00\x00\x00\x00\x00\x05DONE\n"
+            b"\x02\x00\x00\x00\x00\x00\x00\x04ERR\n")
+    sock = FakeSocket(head, body)
+    c = HijackClient(sock)
+    rc, out, err = c._exec_start_hijack("execid", {"Detach": False, "Tty": False},
+                                         b"stdin-payload")
+    sent = sock.sent.decode("latin-1")
+
+    check("断言6 · exec start 的请求行必须带 AttachStdin/AttachStdout/AttachStderr 查询参数",
+          "Detach=0" in sent and "AttachStdin=1" in sent
+          and "AttachStdout=1" in sent and "AttachStderr=1" in sent,
+          f"实际请求 = {sent.splitlines()[0] if sent else '(空)'!r}")
+    check("断言7 · exec start **不得带请求体**（带了就走 200+chunked ⇒ daemon 不消费 stdin）",
+          "Content-Length" not in sent and not sent.rstrip().endswith("{"),
+          f"实际请求 = {sent!r}")
+    check("断言8 · 必须带 Connection: Upgrade + Upgrade: tcp",
+          "Connection: Upgrade" in sent and "Upgrade: tcp" in sent,
+          f"实际请求头 = {sent.splitlines()!r}")
+    check("断言9 · stdin 数据必须写到连接上并半关闭写端（SHUT_WR ⇒ 对端看到 EOF）",
+          "stdin-payload" in sock.sent.decode("latin-1")
+          and sock.shutdown_mode == socket.SHUT_WR,
+          f"shutdown = {sock.shutdown_mode}")
+    check("断言10 · 101 后的字节是**多路复用帧** ⇒ 必须拆成 stdout/stderr",
+          out == "DONE\n" and err == "ERR\n",
+          f"out = {out!r}，err = {err!r}")
+    check("断言11 · exec 退出码要从 /exec/{id}/json 单独取",
+          rc == 0, f"rc = {rc!r}")
 
 
 def main() -> int:
@@ -152,6 +246,9 @@ def main() -> int:
     except docker_api.DockerError:
         raised = True
     check("断言5 · 非 404 的 daemon 错误 ⇒ 必须抛出（不得吞成 False）", raised)
+
+    # --- 断言 6~11：exec-with-stdin 的线格式（docker CLI 形态）----------------
+    check_hijack_wire_format()
 
     print()
     if FAILURES:

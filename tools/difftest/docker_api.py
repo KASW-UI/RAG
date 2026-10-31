@@ -289,29 +289,118 @@ class DockerClient:
         rc = info.get("ExitCode", 0)
         return rc, out, err
 
+    def _raw_socket(self):
+        """⇒ 一个**裸 socket**（unix 或 tcp）—— hijack 场景必须绕过 http.client。"""
+        if self._sock_path:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(self.timeout)
+            s.connect(self._sock_path)
+            return s
+        host, port = self._tcp
+        return socket.create_connection((host, port), timeout=self.timeout)
+
+    @staticmethod
+    def _decode_chunked(raw: bytes) -> bytes:
+        """解 chunked transfer-encoding（兜底路径用；101 劫持是裸流，不需要）。"""
+        out = bytearray()
+        i = 0
+        while i < len(raw):
+            j = raw.find(b"\r\n", i)
+            if j < 0:
+                break
+            size_line = raw[i:j].split(b";", 1)[0].strip()
+            try:
+                size = int(size_line, 16)
+            except ValueError:
+                break
+            if size == 0:
+                break
+            out += raw[j + 2:j + 2 + size]
+            i = j + 2 + size + 2
+        return bytes(out)
+
     def _exec_start_hijack(self, exec_id, start_body, stdin_data):
-        conn = self._conn()
+        """带 stdin 的 exec：daemon 把连接**劫持**（HTTP 101 Switching Protocols）。
+
+        ⚠️ **线格式必须照抄 docker CLI**（实测 2026-10-31 · R6 在 Concourse Task 内）：
+             `POST /exec/{id}/start?Detach=0&Tty=0&AttachStdin=1&AttachStdout=1&AttachStderr=1`
+             **请求体为空**（不带 Content-Length、不带 JSON 体），并且带
+             `Connection: Upgrade` + `Upgrade: tcp` 两个头。
+           ⇒ daemon 才会回 **101 UPGRADED** 并把 stdin/stdout 接到底层连接上。
+           ⇒ 若像常规 API 调用那样**发一个 JSON 请求体**：
+              daemon 走的是**普通 200 + chunked** 路径 ⇒ **根本不消费 stdin**
+              ⇒ 容器里的 `cat` 永远等不到 EOF ⇒ exec 一直 Running ⇒ 表现成「超时」。
+
+        ⚠️ **不能用 `http.client` 的 getresponse() 走这条路径**：
+           101 之后 http.client 认为连接已被接管 ⇒ 把 `conn.sock` 置 None
+           ⇒ 往里写 stdin 直接炸：
+             实测：`conn.sock.sendall(...)` ⇒ AttributeError: 'NoneType' object has no attribute 'sendall'
+           ⇒ 整个 R6 崩在 Traceback 上（而不是判 BLOCKED）。
+        ⇒ 这里改成**手写原始 HTTP**：自己发请求、自己读响应头，
+           响应头之后的字节就是裸流（多路复用帧）。
+        """
+        query = {
+            "Detach": "0",
+            "Tty": "1" if start_body.get("Tty") else "0",
+            "AttachStdin": "1",
+            "AttachStdout": "1",
+            "AttachStderr": "1",
+        }
+        qs = urllib.parse.urlencode(query)
+        payload = b""   # ⚠️ **不带请求体**（见上面的线格式说明）
+        head = (
+            f"POST /exec/{exec_id}/start?{qs} HTTP/1.1\r\n"
+            "Host: localhost\r\n"
+            "Content-Type: application/json\r\n"
+            "Connection: Upgrade\r\n"
+            "Upgrade: tcp\r\n"
+            "\r\n"
+        ).encode("ascii")
+        sock = self._raw_socket()
         try:
-            payload = json.dumps(start_body).encode("utf-8")
-            conn.putrequest("POST", f"/exec/{exec_id}/start")
-            conn.putheader("Content-Type", "application/json")
-            conn.putheader("Content-Length", str(len(payload)))
-            conn.endheaders()
-            conn.send(payload)
-            resp = conn.getresponse()
+            sock.sendall(head + payload)
+            # 读响应头（到 \r\n\r\n 为止）
+            buf = b""
+            while b"\r\n\r\n" not in buf:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+            if b"\r\n\r\n" in buf:
+                raw_head, body = buf.split(b"\r\n\r\n", 1)
+            else:
+                raw_head, body = buf, b""
+            status_line = raw_head.split(b"\r\n", 1)[0].decode("latin-1", "replace")
+            parts = status_line.split(" ")
+            status = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+            if status not in (101, 200):
+                raise DockerError(f"exec start 失败: HTTP {status} {status_line}")
             # 写 stdin（**不**多路复用）⇒ 半关闭写端 ⇒ 对端看到 EOF
             try:
-                conn.sock.sendall(stdin_data)
-                conn.sock.shutdown(socket.SHUT_WR)
+                sock.sendall(stdin_data)
+                sock.shutdown(socket.SHUT_WR)
             except OSError:
                 pass
-            data = resp.read()
+            # 读到 EOF ⇒ 剩下的都是输出流
+            while True:
+                try:
+                    chunk = sock.recv(65536)
+                except socket.timeout:
+                    raise DockerError(
+                        f"exec {exec_id} 读输出超时（{self.timeout}s）"
+                        " ⇒ 环境类失败（不是契约漂移）")
+                if not chunk:
+                    break
+                body += chunk
         finally:
             try:
-                conn.close()
+                sock.close()
             except Exception:
                 pass
-        out, err = _decode_multiplexed(data)
+        # 101 ⇒ 裸多路复用流；200 + chunked ⇒ 先解 chunked 再解多路复用
+        if status == 200 and b"chunked" in raw_head.lower():
+            body = self._decode_chunked(body)
+        out, err = _decode_multiplexed(body)
         info = self._json("GET", f"/exec/{exec_id}/json")
         return info.get("ExitCode", 0), out, err
 
