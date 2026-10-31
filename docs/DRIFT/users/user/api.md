@@ -2112,7 +2112,7 @@ Required Confirmation: 双侧真 Redis 故障注入（iptables DROP 或 redis-cl
 Question:    delete / update / select 的事务边界、`extra_info` jsonb 写入、
              `is_current` 派生字段是否实时、`FOR UPDATE` 行锁 —— 这些全在 user-rpc。
 Go Evidence: 本组件 0 处 DB 访问（grep 零命中），无法提供对照面。
-RAG Evidence: 同上；UserRpcClient.java:18 自己也写着「Phase 2b 填肉阶段：可加 retry /
+RAG Evidence: 同上；UserRpcClient.java:24 自己也写着「Phase 2b 填肉阶段：可加 retry /
              circuit breaker / deadline propagation（DRIFT-018）」—— 即这三项本组件**明确未实现**。
 Why Unknown: 超出本组件组件边界（§2 strict scope）。
              ⚠️ AGENTS.md §3.5 要求** rpc 必须先于 api **，本条正是该排序约束的体现：
@@ -3850,3 +3850,10 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
   - **user-rpc / admin-rpc**：`defaultScheme=dns` + `discoveryProvider=null` ⇒ **provider 从未注册** ⇒ ⇒ 不被接管 ⇒ ⇒ 那 4 处属**预防性**（探针 + 装置正确的配对实验读数见对应域台账）
   - ⇒ ⇒ 决定性变量 = **该上下文有没有 `DiscoveryClient` bean**（devh `@ConditionalOnBean(DiscoveryClient.class)` 命中与否）⇒ ⇒ 「真发 RPC」是必要条件、**不是充分条件**
 - **探针纪律**：临时补丁 + 事后还原（**不用 `git stash`** —— 并发 lane 会互偷工作区状态）⇒ ⇒ 还原后 `grep -c 'forTarget("dns:///127.0.0.1:" + PORT)'` = 1 ⇒ ⇒ 无残留
+---
+
+## 指针漂移订正 —— RAG Evidence 引用的行号（2026-10-31 · G1 lane）
+
+- **订正 1 处**：上文那条「user-rpc 的事务／并发语义不在本组件职责内」的记录里，`RAG Evidence` 写的 `UserRpcClient.java:18`
+  ⇒ ⇒ **`:18` 不是那一行**（`:18` = `框架职责:`）⇒ ⇒ 真实落点 = **`:24`**（`Phase 2b 填肉阶段：可加 retry / circuit breaker / deadline propagation（DRIFT-018）`）
+  ⇒ ⇒ **该行自 2026-10-19 起就在 `:24`**（`git blame` 实测 ⇒ 写台账时就指错了，**不是**后来位移的）⇒ ⇒ 已就地订正（行数不变）。
