@@ -1029,7 +1029,7 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 | 1 | `service/common/…/observability/GoStyleOtelSamplerProtocolGateTest.java:24` | 2 | 真损坏 | ✅ **G4**（`0c72969`） | **G4 树** |
 | 2 | `service/common/…/protection/FakeServerCall.java:13` | 2 | 真损坏 | ✅ **G4** | **G4 树** |
 | 3 | `service/like/like-rpc/…/domain/LikeOutboxEventEntity.java:17` | 3 | 真损坏 | ✅ **G2** | **G2 树** |
-| 4 | `service/message/message-api/…/GoStyleGrpcClientBreakerE2ETest.java:42` | 3 | 真损坏 | ✅ **G2** | **G2 树** |
+| 4 | `service/message/message-api/…/GoStyleGrpcClientBreakerE2ETest.java:43` | 3 | 真损坏 | ✅ **G2** | **G2 树** |
 | 5 | `service/message/message-rpc/…/MessageRpcProductionAddressTest.java:96` | 3 | 真损坏 | ✅ **G2** | **G2 树** |
 | 6 | `service/comment/comment-rpc/…/service/CommentAuditPublisher.java:19` | 3 | 真损坏 | ✅ **G3** | **G3 树** |
 | 7 | `service/favorite/favorite-rpc/…/config/FavoriteRpcLabels.java:9` | 3 | 真损坏 | ✅ **G3** | **G3 树** |

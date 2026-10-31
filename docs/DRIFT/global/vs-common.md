@@ -957,7 +957,7 @@ offset 151: ObjectProvider.orderedStream()                            ← 后应
 | **推断依据（形态 + 语义双重吻合）** | **2×FFFD = 一个 3 字节汉字丢了末字节**（UTF-8 汉字 3 字节 ⇒ 剩 2 字节不完整 ⇒ 2 个替换符）<br>⇒ 「**明**」`E6 98 8E` 丢末字节 → `E6 98` ⇒ **正好 2×FFFD**；「**的**」`E7 9A 84` 丢末字节 → `E7 9A` ⇒ **正好 2×FFFD**<br>⇒ 两条推断**都与字节形态吻合**，且语义通顺（`证明「…」` / `测试用的 {@link …}`）⇒ **可信** |
 | **修法** | **字节级替换**（python `\uXXXX` 转义）⇒ 写进文件的是**正确 UTF-8 字节**；⚠️ **不用 bash heredoc 写中文**（AGENTS.md 已记：heredoc 的中文会被打成 U+FFFD —— 本次用转义序列**绕开**该陷阱）⇒ 替换后**严格 UTF-8 解码通过** |
 | **影响面** | **纯 javadoc 注释** ⇒ **零行为变化**；两文件都在 `service/common` 的**测试**面 ⇒ 由第八次全量回归覆盖 |
-| **其余 11 条的分派（不归本层）** | **G2 域 3 条**（`like-rpc/…/LikeOutboxEventEntity.java:17` · `message-rpc/…/MessageRpcProductionAddressTest.java:96` · `message-api/…/GoStyleGrpcClientBreakerE2ETest.java:42`）⇒ **G2 写权**（G3 已直接分派给 G2）· **G1 域 3 条** ⇒ **G1 写权**（G3 已分派）· **共享面 2 条** ⇒ **无人拥有** ⇒ 已登记到 **§4.10.7 ⑥** · **3 处「故意保留」**（`article-api` 的非 BMP 码点序用例 · `user-api` 的「body 不得含替换符」断言 · `docs/Pitfalls/**` 记录病症样本处）⇒ **一个字都不动** |
+| **其余 11 条的分派（不归本层）** | **G2 域 3 条**（`like-rpc/…/LikeOutboxEventEntity.java:17` · `message-rpc/…/MessageRpcProductionAddressTest.java:96` · `message-api/…/GoStyleGrpcClientBreakerE2ETest.java:43`）⇒ **G2 写权**（G3 已直接分派给 G2）· **G1 域 3 条** ⇒ **G1 写权**（G3 已分派）· **共享面 2 条** ⇒ **无人拥有** ⇒ 已登记到 **§4.10.7 ⑥** · **3 处「故意保留」**（`article-api` 的非 BMP 码点序用例 · `user-api` 的「body 不得含替换符」断言 · `docs/Pitfalls/**` 记录病症样本处）⇒ **一个字都不动** |
 
 > ⚠️ **可复用的核验手法（值得留在仓里）**：`grep -rn $'\xef\xbf\xbd'` **会漏报**（shell 转义 / locale 差异）
 > ⇒ ⇒ **一律用 python 读 `bytes` 判**；且 **必须逐行看上下文** ⇒ **有的 U+FFFD 是「故意的」**（被测对象 / 病症样本）⇒ **改它会直接废掉那条测试**。
