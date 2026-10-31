@@ -119,9 +119,10 @@ class GoStyleClientCallTimeoutSingleSourceGateTest {
      * <p>⚠️ <b>这些不是模板，是漂移面</b> ⇒ ⇒ 终态 = 域侧删掉、改用共享层实现 ⇒ ⇒ 例外集应当<b>收缩</b>。
      */
     private static final Set<String> KNOWN_INLINE_CAP_CALL_SITES = Set.of(
-            // ── 🔴 不可收敛 · 1 条（article-api · 组件内两方向真值不同 ⇒ per-direction 内联**必需** ⇒ **不许剪**）──
-            //      Go article-api.yaml：ArticleRpcConf.Timeout=70000（显式）· UserRpcConf 段无 Timeout ⇒ 2000（默认）
-            //      ⇒ 组件级 cap 表达不了（取 2000 ⇒ article-rpc 方向改严 35 倍；取 70000 ⇒ user-rpc 方向放宽 35 倍）
+            // ── ✅ 第三批（2026-11-01 · article-api 1 条）= **已剪净** ⇒ ⇒ 例外集 **1 → 0**（**本例外集已空**）——
+            //      ⚠️ **原「不可收敛 · 不许剪」的判据作废** —— 它的前提（「组件级 cap 表达不了 per-direction 真值」）**已消失**：
+            //      组件级已改用 `cap-millis-by-service` 分档（`article.ArticleService: 70000` ＋ `user.UserService: 2000`）
+            //      ⇒ ⇒ 两个出向方向**都已有硬上界** ⇒ ⇒ 域侧内联副本成**冗余** ⇒ ⇒ 可剪（域侧那半 = G3 lane 的 `d4d2a486`）
             // ── 🟡 可收敛 · 0 条（**已全部剪净** · 2026-10-31）——
             //      第一批（G3 那批 4 条 · comment-api 1 · hot-api 1 · favorite-api 2）
             //      第二批（G2 那批 2 条 · like-api 1 · task-api 1）⇒ ⇒ 例外集 **7 → 3 → 1**
@@ -131,8 +132,7 @@ class GoStyleClientCallTimeoutSingleSourceGateTest {
             //         ⇒ ⇒ 主线出现过红窗（判据④ 的「例外失效检测」会红：已登记点位不再出现 ⇒ 守门要求剪）
             //         ⇒ ⇒ 本层**补剪**收尾 ⇒ ⇒ **教训：剪除必须与落码同一时刻**
             //         （红窗虽只 1 条，但「主线绿」本该在域侧落码那一刻就成立 ⇒ ⇒ 拆开做 = 主动制造红窗）
-            "service/article/article-api/src/main/java/com/rag/article/article/api/client/"
-                    + "UserRpcClient.java:withDeadlineAfter(effective, TimeUnit.MILLISECONDS);");
+            );
 
     /**
      * <b>域侧私有 cap 的两种来源形态</b>（代码态 ⇒ 注释与字符串字面量不算）。
