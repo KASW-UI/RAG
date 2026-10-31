@@ -989,7 +989,22 @@ def impact_to_class(text: str) -> str:
 
 
 def load_unresolved(line_index) -> dict[str, dict]:
-    """`_unresolved.md` ⇒ {项ID: {class, ids}}"""
+    """`_unresolved.md` ⇒ {项ID: {class, ids}}
+
+    ⚠️ **「`closed`（已关闭 / 已处置）到底改变什么、不改变什么**（2026-10-31 · 合并收口执行者）
+       —— 这两条曾被 lane 侧**预期反了**（⇒ ⇒ 由此产生一次错误的「订正后就会消失」的判断）：
+
+    ① **`closed` 只改「指针时效性」，不改「清单成员」** ——
+       · **改**：条目从 `unres_of` 移到 `unres_closed_of` ⇒ ⇒ 指向它的**排期指针失效**
+         （`schedule` 列多出「⚠️已关闭指针:…」· **不再算「已排期」** ⇒ ⇒ 原先靠它**伪排期**的
+         开放条目会**正确地回到「未排期」** ⇒ ⇒ 开放清单**可能因此变长** —— 那是**修正**，不是新增缺口）。
+       · **不改**：§2.2「未解决项（`_unresolved.md`）」表的**渲染是 `for uid in sorted(unresolved)`**
+         ⇒ ⇒ **遍历全部条目、不按 `closed` 过滤** ⇒ ⇒ **关了它，它仍出现在 §2.2 表里**。
+    ② **`blocking` 不随 `gap` 自动翻转** —— `blocking` 取自 **U5-O 显式定级叠加层**（`ov["blocking"]`）
+       ⇒ ⇒ 「关掉一个 A 类 gap」**不会**把该条目的 `blocking` 从「是」翻成「否」⇒ ⇒
+       **事实层（gap / status）与定级层（blocking / stage）是两路** ⇒ ⇒
+       事实变了只能关事实，**定级要显式拍板**（同 `C-3` 的处置：只关事实、不擅自翻定级）。
+    """
     text = UNRESOLVED.read_text(encoding="utf-8")
     lines = text.split("\n")
     cls = ""
