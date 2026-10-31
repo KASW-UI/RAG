@@ -119,7 +119,7 @@
 | 域 | 组件 | Go 原件（真源） | RAG 实现 | main/LOC | tests |
 |---|---|---|---|---|---|
 | `article` | `article-api` | `service/article/api/internal/handler/routes.go` + `internal/logic/`（7 handler） | `service/article/article-api/`（`controller/ArticleController.java`） | 43 / 5,470 | 133 |
-| `article` | `article-rpc` | `service/article/rpc/internal/logic/` + `internal/svc/`（6 rpc） | `service/article/article-rpc/`（`impl/ArticleServiceGrpcImpl.java`） | 39 / 8,737 | 198 |
+| `article` | `article-rpc` | `service/article/rpc/internal/logic/` + `internal/svc/`（6 rpc） | `service/article/article-rpc/`（`impl/ArticleServiceGrpcImpl.java`） | 39 / 8,737 | 199 |
 | `article` | `article-common` | `service/article/common/errmsg/errmsg.go`（45 行） | `service/article/article-common/…/errmsg/ErrorCode.java` | 1 / 257 | 15 |
 | `article` | `article-proto` | `proto/article.proto` | `service/article/article-proto/src/main/proto/article.proto` | —（生成） | 0 |
 | `comment` | `comment-api` | `service/comment/api/internal/handler/routes.go` + `internal/logic/`（7） | `service/comment/comment-api/`（`controller/CommentController.java`） | 37 / 3,479 | 62 |
