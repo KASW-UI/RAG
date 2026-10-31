@@ -2574,7 +2574,7 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a("")
     a("> ⇒ **「状态开放」= 该条仍有待实现项**（🔴 未闭合 / 🟡 部分闭合 / 仍生效 / ⏳ 未签字）；"
       "**A/B 类（阶段一范围）**那一列全是 0 ⇒ **每棵树的活都已有排期指针** ⇒ 没有「漏排」需要补派。")
-    a(f"**合计 {len(g_open)} 行 / {len({r['id'] for r in g_open})} 个编号** —— "
+    a(f"**合计（口径 = `status` ∈ 开放态 ∧ `schedule == 未排期`）{len(g_open)} 行 / {len({r['id'] for r in g_open})} 个编号** —— "
       f"① **A/B 类**（阶段 1 范围内）**{len(g_ab)}** 个编号")
     a(f"· ② C/D 类（**阶段 2 承接**，§5.3 暂缓项清单已登记）**{len(g_cd)}** 条")
     a(f"· ③ 未定级 **{len(g_unstaged)}** 条")
