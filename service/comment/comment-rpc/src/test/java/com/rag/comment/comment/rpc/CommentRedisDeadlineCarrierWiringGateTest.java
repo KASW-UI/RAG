@@ -2,8 +2,6 @@ package com.rag.comment.comment.rpc;
 
 import com.rag.comment.comment.rpc.support.RealContainerHostPort;
 import com.rag.comment.comment.rpc.support.RealGrpcPort;
-import com.rag.common.observability.GoStyleRequestDeadline;
-import com.rag.common.redis.GoStyleRedisDeadlineConnectionFactory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -60,7 +58,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * <ol>
  *   <li><b>装配面</b>：容器里<b>有且只有一个</b> {@code StringRedisTemplate}
  *       ⇒ ⇒ 且它的 {@code getConnectionFactory()} <b>就是</b>
- *       {@link GoStyleRedisDeadlineConnectionFactory}
+ *       {@link com.rag.common.redis.GoStyleRedisDeadlineConnectionFactory}
  *       ⇒ ⇒ 「只有一个」这条是<b>咬合</b>用的：{@code CommentCacheService} 是<b>按类型</b>注入
  *       {@code StringRedisTemplate} 的 ⇒ ⇒ 容器里若有两个，它拿到的<b>未必</b>是被包过的那个；</li>
  *   <li><b>耗尽 ⇒ 不下发</b>：绑一个<b>已过期</b>的载体 ⇒ {@code set} 必须抛
@@ -203,7 +201,7 @@ class CommentRedisDeadlineCarrierWiringGateTest {
                         + " connection factory 换成了预算感知版"
                         + " —— 否则本域所有经 RedisTemplate 的缓存读写**根本没有 deadline 闸门**"
                         + " ⇒ ⇒ E66 的「照写不误」就仍然成立")
-                .isInstanceOf(GoStyleRedisDeadlineConnectionFactory.class);
+                .isInstanceOf(com.rag.common.redis.GoStyleRedisDeadlineConnectionFactory.class);
     }
 
     // ------------------------------------------------------------------ 判据 ②③
@@ -218,7 +216,7 @@ class CommentRedisDeadlineCarrierWiringGateTest {
         redis.opsForValue().set(key, baseline);
 
         // ---- ② 载体已耗尽 ⇒ 必须拦下，且**值没变**
-        try (GoStyleRequestDeadline.Scope ignored = GoStyleRequestDeadline.bindAbsoluteNanos(
+        try (com.rag.common.observability.GoStyleRequestDeadline.Scope ignored = com.rag.common.observability.GoStyleRequestDeadline.bindAbsoluteNanos(
                 System.nanoTime() - 1_000_000L)) {
             assertThatThrownBy(() -> redis.opsForValue().set(key, "overwritten"))
                     .as("② 载体已耗尽 ⇒ 必须抛 QueryTimeoutException"
@@ -233,7 +231,7 @@ class CommentRedisDeadlineCarrierWiringGateTest {
 
         // ---- ③ 负控：载体充足 ⇒ 同一个 key 必须写得进
         //    ⇒ 否则第 ② 条可能只是「Redis 挂了 / 键名错了 / 序列化坏了」
-        try (GoStyleRequestDeadline.Scope ignored = GoStyleRequestDeadline.bindAbsoluteNanos(
+        try (com.rag.common.observability.GoStyleRequestDeadline.Scope ignored = com.rag.common.observability.GoStyleRequestDeadline.bindAbsoluteNanos(
                 System.nanoTime() + 5_000_000_000L)) {
             redis.opsForValue().set(key, "written");
         }
@@ -260,7 +258,7 @@ class CommentRedisDeadlineCarrierWiringGateTest {
         //   ⇒ ⇒ 而本域 `CommentCacheService.java:429`/`:433` 与 `:524`/`:528`
         //       **两条写路径正是这个形态** ⇒ ⇒ 不测这一条 = 台账那句「写路径不再照写不误」
         //       **少一半证据**。
-        try (GoStyleRequestDeadline.Scope ignored = GoStyleRequestDeadline.bindAbsoluteNanos(
+        try (com.rag.common.observability.GoStyleRequestDeadline.Scope ignored = com.rag.common.observability.GoStyleRequestDeadline.bindAbsoluteNanos(
                 System.nanoTime() - 1_000_000L)) {
             assertThatThrownBy(() -> redis.execute(new SessionCallback<Object>() {
                 @Override

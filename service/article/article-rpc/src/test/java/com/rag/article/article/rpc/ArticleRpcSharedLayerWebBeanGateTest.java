@@ -2,11 +2,6 @@ package com.rag.article.article.rpc;
 
 import com.rag.article.article.rpc.support.RealContainerHostPort;
 import com.rag.article.article.rpc.support.RealGrpcPort;
-import com.rag.common.http.GoStyleTomcatParameterLimitCustomizer;
-import com.rag.common.protection.GoStyleBreakerFilter;
-import com.rag.common.protection.GoStyleCpuSheddingFilter;
-import com.rag.common.protection.GoStyleMaxBytesFilter;
-import com.rag.common.protection.GoStyleMaxConnsFilter;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -141,13 +136,13 @@ class ArticleRpcSharedLayerWebBeanGateTest {
     @Test
     @DisplayName("③ 边界：api 侧那 5 个 web Bean 一个都不在 rpc 容器里（含 Tomcat 参数上限定制器）")
     void apiSideWebBeansAreAbsent() {
-        assertThat(context.getBeanNamesForType(GoStyleCpuSheddingFilter.class))
+        assertThat(context.getBeanNamesForType(com.rag.common.protection.GoStyleCpuSheddingFilter.class))
                 .as("CPU 降载 filter 挂在观测端口上 ⇒ 抓取请求会被拒 ⇒ 载体装了也抓不到")
                 .isEmpty();
-        assertThat(context.getBeanNamesForType(GoStyleMaxConnsFilter.class)).isEmpty();
-        assertThat(context.getBeanNamesForType(GoStyleMaxBytesFilter.class)).isEmpty();
-        assertThat(context.getBeanNamesForType(GoStyleBreakerFilter.class)).isEmpty();
-        assertThat(context.getBeanNamesForType(GoStyleTomcatParameterLimitCustomizer.class))
+        assertThat(context.getBeanNamesForType(com.rag.common.protection.GoStyleMaxConnsFilter.class)).isEmpty();
+        assertThat(context.getBeanNamesForType(com.rag.common.protection.GoStyleMaxBytesFilter.class)).isEmpty();
+        assertThat(context.getBeanNamesForType(com.rag.common.protection.GoStyleBreakerFilter.class)).isEmpty();
+        assertThat(context.getBeanNamesForType(com.rag.common.http.GoStyleTomcatParameterLimitCustomizer.class))
                 .as("Tomcat 参数上限定制器是**容器级**的 ⇒ 它若生效 ⇒ rpc 域的 Tomcat 会被抬到 10001 "
                         + "⇒ ⇒ hot 域「段数轴已销账」那条结论会从绿变红 ⇒ ⇒ 必须钉住")
                 .isEmpty();

@@ -5,9 +5,6 @@ import com.rag.article.article.proto.GetArticleRequest;
 import com.rag.article.article.proto.GetArticleResponse;
 import com.rag.article.article.rpc.support.RealGrpcPort;
 import com.rag.common.observability.GoStyleRequestDeadline;
-import com.rag.common.observability.RpcInterceptor;
-import com.rag.common.protection.GoStyleOutboundDeadlineInterceptor;
-import com.rag.common.protection.GoStyleProtectionProperties;
 import com.rag.message.message.proto.MessageServiceGrpc;
 import io.grpc.CallOptions;
 import io.grpc.Channel;
@@ -239,7 +236,7 @@ class ArticleOutboundDeadlineCarrierGateTest {
      * （{@code GoStyleOutboundDeadlineRpcAssemblyTest} + 主干
      * {@code GoStyleDevhOutboundDeadlineAssemblyGateTest}）⇒ ⇒ 两边合起来才是完整证据链。
      */
-    private static GoStyleOutboundDeadlineInterceptor sharedInterceptor;
+    private static com.rag.common.protection.GoStyleOutboundDeadlineInterceptor sharedInterceptor;
 
     @BeforeAll
     static void startServer() throws Exception {
@@ -247,9 +244,9 @@ class ArticleOutboundDeadlineCarrierGateTest {
 
         // 🔴 共享层的出向拦截器：**用本域配置的那个值**（2000ms）构造
         //    ⇒ ⇒ 「域侧只配参数」这条纪律在测试里也成立（不是另写一份算术）。
-        GoStyleProtectionProperties props = new GoStyleProtectionProperties();
+        com.rag.common.protection.GoStyleProtectionProperties props = new com.rag.common.protection.GoStyleProtectionProperties();
         props.getOutboundDeadline().setCapMillis(CONFIGURED_CAP_MILLIS);
-        sharedInterceptor = new GoStyleOutboundDeadlineInterceptor(props);
+        sharedInterceptor = new com.rag.common.protection.GoStyleOutboundDeadlineInterceptor(props);
 
         // ⚠️ 这里**只给 service name**（不给 `getServiceDescriptor()`）：
         //    带 descriptor 构造 ⇒ grpc-java 会要求「descriptor 里的每个方法都必须被绑定」
@@ -283,7 +280,7 @@ class ArticleOutboundDeadlineCarrierGateTest {
         //    ⇒ 生效预算 = min(无, 客户端 deadline) = **客户端 deadline**
         //    ⇒ 与本仓生产的 rpc 组件形态一致（本域未配 `grpc.server.timeout`）。
         ServerServiceDefinition intercepted = ServerInterceptors.intercept(service,
-                RpcInterceptor.newUnaryServerInterceptor(Duration.ZERO, Duration.ofSeconds(1)));
+                com.rag.common.observability.RpcInterceptor.newUnaryServerInterceptor(Duration.ZERO, Duration.ofSeconds(1)));
 
         server = ServerBuilder.forPort(port).addService(intercepted).build().start();
         // 🔴 **必须用显式 `dns:///` scheme，不能用 `forAddress(...)`**（2026-10-31 实测踩坑）：
@@ -317,7 +314,7 @@ class ArticleOutboundDeadlineCarrierGateTest {
      *
      * @param interceptor 共享层出向拦截器（**生产同款类**；用不同参数构造 ⇒ 读数随参数变）
      */
-    private static io.grpc.Deadline sharedOutboundDeadline(GoStyleOutboundDeadlineInterceptor interceptor) {
+    private static io.grpc.Deadline sharedOutboundDeadline(com.rag.common.protection.GoStyleOutboundDeadlineInterceptor interceptor) {
         RecordingChannel recorder = new RecordingChannel();
         interceptor.interceptCall(MessageServiceGrpc.getSendNotificationMethod(), CallOptions.DEFAULT, recorder);
         CallOptions captured = recorder.captured();
@@ -638,7 +635,7 @@ class ArticleOutboundDeadlineCarrierGateTest {
     @Test
     @DisplayName("🔴 本域 yml 的 `cap-millis` 真的能绑定进共享层拦截器读的那个属性对象")
     void domainYamlBindsIntoSharedProtectionProperties() throws Exception {
-        GoStyleProtectionProperties props = bindProtectionProperties(null);
+        com.rag.common.protection.GoStyleProtectionProperties props = bindProtectionProperties(null);
 
         assertThat(props.getOutboundDeadline().getCapMillis())
                 .as("🔴 域侧 yml 的 `rag.protection.outbound-deadline.cap-millis` 必须真的绑定进共享层的 "
@@ -668,13 +665,13 @@ class ArticleOutboundDeadlineCarrierGateTest {
     @DisplayName("🔴 变异（放宽方向）：`cap-millis` 覆盖成 4000 ⇒ 实测上界跟着放宽（证 cap 是配置驱动，不是写死 2000）")
     void capIsConfigDrivenNotHardCoded() throws Exception {
         // ① 真按生产链读配置（yml ＋ 一条**放宽**的覆盖）
-        GoStyleProtectionProperties props = bindProtectionProperties(4_000L);
+        com.rag.common.protection.GoStyleProtectionProperties props = bindProtectionProperties(4_000L);
         assertThat(props.getOutboundDeadline().getCapMillis())
                 .as("覆盖值必须真的绑进 `GoStyleProtectionProperties`（否则这条测的就不是生产链）")
                 .isEqualTo(4_000L);
 
         // ② 用**生产同款**的拦截器 + 该值构造（共享层唯一实现，不是本类另写一遍算术）
-        GoStyleOutboundDeadlineInterceptor relaxed = new GoStyleOutboundDeadlineInterceptor(props);
+        com.rag.common.protection.GoStyleOutboundDeadlineInterceptor relaxed = new com.rag.common.protection.GoStyleOutboundDeadlineInterceptor(props);
 
         // ③ 绑定一个**长于** 4s 的载体 ⇒ ⇒ 载体不是限制项 ⇒ 读数只可能来自 cap
         long carrierNanos = TimeUnit.SECONDS.toNanos(30L);
@@ -705,7 +702,7 @@ class ArticleOutboundDeadlineCarrierGateTest {
      *
      * @param overrideCapMillis 覆盖值（毫秒）；{@code null} = 不覆盖（读 yml 原值）
      */
-    private static GoStyleProtectionProperties bindProtectionProperties(Long overrideCapMillis) throws Exception {
+    private static com.rag.common.protection.GoStyleProtectionProperties bindProtectionProperties(Long overrideCapMillis) throws Exception {
         YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
         java.util.List<PropertySource<?>> sources =
                 loader.load("application", new ClassPathResource("application.yml"));
@@ -722,7 +719,7 @@ class ArticleOutboundDeadlineCarrierGateTest {
         }
 
         return new Binder(ConfigurationPropertySources.from(mutable))
-                .bind("rag.protection", GoStyleProtectionProperties.class)
+                .bind("rag.protection", com.rag.common.protection.GoStyleProtectionProperties.class)
                 .orElseThrow(() -> new IllegalStateException("`rag.protection` 段没绑上"));
     }
 }
