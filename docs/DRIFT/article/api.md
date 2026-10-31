@@ -2901,14 +2901,49 @@ bash tools/api-full-parity-probe/favorite/run.sh   # 现成骨架
 - 证据强度 = **源码级逐条对照**（Go yaml 真值 ＋ zrpc 消费点 ＋ proto 服务全名）＋ **L4 域内运行期证据**（裸 stub 真发调用 ＋ 服务端观测 deadline ＋ 两次变异测试精确转红）＋ **逐类前后回归全等** ⇒ ⇒ **未做「双侧活体对拍」** ⇒ ⇒ **不写成「已闭环」**。
 - 本节**不外推**到端到端生产链路（不证「整条链路的超时表现」）；「裸 stub 也经过全局拦截器」这一前提由**共享层**的装配面守门承担（devh `interceptForward` ＋ `getBeansWithAnnotation`）。
 - ⚠️ **新增的域侧依赖**：剪除后，本域**所有出向方向**的上界**完全**由 `cap-millis-by-service` 表决定 ⇒ ⇒ **该表必须覆盖本域全部出向方向**（当前 2 个：article / user）⇒ ⇒ **将来新增出向方向必须同步加键**，否则该方向**没有客户端硬上界** ⇒ ⇒ 这条依赖由本节新增守门 ① ② 兜住。
-### 八、补充（2026-11-02 · 同一轮）—— 🔴 **A-1 那一格是「源声明口径」：133 → 140**（**不是** 216 → 223）
+### 八、补充（2026-11-02 · 同一轮）—— 🔴 **A-1 那一格是「源声明口径」：133 → 141**（**不是** 216 → 223）
 
 - ⚠️ **两个口径不可相减、不可互换**：
   - 本节「五、回归读数」里的 **216 / 223** = **surefire 执行口径**（`@ParameterizedTest` 会被展开成 N 条 case）⇒ ⇒ **只用于「零行为变更」的逐类前后对比**；
   - `docs/PhaseGoal-judge.md` 的 **A-1 `tests` 列** = **源声明测试方法数**（环境无关口径 · 2026-10-31 起 · **一个参数化方法算 1**）⇒ ⇒ **该列要改的是**：
-    - `article-api` 行：**133 → 140**（= 133 ＋ 本笔新增守门类的 **7** 个 `@Test` 方法）
-    - 文档声明的「全仓源声明测试方法数」：**3330 → 3337**
+    - `article-api` 行：**133 → 141**（= 133 ＋ 本轮新增的 **8** 个 `@Test` 方法 ＝ 新守门类 **7** ＋ 装配面断言 **1**）
+    - 文档声明的「全仓源声明测试方法数」：**3330 → 3338**
 - ⇒ ⇒ ⚠️ **本节上面的 216 / 223 不能填进 A-1**（填了就等于把「覆盖面口径」当「执行口径」用 ⇒ ⇒ 下次复算必然对不上）。
-- 权威值 = 守门 `tools/difftest/check-source-test-decl-count.py` **自己打印的实测值**：`🔴 [M1] article-api 列= 133 源= 140 ← 不一致（差 +7）` ＋ `🔴 [M2] 文档声明「全仓源声明测试方法数」= 3330，实测 = 3337`。
+- 权威值 = 守门 `tools/difftest/check-source-test-decl-count.py` **自己打印的实测值**：`🔴 [M1] article-api 列= 133 源= 141 ← 不一致（差 +8）` ＋ `🔴 [M2] 文档声明「全仓源声明测试方法数」= 3330，实测 = 3338`。
 - ⚠️ **该文件与派生层产物（`docs/DRIFT/_cross/stage1-derivation.*`）都是别人的写权面** ⇒ ⇒ 本域**只登记不刷**（禁手面）⇒ ⇒ 已发更正回执给收口执行者。
 - ⚠️ **本轮本 lane 落码 commit 的 message 里，沿用了同一处措辞** ⇒ ⇒ **以本节为准**（历史不重写，按仓的「零行位移订正」惯例以追加节订正）。
+### 九、补充（2026-11-02 · 同一轮续）—— 🟢 **补上 article-api 域侧的「装配面守门」**（G4 lane 指派的域侧缺口）
+
+■ **缺口事实**（G4 lane §三 指派 · 本域只读检出）
+· 全仓扫描：`service/*/*-api/src/test/` 里命中 `GlobalClientInterceptorRegistry` 的域侧守门 = **7 个**（favorite · follow · hot · like · message · task），而 **`service/article/article-api/src/test/` 零命中**
+· ⇒ ⇒ 即 **四域都有、article-api 独缺** ⇒ ⇒ 而本域两个出向方向（`article-rpc` / `user-rpc`）的上界**全部**来自这个拦截器 ＋ 域 yml 的分档表 ⇒ ⇒ 缺这条 ⇒ ⇒ 「拦截器不在 registry」这个失效形态在本域**无人看守**
+
+■ **修法**（**域侧**：在本域自己的真上下文里加一条）
+· 落点：`service/article/article-api/src/test/java/com/rag/article/article/api/ArticleApiAssemblyWiringTest.java`（**真 `@SpringBootTest`（`ArticleApiApplication` ＋ RANDOM_PORT）＋ 刻意不 mock** ⇒ ⇒ 拿到的 registry 是**生产路径**上那一个，不是手工 new 的）
+· 新增 1 条：`outboundDeadlineInterceptorIsRegisteredWithTheStarter` ⇒ ⇒ 断言 devh 的 `GlobalClientInterceptorRegistry.getClientInterceptors()` **真名单**里含 `GoStyleOutboundDeadlineInterceptor`
+
+■ **⚠️ 判据为什么打在「真名单」上**（AGENTS.md §3.3）
+· 「上下文里有这个 Bean」**证不了**「它真被收集」⇒ ⇒ devh 认的是**类上的注解**（`@GrpcGlobalClientInterceptor`），而收集发生在 starter 的 `AnnotationGlobalClientInterceptorConfigurer`（= `getBeansWithAnnotation(...)`）⇒ ⇒ 只有**进了 registry** 的那些才会被 devh 的 `AbstractChannelFactory#createChannel` 最后一步 `ClientInterceptors.interceptForward(channel, interceptors)` 装到 channel 上 ⇒ ⇒ 漏了 ⇒ **出向调用没有任何客户端硬上界，且不报错**
+
+■ **变异验证**（**精确转红**）
+· 变异 = 临时把共享层 `GoStyleOutboundDeadlineInterceptor` 类上的 `@GrpcGlobalClientInterceptor` 摘掉（**只在本 lane 工作树内临时改 ⇒ 立即还原**）
+· 实测：**该条精确转红**，诊断行给出实测名单 = `[com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor@…]` ⇒ ⇒ **名单里只剩熔断拦截器** ⇒ ⇒ 出向 deadline 拦截器**确实不在** ⇒ ⇒ 判据有鉴别力
+· 还原后 `sha256sum` **逐字节一致**（`9d2378f8…`）＋ `git status service/common/` **为空**
+· ⚠️ 顺带佐证：变异态下名单里**本来就装着**带注解的熔断拦截器 ⇒ ⇒ devh 的收集机制**在正常工作** ⇒ ⇒ 这条判据不是空转
+
+■ **⚠️ 两处踩坑**（写下来免得再犯）
+· ① **同方法内多断言会互相遮蔽**：第一版把「静态：类上带注解」与「运行期：名单含它」放在**同一个**测试方法里 ⇒ ⇒ 变异后只有静态那条红、运行期那条「毫无反应」⇒ ⇒ 其实是**前一条断言失败 ⇒ 抛异常 ⇒ 后一条根本没执行** ⇒ ⇒ 读起来像「后一条判据不灵」⇒ ⇒ 修法 = 删掉**冗余**的静态断言（运行期那条**已隐含**它 ⇒ 同一根前提）⇒ ⇒ 只留运行期那条 ⇒ ⇒ 变异即刻精确命中
+· ② 「Bean 存在」≠「机制生效」：共享层自己有装配面守门（`GoStyleOutboundDeadlineApiAssemblyTest`），但那**证不了本域**（域侧缺口就是本域这一条）
+
+■ **回归读数**（**逐类前后对比** · 零行为变更判据仍成立）
+· 基线（隔离 worktree · 主干 `8c1dd6bb`）= 11 类 / **216** / 0F / 0E
+· 本轮之后 = 12 类 / **224** / 0F / 0E（= 216 ＋ 新守门 **7** ＋ 装配面断言 **1**）
+· 逐类：**除 `ArticleApiAssemblyWiringTest`（本轮**有意** ＋1 条断言：13 → 14）外，其余 10 类逐类「条数 ＋ 失败数 ＋ 错误数」全等** ⇒ ⇒ 零行为变更判据**成立**
+· 权威读数 = surefire XML 求和
+
+■ **🔴 A-1 的最终待改值**（**以本节为准** · 前面两版数字作废）
+· `article-api` 行：**133 → 141**
+· 文档声明的「全仓源声明测试方法数」：**3330 → 3338**
+· 权威实测：`🔴 [M1] article-api 列= 133 源= 141 ← 不一致（差 +8）` ＋ `🔴 [M2] 文档声明 = 3330，实测 = 3338`
+· ⚠️ **两个口径不可互换**：**216 / 224** 是 **surefire 执行口径**；**133 / 141** 是 **源声明口径**（A-1 那一列用的就是它）
+· ⚠️ `docs/PhaseGoal-judge.md` 与 `docs/DRIFT/_cross/stage1-derivation.*` 是**别人的写权面** ⇒ ⇒ 本域**只登记不刷** ⇒ ⇒ 已发回执给收口执行者
