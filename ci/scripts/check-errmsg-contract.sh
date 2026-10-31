@@ -253,16 +253,40 @@ compile_module() {
 # ── 取模块的真实依赖集（探针 import io.grpc 时必需）────────────────────────
 # ⚠️ 用 dependency:build-classpath 取**模块的真实依赖集**，
 #    而不是手工 find ~/.m2 里的某个版本（那会让探针跑到与生产不同的 grpc 版本上）。
+#
+# ⚠️⚠️ **compile 必须与 dependency:build-classpath 在同一次 mvn 调用里**：
+#   实测 2026-10-31（R5 在 Concourse Task 内 · task 域 BLOCKED）：
+#     `mvn -pl service/task/task-rpc -am dependency:build-classpath` 单独跑 ⇒
+#     reactor 里的上游模块（task-proto / common）**没有编译产物**
+#     ⇒ Maven 只能从本地仓库找它们的 jar
+#     ⇒ 干净环境（CI 的 .m2 缓存里没有已安装的 com.rag:*）报：
+#        `Could not find artifact com.rag:task-proto:jar:0.0.1-SNAPSHOT`
+#     ⇒ 该域 BLOCKED（**根因离症状很远**：看着像依赖问题，其实是 reactor 没编译）。
+#   ⇒ 加上 `compile` ⇒ reactor 内直接用上游模块的 `target/classes` ⇒ 不依赖本地仓库。
+#
+# ⚠️ `-Dmdep.outputFile` 必须用**相对路径**：
+#   绝对路径 ⇒ reactor 里**每个模块都写同一个文件** ⇒ 互相覆盖
+#   ⇒ 最后写入的不是我们要的那个模块的 classpath（本次要哪个域就拿到哪个域的 ⇒ 假绿/假红）。
+#   相对路径 ⇒ 每个模块写**自己 basedir 下**的文件 ⇒ 互不干扰。
 build_dep_classpath() {
-  local module="$1" out="$2" logf="$3"
+  # 用法：build_dep_classpath <模块列表(逗号分隔)> <日志文件>
+  # ⇒ 产出 <每个模块>/target/ci-cp.txt
+  local modules="$1" logf="$2"
   local args=()
   [ "${MVN_OFFLINE}" = "1" ] && args+=(-o)
-  args+=(-B --no-transfer-progress -f "${POM}" -pl "${module}")
+  args+=(-B --no-transfer-progress -f "${POM}" -pl "${modules}")
   [ "${AM}" = "yes" ] && args+=(-am)
-  args+=(dependency:build-classpath "-Dmdep.outputFile=${out}" -Dmdep.includeScope=test)
-  mvn "${args[@]}" >"${logf}" 2>&1 || return 1
-  [ -s "${out}" ] || return 1
-  return 0
+  args+=(compile dependency:build-classpath
+         "-Dmdep.outputFile=target/ci-cp.txt" -Dmdep.includeScope=test)
+  mvn "${args[@]}" >"${logf}" 2>&1
+}
+
+# 读某个模块自己的 classpath 文件 ⇒ 内容；读不到 ⇒ 非 0
+read_cp_file() {
+  local module="$1"
+  local f="${REPO_ROOT}/${module}/target/ci-cp.txt"
+  [ -s "${f}" ] || return 1
+  cat "${f}"
 }
 
 # =============================================================================
@@ -627,14 +651,18 @@ run_single_probe_domain() {
     # ④ classpath
     cp="${classes}"
     if [ "${CP_MODE}" = "classes+deps" ]; then
-      local cpfile="${dwork}/cp.txt"
-      if ! build_dep_classpath "${MODULES}" "${cpfile}" "${dwork}/mvn-cp.log"; then
+      if ! build_dep_classpath "${MODULES}" "${dwork}/mvn-cp.log"; then
         warn "   ✗ dependency:build-classpath 失败（${MODULES}）"
         tail -25 "${dwork}/mvn-cp.log" | sed 's/^/   | /'
         warn "     ⇒ BLOCKED"
         return 2
       fi
-      cp="${classes}:$(cat "${cpfile}")"
+      local cpf
+      if ! cpf="$(read_cp_file "${MODULES}")"; then
+        warn "   ✗ 读不到 ${MODULES}/target/ci-cp.txt ⇒ BLOCKED"
+        return 2
+      fi
+      cp="${classes}:${cpf}"
     fi
   fi
 
@@ -749,18 +777,20 @@ run_task_domain() {
     [ -d "${classes_api}" ] || { warn "   ✗ 缺编译产物：${classes_api} ⇒ BLOCKED"; return 2; }
 
     local cp_rpc_file="${dwork}/cp-rpc.txt" cp_api_file="${dwork}/cp-api.txt"
-    if ! build_dep_classpath "service/task/task-rpc" "${cp_rpc_file}" "${dwork}/mvn-cp-rpc.log"; then
-      warn "   ✗ dependency:build-classpath（task-rpc）失败 ⇒ BLOCKED"
-      tail -20 "${dwork}/mvn-cp-rpc.log" | sed 's/^/   | /'
+    if ! build_dep_classpath "service/task/task-rpc,service/task/task-api" \
+         "${dwork}/mvn-cp.log"; then
+      warn "   ✗ dependency:build-classpath（task-rpc,task-api）失败 ⇒ BLOCKED"
+      tail -25 "${dwork}/mvn-cp.log" | sed 's/^/   | /'
       return 2
     fi
-    if ! build_dep_classpath "service/task/task-api" "${cp_api_file}" "${dwork}/mvn-cp-api.log"; then
-      warn "   ✗ dependency:build-classpath（task-api）失败 ⇒ BLOCKED"
-      tail -20 "${dwork}/mvn-cp-api.log" | sed 's/^/   | /'
+    local cpr cpa
+    if ! cpr="$(read_cp_file "service/task/task-rpc")" \
+       || ! cpa="$(read_cp_file "service/task/task-api")"; then
+      warn "   ✗ 读不到 task-rpc/task-api 的 target/ci-cp.txt ⇒ BLOCKED"
       return 2
     fi
-    local cp_rpc="${classes_rpc}:$(cat "${cp_rpc_file}")"
-    local cp_api="${classes_api}:$(cat "${cp_api_file}")"
+    local cp_rpc="${classes_rpc}:${cpr}"
+    local cp_api="${classes_api}:${cpa}"
 
     if [ -n "${REPLAY_DIR}" ]; then
       [ -s "${REPLAY_DIR}/task-rpc.dump" ] || { warn "   ✗ 离线复验：缺 task-rpc.dump ⇒ BLOCKED"; return 2; }
