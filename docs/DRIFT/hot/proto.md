@@ -21,11 +21,11 @@
 |---|---|
 | **总体判定** | ✅ **一致**（行为层零差异） |
 | **行为差异** | **0 条** |
-| **复刻度 R / 证据强度 E** | 基线记 **R3 / E3**（[`docs/PhaseGoal-judge.md`](../../PhaseGoal-judge.md) §四 A-2 的 `hot-proto` 行）⇒ 🆕 **本轮实测已满足 R4 的 ⑦⑧**（**双侧同时运行**的探针对拍通过 ＋ **在版本控制内、现在可复算** ＋ **有变异验证记录**）⇒ ⇒ **建议 R3 → R4**；⚠️ **基线是 SHARED 面 ⇒ 本 lane 不改** ⇒ **登记给合并收口执行者** |
+| **复刻度 R / 证据强度 E** | 基线**已回填 R4 / E3**（[`docs/PhaseGoal-judge.md`](../../PhaseGoal-judge.md) **§三 矩阵 A-2** 的 `hot-proto` 行 · **2026-10-31 · G3 第二十二轮** ⇒ **R3 → R4**）⇒ ✅ **本轮独立复跑实测 R4 的 ⑦⑧**（**双侧同时运行**的探针对拍通过 ＋ **在版本控制内、现在可复算** ＋ **有变异验证记录**）⇒ ⇒ **R4 成立**；⚠️ **原写「基线是 SHARED 面 ⇒ 本 lane 不改 ⇒ 登记给合并收口执行者」＝ 已过期** —— 按 [`docs/Worktree.md`](../../Worktree.md) §二「G3 ⇒ `g3.md` ＋ **judge 的四域行**」⇒ **judge 的 hot 行归本 lane 写** ⇒ 本 lane 直接回填 |
 | **复制忠实度** | ✅ **剥掉 `option` / `package` / 注释 / 空行后逐行 diff 为空** ⇒ message 名 / 字段名 / 字段号 / 类型 / 枚举值 / rpc 签名全部一致 |
 | **表达层差异** | `option go_package`（Go 专用，Java 不消费）· 加 `java_package` + `java_multiple_files=true`（§3.4 允许） |
 | **回归网** | ✅ **域内 `HotProtoContractTest`**（期望值由 `generate.py` **从 Go 真源生成并冻结**）＋ **契约面守门** `check-surface-parity.py --domain hot` |
-| **wire 字节级** | ✅ **已闭合（2026-10-29 · G3）** —— `tools/proto-wire-probe/hot/` ⇒ Go 真源生成码 == `expected.txt` == RAG 生成码 **逐字节一致**（13 条用例）＋ 变异 **3/3 精确转红** ⇒ **A7 = L4** ⇒ `hot-proto` **R3 → R4**（登记给收口执行者改基线） |
+| **wire 字节级** | ✅ **已闭合（2026-10-29 · G3）** —— `tools/proto-wire-probe/hot/` ⇒ Go 真源生成码 == `expected.txt` == RAG 生成码 **逐字节一致**（13 条用例）＋ 变异 **3/3 精确转红** ⇒ **A7 = L4** ⇒ `hot-proto` **R3 → R4**（✅ **基线已回填** —— 2026-10-31 · G3 第二十二轮 ⇒ judge **§三 矩阵 A-2** 的 `hot-proto` 行 = **R4**；⚠️ **原写「登记给收口执行者改基线」＝ 已过期**：judge 的四域行归本 lane 写） |
 | **仍未覆盖** | ✅ **消费方式已取证（2026-10-31 · G3 第十九轮 · hot 域）** —— **G-19 的三个子项逐条有结论**：① **`optional` presence`** ⇒ **已被两个回归网钉住**（`HotProtoContractTest` 比 `Descriptors.FileDescriptor` 的 `optional ` 前缀 ＋ `HotProtoWireParityTest` 的零值不落 wire）② **字段号硬编码** ⇒ **本域不存在**（域侧代码零命中；命中全在 `target/generated-sources` 的 protoc 生成码里）③ **Jackson 配置** ⇒ **不适用**（hot 的 proto 只走 gRPC 二进制通道：`JsonFormat` / `protobuf-java-util` **零命中**；Jackson 只用于 Kafka 载荷）⇒ ⇒ **hot 域的 G-19 无剩余待取证项**（⚠️ **其余 9 个 proto 仍开** ⇒ 基线 §九那句「10 个 proto 全部未取证」**对 hot 已不成立**）· ⚠️ **gRPC 帧 / HTTP2 帧**（需两侧同时起服务） |
 
 ---
@@ -63,7 +63,7 @@
 
 | # | 事项 | 类型 | 归属 |
 |---|---|---|---|
-| ~~**H-3**~~ | ~~**wire 字节级**对拍探针~~ ⇒ ✅ **已闭合（2026-10-29 · G3 域侧落码）** | 取证缺口 → ✅ **已闭合** | ✅ **已落码**：`tools/proto-wire-probe/hot/`（`run.sh` + `mutate-wire.sh` + `go/main.go` + `expected.txt` + `README.md`）＋ Java 侧 `HotProtoWireParityTest`（**7 例**）⇒ 对拍 **EXIT=0** ＋ 变异 **3/3 精确转红** ⇒ **A7 = L4** ⇒ `hot-proto` **R3 → R4**（基线 §四 A-2 属 **SHARED 面** ⇒ 登记给**合并收口执行者**改基线）<br>⚠️ **归属订正**：本行原写「`tools/**` 共享面 ⇒ G3 只读」⇒ **该归属判断已作废** —— 按 AGENTS.md §5.3f「**共享判据 = 依赖度数**」⇒ `tools/proto-wire-probe/hot/` **只被 hot 域引用** ⇒ **真私有 ⇒ G3 域侧落码合法** |
+| ~~**H-3**~~ | ~~**wire 字节级**对拍探针~~ ⇒ ✅ **已闭合（2026-10-29 · G3 域侧落码）** | 取证缺口 → ✅ **已闭合** | ✅ **已落码**：`tools/proto-wire-probe/hot/`（`run.sh` + `mutate-wire.sh` + `go/main.go` + `expected.txt` + `README.md`）＋ Java 侧 `HotProtoWireParityTest`（**7 例**）⇒ 对拍 **EXIT=0** ＋ 变异 **3/3 精确转红** ⇒ **A7 = L4** ⇒ `hot-proto` **R3 → R4**（✅ **基线已回填** —— 2026-10-31 · G3 第二十二轮 ⇒ judge **§三 矩阵 A-2** 的 `hot-proto` 行 = **R4**；⚠️ **原写「基线 §四 A-2 属 SHARED 面 ⇒ 登记给合并收口执行者」＝ 已过期**：judge 的四域行归本 lane 写）<br>⚠️ **归属订正**：本行原写「`tools/**` 共享面 ⇒ G3 只读」⇒ **该归属判断已作废** —— 按 AGENTS.md §5.3f「**共享判据 = 依赖度数**」⇒ `tools/proto-wire-probe/hot/` **只被 hot 域引用** ⇒ **真私有 ⇒ G3 域侧落码合法** |
 | **G-19** | proto 的**消费方式**取证 —— AGENTS.md §3.4 的效力边界「复制忠实 ≠ 消费方式已验」 | 取证缺口 → ✅ **已闭合（2026-10-31 · G3 第十九轮 · hot 域）**（**不阻断阶段一**） | ✅ **已闭合（域内取证 · 非行为漂移）**：三个子项逐条落地 —— ① **`optional` presence`** ⇒ `HotProtoContractTest`（比对 `Descriptors.FileDescriptor`，含 `optional ` 前缀）＋ `HotProtoWireParityTest`（7 例，含零值不落 wire）⇒ 本轮实跑 **8 例 / 0F / 0E / 0S**；② **字段号硬编码** ⇒ **本域不存在**（域侧代码零命中；命中全在 protoc 生成码）；③ **Jackson 配置** ⇒ **不适用**（proto 不走 JSON：`JsonFormat` / `protobuf-java-util` 零命中）⇒ ⇒ **hot 域无剩余待取证项**（⚠️ **其余 9 个 proto 的 G-19 仍开** ⇒ 基线 §九「10 个 proto 全部未取证」**对 hot 已不成立**） |
 | **G-15 / G-18** | ~~「hot-proto 无自动守门」与「已落码 `HotProtoContractTest`」自相矛盾~~ ＋ ~~判定记录只在 `vs-common.md` 不在 `proto.md`~~ | 记录缺口 | ✅ **2026-10-29 · G3 已订正**：`vs-common.md` A7 行回填 ＋ **本文件建立** ⇒ 两处口径统一 |
 
