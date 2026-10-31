@@ -3,13 +3,6 @@ package com.rag.article.article.api;
 import com.rag.article.article.api.client.ArticleRpcClient;
 import com.rag.article.article.api.client.UserRpcClient;
 import com.rag.common.http.GoStyleJsonBodyConverter;
-import com.rag.common.http.GoStyleJsonBodyConverterConfig;
-import com.rag.common.protection.GoStyleBreakerFilter;
-import com.rag.common.protection.GoStyleCpuSheddingFilter;
-import com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor;
-import com.rag.common.protection.GoStyleMaxBytesFilter;
-import com.rag.common.protection.GoStyleMaxConnsFilter;
-import com.rag.common.spring.HttpMiddlewareFilter;
 import com.rag.users.common.jwt.JwtUtil;
 import jakarta.servlet.Filter;
 import org.junit.jupiter.api.DisplayName;
@@ -130,14 +123,14 @@ class ArticleApiAssemblyWiringTest {
     void sharedCommonBeansAreReallyRegistered() {
         // ⚠️ ArticleApiApplication 的 scanBasePackages 含 "com.rag.common" ——
         //    漏掉它 ⇒ 保护层**静默消失**且**不报错**（AGENTS.md §3.3）。
-        assertNotNull(ctx.getBean(GoStyleGrpcClientBreakerInterceptor.class),
+        assertNotNull(ctx.getBean(com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor.class),
                 "GoStyleGrpcClientBreakerInterceptor 必须被扫到（熔断层）");
-        assertNotNull(ctx.getBean(GoStyleMaxConnsFilter.class), "GoStyleMaxConnsFilter 必须被扫到");
-        assertNotNull(ctx.getBean(GoStyleBreakerFilter.class), "GoStyleBreakerFilter 必须被扫到");
-        assertNotNull(ctx.getBean(GoStyleCpuSheddingFilter.class), "GoStyleCpuSheddingFilter 必须被扫到");
-        assertNotNull(ctx.getBean(HttpMiddlewareFilter.class), "HttpMiddlewareFilter 必须被扫到");
-        assertNotNull(ctx.getBean(GoStyleMaxBytesFilter.class), "GoStyleMaxBytesFilter 必须被扫到");
-        assertNotNull(ctx.getBean(GoStyleJsonBodyConverterConfig.class),
+        assertNotNull(ctx.getBean(com.rag.common.protection.GoStyleMaxConnsFilter.class), "GoStyleMaxConnsFilter 必须被扫到");
+        assertNotNull(ctx.getBean(com.rag.common.protection.GoStyleBreakerFilter.class), "GoStyleBreakerFilter 必须被扫到");
+        assertNotNull(ctx.getBean(com.rag.common.protection.GoStyleCpuSheddingFilter.class), "GoStyleCpuSheddingFilter 必须被扫到");
+        assertNotNull(ctx.getBean(com.rag.common.spring.HttpMiddlewareFilter.class), "HttpMiddlewareFilter 必须被扫到");
+        assertNotNull(ctx.getBean(com.rag.common.protection.GoStyleMaxBytesFilter.class), "GoStyleMaxBytesFilter 必须被扫到");
+        assertNotNull(ctx.getBean(com.rag.common.http.GoStyleJsonBodyConverterConfig.class),
                 "GoStyleJsonBodyConverterConfig 必须被扫到（WebMvcConfigurer）");
         // ⚠️ 转换器本身**不是 Bean**（它在 extendMessageConverters 里 new 出来）⇒
         //    断言「Bean 存在」测不到「它真被插进了 MVC 的转换器链」⇒ 必须查链。
