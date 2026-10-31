@@ -1029,7 +1029,7 @@ MP 自动配置退避（`@ConditionalOnSingleCandidate(DataSource)` 找不到 Da
 | 1 | `service/common/…/observability/GoStyleOtelSamplerProtocolGateTest.java:24` | 2 | 真损坏 | ✅ **G4**（`0c72969`） | **G4 树** |
 | 2 | `service/common/…/protection/FakeServerCall.java:13` | 2 | 真损坏 | ✅ **G4** | **G4 树** |
 | 3 | `service/like/like-rpc/…/domain/LikeOutboxEventEntity.java:17` | 3 | 真损坏 | ✅ **G2** | **G2 树** |
-| 4 | `service/message/message-api/…/GoStyleGrpcClientBreakerE2ETest.java:42` | 3 | 真损坏 | ✅ **G2** | **G2 树** |
+| 4 | `service/message/message-api/…/GoStyleGrpcClientBreakerE2ETest.java:43` | 3 | 真损坏 | ✅ **G2** | **G2 树** |
 | 5 | `service/message/message-rpc/…/MessageRpcProductionAddressTest.java:96` | 3 | 真损坏 | ✅ **G2** | **G2 树** |
 | 6 | `service/comment/comment-rpc/…/service/CommentAuditPublisher.java:19` | 3 | 真损坏 | ✅ **G3** | **G3 树** |
 | 7 | `service/favorite/favorite-rpc/…/config/FavoriteRpcLabels.java:9` | 3 | 真损坏 | ✅ **G3** | **G3 树** |
@@ -6255,3 +6255,4 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
   · ⇒ ⇒ 根因 = 把**近期的行位移**套到**快照口径**的表上（口径混用）⇒ ⇒ 与「引用工具产出的数要先报工具版本」同族（**基线与增量不可混算**）。
 - **若将来要全表换成「今址」**：真正会变的**只有 2 行**（第 4 行 43 → 45 · 第 13 行 44 → 28）⇒ ⇒ 其余 11 行**快照与今址行数完全一致**（逐份实测）⇒ ⇒ ⇒ **换口径必须连 §20.2 的合并规则一起换，不能只改单行**。
 - **附带发现（同名副本串位）**：全仓 `GoStyleGrpcClientBreakerE2ETest.java` 有 **3 份同名**（message-api · user-api · hot-api）⇒ ⇒ **裸文件名形态不可寻址** ⇒ ⇒ 他域台账里任何「同文件名的行号位移」都必须先确认**是哪一份副本**。
+- **落地轨迹（补记）**：上述「42」的订正已于 2026-11-01 随主干一笔「行号位移指针订正（9 处）」**实际落地** ⇒ ⇒ 本层**就地改回 43**（零行位移）⇒ ⇒ 该笔订正里其余 8 处属他域，**本层不复核**（只报不改）⇒ ⇒ 唯一连带的一处（他域清单里指向本域 `user/api.md` 的那一条）已在该文件就地写死口径。
