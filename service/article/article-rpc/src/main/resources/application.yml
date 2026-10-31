@@ -190,15 +190,40 @@ rag:
   side: rpc
 
   # 🔴 **客户端硬上界（Go 侧 zrpc client 的 `Timeout`）** —— 2026-10-31 · G3 第十一轮
+  #   ⇒ ⇒ **第十二轮复核了取值依据**（Go 的 `Timeout` 是**按 client** 生效 ⇒ 本域两个方向真值不同）
   #   Go 出处（消费点，不是声明点）：
   #     go-zero@v1.10.2/zrpc/config.go:31          `Timeout int64 \`json:",default=2000"\``
   #     go-zero@v1.10.2/zrpc/internal/config.go:15 `Timeout bool \`json:",default=true"\``
   #     go-zero@v1.10.2/zrpc/internal/client.go:113-117（**无条件**装 TimeoutInterceptor）
-  #   本域 Go 侧 `etc/article.yaml` 的 `MessageRpc:` 段**没写 `Timeout`** ⇒ ⇒ 走默认值 **2000ms**
-  #   （该文件的 `Timeout: 70000` 是**服务端**方法超时、`SecurityConf.Timeout: 10000` 是安全客户端
-  #     ⇒ 而 RAG 侧安全客户端是**骨架占位、无真实调用** ⇒ 不在本封顶面里）
+  #     go-zero@v1.10.2/zrpc/client.go:70-71        `if c.Timeout > 0 { WithTimeout(...) }`
+  #        ⇒ ⚠️ **`Timeout` 挂在 `zrpc.RpcClientConf` 上 ⇒ 每个 client 一份 ⇒ 按 client 生效**
+  #
+  #   【🔴 本域 yaml 的两个出向客户端超时**不同**（第十二轮实测）】
+  #     service/article/rpc/etc/article.yaml
+  #       :92-96  MessageRpc:   { … }                  ← **没写 Timeout** ⇒ 走 default **2000**
+  #                                            （Go: svc/service_context.go:74 ⇒ **本域唯一活着的出向出口**）
+  #       :85-90  SecurityConf: { …, Timeout: 10000 }  ← 显式 10000
+  #                                            （Go: svc/service_context.go:60）
+  #       :3      Timeout: 70000                      ← **服务端**方法超时（顶层挨着 ListenOn）⇒ **不是**客户端值
+  #
+  #   【⚠️ 为什么这里取 2000（而不是 10000）—— 判据 =「可观察行为」】
+  #     共享层这个 `cap-millis` 是**模块级一个数** ⇒ 装哪个值都会有一侧与 Go 不同 ⇒
+  #       装 **2000** ⇒ message 方向 = Go **精确同形**（本域唯一活着的出向出口）
+  #                    ⇒ security 方向会比 Go **严 5 倍** —— ⚠️ 但该方向**当前没有任何真实调用**
+  #                       （`SecurityRpcClient` / `ImageSecurityRpcClient` 全仓零引用，实际生效的是
+  #                        骨架 `UnavailableContentSecurityClient`）⇒ ⇒ **不可观测 ⇒ 不是行为漂移**
+  #       装 **10000** ⇒ security 方向 = Go 同形；**但** message 方向会被**放宽 5 倍**
+  #                    ⇒ ⇒ 那是**活路径上的可观察漂移**（Go 2s 放弃 / RAG 10s 才放弃；
+  #                        且该出口**吞掉异常** ⇒ 只表现为「消费变慢」⇒ **更难被发现**）
+  #     ⇒ ⇒ **取 2000**（可观察行为优先：活路径精确 > 死路径潜在偏差）
+  #     ⇒ ⇒ ⚠️ **这不是「模块级一个数能表达 Go 的 per-client 语义」** —— 它表达不了
+  #         ⇒ ⇒ **共享层的模型缺口**（多 client 域需要 per-client 上界）⇒ ⇒ 归 **G4 写权**
+  #         ⇒ ⇒ 本域**不擅自**用内联 cap 绕开（共享层棘轮
+  #         `GoStyleClientCallTimeoutSingleSourceGateTest` 判据 ④ **明令禁止**域侧自带 cap）
+  #         ⇒ ⇒ 等共享层支持 per-client 上界后，本行再按 Go 逐方向拆开
+  #
   #   ⚠️ 共享层 `GoStyleProtectionProperties.OutboundDeadline#capMillis` **默认 0 = 不启用**
-  #     ⇒ ⇒ **不配这一行 = 出向零期限 = 比 Go 松** ⇒ ⇒ 域侧副本已于本轮删除（改由共享层统一施加）
+  #     ⇒ ⇒ **不配这一行 = 出向零期限 = 比 Go 松** ⇒ ⇒ 域侧副本已于第十一轮删除（改由共享层统一施加）
   protection:
     outbound-deadline:
       cap-millis: 2000
@@ -235,11 +260,20 @@ grpc:
   #    生产地址从未被任何测试跑过 ⇒「跑绿」与「能启动」无关。
   #    守门：ArticleRpcProductionAddressTest（直接调 devh 真正的消费点）。
   client:
+    # ⚠️⚠️ **下面两个 `deadline:` 键在本仓是「死配置」（2026-10-31 第十二轮实测）**
+    #   【实测】`grep -rn 'spring\.grpc\.client' --include=*.java service/` ⇒ **零命中**
+    #     ⇒ 全仓**没有任何** `@ConfigurationProperties("spring.grpc.client")`
+    #   【实测】devh `grpc-client-spring-boot-starter 3.1.0.RELEASE` 的客户端属性只有
+    #     `net.devh.boot.grpc.client.channels.*`（keepalive / negotiation / shutdown）
+    #     ⇒ **它根本没有 per-client deadline 这个旋钮** ⇒ ⇒ 这两个键**不生效**
+    #   ⇒ ⇒ **别把「yml 里写了 deadline」读成「出向调用有了 deadline」**（AGENTS.md §3.3.1）
+    #   ⇒ ⇒ **真正生效的上界** = 共享层的 `rag.protection.outbound-deadline.cap-millis`（模块级一个数）
     security-rpc:
       address: discovery:///security-rpc
       enable-keep-alive: true
       keep-alive-time: 30s
       # ⚠️ 对应 Go SecurityConf.Timeout: 10000（yaml 里显式配了，不是框架默认值）
+      #    ⚠️ **本键不生效**（见上方「死配置」实测）⇒ 该方向当前**无真实调用**
       deadline: 10s
     message-rpc:
       address: discovery:///message-rpc
@@ -247,12 +281,15 @@ grpc:
       keep-alive-time: 30s
       # ⚠️ Go 的 MessageRpc **没有**配 Timeout ⇒ 走 go-zero 的默认值 **2000ms（2s）**。
       #    证据（消费点，不是声明点）：
-      #      声明点：go-zero@v1.10.3/zrpc/config.go:31 —— `Timeout int64 `json:",default=2000"``
-      #      消费点：zrpc client 每次调用用该值设 deadline。
+      #      声明点：go-zero@v1.10.2/zrpc/config.go:31 —— `Timeout int64 `json:",default=2000"``
+      #      消费点：go-zero@v1.10.2/zrpc/client.go:70-71 —— `if c.Timeout > 0 { WithTimeout(...) }`
       #    ⚠️ 之前这里引的是 `zrpc/internal/config.go:14`，那一行在 `ClientMiddlewaresConf` 里，
       #    是**中间件开关**（`Timeout bool `json:",default=true"``）而非超时值；3s 实际是
       #    `rest/config.go:55` 的 `RestConf.Timeout`（HTTP 侧），被串到了 RPC 侧。
       #    同类错误：等不到去读标签的 default，就把别的类型的默认值当成本类型的默认值（AGENTS.md §3.3.1）。
+      #    ⚠️ 另：版本号此前误写 `v1.10.3` ⇒ 本域 `service/article/rpc/go.mod:17` 钉的是 **v1.10.2**
+      #    （与共享层 `GoStyleOutboundDeadlineInterceptor` 的 javadoc 同版本）⇒ 本轮据实订正。
+      #    ⚠️ **本键不生效**（见上方「死配置」实测）⇒ 真实上界 = 模块 cap 2000
       deadline: 2s
 
 # =============================================================================
@@ -312,10 +349,15 @@ article-rpc:
 
   security:
     key: security.rpc
+    # ⚠️ **本字段当前没有消费点**（2026-10-31 第十二轮实测）—— 保留它只为让配置面与 Go 一一对应
+    #    （Go: `article.yaml:85-90` 的 `SecurityConf.Timeout: 10000`）
+    #    ⇒ 共享层的 `cap-millis` 是**模块级一个数** ⇒ ⇒ 装不下「按 client 各一个」⇒ ⇒ 详见 `rag.protection` 段注释
     timeout: 10000
   message-rpc:
     key: message.rpc
-    # 对应 Go 的未配超时 ⇒ zrpc 默认 2000ms（与上方 grpc.client.message-rpc.deadline 保持一致）
+    # 对应 Go 的未配超时 ⇒ zrpc 默认 2000ms（与上方 `grpc.client.message-rpc.deadline` 同一个值）
+    # ⚠️ **本字段当前也没有消费点**（同上）⇒ 真正生效的是 `rag.protection.outbound-deadline.cap-millis=2000`
+    #    ⇒ ⇒ 等共享层支持 per-client 上界后，本字段就是该方向的落点（值已与 Go 同源）
     timeout: 2000
 
   article-sync-outbox:

@@ -114,6 +114,17 @@ public class MessageRpcClient {
      * ⚠️ 本域 {@code service/article/rpc/etc/article.yaml} 的 {@code MessageRpc} 段
      * <b>没写 Timeout</b> ⇒ 取的就是这个 default ⇒ ⇒ <b>不是</b>我拍脑袋定的数。
      *
+     * <p>🔴 <b>2026-10-31 第十二轮复核：Go 的这个超时是<b>按 client</b> 生效的</b>
+     * ⇒ 本域<b>两个</b>出向客户端真值<b>不同</b>（{@code MessageRpc} ⇒ default <b>2000</b>（就是本类这个方向）；
+     * {@code SecurityConf} ⇒ 显式 <b>10000</b>）
+     * ⇒ ⇒ 而共享层的 {@code rag.protection.outbound-deadline.cap-millis} 是<b>模块级一个数</b>
+     * ⇒ ⇒ 本类的 2000 取<b>本域唯一活着的出向出口</b>那个值（⇒ <b>活路径与 Go 精确同形</b>）；
+     * ⇒ ⇒ 另一个方向当前<b>无真实调用</b>（安全客户端是骨架占位、全仓零引用）⇒ ⇒ <b>不可观测</b> ⇒ ⇒ 不是行为漂移
+     * ⇒ ⇒ ⚠️ **「模块级一个数表达不了 Go 的 per-client 语义」是共享层的模型缺口**（多 client 域需要 per-client 上界）
+     * ⇒ ⇒ 归 <b>G4 写权</b> ⇒ ⇒ 本域<b>不擅自</b>用调用点自带 cap 绕开（共享层棘轮
+     * {@code GoStyleClientCallTimeoutSingleSourceGateTest} 判据 ④ <b>明令禁止</b>域侧自带 cap）
+     * ⇒ ⇒ 等共享层支持 per-client 上界后，本域再按 Go 逐方向拆开
+     *
      * <p><b>修前的可观察分叉</b>：本类原先<b>直接用注入的 stub 发起调用</b> ⇒ <b>零期限</b>
      * ⇒ ⇒ 下游 {@code message-rpc} 挂死时 Go 2s 就返回、RAG <b>一路等到底</b>
      * ⇒ ⇒ 而本调用点<b>吞掉异常</b>（只记日志、返回 false）⇒ ⇒ 失败<b>时机</b>的差异不会向上冒泡
