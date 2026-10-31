@@ -70,7 +70,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * ⇒ 若写成 {@code applyTo(stub).withDeadlineAfter(2, SECONDS)}，HTTP 剩余预算会被顶掉
  * （剩 0.5s 时反而给 2s）⇒ 请求可能超出 HTTP 总预算。
  *
- * <h2>🆕 2026-11-02 · G3 lane：断言对象从「域侧内联副本」换成「共享层机制 ＋ 域 yml 参数」</h2>
+ * <h2>🆕 2026-11-01 · G3 lane：断言对象从「域侧内联副本」换成「共享层机制 ＋ 域 yml 参数」</h2>
  * <p>本类原先断言的是 {@code UserRpcClient} <b>自带</b>的那份内联副本
  * （{@code min(剩余, 2s)} + 域侧私有常量）⇒ ⇒ 那是<b>第二个上界来源</b>
  * ⇒ ⇒ 该副本已<b>剪除</b>（上界改由共享层 {@code GoStyleOutboundDeadlineInterceptor}

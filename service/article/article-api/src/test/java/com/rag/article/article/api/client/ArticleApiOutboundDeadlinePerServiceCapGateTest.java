@@ -70,7 +70,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * </ul>
  * ⇒ ⇒ 组件级<b>一个</b>上界表达不了 ⇒ ⇒ 必须<b>按下游 gRPC 服务全名分档</b>。
  *
- * <h2>🆕 2026-11-02 · G3 lane：域侧内联副本<b>剪除</b>（per-service 覆盖到位 ⇒ 副本冗余）</h2>
+ * <h2>🆕 2026-11-01 · G3 lane：域侧内联副本<b>剪除</b>（per-service 覆盖到位 ⇒ 副本冗余）</h2>
  * <p>此前 {@code UserRpcClient} 自带一份内联副本（{@code min(请求剩余, 2000)} + 域侧私有常量）
  * ⇒ ⇒ 那正是共享层棘轮
  * {@code GoStyleClientCallTimeoutSingleSourceGateTest} 判据 ④ 登记的<b>唯一</b>点位级例外
