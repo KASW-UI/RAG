@@ -171,7 +171,7 @@ class HotProtoWireParityTest {
     }
 
     @Test
-    @DisplayName("🔴 bool success 的零值在 wire 上完全���落（false ⇒ 空字节）")
+    @DisplayName("🔴 bool success 的零值在 wire 上完全不落（false ⇒ 空字节）")
     void boolFalseIsNotOnTheWire() {
         // ⑧ true ⇒ varint 1。
         LikeArticleResponse ok = LikeArticleResponse.newBuilder()

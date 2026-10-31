@@ -76,3 +76,18 @@
 | [`docs/DRIFT/hot/vs-common.md`](vs-common.md) | **H-1 行 = 落码与取证过程的权威记录**（本文件只给判定结论，不重复） |
 | [`docs/DRIFT/hot/common.md`](common.md) | 本域 `hot-common` 组件台账（**另一个组件**） |
 | [`docs/DRIFT/_cross/proto-verification.md`](../_cross/proto-verification.md) | §3.4 的**全仓级**验证 —— **共享文件**，本工作树不碰（⇒ 其 `:45` 行「脚本一个都没覆盖」已过期，属收口订正项） |
+
+## 5. 🩹 U+FFFD 真乱码修复（2026-11-01 · G3 lane）
+
+> **事实**：`service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/proto/HotProtoWireParityTest.java:174` 的 `@DisplayName` 里含 **3 个 U+FFFD 字节组**（`ef bf bd` × 3）⇒ ⇒ **恰好 1 个完整汉字**被替换（UTF-8 一个汉字 = 3 字节）⇒ ⇒ 原句 `在 wire 上完全▢▢▢落` 的第 3 个字不可见。
+
+> **① 原字可考 = 「不」**（不是「不可考」）—— **三处独立印证**：
+> · **同一文件的 `:47`**（本文件所在类自己的 javadoc，字节完好）：`* <p>🔴 {@code success = false} 在 proto3 里是<b>零值 ⇒ 完全不落 wire</b>`
+> · **同仓孪生句**：`service/comment/comment-rpc/src/test/java/com/rag/comment/comment/rpc/proto/CommentProtoWireParityTest.java:166` = `@DisplayName("🔴 枚举的零值在 wire 上完全不落（STATE_NORMAL ⇒ 空字节）")`（字节完好）
+> · **hot 探针 Go 侧**：`tools/proto-wire-probe/hot/go/main.go:19` = `③ hot 域特有：**`bool` 零值在 wire 上完全不落**（`success=false` ⇒ 整条消息是空字节）`（字节完好）
+
+> **② 处置 = 直接修复**（**不是**登记「末字不可恢复」）—— 理由：原字**可考** ⇒ ⇒ 按本仓既有先例「原字不可考 ⇒ 核了上下文再落笔」的反面，**可考就应当修** ⇒ ⇒ 把那 3 个 U+FFFD 字节组替换成「不」⇒ ⇒ 该 `@DisplayName` 现在是 `@DisplayName("🔴 bool success 的零值在 wire 上完全不落（false ⇒ 空字节）")` ⇒ ⇒ 与 `:47` 的 javadoc、孪生句、探针 Go 侧**四处措辞一致**。
+
+> **③ 效力边界（两条）** —— ① 该串在 `@DisplayName` 里 ⇒ ⇒ **只影响测试报告的显示名**，**不参与任何断言** ⇒ ⇒ **零行为变更**、**不构成假绿/假红风险**；② 本条**不覆盖**全仓其它 U+FFFD 字节 —— `service/article/article-api/src/test/java/com/rag/article/article/api/ArticleApiMvcPipelineTest.java:1143` / `:1159` 是**故意的测试夹具**（该处上下文明写 `// U+FFFD` 标记，测的就是非法 UTF-8 字节的处理）⇒ ⇒ **不得动**（动了这条测试就废了）。
+
+> **④ 实测读数（自己跑出来的）** —— ① 修前该文件 U+FFFD 字节数 = **3** ⇒ ⇒ 修后 = **0**；② 四域 `service/` 下 U+FFFD 字节数复查：**hot = 0** · comment = 0 · favorite = 0 · article = **2**（= ③ 的故意夹具 ⇒ 保持）；③ `bash tools/proto-wire-probe/hot/run.sh` ⇒ **EXIT=0**（Go 真源生成码 == 冻结 `expected.txt` == RAG 真实生成码，**逐字节一致**）⇒ ⇒ 修复未破坏本组件的回归网。
