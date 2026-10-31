@@ -1,6 +1,5 @@
 package com.rag.hot.hot.api;
 
-import com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor;
 import com.rag.common.protection.GoStyleProtectionProperties;
 import com.rag.hot.hot.api.client.ArticleRpcClient;
 import com.rag.hot.hot.api.client.HotRpcClient;
@@ -62,7 +61,7 @@ class GoStyleGrpcClientBreakerWiringTest {
     private GlobalClientInterceptorRegistry registry;
 
     @Autowired
-    private GoStyleGrpcClientBreakerInterceptor interceptor;
+    private com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor interceptor;
 
     @Autowired
     private GrpcChannelFactory channelFactory;

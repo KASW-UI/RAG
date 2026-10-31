@@ -1,7 +1,5 @@
 package com.rag.comment.comment.api.client;
 
-import com.rag.common.observability.GoStyleRequestDeadline;
-import com.rag.common.protection.GoStyleOutboundDeadlineInterceptor;
 import com.rag.common.protection.GoStyleProtectionProperties;
 import com.rag.comment.comment.proto.CommentServiceGrpc;
 import io.grpc.Channel;
@@ -189,7 +187,7 @@ class CommentApiRpcDeadlineGateTest {
     @AfterEach
     void clearDeadline() {
         // 测试之间绝不能残留 deadline —— 残留会把下一个用例变成假绿/假红
-        GoStyleRequestDeadline.clear();
+        com.rag.common.observability.GoStyleRequestDeadline.clear();
         currentToken = callToken.incrementAndGet();
         serverCompleted.set(false);
     }
@@ -205,7 +203,7 @@ class CommentApiRpcDeadlineGateTest {
      */
     private static CommentRpcClient client(Map<String, Object> envOverrides) {
         Channel capped = ClientInterceptors.intercept(channel,
-                new GoStyleOutboundDeadlineInterceptor(domainProperties(envOverrides)));
+                new com.rag.common.protection.GoStyleOutboundDeadlineInterceptor(domainProperties(envOverrides)));
         CommentRpcClient c = new CommentRpcClient();
         c.rawStubField(CommentServiceGrpc.newBlockingStub(capped));
         return c;
@@ -266,7 +264,7 @@ class CommentApiRpcDeadlineGateTest {
     @DisplayName("③ Go zrpc/config.go:31 default=2000 —— **无 HTTP 预算**时下游调用也必须有 2s 上限")
     void noHttpBudgetStillGetsTwoSecondCap() {
         serverSleepMillis = 2_500L;
-        assertEquals(-1L, GoStyleRequestDeadline.remainingMillis(), "本用例的前提：当前线程没有 HTTP 预算");
+        assertEquals(-1L, com.rag.common.observability.GoStyleRequestDeadline.remainingMillis(), "本用例的前提：当前线程没有 HTTP 预算");
 
         long start = System.nanoTime();
         Status.Code code = call(client(null));
@@ -285,7 +283,7 @@ class CommentApiRpcDeadlineGateTest {
     @DisplayName("④ Go http.go:53 的 3s 预算 vs zrpc 的 2s 上限 ⇒ **2s 生效**（上限小于预算）")
     void twoSecondCapWinsOverLongerHttpBudget() {
         serverSleepMillis = 2_500L;
-        GoStyleRequestDeadline.begin(System.nanoTime() + TimeUnit.SECONDS.toNanos(30));
+        com.rag.common.observability.GoStyleRequestDeadline.begin(System.nanoTime() + TimeUnit.SECONDS.toNanos(30));
 
         long start = System.nanoTime();
         Status.Code code = call(client(null));
@@ -302,7 +300,7 @@ class CommentApiRpcDeadlineGateTest {
     @DisplayName("⑤ 生产形态（HTTP 预算 3s + 上限 2s）⇒ **2s 处**掐断，不是 3s")
     void productionShapeCapsAtTwoSecondsNotThree() {
         serverSleepMillis = 5_000L;
-        GoStyleRequestDeadline.begin(System.nanoTime() + TimeUnit.SECONDS.toNanos(3));
+        com.rag.common.observability.GoStyleRequestDeadline.begin(System.nanoTime() + TimeUnit.SECONDS.toNanos(3));
 
         long start = System.nanoTime();
         Status.Code code = call(client(null));
@@ -318,8 +316,8 @@ class CommentApiRpcDeadlineGateTest {
     @DisplayName("⑥ 预算已耗尽 ⇒ **立刻**失败（1ms），不是「没有 deadline」")
     void exhaustedBudgetMeansImmediateNotAbsent() {
         serverSleepMillis = 5_000L;
-        GoStyleRequestDeadline.begin(System.nanoTime() - 1L);   // 已经过去
-        assertEquals(0L, GoStyleRequestDeadline.remainingMillis());
+        com.rag.common.observability.GoStyleRequestDeadline.begin(System.nanoTime() - 1L);   // 已经过去
+        assertEquals(0L, com.rag.common.observability.GoStyleRequestDeadline.remainingMillis());
 
         long start = System.nanoTime();
         Status.Code code = call(client(null));

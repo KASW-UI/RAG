@@ -1,8 +1,5 @@
 package com.rag.favorite.favorite.rpc.client;
 
-import com.rag.common.observability.GoStyleRequestDeadline;
-import com.rag.common.observability.RpcInterceptor;
-import com.rag.common.protection.GoStyleOutboundDeadlineInterceptor;
 import com.rag.common.protection.GoStyleProtectionProperties;
 import com.rag.favorite.favorite.proto.FavoriteServiceGrpc;
 import com.rag.favorite.favorite.proto.GetFavoriteFoldersReq;
@@ -191,7 +188,7 @@ class FavoriteOutboundDeadlineCarrierGateTest {
      * （{@code GoStyleOutboundDeadlineRpcAssemblyTest} + 主干
      * {@code GoStyleDevhOutboundDeadlineAssemblyGateTest}）⇒ ⇒ 两边合起来才是完整证据链。
      */
-    private static GoStyleOutboundDeadlineInterceptor sharedInterceptor;
+    private static com.rag.common.protection.GoStyleOutboundDeadlineInterceptor sharedInterceptor;
 
     @BeforeAll
     static void startServer() throws Exception {
@@ -201,7 +198,7 @@ class FavoriteOutboundDeadlineCarrierGateTest {
         //    ⇒ ⇒ 「域侧只配参数」这条纪律在测试里也成立（不是另写一份算术）。
         GoStyleProtectionProperties props = new GoStyleProtectionProperties();
         props.getOutboundDeadline().setCapMillis(CONFIGURED_CAP_MILLIS);
-        sharedInterceptor = new GoStyleOutboundDeadlineInterceptor(props);
+        sharedInterceptor = new com.rag.common.protection.GoStyleOutboundDeadlineInterceptor(props);
 
         // ⚠️ 这里**只给 service name**（不给 `getServiceDescriptor()`）：
         //    带 descriptor 构造 ⇒ grpc-java 会要求「descriptor 里的每个方法都必须被绑定」
@@ -213,8 +210,8 @@ class FavoriteOutboundDeadlineCarrierGateTest {
                                                    io.grpc.stub.StreamObserver<GetFavoriteFoldersResp> observer) -> {
                             // 🔴 下面几行跑在 **gRPC handler 线程** ⇒ 共享层 `RpcInterceptor.onHalfClose`
                             //    在**同一线程**上绑的 ThreadLocal 载体**在这里可见**。
-                            carrierPresent.set(GoStyleRequestDeadline.isPresent());
-                            carrierRemainingNanos.set(GoStyleRequestDeadline.remainingNanos());
+                            carrierPresent.set(com.rag.common.observability.GoStyleRequestDeadline.isPresent());
+                            carrierRemainingNanos.set(com.rag.common.observability.GoStyleRequestDeadline.remainingNanos());
 
                             // 域内真实消费点：**共享层拦截器算出来的那个出向上界**
                             //（生产同款：devh 把 `@GrpcGlobalClientInterceptor` 装到**每个**
@@ -235,7 +232,7 @@ class FavoriteOutboundDeadlineCarrierGateTest {
         //    ⇒ 生效预算 = min(无, 客户端 deadline) = **客户端 deadline**
         //    ⇒ 与本仓生产的 rpc 组件形态一致（本域未配 `grpc.server.timeout`）。
         ServerServiceDefinition intercepted = ServerInterceptors.intercept(service,
-                RpcInterceptor.newUnaryServerInterceptor(Duration.ZERO, Duration.ofSeconds(1)));
+                com.rag.common.observability.RpcInterceptor.newUnaryServerInterceptor(Duration.ZERO, Duration.ofSeconds(1)));
 
         server = ServerBuilder.forPort(port).addService(intercepted).build().start();
                 // 🔴 **必须用显式 `dns:///` scheme，不能用 `forAddress(...)`**（2026-10-31 实测踩坑）：
@@ -442,19 +439,19 @@ class FavoriteOutboundDeadlineCarrierGateTest {
         //    **类加载 + JIT** 的钱（本机实测 ≈ 0.15ms）⇒ ⇒ 那笔钱会**混进 loss**
         //    ⇒ ⇒ 不热身就会读到「loss ≈ 0.15ms」而误判成精度损失。
         //    ⇒ 热身跑的是**同一条路径**（同样在 scope 内、同样带载体）。
-        try (GoStyleRequestDeadline.Scope ignored = GoStyleRequestDeadline.bindAbsoluteNanos(
+        try (com.rag.common.observability.GoStyleRequestDeadline.Scope ignored = com.rag.common.observability.GoStyleRequestDeadline.bindAbsoluteNanos(
                 System.nanoTime() + budgetNanos)) {
             sharedOutboundDeadline();
         }
 
-        try (GoStyleRequestDeadline.Scope ignored = GoStyleRequestDeadline.bindAbsoluteNanos(
+        try (com.rag.common.observability.GoStyleRequestDeadline.Scope ignored = com.rag.common.observability.GoStyleRequestDeadline.bindAbsoluteNanos(
                 System.nanoTime() + budgetNanos)) {
             // 🔴 **基线**：此刻载体自己还剩多少（在同一线程、同一载体上直接读）。
             //    之所以要拿它当基线，是因为「两次 nanoTime 调用之间的机器开销」
             //    （本机实测约 0.3–0.5ms：类加载 + JIT）会**混进**绝对值里
             //    ⇒ ⇒ 判据必须测**相对损失**（出向比载体窄了多少），
             //    而不是测绝对剩余值（那会把测量开销误读成精度损失）。
-            carrierNow = GoStyleRequestDeadline.remainingNanos();
+            carrierNow = com.rag.common.observability.GoStyleRequestDeadline.remainingNanos();
 
             io.grpc.Deadline deadline = sharedOutboundDeadline();
             outbound = deadline == null ? -1L : deadline.timeRemaining(TimeUnit.NANOSECONDS);
@@ -479,7 +476,7 @@ class FavoriteOutboundDeadlineCarrierGateTest {
     @Test
     @DisplayName("🔴 线程上没有载体 ⇒ 出向仍套 2s 客户端封顶（Go 侧 TimeoutInterceptor 是拦截器级别的）")
     void noCarrierStillGetsTwoSecondClientCap() {
-        assertThat(GoStyleRequestDeadline.isPresent())
+        assertThat(com.rag.common.observability.GoStyleRequestDeadline.isPresent())
                     .as("本用例的前提：当前线程**没有**载体（否则测的就不是「无预算」这条路径）")
                     .isFalse();
 
