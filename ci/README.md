@@ -15,7 +15,7 @@
 ## 快速开始
 
 ```bash
-# 一次性：本地 Concourse 起流（load 镜像 tar → 起环境 → 注册 11 条流水线）
+# 一次性：本地 Concourse 起流（load 镜像 tar → 起环境 → 注册 13 条流水线 = 11 日常 + 2 契约）
 bash ci/local-up.sh                 # 公网镜像源
 bash ci/local-up.sh --registry      # 额外起本地 registry（公网源不稳时用）
 bash ci/local-up.sh --trigger rag-task   # 注册完顺带触发一条并跟踪日志
@@ -118,10 +118,10 @@ Concourse 的 `git` 资源**原生支持 `paths` 过滤**（官方 monorepo 指�
 | `service/article/article-proto/**` | `rag-article` + `rag-comment` + `rag-favorite` + `rag-hot` |
 | `service/users/user/user-proto/**` | `rag-users-user` + `rag-users-admin` + `rag-article` + `rag-favorite` + `rag-follow` + `rag-message` |
 | `service/users/admin/admin-proto/**` | `rag-users-admin` + `rag-message` |
-| `service/common/**` | **全部 11 条** |
+| `service/common/**` | **全部 11 条日常流水线**（⚠️ **两条契约流水线不触发** —— 它们只听 `ci/contracts/**` 与各域 `errmsg`/`db/migration` 路径 ⇒ 这条性质已被**服务端实跑断言**） |
 | `service/users/users-common/**` | 除 `rag-task`、`rag-hot` 外的 **9 条**（这俩不用它） |
-| `pom.xml` / `service/pom.xml` / `mvnw` / `.mvn/**` | **全部 11 条**（工具链变更 = 全量重跑） |
-| **`ci/**`** | **全部 11 条**（CI 自身脚本变更 = 全量重跑） |
+| `pom.xml` / `service/pom.xml` / `mvnw` / `.mvn/**` | **全部 11 条日常**（工具链变更 = 全量重跑） |
+| **`ci/**`** | **全部 13 条**（含两条契约流水线：CI 自身脚本变更 = 全量重跑） |
 
 ⚠️ **`ci/**` 必须在触发面里，而且它不只是"顺带加上"**（实测 2026-10-30 命中）：
 git 资源的 `paths` 决定"**取哪个 commit 的树**"。若 `ci/**` 不在 paths 里，
@@ -151,7 +151,7 @@ get repo (trigger: true)   ← git 资源，paths 过滤 ⇒ 只在相关改动�
 |---|---|---|
 | 源码获取 | 从 `https://github.com/KASW-UI/RAG.git` 的 `do-my-own-gh` 分支取代码 | 公开 HTTPS ⇒ **YAML 里零密钥**；`paths` 过滤 ⇒ 版本明确（每个资源版本 = 一个 commit） |
 | 变更判断 | 由 `git` 资源的 `paths` 在**资源层**完成 ⇒ 不触发的域连 build 都不排 | 不是"进 job 再判断"，是"根本不产生版本" |
-| 环境准备 | DinD：任务容器（privileged）里起内层 `dockerd` ⇒ 再在内层 daemon 上跑嵌套构建容器 | 本仓 128 个测试文件直接起 Testcontainers 容器，任务容器里必须有 Docker；而 Concourse 8 的 task 配置**没有**挂载声明项 ⇒ wormhole 走不通 ⇒ 只能用 DinD |
+| 环境准备 | DinD：任务容器（privileged）里起内层 `dockerd` ⇒ 再在内层 daemon 上跑嵌套构建容器 | 本仓 **126** 个测试文件直接起 Testcontainers 容器（口径 = `grep -rlE 'new (PostgreSQLContainer\|GenericContainer)' --include=*.java service/ \| grep '/src/test/'`，实测 2026-10-31），任务容器里必须有 Docker；而 Concourse 8 的 task 配置**没有**挂载声明项 ⇒ wormhole 走不通 ⇒ 只能用 DinD |
 | 构建 | `mvn -pl <本域模块> -am -DskipTests package` | `-am` **必须带**：跨模块依赖是 reactor 内 SNAPSHOT，不带 `-am` 会拿到 `~/.m2` 里的**陈旧** jar（本仓 `*SharedLayerArtifactFreshnessGateTest` 就在守这条） |
 | 测试 | `mvn -pl <本域模块> -am test` | 同上；`-am` 会连带跑依赖模块的测试 —— 已知代价，理由见 `ci/scripts/test.sh` |
 | 静态守门 | 9 个复用本仓已有资产（`tools/difftest/`）+ 1 个 CI 自带（`ci/scripts/check-pom-parent-relativepath.py`）+ **1 个契约门**（`ci/scripts/check-proto-contract.py`，R4）+ `check-jar-executable.sh`（按域传模块目录） | 前 9 个不新造检查；第 9 个是 CI 实战抓出缺陷后补的（见 `ci/DELIVERY.md` §六.2）；**R4 契约门**是纯文本秒级 ⇒ 属快速门禁 ⇒ 每条域流水线都跑一遍 |
@@ -224,9 +224,13 @@ fly -t concourse trigger-job -j rag-contract-schema/contract-check --watch
 > ⇒ 两个内层容器**顺序执行、共用同一个 bind mount** ⇒ dump 在**同一次 build 内**交接 ⇒ 不会拿到上一次的 dump。
 > ⇒ dump 阶段**不记账**（还没比对 ⇒ 无从判 PASS/FAIL）⇒ 杜绝「没比对就当通过」。
 >
-> ⚠️ **R5 当前是「有意为红」**：`rag-contract-errmsg` 的 build 退出码 = **3（PENDING）**，
-> 因为存在 **8 条已登记但未签字**的差异 ⇒ **不计入 PASS** ⇒ 这是设计语义，**不是回归**。
-> ⇒ 签字入口见 `ci/requirements/README.md` §8.2。
+> 🆕 **R5 的「有意为红」已于 2026-10-31 解除**：8 条已登记未签字的差异**全部销项**
+> （4+3 条转 `approved` · 1 条转 `closed`）⇒ `rag-contract-errmsg` 退出码 = **0（PASS 9 / PENDING 0）**。
+> ⇒ **签字不是走过场**：它要求在 `docs/Intentional_Deviations/` 登记并签字，
+> 基准文件填上依据 id ⇒ 守门**机器回指**该 id（查不到 ⇒ FAIL ⇒ 自证豁免被拦）。
+> ⇒ 裁定与依据见 `ci/requirements/README.md` §8.2。
+> ⚠️ **但「R5 变绿」≠「目标全部达成」**：清单里那两条要求转成了 `APPROVED_DIFFERENCE`
+> ⇒ **不计入 PASS**（PASS 仍是 23 · 缺口 18）⇒ 签字 = **承认并接受**差异，不是**证明两侧一致**。
 
 **R10 目标要求清单的六态**（`ci/requirements/README.md`，**与契约门的五态不是一回事**）
 
@@ -261,7 +265,7 @@ fly -t concourse trigger-job -j rag-contract-schema/contract-check --watch
 
 | 文件 | 职责 |
 |---|---|
-| `ci/pipelines/rag-*.yml`（11 个） | 各域流水线定义。**由生成器产出**，不要手改 |
+| `ci/pipelines/rag-*.yml`（13 个 = 11 日常 + 2 契约） | 流水线定义。**由生成器产出**，不要手改 |
 | `ci/tasks/maven-build.yml` | 构建阶段的 task 配置（**唯一真源**） |
 | `ci/tasks/maven-test.yml` | 测试阶段的 task 配置 |
 | `ci/tasks/static-gates.yml` | 静态守门阶段的 task 配置 |
@@ -305,7 +309,7 @@ fly -t concourse trigger-job -j rag-contract-schema/contract-check --watch
 > Concourse 的 pipeline step **必须**带 `file:` 或 `config:` 二选一，
 > 不能引用独立的任务文件（实测 `fly validate-pipeline` 报
 > `must specify either 'file:' or 'config:'`）。
-> ⇒ `ci/tasks/*.yml` 是**唯一真源**，由生成器**内联**进 11 条 pipeline ⇒ 不会两份漂移。
+> ⇒ `ci/tasks/*.yml` 是**唯一真源**，由生成器**内联**进 13 条 pipeline ⇒ 不会两份漂移。
 > ⇒ 这些文件同时也是 `fly execute -c ci/tasks/maven-build.yml` 一次性调试用的。
 
 ---
@@ -367,7 +371,7 @@ python3 ci/generate-pipelines.py --check  # 校验（CI 也跑这一条）
 | 构建命令正确性 | ✅ | 宿主机实测：`mvn -o -pl service/article/article-api,service/article/article-rpc -am -DskipTests package` → BUILD SUCCESS（14 模块 / 8.6s）；`mvn -o -pl service/common -am clean test` → 405/405 全绿（1:12） |
 | **静态守门在真实 task 镜像内** | ✅ | `docker run python:3.12-bookworm sh ci/scripts/run-static-gates.sh` → **8/8 全绿**；加入第 9 道门后为 **9/9**，且已在**真 CI 容器**内实测通过 |
 | **Concourse 服务端落地** | ✅ | 本地 **8.3.2** 起流成功（`/api/v1/info` → `{"version":"8.3.2","worker_version":"3.0"}`）；worker `22f904bc9cc6 running 3.0` 已注册 |
-| **11 条流水线注册** | ✅ | `ci/deploy.sh` 跑完；`fly pipelines` 列出 11 条 `rag-*`（配置已按最新生成物重新部署）|
+| **13 条流水线注册** | ✅ | `ci/deploy.sh` 跑完；`fly pipelines` 列出 13 条 `rag-*`（11 日常 + 2 契约；配置已按最新生成物重新部署）|
 | **canonical 流水线当前是 paused** | 📌 | 本 PR **合并前**它们必须 pause：`ci/` 还没进 `do-my-own-gh` ⇒ 别的 lane 一推 commit 就会触发 build 并在第一步就红（`repo/ci/scripts/dind-run.sh: No such file`）⇒ 是噪声不是信号。**合并后**一条命令恢复：`for p in $(fly -t concourse pipelines -a \| awk 'NR>1 && $2=="no" {print $1}'); do fly -t concourse unpause-pipeline -p $p; done` |
 | **worker 从本地 registry 拉镜像** | ✅ | 探针流水线 **21s 成功**，层下载进度可见 ⇒ **containerd 走 HTTP 拉本地 registry 可行**（Concourse 8 的 containerd 2.4.2 不接受根级 `[registry]` 段，但 Concourse 自身的拉取路径能处理 HTTP registry） |
 | **task 容器出网** | ✅ | 探针：DNS(8.8.8.8 / 223.5.5.5) OK、`github.com:443` OK、`172.17.0.1:5010`（本地 registry）OK；`10.80.0.1:5010` FAIL（预期，网关无此服务） |
@@ -375,9 +379,10 @@ python3 ci/generate-pipelines.py --check  # 校验（CI 也跑这一条）
 | **Testcontainers 在 DinD 里真跑** | ✅ | 真 CI 日志：`Container postgres:16-alpine is starting` → `started in PT5.21S` → `JDBC URL: jdbc:postgresql://10.250.0.1:32769/mp_probe` ⇒ 内层 daemon 起 PG + 嵌套容器按**内层 bridge 网关**连上 |
 | **完整 4 step build 跑绿** | ✅ | **共享层流水线演练 build #2：`succeeded`（3m40s）** ⇒ build ✅ / test ✅ / 静态守门 **8 过 0 挂** ✅ / 汇总 **484 条用例全通过**（service/common 445 + users-common 39；0 失败 0 错误 1 跳过）⇒ 详见 `ci/DELIVERY.md` §四.1（含 8 次演练逐次的卡点与根因） |
 | 🆕 **R6 Schema 契约门在 Task 内完整跑通** | ✅ | `rag-contract-schema` **build 5 = `succeeded`（1m6s）** ⇒ **PASS 8 / FAIL 0 / BLOCKED 0 / NOT_RUN 1**（`hot` = DDL 维度不适用 ⇒ **不是「已对齐」**）⇒ Java-only · 无 Go 仓 · 无 Go 工具链 |
-| 🆕 **R5 错误码契约门在 Task 内完整跑通** | 📌 **有意为红** | `rag-contract-errmsg` **build 7**：阶段① maven 出 dump **9/9 域成功** → 阶段② python 比对 ⇒ **PASS 7 / FAIL 0 / BLOCKED 0 / PENDING 2**（域 `comment`·`like`）⇒ 差异台账 **approved 31 / closed 2 / technical 13 / pending 8** ⇒ 退出码 **3** ⇒ **build 红是设计语义**（未签字差异不计入 PASS），**不是回归** |
+| 🆕 **R5 错误码契约门在 Task 内完整跑通** | ✅ **已转正** | `rag-contract-errmsg` **build 7**（**签字前**）：阶段① maven 出 dump **9/9 域成功** → 阶段② python 比对 ⇒ **PASS 7 / FAIL 0 / BLOCKED 0 / PENDING 2**（域 `comment`·`like`）⇒ 退出码 **3** ⇒ **build 红是设计语义**（未签字差异不计入 PASS），**不是回归**<br>🆕 **2026-10-31 用户签字后**：8 条差异全部销项（4+3 → `approved` · 1 → `closed`）⇒ **PASS 9 / FAIL 0 / BLOCKED 0 / PENDING 0** ⇒ 退出码 **0**（🟢 绿）⇒ 差异台账 approved 38 / closed 3 / technical 13 / **pending 0** · ⚠️ **Task 内重跑待合入 + 解暂停后补跑** |
 | 🆕 **静态守门 13 道（CI 镜像内）** | ✅ | `docker run -v <clone>:/build/repo -w /build python:3.12-bookworm sh repo/ci/scripts/run-static-gates.sh` ⇒ **12 道全绿 / 0 失败**（第 13 道 `check-jar-executable.sh` 需 `JAR_MODULES` ⇒ 无 jar 时不跑） |
 | 🆕 **触发面静态一致性** | ✅ | `bash ci/verify-triggers.sh --static` ⇒ **7/7 精确集合一致**（从生成器产出的 `paths` 算触发集合 vs 手工推导的意图集合） |
+| 🆕 **触发面服务端验证** | ✅ | `bash ci/verify-triggers-server.sh` ⇒ **7/7 精确集合一致（EXIT=0）** —— 真实 commit ⇒ 真实 build ⇒ 从服务端读出「哪些流水线真的产生了新 build」⇒ 与静态口径**逐条一致** |
 | 🆕 **docker_api 自测** | ✅ | `python3 ci/scripts/check-docker-api-selftest.py` ⇒ **11/11**；变异（退回「带 JSON 请求体」的 exec 写法）⇒ **3 条断言转红**（红在断言、无 Traceback），真源字节已恢复 |
 
 > 「配置校验通过」**不等于**「CI 跑通了」—— 但两者现在**都有实测绿灯**：

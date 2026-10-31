@@ -56,6 +56,25 @@ def _find(data: dict, rid: str) -> dict:
     raise KeyError(f"清单里没有 {rid}")
 
 
+def _mutate_fail_without_note(data: dict) -> None:
+    """**自建靶子**：把一条 `NOT_VERIFIED` 要求改成 `FAIL` **并抹掉 `gap_note`**
+    ⇒ 必须命中守门的 **R7**（FAIL 条目必须有理由 ⇒ 差异不得被藏起来）。
+
+    ⚠️ **为什么要自建靶子，而不是「抹掉现有 FAIL 条目的理由」**：
+    R7 只对 `status == "FAIL"` 生效 ⇒ 若清单里**当前没有** FAIL 条目
+    （**2026-10-31 用户签字后 `REQ-ERRMSG-LIKE-001` 从 FAIL 转 APPROVED_DIFFERENCE ⇒ FAIL 清零**），
+    「抹掉现有 FAIL 条目的理由」就**变异落空** ⇒ 守门返回 0 ⇒
+    **看起来像「门禁抓不到」，其实是「靶子不存在」** ⇒ 自证能力静默失效。
+    ⇒ 故本变异**自己造一个 FAIL 条目**⇒ 无论清单当前状态如何，都打在同一性质上。
+    """
+    for r in data["requirements"]:
+        if r.get("status") == "NOT_VERIFIED":
+            r["status"] = "FAIL"
+            r.pop("gap_note", None)
+            return
+    raise RuntimeError("清单里没有 NOT_VERIFIED 条目 ⇒ 无处造 FAIL 靶子")
+
+
 # ── 变异用例 ────────────────────────────────────────────────────────────────
 #   (名称, 施加到清单上的变换, 期望守门报出的规则标记)
 MUTATIONS = [
@@ -85,7 +104,7 @@ MUTATIONS = [
      "R5"),
 
     ("M7 · FAIL 条目抹掉理由（把已知不一致藏起来）",
-     lambda d: _find(d, "REQ-ERRMSG-LIKE-001").pop("gap_note", None),
+     lambda d: _mutate_fail_without_note(d),
      "R7"),
 
     ("M8 · VERIFIED 要求挂到不存在的流水线（没人执行它）",
@@ -142,11 +161,21 @@ def main() -> int:
 
     for name, mutate, expect_rule in MUTATIONS:
         data = json.loads(REGISTER.read_text(encoding="utf-8"))
+        before_d = json.dumps(data, ensure_ascii=False, sort_keys=True)
         try:
             mutate(data)
         except Exception as e:
             results.append({"name": name, "expect": expect_rule, "caught": False,
                             "detail": f"变异施加失败：{e}"})
+            ok = False
+            continue
+
+        # ⚠️ **变异必须真的改动了内容** ⇒ 否则「守门返回 0」会被读成「抓不到」，
+        #    而真相是「**靶子不存在、变异根本没生效**」⇒ 两种情况必须分开记。
+        if json.dumps(data, ensure_ascii=False, sort_keys=True) == before_d:
+            results.append({"name": name, "expect": expect_rule, "caught": False,
+                            "detail": "⚠️ **变异落空**（清单内容逐字节未变）⇒ 靶子不存在，"
+                                      "不是守门抓不到 ⇒ 该变异必须改成自建靶子"})
             ok = False
             continue
 

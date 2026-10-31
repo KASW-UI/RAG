@@ -150,6 +150,19 @@ class GoStyleClientCallTimeoutSingleSourceGateTest {
     private static final Pattern SHARED_CAP_PARAM = Pattern.compile(
             "getOutboundDeadline\\s*\\(\\s*\\)\\s*\\.\\s*getCapMillis\\s*\\(");
 
+    /**
+     * 「cap 以 <b>min</b> 语义并入预算」的形态（代码态）。
+     *
+     * <p>🆕 2026-10-31（合并收口执行者 · 加「按下游服务名覆盖」时）：原判据是
+     * <b>字面量</b> {@code Math.min(budgetNanos, TimeUnit.MILLISECONDS.toNanos(capMillis))}
+     * ⇒ ⇒ 共享实现一旦把 cap 归一到**中间变量**（本轮的 {@code effectiveCap}）⇒ ⇒ 判据**假红**
+     * ⇒ ⇒ 判据必须打在<b>性质</b>上：「{@code budgetNanos} 与<b>某个</b>毫秒上限取 min」
+     * ⇒ ⇒ 变量名可换，但**覆盖语义**（不取 min）仍匹配不上 ⇒ ⇒ 鉴别力不变。
+     */
+    private static final Pattern CAP_MIN_MERGE_PATTERN = Pattern.compile(
+            ".*Math\\.min\\(\\s*budgetNanos\\s*,\\s*TimeUnit\\.MILLISECONDS\\.toNanos\\(\\s*"
+                    + "[A-Za-z_][A-Za-z0-9_]*\\s*\\)\\s*\\).*");
+
     /** 域侧调用点：{@code withDeadlineAfter(...)}（代码态）。 */
     private static final Pattern DEADLINE_CALL = Pattern.compile(
             "\\bwithDeadlineAfter\\s*\\([^;]*?\\)\\s*;");
@@ -210,8 +223,14 @@ class GoStyleClientCallTimeoutSingleSourceGateTest {
                 .anyMatch(l -> l.contains("getOutboundDeadline().getCapMillis()"));
         assertThat(code)
                 .as("🔴 cap 必须按 **min** 语义并入（Go 的 `context.WithTimeout` 取更早者）")
-                .anyMatch(l -> l.contains(
-                        "Math.min(budgetNanos, TimeUnit.MILLISECONDS.toNanos(capMillis))"));
+                // ⚠️ **判据打成「性质」而不是「一个字面量」**（2026-10-31 · 合并收口执行者）
+                //   ⇒ 原判据写死变量名 `capMillis` ⇒ ⇒ 只要共享实现把 cap 归一到一个**中间变量**
+                //      （本轮为了加「按下游服务名覆盖」而引入 `effectiveCap`）⇒ ⇒ 判据**假红**
+                //      ⇒ ⇒ **假红比假绿更贵**（它会把一次正确的实现改进判成缺陷 ⇒ ⇒ 让人去「修」一个没坏的东西）。
+                //   ⇒ ⇒ 改判 = 「`budgetNanos` 必须与**某个**毫秒上限取 min」
+                //      ⇒ 变量名随便换都不影响 ⇒ ⇒ 但**覆盖语义**（不取 min）仍然**匹配不上** ⇒ ⇒ 鉴别力不变。
+                //   ⇒ ⚠️ 仍要求「变量名是标识符」⇒ ⇒ 防止有人写 `Math.min(budgetNanos, ...toNanos("x"))` 蒙混。
+                .anyMatch(l -> CAP_MIN_MERGE_PATTERN.matcher(l).matches());
     }
 
     @Test

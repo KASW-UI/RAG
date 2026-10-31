@@ -239,7 +239,7 @@ canonical 流水线指向 `https://github.com/KASW-UI/RAG.git` 的 `do-my-own-gh
 | A6 | **R4 契约门**：10 类变异全转红 | A | `python3 ci/scripts/check-proto-contract.py --baseline ci/contracts/proto` ⇒ PASS 10 / FAIL 0 / BLOCKED 0；变异含改字段号 / 改类型 / 删 message / 改 package / Java 侧 proto 缺失 / 基准缺失 / 基准目录有未登记文件 ⇒ 基准缺失正确判 **BLOCKED(2)** |
 | A7 | **R5 契约门**（初版）正向跑通 + 6 类变异全转红 | A | `bash ci/scripts/check-errmsg-contract.sh` ⇒ PASS 9；变异含改码值 / 改文案 / **新增错误码枚举常量（CONST+TABLE 两行都新增 ⇒ 不漏）** / 改 OBS case 名 / 基准缺失(BLOCKED) / Maven 编译失败(BLOCKED) |
 | A8 | 🔴 **R5 初版基准是「Java 现状」⇒ 违反「禁止反向定义」** ⇒ **已返工完成** | A | `ci/contracts/errmsg/*.txt` 的 dump 段实为 **Java 侧 dump**，Go 值只在注释里 ⇒ 已返工为 **Go 派生基准**（`# >>> go-authority >>>` 段：`GOCONST`/`GOTABLE`/`GOFALLBACK` + Go `文件:行号` + sha256）+ `# >>> deviations >>>` 差异四态段（9 字段 `DEVIATION|…`） |
-| A8b | ✅ **R5 返工后的正向读数**：**PASS 7 / FAIL 0 / BLOCKED 0 / PENDING 2**（域 `comment`·`like`）⇒ **EXIT=3** | A | `bash ci/scripts/check-errmsg-contract.sh` ⇒ 差异台账分列 **approved 31 / closed 2 / technical 13 / pending 8**（pending 单列 ⇒ 需用户拍板，清单见 `ci/requirements/README.md` §8.2） |
+| A8b | ✅ **R5 返工后的正向读数**：**PASS 7 / FAIL 0 / BLOCKED 0 / PENDING 2**（域 `comment`·`like`）⇒ **EXIT=3**<br>🆕 **2026-10-31 用户签字后**：**PASS 9 / FAIL 0 / BLOCKED 0 / PENDING 0** ⇒ **EXIT=0**（🟢 绿） | A | `bash ci/scripts/check-errmsg-contract.sh` ⇒ 差异台账分列 **approved 38 / closed 3 / technical 13 / pending 0**（pending 清零 ⇒ 8 条差异已全部销项：4+3 转 `approved` · 1 转 `closed`）⇒ 裁定与依据见 `ci/requirements/README.md` §8.2 |
 | A8c | ✅ **R5 门禁变异测试 11/11 红在目标断言**，且**真源字节全部恢复** | A | `python3 ci/scripts/check-errmsg-contract-mutations.py` ⇒ M1 改码值 · M2 删码 · M3 改文案 · M4 改回落 · M5 缺 authority 段(BLOCKED) · M6 DEVIATION 字段损坏(BLOCKED) · **M7 pending→假 approved(自证豁免)⇒FAIL** · M8 approved 依据文件越界⇒FAIL · M9 基准缺失(BLOCKED) · M10 探针编译失败(BLOCKED) · **M11 Java 侧真改一个文案 ⇒ FAIL** |
 | A8d | ⚠️ 变异过程**抓出两个变异脚本缺陷**（**不是门禁缺陷**） | A | ① `article` 域探针在 `tools/errmsg-probe/java/Probe.java`（**无 `article/` 子目录**）⇒ 路径写错 ⇒ 脚本崩；② Java 侧变异命中**测试文件**（`rglob` 顺序）⇒ 改的不是 `target/classes` 的来源 ⇒ 门禁当然绿 ⇒ **已限定 `src/main/**`** ⇒ 单验 M11：影子仓改 `SUCCESS(200,"OK")` ⇒ 门禁判 `DRIFT\|UNREGISTERED\|TABLE\|200\|Go=OK / Java=OK-漂移了` ⇒ **FAIL** ⇒ **门禁确实能抓 Java 侧漂移** |
 | A9 | **生成物一致 + 13 条流水线全部通过 Concourse 校验** | A | `python3 ci/generate-pipelines.py --check` ⇒ EXIT=0（11 日常 + 2 契约）；`fly validate-pipeline` ⇒ 13/13 |
@@ -264,11 +264,26 @@ canonical 流水线指向 `https://github.com/KASW-UI/RAG.git` 的 `do-my-own-gh
 | B2 | 🔴 **实跑抓出缺陷①：`docker_api.image_exists` 把 tag 丢了** | B | 症状：R6 首跑报 `GET /images/postgres/json ⇒ HTTP 404 ⇒ 查镜像失败` ⇒ **9 域全 BLOCKED**（明明 registry 里有 `library/postgres:16-alpine`）。<br>根因：`GET /images/{name}/json` **省略 tag** ⇒ daemon 按 `:latest` 解析 ⇒ `postgres:16-alpine` 被误判。<br>⚠️ **同源第二个面**：若 `:latest` 恰存在则**假阳性** True ⇒ 跳过拉镜像 ⇒ 随后「起容器失败」。<br>修法：按 `name:tag` 完整引用查 + **404 返回 False**（正常答案）而非抛异常。⇒ 已加**第 13 道静态门** `ci/scripts/check-docker-api-selftest.py`（11 条断言） |
 | B3 | 🔴 **实跑抓出缺陷②：exec-with-stdin 的线格式错了 ⇒ daemon 根本不消费 stdin** | B | 症状：R6 第二个域起 PG 成功，但 `psql -f -` 永远等不到 EOF ⇒ exec 一直 Running ⇒ 表现成「超时」（**根因离症状很远**）。<br>根因：我方写法是 `POST /exec/{id}/start` + **JSON 请求体** ⇒ daemon 走 **200 + chunked 普通响应**路径 ⇒ **不接 stdin**；docker CLI 的写法是**无请求体 + 参数走 query + `Connection: Upgrade`** ⇒ daemon 才回 **101 劫持**。<br>⚠️ 叠加第二个坑：101 之后 `http.client` 会把 `conn.sock` 置 None ⇒ 旧实现 `conn.sock.sendall` ⇒ `AttributeError` ⇒ **整个 R6 崩在 Traceback**（而不是判 BLOCKED）。<br>修法：改为**手写原始 HTTP**（自建 socket / 自读响应头 / 裸流多路复用解码）+ R6 检查器把**任何意外异常归 BLOCKED(2)**。⇒ 真机对拍：`out='DONE\n23\n'`（与 docker CLI 完全一致）；自测扩到 11 条断言，**变异（退回带 JSON 体的写法）⇒ 3 条断言转红**（红在断言、无 Traceback），真源字节已恢复 |
 | B4 | 🔴 **实跑抓出缺陷③：CI 的 maven 镜像里没有 python3 ⇒ R5 的比对逻辑跑不了** | B | 症状：`ci/scripts/check-errmsg-contract.sh: line 239: python3: command not found` ⇒ **每个域都被记成 BLOCKED**。<br>根因：R5 需要**两种互斥运行时** —— 跑 Java 侧探针要 **JDK+Maven**（探针 import 的是各域**编译产物**里的 `ErrorCode`），做基准比对要 **python3**；而 `maven:3.9.11-eclipse-temurin-21`（Ubuntu 24.04）**没有 python3**。<br>修法：R5 拆成**两个内层容器**（顺序执行、共用同一 bind mount）：内层① maven 出 Java 侧 dump → 内层② python 做比对。⇒ dump 目录放 `$PWD/errmsg-dump`（**不在 `repo/` 里** ⇒ 不进 task outputs ⇒ 不跨 build 残留）；dump 阶段**不记账**（还没比对 ⇒ 无从判 PASS/FAIL）⇒ 杜绝「没比对就当通过」 |
-| B5 | 🔴 **实跑抓出缺陷④：`dependency:build-classpath` 单独跑 ⇒ 干净环境解析不到上游模块** | B | 症状：R5 的 `task` 域报 `Could not find artifact com.rag:task-proto:jar:0.0.1-SNAPSHOT` ⇒ 该域 BLOCKED（看着像依赖问题，**其实是 reactor 没编译**）。<br>根因：`mvn -pl … -am dependency:build-classpath` **单独跑** ⇒ reactor 里上游模块（`task-proto`/`common`）没有编译产物 ⇒ Maven 只能从本地仓库找它们的 jar ⇒ 干净环境（CI 的 `.m2` 缓存里没有已安装的 `com.rag:*`）必然失败。<br>修法：① `compile` 与 `dependency:build-classpath` **同一次 mvn 调用** ⇒ reactor 内直接用上游的 `target/classes`；② `-Dmdep.outputFile` 改**相对路径** `target/ci-cp.txt` ⇒ 每个 reactor 模块写自己 basedir 下的文件（绝对路径会互相覆盖 ⇒ 拿到的不是目标模块的 classpath）。<br>本地实证：造了一个**去掉 `com/rag`** 的 `.m2` 仓库视图模拟干净环境 ⇒ task 域 dump 产出成功；全 9 域 dump ⇒ compare ⇒ **PASS 7 / FAIL 0 / BLOCKED 0 / PENDING 2（EXIT=3）** |
+| B5 | 🔴 **实跑抓出缺陷④：`dependency:build-classpath` 单独跑 ⇒ 干净环境解析不到上游模块** | B | 症状：R5 的 `task` 域报 `Could not find artifact com.rag:task-proto:jar:0.0.1-SNAPSHOT` ⇒ 该域 BLOCKED（看着像依赖问题，**其实是 reactor 没编译**）。<br>根因：`mvn -pl … -am dependency:build-classpath` **单独跑** ⇒ reactor 里上游模块（`task-proto`/`common`）没有编译产物 ⇒ Maven 只能从本地仓库找它们的 jar ⇒ 干净环境（CI 的 `.m2` 缓存里没有已安装的 `com.rag:*`）必然失败。<br>修法：① `compile` 与 `dependency:build-classpath` **同一次 mvn 调用** ⇒ reactor 内直接用上游的 `target/classes`；② `-Dmdep.outputFile` 改**相对路径** `target/ci-cp.txt` ⇒ 每个 reactor 模块写自己 basedir 下的文件（绝对路径会互相覆盖 ⇒ 拿到的不是目标模块的 classpath）。<br>本地实证：造了一个**去掉 `com/rag`** 的 `.m2` 仓库视图模拟干净环境 ⇒ task 域 dump 产出成功；全 9 域 dump ⇒ compare ⇒ **PASS 7 / FAIL 0 / BLOCKED 0 / PENDING 2（EXIT=3）**（**签字前读数**）⇒ 🆕 **2026-10-31 用户签字后复跑 ⇒ PASS 9 / FAIL 0 / BLOCKED 0 / PENDING 0（EXIT=0）** |
 | B6 | ✅ **静态守门在真实 CI 镜像内 12/12 通过**（含新增的第 12/13 道门） | B | `docker run -v <clone>:/build/repo -w /build python:3.12-bookworm sh repo/ci/scripts/run-static-gates.sh` ⇒ **12 道全绿 / 0 失败**。<br>⚠️ **一个重要的台架陷阱**：从 **git worktree** 挂进容器跑 ⇒ 前 3 道门报「没收集到任何文件 ⇒ 无法判定」⇒ 因为它们用 `git ls-files` 收集文件，而 worktree 的 `.git` 是**指针文件**、主仓 worktrees 目录没挂进容器 ⇒ **不是门禁缺陷，是台架缺陷**；从**纯 clone**（= Concourse 的实际形态）跑 ⇒ 12/12 全绿 |
 | B7 | ✅ **触发面静态一致性 7/7 通过**（精确集合比对，非模糊的「有触发就算」） | A/B | `bash ci/verify-triggers.sh --static` ⇒ 从生成器产出的 `paths` 算出触发集合，与**手工推导的意图集合**逐条精确比对 ⇒ **7/7 一致**。<br>⇒ 新增**第 12 道静态门** ⇒ 生成器漂移会被当场抓住。<br>附带确认了一条**可被检查的性质**：`service/common/**` 的改动**不会**触发两条契约流水线（契约门只听 `ci/contracts/**` 与各域 `errmsg`/`db/migration` 路径）⇒ 此前是「没人验证过的假设」，现在是**断言** |
 | B8 | 🔴 **宿主磁盘 100% 满的根因定位与处置** | B | `/System/Volumes/Data` 一度只剩 **216 MiB** ⇒ Docker containerd 内容库块级 EIO ⇒ daemon 挂死 / Concourse 整栈退出（**连续崩 3 次**）。<br>定位：**元凶是 141 个 Docker 卷**（Concourse 的 build/worker 卷 + 各 lane 的探针残留）⇒ `docker volume prune` 一次回收 **133.9 GB** ⇒ 可用空间 216 MiB → **120 GiB** ⇒ daemon 与 Concourse 全部恢复。<br>⇒ 结论：**这不是「环境时好时坏」，是可定位、可清理的具体占用**；记此条是为了下次不必重新踩一遍 |
+| B9 | ✅ **触发面在真实服务端验证通过：7/7 精确集合一致** | B | `bash ci/verify-triggers-server.sh` ⇒ **EXIT=0**。<br>读数（**真实 commit ⇒ 真实 build**，逐条精确集合比对）：<br>· 改 `service/common/**` ⇒ **11 条日常**触发、**2 条契约不触发**<br>· 改 `service/users/users-common/**` ⇒ 9 条（**不含 `rag-task`**）<br>· 改 `users/user` proto ⇒ 6 条<br>· 改 `article` proto ⇒ 4 条（`article`/`comment`/`favorite`/`hot`）<br>· 改 `service/users/pom.xml`（祖先 pom）⇒ 9 条<br>· 改 `ci/**` ⇒ **全部 13 条**<br>· 改 `docs/**` ⇒ **无**（0 条）<br>⇒ 与**静态**口径（`verify-triggers.sh --static`，7/7）**逐条一致** ⇒ 静态门（#12）站得住 |
+| B10 | 🔴 **服务端触发面验证踩出的三个测量陷阱**（都不是门禁缺陷） | B | ① **暂停的 job 不产生 build** —— 13 条 job 全 `pause-job` 后推 3 个 probe commit ⇒ **零 build**（调度器对暂停的 job 连资源检测都不做）⇒ 「暂停省算力」会让触发面**完全不可观测** ⇒ 改用**轻量版流水线**（`paths` 逐字节照抄 + 空任务 ⇒ 零算力、语义等价）。<br>② **「等第一个 build 出现」会测出假的不符** —— 13 条流水线各有自己的 git resource 实例 ⇒ 检查时刻散开 ⇒ 等到第一个就快照会得到**残缺**集合，且**上一场景的 build 会串场**（实测读数整体错位一格）⇒ 改成等集合**稳定**（≥90s 且连续 30s 无变化，上限 240s）。<br>③ **`check_every: 15s` 会让 git 资源的 check 反复失败** —— ATC 日志里 `check-step.finished` 与 `run.finish.failed` 成对出现 ⇒ 资源状态 `failed` ⇒ **零 build** ⇒ 去掉后资源 `succeeded`、轻量 build `succeeded`（6s）⇒ **测量靠「等稳定」，不靠调资源间隔** |
 
+
+### 4.5 🆕 2026-10-31（签字落码轮）：R5 的 8 条 `pending` 销项 + **三条事实订正**
+
+> 本节记的是**用户裁定落地**这一轮，以及**本轮核出的三条与「读数/断言」有关的事实订正**。
+> ⚠️ **订正不靠改写历史**（共享分支的历史改写代价大于收益）⇒ 事实订正一律**记在台账里**。
+
+| # | 结论 | 层级 | 依据 |
+|---|---|---|---|
+| B11 | ✅ **R5 的 8 条 `pending` 全部销项 ⇒ 契约门由「有意为红」转绿** | A | 用户裁定（2026-10-31）：**「comment 3 条 + like 4 条签、foreign_plain 降级为 closed」**。<br>落笔：签字档新增 **`SD-2026-10-31-01`**（like · `docs/Intentional_Deviations/like/rpc.md`）与 **`SD-2026-10-31-02`**（comment · `docs/Intentional_Deviations/comment/common.md`）⇒ 基准 `like.txt` 4 条 → `approved` + `foreign_plain` → `closed`（依据 `D-7` · **比较点错配**）；`comment.txt` 3 条 → `approved`。<br>读数：**PASS 9 / FAIL 0 / BLOCKED 0 / PENDING 0 · EXIT=0**（原 EXIT=3）；差异台账 approved 31→**38** · closed 2→**3** · technical 13 · pending 8→**0**。<br>清单侧：**PASS 仍 = 23**（`APPROVED_DIFFERENCE` 不计入）· **FAIL 1→0** · 缺口 **19→18**。<br>⇒ ⚠️ **签字 = 承认并接受差异 ≠ 证明两侧一致** ⇒ PASS **不会**因签字而上升。<br>⇒ ⚠️ **Task 内重跑尚未执行**：canonical 指向 GitHub `do-my-own-gh` 且 **paused**，而本轮**不 push** ⇒ 重跑待合入 + 解暂停后补跑 |
+| B12 | 🔴 **事实订正①：`615cf933` 提交信息里的「CI lane 停摆」不成立** | — | 该笔写「CI lane 于 19:49:22 收到用户裁定后即遇 Token Plan 配额上限（42212）⇒ 工作树停在未提交状态 ⇒ 由收口执行者代落」⇒ **CI lane 未停摆**，裁定后一直在完整落码 ⇒ 该笔内容**全部来自 CI lane 工作树**（含两个变异套件的修复）⇒ **无内容损失**。<br>⇒ 该笔**已合入主干** ⇒ **不改写历史** ⇒ 订正记在此处。<br>⇒ **教训**：「**工作树有未提交改动**」≠「**那个 agent 停摆了**」⇒ 并发写权下**代提交前必须先确认对方是否真的在动**（查工作树 mtime / 会话活跃度），否则会**把在产的活儿记成停摆** |
+| B13 | 🔴 **事实订正②：「主干红」在本 lane 的读数不成立** | — | CI lane 在**自己落后主干 250+ 笔的分支树**上读到 `tools/check-ledger-selfcheck.py` **EXIT=1**（task 域 Go 侧 import 映射）⇒ 在**主干树上实测 EXIT=0**（层 0~4 全过）⇒ ⇒ **「lane 报的主干红」在主干不成立**。<br>⇒ 纪律：**凡要报「主干红」，必须先在主干树上复跑**；且**不要用 `git stash`**（会偷并发 agent 的改动）⇒ 用**只读**方式（另开 clone / `git worktree`）复核 |
+| B14 | 🟡 **判读纪律：`BLOCKED` 可能是**瞬时**环境值 ⇒ 重跑才定性** | — | 收口执行者首次跑 R5 门时出现 **1 次 `BLOCKED(article)`** ⇒ 实测是**容器启动竞态**的瞬时值 ⇒ **重跑即 PASS 9** ⇒ 记为**环境性瞬时值、不记为缺陷**。<br>⇒ 与既有纪律一致：**环境问题绝不能报成 FAIL**；且**反过来也不能默认当噪声忽略** ⇒ 判据 = **重跑一次**：仍 BLOCKED ⇒ 才是环境侧缺陷；复现 PASS ⇒ 瞬时值（**须记录**） |
+| B15 | 🔴 **方法论：变异套件的「靶子消失」会被读成「守门抓不到」** | A | 签字后变异抓取率掉了（10/10→**9/10**、11/11→**10/11**）⇒ 根因**不是守门变弱**，而是**靶子没了**：<br>· `check-requirements-mutations.py` **M7** 打的是「抹掉现有 **FAIL** 条目的 `gap_note`」，而 R7 规则只对 `status=FAIL` 生效 ⇒ 签字后 FAIL 清零 ⇒ **变异落空**（守门返回 0 ⇒ 看起来像「抓不到」）；<br>· `check-errmsg-contract-mutations.py` **M7** 打的是「**pending** → approved」⇒ pending 清零 ⇒ 同类落空。<br>修法（**只改变异脚本、不动守门规则**）：M7 改为**自建靶子**（把一条 `NOT_VERIFIED` 改成 `FAIL` 且删 `gap_note` / 退回挑 `approved` 并换成**查不到的** id）⇒ 回到 **10/10** 与 **11/11**。<br>⇒ 🆕 两个套件都加了「**变异必须真的改写了内容**」自证 ⇒ **落空**单独记为「**变异落空**」，不再与「守门抓不到」混为一谈。<br>⇒ **可复用**：任何「打靶式」自证（变异 / 探针 / 断言）**都要先确认靶子还在** ⇒ 否则「自证失败」会被归因成「守门有洞」，修错方向 |
 
 ---
 
@@ -476,6 +491,24 @@ python3 ci/generate-pipelines.py --check  # 校验（应为 EXIT=0）
 `ci/**` 在触发面里 ⇒ 11 条流水线会全部重跑。
 若改了 `ci/tasks/*.yml`，**必须**重跑生成器（task 配置是内联进 pipeline 的）。
 
+### 7.3b 🆕 改了「目标要求清单」或「契约基准」之后
+
+| 改了什么 | 必须再跑 | 为什么 |
+|---|---|---|
+| `ci/requirements/requirements.json` | `python3 ci/scripts/check-requirements.py` + `check-requirements-mutations.py` | 清单的结构与六态口径由守门保证；变异测试保证**守门不是假绿** |
+| `ci/contracts/errmsg/*.txt` | `bash ci/scripts/check-errmsg-contract.sh` + `check-errmsg-contract-mutations.py` | 基准变了 ⇒ 必须重判差异四态 |
+| `ci/contracts/schema/*.json` | `python3 ci/scripts/check-schema-contract.py --all` + `check-schema-contract-mutations.py` | 同上 |
+| `ci/contracts/proto/*.proto` | `python3 ci/scripts/check-proto-contract.py --baseline ci/contracts/proto` | 同上 |
+| `ci/scripts/dind-run.sh`（改了内层阶段编排） | `bash ci/verify-triggers-server.sh` | 触发面是**服务端**性质 ⇒ 只做静态检查不够 |
+| `ci/pipelines/*.yml`（或 pom 依赖） | `python3 ci/generate-pipelines.py --check` + `bash ci/verify-triggers.sh --static` | 生成器与**意图集合**必须一致 |
+
+> ⚠️ **签字流程（唯一的「让红变绿」的正当途径）**：
+> 差异要转正 ⇒ **先**在 `docs/Intentional_Deviations/` 登记并签字 ⇒ **再**把基准文件里对应那条
+> `DEVIATION|…` 的状态从 `pending` 改成 `approved` 并填上依据 id ⇒ **再**把清单里该要求的
+> 状态改成 `APPROVED_DIFFERENCE` 并填 `deviation.id` ⇒ 守门会**机器回指**该 id（查不到 ⇒ FAIL）。
+> ⇒ ⛔ **不要**为了让 build 变绿而改 Java 业务代码；⛔ **不要**自行把 `pending` 改成 `approved`
+> 而不签字 —— 守门会拦（变异测试 M7/M8 就是专门测这个）。
+
 ### 7.4 常见故障与定位
 
 | 症状 | 先查 |
@@ -483,9 +516,14 @@ python3 ci/generate-pipelines.py --check  # 校验（应为 EXIT=0）
 | task 报 `repo/ci/scripts/... not found` | 触发面缺 `ci/**` ⇒ 取到的 commit 里没有 `ci/` |
 | 内层 daemon 拉镜像 `connection refused` | 内层 dockerd 的 bridge 与外层同网段 ⇒ 查 `--bip` |
 | 内层 daemon 拉镜像 404 | registry 里仓库路径不对（`library/postgres` vs `apache/kafka`） |
+| **R6 报「查镜像失败」** | `docker_api.image_exists` 丢了 tag ⇒ daemon 按 `:latest` 解析 ⇒ 查 registry 里有没有该 tag（§4.4 B2） |
+| **R6 迁移卡住 / exec 一直 Running** | exec-with-stdin 的**线格式**不对 ⇒ daemon 不消费 stdin ⇒ 必须照抄 docker CLI 的写法（§4.4 B3） |
+| **R5 报 `python3: command not found`** | CI 的 maven 镜像**没有 python3** ⇒ 必须走**两个内层阶段**（§4.4 B4） |
+| **R5 某域报 `Could not find artifact com.rag:…`** | `dependency:build-classpath` 单独跑 ⇒ 上游模块没编译 ⇒ 必须与 `compile` 同一次 mvn 调用（§4.4 B5） |
 | `fly set-pipeline` 报变量未定义 | `registry` / `maven_mirror` 两个 var 都要给（`ci/deploy.sh` 会给） |
 | 构建报 `Non-resolvable parent POM` | 仓内 pom 的 `relativePath` 缺陷（§六） |
 | git 资源 check 反复失败 | 看 GitHub 链路带宽（§五）⇒ 换本地 git 服务 |
+| **build 永远 pending** | 流水线或 job 被暂停 ⇒ `fly unpause-pipeline` / `fly unpause-job`（**暂停的 job 不会产生 build**，连资源检测都不做 ⇒ 触发面会完全不可观测） |
 
 ### 7.5 边界声明
 

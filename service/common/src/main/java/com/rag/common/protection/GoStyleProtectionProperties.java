@@ -3,6 +3,9 @@ package com.rag.common.protection;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 /**
  * Go「请求保护层」四道中间件的配置聚合点。
  *
@@ -285,6 +288,47 @@ public class GoStyleProtectionProperties {
          */
         private long capMillis = 0L;
 
+        /**
+         * <b>按下游 gRPC 服务全名</b>覆盖的客户端硬上界（毫秒）。
+         *
+         * <h2>为什么需要它（组件级一个值表达不了 per-direction 真值）</h2>
+         * <p>{@link #capMillis} 是<b>组件级</b>一个值 ⇒ 而
+         * {@link GoStyleOutboundDeadlineInterceptor} 带 devh 的
+         * {@code @GrpcGlobalClientInterceptor} ⇒ 它装在<b>每一个</b>出向调用上
+         * ⇒ ⇒ <b>同一个进程里不同出向方向无法有不同上界</b>。
+         * <p>实测反例（RAG 仓 · 2026-10-31 · {@code article-api}）：
+         * <pre>
+         *   Go service/article/api/etc/article-api.yaml
+         *     ArticleRpcConf.Timeout: 70000   ⇒ article-rpc 方向 = 70s
+         *     UserRpcConf:（无 Timeout）       ⇒ 走 zrpc struct tag 默认 2000 ⇒ user-rpc 方向 = 2s
+         * </pre>
+         * ⇒ ⇒ 组件级配 <b>2000</b> ⇒ 会把 article-rpc 方向从 70s <b>改严 35 倍</b>；
+         * ⇒ ⇒ 组件级配 <b>70000</b> ⇒ 会把 user-rpc 方向从 2s <b>放宽 35 倍</b>
+         * ⇒ ⇒ <b>两个值都不对</b> ⇒ ⇒ 该组件只能「刻意不配 + 域侧内联副本」⇒ ⇒ 那正是漂移面。
+         *
+         * <h2>键是什么、为什么是它</h2>
+         * <p>键 = <b>下游 gRPC 服务全名</b>（proto 的 {@code package.Service}，如
+         * {@code article.ArticleService} / {@code user.UserService}）⇒ ⇒ 理由 = 那是
+         * <b>全局拦截器在拦截时唯一拿得到</b>的出向标识（{@code MethodDescriptor#getServiceName()}）
+         * ⇒ ⇒ <b>域侧零代码改动</b>（只需配参数）⇒ ⇒ 与「域侧只配参数」的原则同形。
+         *
+         * <h2>语义 = <b>覆盖</b>（不是 min）</h2>
+         * <p>某个服务名命中且值 <b>&gt; 0</b> ⇒ ⇒ <b>取代</b>组件级 {@link #capMillis}
+         * ⇒ ⇒ 可<b>放宽</b>（70000 覆盖 2000）也可<b>收紧</b>（2000 覆盖 70000）。
+         * <p>值 <b>≤ 0</b> 或<b>缺省</b> ⇒ ⇒ 回落组件级 {@link #capMillis}
+         * ⇒ ⇒ <b>0 = 未配置</b>（与组件级 0 = 不启用同义）⇒ ⇒ 不引入第三种含义。
+         *
+         * <h2>Go 出处（为什么是「每方向一个上界」）</h2>
+         * <pre>
+         *   go-zero@v1.10.2/zrpc/client.go:70-71
+         *       if c.Timeout &gt; 0 { opts = append(opts, WithTimeout(time.Duration(c.Timeout)*time.Millisecond)) }
+         *   go-zero@v1.10.2/zrpc/config.go:31
+         *       Timeout int64 `json:",default=2000"` ⇒ 默认值，**各 client 段可各自覆盖**
+         * </pre>
+         * ⇒ ⇒ Go 侧本就是<b>每个 client 段一个 Timeout</b> ⇒ ⇒ RAG 侧按下游服务名分档同形。
+         */
+        private Map<String, Long> capMillisByService = new LinkedHashMap<>();
+
         public boolean isEnabled() {
             return enabled;
         }
@@ -299,6 +343,15 @@ public class GoStyleProtectionProperties {
 
         public void setCapMillis(long capMillis) {
             this.capMillis = capMillis;
+        }
+
+        /** 按下游 gRPC 服务全名覆盖的客户端硬上界（毫秒）；缺省为空 ⇒ 全部回落组件级。 */
+        public Map<String, Long> getCapMillisByService() {
+            return capMillisByService;
+        }
+
+        public void setCapMillisByService(Map<String, Long> capMillisByService) {
+            this.capMillisByService = capMillisByService;
         }
     }
 

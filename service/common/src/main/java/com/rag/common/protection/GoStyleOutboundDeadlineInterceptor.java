@@ -125,6 +125,14 @@ public class GoStyleOutboundDeadlineInterceptor implements ClientInterceptor {
     private final long capMillis;
 
     /**
+     * <b>按下游 gRPC 服务全名</b>覆盖的客户端硬上界（毫秒）。
+     *
+     * <p>见 {@link GoStyleProtectionProperties.OutboundDeadline#getCapMillisByService()} 的 javadoc
+     * （为什么组件级一个值表达不了 per-direction 真值 · 为什么键是服务全名 · 语义是「覆盖」不是 min）。
+     */
+    private final java.util.Map<String, Long> capMillisByService;
+
+    /**
      * Spring 注入点。
      *
      * <p>⚠️ <b>必须显式标注 {@code @Autowired}</b>：本类有第二个构造器（给测试用），
@@ -137,6 +145,10 @@ public class GoStyleOutboundDeadlineInterceptor implements ClientInterceptor {
     public GoStyleOutboundDeadlineInterceptor(GoStyleProtectionProperties props) {
         this.enabled = props.getOutboundDeadline().isEnabled();
         this.capMillis = props.getOutboundDeadline().getCapMillis();
+        java.util.Map<String, Long> byService = props.getOutboundDeadline().getCapMillisByService();
+        this.capMillisByService = byService == null
+                ? java.util.Map.of()
+                : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(byService));
     }
 
     /**
@@ -160,8 +172,27 @@ public class GoStyleOutboundDeadlineInterceptor implements ClientInterceptor {
      * @param capMillis 客户端硬上界（毫秒）；{@code 0} = 不启用
      */
     public GoStyleOutboundDeadlineInterceptor(boolean enabled, long capMillis) {
+        this(enabled, capMillis, java.util.Map.of());
+    }
+
+    /**
+     * <b>公开</b>的「直接给开关、组件级上界、按服务名覆盖表」构造器。
+     *
+     * <p>🆕 2026-10-31（合并收口执行者 · 代 G4 落 per-client 上界）：
+     * 组件级一个 {@code capMillis} 表达不了「同一进程不同出向方向不同上界」
+     * ⇒ ⇒ 故补这张按<b>下游 gRPC 服务全名</b>的覆盖表。
+     *
+     * @param enabled         出向 deadline 传播是否开启
+     * @param capMillis       组件级客户端硬上界（毫秒）；{@code 0} = 不启用
+     * @param capMillisByService 按下游服务全名覆盖的上界（毫秒）；命中且 {@code > 0} ⇒ <b>取代</b>组件级
+     */
+    public GoStyleOutboundDeadlineInterceptor(boolean enabled, long capMillis,
+                                              java.util.Map<String, Long> capMillisByService) {
         this.enabled = enabled;
         this.capMillis = capMillis;
+        this.capMillisByService = capMillisByService == null
+                ? java.util.Map.of()
+                : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(capMillisByService));
     }
 
     @Override
@@ -169,11 +200,13 @@ public class GoStyleOutboundDeadlineInterceptor implements ClientInterceptor {
             MethodDescriptor<ReqT, RespT> method,
             CallOptions callOptions,
             Channel next) {
-        return next.newCall(method, effectiveCallOptions(callOptions));
+        // ⚠️ **服务全名 = 全局拦截器在拦截时唯一拿得到的出向标识**
+        //    （MethodDescriptor#getServiceName）⇒ ⇒ per-service 覆盖表不需要域侧任何代码改动
+        return next.newCall(method, effectiveCallOptions(callOptions, method.getServiceName()));
     }
 
     /**
-     * 按 <b>min</b> 语义算出这次出向调用的 deadline。
+     * 按 <b>min</b> 语义算出这次出向调用的 deadline（<b>不</b>应用 per-service 覆盖 ⇒ 回落组件级）。
      *
      * <p>⚠️ <b>为什么必须显式算 min 而不是直接覆盖</b>：grpc-java 的
      * {@link CallOptions#withDeadlineAfter(long, TimeUnit)} 是<b>覆盖</b>语义
@@ -185,6 +218,31 @@ public class GoStyleOutboundDeadlineInterceptor implements ClientInterceptor {
      * @return 带上 min 后 deadline 的新选项；<b>三项都没有预算时原样返回</b>
      */
     CallOptions effectiveCallOptions(CallOptions callOptions) {
+        return effectiveCallOptions(callOptions, null);
+    }
+
+    /**
+     * 按 <b>min</b> 语义算出这次出向调用的 deadline；<b>并</b>按下游服务全名应用 per-service 覆盖。
+     *
+     * <h2>⚠️ 两处「取 min」与一处「覆盖」必须分清</h2>
+     * <table border="1">
+     *   <caption>本方法的算术</caption>
+     *   <tr><th>项</th><th>关系</th><th>理由</th></tr>
+     *   <tr><td>入向请求预算</td><td>与 cap <b>取 min</b></td>
+     *       <td>Go 的 {@code context.WithTimeout(ctx, t)} ⇒ 取更早者</td></tr>
+     *   <tr><td>调用点自带 deadline</td><td>与上面 <b>取 min</b></td>
+     *       <td>同上（不能覆盖调用点自己声明的更早 deadline）</td></tr>
+     *   <tr><td><b>per-service 上界 vs 组件级上界</b></td><td><b>覆盖</b>（不是 min）</td>
+     *       <td>否则 per-service 永远赢不了组件级 ⇒ 「按方向分档」就<b>表达不出来</b>：
+     *       组件级 2000 + per-service 70000 若取 min ⇒ 仍是 2000 ⇒ article-rpc 方向被改严 35 倍</td></tr>
+     * </table>
+     *
+     * @param callOptions 调用点原本的选项
+     * @param serviceName 下游 gRPC 服务全名（proto 的 {@code package.Service}）；
+     *                    {@code null} ⇒ 不应用 per-service 覆盖（回落组件级）
+     * @return 带上 min 后 deadline 的新选项
+     */
+    CallOptions effectiveCallOptions(CallOptions callOptions, String serviceName) {
         if (!enabled) {
             return callOptions;
         }
@@ -197,8 +255,16 @@ public class GoStyleOutboundDeadlineInterceptor implements ClientInterceptor {
         }
 
         // ② 客户端硬上界（Go 的 zrpc client Timeout；本轮默认 0 = 不启用，见类 javadoc）
-        if (capMillis > 0L) {
-            budgetNanos = Math.min(budgetNanos, TimeUnit.MILLISECONDS.toNanos(capMillis));
+        //    ⚠️ **per-service 是「覆盖」组件级，不是 min**（理由见本方法 javadoc 的表）
+        long effectiveCap = capMillis;
+        if (serviceName != null) {
+            Long perService = capMillisByService.get(serviceName);
+            if (perService != null && perService > 0L) {
+                effectiveCap = perService;
+            }
+        }
+        if (effectiveCap > 0L) {
+            budgetNanos = Math.min(budgetNanos, TimeUnit.MILLISECONDS.toNanos(effectiveCap));
         }
 
         // ③ 调用点自己声明的 deadline（= applyTo(stub) 的产物）⇒ 必须取 min，不能覆盖

@@ -2,7 +2,7 @@
 
 | 编号 | 域 | 判定 | 依据（一句话，说明凭什么） | 本体位置 |
 |---|---|---|---|---|
-| `S1-FOLLOW-007` | `users` | 同一件事 | users 档 :524 讲「基线 `PhaseGoal-judge.md` 仍把已签字偏离 `DRIFT-FOLLOW-008` 记成开放缺陷」，与 follow 域自己的登记讲的是同一件事，且 users 档 :495 自己就写「详见 follow 档 `S1-FOLLOW-007`」⇒ 跨域引用 | （未派工 ⇒ 无本体）；实际本体 = `DRIFT/follow/stage1-admission.md:400` |
+| `S1-FOLLOW-007` | `users` | 同一件事 | ⚠️ **【2026-10-31 订正 · 合并收口执行者】原写「users 档 :524 讲『基线 `PhaseGoal-judge.md` 仍把已签字偏离 `DRIFT-FOLLOW-008` 记成开放缺陷』」= 当时的转述 ⇒ ⇒ 现已陈旧** —— users 档 :524 已改为「**✅ 本轮销号（2026-10-31 · G1 lane）—— 危害已消解 ⇒ 不再阻断阶段 1**」⇒ ⇒ **现在 users 档 :524 与 follow 档 :400 讲的是同一件事，且两边都已销号**（派生层 `S1-FOLLOW-007` = ✅ 已一致）⇒ ⇒ 且 users 档 :495 自己就写「详见 follow 档 `S1-FOLLOW-007`」⇒ 跨域引用 | （未派工 ⇒ 无本体）；实际本体 = `DRIFT/follow/stage1-admission.md:400` |
 | `S1-FOLLOW-004` | `users` | 同一件事 | 两处讲的是同一现象（根 `docker-compose.yaml` 只有 7 个 service ⇒ follow 域无编排入口），users 档 :523 是 follow 域 :394 那条的抄录 ⇒ 同一件事 | （未派工 ⇒ 无本体）；实际本体 = `DRIFT/follow/stage1-admission.md:145` ／ `:394` |
 | `S1-FOLLOW-008` | `users` | 同一件事 | 两处讲的都是 `tools/difftest/check-surface-parity.py` 的同两个静默假绿口子（`--domain users` 匹配不到任何域仍 EXIT=0 ＋ `GO_REPO` 按同级目录推导）⇒ 同一件事 | （未派工 ⇒ 无本体）；实际本体 = `DRIFT/follow/stage1-admission.md:401` |
 | `S1-FOLLOW-009` | `users` | 同一件事 | 两处讲的都是同一批 5 个 api 模块（article／comment／hot／like／task-api）缺 `TESTCONTAINERS_RYUK_DISABLED`，落点与现象逐条一致 ⇒ 同一件事 | （未派工 ⇒ 无本体）；实际本体 = `DRIFT/follow/stage1-admission.md:402` |

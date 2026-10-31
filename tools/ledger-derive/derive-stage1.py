@@ -989,7 +989,22 @@ def impact_to_class(text: str) -> str:
 
 
 def load_unresolved(line_index) -> dict[str, dict]:
-    """`_unresolved.md` ⇒ {项ID: {class, ids}}"""
+    """`_unresolved.md` ⇒ {项ID: {class, ids}}
+
+    ⚠️ **「`closed`（已关闭 / 已处置）到底改变什么、不改变什么**（2026-10-31 · 合并收口执行者）
+       —— 这两条曾被 lane 侧**预期反了**（⇒ ⇒ 由此产生一次错误的「订正后就会消失」的判断）：
+
+    ① **`closed` 只改「指针时效性」，不改「清单成员」** ——
+       · **改**：条目从 `unres_of` 移到 `unres_closed_of` ⇒ ⇒ 指向它的**排期指针失效**
+         （`schedule` 列多出「⚠️已关闭指针:…」· **不再算「已排期」** ⇒ ⇒ 原先靠它**伪排期**的
+         开放条目会**正确地回到「未排期」** ⇒ ⇒ 开放清单**可能因此变长** —— 那是**修正**，不是新增缺口）。
+       · **不改**：§2.2「未解决项（`_unresolved.md`）」表的**渲染是 `for uid in sorted(unresolved)`**
+         ⇒ ⇒ **遍历全部条目、不按 `closed` 过滤** ⇒ ⇒ **关了它，它仍出现在 §2.2 表里**。
+    ② **`blocking` 不随 `gap` 自动翻转** —— `blocking` 取自 **U5-O 显式定级叠加层**（`ov["blocking"]`）
+       ⇒ ⇒ 「关掉一个 A 类 gap」**不会**把该条目的 `blocking` 从「是」翻成「否」⇒ ⇒
+       **事实层（gap / status）与定级层（blocking / stage）是两路** ⇒ ⇒
+       事实变了只能关事实，**定级要显式拍板**（同 `C-3` 的处置：只关事实、不擅自翻定级）。
+    """
     text = UNRESOLVED.read_text(encoding="utf-8")
     lines = text.split("\n")
     cls = ""
@@ -1338,15 +1353,61 @@ def _cells(line: str) -> list[str]:
 #   ⇒ 旧口径「按整行取最早标记」⇒ 把「已修」读成「未闭合」⇒ **虚增真缺口**。
 STATUS_COL_NAMES = ("状态", "处置", "结论", "现状")
 
+# ⚠️ **当前态列**（2026-10-31 · 治本）—— 必须**精确匹配**，不能靠子串。
+#   ⚠️ **为什么不能靠子串**：「现行态」**不含**「状态」二字（**状 ≠ 行**）
+#     ⇒ 子串匹配打不中 ⇒ 只能靠 ①「显式『现行态 = X』」或 ⓪迁移记号才读得到。
+CURRENT_COL_NAMES = ("现行态", "当前状态", "当前态")
+
+# ⚠️ **历史列**（2026-10-31）—— 表头带这些词的列装的是**快照/原值**，**不是当前态**
+#   ⇒ 子串命中它们 = **读到历史态**。
+#   实测反例（`docs/DRIFT/follow/vs-common.md:1190` 的表头
+#     `| 编号 | 原状态 | 现行态 | 依据（两侧 文件:行号 · 核对日期 2026-10-29） | 改判 |`）：
+#   旧口径按「状态」子串 ⇒ 命中**第 1 格「原状态」**（历史列）
+#   ⇒ `PITFALL-FOLLOW-005` 被读成「🔴 未修 ⇒ 派 G4」
+#   ⇒ 而它**同一行**的「现行态」格写的是 **✅ 已闭环**，
+#      §9.2 订正段与 U5-O 定级（`DRIFT/follow/vs-common.md:1315` = 归属 **D** ·「差异已消失」）
+#      也都写「差异已消失 ⇒ 无待实现项」
+#   ⇒ 该条**本就不该进「真缺口（可开工清单）」** ⇒ 旧读数是**假红**。
+HISTORICAL_COL_HINTS = ("原状态", "快照状态", "历史状态", "修前状态")
+
+# ⚠️ **「当前态」标记词** —— 表头**同时**含历史词与当前态词（如 `原状态 → 现行态`）
+#   ⇒ 那一格装的是**状态迁移**（`旧 → 新`）⇒ 仍属**当前态列** ⇒ 不排除。
+CURRENT_MARKERS = ("现行", "当前", "现状", "最新")
+
 # ⚠️ **状态严重度**（护栏用）—— 🔴 未闭合 > 🟡 部分闭合 > ✅ 已一致 > ⚫ 已签字偏离
 STATUS_SEVERITY = {"🔴": 3, "🟡": 2, "✅": 1, "⚫": 0}
 
 
 def _status_col_index(hdr: list[str]) -> int:
-    """表头里「状态 / 处置 / 结论 / 现状」列的序号；找不到 ⇒ -1。"""
+    """表头里「当前状态」列的序号；找不到 ⇒ -1。
+
+    ⚠️ **为什么不能纯子串**（2026-10-31 实测）：
+      ① 「现行态」**不含**「状态」二字（状 ≠ 行）⇒ 子串**打不中** ⇒ 必须精确匹配；
+      ② 「原状态」/「快照状态」含「状态」⇒ 子串**误命中历史列** ⇒ 读到**历史态**。
+    ⇒ 顺序 = 精确「现行态/当前状态/当前态」
+            → 精确「状态/处置/结论/现状」
+            → 子串（**排除纯历史列**）。
+    ⚠️ **影响面已量**（A/B 双跑实测）：全仓仅 **1 条**读数变化
+      （`PITFALL-FOLLOW-005` ⇒ 由「🔴 未闭合」变「✅ 已一致」）⇒ **只去一条假红**。
+    """
+    # ① 精确「当前态」列
+    for want in CURRENT_COL_NAMES:
+        for idx, c in enumerate(hdr):
+            if c.strip() == want:
+                return idx
+    # ② 精确「状态/处置/结论/现状」列
+    for want in STATUS_COL_NAMES:
+        for idx, c in enumerate(hdr):
+            if c.strip() == want:
+                return idx
+    # ③ 子串兜底 ⇒ **排除纯历史列**（含历史词但不含当前态词的不算）
     for want in STATUS_COL_NAMES:
         for idx, c in enumerate(hdr):
             if want in c:
+                hist = any(h in c for h in HISTORICAL_COL_HINTS)
+                cur = any(m in c for m in CURRENT_MARKERS)
+                if hist and not cur:
+                    continue
                 return idx
     return -1
 

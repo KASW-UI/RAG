@@ -126,20 +126,26 @@
 
 ---
 
-## 八、当前状态（2026-10-31 实测）
+## 八、当前状态（2026-10-31 实测 · **签字后**）
 
 ```
 ✅ VERIFIED           （23）  proto 契约 ×10 · errmsg 契约 ×4（article/favorite/hot/users）
                                 schema 契约 ×7（除 users）· 表单段数上限 ×1 · 探针判定器 ×1
-❌ FAIL               （1）   REQ-ERRMSG-LIKE-001（like 域 4 条「D-7 下游非本域错误」待用户拍板）
-⚠️ NOT_VERIFIED      （19）  proto 消费面 4 · errmsg 未签字差异 5 域 · schema users 未签字差异
-                                1 · errmsg 场景/传播 2 · CHECK/触发器 2 · deadline 行为 1
-                                JWT/状态机/异步消息 3 · 调用图 1
+❌ FAIL               （0）   （无）—— 2026-10-31 用户签字后清零
+⚠️ NOT_VERIFIED      （18）  proto 消费面 4 · errmsg 场景/传播 2 · CHECK/触发器 2 · deadline 行为 1
+                                JWT/状态机/异步消息 3 · 调用图 1 · schema users 未签字差异 1
+                                errmsg 未签字差异 4 域（follow/message/task×2）
 ➖ NOT_APPLICABLE     （2）   hot 域 DDL 维度 · 外键维度（两侧皆无）
-🏷 APPROVED_DIFFERENCE（1）   REQ-ERRMSG-LIKE-002（SD-2026-10-23-06，机器回指已签字）
+🏷 APPROVED_DIFFERENCE（3）   REQ-ERRMSG-LIKE-002（SD-2026-10-23-06）
+                                REQ-ERRMSG-LIKE-001（**SD-2026-10-31-01** · 机器回指已签字）
+                                REQ-ERRMSG-COMMENT-001（**SD-2026-10-31-02** · 机器回指已签字）
 ```
 
-**PASS = 23**，**不计入 PASS 的缺口 = 19**，**FAIL = 1** ⇒ ⇒ **目标达成度远未完成**，这份清单的作用正是让这件事**可见**。
+**PASS = 23**，**不计入 PASS 的缺口 = 18**，**FAIL = 0** ⇒ ⇒ **目标达成度远未完成**，这份清单的作用正是让这件事**可见**。
+
+> ⚠️ **签字 ≠ 达成**：两条 errmsg 要求从 `FAIL`/`NOT_VERIFIED` 转成 `APPROVED_DIFFERENCE`
+> ⇒ **不计入 PASS**（PASS 仍是 23）⇒ **缺口从 19 降到 18，不是降到 0**。
+> ⇒ 签字的语义是「**承认并接受这处差异**」，不是「**证明两侧一致**」。
 
 ### 8.1 ⚠️ 「门禁 PASS」与「清单 VERIFIED」不是同一件事（别混谈）
 
@@ -153,24 +159,63 @@
 但清单里这些域判 **NOT_VERIFIED**（差异是技术判定，**不是用户批准**）
 ⇒ **两处口径都保守，不冲突** —— 门禁不误报漂移，清单不虚报达成。
 
-### 8.2 🆕 待用户拍板的差异清单（R5 · 8 条 `pending`）
+### 8.2 ✅ 已裁定的差异清单（R5 · 8 条 `pending` → **0 条待办**）
 
-**这 8 条是 Java 与 Go 真源**确实不一致**、但**没有人批准**的差异 ⇒ 按方向纠正，
-**不得自行加豁免**、**不得为绿改 Java 业务代码** ⇒ 需你逐条裁定。
+> **裁定（2026-10-31 · Jason）**：**「comment 3 条 + like 4 条签、foreign_plain 降级为 closed」**
+> ⇒ 8 条**全部销项** ⇒ 本域 `pending` 清零 ⇒ R5 契约门退出码由 **3 → 0**。
+> **落笔位置**：签字档 = `docs/Intentional_Deviations/like/rpc.md`（`SD-2026-10-31-01`）+
+> `docs/Intentional_Deviations/comment/common.md`（`SD-2026-10-31-02`）；
+> 机器基准 = `ci/contracts/errmsg/{like,comment}.txt` 的 `DEVIATION` 段状态。
 
-| # | 域 | 键 | Go 侧 | Java 侧 | 出处 | 差异性质 |
-|---|---|---|---|---|---|---|
-| 1 | `like` | `BIZCODE\|foreign_internal` | `13` | `1015` | `docs/DRIFT/like/vs-common.md:72`（D-7） | Go like-api 把下游 gRPC `INTERNAL` 码当业务码直传；Java 侧 `mapGrpcCodeToBizCode` 收敛到 1015 |
-| 2 | `like` | `BIZCODE\|foreign_invalid_argument` | `3` | `2001` | 同上 | Go 直传 `INVALID_ARGUMENT`；Java 映到 2001 |
-| 3 | `like` | `BIZCODE\|foreign_notfound` | `5` | `1015` | 同上 | Go 直传 `NOT_FOUND`；Java 收敛到 1015 |
-| 4 | `like` | `BIZCODE\|foreign_plain` | `5001` | `1015` | 同上 | Go 兜底 `ErrorServerCommon`(5001)；Java 兜底 1015 |
-| 5 | `like` | `BIZCODE\|foreign_unauthenticated` | `16` | `1009` | 同上 | Go 直传 `UNAUTHENTICATED`；Java 映到 1009 |
-| 6 | `comment` | `OBS\|obs_wire_grpcstatus_1012` | `1012\|1012\|code(1012)\|评论区不存在\|1012` | `1012\|2\|unknown\|评论区不存在\|1012` | `docs/DRIFT/comment/common.md`（D1） | **业务码 wire 载体**：Go 把业务码写进 `grpc-status`；grpc-java 只能发 17 个标准码 ⇒ Java 挪到自定义 trailer。**业务码与文案两侧无损**，只差 `grpc-status` 字段的数值 |
-| 7 | `comment` | `OBS\|obs_wire_grpcstatus_2001` | `2001\|…\|code(2001)\|…` | `2001\|3\|invalid_argument\|…` | 同上 | 同上 |
-| 8 | `comment` | `OBS\|obs_wire_grpcstatus_5003` | `5003\|…\|code(5003)\|…` | `5003\|2\|unknown\|…` | 同上 | 同上 |
+| # | 域 | 键 | Go 侧 | Java 侧 | 出处 | 差异性质 | **裁定** |
+|---|---|---|---|---|---|---|---|
+| 1 | `like` | `BIZCODE\|foreign_internal` | `13` | `1015` | `docs/DRIFT/like/vs-common.md:72`（D-7） | Go like-api 把下游 gRPC `INTERNAL` 码当业务码直传；Java 侧 `mapGrpcCodeToBizCode` 收敛到 1015 | ✅ **approved**（`SD-2026-10-31-01`） |
+| 2 | `like` | `BIZCODE\|foreign_invalid_argument` | `3` | `2001` | 同上 | Go 直传 `INVALID_ARGUMENT`；Java 映到 2001 | ✅ **approved**（同上） |
+| 3 | `like` | `BIZCODE\|foreign_notfound` | `5` | `1015` | 同上 | Go 直传 `NOT_FOUND`；Java 收敛到 1015 | ✅ **approved**（同上） |
+| 4 | `like` | `BIZCODE\|foreign_plain` | `5001` | `1015` | 同上 | Go 兜底 `ErrorServerCommon`(5001)；Java 兜底 1015 | ✅ **closed**（比较点错配 ⇒ 两侧对外一致 ⇒ 不是行为漂移） |
+| 5 | `like` | `BIZCODE\|foreign_unauthenticated` | `16` | `1009` | 同上 | Go 直传 `UNAUTHENTICATED`；Java 映到 1009 | ✅ **approved**（`SD-2026-10-31-01`） |
+| 6 | `comment` | `OBS\|obs_wire_grpcstatus_1012` | `1012\|1012\|code(1012)\|评论区不存在\|1012` | `1012\|2\|unknown\|评论区不存在\|1012` | `docs/DRIFT/comment/common.md`（D1） | **业务码 wire 载体**：Go 把业务码写进 `grpc-status`；grpc-java 只能发 17 个标准码 ⇒ Java 挪到自定义 trailer。**业务码与文案两侧无损**，只差 `grpc-status` 字段的数值 | ✅ **approved**（`SD-2026-10-31-02`） |
+| 7 | `comment` | `OBS\|obs_wire_grpcstatus_2001` | `2001\|…\|code(2001)\|…` | `2001\|3\|invalid_argument\|…` | 同上 | 同上 | ✅ **approved**（同上） |
+| 8 | `comment` | `OBS\|obs_wire_grpcstatus_5003` | `5003\|…\|code(5003)\|…` | `5003\|2\|unknown\|…` | 同上 | 同上 | ✅ **approved**（同上） |
 
 > ℹ️ 第 6~8 条与 like 域**已签字**的 `SD-2026-10-23-06`（grpc 业务码载体迁移 · 框架限制）**同族**
-> ⇒ 若你签字该族，这 3 条可一并转正 ⇒ `comment` 域即可从 `NOT_VERIFIED` 升为 `VERIFIED`。
+> ⇒ 用户签字该族 ⇒ `comment` 域的 3 条一并转正。
+
+#### 核对补记（2026-10-31 · 逐条核对 Go↔Java 消费点后 ⇒ 裁定依据）
+
+> ⚠️ 核对方法 = **两侧同时读消费点**（Go `service/like/api/internal/logic/like/*.go` 6 处同形 +
+> Java `service/like/like-api/.../LikeApiSupport.java`），不是拿 RAG 现状当基准。
+
+| # | 核对结论 | 证据 |
+|---|---|---|
+| 1 / 2 / 3 / 5 | 🔴 **对外可见的真实差异**（不止是库方法层）—— Go 侧业务码 = 原始 gRPC 码（13/3/5/16），Java 侧 = 域内代表码（1015/2001/1015/1009）；**文案两侧相同**（Go `st.Message()` / Java `status.getDescription()`，都不查表）⇒ 客户端看到的 `code` 字段变了 ⇒ **签字即表示接受这个客户端可见的差异** | Go：`getlikecountlogic.go:41-46` 等 6 处 `status.FromError` → `errmsg.NewErrCodeMsg(int(st.Code()), st.Message())`；Java：`LikeApiSupport.java:181-186`（`status != null` ⇒ 走 `bizCodeFromError`）+ `LikeGrpcError.java:233-247`（`mapGrpcCodeToBizCode`） |
+| 4（`foreign_plain`） | 🟡 **「比较点错配」**——探针比的是 Java 的**库方法** `LikeGrpcError#bizCodeFromError`（非 status ⇒ 末尾兜底 1015），Go 侧比的是**消费点**；而 Java 的**实际消费点** `LikeApiSupport#rpcError` **先判 `status == null`** ⇒ 对外返回 **5001**（= Go 的 `NewErrCode(ErrorServerCommon)`）⇒ **两侧对外一致** ⇒ **不是行为漂移** ⇒ 用户裁定降为 **`closed`** | Java：`LikeApiSupport.java:181-185`（`if (status == null) return CodeError.newCode(ERROR_SERVER_COMMON)`）· 佐证：全仓 `bizCodeFromError` 的**生产调用点只有 1 处**（`LikeApiSupport.java:183`）且带该前置守卫；`GoStyleCircuitOpenException extends RuntimeException`（`service/common/.../GoStyleCircuitOpenException.java:30`）⇒ 非 status ⇒ 熔断打开路径两侧同为 5001 |
+| 6 / 7 / 8 | 🟡 **只差 `grpc-status` 字段的数值**；业务码与文案两侧无损（Java 从 trailer `rag-comment-biz-code` 取回）⇒ **不可复原项 = 平台限制**（grpc-java `Status.Code` 只有 17 个成员）⇒ 与 like 域已签字的 `SD-2026-10-23-06@like` **同一族** | Go：`service/comment/common/errmsg/errmsg.go:33-35`（`status.Error(codes.Code(code), msg)`）；Java：`CommentGrpcError.java:72`（trailer key）+ `:116-121`（`mapToGrpcCode`）+ `:139-145`（`grpcError`） |
+
+> 🆕 **顺带核出一条新事实（属 like 域写权 ⇒ 本 lane 只登记、不改代码）**：
+> `service/like/like-api/src/main/java/com/rag/like/like/api/client/LikeRpcClient.java:70-77` 的 javadoc 写
+> 「熔断打开 ⇒ 落进 `bizCodeFromError` 的兜底 ⇒ 业务码 **1015**；Go 侧此时是 5001」
+> ⇒ **该措辞与当前实现不符**：`LikeApiSupport#rpcError` 在调用 `bizCodeFromError` **之前**就判了
+> `status == null` ⇒ 熔断打开（`GoStyleCircuitOpenException` 非 status）对外返回 **5001** = **与 Go 一致**。
+> ⇒ **实测依据**：grpc-java 1.63.0 `io/grpc/ClientInterceptors.java:153-157`（`interceptCall` 在
+> `newCall()` 时被调）＋ `io/grpc/stub/ClientCalls.java:148-155`（`channel.newCall(...)` 在 `try` **之外**）
+> ⇒ 熔断异常**原样**抛出 ⇒ 不会被包装成 `StatusRuntimeException`。
+> ⇒ 处置建议：**订正该 javadoc**（like 域写权）—— 但这**不影响**上表任何一条的状态。
+> ⚠️ **该条已转派给 like 域 lane（G2）**（合并收口执行者已在回执里派出）。
+
+**这 8 条在 CI 里长什么样**
+
+| 门 | 裁定前（2026-10-31 上午） | 裁定后（2026-10-31 下午） |
+|---|---|---|
+| `rag-contract-errmsg`（R5） | PASS 7 / FAIL 0 / BLOCKED 0 / **PENDING 2**（域 `comment`·`like`）· 退出码 **3** · build 🔴 **红 —— 有意为之** | **PASS 9 / FAIL 0 / BLOCKED 0 / PENDING 0** · 退出码 **0** · build 🟢 **绿** |
+| 差异台账分列 | approved 31 · closed 2 · technical 13 · **pending 8** | approved **38** · closed **3** · technical 13 · **pending 0** |
+| 目标要求清单 | PASS 23 · **FAIL 1**（`REQ-ERRMSG-LIKE-001`）· NOT_VERIFIED 19 · 缺口 19 | PASS 23 · **FAIL 0** · NOT_VERIFIED **18** · 缺口 **18** · APPROVED_DIFFERENCE **3** |
+
+> ⚠️ **「R5 变绿」≠「目标全部达成」**：两条 errmsg 要求转成了 **`APPROVED_DIFFERENCE`**（**不计入 PASS**，
+> 因为「已批准差异」≠「已验证一致」）⇒ **PASS 仍是 23**、缺口仍是 **18**。
+> ⇒ 签字的语义是「**承认这处差异并接受**」，不是「**证明两侧一致**」。
+> ⇒ 下一步若要抬 PASS 数，靠的是**补齐那 18 项缺口**（proto 消费面 / schema 约束 / runtime 行为 / 调用图），
+> **不是**再签字。
 
 ---
 
