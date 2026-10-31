@@ -168,10 +168,12 @@ get repo (trigger: true)   ← git 资源，paths 过滤 ⇒ 只在相关改动�
 
 | 门 | 检查什么 | 在哪跑 | 需要什么 | 手动执行 |
 |---|---|---|---|---|
-| **R4** Proto 契约 | Java 侧 `.proto` ↔ `ci/contracts/proto/` 基准逐字节 | **每条域流水线的静态守门步** | python3（零第三方依赖） | `python3 ci/scripts/check-proto-contract.py --baseline ci/contracts/proto` |
-| **R5** 错误码契约 | Java 侧错误码 dump ↔ `ci/contracts/errmsg/` 基准逐字节 | 独立流水线 `rag-contract-errmsg` | JDK21 + Maven（编译 `<域>-common`） | `bash ci/scripts/check-errmsg-contract.sh` |
+| **R4** Proto 契约 | Java 侧 `.proto` ↔ `ci/contracts/proto/` 基准逐字节 | **每条域流水线的静态守门步**（第 10 道门） | python3（零第三方依赖） | `python3 ci/scripts/check-proto-contract.py --baseline ci/contracts/proto` |
+| **R5** 错误码契约 | Java 侧错误码 dump ↔ `ci/contracts/errmsg/` 基准逐字节 | 独立流水线 `rag-contract-errmsg`（**两个内层阶段**） | 阶段① JDK21 + Maven；阶段② python3 | `bash ci/scripts/check-errmsg-contract.sh`（本地一次性跑完两阶段） |
 | **R6** Schema 契约 | Flyway 迁移重放出的实际 schema ↔ `ci/contracts/schema/` 语义基准 | 独立流水线 `rag-contract-schema` | python3 + Docker API + PG 容器 | `python3 ci/scripts/check-schema-contract.py --all` |
 | 🆕 **R10** 目标要求清单 | 清单本身的结构 / 六态口径 / **Go 依据必填** / **已批准差异机器回指** | **每条域流水线的静态守门步**（第 11 道门） | python3（零第三方依赖） | `python3 ci/scripts/check-requirements.py` |
+| 🆕 **触发面一致性** | 生成器算出的 `paths` vs 手工推导的「应该触发谁」 | **每条域流水线的静态守门步**（第 12 道门） | bash + python3 | `bash ci/verify-triggers.sh --static` |
+| 🆕 **docker_api 自测** | 镜像 tag 判定 + exec 劫持线格式（**R6 的两条命脉**） | **每条域流水线的静态守门步**（第 13 道门） | python3（零第三方依赖） | `python3 ci/scripts/check-docker-api-selftest.py` |
 
 **手动触发契约流水线**
 
@@ -206,6 +208,26 @@ fly -t concourse trigger-job -j rag-contract-schema/contract-check --watch
 > ⇒ 必须走 **Docker Engine API over unix socket**（纯标准库，零依赖）。
 > ⇒ 这也是 R6 能进 CI、而不需要 Go 仓 + Go 工具链的前提。
 
+**R5 的两个内层阶段（2026-10-31 实测后新增）**
+
+```
+任务容器 docker:27-dind
+  ├─ 内层① maven:3.9.11-eclipse-temurin-21   ← 编译 + 跑探针 ⇒ 产出 Java 侧 dump
+  │     └─ dump 落在 $PWD/errmsg-dump（**不在 repo/ 里** ⇒ 不进 task outputs）
+  └─ 内层② python:3.12-bookworm              ← 读同一目录 ⇒ 与 Go 真源基准双向比对
+```
+
+> ⚠️ **为什么必须拆**：R5 需要**两种互斥运行时** ——
+> 跑 Java 侧探针要 **JDK + Maven**（探针 import 的是各域**编译产物**里的 `ErrorCode` ⇒ 必须真编译），
+> 做基准比对要 **python3**（解析两段式基准 / percent 反转义 / 差异四态分类 / 回指台账）。
+> 而 CI 的 maven 镜像（Ubuntu 24.04）**没有 python3** ⇒ 单容器跑必然 `python3: command not found`。
+> ⇒ 两个内层容器**顺序执行、共用同一个 bind mount** ⇒ dump 在**同一次 build 内**交接 ⇒ 不会拿到上一次的 dump。
+> ⇒ dump 阶段**不记账**（还没比对 ⇒ 无从判 PASS/FAIL）⇒ 杜绝「没比对就当通过」。
+>
+> ⚠️ **R5 当前是「有意为红」**：`rag-contract-errmsg` 的 build 退出码 = **3（PENDING）**，
+> 因为存在 **8 条已登记但未签字**的差异 ⇒ **不计入 PASS** ⇒ 这是设计语义，**不是回归**。
+> ⇒ 签字入口见 `ci/requirements/README.md` §8.2。
+
 **R10 目标要求清单的六态**（`ci/requirements/README.md`，**与契约门的五态不是一回事**）
 
 | 状态 | 含义 | 计入 PASS？ |
@@ -227,9 +249,9 @@ fly -t concourse trigger-job -j rag-contract-schema/contract-check --watch
 | 检查 | 额外环境 | 没有它会怎样 |
 |---|---|---|
 | R4 | 无（python3 即可） | —— |
-| R5 | JDK21 + Maven（CI 镜像已含）；**Maven 依赖需预热**（`~/.m2` 缓存，CI 用 `m2-repo-v1` 缓存卷） | 编译失败 ⇒ **BLOCKED(2)**（不是 FAIL） |
+| R5 | 阶段① **JDK21 + Maven**（CI 镜像已含；Maven 依赖走 `m2-repo-v1` 缓存卷）；阶段② **python3**（`python:3.12-bookworm` 内层镜像） | 编译失败 ⇒ **BLOCKED(2)**（不是 FAIL）；比对阶段缺 python3 ⇒ 同样 BLOCKED |
 | R6 | 活体 PostgreSQL 容器 + Docker API（CI 用 DinD 提供） | PG 起不来 ⇒ **BLOCKED(2)**（不是 FAIL） |
-| R10 | 无（python3 即可） | —— |
+| R10 / 触发面一致性 / docker_api 自测 | 无（python3 即可） | —— |
 | 全部 | **❌ 不需要 Go 工具链　❌ 不需要 Go 仓在线可访问** | —— |
 
 
@@ -258,8 +280,13 @@ fly -t concourse trigger-job -j rag-contract-schema/contract-check --watch
 | `ci/scripts/check-schema-contract.py` | **R6 契约门**（活体 PG 重放 Flyway → 逐列比对 `ci/contracts/schema/`） |
 | `ci/scripts/check-requirements.py` | **第 11 道门**：目标要求清单（Go 依据必填 / 六态 / 已批准差异机器回指） |
 | `ci/scripts/check-requirements-mutations.py` | 清单守门的变异测试（10 条变异全部红在目标规则） |
-| `ci/scripts/contract-errmsg.sh` / `contract-schema.sh` | R5 / R6 在 DinD 内层容器里的阶段脚本 |
-| `ci/scripts/verify-triggers.sh` | 触发面**真实服务端**验证（7 个场景） |
+| `ci/scripts/check-docker-api-selftest.py` | **第 13 道门**：`docker_api` 的**无依赖**回归自测（11 条断言：镜像 tag 判定 + exec 劫持线格式） |
+| `ci/scripts/contract-errmsg.sh` / `contract-errmsg-compare.sh` | R5 的**两个内层阶段**：① maven 出 Java 侧 dump ② python 做比对 |
+| `ci/scripts/contract-schema.sh` | R6 在 DinD 内层容器里的阶段脚本（内层用 `python:3.12-bookworm`，**不需要 Maven/JDK**） |
+| `ci/scripts/verify-triggers.sh` | 触发面验证：`--static`（实现 vs 意图 · **第 12 道门**）/ 服务端模式（真实 commit ⇒ 真实 build） |
+| `ci/scripts/make-trigger-probe-pipelines.py` | 生成**轻量版**流水线做服务端触发面验证（`paths` 块**逐字节照抄**，只换 job 体 ⇒ 零算力） |
+| `ci/verify-triggers.sh` | 触发面**场景表 + 比对**（7 个场景 · 期望集合 = 手工推导的**意图**） |
+| `ci/verify-triggers-server.sh` | 触发面**服务端**验证编排：部署轻量版 → 实跑 → 还原 canonical |
 | `ci/contracts/README.md` | 契约基准的治理约定（来源 / 裁定 / 版本 / 审查 / 五态语义） |
 | `ci/contracts/proto/*.proto`（10） | **R4 基准**（Go 真源离线提取） |
 | `ci/contracts/errmsg/*.txt`（10） | **R5 基准**（Go 侧权威值 + 差异逐条裁定） |
@@ -347,6 +374,11 @@ python3 ci/generate-pipelines.py --check  # 校验（CI 也跑这一条）
 | **DinD 外壳（真实 privileged）** | ✅ | 内层 `dockerd` 起来 → 从本地 registry 拉到 `maven:3.9.11-eclipse-temurin-21` → 进入 Maven 构建 |
 | **Testcontainers 在 DinD 里真跑** | ✅ | 真 CI 日志：`Container postgres:16-alpine is starting` → `started in PT5.21S` → `JDBC URL: jdbc:postgresql://10.250.0.1:32769/mp_probe` ⇒ 内层 daemon 起 PG + 嵌套容器按**内层 bridge 网关**连上 |
 | **完整 4 step build 跑绿** | ✅ | **共享层流水线演练 build #2：`succeeded`（3m40s）** ⇒ build ✅ / test ✅ / 静态守门 **8 过 0 挂** ✅ / 汇总 **484 条用例全通过**（service/common 445 + users-common 39；0 失败 0 错误 1 跳过）⇒ 详见 `ci/DELIVERY.md` §四.1（含 8 次演练逐次的卡点与根因） |
+| 🆕 **R6 Schema 契约门在 Task 内完整跑通** | ✅ | `rag-contract-schema` **build 5 = `succeeded`（1m6s）** ⇒ **PASS 8 / FAIL 0 / BLOCKED 0 / NOT_RUN 1**（`hot` = DDL 维度不适用 ⇒ **不是「已对齐」**）⇒ Java-only · 无 Go 仓 · 无 Go 工具链 |
+| 🆕 **R5 错误码契约门在 Task 内完整跑通** | 📌 **有意为红** | `rag-contract-errmsg` **build 7**：阶段① maven 出 dump **9/9 域成功** → 阶段② python 比对 ⇒ **PASS 7 / FAIL 0 / BLOCKED 0 / PENDING 2**（域 `comment`·`like`）⇒ 差异台账 **approved 31 / closed 2 / technical 13 / pending 8** ⇒ 退出码 **3** ⇒ **build 红是设计语义**（未签字差异不计入 PASS），**不是回归** |
+| 🆕 **静态守门 13 道（CI 镜像内）** | ✅ | `docker run -v <clone>:/build/repo -w /build python:3.12-bookworm sh repo/ci/scripts/run-static-gates.sh` ⇒ **12 道全绿 / 0 失败**（第 13 道 `check-jar-executable.sh` 需 `JAR_MODULES` ⇒ 无 jar 时不跑） |
+| 🆕 **触发面静态一致性** | ✅ | `bash ci/verify-triggers.sh --static` ⇒ **7/7 精确集合一致**（从生成器产出的 `paths` 算触发集合 vs 手工推导的意图集合） |
+| 🆕 **docker_api 自测** | ✅ | `python3 ci/scripts/check-docker-api-selftest.py` ⇒ **11/11**；变异（退回「带 JSON 请求体」的 exec 写法）⇒ **3 条断言转红**（红在断言、无 Traceback），真源字节已恢复 |
 
 > 「配置校验通过」**不等于**「CI 跑通了」—— 但两者现在**都有实测绿灯**：
 > 前者是 11/11 `fly validate-pipeline` + `--check` EXIT=0；后者是**真 build 跑完 4 个 step 全绿**。

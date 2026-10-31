@@ -137,6 +137,40 @@ for b in d:
     | sort
 }
 
+# ── 等 build 集合「稳定」 ────────────────────────────────────────────────────
+# ⚠️ 见主流程里的说明：13 条流水线各有自己的 git resource 实例 ⇒ 检查时刻散开
+#   ⇒ 必须等集合**稳定**，不能等「第一个 build 出现」。
+SETTLE_MIN_SECS="${SETTLE_MIN_SECS:-90}"
+SETTLE_STABLE_CHECKS="${SETTLE_STABLE_CHECKS:-3}"
+SETTLE_POLL_SECS="${SETTLE_POLL_SECS:-10}"
+SETTLE_MAX_SECS="${SETTLE_MAX_SECS:-240}"
+
+wait_for_settle() {
+  local start now prev="" cur stable=0
+  start="$(date +%s)"
+  prev="$(snapshot_builds)"
+  while true; do
+    sleep "$SETTLE_POLL_SECS"
+    cur="$(snapshot_builds)"
+    now="$(date +%s)"
+    if [ "$cur" == "$prev" ]; then
+      stable=$((stable + 1))
+    else
+      stable=0
+    fi
+    prev="$cur"
+    local elapsed=$((now - start))
+    if [ "$stable" -ge "$SETTLE_STABLE_CHECKS" ] && [ "$elapsed" -ge "$SETTLE_MIN_SECS" ]; then
+      echo "    （已稳定：${elapsed}s，集合连续 ${stable} 次无变化）"
+      return 0
+    fi
+    if [ "$elapsed" -ge "$SETTLE_MAX_SECS" ]; then
+      echo "    ⚠️ 达到上限 ${SETTLE_MAX_SECS}s 仍未判稳（集合连续 ${stable} 次无变化）⇒ 用当前读数"
+      return 0
+    fi
+  done
+}
+
 # -----------------------------------------------------------------------------
 # 统一比对
 # -----------------------------------------------------------------------------
@@ -197,6 +231,12 @@ fi
 echo "==> 0/4 记录基线 build 列表"
 BASE_BUILDS="$(snapshot_builds)"
 echo "    当前 build 总数: $(echo "$BASE_BUILDS" | grep -c . || true)"
+# ⚠️ 先等基线**稳定**再开跑：否则上一轮遗留的 build 会在第一个场景里陆续出现
+#   ⇒ 会被误算成「本次触发的」⇒ 读数串场（实测踩过）。
+echo "    等待基线稳定..."
+wait_for_settle
+BASE_BUILDS="$(snapshot_builds)"
+echo "    稳定后 build 总数: $(echo "$BASE_BUILDS" | grep -c . || true)"
 
 for entry in "${scenarios[@]}"; do
   IFS='|' read -r title path expect <<<"$entry"
@@ -220,12 +260,15 @@ for entry in "${scenarios[@]}"; do
   ( cd "$WORK" && git push -q "$BARE" "$BRANCH:$BRANCH" ) || { echo "    ❌ push 失败"; FAILURES=$((FAILURES+1)); continue; }
 
   # 3) 等 Concourse 检出并排 build
-  echo "    等待 Concourse 产生新 build（最多 90s）..."
-  for _ in $(seq 1 90); do
-    sleep 1
-    NEW="$(snapshot_builds | comm -13 <(echo "$BASE_BUILDS") <(echo "$(snapshot_builds)"))"
-    if [[ -n "$NEW" ]]; then break; fi
-  done
+  # ⚠️⚠️ **必须等「集合稳定」，不能等「第一个 build 出现」**（实测 2026-10-31 踩过）：
+  #   · 13 条流水线各有**自己的** git resource 实例 ⇒ 检查时刻**散开**
+  #     ⇒ 「等第一个 build」会在只有一部分流水线检出时就快照 ⇒ 得到**残缺**的触发集合；
+  #   · 更糟的是**上一场景的 build 会在下一场景的窗口里陆续出现**
+  #     ⇒ 实际触发集合会**串场**（实测读数整体错位一格）。
+  #   ⇒ 判据 =「集合**连续 3 次快照（30s）无变化**」**且**「距推送已过 ≥90s（≥1.5 个资源检查周期）」
+  #   ⇒ 上限 240s ⇒ 宁可等久一点，不要测出一个假的不符。
+  echo "    等待 Concourse 的 build 集合**稳定**（≥90s 且连续 30s 无变化，上限 240s）..."
+  wait_for_settle
   ACTUAL="$(snapshot_builds | comm -13 <(echo "$BASE_BUILDS") - | awk -F'#' '{print $1}' | sort -u | tr '\n' ' ' | sed 's/ $//')"
   BASE_BUILDS="$(snapshot_builds)"
 
