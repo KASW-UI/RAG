@@ -1579,7 +1579,7 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时（`service/users/user/
   ⇒ 装在**每个**出向 devh 调用上 ⇒ ⇒ **域侧零代码改动**，只配一个参数。
 - **域侧只配参数**：`rag.protection.outbound-deadline.cap-millis`
   ⇒ 本域 = `${FOLLOW_RPC_OUTBOUND_DEADLINE_CAP_MILLIS:2000}`（Go 侧 `follow.yaml:37-41` 无显式 Timeout ⇒ 恒 2000ms）。
-- **域侧原先那份私有副本已删** ⇒ ⇒ **副本数 = 漂移面**这条纪律在本域得到遵守。
+- **域侧原先那份内联副本（内联封顶）已删** ⇒ ⇒ **副本数 = 漂移面**这条纪律在本域得到遵守。
   - ⚠️ 共享层的单源棘轮 `GoStyleClientCallTimeoutSingleSourceGateTest` 的**已知盲区**（按类名识别 + api 侧内联形态不在检测面）
     **仍然覆盖不到本域这三处内联副本** ⇒ ⇒ 本轮在**域侧**补了形态面判据（第 ⑤ 条：本域 `src/main/java` 不得出现 `withDeadlineAfter` 的代码行）
     ⇒ ⇒ **该盲区的根治属共享层写权面** ⇒ ⇒ **转 G4 / 收口执行者**。
@@ -1592,7 +1592,18 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时（`service/users/user/
   - ⚠️ 顺带：④ 的**落点** `:50` **一直是错的**（`:50` 是空 javadoc 行 ⇒ 复核者按它定位会落到 javadoc）
     ⇒ ⇒ 本 lane 已在**本文件**与 `docs/DRIFT/users/vs-common.md` 内就地改指真实调用点 `:88`；共享面那一处**同样转收口执行者**。
 
-**三、本域【未做】的（残余）**
+**三、本域【未做】的（残余）—— 本轮已清空（唯一一项 = follow-api 的内联副本）**
 
-- **`follow-api` 的私有副本仍在**（`FollowRpcClient.java:230` 调用 / `:247` 定义）⇒ ⇒ 仍写死 2000ms ⇒ ⇒ 仍不可 env 覆盖。
-  - 不做的理由与登记详见 `docs/DRIFT/follow/rpc.md` 末尾同题小节「四、」⇒ ⇒ **不静默留着**。
+- **`follow-api` 的内联副本已删**（`FollowRpcClient.java:230` 调用点**行号不变**；`capByClientTimeout` 方法连同 javadoc 已删）⇒ ⇒ 出向封顶改由**共享层唯一实现**承担 ⇒ ⇒ 域侧只配 `rag.protection.outbound-deadline.cap-millis` ⇒ ⇒ **可 env 覆盖**。
+  - 落码记录与变异实测见 `docs/DRIFT/follow/rpc.md` 与 `docs/DRIFT/follow/api.md` 末尾同题小节 ⇒ ⇒ **不静默留着**。
+
+
+---
+
+## follow-api 的内联副本清理 —— 共享层对账记录（2026-10-31 · G1 lane）
+
+- **本域出向硬上界的「第二份实现」已清零**：follow-rpc / user-api / admin-api（上一轮）＋ **follow-api（本轮）** ⇒ ⇒ 四域的域侧实现全部退化为「**只配 `rag.protection.outbound-deadline.cap-millis`**」⇒ ⇒ 出向封顶的**唯一实现** = 共享层 `GoStyleOutboundDeadlineInterceptor`（`@GrpcGlobalClientInterceptor`）
+- **共享层在位证据（自读，非转述）**：`FollowApiApplication.java:68-71` 的 `scanBasePackages = {"com.rag.follow.follow.api", "com.rag.common"}` ⇒ ⇒ `GoStyleOutboundDeadlineConfiguration`（`@Configuration` + `@ConditionalOnClass(name = {"net.devh.boot.grpc.client.interceptor.GrpcGlobalClientInterceptor", "io.grpc.ManagedChannel"})` + `@Bean`）在扫描面内 ⇒ ⇒ 其产出的拦截器（`:121` 带 `@GrpcGlobalClientInterceptor`）被 devh 的 `GlobalClientInterceptorRegistry` 收集 ⇒ ⇒ 装在**每个**出向 devh 调用上 ⇒ ⇒ **域侧配 cap 即生效，不需要改启动类**
+- **本轮新增的域侧守门**：`FollowRpcClientDeadlineCapTest`（**5 条**）⇒ ⇒ 形态面第 ⑤ 条（本域 `src/main/java` 不得出现 `withDeadlineAfter` 的代码行）**补上了共享层单源棘轮的已知盲区**（`GoStyleClientCallTimeoutSingleSourceGateTest` 按类名识别 ⇒ 覆盖不到 api 侧内联形态）⇒ ⇒ **根治（把棘轮扩到内联形态）属共享层写权面 ⇒ 转 G4**
+- **已知残余（shared 面，本轮不动）**：`docs/Pitfalls/_cross/testing-pitfalls.md:489` 按**方法名**提到 `FollowRpcClient.capByClientTimeout` ⇒ ⇒ 本轮删掉该方法后，那一行**按名指向一个已不存在的方法** ⇒ ⇒ 语义悬空（不是行号悬空）⇒ ⇒ **该文件不在本 lane 写权面 ⇒ 转收口执行者 / G4 订正**
+- **指针状态**：`:164`（常量行，被 `docs/Pitfalls/follow/api.md:481/:509` 指着）⇒ **行号不变**；`:230`（调用点）⇒ **行号不变**；`docs/DRIFT/follow/vs-common.md` 内指向 `:230` 的那一条**仍然有效**（已就地改指真实形态）

@@ -157,11 +157,11 @@ public class FollowRpcClient implements InitializingBean {
      * {@code service/follow/api/etc/followcenter.yaml} 的 {@code FollowRpc} 段
      * 只有 {@code Etcd.{Hosts,Key}}，<b>没有</b> {@code Timeout}
      * ⇒ 实际生效值来自 go-zero 的 {@code default=2000}。
-     * <p>它与「HTTP 超时 3s」是<b>两层</b>预算，<b>取更小的生效</b>：
-     * Go 侧下游挂死时是 <b>2s 先到</b> ⇒ api 返回 <b>200 + 业务码 1015</b>；
-     * 若只带 3s 的 ctx 预算，就会一路顶到 HTTP 超时分支 ⇒ 返回 503 "Request Timeout"。
+     * <p>它与「HTTP 超时 3s」是<b>两层</b>预算，<b>取更小的生效</b>：Go 侧下游挂死时是 <b>2s 先到</b>
+     * ⇒ api 返回 <b>200 + 业务码 1015</b>；若只带 3s 的 ctx 预算，就会一路顶到 HTTP 超时分支 ⇒ 503。
+     * <p>⚠️ <b>2026-10-31 起本常量只是【断言用期望值】</b>：出向封顶由共享层唯一实现承担（域侧只配 rag.protection.outbound-deadline.cap-millis）⇒ ⇒ 本常量<b>不再是第二份实现</b>。
      */
-    private static final long CLIENT_TIMEOUT_MILLIS = 2000L;
+    public static final long CLIENT_TIMEOUT_MILLIS = 2000L;
 
     @GrpcClient("follow-rpc")
     private FollowServiceGrpc.FollowServiceBlockingStub followServiceBlockingStub;
@@ -227,35 +227,7 @@ public class FollowRpcClient implements InitializingBean {
      * （2026-10-24 双侧活体对拍实测，见 docs/DRIFT/follow/api.md）。
      */
     public FollowServiceGrpc.FollowServiceBlockingStub followRpc() {
-        return capByClientTimeout(
-                com.rag.common.observability.GoStyleRequestDeadline.applyTo(followServiceBlockingStub));
-    }
-
-    /**
-     * 把 deadline 压到「ctx 预算」与「客户端超时」里的<b>较小者</b>。
-     *
-     * <p><b>语义</b>：Go 侧客户端拦截器
-     * {@code zrpc/internal/clientinterceptors/timeoutinterceptor.go} 做的是
-     * {@code ctx, cancel := context.WithTimeout(ctx, c.Timeout)} ——
-     * 即「在已有 ctx 预算之上再套一层 2s」，<b>取更小的生效</b>。
-     *
-     * <p><b>⚠️ 没有 ctx 预算时也要套 2s</b>：Go 的客户端超时是
-     * <b>拦截器级别</b>的，与有没有 HTTP 超时中间件无关；
-     * 若此时原样返回，就等于「有时有客户端超时、有时没有」——
-     * 那正是 Go 的 ctx 语义里不存在的不一致。
-     */
-    private FollowServiceGrpc.FollowServiceBlockingStub capByClientTimeout(
-            FollowServiceGrpc.FollowServiceBlockingStub stub) {
-        io.grpc.Deadline deadline = stub.getCallOptions().getDeadline();
-        long remainingNanos = deadline == null
-                ? Long.MAX_VALUE
-                : deadline.timeRemaining(java.util.concurrent.TimeUnit.NANOSECONDS);
-        long capNanos = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(CLIENT_TIMEOUT_MILLIS);
-        if (remainingNanos <= 0L) {
-            // 预算已耗尽 ⇒ 立刻失败（Go 侧 ctx 到期同理）
-            return stub.withDeadlineAfter(1L, java.util.concurrent.TimeUnit.NANOSECONDS);
-        }
-        return stub.withDeadlineAfter(Math.min(remainingNanos, capNanos),
-                java.util.concurrent.TimeUnit.NANOSECONDS);
+        return com.rag.common.observability.GoStyleRequestDeadline.applyTo(
+                followServiceBlockingStub);
     }
 }

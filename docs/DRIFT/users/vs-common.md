@@ -5976,7 +5976,7 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
 - **Go 出处**：`go-zero@v1.10.2/zrpc/config.go:31` = `Timeout int64 json:",default=2000"`（**默认值**）；
   Go 侧 `service/user/user/api/etc/usercenter.yaml:37-41` 的 `UserRpc:` 段 与
   `service/user/admin/api/etc/admincenter.yaml:35-39` 的 `AdminRpc:` 段 **均无显式 Timeout** ⇒ ⇒ 两域**恒 2000ms**。
-- **删掉的东西**：两个 client 类里的 `capByClientTimeout` 私有副本
+- **删掉的东西**：两个 client 类里的 `capByClientTimeout` **内联副本（内联封顶）**
   （`UserRpcClient` / `AdminRpcClient`）⇒ ⇒ 域侧出向调用**不再自己设 deadline**；
   常量 `CLIENT_TIMEOUT_MILLIS` 保留 ⇒ 语义改为**断言用期望值**。
   - ⚠️ **删副本的原因要说准**：`min` **只压小、不压大** ⇒ ⇒ 副本把上界写死 2000ms ⇒ ⇒
