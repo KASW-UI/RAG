@@ -1954,3 +1954,71 @@ git diff --stat -- service/ # ⇒ 0 行
 | **跨写权面耦合（🔴 必须共享层那半同步剪枝）** | 共享层 `GoStyleClientCallTimeoutSingleSourceGateTest` 的判据 ④（点位级棘轮）在本轮**红了** —— 它的 `KNOWN_INLINE_CAP_CALL_SITES` 里那两条**已失效**（域侧点位已被修好）⇒ ⇒ 共享层那个门自己报「🟢 **例外已失效** ⇒ 请剪掉」⇒ ⇒ **该门归共享层写权**（G4 唯一）⇒ ⇒ **已转派 G4 剪枝**（反馈单 7 项已发）⇒ ⇒ ⚠️ **合并时机**：若在 G4 剪完前合并，主线会红**一次**（红在「例外已失效」这一条 ⇒ **是预期信号、不是回归**） |<br>🔴 **【2026-10-31 16:0x 追加 · A-1 守门这条耦合，与上一条同源但不同门】** ⇒ ⇒ 本 lane 把 M2 判据**从「空转」改成真生效**（`docs/PhaseGoal-judge.md:117` 的总数声明行改成正则可匹配形态 `**全仓源声明测试方法数** = **3,300**` ⇒ ⇒ `check-source-test-decl-count.py` 的 M2 从「跳过」变成「真比对」）⇒ ⇒ **实测（临时树真合并 G2+G3）**：合并树 `check-source-test-decl-count` **EXIT=1**（A-1 列求和 **3300** vs 源声明求和 **3314**）＋ `check-phasegoal-consistency` **EXIT=1** ⇒ ⇒ **M2 激活 = 跨 lane 的全局总数断言被打开**⇒ ⇒ ⚠️ **根因不在本 lane**：那 14 条差额来自 G3 的 `049ffb66`（`comment-api` +4 / `favorite-api` +3 / `hot-api` +7）**未回填 A-1 的 `tests` 列** ⇒ ⇒ 已在 **G3 分支上单独实测到同一现象** ⇒ ⇒ **不是合并引入的**⇒ ⇒ ⚠️ **本 lane 分支上必须保持 3,300**（写 3,314 会让本 lane 自己的门立刻红 ⇒ ⇒ 3,314 是**合并后**的实测值）⇒ ⇒ **最终值归合并收口时写** ⇒ ⇒ **已回执协调员**（该行归本 lane 修 ⇒ 本 lane 已在自己分支写好自洽值）<br>🔴 **【2026-10-31 16:3x 订正 · 上面那句「归合并收口时写」已被后续事实取代 ⇒ ⇒ 现在由本 lane 直接写】** ⇒ ⇒ **合并已经发生**：主干已含 G2 第三波（`22423962`）＋ G3 的 A-1 回填（`713896ff`）＋ G4 的例外集批剪 4 条（`55bdd673`）＋ G1 第三波（`fd6c9830`）⇒ ⇒ **合并后实测源声明求和 = 3,314** ⇒ ⇒ ⇒ ⇒ 而 A-1 的 `tests` 列**逐行**已经全绿（**M1 列求和 3314 == 源声明求和 3314** ⇒ ⇒ G3 那三行回填已生效）⇒ ⇒ **只剩 M2 一条** ⇒ ⇒ ⇒ ⇒ **本 lane 把该行从 `**3,300**` 改成 `**3,314**`**（同一行就地替换 · **零行位移** · 文件行数 728 → 728）⇒ ⇒ **实测 `check-source-test-decl-count` EXIT=0**（M1+M2 全过）⇒ ⇒ ⚠️ **为什么这次该本 lane 直接写**：① 该行的**形态**是本 lane 在 `4b7b3a9c` 里改的（M2 激活）⇒ ⇒ **写权归本 lane**；② **合并已完成** ⇒ ⇒ 3,314 是**当时的实测值**（不再是「合并后的预测值」）⇒ ⇒ **不存在「哪个 lane 写」的歧义**⇒ ⇒ ⚠️ **上一条曾把它写成「3,314 是合并后的实测值 ⇒ 合并前不要写」** ⇒ ⇒ **那条现在仍然成立**（本 lane 合并前那棵树确实是 3300）⇒ ⇒ **本条是它的后续**：合并落地 ⇒ ⇒ 数字变实测值 ⇒ ⇒ 本 lane 落码<br>🔴 **【2026-10-31 22:5x 再订正 · 上面那句「3,314 已是终值」已被推翻 ⇒ ⇒ 真值是 3,323】** ⇒ ⇒ **本 lane 那笔 `b5cbd525`（3,314）已落主干** ✔ ⇒ ⇒ **但随后协调员在主干把总数改成了 `**3,323**`**（`670c92a4 merge(do-my-own-gh): … + 裁决 judge 的 M2 总数冲突（3,315 ⇒ 3,323）`）⇒ ⇒ **G1/G3 后续轮次又新增了测试方法（+9）** ⇒ ⇒ **实测值从 3,314 变成 3,323** ⇒ ⇒ ⇒ ⇒ **所以「3,314 是终值」是错的** ⇒ ⇒ **终值只在合并完成、且没有后续 lane 再加测试的那一刻成立** ⇒ ⇒ ⇒ ⇒ ⚠️ **教训（可复用）**：**M2 总数是【合并的产物】，不是【任何 lane 分支的产物】** ⇒ ⇒ ⇒ 在波次并发下，某个 lane 分支上算出的总数**必然会在别的 lane 落码后过期** ⇒ ⇒ ⇒ ⇒ ⇒ **推论一**：**不要在 lane 分支上把总数写死成「我这棵树的值」** ⇒ ⇒ ⇒ ⇒ ⇒ **推论二**：**该值只能由收口执行者在合并后按实测写** ⇒ ⇒ ⇒ ⇒ ⇒ **推论三**：**任何 lane 的台账里写「X 是终值」都是有时效的断言** ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ **本 lane 这条就是活证**（16:3x 写「3,314 是终值」⇒ ⇒ 22:5x 被 3,323 推翻 ⇒ ⇒ **两次订正都在同一行内、零行位移**）⇒ ⇒ ⚠️ **诚实边界**：本 lane **不改**那行现在的主干值（3,323 是协调员裁决的实测值 ⇒ ⇒ 归收口面）⇒ ⇒ 本 lane 这两笔（3,300→3,314、及随后的 3,323）**都是共享面数字的中间态** ⇒ ⇒ ⇒ **本 lane 记的是「这个数会过期、且该由谁写」这条方法论**，不是那个数<br>🔴 **【2026-10-31 23:1x 补记 · 这条方法论在【口径变更】后又活证了一次 ⇒ ⇒ 而且说明「过期」有第二个来源】** ⇒ ⇒ **协调员 `b9c4b2d6`（18:24）把「源声明测试方法数」口径改成【只算代码态】**（注释/javadoc 里的 `@Test` 文本不算 ⇒ ⇒ 用等长空格掩码器）⇒ ⇒ **当时总数从 3,314 变成 3,307**（`service/common` 481→480 · `follow-api` 101→99 · `user-api` 140→138 · `admin-api` 162→160）⇒ ⇒ ⇒ ⇒ **但协调员回执里给的「3,307」是那一轮的快照** ⇒ ⇒ **我实测主干当前态（临时树 · `do-my-own-gh` @ `2c524a34`）= 3,323** ⇒ ⇒ `check-source-test-decl-count` **EXIT=0**（列求和 3323 == 源声明求和 3323）＋ `check-phasegoal-consistency` **EXIT=0** ⇒ ⇒ ⇒ ⇒ **3,307 又被推翻了**（`b9c4b2d6` 之后 `133778ac` per-client cap 两个新守门 ＋ `e956056d` comment proto-wire 探针又加了测试方法 ⇒ ⇒ `670b92a4` 裁决成 3,323）⇒ ⇒ ⇒ ⇒ ⇒ ⇒ **⇒ 「这个数会过期」有两个独立来源**：① **别的 lane 加测试方法**（数量变）② **守门口径本身变**（同量算出不同值）⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ **⇒ 推论四（补）**：**回执里的总数也是有时效的快照** ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ **⇒ 核销时不能拿回执里的数字当现状** ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ **必须自己在目标树上跑一遍守门** ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ **⇒ 本 lane 记的仍然是「方法论」**：**任何跨 lane 的全局计数，只能在【当下那棵树】上重算，不能引用任何回执或台账里的旧值**（**⚠️ 本行里出现的 3,300 / 3,314 / 3,307 / 3,323 全部是历史值 · 均已过期 ⇒ ⇒ 现值一律以 `check-source-test-decl-count.py` 在【当下那棵树】上的实测输出为准 ⇒ ⇒ 不要把其中任何一个当常量搬走**）⇒ ⇒ ⚠️ **M2 只被 `check-source-test-decl-count.py` 读**（已 grep 全 `tools/**` ⇒ 无第二处依赖）⇒ ⇒ 影响面 = 1 道门 ⇒ ⇒ **合并时机**：若在收口改总数前合并 ⇒ ⇒ 主线会红**一次**（红在 M2「文档声明 ≠ 实测」⇒ ⇒ **是预期信号、不是回归**） |<br>🔴 **【2026-10-31 16:2x 追加 · 本 lane 自己引入的一处守门误报，已修】** ⇒ ⇒ 合并主干后 `check-wave-coupling.py` 报 **1 项** `common_radiation` 漂移（`GoStyleProtectionConfiguration` 多出 `message`）⇒ ⇒ **归因（本 lane 的错）**：该门用 **import 判定**扫辐射度（`tools/difftest/check-wave-coupling.py:190` `re.findall(r"^import\s+...")`）⇒ ⇒ **全限定名引用看不见**⇒ ⇒ 而 `message` 域的**生产代码**用的是**全限定名**（`MessageRpcApplication.java:96` `com.rag.common.protection.GoStyleProtectionConfiguration.class` ⇒ 该引用**早于 10-24** 就在 ⇒ ⇒ **不是本 lane 引入**）⇒ ⇒ **真正让该门看见 `message` 的，是本 lane 新增的两个守门类**（`MessageRpcOutboundDeadlineCapGateTest` / `MessageApiOutboundDeadlineCapGateTest` 用 `import` 引用它）⇒ ⇒ ⇒ ⇒ **修法**：把那两处改成**全限定名**引用（与生产代码形态一致）⇒ ⇒ 删 import 语句 + `ctx.register(...)` / `imports.contains(...)` 改全限定名 ⇒ ⇒ **零语义变化**（同一 class 对象）⇒ ⇒ **实测**：`check-wave-coupling.py` ⇒ **EXIT=0 / PASS**（6 组全过）＋ `mvn compile` **EXIT=0** ＋ 两个守门类真跑 **18 条 / 0F / 0E / 0S**（message-rpc 10 + message-api 8）⇒ ⇒ ⇒ **判据的盲区本身仍在**（import 判定 ⇒ 全限定名引用**系统性漏计** ⇒ ⇒ 辐射度**偏小**）⇒ ⇒ **该盲区属共享面**（`tools/**`）⇒ ⇒ **本 lane 不改工具** ⇒ ⇒ **只报告** ⇒ ⇒ 已回执协调员/G4 |
 | **变异验证（红在目标断言）** | **M-G**（在 `like-api/LikeRpcClient.likeRpc()` 把域侧那份写死 2000ms 的副本**加回来**：`.withDeadlineAfter(2_000L, TimeUnit.MILLISECONDS)`）⇒ **3 红 / 15**、**0 errors** —— ① **④b** 红在「实测耗时 = **2004ms**，必须 ≥ 3000ms」⇒ ⇒ 正是「域侧还压着一份写死 2000ms 的副本」；② **⑥** 红在「命中分布 = `{LikeRpcClient.java=1}`，而已登记的基线 = `{}`」；③ 既有守门 `LikeRpcTimeoutCapTest` 的**反向对照**红在「上界调到 5s ⇒ 调用**应当成功**」⇒ ⇒ 该条原本是裸异常（Error），本轮已改成 `assertDoesNotThrow` ⇒ ⇒ **红在断言上、且消息自解释**⇒ ⇒ **三条全部红在目标断言**（**不是**红在容器/端口/`@Timeout`）⇒ ⇒ 变异代码**已还原**（`git diff` 复核：生产代码回到收敛后的形态） <br>🔬 **补充实测（第三个旋钮 · 「调用路径」）**：把 ④b **临时改回【裸 stub】形态**、再叠加**同一个** M-G 副本 ⇒ ⇒ **1 红 / 9** —— **只有 ⑥ 红**、**④b 仍绿** ⇒ ⇒ ⇒ **实测证明「调用路径」是与「方向」相互独立的第二个旋钮**（方向取对了「放宽」**还不够**）⇒ ⇒ 域侧那份副本装在 `likeRpc()` 里 ⇒ ⇒ 走裸 stub 的话它**根本不会经过那一层** ⇒ ⇒ ⇒ ⇒ **两条判据互补**：⑥ 抓**形态**（代码行出现）、④b 抓**行为**（实测耗时被压回 2000ms）⇒ ⇒ **只留 ⑥** ⇒ ⇒ 行为层面的漂移会**静默通过**；**④b 若走裸 stub** ⇒ ⇒ 同上 ⇒ ⇒ ⇒ ⇒ **两条都要留，且 ④b 必须走域 client** ⇒ ⇒ 测量态**已还原**（`git status` 复核：工作区干净） |
 | **诚实边界** | ✅ **【2026-10-31 22:56~23:08 · 合并主干 114 笔后的干净回归读数（独占跑 · 无并发）】** ⇒ ⇒ **三域八模块全量回归 = 833 条 / 0 failures / 0 errors / 0 skipped**（surefire XML 逐文件求和）⇒ ⇒ 分模块：message-common **21** · message-rpc **115** · message-api **122** · like-common **18** · like-rpc **163** · like-api **113** · task-api **144** · task-rpc **137**（合计 **833**）⇒ ⇒ `mvn` 收尾 `EXIT=0` · 耗时 11 分 08 秒⇒ ⇒ ⚠️ **本轮跑之前清过 `target/surefire-reports`**（10 个目录）⇒ ⇒ **因为上一轮读数里 like-api 那 1 个 failure 是【变异残留】**（15:49 的 M-G 变异 XML 留在盘上 ⇒ ⇒ 报的是早已删除的那份写死副本 ⇒ ⇒ **不是真缺陷**）⇒ ⇒ **清盘后重跑即 0F** ⇒ ⇒ ⇒ **教训：变异测试的产物会残留 ⇒ ⇒ 读数前先确认 XML 时间戳属于本轮**⇒ ⇒ ⚠️ **并发纪律**：上一次跑被 G4 的并发 maven 干扰（同一 `~/.m2` ＋ 共享 `target/`）⇒ ⇒ 本轮**独占跑**（起跑前确认无 maven/java 进程）⇒ ⇒ ⇒ **回归读数必须独占取**⇒ ⇒ ⚠️ **本分支已与主干同步（0 落后 / 0 领先）** ⇒ ⇒ 本节读数对应主干 `26763ded` 那个态 ⇒ ⇒ ⚠️ **诚实边界**：① 本节全部读数取自 surefire XML，**不看** stdout 的 BUILD SUCCESS；② 变异红**均在目标断言**（④b 停在 ~2000ms、⑥ 报「命中分布 ≠ 基线」），**不是**红在容器/端口/`@Timeout`；③ ⑦ 证的是「**装配面 ＋ 绑定面**」，**不**证「本域进程连得上 Nacos / 真 like-rpc 起得来」；④ 「零副本」这件事有**两条独立的运行期证据**：域侧 ⑥ 零命中棘轮 ＋ ④b 放宽方向（另有共享层棘轮，**待 G4 剪完**才算第三条） |
+
+### 🟢 第六轮追加（2026-11-01 · G2 收工轮）· 测试面 `import` 共享层类伪装成「生产依赖面」⇒ 改全限定名（零行为变更）
+
+**背景（一句话）**：辐射度判据曾以 **`import` 判定**统计「哪个域引用了共享层类」⇒ ⇒ **测试面的一条 `import` 会把测试文件所在域算成「生产依赖方」** ⇒ ⇒ 本轮把这类 import 全部改成全限定名（**零行为变更**）⇒ ⇒ 生产依赖面回到真实值。
+
+**口径（本域既有定案，非本轮自创）**：测试面 `import` 某共享层类 **且** 本域**生产面**对该类的引用**不是 import 形态**（全限定名或本无依赖）⇒ ⇒ 改全限定名；**生产面本来就是 import** ⇒ ⇒ **不改**。
+
+**分母（写死 · 便于复算）**：全波次 **30 对（域 × 类）/ 37 对（文件 × 类）/ 20 个测试文件**（like **5** 类 · message **13** 类 · task **12** 类 = 30）⇒ ⇒ ⚠️ **报数必须带分母** —— 只写「37 处」会被读成「37 个类」。
+
+#### 本域（like）落码清点
+
+| 测试文件（`service/like/**`） | 删掉的 import 条数 | 新增含全限定名的行数 |
+|---|---|---|
+| `like-api/src/test/java/com/rag/like/like/api/LikeApiGrpcClientBreakerE2ETest.java` | 1 | 1 |
+| `like-api/src/test/java/com/rag/like/like/api/LikeApiPathNormalizationRealTomcatTest.java` | 1 | 4 |
+| `like-api/src/test/java/com/rag/like/like/api/LikeRpcTimeoutCapTest.java` | 2 | 8 |
+| `like-api/src/test/java/com/rag/like/like/api/client/LikeApiOutboundDeadlineCapGateTest.java` | 2 | 12 |
+| `like-rpc/src/test/java/com/rag/like/like/rpc/client/LikeRpcOutboundDeadlineCapGateTest.java` | 2 | 11 |
+| `like-rpc/src/test/java/com/rag/like/like/rpc/service/LikeA9GrpcSpanEndToEndTest.java` | 1 | 3 |
+| **本域合计** | **9** | **39** |
+
+本域删掉的 **5** 个类 = `GoStyleGrpcClientBreakerInterceptor` · `GoStyleOutboundDeadlineInterceptor` · `GoStylePathNormalizingFilter` · `GoStyleRequestDeadline` · `RpcInterceptor`（`com.rag.common.observability` / `.http` / `.protection` 三个包各按其原 import 行取全限定名 ⇒ ⇒ **FQN 不是拼的，是抄的原 import 行** ⇒ ⇒ 零语义变化）。
+
+#### 零行为变更的自证（落码前后逐模块读数完全相同）
+
+| 模块 | 落码前（基线） | 落码后 | 判定 |
+|---|---|---|---|
+| `like-api` | 113 条 / 0F / 0E / 0S | 113 条 / 0F / 0E / 0S | ✅ 四项全等 |
+| `like-common` | 18 条 / 0F / 0E / 0S | 18 条 / 0F / 0E / 0S | ✅ 四项全等 |
+| `like-rpc` | 163 条 / 0F / 0E / 0S | 163 条 / 0F / 0E / 0S | ✅ 四项全等 |
+| **本域小计** | **294 条 / 0F / 0E / 0S** | **294 条 / 0F / 0E / 0S** | ✅ 全等 |
+⚠️ **全波次九模块**（本域三模块 + 另两域六模块 + `users-common`）**合计 872 条 / 0F / 0E / 0S** ⇒ ⇒ **落码前后逐模块四项（条数 / 失败 / 错误 / 跳过）全等** ⇒ ⇒ **零行为变更成立**。
+⚠️ **跑法**：落码前后**同一套命令**（6 个业务模块 + `-am` ⇒ 实际 9 个模块出测试）· `-o` 离线 · `--fail-at-end` · `MVN_EXIT=0` · 耗时 11 分 13 秒 · 跑前清过 `target/surefire-reports`（10 个目录）⇒ ⇒ **读数不属于上一轮残留**。
+⚠️ **本轮不是全程独占跑**：起跑时另有 G3 的两轮 maven 在跑（主仓 · article/comment/favorite/hot 域）⇒ ⇒ 已逐项排除干扰面：① 两边 `target/` 目录互不重叠；② 那两轮都是 `-o` 离线 + `test` 阶段 ⇒ ⇒ **零 `~/.m2` 写入**（实测 `com/rag` 下近 20 分钟零 jar 写入）；③ **固定宿主口段零重叠**（我三域 message `22760–22789` / like `22790–22819` / task `22820–22849` vs G3 四域 article `22850–22879` / comment `22880–22909` / favorite `22910–22939` / hot `22940–22969`）；④ PG / Redis **各自 testcontainers 实例**（库与缓存物理隔离）；⑤ G3 那两轮在**我这三域模块的实际执行窗口内已结束** ⇒ ⇒ **本域模块的实际执行窗口无并发**。
+⚠️ **为什么必须逐项排除**：并发只可能造成**假红**（抢口 / 抢资源 / 抢 `~/.m2`），**不会造成假绿** ⇒ ⇒ 本轮读数为绿 ⇒ **绿是可信的**；若为红则须独占复跑才能定性 ⇒ ⇒ **这次不需要复跑**。
+
+
+⚠️ **判据**：落码是**纯改名**（`import X` + 裸用点 `X` ⇒ 删 import 行 + 用点写 `X` 的全限定名）⇒ ⇒ **同一 class 对象、同一断言、同一字节码语义** ⇒ ⇒ 可验证的等价信号 = **落码前后 surefire 读数逐模块完全相同**（条数 / 失败 / 错误 / 跳过 四项全等）⇒ ⇒ **任何一项不等 ⇒ 落码就不是零行为变更 ⇒ 停下报告，不自行修**。
+⚠️ **读数口径**：以 **surefire XML 的 `tests=` / `failures=` / `errors=` / `skipped=`** 为准，**不看** stdout 的 `BUILD SUCCESS`；**skip ≠ 通过**；**跑绿 ≠ 对**。
+
+#### 行号位移（删 import ⇒ 后续行号前移）⇒ 台账指针新值
+
+⚠️ **位移是「删行」造成的，不是「改内容」造成的** ⇒ ⇒ 既有条目行号**不变**（本节是**追加**，不是改写）⇒ ⇒ **只有指向被改测试文件的行号会变**。
+
+| 既有指针（旧） | 新行号 | 目标文件 | 核对 |
+|---|---|---|---|
+| `LikeRpcTimeoutCapTest.java:76` | `:74` | like-api | ✅ 新行内容与旧行逐字一致 |
+| `LikeRpcTimeoutCapTest.java:82` | `:80` | like-api | ✅ 内容一致 |
+| `LikeApiGrpcClientBreakerE2ETest.java:78` | `:77` | like-api | ✅ 内容一致 |
+| `LikeRpcTimeoutCapTest.java:233` | `:231` | like-api | ✅ 内容一致 |
+| `LikeA9GrpcSpanEndToEndTest.java:314` | `:313` | like-rpc | ✅ 内容一致 |
+| `GoStyleGrpcClientBreakerE2ETest.java:43` | `:42` | **message-api**（他域文件 · 本台账引用） | ✅ 内容一致 |
+
+⚠️ **本域台账内的既有指针**：本节**只追加、不就地改既有行** ⇒ ⇒ 既有行里的旧行号**保持原样**（那是「当时那条结论」的快照）⇒ ⇒ **新行号以本节表格为准**。
+⚠️ **一个例外必须点名**：本台账上文「第五轮追加 ①」那条订正里写着「本域唯一的 `import` 在测试里：`service/like/like-api/src/test/java/com/rag/like/like/api/LikeApiGrpcClientBreakerE2ETest.java:3`（import）」⇒ ⇒ **本轮把那条 import 删了** ⇒ ⇒ **该指针现在悬空**（第 3 行已不是 import 行）⇒ ⇒ **但那条记录本身仍然是有效的历史事实**（它记的是「落码前，本域唯一的 import 在测试里」⇒ ⇒ 这正是本轮要消掉的伪依赖面）⇒ ⇒ **保留原样，不改写**（改写会把「落码前的发现」抹掉 ⇒ ⇒ 抹掉就再也看不出「这条 import 为什么会被删」）。
+
+#### 共享面 / 他域（只报告 · 本 lane 无写权）
+
+| 位置 | 旧 → 新 | 归属 |
+|---|---|---|
+| `docs/Worktree.md:1076` | `MessageRpcOutboundDeadlineCapGateTest.java:427` → `:425` · `:436` → `:434` · `MessageApiOutboundDeadlineCapGateTest.java:383` → `:381` | 合并收口执行者 |
+| `docs/DRIFT/_cross/grading/W29.md:3` · `W30.md:3` | `LikeA9GrpcSpanEndToEndTest.java:291` → `:290` · `:314` → `:313` | 合并收口执行者 |
+| `docs/DRIFT/_cross/grading/W5.md:18` | `GoStyleGrpcClientBreakerE2ETest.java:123` → `:122` | 合并收口执行者 |
+| `docs/DRIFT/global/vs-common.md`（多处） | `GoStyleGrpcClientBreakerE2ETest.java:43` → `:42` · `:247` → `:246` · `LikeA9GrpcSpanEndToEndTest.java:291` → `:290` | G4（共享层面） |
+| `docs/DRIFT/users/vs-common.md:1032` · `docs/DRIFT/users/user/api.md:3645/:3646/:3742` | `GoStyleGrpcClientBreakerE2ETest.java:43` → `:42` · `:123` → `:122` | G1（users 域） |
+| `docs/Pitfalls/like/api.md:271` · `:520` | `LikeRpcTimeoutCapTest.java:233` → `:231` | 踩坑档（不在 G2 lane 白名单内） |
+
+⚠️ **这些指针是「指向 `service/**` 的行号」** ⇒ ⇒ 它们**不是**派生层的「证据指针」（派生层只认指向 `docs/{DRIFT,Pitfalls,Intentional_Deviations}/**.md` 的指针）⇒ ⇒ **不会造成派生层漂移、不会让指针棘轮转红**（实测：`check-pointer-consistency.py` ⇒ **新增 0 条**）⇒ ⇒ **但行号会变旧** ⇒ ⇒ 上表是**待各面就地订正的清单**（本 lane 只报告、不改）。

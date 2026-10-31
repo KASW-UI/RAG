@@ -1,11 +1,6 @@
 package com.rag.task.task.api;
 
 import com.rag.common.http.GoStyleJsonBodyConverterConfig;
-import com.rag.common.protection.GoStyleCpuSheddingFilter;
-import com.rag.common.protection.GoStyleBreakerFilter;
-import com.rag.common.protection.GoStyleMaxBytesFilter;
-import com.rag.common.protection.GoStyleMaxConnsFilter;
-import com.rag.common.spring.HttpMiddlewareFilter;
 import com.rag.task.task.api.config.TaskApiJsonBodyConfig;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -53,17 +48,17 @@ class TaskApiWiringTest {
     @Test
     @DisplayName("Go task.go:29 —— observability 的 HTTP 中间件必须在容器里（扫到 com.rag.common 的前提）")
     void httpMiddlewareFilterIsRegistered() {
-        assertNotNull(ctx.getBean(HttpMiddlewareFilter.class),
-                "HttpMiddlewareFilter 未注册 ⇒ com.rag.common 没被扫到 ⇒ HTTP 3s 超时失效");
+        assertNotNull(ctx.getBean(com.rag.common.spring.HttpMiddlewareFilter.class),
+                "com.rag.common.spring.HttpMiddlewareFilter 未注册 ⇒ com.rag.common 没被扫到 ⇒ HTTP 3s 超时失效");
     }
 
     @Test
     @DisplayName("Go rest/config.go:12-23,52-53 —— 四道保护闸门（tag 默认全开）必须在容器里")
     void protectionFiltersAreRegistered() {
-        assertNotNull(ctx.getBean(GoStyleMaxConnsFilter.class), "MaxConns=10000 失效");
-        assertNotNull(ctx.getBean(GoStyleMaxBytesFilter.class), "MaxBytes=1MiB 失效（413 不再返回）");
-        assertNotNull(ctx.getBean(GoStyleCpuSheddingFilter.class), "CPU 降载失效（Go CpuThreshold=900）");
-        assertNotNull(ctx.getBean(GoStyleBreakerFilter.class), "HTTP 侧熔断失效");
+        assertNotNull(ctx.getBean(com.rag.common.protection.GoStyleMaxConnsFilter.class), "MaxConns=10000 失效");
+        assertNotNull(ctx.getBean(com.rag.common.protection.GoStyleMaxBytesFilter.class), "MaxBytes=1MiB 失效（413 不再返回）");
+        assertNotNull(ctx.getBean(com.rag.common.protection.GoStyleCpuSheddingFilter.class), "CPU 降载失效（Go CpuThreshold=900）");
+        assertNotNull(ctx.getBean(com.rag.common.protection.GoStyleBreakerFilter.class), "HTTP 侧熔断失效");
     }
 
     @Test

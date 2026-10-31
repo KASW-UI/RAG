@@ -1,7 +1,6 @@
 package com.rag.message.message.api;
 
 import com.rag.message.message.api.MessageApiApplication;
-import com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor;
 import com.rag.common.protection.GoStyleProtectionProperties;
 import com.rag.message.message.api.client.MessageRpcClient;
 import net.devh.boot.grpc.client.interceptor.GlobalClientInterceptorRegistry;
@@ -43,7 +42,7 @@ class GoStyleGrpcClientBreakerWiringTest {
     private GlobalClientInterceptorRegistry registry;
 
     @Autowired
-    private GoStyleGrpcClientBreakerInterceptor interceptor;
+    private com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor interceptor;
 
     @MockitoBean
     private MessageRpcClient rpcClient;

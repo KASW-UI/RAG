@@ -1,6 +1,5 @@
 package com.rag.like.like.api;
 
-import com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor;
 import com.rag.like.like.api.controller.LikeController;
 import com.rag.like.like.proto.LikeServiceGrpc;
 import com.rag.users.common.jwt.JwtUtil;
@@ -123,7 +122,7 @@ class LikeApiGrpcClientBreakerE2ETest {
     private MockMvc mockMvc;
 
     @Autowired
-    private GoStyleGrpcClientBreakerInterceptor interceptor;
+    private com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor interceptor;
 
     @LocalServerPort
     private int port;

@@ -1,7 +1,6 @@
 package com.rag.like.like.rpc.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.rag.common.observability.RpcInterceptor;
 import com.rag.like.like.proto.GetLikeCountReq;
 import com.rag.like.like.proto.LikeServiceGrpc;
 import com.rag.like.like.rpc.client.MessageRpcClient;
@@ -293,7 +292,7 @@ class LikeA9GrpcSpanEndToEndTest {
 
         // ⚠️ 必须在 SDK 装好之后取拦截器：共享层在 newUnaryServerInterceptor() 里就
         //    GlobalOpenTelemetry.get().getTracer("rpc-server") 取了 tracer。
-        callThrough(RpcInterceptor.newUnaryServerInterceptor(
+        callThrough(com.rag.common.observability.RpcInterceptor.newUnaryServerInterceptor(
                 Duration.ofSeconds(2), Duration.ofSeconds(1)));
 
         SpanData span = onlySpan();
@@ -335,12 +334,12 @@ class LikeA9GrpcSpanEndToEndTest {
     @Test
     @DisplayName("护栏：共享层那个拦截器必须真的在链路上（否则上面两条测的是别的拦截器）")
     void sharedInterceptorIsReallyTheOneOnTheChain() {
-        ServerInterceptor shared = RpcInterceptor.newUnaryServerInterceptor(
+        ServerInterceptor shared = com.rag.common.observability.RpcInterceptor.newUnaryServerInterceptor(
                 Duration.ofSeconds(2), Duration.ofSeconds(1));
         assertNotNull(shared, "共享层必须能产出拦截器");
         // 「真链路」那条用的是共享层的静态工厂；这里锁住「它产出的确实是 ServerInterceptor」
         // ⇒ ⇒ 防止将来有人把共享层那个类改成不再产出拦截器 ⇒ 而本文件还在测「域侧写法」
-        assertTrue(shared.getClass().getName().contains("RpcInterceptor")
+        assertTrue(shared.getClass().getName().contains("com.rag.common.observability.RpcInterceptor")
                         || shared.getClass().getName().startsWith("com.rag.common.observability"),
                 "共享层拦截器的实现类应在 com.rag.common.observability 包下，实际 = "
                         + shared.getClass().getName());

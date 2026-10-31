@@ -2,8 +2,6 @@ package com.rag.task.task.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.rag.common.http.GoStyleFormLimitMode;
-import com.rag.common.http.GoStyleFormValueLimitInterceptor;
 import com.rag.task.task.api.client.TaskRpcClient;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -134,7 +132,7 @@ class TaskApiFormLimitReachabilityTest {
     private TaskRpcClient taskRpcClient;
 
     @Autowired
-    private GoStyleFormValueLimitInterceptor formLimitInterceptor;
+    private com.rag.common.http.GoStyleFormValueLimitInterceptor formLimitInterceptor;
 
     // ---------------------------------------------------------------- 守门
 
@@ -144,7 +142,7 @@ class TaskApiFormLimitReachabilityTest {
         // 🔴 这条断言是**本守门的非空洞前提**：光断言「请求返回 200」区分不了
         //    「闸门被关掉」与「闸门根本没装」—— 两者都表现为 200。
         //    ⇒ 必须**直接**断言生效中的模式。
-        assertEquals(GoStyleFormLimitMode.Mode.OFF, formLimitInterceptor.mode(),
+        assertEquals(com.rag.common.http.GoStyleFormLimitMode.Mode.OFF, formLimitInterceptor.mode(),
                 "本域的 rag.http.go-form-limit.mode 必须是 OFF：Go 侧 gettaskhandler.go:19 用裸 "
                         + "json.NewDecoder ⇒ 从不调 httpx.Parse/ParseForm ⇒ go-zero 的 2048 上限在本域不可达；"
                         + "RAG 侧若开闸门 ⇒ 多出一道 Go 没有的拒绝。实际生效模式 = " + formLimitInterceptor.mode());

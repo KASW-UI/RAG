@@ -1,9 +1,7 @@
 package com.rag.message.message.rpc;
 
 import com.rag.common.protection.GoStyleProtectionProperties;
-import com.rag.common.protection.GoStyleRpcBreakerInterceptor;
 import com.rag.common.protection.GoStyleRpcProtectionChain;
-import com.rag.common.protection.GoStyleRpcSheddingInterceptor;
 import io.grpc.Metadata;
 import io.grpc.MethodDescriptor;
 import io.grpc.ServerBuilder;
@@ -146,9 +144,9 @@ class MessageProtectionChainWiringTest {
 
         assertThat(run.businessCall().getClass().getEnclosingClass())
                 .as("降载已关 ⇒ 此刻唯一可能包住业务 call 的就是 **breaker 层**；"
-                        + "若这一层归属不是 GoStyleRpcBreakerInterceptor，说明链的层次不对"
+                        + "若这一层归属不是 com.rag.common.protection.GoStyleRpcBreakerInterceptor，说明链的层次不对"
                         + "（例如 breaker 被排到了降载外层/内层之外），或包装层被别的层顶替。")
-                .isEqualTo(GoStyleRpcBreakerInterceptor.class);
+                .isEqualTo(com.rag.common.protection.GoStyleRpcBreakerInterceptor.class);
     }
 
     @Test
@@ -172,9 +170,9 @@ class MessageProtectionChainWiringTest {
         assertThat(run.businessCall().getClass().getEnclosingClass())
                 .as("降载开着时，**最内层**包住业务 call 的应当是降载层"
                         + "（Go 的链序 zrpc/server.go:144-167：Breaker → Shedding → handler ⇒ "
-                        + "降载在熔断**内层**）；若这一层归属不是 GoStyleRpcSheddingInterceptor，"
+                        + "降载在熔断**内层**）；若这一层归属不是 com.rag.common.protection.GoStyleRpcSheddingInterceptor，"
                         + "说明降载层没挂上，或链的层次被排错了。")
-                .isEqualTo(GoStyleRpcSheddingInterceptor.class);
+                .isEqualTo(com.rag.common.protection.GoStyleRpcSheddingInterceptor.class);
     }
 
     /**

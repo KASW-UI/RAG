@@ -2,7 +2,6 @@ package com.rag.message.message.api;
 
 import com.rag.common.protection.GoStyleCircuitOpenException;
 import com.rag.users.common.jwt.JwtUtil;
-import com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor;
 import com.rag.message.message.api.MessageApiApplication;
 import com.rag.message.message.proto.MessageServiceGrpc;
 import io.grpc.Server;
@@ -97,7 +96,7 @@ class GoStyleGrpcClientBreakerE2ETest {
     private MockMvc mockMvc;
 
     @Autowired
-    private GoStyleGrpcClientBreakerInterceptor interceptor;
+    private com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor interceptor;
 
     @LocalServerPort
     private int port;
