@@ -207,11 +207,21 @@ rag:
     #   ⇒ ⇒ 共享层的 `cap-millis` 是**组件级一个值**（`@GrpcGlobalClientInterceptor`
     #     ⇒ 装在**每个**出向调用上）⇒ ⇒ 配 2000 会把 article-rpc 方向从 70s **改严 35 倍**；
     #     配 70000 会把 user-rpc 方向从 2s **放宽 35 倍** ⇒ ⇒ **两个值都不对**。
-    #   ⇒ ⇒ 因此本组件**保留域侧 per-direction 内联**（`UserRpcClient` 的 2000ms；
-    #     article-rpc 方向靠 `ArticleRpcClient` 继承 HTTP 70s 预算 ⇒ 与 Go 的 70000 同形）
-    #     ⇒ ⇒ **这是「组件级 cap 表达不了 per-client 真值」的已知缺口**，待共享层加
-    #     `per-client` 上界参数后再收敛（G4 反馈单 · 共享层模型缺口）。
+    #   ⇒ ⇒ **2026-10-31 · 合并收口执行者（代 G4 落 per-client 上界 · Jason 授权）**：
+    #     共享层已加 `cap-millis-by-service`（**按下游 gRPC 服务全名**覆盖组件级）
+    #     ⇒ ⇒ 本组件**改用它**分档（下面那段）⇒ ⇒ **组件级 `cap-millis` 仍然不配**。
     #   ⇒ ⇒ ⚠️ **别在这里补一行 cap-millis: 2000**（那是把一条真漂移"配"进产品）。
+    outbound-deadline:
+      # ⚠️ **组件级仍然不配**（理由见上）⇒ ⇒ 下面这张表是本组件**唯一**的上界来源。
+      cap-millis-by-service:
+        # article-rpc 方向 = 70s（Go `ArticleRpcConf.Timeout: 70000`）
+        # ⚠️ 键 = **下游 gRPC 服务全名**（proto 的 package.Service）⇒ ⇒ 全局拦截器
+        #   在拦截时唯一拿得到的出向标识（`MethodDescriptor#getServiceName()`）
+        #   ⇒ ⇒ **域侧零代码改动**（只配参数）⇒ ⇒ 与「域侧只配参数」原则同形。
+        article.ArticleService: 70000
+        # user-rpc 方向 = 2s（Go `UserRpcConf` 段无 Timeout ⇒ zrpc struct tag 默认 2000）
+        # ⚠️ 语义 = **覆盖**组件级（不是 min）⇒ ⇒ 可放宽也可收紧。
+        user.UserService: 2000
 
 # =============================================================================
 # Metrics / Observability 端点
