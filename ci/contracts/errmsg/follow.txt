@@ -1,183 +1,81 @@
-# =============================================================================
-# ci/contracts/errmsg/follow.txt —— R5 错误码契约基准（follow 域）
+# ============================================================================
+# ci/contracts/errmsg/follow.txt —— R5 错误码契约基准（follow 域）· **Go 真源派生**
 #
 # 【这是什么】
-#   Java 侧follow 域错误码契约的**机器可读基准**。
-#   CI 用 `ci/scripts/check-errmsg-contract.sh` 跑 **Java 半边探针**
-#   （`tools/errmsg-probe/follow/java/Probe.java`）并与本文件的 dump 段**逐字节**比对。
+#   R5 错误码契约的**机器可读基准**。CI 用 `ci/scripts/check-errmsg-contract.sh`
+#   跑 **Java 半边探针**（tools/errmsg-probe/follow/java/Probe.java）⇒ 把产物当作**被测对象**，
+#   与本文件的 **Go 权威段**做**双向**比对。
 #
 # 【权威性来源 = Go 真源（只读 · 冻结）】
 #   Go 真源：Sea-RideTheWind_golang/service/follow/common/errmsg.go
-#     · const 块 :33-53 · codeMsg 表 :55-73 · GetErrMsg :89-95 · GRPCError :97-99 · BizCodeFromError :101-133
+#     · const 块 :33-53 · codeMsg 表 :55-74 · GetErrMsg :89-97
+#     · sha256 = 09a442c1363efa9072b733b11c6dff8b1fd45891cd23b14316dfd56ec3cda27c
 #   Java 被测：service/follow/follow-common/src/main/java/com/rag/follow/follow/common/errmsg/{FollowErrorCode,FollowErrorMessages,FollowCodeError,FollowGrpcError}.java
 #
 # 【提取方式（离线 · 一次性 · 可复算）】
-#   2026-10-31 用 `tools/errmsg-probe/follow/run-parity.sh` 跑**双侧对拍**：
-#     · Go 半边：把真源 `errmsg.go` 复制进临时模块、与真源**同包**编译后跑
-#       （复制件与真源比 sha256，不一致即 exit 2 ⇒ 验的确实是真源）；
-#     · Java 半边：`javac` 编译探针 → 跑**真实编译产物**（`<域>-common` 的
-#       `target/classes`）⇒ 探针自己**不持有任何码值/文案常量**（否则是「拿 RAG 的值验 RAG 的值」）。
-#   本文件 = **Java 侧 dump**（Java 侧应当满足的契约）。
-#   ⇒ Go 仓**不需要**在线、Go 工具链**不需要**进 CI 镜像。
+#   `python3 ci/scripts/extract-errmsg-authority.py --emit follow` ⇒ 本文件的 go-authority 段
+#   独立复算：`python3 ci/scripts/extract-errmsg-authority.py --check`（逐字节比对 ⇒ 证明基准确实来自 Go）
+#   ⚠️ CI **不拉 Go 仓、不装 Go 工具链、不跑 Go 探针** ⇒ 权威值固化在本目录。
 #
-# 【裁定依据】
-#     · Go↔Java 双侧 dump 有 **3 条差异**，全部落在 `OBS` 段。
-#     · 裁定依据：`docs/DRIFT/follow/common.md` + `tools/errmsg-probe/follow/README.md` §五（逐条 Go 出处 / RAG 出处）。
-#     · ⚠️ 这 3 条**全部**是「构造出来的不可达形态」：follow 域的真实链路恒走 `status.FromError` 的
-#     · 「顶层直接命中」分支（4 个 client interceptor + 4 个 server interceptor 全部原样透传）⇒ 不构成行为漂移。
+# 【两段式结构】
+#   # >>> go-authority >>>  —— **Go 侧权威值**（CI 的真值来源）
+#       `GOCONST|<code>|<Go 常量名>`（const 块全部常量）· `GOTABLE|<code>|<文案>`（codeMsg 表全部条目）· `GOFALLBACK|<文案>`（GetErrMsg 对未知码的回落 = codeMsg[Error]）
+#   # >>> deviations >>>   —— **逐条差异裁定**（Go↔Java 的每一条差异都在这里落笔）
+#       DEVIATION|<段>|<键>|<go值>|<java值>|<status>|<依据id>|<依据出处>|<理由>
+#       status ∈ approved | closed | technical | pending
 #
-# 【本域已批准差异清单】（Go 侧 vs Java 侧 · **逐条** · 共 3 条）
-#   ⑴ OBS|obs_custom_grpcstatus
-#        Go   : 5101
-#        Java : 1015
-#        裁定 : 已登记 · 不可达差异（OBS 段） —— g r p c - g o   的   ` s t a t u s . F r o m E r r o r `   认 「 * * 顶 层 实 现 了   ` G R P C S t a t u s ( )   * S t a t u s `   的 任 意   e r r o r * * 」 ⇒   文 案 反 查 命 中   ⇒   5 1 0 1 ； J a v a   侧   ` r e s o l v e S t a t u s `   * * 只 认 * *   ` S t a t u s E x c e p t i o n `   /   ` S t a t u s R u n t i m e E x c e p t i o n `   两 个 具 体 类   ⇒   认 不 出   ⇒   兜 底   1 0 1 5 。 ⇒ **构造出来的不可达形态**（真实链路恒走「顶层直接命中」分支）⇒ 不构成行为漂移。出处：`tools/errmsg-probe/follow/README.md` §五 + `docs/DRIFT/follow/common.md`。
-#   ⑴ OBS|obs_ok_status
-#        Go   : 200
-#        Java : 5001
-#        裁定 : 已登记 · 不可达差异（OBS 段） —— G o   的   ` s t a t u s . E r r o r ( c o d e s . O K ,   m s g ) `   * * 返 回   n i l * * （ g r p c - g o   ` i n t e r n a l / s t a t u s / s t a t u s . g o ` ） ⇒   ` B i z C o d e F r o m E r r o r ( n i l ) `   ⇒   ` S u c c e s s ` ( 2 0 0 ) ； J a v a   侧   ` S t a t u s . f r o m C o d e ( O K ) . . . a s E x c e p t i o n ( ) `   造 出 来 的 是 一 个   * * c o d e = O K   的 非   n i l   ` S t a t u s E x c e p t i o n ` * *   ⇒   走 反 查 / 兜 底   ⇒   5 0 0 1 。 「 O K   状 态 不 是 错 误 」 是   g r p c - g o   的   A P I   形 态 ， g r p c - j a v a   没 有 对 应 的 塌 缩 。 ⇒ **构造出来的不可达形态**（真实链路恒走「顶层直接命中」分支）⇒ 不构成行为漂移。出处：`tools/errmsg-probe/follow/README.md` §五 + `docs/DRIFT/follow/common.md`。
-#   ⑴ OBS|obs_wrapped_outer_msg
-#        Go   : 5002
-#        Java : 5101
-#        裁定 : 已登记 · 不可达差异（OBS 段） —— G o   的   ` f m t . E r r o r f ( " % w " ) `   的   ` E r r o r ( ) `   =   ` " 外 层 文 本 :   内 层 文 本 " `   ⇒   * * 文 案 反 查 必 然 落 空 * *   ⇒   s w i t c h   兜 底   5 0 0 2 ； J a v a   的   ` T h r o w a b l e # g e t M e s s a g e ( ) `   * * 只 有 外 层 文 本 * *   ⇒   反 查 * * 能 命 中 * *   ⇒   5 1 0 1 。 这 是   G o   的   ` f m t . E r r o r f `   文 本 格 式   v s   J a v a   的   ` g e t M e s s a g e ( ) `   的 * * 结 构 性 差 异 * * 。 ⇒ **构造出来的不可达形态**（真实链路恒走「顶层直接命中」分支）⇒ 不构成行为漂移。出处：`tools/errmsg-probe/follow/README.md` §五 + `docs/DRIFT/follow/common.md`。
+# 【四类差异状态】
+#   approved  —— 已签字（依据 id 必能在 `docs/Intentional_Deviations/` 里查到）
+#   closed    —— 已销号/证伪关闭（依据 id 必能在 `docs/DRIFT/` 里查到）
+#   technical —— 技术判定（Go 侧该形态**不可达** / 两个运行时的**结构性差异**）
+#               ⇒ 依据出处必须给出 Go 侧 `文件:行号`
+#   pending   —— **未经批准、需用户拍板** ⇒ **不判 FAIL**，但逐条显式报出，
+#               且**该域不得计入 PASS**（门以退出码 3 收口）
 #
-# 【层次与规模】
-#   CONST(16) + TABLE(16) + FALLBACK(19) + CODEERR(16) + WIRE(16) + WIREX(24) + BIZCODE(23) + OBS(3)
+# 【本域差异台账】 approved=0 · closed=0 · technical=3 · pending=0（共 3 条）
 #
-# 【基准版本】v1 · 2026-10-31
-# 【格式】`#` 开头的是注释（不参与比对）；`# >>> dump >>>` 之后是契约正文。
-# =============================================================================
+#   ⚠️ 这 3 条**全部**是「构造出来的不可达形态」：follow 域的真实链路恒走 `status.FromError` 的「顶层直接命中」分支 ⇒ 不构成行为漂移。
+#
+# 【基准版本】v2 · 2026-10-31（v1 = Java dump 快照；**v2 起权威内容改为 Go 派生**）
+# 【格式】`#` 开头的是注释（不参与比对）；正文按 `# >>> <段> >>>` 切分。
+# ============================================================================
 
-# >>> dump >>>
-CONST|200
-CONST|500
-CONST|1015
-CONST|5001
-CONST|5002
-CONST|5003
-CONST|5004
-CONST|5005
-CONST|5006
-CONST|5007
-CONST|5008
-CONST|5101
-CONST|5201
-CONST|5202
-CONST|5203
-CONST|5204
-TABLE|200|OK
-TABLE|500|FAIL
-TABLE|1015|service busy
-TABLE|5001|internal server error
-TABLE|5002|record not found
-TABLE|5003|invalid parameter
-TABLE|5004|unauthorized
-TABLE|5005|forbidden
-TABLE|5006|already exists
-TABLE|5007|database query failed
-TABLE|5008|database update failed
-TABLE|5101|user not found
-TABLE|5201|self relation is not allowed
-TABLE|5202|blocked relation exists
-TABLE|5203|follow relation not found
-TABLE|5204|block relation not found
-FALLBACK|0|FAIL
-FALLBACK|-1|FAIL
-FALLBACK|1|FAIL
-FALLBACK|999|FAIL
-FALLBACK|1001|FAIL
-FALLBACK|1012|FAIL
-FALLBACK|1013|FAIL
-FALLBACK|2001|FAIL
-FALLBACK|3001|FAIL
-FALLBACK|5009|FAIL
-FALLBACK|5010|FAIL
-FALLBACK|5012|FAIL
-FALLBACK|5102|FAIL
-FALLBACK|5205|FAIL
-FALLBACK|5206|FAIL
-FALLBACK|5207|FAIL
-FALLBACK|9999|FAIL
-FALLBACK|2147483647|FAIL
-FALLBACK|-2147483648|FAIL
-CODEERR|200|ErrCode:200, Errmsg:OK
-CODEERR|500|ErrCode:500, Errmsg:FAIL
-CODEERR|1015|ErrCode:1015, Errmsg:service busy
-CODEERR|5001|ErrCode:5001, Errmsg:internal server error
-CODEERR|5002|ErrCode:5002, Errmsg:record not found
-CODEERR|5003|ErrCode:5003, Errmsg:invalid parameter
-CODEERR|5004|ErrCode:5004, Errmsg:unauthorized
-CODEERR|5005|ErrCode:5005, Errmsg:forbidden
-CODEERR|5006|ErrCode:5006, Errmsg:already exists
-CODEERR|5007|ErrCode:5007, Errmsg:database query failed
-CODEERR|5008|ErrCode:5008, Errmsg:database update failed
-CODEERR|5101|ErrCode:5101, Errmsg:user not found
-CODEERR|5201|ErrCode:5201, Errmsg:self relation is not allowed
-CODEERR|5202|ErrCode:5202, Errmsg:blocked relation exists
-CODEERR|5203|ErrCode:5203, Errmsg:follow relation not found
-CODEERR|5204|ErrCode:5204, Errmsg:block relation not found
-WIRE|200|internal|OK
-WIRE|500|internal|FAIL
-WIRE|1015|internal|service busy
-WIRE|5001|internal|internal server error
-WIRE|5002|internal|record not found
-WIRE|5003|internal|invalid parameter
-WIRE|5004|internal|unauthorized
-WIRE|5005|internal|forbidden
-WIRE|5006|internal|already exists
-WIRE|5007|internal|database query failed
-WIRE|5008|internal|database update failed
-WIRE|5101|internal|user not found
-WIRE|5201|internal|self relation is not allowed
-WIRE|5202|internal|blocked relation exists
-WIRE|5203|internal|follow relation not found
-WIRE|5204|internal|block relation not found
-WIREX|invalid_argument|5101|invalid_argument|user not found
-WIREX|invalid_argument|5201|invalid_argument|self relation is not allowed
-WIREX|invalid_argument|5007|invalid_argument|database query failed
-WIREX|unauthenticated|5101|unauthenticated|user not found
-WIREX|unauthenticated|5201|unauthenticated|self relation is not allowed
-WIREX|unauthenticated|5007|unauthenticated|database query failed
-WIREX|permission_denied|5101|permission_denied|user not found
-WIREX|permission_denied|5201|permission_denied|self relation is not allowed
-WIREX|permission_denied|5007|permission_denied|database query failed
-WIREX|already_exists|5101|already_exists|user not found
-WIREX|already_exists|5201|already_exists|self relation is not allowed
-WIREX|already_exists|5007|already_exists|database query failed
-WIREX|not_found|5101|not_found|user not found
-WIREX|not_found|5201|not_found|self relation is not allowed
-WIREX|not_found|5007|not_found|database query failed
-WIREX|internal|5101|internal|user not found
-WIREX|internal|5201|internal|self relation is not allowed
-WIREX|internal|5007|internal|database query failed
-WIREX|unavailable|5101|unavailable|user not found
-WIREX|unavailable|5201|unavailable|self relation is not allowed
-WIREX|unavailable|5007|unavailable|database query failed
-WIREX|deadline_exceeded|5101|deadline_exceeded|user not found
-WIREX|deadline_exceeded|5201|deadline_exceeded|self relation is not allowed
-WIREX|deadline_exceeded|5007|deadline_exceeded|database query failed
-BIZCODE|nil_error|200
-BIZCODE|plain_error|1015
-BIZCODE|code_error|5003
-BIZCODE|code_error_wrapped|1015
-BIZCODE|desc_5001|5001
-BIZCODE|desc_5002|5002
-BIZCODE|desc_5007|5007
-BIZCODE|desc_5101|5101
-BIZCODE|desc_5201|5201
-BIZCODE|desc_5201_unauth|5201
-BIZCODE|desc_5002_runtime|5002
-BIZCODE|desc_5002_exception|5002
-BIZCODE|wrapped_unknown|5002
-BIZCODE|desc_unknown|5001
-BIZCODE|desc_unknown_invalid|5003
-BIZCODE|desc_unknown_unauth|5004
-BIZCODE|desc_unknown_perm|5005
-BIZCODE|desc_unknown_exists|5006
-BIZCODE|desc_unknown_notfound|5002
-BIZCODE|desc_unknown_unavail|1015
-BIZCODE|desc_unknown_deadline|1015
-BIZCODE|desc_ok_text|5001
-BIZCODE|desc_fail_text|5001
-OBS|obs_ok_status|5001
-OBS|obs_custom_grpcstatus|1015
-OBS|obs_wrapped_outer_msg|5101
+# >>> go-authority >>>
+GOCONST|200|Success
+GOCONST|500|Error
+GOCONST|1015|CodeServerBusy
+GOCONST|5001|ErrorServerCommon
+GOCONST|5002|ErrorNotFound
+GOCONST|5003|ErrorInvalidParam
+GOCONST|5004|ErrorUnauthorized
+GOCONST|5005|ErrorForbidden
+GOCONST|5006|ErrorAlreadyExist
+GOCONST|5007|ErrorDbSelect
+GOCONST|5008|ErrorDbUpdate
+GOCONST|5101|ErrorUserNotFound
+GOCONST|5201|ErrorSelfRelation
+GOCONST|5202|ErrorRelationBlocked
+GOCONST|5203|ErrorFollowNotFound
+GOCONST|5204|ErrorBlockNotFound
+GOTABLE|200|OK
+GOTABLE|500|FAIL
+GOTABLE|1015|service busy
+GOTABLE|5001|internal server error
+GOTABLE|5002|record not found
+GOTABLE|5003|invalid parameter
+GOTABLE|5004|unauthorized
+GOTABLE|5005|forbidden
+GOTABLE|5006|already exists
+GOTABLE|5007|database query failed
+GOTABLE|5008|database update failed
+GOTABLE|5101|user not found
+GOTABLE|5201|self relation is not allowed
+GOTABLE|5202|blocked relation exists
+GOTABLE|5203|follow relation not found
+GOTABLE|5204|block relation not found
+GOFALLBACK|FAIL
+
+# >>> deviations >>>
+DEVIATION|OBS|obs_custom_grpcstatus|5101|1015|technical|-|Go service/follow/common/errmsg.go:97-99 · docs/DRIFT/follow/common.md|grpc-go 的 status.FromError 认「顶层实现了 GRPCStatus()」的任意 error ⇒ 文案反查命中；Java 侧 resolveStatus 只认 StatusException/StatusRuntimeException ⇒ 认不出 ⇒ 兜底 1015。
+DEVIATION|OBS|obs_ok_status|200|5001|technical|-|Go service/follow/common/errmsg.go:89-95 · docs/DRIFT/follow/common.md|grpc-go 的 status.Error(codes.OK, msg) 返回 nil ⇒ BizCodeFromError(nil) ⇒ 200；grpc-java 没有「OK 不是错误」的塌缩 ⇒ 走反查/兜底 ⇒ 5001。
+DEVIATION|OBS|obs_wrapped_outer_msg|5002|5101|technical|-|Go service/follow/common/errmsg.go:101-133 · docs/DRIFT/follow/common.md|Go 的 fmt.Errorf("%25w") 的 Error() 文本含外层+内层 ⇒ 文案反查落空 ⇒ 兜底 5002；Java 的 Throwable#getMessage() 只有外层文本 ⇒ 反查命中 ⇒ 5101（结构性差异）。

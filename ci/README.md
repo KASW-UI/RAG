@@ -171,6 +171,7 @@ get repo (trigger: true)   ← git 资源，paths 过滤 ⇒ 只在相关改动�
 | **R4** Proto 契约 | Java 侧 `.proto` ↔ `ci/contracts/proto/` 基准逐字节 | **每条域流水线的静态守门步** | python3（零第三方依赖） | `python3 ci/scripts/check-proto-contract.py --baseline ci/contracts/proto` |
 | **R5** 错误码契约 | Java 侧错误码 dump ↔ `ci/contracts/errmsg/` 基准逐字节 | 独立流水线 `rag-contract-errmsg` | JDK21 + Maven（编译 `<域>-common`） | `bash ci/scripts/check-errmsg-contract.sh` |
 | **R6** Schema 契约 | Flyway 迁移重放出的实际 schema ↔ `ci/contracts/schema/` 语义基准 | 独立流水线 `rag-contract-schema` | python3 + Docker API + PG 容器 | `python3 ci/scripts/check-schema-contract.py --all` |
+| 🆕 **R10** 目标要求清单 | 清单本身的结构 / 六态口径 / **Go 依据必填** / **已批准差异机器回指** | **每条域流水线的静态守门步**（第 11 道门） | python3（零第三方依赖） | `python3 ci/scripts/check-requirements.py` |
 
 **手动触发契约流水线**
 
@@ -192,6 +193,35 @@ fly -t concourse trigger-job -j rag-contract-schema/contract-check --watch
 > 契约门在 BLOCKED 时同样会让 build 变红 —— 这是**安全方向**：
 > 「没检查」绝不能看起来像「查过了且没问题」。
 
+**R6 的 CI 环境编排（2026-10-31 定案并实测）**
+
+```
+任务容器 docker:27-dind            ← 起内层 dockerd（Concourse 8 不支持挂宿主 docker.sock）
+  └─ 内层容器 python:3.12-bookworm  ← 不需要 Maven/JDK
+       └─ tools/difftest/docker_api.py  ← 纯标准库 Docker Engine API over unix socket
+            └─ postgres:16-alpine       ← 活体 PG，重放 Flyway 迁移，逐列比对基准
+```
+
+> ⚠️ **CI 镜像里没有 `docker` CLI**（`ci/scripts/testcontainers-env.sh` 已注明）⇒ 所以不能用 `docker exec` ⇒
+> ⇒ 必须走 **Docker Engine API over unix socket**（纯标准库，零依赖）。
+> ⇒ 这也是 R6 能进 CI、而不需要 Go 仓 + Go 工具链的前提。
+
+**R10 目标要求清单的六态**（`ci/requirements/README.md`，**与契约门的五态不是一回事**）
+
+| 状态 | 含义 | 计入 PASS？ |
+|---|---|---|
+| `VERIFIED` | Java 侧**实际验证通过**（有可复算命令 + 证据） | ✅ **是**（且**只有**它是） |
+| `FAIL` | Java 侧与目标要求**不一致**（含「已知差异但未经批准」） | ❌ |
+| `NOT_IMPLEMENTED` | Java 侧**尚未实现** | ❌ |
+| `NOT_VERIFIED` | **有实现但验证不足** | ❌ |
+| `APPROVED_DIFFERENCE` | **已明确批准**的差异（机器回指已签字条目） | ❌ |
+| `BLOCKED` | **验证条件不具备** | ❌ |
+| `NOT_APPLICABLE` | 该维度**对目标域不适用** | ❌（但**必须显式打印**） |
+
+> ⚠️ **R10 门退出 0 的含义 = 「无回归 + 结构合规」，不等于「目标全部达成」** ⇒ 六态分列与 PASS 数同时打印。
+> ⚠️ **`APPROVED_DIFFERENCE` 必须能机器回指** `docs/Intentional_Deviations/` 里**已签字**的条目
+> ⇒ **不许自行把差异列进豁免**（守门规则 R6 + 变异测试 M3/M4 证明）。
+
 **哪些检查需要额外环境**
 
 | 检查 | 额外环境 | 没有它会怎样 |
@@ -199,7 +229,9 @@ fly -t concourse trigger-job -j rag-contract-schema/contract-check --watch
 | R4 | 无（python3 即可） | —— |
 | R5 | JDK21 + Maven（CI 镜像已含）；**Maven 依赖需预热**（`~/.m2` 缓存，CI 用 `m2-repo-v1` 缓存卷） | 编译失败 ⇒ **BLOCKED(2)**（不是 FAIL） |
 | R6 | 活体 PostgreSQL 容器 + Docker API（CI 用 DinD 提供） | PG 起不来 ⇒ **BLOCKED(2)**（不是 FAIL） |
+| R10 | 无（python3 即可） | —— |
 | 全部 | **❌ 不需要 Go 工具链　❌ 不需要 Go 仓在线可访问** | —— |
+
 
 ---
 
@@ -212,18 +244,35 @@ fly -t concourse trigger-job -j rag-contract-schema/contract-check --watch
 | `ci/tasks/maven-test.yml` | 测试阶段的 task 配置 |
 | `ci/tasks/static-gates.yml` | 静态守门阶段的 task 配置 |
 | `ci/tasks/report.yml` | 结果汇总阶段的 task 配置 |
+| `ci/tasks/contract-errmsg.yml` | **R5 契约门**的 task 配置（独立流水线用） |
+| `ci/tasks/contract-schema.yml` | **R6 契约门**的 task 配置（独立流水线用） |
 | `ci/scripts/build.sh` | 在嵌套构建容器里跑 `mvn package -DskipTests` |
 | `ci/scripts/test.sh` | 在嵌套构建容器里跑 `mvn test`（先 source Testcontainers 环境） |
 | `ci/scripts/testcontainers-env.sh` | Testcontainers 环境：Docker 前置断言 + host override + Ryuk 关闭 |
 | `ci/scripts/dind-run.sh` | DinD 外壳：起内层 `dockerd` → 在其上跑嵌套构建容器 |
-| `ci/scripts/run-static-gates.sh` | 按序跑静态守门，汇总通过/失败 |
+| `ci/scripts/run-static-gates.sh` | 按序跑静态守门，汇总通过/失败（**豁免命中数单列**） |
 | `ci/scripts/check-pom-parent-relativepath.py` | **第 9 道门**：每个 pom 的 `<parent>` 能否被本地 `relativePath` 正确解析（离线；见 `ci/DELIVERY.md` §六.2） |
 | `ci/scripts/collect-surefire.sh` | 读 `TEST-*.xml` 汇总用例数与失败清单 |
-| `ci/generate-pipelines.py` | 从 pom 依赖图生成 11 条 pipeline；`--check` 校验漂移 |
-| `ci/deploy.sh` | 校验 + `set-pipeline`（注入 `registry` 变量）+ `unpause-pipeline`（幂等） |
-| `ci/local-up.sh` | **本地环境一键起流**：load 人工下载的镜像 tar → （可选）起本地 registry → 起 Concourse → `fly login` → 注册 11 条流水线 → （可选）触发 build |
+| `ci/scripts/check-proto-contract.py` | **第 10 道门**：R4 Proto 契约（Java 侧 ↔ `ci/contracts/proto/`） |
+| `ci/scripts/check-errmsg-contract.sh` | **R5 契约门**（纯 Java 半边探针 ↔ `ci/contracts/errmsg/`） |
+| `ci/scripts/check-schema-contract.py` | **R6 契约门**（活体 PG 重放 Flyway → 逐列比对 `ci/contracts/schema/`） |
+| `ci/scripts/check-requirements.py` | **第 11 道门**：目标要求清单（Go 依据必填 / 六态 / 已批准差异机器回指） |
+| `ci/scripts/check-requirements-mutations.py` | 清单守门的变异测试（10 条变异全部红在目标规则） |
+| `ci/scripts/contract-errmsg.sh` / `contract-schema.sh` | R5 / R6 在 DinD 内层容器里的阶段脚本 |
+| `ci/scripts/verify-triggers.sh` | 触发面**真实服务端**验证（7 个场景） |
+| `ci/contracts/README.md` | 契约基准的治理约定（来源 / 裁定 / 版本 / 审查 / 五态语义） |
+| `ci/contracts/proto/*.proto`（10） | **R4 基准**（Go 真源离线提取） |
+| `ci/contracts/errmsg/*.txt`（10） | **R5 基准**（Go 侧权威值 + 差异逐条裁定） |
+| `ci/contracts/schema/*.json`（9） | **R6 基准**（Go GORM 活体提取：必须保持 + 已批准 + 未确认） |
+| `ci/requirements/requirements.json` | **目标要求清单**（46 条 · 机器可读 · 单一真源） |
+| `ci/requirements/README.md` | 清单治理约定（字段 / 维度 / 规则 / 变更流程 / 当前状态） |
+| `tools/difftest/docker_api.py` | **纯标准库** Docker Engine API over unix socket（CI 镜像无 docker CLI） |
+| `ci/generate-pipelines.py` | 从 pom 依赖图生成 11 条日常 + 2 条契约 pipeline；`--check` 校验漂移 |
+| `ci/deploy.sh` | 校验 + `set-pipeline`（注入 `registry` 等变量）+ `unpause-pipeline`（幂等） |
+| `ci/local-up.sh` | **本地环境一键起流**：load 人工下载的镜像 tar → （可选）起本地 registry → 起 Concourse → `fly login` → 注册流水线 → （可选）触发 build |
 | `ci/DELIVERY.md` | **交付文档**：架构 / 文件清单 / 执行流程 / 分层验证记录 / 演练历程 / 维护说明 |
-| `ci/BASELINE.md` | **CI 需求基线**：以 Go 原版为参照 ⇒ Java CI 应验证什么（9 条需求 + 微服务级矩阵 + 触发需求 + 接入条件与验收标准 + 8 条待定项） |
+| `ci/BASELINE.md` | **CI 需求基线**：以 Go 原版为参照 ⇒ Java CI 应验证什么（R1~R10 + 目标要求清单 + 微服务级矩阵 + 触发需求 + 接入条件与验收标准 + 待定项） |
+
 
 > **为什么 task 配置要内联进 pipeline**
 > Concourse 的 pipeline step **必须**带 `file:` 或 `config:` 二选一，

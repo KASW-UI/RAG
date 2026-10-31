@@ -278,27 +278,51 @@ users/admin  ──▶ users/user
   也**不等于**校验 protoc 生成产物（`target/generated-sources/**` 的 `FIELD_NUMBER` 常量）——
   生成代码一致性**未覆盖**（仓内已有的 `*ProtoContractTest` 是 Maven 测试、期望值硬编码，**不是**本门）。
 
-### R5 错误码契约一致性（项目级 · 🟢 已有工具 · ✅ 2026-10-31 已进 CI）
+### R5 错误码契约一致性（项目级 · 🟢 已有工具 · 🔴 2026-10-31 基准返工：Java 派生 → Go 派生）
 
-- **Go 出处**：G4 —— 8 份 `errmsg.go`，错误码是 wire 契约。
-- **Java 现状**：8 个 `*ErrorCode` 类；已有 `tools/errmsg-probe/<域>/run-parity.sh` 做**双侧逐字节对拍**。
+- **Go 出处**：G4 —— 8 份 `errmsg.go`（`service/{article,comment,favorite,follow,hot,like,message}/common/errmsg*.go`
+  + `service/user/common/errmsg/errmsg.go`），错误码是 wire 契约。
+  ⚠️ **task 域 Go 侧没有 codeMsg 表** —— Go 的 task 服务在调用点内联 `status.Error(codes.X, "...")`
+  （`service/task/rpc/internal/logic/get_task_logic.go:44`、`service/task/api/internal/types/types.go:35-46`）
+  ⇒ 该域的 Go 权威 = **逐调用点的错误码与文案**，不是码表。
+- **Java 现状**：9 个 `*ErrorCode` 类；已有 `tools/errmsg-probe/<域>/run-parity.sh` 做**双侧逐字节对拍**。
 - **判定标准**：每个 Java 错误码的 code 与 message 与 Go 侧逐条一致；**并且**要能发现「新增错误码」。
-- **已具备？** ✅ **已进 CI**（2026-10-31）：
-  - 门 = `ci/scripts/check-errmsg-contract.sh`（**纯 Java 半边**：只编译 `<域>-common` 并跑
-    `tools/errmsg-probe/<域>/java/Probe.java`，**不跑 Go 半边**）；
-  - 基准 = `ci/contracts/errmsg/<域>.txt`（**从 Go 真源一次性离线提取 + 人工逐条裁定的 Java 侧期望值**，
-    已批准差异也记在基准文件头）；
-  - 归入**独立契约流水线** `rag-contract-errmsg`（分钟级 × 9 域 ⇒ 不塞进 11 条日常流水线）。
-  - 覆盖：码值 / 文案 / 未知码回落 / 业务码载体 / gRPC-HTTP 语义（task 域 4 层 43 条）。
-  - 已批准的差异：`users` 域 `TABLE|1017` / `TABLE|1018`（`DRIFT-USERSCOMMON-001`，2026-10-27 已销号）。
+- 🔴 **2026-10-31 发现的自身缺陷（本轮的实质修正）**：
+  初版基准 `ci/contracts/errmsg/*.txt` 的 dump 段里存的是 **Java 侧探针的输出**，
+  Go 值只出现在文件头的注释里 ⇒ **基准的权威内容其实是 Java 现状**
+  ⇒ 这正是新方向禁止的「**以 Java 现状反向定义目标**」⇒ **返工**。
+- ✅ **返工后的形态**（已实测）：
+  - 基准改为**两段式**：`# >>> go-authority >>>`（**Go 侧权威值**：`GOCONST` / `GOTABLE` / `GOFALLBACK`，
+    逐条附 Go 源文件 `文件:行号` + sha256）+ `# >>> deviations >>>`（**54 条差异逐条裁定**）；
+  - 检查器改为**以 Go 权威为基准做双向比对**：Go 有 Java 无 ⇒ FAIL；Java 有 Go 无 ⇒ FAIL；
+    同码文案不同 ⇒ FAIL；Go 回落规则 vs Java 回落行为不同 ⇒ FAIL；
+  - 差异**四态**（这是「不许自行豁免」的落点）：
+    | 状态 | 含义 | 门禁行为 | 本轮实测条数 |
+    |---|---|---|---|
+    | `approved` | 回指 `docs/Intentional_Deviations/` 里**已签字**条目 | 放行；**依据 id 查不到 ⇒ FAIL** | **31** |
+    | `closed` | 回指 `docs/DRIFT/` 里**已销号**条目 | 放行 | **2** |
+    | `technical` | 技术判定（Go 侧形态**不可达** / 运行时**结构性差异**），须带 Go `文件:行号` | 放行 | **13** |
+    | `pending` | **未经批准 ⇒ 需用户拍板** | **不判 FAIL，但该域不得计入 PASS**，且逐条显式报出 | **8** |
+  - 退出码**四态**：`0`=PASS · `1`=FAIL · `2`=BLOCKED · `3`=PENDING（**存在未签字差异 ⇒ 不计入 PASS**）
+  - 归入独立契约流水线 `rag-contract-errmsg`（分钟级 × 9 域 ⇒ 不塞进 11 条日常流水线）。
+- **实测读数（2026-10-31）**：**PASS 7 / FAIL 0 / BLOCKED 0 / PENDING 2**（域：`comment` · `like`）⇒ **EXIT=3**；
+  差异台账分列 approved 31 / closed 2 / technical 13 / **pending 8**。
+- 🆕 **变异测试** `ci/scripts/check-errmsg-contract-mutations.py`（**11 条**，含「Java 侧真改一个文案」）：
+  ⇒ **11/11 红在目标断言**，且**真源字节全部恢复**。
+  ⚠️ 变异过程本身抓出**两个变异脚本缺陷**（都不是门禁缺陷）：
+  ① 探针路径写错（`article` 域探针在 `tools/errmsg-probe/java/Probe.java`，**没有** `article/` 子目录）；
+  ② Java 侧变异命中了**测试文件**（`rglob` 顺序）⇒ 改的不是 `target/classes` 的来源 ⇒ 门禁当然绿
+  ⇒ **已限定 `src/main/**`** ⇒ 单验 M11：影子仓里改 `SUCCESS(200, "OK")` ⇒ 门禁判
+  `DRIFT|UNREGISTERED|TABLE|200|Go=OK / Java=OK-漂移了` ⇒ **FAIL** ⇒ **门禁确实能抓 Java 侧漂移**。
 - **⚠️ 覆盖缺口（显式记录）**：
-  - `favorite` / `article` **无 mutate 脚本** ⇒ 这 2 个域的「守门非假绿」**无变异证据**；
-  - Go 侧 `ProbeConstCodes()` 是**手写清单** ⇒ 本门以「Java 侧 dump vs 基准」为准，
+  - `favorite` / `article` **无 mutate 脚本** ⇒ 这 2 个域的「守门非假绿」靠**本轮新增的通用变异套件**覆盖；
+  - Go 侧 `ProbeConstCodes()` 是**手写清单** ⇒ 本门以「Go 权威段」为准，
     **不再依赖** Go 侧清单 ⇒ 真源新增常量需**重新提取基准**（人工流程，非自动）；
   - 8 个域的 `run-parity.sh` 里 `mvn compile` **无 `|| die`** ⇒ 那条本地路径会把构建失败报成 exit 1（漂移）；
     **本门不受影响**（新写的检查器里编译失败 ⇒ BLOCKED(2)）。
 
-### R6 数据库 schema 一致性（服务级 · 🟢 已有工具 · 🟡 2026-10-31 已具备 Java 侧独立路径）
+
+### R6 数据库 schema 一致性（服务级 · 🟢 已有工具 · ✅ 2026-10-31 已具备 Java 侧独立路径并进 CI）
 
 - **Go 出处**：G5 —— schema 真相在 Go 的 model struct（`AutoMigrate`）。
 - **Java 现状**：37 份 Flyway SQL；已有 `tools/difftest/check-ddl-static.py`（列级：类型/可空性/DEFAULT/索引）
@@ -308,14 +332,33 @@ users/admin  ──▶ users/user
   ② **Java 技术栈合理产生的实现差异**（表名加域前缀、索引命名形态、序列名）；
   ③ **已确认允许的结构差异**（有台账/签字）；
   ④ **尚未确认的差异**（必须显式报出）。
-- **已具备？** 🟡 **工具已具备 Java 侧独立路径**，CI 接入待环境就绪：
+- **已具备？** ✅ **已具备 Java 侧独立路径并进 CI**（2026-10-31）：
   - `check-ddl-static.py` 新增 `--rag-only`（**完全跳过 Go 侧读取与 Go↔RAG 列级对比**）
     + `--semantic-baseline`（只比对基准里 `must_match` 列出的维度 + 唯一约束，
     **不比对**索引命名形态 / 序列名 / CHECK / 触发器）⇒ **CI 不需要 Go 仓、不需要 Go 工具链**；
-  - 基准 = `ci/contracts/schema/<域>.json`（9 域）⇒ 记录「必须保持」+「已批准差异」+「未确认差异」。
-  - ⚠️ **未进 CI 的原因**：该门需 **活体 PostgreSQL + docker CLI + python3 同环境**，
-    而现有 DinD 形态的嵌套容器（maven 镜像）**没有 docker CLI** ⇒ 环境编排待定。
-    ⇒ **本阶段按 NOT_RUN 记账，不得计入 PASS。**
+  - 基准 = `ci/contracts/schema/<域>.json`（9 域）⇒ **由 Go GORM AutoMigrate 活体提取**（读源码推不出
+    索引名/可空性/DEFAULT ⇒ 必须活体）⇒ 记录「必须保持」+「已批准差异」+「**未确认差异**」三段；
+  - 门 = `ci/scripts/check-schema-contract.py`（活体 PG 重放 Flyway → 逐列比对）
+    + `ci/scripts/contract-schema.sh` + `ci/tasks/contract-schema.yml`
+    ⇒ 独立流水线 **`rag-contract-schema`**（`STAGE=contract-schema`）。
+  - **CI 环境编排**（本阶段新解）：任务容器 `docker:27-dind`（起内层 dockerd）
+    → 内层 `python:3.12-bookworm`（**不需要 Maven/JDK**）
+    → 通过 `tools/difftest/docker_api.py`（**纯标准库 Docker Engine API over unix socket**）
+    操作内层 daemon ⇒ 同时满足「活体 PG + docker 能力 + python3」三个条件
+    （CI 镜像**没有 docker CLI**，这是实测踩出来的约束）。
+  - **三态退出码 + 分类修正**（2026-10-31 实测踩坑后修）：
+    ① **基础设施类失败**（容器被杀 / 连不上 / 建库失败 · psql 返 `exit status 137`）
+       ⇒ 判 **BLOCKED(2)**，**不是 FAIL** ⇒ 维护者不会去查代码而真因在环境；
+    ② **迁移 SQL 被 PG 拒绝** ⇒ 判 **BLOCKED(2)**（检查没做完）**并打印 psql 原文**
+       ⇒ 提示「这可能是迁移脚本本身的缺陷」；
+    ③ **hot 域**（两侧皆无业务表）⇒ 判 **NOT_RUN(3)** ⇒ **不是「已对齐」**；
+    ④ **逐域容器自愈**（一域把 PG 搞挂 ⇒ 换名重建 ⇒ **单域故障不传染后续域**）。
+- **⚠️ 覆盖缺口（显式记录）**：
+  - `CHECK` 约束与**触发器**维度**未覆盖**（定义文本形态差异大，逐字比产生噪音）⇒ 已登记为
+    `REQ-SCHEMA-ALL-002` / `REQ-SCHEMA-ALL-003`（状态 `NOT_VERIFIED`）；
+  - **外键**：两侧皆无 ⇒ `NOT_APPLICABLE`（不是「已对齐」）；
+  - `users` 域存在**未签字**差异（`users_user.status` 可空性 + 4 处时间列 DEFAULT）⇒ 该域判 **NOT_VERIFIED**。
+
 
 ### R7 产物可执行性（服务级 · 🟢 已有 · ⚠️ 需修 CI 传递链）
 
@@ -348,26 +391,79 @@ users/admin  ──▶ users/user
 | R1 干净构建 | 项目级 | ✅ | ✅（build 步） |
 | R2 单测可判定 | 项目级 | ✅ | ⚠️（test + report 步；**2026-10-31 已补两条断言**：模块报告缺失 / 模块 0 条用例 ⇒ 原为假绿） |
 | R3 集成测试活体依赖 | 服务级 | ✅（🔴 一处 Linux-only 缺陷） | ✅（DinD） |
-| R4 接口契约 | ①仓级 ②消费方式 | ①✅ ②🟡 未覆盖 | ✅（① 进静态守门；**② 显式标为部分覆盖**） |
-| R5 错误码契约 | 项目级 | ✅ | ✅（独立流水线 `rag-contract-errmsg`） |
-| R6 schema 一致性 | 服务级 | 🟡 Java 侧独立路径已具备 | ❌（环境编排未定 ⇒ **NOT_RUN**） |
+| R4 接口契约 | ①仓级 ②消费方式 | ①✅ ②🟡 未覆盖 | ✅（① 进静态守门；**② 显式标为部分覆盖**·已登记 `REQ-PROTO-ALL-002~005`） |
+| R5 错误码契约 | 项目级 | 🟡 **基准原为 Java 派生 ⇒ 返工为 Go 派生中** | ⏳（独立流水线 `rag-contract-errmsg` 在跑；**基准返工未完成 ⇒ 该域不得计入 PASS**） |
+| R6 schema 一致性 | 服务级 | ✅（Go 派生基准 + 活体对拍） | ✅（独立流水线 `rag-contract-schema`；⚠️ `users` 域有未签字差异 ⇒ 判 NOT_VERIFIED） |
 | R7 产物可执行 | 服务级 | ✅ | ✅（static-gates 步） |
 | R8 影响面传播 | 项目级 | ✅ | ✅（git 资源 paths；**2026-10-31 已加固**：上游依赖模块的祖先聚合 pom 也纳入） |
 | R9 配置与密钥 | 项目级 | ✅ | ✅（static-gates 步；**2026-10-31 已分级汇总**：豁免命中数单列，不混进 PASS） |
+| 🆕 **R10 目标要求清单**（本轮新增） | 项目级 | ✅（46 条要求 + 11 条规则守门） | ✅（第 11 道静态门；**10/10 变异红在目标规则**） |
+
 
 ### 4.2 项目级 vs 服务级（交付 5 的前置）
 
 | 类别 | 内容 | 归属 |
 |---|---|---|
-| **项目级**（每个域流水线都跑） | R2 的兜底、**R4 的仓级一致性（①层）**、R8、R9 + 10 道静态守门（密钥/NUL/口令形态/Tomcat 上限/gRPC 拦截器接线/gRPC 运行时 classpath/Flyway 账本/**pom 父引用**/**proto 契约**） | 共享层 + CI 自身 |
+| **项目级**（每个域流水线都跑） | R2 的兜底、**R4 的仓级一致性（①层）**、R8、R9 + **11 道静态守门**（密钥/NUL/口令形态/Tomcat 上限/gRPC 拦截器接线/gRPC 运行时 classpath/Flyway 账本/**pom 父引用**/**proto 契约**/**目标要求清单**） | 共享层 + CI 自身 |
 | **服务级**（只在本域跑） | R3（本域 Testcontainers 组合与端口段）、R6（本域 DDL）、R7（本域 api/rpc jar） | 各域 |
-| **独立契约门禁**（2026-10-31 新增 · 按触发面触发的独立流水线） | **R5**（错误码契约 · `rag-contract-errmsg`）· **R6**（Schema 契约 · `rag-contract-schema`，环境就绪前 NOT_RUN） | CI 自身 + 契约基准 |
+| **独立契约门禁**（2026-10-31 新增 · 按触发面触发的独立流水线） | **R5**（错误码契约 · `rag-contract-errmsg`）· **R6**（Schema 契约 · `rag-contract-schema`） | CI 自身 + 契约基准 |
 
 > ⚠️ **门禁位置的三档分类**（任务书 §六.4）：
 > · **快速门禁**（秒级 · 每次变更都该跑）⇒ 进静态守门阶段（**R4** 在此）
 > · **服务级门禁**（本域环境）⇒ 在本域流水线（R3 / R6 / R7）
 > · **独立触发的契约门禁**（分钟级 × 多域）⇒ 独立流水线（**R5** 在此）
 > ⇒ **不得**把分钟级 × 多域的契约检查无条件塞进 11 条日常流水线。
+
+---
+
+### 4.3 🆕 目标要求清单（2026-10-31 方向纠正的核心产物 · R10）
+
+> **真源**：`ci/requirements/requirements.json`（46 条，机器可读）
+> **守门**：`ci/scripts/check-requirements.py`（11 条规则）　**变异**：`check-requirements-mutations.py`（10/10）
+> **治理约定**：`ci/requirements/README.md`
+
+#### 4.3.1 为什么需要它（这条基线里最要紧的一段）
+
+R4/R5/R6 的契约基准虽然都标称「以 Go 为基准」，但**没有任何机器机制**保证「基准真的是 Go 派生的」⇒ 于是这条路畅通无阻：
+
+> 先读 Java 实现 → 把 Java 实现整理成一份「标准」 → 让 CI 检查它是否符合这份标准
+
+这只在验证「Java 是否符合自己」，**不验证「Java 是否符合原始系统的目标」**。
+⇒ 清单把纪律落成**机器判据**：
+
+| 纪律 | 机器化 |
+|---|---|
+| 每条要求必须有 Go 原始依据 | 规则 **R3**：`go_basis` 必填 ⇒ 没有 Go 依据的条目**不允许存在** |
+| 差异必须经批准，不能自行豁免 | 规则 **R6**：`APPROVED_DIFFERENCE` 的 `deviation.id` 必须能在 `docs/Intentional_Deviations/` 查到**且分类为「已签字」** |
+| 未达成的目标不得伪装成通过 | 汇总：**PASS 只 = VERIFIED**；`NOT_IMPLEMENTED`/`NOT_VERIFIED`/`BLOCKED` **一律不计入 PASS** |
+| 「清单里没有」≠「没有问题」 | 汇总逐条打印 `coverage.unregistered_gap_ledgers`（**已知未登记的缺口**） |
+
+#### 4.3.2 状态词表（六态 + 一态 N/A）
+
+| 状态 | 含义 | 计入 PASS |
+|---|---|---|
+| `VERIFIED` | Java 侧**实际验证通过**（有可复算命令 + 证据） | ✅ **是**（且**只有**它是） |
+| `FAIL` | Java 侧与目标要求**不一致**（含「已知差异但未经批准」） | ❌ |
+| `NOT_IMPLEMENTED` | Java 侧**尚未实现** | ❌ |
+| `NOT_VERIFIED` | **有实现但验证不足** | ❌ |
+| `APPROVED_DIFFERENCE` | **已明确批准**的差异（机器回指已签字条目） | ❌ |
+| `BLOCKED` | **验证条件不具备** | ❌ |
+| `NOT_APPLICABLE` | 该维度**对目标域不适用**（hot 域无 DDL；外键两侧皆无） | ❌（但**必须显式打印**） |
+
+#### 4.3.3 当前实测状态（2026-10-31）
+
+```
+✅ VERIFIED           （23）｜ ❌ FAIL （1）｜ ⚠️ NOT_VERIFIED （19）｜ 🏷 APPROVED_DIFFERENCE （1）｜ ➖ NOT_APPLICABLE （2）
+PASS = 23（只计 VERIFIED）｜ 不计入 PASS 的缺口 = 19
+```
+
+**最大的三个空白面**（都是「Go 定义了、Java 侧当前没有可复算验证」）：
+① **业务状态机**（`REQ-RUNTIME-ALL-004`）—— **一条 VERIFIED 都没有**；
+② **异步消息 / 跨服务投递语义**（`REQ-RUNTIME-ALL-005`）；
+③ **调用图目标清单**（`REQ-CALLGRAPH-ALL-001`）。
+
+> ⚠️ **Java 侧 585 个测试不构成上述任何一条的证据** —— 测试数量回答不了「目标是否达成」。
+
 
 ---
 

@@ -1,191 +1,103 @@
-# =============================================================================
-# ci/contracts/errmsg/comment.txt —— R5 错误码契约基准（comment 域）
+# ============================================================================
+# ci/contracts/errmsg/comment.txt —— R5 错误码契约基准（comment 域）· **Go 真源派生**
 #
 # 【这是什么】
-#   Java 侧comment 域错误码契约的**机器可读基准**。
-#   CI 用 `ci/scripts/check-errmsg-contract.sh` 跑 **Java 半边探针**
-#   （`tools/errmsg-probe/comment/java/Probe.java`）并与本文件的 dump 段**逐字节**比对。
+#   R5 错误码契约的**机器可读基准**。CI 用 `ci/scripts/check-errmsg-contract.sh`
+#   跑 **Java 半边探针**（tools/errmsg-probe/comment/java/Probe.java）⇒ 把产物当作**被测对象**，
+#   与本文件的 **Go 权威段**做**双向**比对。
 #
 # 【权威性来源 = Go 真源（只读 · 冻结）】
 #   Go 真源：Sea-RideTheWind_golang/service/comment/common/errmsg/errmsg.go
-#     · NewGrpcErr :33-35 · const 块 :37-65 · codeMsg 表 :67-94 · GetErrMsg :97-103
+#     · const 块 :37-65 · codeMsg 表 :67-95 · GetErrMsg :97-103
+#     · sha256 = 9820df5a62a2d6cd8823830fa0d000e51e147b8e8b6bf8874a4c862b5ff95ae0
 #   Java 被测：service/comment/comment-common/src/main/java/com/rag/comment/comment/common/errmsg/{CommentErrorCode,CommentErrorMessages,CommentCodeError,CommentGrpcError}.java
 #
 # 【提取方式（离线 · 一次性 · 可复算）】
-#   2026-10-31 用 `tools/errmsg-probe/comment/run-parity.sh` 跑**双侧对拍**：
-#     · Go 半边：把真源 `errmsg.go` 复制进临时模块、与真源**同包**编译后跑
-#       （复制件与真源比 sha256，不一致即 exit 2 ⇒ 验的确实是真源）；
-#     · Java 半边：`javac` 编译探针 → 跑**真实编译产物**（`<域>-common` 的
-#       `target/classes`）⇒ 探针自己**不持有任何码值/文案常量**（否则是「拿 RAG 的值验 RAG 的值」）。
-#   本文件 = **Java 侧 dump**（Java 侧应当满足的契约）。
-#   ⇒ Go 仓**不需要**在线、Go 工具链**不需要**进 CI 镜像。
+#   `python3 ci/scripts/extract-errmsg-authority.py --emit comment` ⇒ 本文件的 go-authority 段
+#   独立复算：`python3 ci/scripts/extract-errmsg-authority.py --check`（逐字节比对 ⇒ 证明基准确实来自 Go）
+#   ⚠️ CI **不拉 Go 仓、不装 Go 工具链、不跑 Go 探针** ⇒ 权威值固化在本目录。
 #
-# 【裁定依据】
-#     · Go↔Java 双侧 dump 有 **3 条差异**，全部落在 `OBS` 段。
-#     · 裁定依据：`docs/DRIFT/comment/common.md` §3-D1（业务码 wire 载体差异）+ `docs/DRIFT/comment/vs-common.md`
-#     · + `tools/errmsg-probe/comment/README.md` §五（逐条 Go 出处 / RAG 出处）。
+# 【两段式结构】
+#   # >>> go-authority >>>  —— **Go 侧权威值**（CI 的真值来源）
+#       `GOCONST|<code>|<Go 常量名>`（const 块全部常量）· `GOTABLE|<code>|<文案>`（codeMsg 表全部条目）· `GOFALLBACK|<文案>`（GetErrMsg 对未知码的回落 = codeMsg[Error]）
+#   # >>> deviations >>>   —— **逐条差异裁定**（Go↔Java 的每一条差异都在这里落笔）
+#       DEVIATION|<段>|<键>|<go值>|<java值>|<status>|<依据id>|<依据出处>|<理由>
+#       status ∈ approved | closed | technical | pending
 #
-# 【本域已批准差异清单】（Go 侧 vs Java 侧 · **逐条** · 共 3 条）
-#   ⑴ OBS|obs_wire_grpcstatus_1012
-#        Go   : 1012|1012|code(1012)|评论区不存在|1012
-#        Java : 1012|2|unknown|评论区不存在|1012
-#        裁定 : 已登记 · 业务码 wire 载体差异 —— Go 把业务码**直接写进 grpc-status**（`codes.Code(1012)`）⇒ 线上真实字节是 `grpc-status: 1012`； grpc-java **只能发 17 个标准码（0-16）** ⇒ 业务码被挪到**自定义 trailer** `rag-comment-biz-code`。 ⇒ 每条 OBS 的第 1 / 5 / 6 格两侧相同、第 4 格不同 ⇒ 差异被**限制在「grpc-status 字段的数值」这一格**，业务码与文案**两侧无损**。出处：`docs/DRIFT/comment/common.md` §3-D1 + `docs/DRIFT/comment/vs-common.md` + `tools/errmsg-probe/comment/README.md` §五。
-#   ⑴ OBS|obs_wire_grpcstatus_2001
-#        Go   : 2001|2001|code(2001)|目标类型和ID不能为空|2001
-#        Java : 2001|3|invalid_argument|目标类型和ID不能为空|2001
-#        裁定 : 已登记 · 业务码 wire 载体差异 —— 同 上 ； ` m a p T o G r p c C o d e `   把   2 0 0 1   映 成   ` I N V A L I D _ A R G U M E N T ( 3 ) ` 、 其 余 映 成   ` U N K N O W N ( 2 ) ` 。 ⇒ 每条 OBS 的第 1 / 5 / 6 格两侧相同、第 4 格不同 ⇒ 差异被**限制在「grpc-status 字段的数值」这一格**，业务码与文案**两侧无损**。出处：`docs/DRIFT/comment/common.md` §3-D1 + `docs/DRIFT/comment/vs-common.md` + `tools/errmsg-probe/comment/README.md` §五。
-#   ⑴ OBS|obs_wire_grpcstatus_5003
-#        Go   : 5003|5003|code(5003)|DB查询失败|5003
-#        Java : 5003|2|unknown|DB查询失败|5003
-#        裁定 : 已登记 · 业务码 wire 载体差异 —— 同 上 。 ⇒ 每条 OBS 的第 1 / 5 / 6 格两侧相同、第 4 格不同 ⇒ 差异被**限制在「grpc-status 字段的数值」这一格**，业务码与文案**两侧无损**。出处：`docs/DRIFT/comment/common.md` §3-D1 + `docs/DRIFT/comment/vs-common.md` + `tools/errmsg-probe/comment/README.md` §五。
+# 【四类差异状态】
+#   approved  —— 已签字（依据 id 必能在 `docs/Intentional_Deviations/` 里查到）
+#   closed    —— 已销号/证伪关闭（依据 id 必能在 `docs/DRIFT/` 里查到）
+#   technical —— 技术判定（Go 侧该形态**不可达** / 两个运行时的**结构性差异**）
+#               ⇒ 依据出处必须给出 Go 侧 `文件:行号`
+#   pending   —— **未经批准、需用户拍板** ⇒ **不判 FAIL**，但逐条显式报出，
+#               且**该域不得计入 PASS**（门以退出码 3 收口）
 #
-# 【层次与规模】
-#   CONST(27) + TABLE(27) + FALLBACK(20) + CODEERR(27) + CODEERRMSG(18) + WIRE(18) + OBS(3)
-#     · ⚠️ comment 域的 Go 侧**没有** `BizCodeFromError` ⇒ 其 OBS 段记的是
-#     · 「**业务码在 wire 上的载体不同**」（Go 写进 grpc-status，Java 只能放自定义 trailer `rag-comment-biz-code`）。
+# 【本域差异台账】 approved=0 · closed=0 · technical=0 · pending=3（共 3 条）
 #
-# 【基准版本】v1 · 2026-10-31
-# 【格式】`#` 开头的是注释（不参与比对）；`# >>> dump >>>` 之后是契约正文。
-# =============================================================================
+#   ⚠️ comment 域的 Go 侧**没有** BizCodeFromError ⇒ 其 OBS 段记的是「**业务码在 wire 上的载体不同**」（Go 写进 grpc-status，Java 只能放自定义 trailer `rag-comment-biz-code`）。
+#
+# 【基准版本】v2 · 2026-10-31（v1 = Java dump 快照；**v2 起权威内容改为 Go 派生**）
+# 【格式】`#` 开头的是注释（不参与比对）；正文按 `# >>> <段> >>>` 切分。
+# ============================================================================
 
-# >>> dump >>>
-CONST|200
-CONST|500
-CONST|1001
-CONST|1002
-CONST|1003
-CONST|1004
-CONST|1005
-CONST|1006
-CONST|1007
-CONST|1008
-CONST|1009
-CONST|1010
-CONST|1011
-CONST|1012
-CONST|1013
-CONST|1015
-CONST|2001
-CONST|5001
-CONST|5002
-CONST|5003
-CONST|5004
-CONST|5005
-CONST|5006
-CONST|5007
-CONST|5008
-CONST|5009
-CONST|5010
-TABLE|200|OK
-TABLE|500|FAIL
-TABLE|1001|用户名已存在
-TABLE|1002|用户名或密码错误
-TABLE|1003|用户不存在
-TABLE|1004|TOKEN不存在
-TABLE|1005|TOKEN格式错误
-TABLE|1006|TOKEN已过期
-TABLE|1007|TOKEN刷新失败
-TABLE|1008|权限不足
-TABLE|1009|未登录
-TABLE|1010|已登录
-TABLE|1011|用户已被封禁
-TABLE|1012|评论区不存在
-TABLE|1013|评论不存在
-TABLE|1015|服务繁忙
-TABLE|2001|输入有误
-TABLE|5001|系统内部错误
-TABLE|5002|更新数据库失败
-TABLE|5003|查询数据库失败
-TABLE|5004|数据库插入失败
-TABLE|5005|事务操作失败
-TABLE|5006|雪花ID生成失败
-TABLE|5007|JSON序列化失败
-TABLE|5008|JSON反序列化失败
-TABLE|5009|Kafka消息发送失败
-TABLE|5010|延时消息发送失败
-FALLBACK|0|FAIL
-FALLBACK|-1|FAIL
-FALLBACK|1|FAIL
-FALLBACK|999|FAIL
-FALLBACK|1014|FAIL
-FALLBACK|1016|FAIL
-FALLBACK|1017|FAIL
-FALLBACK|1018|FAIL
-FALLBACK|2002|FAIL
-FALLBACK|3001|FAIL
-FALLBACK|5000|FAIL
-FALLBACK|5011|FAIL
-FALLBACK|5012|FAIL
-FALLBACK|5101|FAIL
-FALLBACK|5201|FAIL
-FALLBACK|5204|FAIL
-FALLBACK|5301|FAIL
-FALLBACK|9999|FAIL
-FALLBACK|2147483647|FAIL
-FALLBACK|-2147483648|FAIL
-CODEERR|200|ErrCode:200, Errmsg:OK
-CODEERR|500|ErrCode:500, Errmsg:FAIL
-CODEERR|1001|ErrCode:1001, Errmsg:用户名已存在
-CODEERR|1002|ErrCode:1002, Errmsg:用户名或密码错误
-CODEERR|1003|ErrCode:1003, Errmsg:用户不存在
-CODEERR|1004|ErrCode:1004, Errmsg:TOKEN不存在
-CODEERR|1005|ErrCode:1005, Errmsg:TOKEN格式错误
-CODEERR|1006|ErrCode:1006, Errmsg:TOKEN已过期
-CODEERR|1007|ErrCode:1007, Errmsg:TOKEN刷新失败
-CODEERR|1008|ErrCode:1008, Errmsg:权限不足
-CODEERR|1009|ErrCode:1009, Errmsg:未登录
-CODEERR|1010|ErrCode:1010, Errmsg:已登录
-CODEERR|1011|ErrCode:1011, Errmsg:用户已被封禁
-CODEERR|1012|ErrCode:1012, Errmsg:评论区不存在
-CODEERR|1013|ErrCode:1013, Errmsg:评论不存在
-CODEERR|1015|ErrCode:1015, Errmsg:服务繁忙
-CODEERR|2001|ErrCode:2001, Errmsg:输入有误
-CODEERR|5001|ErrCode:5001, Errmsg:系统内部错误
-CODEERR|5002|ErrCode:5002, Errmsg:更新数据库失败
-CODEERR|5003|ErrCode:5003, Errmsg:查询数据库失败
-CODEERR|5004|ErrCode:5004, Errmsg:数据库插入失败
-CODEERR|5005|ErrCode:5005, Errmsg:事务操作失败
-CODEERR|5006|ErrCode:5006, Errmsg:雪花ID生成失败
-CODEERR|5007|ErrCode:5007, Errmsg:JSON序列化失败
-CODEERR|5008|ErrCode:5008, Errmsg:JSON反序列化失败
-CODEERR|5009|ErrCode:5009, Errmsg:Kafka消息发送失败
-CODEERR|5010|ErrCode:5010, Errmsg:延时消息发送失败
-CODEERRMSG|1013|评论不存在|ErrCode:1013, Errmsg:评论不存在
-CODEERRMSG|5004|DB插入失败|ErrCode:5004, Errmsg:DB插入失败
-CODEERRMSG|5003|DB查询失败|ErrCode:5003, Errmsg:DB查询失败
-CODEERRMSG|5002|DB修改失败|ErrCode:5002, Errmsg:DB修改失败
-CODEERRMSG|5002|DB更新失败|ErrCode:5002, Errmsg:DB更新失败
-CODEERRMSG|2001|DB更新失败|ErrCode:2001, Errmsg:DB更新失败
-CODEERRMSG|2001|Type和ID不能为空|ErrCode:2001, Errmsg:Type和ID不能为空
-CODEERRMSG|2001|操作类型输入错误|ErrCode:2001, Errmsg:操作类型输入错误
-CODEERRMSG|2001|目标类型和ID不能为空|ErrCode:2001, Errmsg:目标类型和ID不能为空
-CODEERRMSG|2001|评论ID不能为空|ErrCode:2001, Errmsg:评论ID不能为空
-CODEERRMSG|2001|评论ID和目标不能为空|ErrCode:2001, Errmsg:评论ID和目标不能为空
-CODEERRMSG|2001|评论内容不能为空|ErrCode:2001, Errmsg:评论内容不能为空
-CODEERRMSG|5007|Json序列化失败|ErrCode:5007, Errmsg:Json序列化失败
-CODEERRMSG|5009|Kafka推送失败|ErrCode:5009, Errmsg:Kafka推送失败
-CODEERRMSG|5006|雪花算法生成ID出错|ErrCode:5006, Errmsg:雪花算法生成ID出错
-CODEERRMSG|1012|评论区不存在|ErrCode:1012, Errmsg:评论区不存在
-CODEERRMSG|1008|无权执行删除操作|ErrCode:1008, Errmsg:无权执行删除操作
-CODEERRMSG|1008|非up主无法评论|ErrCode:1008, Errmsg:非up主无法评论
-WIRE|1013|评论不存在
-WIRE|5004|DB插入失败
-WIRE|5003|DB查询失败
-WIRE|5002|DB修改失败
-WIRE|5002|DB更新失败
-WIRE|2001|DB更新失败
-WIRE|2001|Type和ID不能为空
-WIRE|2001|操作类型输入错误
-WIRE|2001|目标类型和ID不能为空
-WIRE|2001|评论ID不能为空
-WIRE|2001|评论ID和目标不能为空
-WIRE|2001|评论内容不能为空
-WIRE|5007|Json序列化失败
-WIRE|5009|Kafka推送失败
-WIRE|5006|雪花算法生成ID出错
-WIRE|1012|评论区不存在
-WIRE|1008|无权执行删除操作
-WIRE|1008|非up主无法评论
-OBS|obs_wire_grpcstatus_1012|1012|2|unknown|评论区不存在|1012
-OBS|obs_wire_grpcstatus_2001|2001|3|invalid_argument|目标类型和ID不能为空|2001
-OBS|obs_wire_grpcstatus_5003|5003|2|unknown|DB查询失败|5003
+# >>> go-authority >>>
+GOCONST|200|Success
+GOCONST|500|Error
+GOCONST|1001|ErrorUserExist
+GOCONST|1002|ErrorLoginWrong
+GOCONST|1003|ErrorUserNotExist
+GOCONST|1004|ErrorTokenNotExist
+GOCONST|1005|ErrorTokenTypeWrong
+GOCONST|1006|ErrorTokenRuntime
+GOCONST|1007|ErrorTokenRefresh
+GOCONST|1008|ErrorUserNoRight
+GOCONST|1009|ErrorUserNoLogin
+GOCONST|1010|ErrorUserLogined
+GOCONST|1011|ErrorUserBanned
+GOCONST|1012|ErrorSubjectNotExist
+GOCONST|1013|ErrorCommentNotExist
+GOCONST|1015|CodeServerBusy
+GOCONST|2001|ErrorInputWrong
+GOCONST|5001|ErrorServerCommon
+GOCONST|5002|ErrorDbUpdate
+GOCONST|5003|ErrorDbSelect
+GOCONST|5004|ErrorDbInsert
+GOCONST|5005|ErrorDbTransaction
+GOCONST|5006|ErrorSnowflakeID
+GOCONST|5007|ErrorJsonMarshal
+GOCONST|5008|ErrorJsonUnmarshal
+GOCONST|5009|ErrorKafkaPush
+GOCONST|5010|ErrorDelayMsg
+GOTABLE|200|OK
+GOTABLE|500|FAIL
+GOTABLE|1001|用户名已存在
+GOTABLE|1002|用户名或密码错误
+GOTABLE|1003|用户不存在
+GOTABLE|1004|TOKEN不存在
+GOTABLE|1005|TOKEN格式错误
+GOTABLE|1006|TOKEN已过期
+GOTABLE|1007|TOKEN刷新失败
+GOTABLE|1008|权限不足
+GOTABLE|1009|未登录
+GOTABLE|1010|已登录
+GOTABLE|1011|用户已被封禁
+GOTABLE|1012|评论区不存在
+GOTABLE|1013|评论不存在
+GOTABLE|1015|服务繁忙
+GOTABLE|2001|输入有误
+GOTABLE|5001|系统内部错误
+GOTABLE|5002|更新数据库失败
+GOTABLE|5003|查询数据库失败
+GOTABLE|5004|数据库插入失败
+GOTABLE|5005|事务操作失败
+GOTABLE|5006|雪花ID生成失败
+GOTABLE|5007|JSON序列化失败
+GOTABLE|5008|JSON反序列化失败
+GOTABLE|5009|Kafka消息发送失败
+GOTABLE|5010|延时消息发送失败
+GOFALLBACK|FAIL
+
+# >>> deviations >>>
+DEVIATION|OBS|obs_wire_grpcstatus_1012|1012%7C1012%7Ccode(1012)%7C评论区不存在%7C1012|1012%7C2%7Cunknown%7C评论区不存在%7C1012|pending|D1|docs/DRIFT/comment/common.md:105|业务码 wire 载体差异：Go 把业务码直接写进 grpc-status（codes.Code(1012) 等），grpc-java 只能发 17 个标准码 ⇒ Java 挪到自定义 trailer rag-comment-biz-code；与 like 域已签字的 SD-2026-10-23-06 同族，但 comment 域本域未签 ⇒ 需用户拍板。
+DEVIATION|OBS|obs_wire_grpcstatus_2001|2001%7C2001%7Ccode(2001)%7C目标类型和ID不能为空%7C2001|2001%7C3%7Cinvalid_argument%7C目标类型和ID不能为空%7C2001|pending|D1|docs/DRIFT/comment/common.md:105|业务码 wire 载体差异：Go 把业务码直接写进 grpc-status（codes.Code(1012) 等），grpc-java 只能发 17 个标准码 ⇒ Java 挪到自定义 trailer rag-comment-biz-code；与 like 域已签字的 SD-2026-10-23-06 同族，但 comment 域本域未签 ⇒ 需用户拍板。
+DEVIATION|OBS|obs_wire_grpcstatus_5003|5003%7C5003%7Ccode(5003)%7CDB查询失败%7C5003|5003%7C2%7Cunknown%7CDB查询失败%7C5003|pending|D1|docs/DRIFT/comment/common.md:105|业务码 wire 载体差异：Go 把业务码直接写进 grpc-status（codes.Code(1012) 等），grpc-java 只能发 17 个标准码 ⇒ Java 挪到自定义 trailer rag-comment-biz-code；与 like 域已签字的 SD-2026-10-23-06 同族，但 comment 域本域未签 ⇒ 需用户拍板。

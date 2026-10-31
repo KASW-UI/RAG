@@ -1,155 +1,94 @@
-# =============================================================================
-# ci/contracts/errmsg/favorite.txt —— R5 错误码契约基准（favorite 域）
+# ============================================================================
+# ci/contracts/errmsg/favorite.txt —— R5 错误码契约基准（favorite 域）· **Go 真源派生**
 #
 # 【这是什么】
-#   Java 侧favorite 域错误码契约的**机器可读基准**。
-#   CI 用 `ci/scripts/check-errmsg-contract.sh` 跑 **Java 半边探针**
-#   （`tools/errmsg-probe/favorite/java/Probe.java`）并与本文件的 dump 段**逐字节**比对。
+#   R5 错误码契约的**机器可读基准**。CI 用 `ci/scripts/check-errmsg-contract.sh`
+#   跑 **Java 半边探针**（tools/errmsg-probe/favorite/java/Probe.java）⇒ 把产物当作**被测对象**，
+#   与本文件的 **Go 权威段**做**双向**比对。
 #
 # 【权威性来源 = Go 真源（只读 · 冻结）】
 #   Go 真源：Sea-RideTheWind_golang/service/favorite/common/errmsg.go
-#     · const 块 :8-41 · codeMsg 表 :43-75 · GetErrMsg :91-97 · bizCodeFromMessage :99-102 · GRPCError :104-106 · BizCodeFromError :108-
+#     · const 块 :8-41 · codeMsg 表 :43-76 · GetErrMsg :91-99
+#     · sha256 = f943c1d6734688a02e4efd500e3e92c086d01917f3836de3915d67ecc3d179f1
 #   Java 被测：service/favorite/favorite-common/src/main/java/com/rag/favorite/favorite/common/errmsg/{FavoriteErrorCode,FavoriteErrorMessages,FavoriteGrpcError}.java
 #
 # 【提取方式（离线 · 一次性 · 可复算）】
-#   2026-10-31 用 `tools/errmsg-probe/favorite/run-parity.sh` 跑**双侧对拍**：
-#     · Go 半边：把真源 `errmsg.go` 复制进临时模块、与真源**同包**编译后跑
-#       （复制件与真源比 sha256，不一致即 exit 2 ⇒ 验的确实是真源）；
-#     · Java 半边：`javac` 编译探针 → 跑**真实编译产物**（`<域>-common` 的
-#       `target/classes`）⇒ 探针自己**不持有任何码值/文案常量**（否则是「拿 RAG 的值验 RAG 的值」）。
-#   本文件 = **Java 侧 dump**（Java 侧应当满足的契约）。
-#   ⇒ Go 仓**不需要**在线、Go 工具链**不需要**进 CI 镜像。
+#   `python3 ci/scripts/extract-errmsg-authority.py --emit favorite` ⇒ 本文件的 go-authority 段
+#   独立复算：`python3 ci/scripts/extract-errmsg-authority.py --check`（逐字节比对 ⇒ 证明基准确实来自 Go）
+#   ⚠️ CI **不拉 Go 仓、不装 Go 工具链、不跑 Go 探针** ⇒ 权威值固化在本目录。
 #
-# 【裁定依据】
-#     · Go↔Java 双侧 dump 有 **2 条差异**，全部落在 `OBS` 段（两侧**必然不同**的已批准差异）。
-#     · 裁定依据：`docs/Intentional_Deviations/favorite/common.md`（`DEV-FAV-COMMON-001` / `DEV-FAV-COMMON-002`，均已签字）
-#     · + `docs/DRIFT/favorite/vs-common.md` + `tools/errmsg-probe/favorite/README.md` 的 OBS 段说明。
+# 【两段式结构】
+#   # >>> go-authority >>>  —— **Go 侧权威值**（CI 的真值来源）
+#       `GOCONST|<code>|<Go 常量名>`（const 块全部常量）· `GOTABLE|<code>|<文案>`（codeMsg 表全部条目）· `GOFALLBACK|<文案>`（GetErrMsg 对未知码的回落 = codeMsg[Error]）
+#   # >>> deviations >>>   —— **逐条差异裁定**（Go↔Java 的每一条差异都在这里落笔）
+#       DEVIATION|<段>|<键>|<go值>|<java值>|<status>|<依据id>|<依据出处>|<理由>
+#       status ∈ approved | closed | technical | pending
 #
-# 【本域已批准差异清单】（Go 侧 vs Java 侧 · **逐条** · 共 2 条）
-#   ⑴ OBS|obs_custom_grpcstatus
-#        Go   : 5007
-#        Java : 1015
-#        裁定 : 已签字 · DEV-FAV-COMMON-001 / 002 + 已登记 —— Go 的 `status.FromError` 认「顶层实现 `GRPCStatus()`」⇒ 文案反查命中 ⇒ 5007； Java 的 `FavoriteGrpcError#extractStatus` 只认 `StatusException` / `StatusRuntimeException` 两个具体类 ⇒ 认不出 ⇒ 1015。favorite 域实际 error 全部来自 gRPC stub ⇒ 不可达。 出处：`tools/errmsg-probe/favorite/README.md` OBS 段 + `docs/Intentional_Deviations/favorite/common.md`。
-#   ⑴ OBS|obs_ok_status
-#        Go   : 200
-#        Java : 5001
-#        裁定 : 已签字 · DEV-FAV-COMMON-001 / 002 + 已登记 —— Go 的 `status.Error(codes.OK, msg)` **返回 nil** ⇒ `BizCodeFromError(nil)` = 200； Java 的 `grpcError(OK, …)` 返回一个 `code=OK` 的 `StatusException`（非 nil）⇒ 走反查/兜底 ⇒ 5001。 favorite 域 56 个 `GRPCError` 调用点**没有一个**传 `codes.OK` ⇒ 不可达。 出处：`tools/errmsg-probe/favorite/README.md` OBS 段 + `docs/Intentional_Deviations/favorite/common.md`。
+# 【四类差异状态】
+#   approved  —— 已签字（依据 id 必能在 `docs/Intentional_Deviations/` 里查到）
+#   closed    —— 已销号/证伪关闭（依据 id 必能在 `docs/DRIFT/` 里查到）
+#   technical —— 技术判定（Go 侧该形态**不可达** / 两个运行时的**结构性差异**）
+#               ⇒ 依据出处必须给出 Go 侧 `文件:行号`
+#   pending   —— **未经批准、需用户拍板** ⇒ **不判 FAIL**，但逐条显式报出，
+#               且**该域不得计入 PASS**（门以退出码 3 收口）
 #
-# 【层次与规模】
-#   CONST(24) + TABLE(24) + FALLBACK(19) + WIRE(24) + BIZCODE(17) + OBS(2)
+# 【本域差异台账】 approved=2 · closed=0 · technical=0 · pending=0（共 2 条）
 #
-# 【基准版本】v1 · 2026-10-31
-# 【格式】`#` 开头的是注释（不参与比对）；`# >>> dump >>>` 之后是契约正文。
-# =============================================================================
+# 【基准版本】v2 · 2026-10-31（v1 = Java dump 快照；**v2 起权威内容改为 Go 派生**）
+# 【格式】`#` 开头的是注释（不参与比对）；正文按 `# >>> <段> >>>` 切分。
+# ============================================================================
 
-# >>> dump >>>
-CONST|200
-CONST|500
-CONST|1015
-CONST|5001
-CONST|5002
-CONST|5003
-CONST|5004
-CONST|5005
-CONST|5006
-CONST|5007
-CONST|5008
-CONST|5009
-CONST|5101
-CONST|5102
-CONST|5103
-CONST|5104
-CONST|5105
-CONST|5201
-CONST|5202
-CONST|5203
-CONST|5301
-CONST|5302
-CONST|5303
-CONST|5304
-TABLE|200|OK
-TABLE|500|FAIL
-TABLE|1015|服务繁忙
-TABLE|5001|系统内部错误
-TABLE|5002|not found
-TABLE|5003|参数错误
-TABLE|5004|未登录或登录已失效
-TABLE|5005|无权限操作
-TABLE|5006|记录已存在
-TABLE|5007|数据库查询失败
-TABLE|5008|数据库更新失败
-TABLE|5009|ID生成失败
-TABLE|5101|用户不存在
-TABLE|5102|用户已存在
-TABLE|5103|密码错误
-TABLE|5104|token无效
-TABLE|5105|token已过期
-TABLE|5201|收藏夹不存在
-TABLE|5202|收藏夹名称不能为空
-TABLE|5203|收藏夹名称已存在
-TABLE|5301|收藏记录不存在
-TABLE|5302|该内容已收藏
-TABLE|5303|收藏目标不能为空
-TABLE|5304|收藏暂不可撤回
-FALLBACK|0|FAIL
-FALLBACK|-1|FAIL
-FALLBACK|1|FAIL
-FALLBACK|999|FAIL
-FALLBACK|1016|FAIL
-FALLBACK|1017|FAIL
-FALLBACK|1018|FAIL
-FALLBACK|2001|FAIL
-FALLBACK|2002|FAIL
-FALLBACK|3001|FAIL
-FALLBACK|5010|FAIL
-FALLBACK|5011|FAIL
-FALLBACK|5012|FAIL
-FALLBACK|5204|FAIL
-FALLBACK|5305|FAIL
-FALLBACK|6001|FAIL
-FALLBACK|9999|FAIL
-FALLBACK|2147483647|FAIL
-FALLBACK|-2147483648|FAIL
-WIRE|200|internal|OK
-WIRE|500|internal|FAIL
-WIRE|1015|internal|服务繁忙
-WIRE|5001|internal|系统内部错误
-WIRE|5002|internal|not found
-WIRE|5003|internal|参数错误
-WIRE|5004|internal|未登录或登录已失效
-WIRE|5005|internal|无权限操作
-WIRE|5006|internal|记录已存在
-WIRE|5007|internal|数据库查询失败
-WIRE|5008|internal|数据库更新失败
-WIRE|5009|internal|ID生成失败
-WIRE|5101|internal|用户不存在
-WIRE|5102|internal|用户已存在
-WIRE|5103|internal|密码错误
-WIRE|5104|internal|token无效
-WIRE|5105|internal|token已过期
-WIRE|5201|internal|收藏夹不存在
-WIRE|5202|internal|收藏夹名称不能为空
-WIRE|5203|internal|收藏夹名称已存在
-WIRE|5301|internal|收藏记录不存在
-WIRE|5302|internal|该内容已收藏
-WIRE|5303|internal|收藏目标不能为空
-WIRE|5304|internal|收藏暂不可撤回
-BIZCODE|desc_5304|5304
-BIZCODE|desc_5007|5007
-BIZCODE|desc_5008|5008
-BIZCODE|desc_5203|5203
-BIZCODE|desc_5301|5301
-BIZCODE|desc_5101|5101
-BIZCODE|desc_1015|1015
-BIZCODE|desc_5001|5001
-BIZCODE|desc_unknown|5001
-BIZCODE|desc_unknown_failedpre|1015
-BIZCODE|desc_unknown_unavail|1015
-BIZCODE|desc_unknown_unauth|5004
-BIZCODE|desc_ok_text|5001
-BIZCODE|desc_fail_text|5001
-BIZCODE|desc_5304_unauth|5304
-BIZCODE|plain_error|1015
-BIZCODE|nil_error|200
-OBS|obs_ok_status|5001
-OBS|obs_custom_grpcstatus|1015
+# >>> go-authority >>>
+GOCONST|200|Success
+GOCONST|500|Error
+GOCONST|1015|CodeServerBusy
+GOCONST|5001|ErrorServerCommon
+GOCONST|5002|ErrorNotFound
+GOCONST|5003|ErrorInvalidParam
+GOCONST|5004|ErrorUnauthorized
+GOCONST|5005|ErrorForbidden
+GOCONST|5006|ErrorAlreadyExist
+GOCONST|5007|ErrorDbSelect
+GOCONST|5008|ErrorDbUpdate
+GOCONST|5009|ErrorGenerateID
+GOCONST|5101|ErrorUserNotFound
+GOCONST|5102|ErrorUserExists
+GOCONST|5103|ErrorPasswordInvalid
+GOCONST|5104|ErrorTokenInvalid
+GOCONST|5105|ErrorTokenExpired
+GOCONST|5201|ErrorFavoriteFolderNotFound
+GOCONST|5202|ErrorFavoriteFolderNameEmpty
+GOCONST|5203|ErrorFavoriteFolderNameExists
+GOCONST|5301|ErrorFavoriteNotFound
+GOCONST|5302|ErrorFavoriteAlreadyExist
+GOCONST|5303|ErrorFavoriteTargetEmpty
+GOCONST|5304|ErrorFavoriteHistoryBlocked
+GOTABLE|200|OK
+GOTABLE|500|FAIL
+GOTABLE|1015|服务繁忙
+GOTABLE|5001|系统内部错误
+GOTABLE|5002|not found
+GOTABLE|5003|参数错误
+GOTABLE|5004|未登录或登录已失效
+GOTABLE|5005|无权限操作
+GOTABLE|5006|记录已存在
+GOTABLE|5007|数据库查询失败
+GOTABLE|5008|数据库更新失败
+GOTABLE|5009|ID生成失败
+GOTABLE|5101|用户不存在
+GOTABLE|5102|用户已存在
+GOTABLE|5103|密码错误
+GOTABLE|5104|token无效
+GOTABLE|5105|token已过期
+GOTABLE|5201|收藏夹不存在
+GOTABLE|5202|收藏夹名称不能为空
+GOTABLE|5203|收藏夹名称已存在
+GOTABLE|5301|收藏记录不存在
+GOTABLE|5302|该内容已收藏
+GOTABLE|5303|收藏目标不能为空
+GOTABLE|5304|收藏暂不可撤回
+GOFALLBACK|FAIL
+
+# >>> deviations >>>
+DEVIATION|OBS|obs_custom_grpcstatus|5007|1015|approved|DEV-FAV-COMMON-002|docs/Intentional_Deviations/favorite/common.md:52|Go 的 status.FromError 只认顶层、不沿 cause 链回溯；RAG 侧刻意不回溯 （extractStatus 只认两个具体类）⇒ 两侧形态一致但对「包过一层」的判定不同。
+DEVIATION|OBS|obs_ok_status|200|5001|approved|DEV-FAV-COMMON-001|docs/Intentional_Deviations/favorite/common.md:38|GRPCError(codes.OK, …) 在 grpc-go 返回 nil ⇒ 上游「当成功」；grpc-java 的 Status#asException() 对 OK 也返回对象 ⇒ 调用方「当失败」。

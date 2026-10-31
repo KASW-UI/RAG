@@ -1,57 +1,77 @@
 #!/usr/bin/env bash
 # =============================================================================
-# ci/scripts/check-errmsg-contract.sh —— R5 错误码契约守门（**纯 Java 半边**）
+# ci/scripts/check-errmsg-contract.sh —— R5 错误码契约守门（**基准 = Go 真源派生**）
 #
 # 【守什么】
-#   每个域的 Java 侧错误码契约（码值 / 文案 / 未知码回落 / wire 载体 / gRPC-HTTP 语义）
-#   与 ci/contracts/errmsg/<domain>.txt 里的**基准**逐字节一致。
+#   每个域的 Java 侧错误码契约（码值 / 文案 / 未知码回落 / 逐调用点的码与文案）
+#   与 `ci/contracts/errmsg/<domain>.txt` 的 **Go 权威段**（`# >>> go-authority >>>`）**双向一致**。
 #
-# 【为什么需要基准，而不是直接跟 Go 比】
-#   ⚠️ 本门**绝不**拉 Go 仓、**绝不**装 Go 工具链、**绝不**跑 Go 半边探针。
-#   Go 真源（Sea-RideTheWind_golang）已冻结且**离线** ⇒ 把它的错误码语义
-#   **一次性、离线**提取成机器可读基准固化在 ci/contracts/errmsg/ 下，
-#   CI 只跑 **Java 半边**与基准比对 ⇒ Go 仓不需要在线、Go 工具链不需要进镜像。
-#   （提取与裁定的过程见各基准文件头的「来源 / 裁定依据 / 已批准差异清单」。）
+# 【基准的方向（2026-10-31 纠正）】
+#   ⚠️ 旧版基准存的是 **Java 侧探针的 dump** ⇒ 权威内容其实是「Java 当前现状」
+#      ⇒ 方向反了（拿 Java 现状定义标准，再让 CI 检查 Java 是否符合它）。
+#   ⇒ 现在基准的权威段**从 Go 真源机械提取**（`ci/scripts/extract-errmsg-authority.py`），
+#     Java 侧 dump 是**被测对象**，不是基准。
+#   ⇒ Go 仓**不需要**在线、Go 工具链**不需要**进 CI 镜像（本门**绝不**拉 Go 仓、
+#     **绝不**装 Go 工具链、**绝不**跑 Go 半边探针）。
 #
-# 【为什么 Java 半边探针可以单独跑】
-#   tools/errmsg-probe/<域>/java/Probe.java 只 import **Java 真实产物**
-#   （<域>-common 的编译产物），遍历真实枚举、读真实文案表、调真实错误载体，
-#   输出规范化 dump ⇒ 它**不依赖 Go**，也不依赖 PG / Redis / Kafka / 任何容器。
+# 【比对方式（双向）】
+#   ① Go 有、Java 没有的码   ⇒ **FAIL**（Java 缺实现）
+#   ② Java 有、Go 没有的码   ⇒ **FAIL**（Java 擅自新增错误码）
+#   ③ 同一码文案不同         ⇒ **FAIL**，除非该差异在 `approved`/`closed`/`technical` 名单里
+#   ④ 回落规则不同           ⇒ **FAIL**，除非在名单里
+#   ⑤ `pending`（已登记未签字）⇒ **不判 FAIL**，但**逐条显式报出**（文件名 + 键 + 两侧值），
+#      且**该域不得计入 PASS**
 #
-# 【退出码（三态 · 必须分得开）】
-#   0 = PASS     全部目标域的 Java 侧 dump 与基准**逐字节**一致
-#   1 = FAIL     检查执行了，发现 Java 侧与基准不一致 ⇒ **契约漂移**
-#   2 = BLOCKED  环境/依赖不满足，**检查没做成** ⇒ 基准缺失 / Maven 编译失败 /
-#                探针跑不起来 / dump 形态非法 / 基准文件格式损坏
+# 【差异台账（`# >>> deviations >>>` 段）】
+#   DEVIATION|<段>|<键>|<go值>|<java值>|<status>|<依据id>|<依据出处>|<理由>
+#   status ∈ approved | closed | technical | pending
+#     · approved  ⇒ 依据 id 必能在 `docs/Intentional_Deviations/` 的**被引文件**里查到
+#     · closed    ⇒ 依据 id 必能在 `docs/DRIFT/` 的**被引文件**里查到
+#     · technical ⇒ 依据出处必含 **Go 侧 `文件:行号`**（不可达 / 结构性差异的证据）
+#     · pending   ⇒ 未经批准、需用户拍板
+#   ⚠️ **自证豁免的检查**：`approved` 的依据 id 查不到 ⇒ **FAIL**（不许自行豁免）。
+#
+# 【退出码（四态 · 必须分得开）】
+#   0 = PASS     Java 侧与 **Go 基准**一致（或差异全部已签字/已销号/技术判定）
+#   1 = FAIL     检查执行了，发现 Java 侧与 Go 基准**真漂移**
+#   2 = BLOCKED  环境/依赖不满足，**检查没做成** ⇒ 基准缺失 / 基准格式损坏 /
+#                Maven 编译失败 / 探针跑不起来 / dump 形态非法
+#   3 = PENDING  存在**已登记未签字**（`pending`）的差异 ⇒ **不计入 PASS**，须显式报出
 #   ⚠️ **环境问题绝不能报成 FAIL**：否则「CI 环境没准备好」会被伪装成「契约漂移」
 #      ⇒ 维护者会去查代码，而真因在环境（AGENTS.md §3.3「绿测试可能是错误答案的守卫」）。
-#   ⚠️ **BLOCKED 一律不得计入 PASS**（ci/contracts/README.md 第四节）。
+#   ⚠️ **BLOCKED / PENDING 一律不得计入 PASS**（ci/contracts/README.md 第四节）。
 #
-# 【FAIL 与 BLOCKED 的优先级】
-#   有 FAIL ⇒ 退出 1（真漂移最需要被看见）；否则有 BLOCKED ⇒ 退出 2；
-#   全 PASS ⇒ 退出 0。汇总表里两类都会**单列**，不混进「通过」一句话带过。
+# 【优先级】
+#   FAIL(1) > BLOCKED(2) > PENDING(3) > PASS(0)
+#   ⇒ 有真漂移先报漂移；没有漂移但检查没做成 ⇒ 报 BLOCKED；都干净但有未签字差异 ⇒ 报 PENDING。
 #
 # 【用法】
-#   bash ci/scripts/check-errmsg-contract.sh              # 全部 9 个域
+#   bash ci/scripts/check-errmsg-contract.sh              # 全部 10 个域（9 个域 + task 的两层）
 #   bash ci/scripts/check-errmsg-contract.sh like users   # 只跑指定域（CI 按域拆 task 用）
 #
 # 【环境变量】
-#   RAG_REPO_ROOT        仓根（默认 = 本脚本上两级）
-#   ERRSMSG_DOMAINS      目标域列表（默认全部；也可直接用命令行参数）
-#   ERRSMSG_MVN_OFFLINE  0=**默认**（Maven 可联网解析，靠 CI 侧 ~/.m2/settings.xml 的镜像源）；
-#                        1=强制离线（`mvn -o`）—— 适合缓存已备好的本地/气隙环境。
-#                        ⚠️ CI 侧的 `ci/scripts/dind-run.sh` 当前**只**转发 ERRSMSG_DOMAINS 与
-#                           ERRSMSG_SKIP_COMPILE ⇒ 要在 CI 里切到离线，需给 dind-run.sh 的 `-e` 列表
-#                           补一行（**不在本脚本写权内**）。
-#   ERRSMSG_SKIP_COMPILE 1=跳过 mvn compile（**仅**用于本地调试已有 target/ 的场景；
-#                        CI 里**不得**设置 —— 跳过编译就等于不验「产物是不是新的」）
+#   RAG_REPO_ROOT           仓根（默认 = 本脚本上两级）
+#   ERRSMSG_DOMAINS         目标域列表（默认全部；也可直接用命令行参数）
+#   ERRSMSG_CONTRACTS_DIR   基准目录（默认 ${RAG_REPO_ROOT}/ci/contracts/errmsg）
+#                           ⚠️ **仅供变异测试/离线复验**在副本上跑 ⇒ CI **不得**设置
+#   ERRSMSG_PROBE_DIR       探针目录（默认 ${RAG_REPO_ROOT}/tools/errmsg-probe）
+#                           ⚠️ **仅供变异测试**注入坏探针 ⇒ CI **不得**设置
+#   ERRSMSG_REPLAY_DUMP_DIR 离线复验：直接读 <dir>/<label>.dump 当作 Java 侧产物
+#                           （**不跑探针**）⇒ ⚠️ **仅供变异测试/离线复验** ⇒ CI **不得**设置
+#   ERRSMSG_DUMP_OUT_DIR    把 Java 侧 dump 落盘到 <dir>/<label>.dump
+#                           ⇒ ⚠️ **仅供变异测试/离线复算** ⇒ CI **不得**设置
+#   ERRSMSG_MVN_OFFLINE     0=**默认**（Maven 可联网解析）；1=强制离线（`mvn -o`）
+#   ERRSMSG_SKIP_COMPILE    1=跳过 mvn compile（**仅**用于本地调试已有 target/ 的场景；
+#                           CI 里**不得**设置 —— 跳过编译就等于不验「产物是不是新的」）
 # =============================================================================
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${RAG_REPO_ROOT:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
-CONTRACTS_DIR="${REPO_ROOT}/ci/contracts/errmsg"
-PROBE_DIR="${REPO_ROOT}/tools/errmsg-probe"
+CONTRACTS_DIR="${ERRSMSG_CONTRACTS_DIR:-${REPO_ROOT}/ci/contracts/errmsg}"
+PROBE_DIR="${ERRSMSG_PROBE_DIR:-${REPO_ROOT}/tools/errmsg-probe}"
+REPLAY_DIR="${ERRSMSG_REPLAY_DUMP_DIR:-}"
+DUMP_OUT_DIR="${ERRSMSG_DUMP_OUT_DIR:-}"
 POM="${REPO_ROOT}/pom.xml"
 
 ALL_DOMAINS="article comment favorite follow hot like message users task"
@@ -73,8 +93,9 @@ say()  { printf '%s\n' "$*"; }
 warn() { printf '%s\n' "$*"; }
 
 # ── 汇总计数 ────────────────────────────────────────────────────────────────
-PASS_N=0; FAIL_N=0; BLOCKED_N=0
-FAILED_DOMAINS=""; BLOCKED_DOMAINS=""
+PASS_N=0; FAIL_N=0; BLOCKED_N=0; PENDING_N=0
+APPROVED_N=0; CLOSED_N=0; TECHNICAL_N=0; PENDING_DEV_N=0
+FAILED_DOMAINS=""; BLOCKED_DOMAINS=""; PENDING_DOMAINS=""
 
 # -----------------------------------------------------------------------------
 # 域规格表
@@ -149,8 +170,8 @@ spec_for() {
 # ⚠️ 为什么不把用例表复制一份到 ci/ 下：
 #    用例表是**探针的观察面**，它和探针源码是同一个单元。
 #    复制一份 ⇒ 两份会悄悄错位 ⇒ 基准验的是「另一组观察点」下的 dump。
-#    ⇒ 这里在运行时**从既有的 run-parity.sh 里读**（只读），
-#      用例表一旦变化 ⇒ dump 变化 ⇒ 与基准不符 ⇒ 契约变更必须重新裁定。
+# ⇒ 这里在运行时**从既有的 run-parity.sh 里读**（只读），
+#    用例表一旦变化 ⇒ dump 变化 ⇒ 与基准不符 ⇒ 契约变更必须重新裁定。
 extract_cases() {
   local script="$1" var="$2" out="$3"
   awk -v marker="cat >\"\${${var}}\" <<'EOF'" '
@@ -180,23 +201,6 @@ validate_dump() {
   return 0
 }
 
-# ── 取基准的 dump 段（跳过 '#' 注释头）─────────────────────────────────────
-DUMP_MARKER='# >>> dump >>>'
-extract_baseline_dump() {
-  local baseline="$1" out="$2"
-  [ -f "$baseline" ] || return 1
-  awk -v m="${DUMP_MARKER}" '
-    index($0, m) == 1 { indump = 1; next }
-    indump == 1 { print }
-  ' "$baseline" >"$out"
-  [ -s "$out" ]
-}
-
-# ── OBS 段的 case 名集合（基线 vs 实际）────────────────────────────────────
-obs_case_names() {
-  awk -F'|' '$1 == "OBS" { print $2 }' "$1" | sort -u
-}
-
 # ── 编译模块（失败 ⇒ BLOCKED，绝不报成 FAIL）──────────────────────────────
 compile_module() {
   local modules="$1" logf="$2"
@@ -224,6 +228,320 @@ build_dep_classpath() {
   return 0
 }
 
+# =============================================================================
+# 比对核心（Go 权威段 ⇄ Java 侧 dump · 双向）
+# =============================================================================
+# 用法：compare_domain <基准文件> <Java 侧 dump> <标签>
+#   ⇒ 退出码 0=PASS / 1=FAIL / 2=BLOCKED / 3=PENDING
+#   ⇒ 末行打印 `RESULT|<verdict>|<approved>|<closed>|<technical>|<pending>`
+# =============================================================================
+compare_domain() {
+  python3 - "$1" "$2" "$3" "${REPO_ROOT}" <<'PYEOF'
+# -*- coding: utf-8 -*-
+import os
+import re
+import sys
+
+BASELINE, DUMP, LABEL, REPO = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+AUTH_MARK = "# >>> go-authority >>>"
+DEV_MARK = "# >>> deviations >>>"
+VALID_STATUS = ("approved", "closed", "technical", "pending")
+_UNESC = {"25": "%", "7C": "|", "5C": "\\", "0A": "\n", "0D": "\r", "09": "\t"}
+GO_SITE_RE = re.compile(r"[A-Za-z0-9_./-]+\.go:\d+")
+
+
+def unesc(s):
+    out, i = [], 0
+    while i < len(s):
+        if s[i] == "%" and s[i + 1:i + 3] in _UNESC:
+            out.append(_UNESC[s[i + 1:i + 3]])
+            i += 3
+        else:
+            out.append(s[i])
+            i += 1
+    return "".join(out)
+
+
+def out(msg):
+    print(msg)
+
+
+def blocked(reason):
+    out("   ✗ BLOCKED：%s" % reason)
+    out("RESULT|BLOCKED|0|0|0|0")
+    sys.exit(2)
+
+
+def parse_sections(path):
+    """⇒ {'go-authority': [...], 'deviations': [...]}（段缺失 ⇒ 该 key 不存在）"""
+    secs = {}
+    cur = None
+    with open(path, encoding="utf-8") as f:
+        for line in f.read().splitlines():
+            s = line.strip()
+            if s.startswith("# >>>") and s.endswith(">>>"):
+                cur = s[5:-4].strip()
+                secs.setdefault(cur, [])
+                continue
+            if cur is None:
+                continue
+            if s and not s.startswith("#"):
+                secs[cur].append(s)
+    return secs
+
+
+# ── 基准解析 ────────────────────────────────────────────────────────────────
+if not os.path.isfile(BASELINE):
+    blocked("基准文件缺失：%s" % BASELINE)
+secs = parse_sections(BASELINE)
+if "go-authority" not in secs or not secs["go-authority"]:
+    blocked("基准里没有 '%s' 段（或该段为空）⇒ 基准格式损坏：%s" % (AUTH_MARK, BASELINE))
+
+go_const, go_table, go_calls = {}, {}, []
+go_fallback = None
+for ln in secs["go-authority"]:
+    p = ln.split("|")
+    tag = p[0]
+    if tag == "GOCONST" and len(p) >= 2:
+        go_const[p[1]] = p[2] if len(p) > 2 else ""
+    elif tag == "GOTABLE" and len(p) >= 3:
+        go_table[p[1]] = "|".join(p[2:])
+    elif tag == "GOFALLBACK" and len(p) >= 2:
+        go_fallback = "|".join(p[1:])
+    elif tag == "GOCALL" and len(p) >= 6:
+        go_calls.append((p[1], p[2], p[3], p[4], "|".join(p[5:])))
+    else:
+        blocked("基准的 go-authority 段有无法识别的行：%s" % ln)
+if go_fallback is None and not go_calls:
+    blocked("基准的 go-authority 段没有 GOFALLBACK ⇒ Go 回落规则缺失")
+if not go_const and not go_calls:
+    blocked("基准的 go-authority 段既没有 GOCONST 也没有 GOCALL ⇒ 权威值缺失")
+
+# ── 差异台账解析 ────────────────────────────────────────────────────────────
+registry = {}
+for ln in secs.get("deviations", []):
+    p = ln.split("|")
+    if len(p) != 9 or p[0] != "DEVIATION":
+        blocked("基准的 deviations 段有无法识别的行（应为 9 段 DEVIATION）：%s" % ln)
+    seg, key, gv, jv, status, bid, src, reason = p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]
+    if status not in VALID_STATUS:
+        blocked("差异台账的 status 非法：%s（允许 %s）" % (status, "/".join(VALID_STATUS)))
+    k = (seg, key)
+    if k in registry:
+        blocked("差异台账有重复条目：%s|%s" % (seg, key))
+    registry[k] = {"go": unesc(gv), "java": unesc(jv), "status": status,
+                   "id": unesc(bid), "src": unesc(src), "reason": unesc(reason)}
+
+# ── Java 侧 dump 解析 ──────────────────────────────────────────────────────
+if not os.path.isfile(DUMP):
+    blocked("Java 侧 dump 不存在：%s" % DUMP)
+facts, j_fallback_rows = {}, {}
+with open(DUMP, encoding="utf-8") as f:
+    for line in f.read().splitlines():
+        if not line.strip():
+            continue
+        p = line.split("|")
+        seg = p[0]
+        if seg == "FALLBACK" and len(p) >= 3:
+            j_fallback_rows[p[1]] = "|".join(p[2:])
+            continue
+        if len(p) < 2:
+            continue
+        facts[(seg, p[1])] = "|".join(p[2:])
+
+j_const = {k[1] for k in facts if k[0] == "CONST"}
+j_table = {k[1]: v for k, v in facts.items() if k[0] == "TABLE"}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ① Go 权威 ⇄ Java 侧 的双向差异
+# ═════════════════════════════════════════════════════════════════════════════
+diffs = []   # (段, 键, go值, java值)
+if go_const:
+    def go_eff(code):
+        """Go 侧对该码的**有效文案**（在 codeMsg 表里 ⇒ 表里的文案；否则 ⇒ 回落文案）"""
+        return go_table.get(code, go_fallback)
+
+    for code in sorted(go_const, key=lambda c: (len(c), c)):
+        go_msg = go_eff(code)
+        if code not in j_const:
+            diffs.append(("CONST", code, go_msg, "<absent>"))
+            continue
+        if code not in j_table:
+            # Java 有这个码但**没有文案条目** ⇒ Java 查表会回落到自己的回落文案
+            diffs.append(("TABLE", code, go_msg, j_fallback_rows.get(code, "<no-entry>")))
+        elif j_table[code] != go_msg:
+            diffs.append(("TABLE", code, go_msg, j_table[code]))
+    for code in sorted(j_const):
+        if code not in go_const:
+            diffs.append(("CONST", code, "<absent>", j_table.get(code, "<absent>")))
+    for code in sorted(j_table):
+        if code not in go_table and code not in go_const:
+            diffs.append(("TABLE", code, "<absent>", j_table[code]))
+    # 回落规则：只针对「两侧都未登记」的码（探针的 case 码恰好已登记 ⇒ 由 TABLE 比较覆盖）
+    for code in sorted(j_fallback_rows):
+        if code in j_table or code in go_table or code in go_const:
+            continue
+        if j_fallback_rows[code] != go_fallback:
+            diffs.append(("FALLBACK", code, go_fallback, j_fallback_rows[code]))
+else:
+    # ── task 域：Go 侧没有码表 ⇒ 权威 = 逐调用点（GOCALL）────────────────────
+    groups = {}
+    for site, segment, prefix, value, msg in go_calls:
+        groups.setdefault((segment, prefix), []).append((site, value, msg))
+    for (segment, prefix), entries in sorted(groups.items()):
+        rows = sorted([(k, v) for (s, k), v in facts.items()
+                       if s == segment and k.startswith(prefix)])
+        if not rows:
+            diffs.append((segment, prefix + "*", entries[0][1], "<no-observation>"))
+            continue
+        for key, val in rows:
+            code, _, rest = val.partition("|")
+            hit = False
+            for _site, value, msg in entries:
+                if code != value:
+                    continue
+                if msg != "*" and msg not in rest:
+                    continue
+                hit = True
+                break
+            if not hit:
+                want = " / ".join("%s=%s" % (v, m) for _s, v, m in entries)
+                diffs.append((segment, key, want, "%s|%s" % (code, rest)))
+        # 反向：Go 调用点里非通配的文案，Java 侧至少要出现一次
+        for _site, _value, msg in entries:
+            if msg == "*":
+                continue
+            seen = any(msg in v.partition("|")[2]
+                       for (s, k), v in facts.items()
+                       if s == segment and k.startswith(prefix))
+            if not seen:
+                diffs.append((segment, prefix + "*", msg, "<absent>"))
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ② 差异台账的自洽性 + 依据可查性
+# ═════════════════════════════════════════════════════════════════════════════
+problems = []      # ⇒ FAIL
+stale = []         # ⇒ 仅提示（差异已消失 ⇒ 台账该清理，不是失败）
+pending = []       # ⇒ 显式报出 + 不计入 PASS
+by_status = {s: [] for s in VALID_STATUS}
+for (seg, key), e in sorted(registry.items()):
+    by_status[e["status"]].append((seg, key, e))
+
+for (seg, key), e in sorted(registry.items()):
+    # ②a 依据可查性
+    src = e["src"]
+    md_paths = re.findall(r"[A-Za-z0-9_./-]+\.md(?::\d+)?", src)
+    md_path = md_paths[0] if md_paths else None
+    if md_path:
+        md_file = md_path.split(":")[0]
+        full = os.path.join(REPO, md_file)
+        if not os.path.isfile(full):
+            problems.append("REGISTRY|MISSING_LEDGER|%s|%s|依据出处指向的文件不存在：%s"
+                            % (seg, key, md_file))
+        else:
+            with open(full, encoding="utf-8", errors="replace") as f:
+                body = f.read()
+            if e["id"] not in ("-", "") and e["id"] not in body:
+                if e["status"] == "approved":
+                    problems.append(
+                        "REGISTRY|BAD_APPROVAL|%s|%s|依据 id `%s` 在 %s 里查不到"
+                        " ⇒ 不得自行豁免（approved 必须有**已签字**条目）"
+                        % (seg, key, e["id"], md_file))
+                elif e["status"] == "closed":
+                    problems.append(
+                        "REGISTRY|BAD_CLOSURE|%s|%s|依据 id `%s` 在 %s 里查不到"
+                        " ⇒ closed 必须回指**已销号**条目" % (seg, key, e["id"], md_file))
+                else:
+                    out("   ⚠️ 台账提示：%s|%s 的依据 id `%s` 在 %s 里查不到"
+                        % (seg, key, e["id"], md_file))
+            if e["status"] == "approved" and not md_file.startswith("docs/Intentional_Deviations/"):
+                problems.append(
+                    "REGISTRY|BAD_APPROVAL|%s|%s|approved 的依据必须指向 docs/Intentional_Deviations/"
+                    "（当前 %s）" % (seg, key, md_file))
+            if e["status"] == "closed" and not md_file.startswith("docs/DRIFT/"):
+                problems.append(
+                    "REGISTRY|BAD_CLOSURE|%s|%s|closed 的依据必须指向 docs/DRIFT/"
+                    "（当前 %s）" % (seg, key, md_file))
+    if e["status"] == "technical" and not GO_SITE_RE.search(src):
+        problems.append(
+            "REGISTRY|BAD_TECHNICAL|%s|%s|technical 的依据出处必须给出 Go 侧 `文件:行号`"
+            "（当前 %s）" % (seg, key, src))
+
+    # ②b 台账里记的 Java 侧值必须与**当前** Java 侧一致（否则 Java 漂移了）
+    cur = facts.get((seg, key))
+    if cur is None:
+        stale.append("STALE|台账条目 %s|%s 在当前 Java 侧 dump 里**已不存在**" % (seg, key))
+    elif cur != e["java"]:
+        problems.append("DRIFT|JAVA_VALUE_CHANGED|%s|%s|台账记的 java 值 `%s` ≠ 当前 Java 侧 `%s`"
+                        % (seg, key, e["java"], cur))
+
+# ②c 每一条**实测差异**都必须在台账里落笔
+covered = set()
+for seg, key, gv, jv in diffs:
+    e = registry.get((seg, key))
+    if e is None:
+        problems.append("DRIFT|UNREGISTERED|%s|%s|Go=%s / Java=%s ⇒ 差异**未在台账落笔**"
+                        % (seg, key, gv, jv))
+        continue
+    covered.add((seg, key))
+    if e["go"] != gv or e["java"] != jv:
+        problems.append(
+            "DRIFT|REGISTRY_MISMATCH|%s|%s|台账记 Go=%s/Java=%s ⇒ 实测 Go=%s/Java=%s"
+            % (seg, key, e["go"], e["java"], gv, jv))
+    if e["status"] == "pending":
+        pending.append((seg, key, gv, jv, e))
+
+# ②d 台账里 Go 侧的取值必须与 Go 权威段一致（不许台账改写 Go 的事实）
+for (seg, key), e in sorted(registry.items()):
+    if seg == "TABLE" and key in go_const:
+        want = go_table.get(key, go_fallback)
+        if e["go"] != want:
+            problems.append(
+                "DRIFT|REGISTRY_GO_MISMATCH|%s|%s|台账记 Go=%s ⇒ Go 权威段是 %s"
+                % (seg, key, e["go"], want))
+    if (seg, key) not in covered and seg in ("CONST", "TABLE", "FALLBACK"):
+        stale.append("STALE|台账条目 %s|%s 的差异已**不存在**（Go 与 Java 已一致）"
+                     % (seg, key))
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ③ 判定
+# ═════════════════════════════════════════════════════════════════════════════
+for st in VALID_STATUS:
+    for seg, key, e in by_status[st]:
+        out("   📋 %-9s %s|%s  依据=%s  出处=%s"
+            % (st, seg, key, e["id"], e["src"]))
+for s in stale:
+    out("   ⚠️ %s" % s)
+for p in problems:
+    out("   ❌ %s" % p)
+for seg, key, gv, jv, e in pending:
+    out("   ⏳ PENDING  文件=%s  段=%s  键=%s  Go=%s  Java=%s  依据=%s（%s）"
+        % (os.path.basename(BASELINE), seg, key, gv, jv, e["id"], e["src"]))
+
+n_appr = len(by_status["approved"])
+n_closed = len(by_status["closed"])
+n_tech = len(by_status["technical"])
+n_pend = len(by_status["pending"])
+if problems:
+    verdict = "FAIL"
+elif n_pend:
+    verdict = "PENDING"
+else:
+    verdict = "PASS"
+out("   ⇒ 域判定: %s（差异台账 approved=%d closed=%d technical=%d pending=%d）"
+    % (verdict, n_appr, n_closed, n_tech, n_pend))
+out("RESULT|%s|%d|%d|%d|%d" % (verdict, n_appr, n_closed, n_tech, n_pend))
+sys.exit({"PASS": 0, "FAIL": 1, "BLOCKED": 2, "PENDING": 3}[verdict])
+PYEOF
+}
+
+# ── 取基准（缺失 ⇒ BLOCKED）─────────────────────────────────────────────────
+baseline_for() {
+  local name="$1"
+  [ -f "${CONTRACTS_DIR}/${name}" ] || return 1
+  printf '%s' "${CONTRACTS_DIR}/${name}"
+}
+
 # ── 单探针域的完整流程 ────────────────────────────────────────────────────
 run_single_probe_domain() {
   local d="$1"
@@ -231,16 +549,10 @@ run_single_probe_domain() {
   mkdir -p "${dwork}/java"
 
   # ① 基准必须在
-  local baseline="${CONTRACTS_DIR}/${BASELINE}"
-  if [ ! -f "${baseline}" ]; then
-    warn "   ✗ 基准文件缺失：${baseline}"
+  local baseline
+  if ! baseline="$(baseline_for "${BASELINE}")"; then
+    warn "   ✗ 基准文件缺失：${CONTRACTS_DIR}/${BASELINE}"
     warn "     ⇒ BLOCKED（不是 FAIL：契约基准没固化 ⇒ 这道门没做成，不是代码漂移）"
-    return 2
-  fi
-  local base_dump="${dwork}/baseline.dump"
-  if ! extract_baseline_dump "${baseline}" "${base_dump}"; then
-    warn "   ✗ 基准文件里找不到 dump 段（缺 '${DUMP_MARKER}' 标记或 dump 为空）：${baseline}"
-    warn "     ⇒ BLOCKED（基准格式损坏）"
     return 2
   fi
 
@@ -286,28 +598,45 @@ run_single_probe_domain() {
     cp="${classes}:$(cat "${cpfile}")"
   fi
 
-  # ⑤ 编译并跑探针
-  if ! javac -nowarn -encoding UTF-8 -cp "${cp}" -d "${dwork}/java" \
-       "${PROBE_DIR}/${PROBE_SRC}" >"${dwork}/javac.log" 2>&1; then
-    warn "   ✗ javac 失败（探针源码：${PROBE_SRC}）"
-    tail -25 "${dwork}/javac.log" | sed 's/^/   | /'
-    warn "     ⇒ BLOCKED"
-    return 2
-  fi
+  # ⑤ 产出 Java 侧 dump（跑探针，或**离线复验**读已有 dump）
   local actual="${dwork}/actual.txt"
-  if ! java -cp "${dwork}/java:${cp}" "${PROBE_CLASS}" "${cases}" >"${actual}" 2>"${dwork}/java.err"; then
-    warn "   ✗ 探针执行失败（${PROBE_CLASS}）"
-    tail -25 "${dwork}/java.err" | sed 's/^/   | /'
-    warn "     ⇒ BLOCKED"
-    return 2
+  if [ -n "${REPLAY_DIR}" ]; then
+    local rp_dump="${REPLAY_DIR}/${d}.dump"
+    if [ ! -s "${rp_dump}" ]; then
+      warn "   ✗ 离线复验模式：找不到 dump 文件 ${rp_dump}"
+      warn "     ⇒ BLOCKED"
+      return 2
+    fi
+    cp "${rp_dump}" "${actual}"
+    warn "   ⚠️ 离线复验模式（ERRSMSG_REPLAY_DUMP_DIR）⇒ **没有跑探针** ⇒ 仅供变异测试/离线复算"
+  else
+    if ! javac -nowarn -encoding UTF-8 -cp "${cp}" -d "${dwork}/java" \
+         "${PROBE_DIR}/${PROBE_SRC}" >"${dwork}/javac.log" 2>&1; then
+      warn "   ✗ javac 失败（探针源码：${PROBE_SRC}）"
+      tail -25 "${dwork}/javac.log" | sed 's/^/   | /'
+      warn "     ⇒ BLOCKED"
+      return 2
+    fi
+    if ! java -cp "${dwork}/java:${cp}" "${PROBE_CLASS}" "${cases}" \
+         >"${actual}" 2>"${dwork}/java.err"; then
+      warn "   ✗ 探针执行失败（${PROBE_CLASS}）"
+      tail -25 "${dwork}/java.err" | sed 's/^/   | /'
+      warn "     ⇒ BLOCKED"
+      return 2
+    fi
   fi
   if ! validate_dump "${actual}" "Java 侧"; then
     warn "     ⇒ BLOCKED"
     return 2
   fi
+  # 落盘（供变异测试 / 离线复算复用）⇒ CI **不得**设置
+  if [ -n "${DUMP_OUT_DIR}" ]; then
+    mkdir -p "${DUMP_OUT_DIR}"
+    cp "${actual}" "${DUMP_OUT_DIR}/${d}.dump"
+  fi
 
-  # ⑥ 与基准逐字节比对
-  compare_with_baseline "${baseline}" "${base_dump}" "${actual}" "${d}"
+  # ⑥ 与 Go 权威段双向比对
+  compare_domain "${baseline}" "${actual}" "${d}"
 }
 
 # ── task 域（两套探针 / 两个模块 / 两个基准）──────────────────────────────
@@ -365,88 +694,104 @@ run_task_domain() {
   local cp_rpc="${classes_rpc}:$(cat "${cp_rpc_file}")"
   local cp_api="${classes_api}:$(cat "${cp_api_file}")"
 
-  if ! javac -nowarn -encoding UTF-8 -cp "${cp_rpc}" -d "${dwork}/java" \
-       "${PROBE_DIR}/task/java/RpcProbe.java" >"${dwork}/javac-rpc.log" 2>&1; then
-    warn "   ✗ javac（RpcProbe）失败"
-    tail -25 "${dwork}/javac-rpc.log" | sed 's/^/   | /'
-    warn "     ⇒ BLOCKED"
-    return 2
-  fi
-  if ! javac -nowarn -encoding UTF-8 -cp "${cp_api}" -d "${dwork}/java" \
-       "${PROBE_DIR}/task/java/ApiProbe.java" >"${dwork}/javac-api.log" 2>&1; then
-    warn "   ✗ javac（ApiProbe）失败"
-    tail -25 "${dwork}/javac-api.log" | sed 's/^/   | /'
-    warn "     ⇒ BLOCKED"
-    return 2
-  fi
-
   local actual_rpc="${dwork}/actual-rpc.txt" actual_api="${dwork}/actual-api.txt"
-  if ! java -cp "${dwork}/java:${cp_rpc}" com.rag.task.task.probe.RpcProbe \
-        "${uid_c}" "${bare_c}" >"${actual_rpc}" 2>"${dwork}/java-rpc.err"; then
-    warn "   ✗ 探针执行失败（RpcProbe）"
-    tail -25 "${dwork}/java-rpc.err" | sed 's/^/   | /'
-    warn "     ⇒ BLOCKED"
-    return 2
+  if [ -n "${DUMP_OUT_DIR}" ]; then
+    mkdir -p "${DUMP_OUT_DIR}"
   fi
-  if ! java -cp "${dwork}/java:${cp_api}" com.rag.task.task.probe.ApiProbe \
-        "${api_c}" >"${actual_api}" 2>"${dwork}/java-api.err"; then
-    warn "   ✗ 探针执行失败（ApiProbe）"
-    tail -25 "${dwork}/java-api.err" | sed 's/^/   | /'
-    warn "     ⇒ BLOCKED"
-    return 2
+  if [ -n "${REPLAY_DIR}" ]; then
+    [ -s "${REPLAY_DIR}/task-rpc.dump" ] || { warn "   ✗ 离线复验：缺 task-rpc.dump ⇒ BLOCKED"; return 2; }
+    [ -s "${REPLAY_DIR}/task-api.dump" ] || { warn "   ✗ 离线复验：缺 task-api.dump ⇒ BLOCKED"; return 2; }
+    cp "${REPLAY_DIR}/task-rpc.dump" "${actual_rpc}"
+    cp "${REPLAY_DIR}/task-api.dump" "${actual_api}"
+    warn "   ⚠️ 离线复验模式（ERRSMSG_REPLAY_DUMP_DIR）⇒ **没有跑探针** ⇒ 仅供变异测试/离线复算"
+  else
+    if ! javac -nowarn -encoding UTF-8 -cp "${cp_rpc}" -d "${dwork}/java" \
+         "${PROBE_DIR}/task/java/RpcProbe.java" >"${dwork}/javac-rpc.log" 2>&1; then
+      warn "   ✗ javac（RpcProbe）失败"
+      tail -25 "${dwork}/javac-rpc.log" | sed 's/^/   | /'
+      warn "     ⇒ BLOCKED"
+      return 2
+    fi
+    if ! javac -nowarn -encoding UTF-8 -cp "${cp_api}" -d "${dwork}/java" \
+         "${PROBE_DIR}/task/java/ApiProbe.java" >"${dwork}/javac-api.log" 2>&1; then
+      warn "   ✗ javac（ApiProbe）失败"
+      tail -25 "${dwork}/javac-api.log" | sed 's/^/   | /'
+      warn "     ⇒ BLOCKED"
+      return 2
+    fi
+    if ! java -cp "${dwork}/java:${cp_rpc}" com.rag.task.task.probe.RpcProbe \
+          "${uid_c}" "${bare_c}" >"${actual_rpc}" 2>"${dwork}/java-rpc.err"; then
+      warn "   ✗ 探针执行失败（RpcProbe）"
+      tail -25 "${dwork}/java-rpc.err" | sed 's/^/   | /'
+      warn "     ⇒ BLOCKED"
+      return 2
+    fi
+    if ! java -cp "${dwork}/java:${cp_api}" com.rag.task.task.probe.ApiProbe \
+          "${api_c}" >"${actual_api}" 2>"${dwork}/java-api.err"; then
+      warn "   ✗ 探针执行失败（ApiProbe）"
+      tail -25 "${dwork}/java-api.err" | sed 's/^/   | /'
+      warn "     ⇒ BLOCKED"
+      return 2
+    fi
   fi
   validate_dump "${actual_rpc}" "Java 侧（task-rpc）" || { warn "     ⇒ BLOCKED"; return 2; }
   validate_dump "${actual_api}" "Java 侧（task-api）" || { warn "     ⇒ BLOCKED"; return 2; }
+  if [ -n "${DUMP_OUT_DIR}" ]; then
+    cp "${actual_rpc}" "${DUMP_OUT_DIR}/task-rpc.dump"
+    cp "${actual_api}" "${DUMP_OUT_DIR}/task-api.dump"
+  fi
 
   local r1=0 r2=0
-  compare_with_baseline "${base_rpc}" "${dwork}/baseline-rpc.dump" "${actual_rpc}" "task-rpc"; r1=$?
-  compare_with_baseline "${base_api}" "${dwork}/baseline-api.dump" "${actual_api}" "task-api"; r2=$?
-  # FAIL(1) 优先于 BLOCKED(2)：真漂移最需要被看见
+  compare_domain "${base_rpc}" "${actual_rpc}" "task-rpc"; r1=$?
+  compare_domain "${base_api}" "${actual_api}" "task-api"; r2=$?
+  # FAIL(1) > BLOCKED(2) > PENDING(3)
   if [ "${r1}" = "1" ] || [ "${r2}" = "1" ]; then return 1; fi
   if [ "${r1}" = "2" ] || [ "${r2}" = "2" ]; then return 2; fi
+  if [ "${r1}" = "3" ] || [ "${r2}" = "3" ]; then return 3; fi
   return 0
 }
 
-# ── 与基准比对（返回 0=一致 / 1=不一致）───────────────────────────────────
-compare_with_baseline() {
-  local baseline="$1" base_dump="$2" actual="$3" label="$4"
-  extract_baseline_dump "${baseline}" "${base_dump}" || {
-    warn "   ✗ 基准 dump 段为空：${baseline} ⇒ BLOCKED"
-    return 2
-  }
-
-  # OBS 段的 case 名集合必须与基准一致
-  # ⚠️ 为什么要单独判：OBS 段是「两侧必然不同的已批准差异」——
-  #    它的**形态**（有哪几个 case）是「已批准差异清单」的一部分。
-  #    case 名变了 ⇒ 已批准的差异形态变了 ⇒ 必须**重新裁定**，不能静默通过。
-  local base_obs="${actual}.baseobs" act_obs="${actual}.actobs"
-  obs_case_names "${base_dump}" >"${base_obs}"
-  obs_case_names "${actual}"   >"${act_obs}"
-  local obs_status=0
-  if ! diff -u "${base_obs}" "${act_obs}" >"${actual}.obsdiff" 2>&1; then
-    say "   ❌ OBS 段的 case 名集合与基准不一致 ⇒ 已批准的差异**形态**变了 ⇒ 需重新裁定"
-    sed 's/^/   | /' "${actual}.obsdiff"
-    obs_status=1
+# ── 单域结果记账 ────────────────────────────────────────────────────────────
+# ⚠️ task 域会产出**两行** RESULT（task-rpc + task-api）⇒ 这里按行**汇总**，
+#    域级判定取最严重的一个（FAIL > BLOCKED > PENDING > PASS）。
+record() {
+  local d="$1" rc="$2" out="$3"
+  local agg verdict approved closed technical pending
+  agg="$(printf '%s\n' "${out}" | awk -F'|' '
+    $1=="RESULT" {
+      v=$2; ap+=$3; cl+=$4; te+=$5; pe+=$6;
+      if (v=="FAIL") f=1; else if (v=="BLOCKED") b=1; else if (v=="PENDING") p=1;
+      n++
+    }
+    END {
+      verdict = (n==0) ? "NONE" : (f ? "FAIL" : (b ? "BLOCKED" : (p ? "PENDING" : "PASS")));
+      printf "%s %d %d %d %d\n", verdict, ap, cl, te, pe;
+    }')"
+  read -r verdict approved closed technical pending <<<"${agg}"
+  if [ "${verdict}" = "NONE" ]; then
+    # 没走到比对那一步 ⇒ 按函数的退出码归类（2=BLOCKED / 1=FAIL / 3=PENDING / 0=PASS）
+    case "${rc}" in
+      0) verdict="PASS" ;; 1) verdict="FAIL" ;; 3) verdict="PENDING" ;; *) verdict="BLOCKED" ;;
+    esac
   fi
-
-  if diff -u "${base_dump}" "${actual}" >"${actual}.diff" 2>&1; then
-    if [ "${obs_status}" = "0" ]; then
-      say "   ✅ ${label}：与基准逐字节一致（$(wc -l <"${actual}" | tr -d ' ') 行）"
-      return 0
-    fi
-    return 1
-  fi
-
-  say "   ❌ ${label}：与基准不一致（- = 基准 / + = Java 侧实际）"
-  sed 's/^/   | /' "${actual}.diff"
-  return 1
+  APPROVED_N=$((APPROVED_N + ${approved:-0}))
+  CLOSED_N=$((CLOSED_N + ${closed:-0}))
+  TECHNICAL_N=$((TECHNICAL_N + ${technical:-0}))
+  PENDING_DEV_N=$((PENDING_DEV_N + ${pending:-0}))
+  case "${verdict}" in
+    PASS)    PASS_N=$((PASS_N + 1)) ;;
+    FAIL)    FAIL_N=$((FAIL_N + 1));   FAILED_DOMAINS="${FAILED_DOMAINS} ${d}" ;;
+    BLOCKED) BLOCKED_N=$((BLOCKED_N + 1)); BLOCKED_DOMAINS="${BLOCKED_DOMAINS} ${d}" ;;
+    PENDING) PENDING_N=$((PENDING_N + 1)); PENDING_DOMAINS="${PENDING_DOMAINS} ${d}" ;;
+    *)       BLOCKED_N=$((BLOCKED_N + 1)); BLOCKED_DOMAINS="${BLOCKED_DOMAINS} ${d}" ;;
+  esac
 }
 
 # =============================================================================
 # 主流程
 # =============================================================================
 say "[ci] ============================================================"
-say "[ci] 阶段：错误码契约守门（R5 · 纯 Java 半边）"
+say "[ci] 阶段：错误码契约守门（R5 · 基准 = **Go 真源派生**）"
 say "[ci] 基准目录: ${CONTRACTS_DIR}"
 say "[ci] 目标域  : ${TARGETS[*]}"
 say "[ci] ============================================================"
@@ -461,32 +806,39 @@ for d in "${TARGETS[@]}"; do
     continue
   fi
   if [ "${IS_TASK}" = "1" ]; then
-    run_task_domain "${d}"; rc=$?
+    out="$(run_task_domain "${d}" 2>&1)"; rc=$?
   else
-    run_single_probe_domain "${d}"; rc=$?
+    out="$(run_single_probe_domain "${d}" 2>&1)"; rc=$?
   fi
-  case "${rc}" in
-    0) PASS_N=$((PASS_N + 1)) ;;
-    1) FAIL_N=$((FAIL_N + 1));   FAILED_DOMAINS="${FAILED_DOMAINS} ${d}" ;;
-    *) BLOCKED_N=$((BLOCKED_N + 1)); BLOCKED_DOMAINS="${BLOCKED_DOMAINS} ${d}" ;;
-  esac
+  printf '%s\n' "${out}"
+  record "${d}" "${rc}" "${out}"
 done
 
 say ""
 say "[ci] ============================================================"
-say "[ci] R5 错误码契约守门汇总"
+say "[ci] R5 错误码契约守门汇总（基准 = Go 真源派生）"
 say "[ci]   PASS    : ${PASS_N}"
 say "[ci]   FAIL    : ${FAIL_N}${FAILED_DOMAINS:+  (域:${FAILED_DOMAINS})}"
 say "[ci]   BLOCKED : ${BLOCKED_N}${BLOCKED_DOMAINS:+  (域:${BLOCKED_DOMAINS})}"
+say "[ci]   PENDING : ${PENDING_N}${PENDING_DOMAINS:+  (域:${PENDING_DOMAINS})}"
+say "[ci]   ── 差异台账分列（Go↔Java 逐条裁定）──"
+say "[ci]   approved : ${APPROVED_N}"
+say "[ci]   closed   : ${CLOSED_N}"
+say "[ci]   technical: ${TECHNICAL_N}"
+say "[ci]   pending  : ${PENDING_DEV_N}   ⬅ 单列（已登记未签字 ⇒ 需用户拍板）"
 say "[ci] ============================================================"
 
 if [ "${FAIL_N}" -ne 0 ]; then
-  say "[ci] ❌ 契约漂移：Java 侧与基准不一致。"
+  say "[ci] ❌ 契约漂移：Java 侧与 **Go 真源基准**不一致。"
   exit 1
 fi
 if [ "${BLOCKED_N}" -ne 0 ]; then
   say "[ci] ⚠️  BLOCKED：检查**没做成**（环境/依赖/基准问题）⇒ 不得计入 PASS。"
   exit 2
 fi
-say "[ci] ✅ 错误码契约与基准逐字节一致。"
+if [ "${PENDING_N}" -ne 0 ]; then
+  say "[ci] ⏳ PENDING：存在**已登记未签字**的差异（pending）⇒ **不计入 PASS** ⇒ 须用户拍板。"
+  exit 3
+fi
+say "[ci] ✅ 错误码契约与 Go 真源基准一致（差异全部已签字/已销号/技术判定）。"
 exit 0

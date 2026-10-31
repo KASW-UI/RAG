@@ -1,58 +1,52 @@
-# =============================================================================
-# ci/contracts/errmsg/task-rpc.txt —— R5 错误码契约基准（task 域 · **rpc 层**）
+# ============================================================================
+# ci/contracts/errmsg/task-rpc.txt —— R5 错误码契约基准（task-rpc 域）· **Go 真源派生**
 #
 # 【这是什么】
-#   Java 侧task 域 · **rpc 层**错误码契约的**机器可读基准**。
-#   CI 用 `ci/scripts/check-errmsg-contract.sh` 跑 **Java 半边探针**
-#   （`tools/errmsg-probe/task/java/RpcProbe.java`）并与本文件的 dump 段**逐字节**比对。
+#   R5 错误码契约的**机器可读基准**。CI 用 `ci/scripts/check-errmsg-contract.sh`
+#   跑 **Java 半边探针**（tools/errmsg-probe/task/java/RpcProbe.java）⇒ 把产物当作**被测对象**，
+#   与本文件的 **Go 权威段**做**双向**比对。
 #
 # 【权威性来源 = Go 真源（只读 · 冻结）】
 #   Go 真源：Sea-RideTheWind_golang/service/task/rpc/internal/logic/get_task_logic.go
-#     · uid<=0 ⇒ `status.Error(codes.InvalidArgument, "user_id invalid")` :43-45 · 裸 error 上抛 :58-60
+#     · 逐调用点（见下方 GOCALL 段的 `文件:行号`）
+#     · sha256 = 36b1bef91c9017d5f93437ff4e6612161958c943a50dccd3c9a6861083d15e67
 #   Java 被测：service/task/task-rpc/src/main/java/com/rag/task/task/rpc/{service/TaskDomainService,service/impl/TaskServiceGrpcImpl}.java
 #
 # 【提取方式（离线 · 一次性 · 可复算）】
-#   2026-10-31 用 `tools/errmsg-probe/task/run-parity.sh` 跑**双侧对拍**：
-#     · Go 半边：把真源 `errmsg.go` 复制进临时模块、与真源**同包**编译后跑
-#       （复制件与真源比 sha256，不一致即 exit 2 ⇒ 验的确实是真源）；
-#     · Java 半边：`javac` 编译探针 → 跑**真实编译产物**（`<域>-common` 的
-#       `target/classes`）⇒ 探针自己**不持有任何码值/文案常量**（否则是「拿 RAG 的值验 RAG 的值」）。
-#   本文件 = **Java 侧 dump**（Java 侧应当满足的契约）。
-#   ⇒ Go 仓**不需要**在线、Go 工具链**不需要**进 CI 镜像。
+#   `python3 ci/scripts/extract-errmsg-authority.py --emit task-rpc` ⇒ 本文件的 go-authority 段
+#   独立复算：`python3 ci/scripts/extract-errmsg-authority.py --check`（逐字节比对 ⇒ 证明基准确实来自 Go）
+#   ⚠️ CI **不拉 Go 仓、不装 Go 工具链、不跑 Go 探针** ⇒ 权威值固化在本目录。
 #
-# 【裁定依据】
-#     · Go↔Java 双侧 dump 有 **2 条差异**，全部落在 `OBS` 段（两侧**必然不同**的已批准差异）。
-#     · 裁定依据：`tools/errmsg-probe/task/README.md` §五（逐条 Go 出处 / RAG 出处）+ `docs/DRIFT/task/`。
-#     · ⚠️ 这 2 条在 task 域的**真实链路里不可达** ⇒ 不构成行为漂移，但已钉死。
+# 【两段式结构】
+#   # >>> go-authority >>>  —— **Go 侧权威值**（CI 的真值来源）
+#       `GOCALL|<调用点>|<Java 段>|<键前缀>|<码/状态>|<文案>`（**逐调用点**的码与文案；文案 = `*` ⇒ 运行期相关，不可逐字比对）
+#   # >>> deviations >>>   —— **逐条差异裁定**（Go↔Java 的每一条差异都在这里落笔）
+#       DEVIATION|<段>|<键>|<go值>|<java值>|<status>|<依据id>|<依据出处>|<理由>
+#       status ∈ approved | closed | technical | pending
 #
-# 【本域已批准差异清单】（Go 侧 vs Java 侧 · **逐条** · 共 2 条）
-#   ⑴ OBS|obs_ok_status
-#        Go   : ok|
-#        Java : ok|user_id invalid
-#        裁定 : 已登记 · 不可达差异（OBS 段） —— Go 的 `status.Error(codes.OK, msg)` **返回 nil**（grpc-go `internal/status/status.go`：`func (s *Status) Err() error { if s.Code() == codes.OK { return nil } }`）⇒ `status.FromError(nil)` ⇒ **没有 description**；Java 的 `Status.OK.withDescription(msg).asRuntimeException()` 造出来的是一个**非 nil**、code=OK、**带 description** 的 `StatusRuntimeException`。「OK 状态不是错误」是 grpc-go 的 API 形态，grpc-java 没有对应的塌缩。 Go `get_task_logic.go:44`（形态上）；Java `TaskServiceGrpcImpl.java:81-83`。
-#   ⑴ OBS|obs_wrapped_status
-#        Go   : invalid_argument|outer: rpc error: code = InvalidArgument desc = user_id invalid
-#        Java : unknown|outer: rpc error: code = InvalidArgument desc = user_id invalid
-#        裁定 : 已登记 · 不可达差异（OBS 段） —— Go 的 `status.FromError`（grpc-go v1.81.1）**用 `errors.As` 穿透包装**找到内层 status ⇒ **保住 code**；但 **description 被换成外层 error 的全文**（`p.Message = err.Error()`）。Java 的 `TaskServiceGrpcImpl` 只认**直接抛出的** `StatusRuntimeException` ⇒ 包装过就落进 `catch (RuntimeException)` ⇒ **code 退化成 `UNKNOWN`**。这是 grpc-go 与 grpc-java 的**结构性差异**。 Go grpc-go `status/status.go` 的 `FromError`；Java `TaskServiceGrpcImpl.java:81-89`。
+# 【四类差异状态】
+#   approved  —— 已签字（依据 id 必能在 `docs/Intentional_Deviations/` 里查到）
+#   closed    —— 已销号/证伪关闭（依据 id 必能在 `docs/DRIFT/` 里查到）
+#   technical —— 技术判定（Go 侧该形态**不可达** / 两个运行时的**结构性差异**）
+#               ⇒ 依据出处必须给出 Go 侧 `文件:行号`
+#   pending   —— **未经批准、需用户拍板** ⇒ **不判 FAIL**，但逐条显式报出，
+#               且**该域不得计入 PASS**（门以退出码 3 收口）
 #
-# 【层次与规模】
-#   RPCUID(4) + RPCBARE(5) + OBS(2)
-#     · 🔴 `obs_wrapped_status` 是一条**真实的回归风险**：若将来有人在 api→rpc 之间加一层 `try/catch` 把 gRPC 异常包起来
-#     · （`throw new RuntimeException("…", e)`），`INVALID_ARGUMENT` 会**当场退化成 `UNKNOWN`** ⇒ 本基准会红。
+# 【本域差异台账】 approved=0 · closed=0 · technical=2 · pending=0（共 2 条）
 #
-# 【基准版本】v1 · 2026-10-31
-# 【格式】`#` 开头的是注释（不参与比对）；`# >>> dump >>>` 之后是契约正文。
-# =============================================================================
+#   🔴 **task 域的 Go 侧没有 codeMsg 表** ⇒ 本基准的权威段是**逐调用点**（`GOCALL`）⇒ **不假装有码表**。
+#
+# 🔴 **task 域的 Go 侧没有 codeMsg 表**：Go 的 task 服务在调用点内联 `status.Error(codes.X, "…")`
+# #   ⇒ 权威段用 `GOCALL`（逐调用点）表达，**不假装有码表**。
+#
+# 【基准版本】v2 · 2026-10-31（v1 = Java dump 快照；**v2 起权威内容改为 Go 派生**）
+# 【格式】`#` 开头的是注释（不参与比对）；正文按 `# >>> <段> >>>` 切分。
+# ============================================================================
 
-# >>> dump >>>
-RPCUID|rpc_uid_zero|invalid_argument|user_id invalid
-RPCUID|rpc_uid_neg_one|invalid_argument|user_id invalid
-RPCUID|rpc_uid_neg_min|invalid_argument|user_id invalid
-RPCUID|rpc_uid_neg_big|invalid_argument|user_id invalid
-RPCBARE|rpc_bare_simple|unknown|boom
-RPCBARE|rpc_bare_pq|unknown|pq: deadlock detected
-RPCBARE|rpc_bare_empty|unknown|
-RPCBARE|rpc_bare_unicode|unknown|用户不存在
-RPCBARE|rpc_bare_has_pipe|unknown|left\|right
-OBS|obs_ok_status|ok|user_id invalid
-OBS|obs_wrapped_status|unknown|outer: rpc error: code = InvalidArgument desc = user_id invalid
+# >>> go-authority >>>
+GOCALL|service/task/rpc/internal/logic/get_task_logic.go:44|RPCUID|rpc_uid_|invalid_argument|user_id invalid
+GOCALL|service/task/rpc/internal/logic/get_task_logic.go:59|RPCBARE|rpc_bare_|unknown|*
+
+# >>> deviations >>>
+DEVIATION|OBS|obs_ok_status|ok%7C|ok%7Cuser_id invalid|technical|-|Go service/task/rpc/internal/logic/get_task_logic.go:44|grpc-go 的 status.Error(codes.OK, msg) 返回 nil ⇒ status.FromError(nil) 没有 description；Java 侧 Status.OK.withDescription(msg).asRuntimeException() 是非 nil、带 description 的异常。
+DEVIATION|OBS|obs_wrapped_status|invalid_argument%7Couter: rpc error: code = InvalidArgument desc = user_id invalid|unknown%7Couter: rpc error: code = InvalidArgument desc = user_id invalid|technical|-|Go service/task/rpc/internal/logic/get_task_logic.go:44|grpc-go 的 status.FromError 用 errors.As 穿透包装找到内层 status（保住 code），但 description 被换成外层 error 全文；Java 侧只认直接抛出的 StatusRuntimeException ⇒ 包装后 code 退化成 UNKNOWN（结构性差异）。

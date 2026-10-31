@@ -78,15 +78,17 @@ worker 的可用环境变量里也没有任何"挂宿主路径"的开关
 
 ---
 
-## 二、文件清单（29 个文件 + 本文档）
+## 二、文件清单（45 个文件 + 本文档）
 
 | 路径 | 职责 | 真源？ |
 |---|---|---|
-| `ci/pipelines/rag-*.yml`（11 个） | 各域流水线定义（4 step） | ⛔ **生成物**，不要手改 |
+| `ci/pipelines/rag-*.yml`（11 个日常 + 2 个契约） | 各域流水线定义（4 step）/ 契约流水线定义 | ⛔ **生成物**，不要手改 |
 | `ci/tasks/maven-build.yml` | 构建阶段 task 配置 | ✅ 唯一真源 |
 | `ci/tasks/maven-test.yml` | 测试阶段 task 配置 | ✅ 唯一真源 |
 | `ci/tasks/static-gates.yml` | 静态守门阶段 task 配置 | ✅ 唯一真源 |
 | `ci/tasks/report.yml` | 结果汇总阶段 task 配置 | ✅ 唯一真源 |
+| `ci/tasks/contract-errmsg.yml` | **R5 契约门** task 配置 | ✅ 唯一真源 |
+| `ci/tasks/contract-schema.yml` | **R6 契约门** task 配置 | ✅ 唯一真源 |
 | `ci/scripts/build.sh` | 嵌套容器内 `mvn package -DskipTests` | ✅ |
 | `ci/scripts/test.sh` | 嵌套容器内 `mvn test`（先 source Testcontainers 环境） | ✅ |
 | `ci/scripts/testcontainers-env.sh` | Docker 可达性前置断言 + host override + Ryuk 关闭 | ✅ |
@@ -95,18 +97,31 @@ worker 的可用环境变量里也没有任何"挂宿主路径"的开关
 | `ci/scripts/check-pom-parent-relativepath.py` | **第 9 道门**：每个 pom 的 `<parent>` 能否被本地 `relativePath` 正确解析（见 §六.2） | ✅ |
 | `ci/scripts/collect-surefire.sh` | 读 `TEST-*.xml` 汇总用例数与失败清单；**并判「该在而不在」与「跑了但 0 条用例」**（见 §四.5） | ✅ |
 | `ci/scripts/check-proto-contract.py` | **R4 契约门**：Java 侧 `.proto` ↔ `ci/contracts/proto/` 基准逐字节比对（唯一归一化实现） | ✅ |
-| `ci/scripts/check-errmsg-contract.sh` | **R5 契约门**：**纯 Java 半边**探针 ↔ `ci/contracts/errmsg/` 基准逐字节比对 | ✅ |
+| `ci/scripts/check-errmsg-contract.sh` | **R5 契约门**：**纯 Java 半边**探针 ↔ `ci/contracts/errmsg/` 基准比对 | ✅ |
+| `ci/scripts/check-errmsg-contract-mutations.py` | R5 门禁的**变异测试**（证明非假绿） | ✅ |
+| `ci/scripts/check-schema-contract.py` | **R6 契约门**：活体 PG 重放 Flyway → 逐列比对 `ci/contracts/schema/` 基准 | ✅ |
+| `ci/scripts/check-schema-contract-mutations.py` | R6 门禁的**变异测试**（含故障注入：容器被杀 ⇒ 必须判 BLOCKED 而非 FAIL） | ✅ |
+| `ci/scripts/check-requirements.py` | **第 11 道门**：目标要求清单守门（11 条规则 + 六态汇总） | ✅ |
+| `ci/scripts/check-requirements-mutations.py` | 清单守门的**变异测试**（10 条变异全部红在目标规则） | ✅ |
 | `ci/scripts/contract-errmsg.sh` | R5 在 DinD 内层容器里的阶段脚本 | ✅ |
+| `ci/scripts/contract-schema.sh` | R6 在 DinD 内层容器里的阶段脚本（内层用 `python:3.12-bookworm`，**不需要 Maven/JDK**） | ✅ |
+| `ci/scripts/verify-triggers.sh` | 触发面**真实服务端**验证（7 个场景） | ✅ |
 | `ci/contracts/README.md` | **契约基准的治理约定**：来源 / 裁定 / 版本 / 审查 / 五态失败语义 | ✅ |
 | `ci/contracts/proto/*.proto`（10 份） | **R4 契约基准**（从 Go 真源一次性离线提取 + 人工裁定） | ✅ 基准 |
-| `ci/contracts/errmsg/*.txt`（10 份） | **R5 契约基准**（Java 侧应满足的码值/文案/回落/wire 语义） | ✅ 基准 |
-| `ci/contracts/schema/*.json`（9 份） | **R6 语义约束基准**（必须保持的约束 + 已批准差异 + 未确认差异） | ✅ 基准 |
-| `ci/generate-pipelines.py` | 从 pom 依赖图生成 11 条日常 + 契约流水线；`--check` 校验漂移 | ✅ |
+| `ci/contracts/errmsg/*.txt`（10 份） | **R5 契约基准**（Go 侧权威值 + 差异逐条裁定） | ✅ 基准 |
+| `ci/contracts/schema/*.json`（9 份） | **R6 语义约束基准**（Go GORM 活体提取：必须保持 + 已批准差异 + 未确认差异） | ✅ 基准 |
+| `ci/requirements/requirements.json` | **目标要求清单**（46 条：Go 依据 / Java 实现 / 验证方法 / 六态 / 差异批准 / 归属 Pipeline+Task / 证据） | ✅ **单一真源** |
+| `ci/requirements/README.md` | 清单治理约定（字段 / 维度 / 规则 / 变更流程 / 当前状态） | ✅ |
+| `ci/generate-pipelines.py` | 从 pom 依赖图生成 11 条日常 + 2 条契约流水线；`--check` 校验漂移 | ✅ |
 | `ci/deploy.sh` | 校验 + `set-pipeline`（注入 4 个 var）+ `unpause-pipeline`（幂等） | ✅ |
 | `ci/local-up.sh` | 本地环境一键起流（load tar → 可选本地 registry → 起 Concourse → 注册流水线 → 可选触发） | ✅ |
 | `ci/README.md` | 使用说明 / 依赖矩阵 / 触发规则 / 环境约束 | ✅ |
 | `ci/DELIVERY.md` | 本文档 | ✅ |
-| `ci/BASELINE.md` | **CI 需求基线**：以 Go 原版为参照，列出 Java CI 应验证什么（R1~R9）+ 微服务级矩阵 + 触发需求 + 接入条件与验收标准 + 待定事项 | ✅ |
+| `ci/BASELINE.md` | **CI 需求基线**：以 Go 原版为参照，列出 Java CI 应验证什么（R1~R10）+ 微服务级矩阵 + 触发需求 + 接入条件与验收标准 + 待定事项 | ✅ |
+| `tools/difftest/docker_api.py` | **纯标准库** Docker Engine API over unix socket（CI 镜像**没有 docker CLI** ⇒ 绕开它） | ✅ |
+| `tools/difftest/extract-schema-baseline.py` | **一次性离线**提取：从 Go GORM `AutoMigrate` 活体 + Java Flyway 活体 ⇒ 产出 R6 基准 | ✅ |
+| `tools/difftest/schema-baseline-deviations.json` | R6 差异的**人工裁定表**（approved / unconfirmed 分列） | ✅ |
+
 
 > **为什么 task 配置要内联进 pipeline**
 > Concourse 的 pipeline step **必须**带 `file:` 或 `config:` 二选一，不能引用独立任务文件
@@ -200,6 +215,35 @@ canonical 流水线指向 `https://github.com/KASW-UI/RAG.git` 的 `do-my-own-gh
 ⇒ 演练验证的是**流水线机制本身**（取源/触发面/DinD/构建/守门/汇总）；
 **未验证**的是 GitHub 链路上的完整绿灯 —— 该链路的可达性已单独实测通过
 （`github.com:443` 从 task 容器内 TCP 连通），但**克隆极慢**（见 §五）。
+
+### 4.3 2026-10-31（方向纠正轮）的验证记录
+
+> ⚠️ **本轮的方向纠正改变了「什么算合格」** ⇒ 下面的读数分两类：
+> **A** = 代码层实测（可复算）；**B** = Concourse Task 内实跑（证据强度最高）。
+
+| # | 结论 | 层级 | 依据 |
+|---|---|---|---|
+| A1 | **目标要求清单守门**：结构合规 + 六态分列正确 ⇒ EXIT=0 | A | `python3 ci/scripts/check-requirements.py` ⇒ PASS=23 / FAIL=1 / NOT_VERIFIED=19 / APPROVED_DIFFERENCE=1 / NOT_APPLICABLE=2 |
+| A2 | **清单守门不是假绿**：**10/10 变异红在目标规则**，且**真清单字节未变** | A | `python3 ci/scripts/check-requirements-mutations.py` ⇒ M1(R3 反向定义入口) · M2(R2 取值域) · M3/R6(**回指未签字**) · M4(R6 回指不存在) · M5/R5(空壳 PASS) · M6(R5 脚本不存在) · M7(R7 藏差异) · M8(R8 没人执行) · M9(R10 覆盖缺口) · M10(R1 重复) |
+| A3 | 🔴 **变异测试抓出守门自身的一个缺陷**并已修 | A | 首轮 10 条变异「全部退出码非 0」，但**红在崩溃**（守门对仓外路径 `relative_to(ROOT)` 抛 ValueError）⇒ 读数会被误判成「门禁有牙」⇒ 已修 + 变异脚本改为**同时断言「红在目标规则」且「无 Traceback」** |
+| A4 | **R6 契约门**正向跑通 | A | `python3 ci/scripts/check-schema-contract.py --all`（宿主）⇒ 9 域逐列比对 |
+| A5 | **R6 三态分类修正**已落地 | A | 基础设施类失败（容器被杀 · psql `exit status 137`）⇒ **BLOCKED(2) 而非 FAIL(1)**；`hot` 域 ⇒ **NOT_RUN(3)**；逐域容器自愈（换名重建 ⇒ 单域故障不传染后续域） |
+| A6 | **R4 契约门**：10 类变异全转红 | A | `python3 ci/scripts/check-proto-contract.py --baseline ci/contracts/proto` ⇒ PASS 10 / FAIL 0 / BLOCKED 0；变异含改字段号 / 改类型 / 删 message / 改 package / Java 侧 proto 缺失 / 基准缺失 / 基准目录有未登记文件 ⇒ 基准缺失正确判 **BLOCKED(2)** |
+| A7 | **R5 契约门**（初版）正向跑通 + 6 类变异全转红 | A | `bash ci/scripts/check-errmsg-contract.sh` ⇒ PASS 9；变异含改码值 / 改文案 / **新增错误码枚举常量（CONST+TABLE 两行都新增 ⇒ 不漏）** / 改 OBS case 名 / 基准缺失(BLOCKED) / Maven 编译失败(BLOCKED) |
+| A8 | 🔴 **R5 初版基准是「Java 现状」⇒ 违反「禁止反向定义」** ⇒ **已返工完成** | A | `ci/contracts/errmsg/*.txt` 的 dump 段实为 **Java 侧 dump**，Go 值只在注释里 ⇒ 已返工为 **Go 派生基准**（`# >>> go-authority >>>` 段：`GOCONST`/`GOTABLE`/`GOFALLBACK` + Go `文件:行号` + sha256）+ `# >>> deviations >>>` 差异四态段（9 字段 `DEVIATION|…`） |
+| A8b | ✅ **R5 返工后的正向读数**：**PASS 7 / FAIL 0 / BLOCKED 0 / PENDING 2**（域 `comment`·`like`）⇒ **EXIT=3** | A | `bash ci/scripts/check-errmsg-contract.sh` ⇒ 差异台账分列 **approved 31 / closed 2 / technical 13 / pending 8**（pending 单列 ⇒ 需用户拍板，清单见 `ci/requirements/README.md` §8.2） |
+| A8c | ✅ **R5 门禁变异测试 11/11 红在目标断言**，且**真源字节全部恢复** | A | `python3 ci/scripts/check-errmsg-contract-mutations.py` ⇒ M1 改码值 · M2 删码 · M3 改文案 · M4 改回落 · M5 缺 authority 段(BLOCKED) · M6 DEVIATION 字段损坏(BLOCKED) · **M7 pending→假 approved(自证豁免)⇒FAIL** · M8 approved 依据文件越界⇒FAIL · M9 基准缺失(BLOCKED) · M10 探针编译失败(BLOCKED) · **M11 Java 侧真改一个文案 ⇒ FAIL** |
+| A8d | ⚠️ 变异过程**抓出两个变异脚本缺陷**（**不是门禁缺陷**） | A | ① `article` 域探针在 `tools/errmsg-probe/java/Probe.java`（**无 `article/` 子目录**）⇒ 路径写错 ⇒ 脚本崩；② Java 侧变异命中**测试文件**（`rglob` 顺序）⇒ 改的不是 `target/classes` 的来源 ⇒ 门禁当然绿 ⇒ **已限定 `src/main/**`** ⇒ 单验 M11：影子仓改 `SUCCESS(200,"OK")` ⇒ 门禁判 `DRIFT\|UNREGISTERED\|TABLE\|200\|Go=OK / Java=OK-漂移了` ⇒ **FAIL** ⇒ **门禁确实能抓 Java 侧漂移** |
+| A9 | **生成物一致 + 13 条流水线全部通过 Concourse 校验** | A | `python3 ci/generate-pipelines.py --check` ⇒ EXIT=0（11 日常 + 2 契约）；`fly validate-pipeline` ⇒ 13/13 |
+| A10 | **R6 的 CI 环境编排**打通（实测日志） | B | `rag-contract-schema` build 1420 日志：内层 `dockerd` 就绪 → 从本地 registry 拉到 `python:3.12-bookworm` → 内层容器启动 ⇒ **编排链路成立**；该次失败**不是**环境问题，而是 `check-schema-contract.py` **尚未提交** ⇒ 已在 `5707a16a` 补上 |
+| A11 | **R5 契约门在 Concourse Task 内逐域跑通** | B | `rag-contract-errmsg` build 1375 日志：`article ✅ 49 行` · `comment ✅ 140 行` · `favorite ✅ 110 行` ⇒ 逐域判定链路成立（冷 m2 下 9 域编译耗时较长） |
+| A13 | ✅ **第 11 道门（目标要求清单）在真实 CI 镜像内跑通** | B | `docker run -v $PWD:/build/repo -w /build python:3.12-bookworm sh repo/ci/scripts/run-static-gates.sh` ⇒ 第 10 道门（R4）**PASS 10 / FAIL 0 / BLOCKED 0** + 第 11 道门**PASS=23 / FAIL=1 / NOT_VERIFIED=19** ⇒ 两道门均绿 |
+| A14 | 🔴 **宿主磁盘 100% 满 ⇒ Docker containerd `meta.db` I/O error ⇒ daemon 挂起** | B | `/System/Volumes/Data` 一度只剩 **139 MiB** ⇒ `docker ps` 无限挂起、Concourse worker 拉不动镜像 ⇒ **这是环境问题（BLOCKED），不是代码回归**；清理 `/private/tmp` 探针残留（26G→13G）+ 重启 Docker Desktop 后部分恢复 |
+| A12 | 🔴 **踩坑：流水线全部处于 paused ⇒ build 永远 pending** | B | `fly paused-pipelines` 显示 15 条全部 `paused=yes`（`paused_by=test`，06:32 暂停；`fly set-pipeline` **保留暂停态** ⇒ 15:43 重部署后仍是暂停）⇒ **build 卡在 pending 不动**，不是调度器坏了 ⇒ 排查耗时 ⇒ **恢复办法：`fly unpause-pipeline`**（收尾时会把 canonical 重新置回 paused） |
+
+> ⚠️ **A10/A11 的证据边界**：它们证明的是「**流水线机制 + 门禁脚本能在 Concourse Task 内真实执行**」，
+> **不等于**「全链路绿」——`rag-contract-schema` 的**首轮**结论是 **失败**（脚本缺失），**修复后需重跑确认**。
+
 
 ---
 
