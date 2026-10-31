@@ -2,7 +2,6 @@ package com.rag.message.message.rpc.client;
 
 import com.rag.common.observability.GoStyleRequestDeadline;
 import com.rag.common.protection.GoStyleOutboundDeadlineInterceptor;
-import com.rag.common.protection.GoStyleProtectionConfiguration;
 import com.rag.common.protection.GoStyleProtectionProperties;
 import com.rag.message.message.rpc.MessageRpcApplication;
 import com.rag.message.message.rpc.exception.MessageExceptions;
@@ -425,7 +424,7 @@ class MessageRpcOutboundDeadlineCapGateTest {
     void productionWiringReallyProducesTheInterceptorWithTheDomainCap() {
         // ── (1) 声明面 ──
         Set<Class<?>> imports = effectiveImports(MessageRpcApplication.class);
-        assertTrue(imports.contains(GoStyleProtectionConfiguration.class),
+        assertTrue(imports.contains(com.rag.common.protection.GoStyleProtectionConfiguration.class),
                 "🔴 本域启动类（MessageRpcApplication）的 @Import 必须含 GoStyleProtectionConfiguration"
                         + "（实测 = " + imports + "）"
                         + "⇒ ⇒ 本模块刻意不扫 com.rag.common ⇒ ⇒ 共享层保护层只能靠 @Import 进得来"
@@ -434,7 +433,7 @@ class MessageRpcOutboundDeadlineCapGateTest {
 
         // ── (2) 运行面 ──
         try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
-            ctx.register(GoStyleProtectionConfiguration.class);
+            ctx.register(com.rag.common.protection.GoStyleProtectionConfiguration.class);
             // ⚠️ devh 自己的收集器（生产里由 grpc-client starter 的自动配置注册）
             ctx.registerBean(AnnotationGlobalClientInterceptorConfigurer.class);
             addDomainYamlTo(ctx);
