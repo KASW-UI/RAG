@@ -80,6 +80,12 @@ jobs:
       #   ⇒ 复用同一份 ~/.m2 缓存、同一份 Maven 镜像源 settings.xml、同一套镜像源机制
       #   ⇒ **不新增任何 CI 机制**，只是多一个 STAGE。
       #
+      # 【两个内层阶段（2026-10-31 实测后新增）】
+      #   ① contract-errmsg（maven 镜像）          ⇒ 编译 + 跑探针 ⇒ 产出 Java 侧 dump
+      #   ② contract-errmsg-compare（python 镜像） ⇒ 比对 dump ⇄ Go 真源基准
+      #   ⇒ 两者共用同一个 bind mount（$PWD）⇒ dump 在同一次 build 内交接。
+      #   ⚠️ 拆分根因：maven 镜像**没有 python3** ⇒ 单容器跑比对必然 `python3: command not found`。
+      #
       # 【为什么独立成一条流水线，而不是塞进 11 条日常流水线】
       #   R5 要编译 9 个域的 `<域>-common` 并各跑一次 Java 半边探针（分钟级）
       #   ⇒ 无条件塞进 11 条日常流水线不可接受（任务书 §九.11）。
@@ -119,4 +125,6 @@ jobs:
       REGISTRY: ((registry))
       MAVEN_MIRROR_URL: ((maven_mirror))
       STAGE: contract-errmsg
+      IMAGE2: ((registry))/library/python:3.12-bookworm
+      STAGE2: contract-errmsg-compare
       ERRSMSG_DOMAINS: ''

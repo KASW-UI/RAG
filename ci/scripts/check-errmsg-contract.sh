@@ -63,6 +63,25 @@
 #   ERRSMSG_MVN_OFFLINE     0=**默认**（Maven 可联网解析）；1=强制离线（`mvn -o`）
 #   ERRSMSG_SKIP_COMPILE    1=跳过 mvn compile（**仅**用于本地调试已有 target/ 的场景；
 #                           CI 里**不得**设置 —— 跳过编译就等于不验「产物是不是新的」）
+#   ERRSMSG_PHASE           本脚本要跑哪个阶段（默认 `full`）：
+#                             full    = 编译 + 跑探针 + 比对（本地开发 / 变异测试用）
+#                             dump    = 编译 + 跑探针，**只产出 Java 侧 dump**，不比对
+#                             compare = **只比对**（从 ERRSMSG_REPLAY_DUMP_DIR 读 dump）
+#
+# 【为什么要拆成两个阶段（2026-10-31 · R5 在 Concourse Task 内首跑实测）】
+#   跑探针需要 **JDK + Maven**（探针 import 的是各域 **编译产物**里的 ErrorCode
+#   ⇒ 不是源码解析 ⇒ 必须真编译），而比对逻辑（解析两段式基准、反转义、
+#   四态分类、回指 docs/Intentional_Deviations/）写的是 **python3**。
+#   ⚠️ **CI 的 maven 镜像里没有 python3**（实测 `maven:3.9.11-eclipse-temurin-21`
+#      = Ubuntu 24.04，`command -v python3` ⇒ MISSING）
+#   ⇒ 单阶段跑 ⇒ `python3: command not found` ⇒ 每个域都被记成 BLOCKED。
+#   ⇒ CI 因此拆成**两个内层容器**（见 ci/scripts/dind-run.sh 的 STAGE2）：
+#       内层① maven 镜像  ⇒ PHASE=dump    ⇒ 产出 Java 侧 dump
+#       内层② python 镜像 ⇒ PHASE=compare ⇒ 比对
+#   ⇒ 两者共用同一个 bind mount ⇒ dump 在**同一次 build 内**传递，不落进仓内。
+#   ⚠️ 「CI 不得设置 DUMP_OUT_DIR / REPLAY_DUMP_DIR」那条规则的**本意**是
+#      「不许拿**上一次**的 dump 当本次产物」⇒ 跨阶段交接是**同一次 build 内**的，
+#      dump 目录每次 build 重建 ⇒ 不违反该规则的本意（脚本里对此有显式断言）。
 # =============================================================================
 set -uo pipefail
 
@@ -83,6 +102,24 @@ fi
 
 MVN_OFFLINE="${ERRSMSG_MVN_OFFLINE:-0}"
 SKIP_COMPILE="${ERRSMSG_SKIP_COMPILE:-0}"
+PHASE="${ERRSMSG_PHASE:-full}"
+case "${PHASE}" in
+  full|dump|compare) ;;
+  *)
+    warn "✗ 未知 ERRSMSG_PHASE='${PHASE}'（合法值：full / dump / compare）"
+    exit 2
+    ;;
+esac
+# ⚠️ compare 阶段**必须**有 dump 来源；dump 阶段**必须**有 dump 落盘目录。
+#   ⇒ 缺了就立刻 BLOCKED ⇒ 绝不静默地「没比对就当通过」。
+if [ "${PHASE}" = "compare" ] && [ -z "${REPLAY_DIR}" ]; then
+  warn "✗ PHASE=compare 必须设置 ERRSMSG_REPLAY_DUMP_DIR（Java 侧 dump 的来源）"
+  exit 2
+fi
+if [ "${PHASE}" = "dump" ] && [ -z "${DUMP_OUT_DIR}" ]; then
+  warn "✗ PHASE=dump 必须设置 ERRSMSG_DUMP_OUT_DIR（Java 侧 dump 的落盘位置）"
+  exit 2
+fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
@@ -570,37 +607,48 @@ run_single_probe_domain() {
     return 2
   fi
 
-  # ③ 编译
-  local mlog="${dwork}/mvn.log"
-  if ! compile_module "${MODULES}" "${mlog}"; then
-    warn "   ✗ mvn compile 失败（${MODULES}）"
-    tail -25 "${mlog}" | sed 's/^/   | /'
-    warn "     ⇒ BLOCKED（构建失败是环境/代码状态问题，不是契约漂移）"
-    return 2
-  fi
-  local classes="${REPO_ROOT}/${MODULES}/target/classes"
-  if [ ! -d "${classes}" ]; then
-    warn "   ✗ 编译产物目录不存在：${classes}"
-    warn "     ⇒ BLOCKED"
-    return 2
-  fi
-
-  # ④ classpath
-  local cp="${classes}"
-  if [ "${CP_MODE}" = "classes+deps" ]; then
-    local cpfile="${dwork}/cp.txt"
-    if ! build_dep_classpath "${MODULES}" "${cpfile}" "${dwork}/mvn-cp.log"; then
-      warn "   ✗ dependency:build-classpath 失败（${MODULES}）"
-      tail -25 "${dwork}/mvn-cp.log" | sed 's/^/   | /'
+  # ③ 编译（compare 阶段不需要：它只比对上一阶段产出的 dump）
+  local classes="" cp=""
+  if [ "${PHASE}" != "compare" ]; then
+    local mlog="${dwork}/mvn.log"
+    if ! compile_module "${MODULES}" "${mlog}"; then
+      warn "   ✗ mvn compile 失败（${MODULES}）"
+      tail -25 "${mlog}" | sed 's/^/   | /'
+      warn "     ⇒ BLOCKED（构建失败是环境/代码状态问题，不是契约漂移）"
+      return 2
+    fi
+    classes="${REPO_ROOT}/${MODULES}/target/classes"
+    if [ ! -d "${classes}" ]; then
+      warn "   ✗ 编译产物目录不存在：${classes}"
       warn "     ⇒ BLOCKED"
       return 2
     fi
-    cp="${classes}:$(cat "${cpfile}")"
+
+    # ④ classpath
+    cp="${classes}"
+    if [ "${CP_MODE}" = "classes+deps" ]; then
+      local cpfile="${dwork}/cp.txt"
+      if ! build_dep_classpath "${MODULES}" "${cpfile}" "${dwork}/mvn-cp.log"; then
+        warn "   ✗ dependency:build-classpath 失败（${MODULES}）"
+        tail -25 "${dwork}/mvn-cp.log" | sed 's/^/   | /'
+        warn "     ⇒ BLOCKED"
+        return 2
+      fi
+      cp="${classes}:$(cat "${cpfile}")"
+    fi
   fi
 
-  # ⑤ 产出 Java 侧 dump（跑探针，或**离线复验**读已有 dump）
+  # ⑤ 产出/取用 Java 侧 dump
   local actual="${dwork}/actual.txt"
-  if [ -n "${REPLAY_DIR}" ]; then
+  if [ "${PHASE}" = "compare" ]; then
+    local rp_dump="${REPLAY_DIR}/${d}.dump"
+    if [ ! -s "${rp_dump}" ]; then
+      warn "   ✗ compare 阶段：找不到 Java 侧 dump ${rp_dump}"
+      warn "     ⇒ BLOCKED（上一阶段没产出 ⇒ 不是契约漂移）"
+      return 2
+    fi
+    cp "${rp_dump}" "${actual}"
+  elif [ -n "${REPLAY_DIR}" ]; then
     local rp_dump="${REPLAY_DIR}/${d}.dump"
     if [ ! -s "${rp_dump}" ]; then
       warn "   ✗ 离线复验模式：找不到 dump 文件 ${rp_dump}"
@@ -629,6 +677,15 @@ run_single_probe_domain() {
     warn "     ⇒ BLOCKED"
     return 2
   fi
+
+  # ── dump 阶段到此为止：只产出 Java 侧 dump，比对交给下一个内层阶段 ──────────
+  if [ "${PHASE}" = "dump" ]; then
+    mkdir -p "${DUMP_OUT_DIR}"
+    cp "${actual}" "${DUMP_OUT_DIR}/${d}.dump"
+    say "   ✔ Java 侧 dump 已产出（比对在下一内层阶段执行）"
+    return 0
+  fi
+
   # 落盘（供变异测试 / 离线复算复用）⇒ CI **不得**设置
   if [ -n "${DUMP_OUT_DIR}" ]; then
     mkdir -p "${DUMP_OUT_DIR}"
@@ -667,75 +724,93 @@ run_task_domain() {
   extract_cases "${rp}" "BARE_CASES" "${bare_c}" || { warn "   ✗ 抽不出 BARE_CASES ⇒ BLOCKED"; return 2; }
   extract_cases "${rp}" "API_CASES"  "${api_c}"  || { warn "   ✗ 抽不出 API_CASES ⇒ BLOCKED"; return 2; }
 
-  local mlog="${dwork}/mvn.log"
-  if ! compile_module "service/task/task-rpc,service/task/task-api" "${mlog}"; then
-    warn "   ✗ mvn compile 失败（task-rpc,task-api）"
-    tail -25 "${mlog}" | sed 's/^/   | /'
-    warn "     ⇒ BLOCKED"
-    return 2
-  fi
-
-  local classes_rpc="${REPO_ROOT}/service/task/task-rpc/target/classes"
-  local classes_api="${REPO_ROOT}/service/task/task-api/target/classes"
-  [ -d "${classes_rpc}" ] || { warn "   ✗ 缺编译产物：${classes_rpc} ⇒ BLOCKED"; return 2; }
-  [ -d "${classes_api}" ] || { warn "   ✗ 缺编译产物：${classes_api} ⇒ BLOCKED"; return 2; }
-
-  local cp_rpc_file="${dwork}/cp-rpc.txt" cp_api_file="${dwork}/cp-api.txt"
-  if ! build_dep_classpath "service/task/task-rpc" "${cp_rpc_file}" "${dwork}/mvn-cp-rpc.log"; then
-    warn "   ✗ dependency:build-classpath（task-rpc）失败 ⇒ BLOCKED"
-    tail -20 "${dwork}/mvn-cp-rpc.log" | sed 's/^/   | /'
-    return 2
-  fi
-  if ! build_dep_classpath "service/task/task-api" "${cp_api_file}" "${dwork}/mvn-cp-api.log"; then
-    warn "   ✗ dependency:build-classpath（task-api）失败 ⇒ BLOCKED"
-    tail -20 "${dwork}/mvn-cp-api.log" | sed 's/^/   | /'
-    return 2
-  fi
-  local cp_rpc="${classes_rpc}:$(cat "${cp_rpc_file}")"
-  local cp_api="${classes_api}:$(cat "${cp_api_file}")"
-
   local actual_rpc="${dwork}/actual-rpc.txt" actual_api="${dwork}/actual-api.txt"
   if [ -n "${DUMP_OUT_DIR}" ]; then
     mkdir -p "${DUMP_OUT_DIR}"
   fi
-  if [ -n "${REPLAY_DIR}" ]; then
-    [ -s "${REPLAY_DIR}/task-rpc.dump" ] || { warn "   ✗ 离线复验：缺 task-rpc.dump ⇒ BLOCKED"; return 2; }
-    [ -s "${REPLAY_DIR}/task-api.dump" ] || { warn "   ✗ 离线复验：缺 task-api.dump ⇒ BLOCKED"; return 2; }
+  # ── compare 阶段：只取上一阶段产出的 dump（不编译、不跑探针）──────────────
+  if [ "${PHASE}" = "compare" ]; then
+    [ -s "${REPLAY_DIR}/task-rpc.dump" ] || { warn "   ✗ compare 阶段：缺 task-rpc.dump ⇒ BLOCKED"; return 2; }
+    [ -s "${REPLAY_DIR}/task-api.dump" ] || { warn "   ✗ compare 阶段：缺 task-api.dump ⇒ BLOCKED"; return 2; }
     cp "${REPLAY_DIR}/task-rpc.dump" "${actual_rpc}"
     cp "${REPLAY_DIR}/task-api.dump" "${actual_api}"
-    warn "   ⚠️ 离线复验模式（ERRSMSG_REPLAY_DUMP_DIR）⇒ **没有跑探针** ⇒ 仅供变异测试/离线复算"
   else
-    if ! javac -nowarn -encoding UTF-8 -cp "${cp_rpc}" -d "${dwork}/java" \
-         "${PROBE_DIR}/task/java/RpcProbe.java" >"${dwork}/javac-rpc.log" 2>&1; then
-      warn "   ✗ javac（RpcProbe）失败"
-      tail -25 "${dwork}/javac-rpc.log" | sed 's/^/   | /'
+    local mlog="${dwork}/mvn.log"
+    if ! compile_module "service/task/task-rpc,service/task/task-api" "${mlog}"; then
+      warn "   ✗ mvn compile 失败（task-rpc,task-api）"
+      tail -25 "${mlog}" | sed 's/^/   | /'
       warn "     ⇒ BLOCKED"
       return 2
     fi
-    if ! javac -nowarn -encoding UTF-8 -cp "${cp_api}" -d "${dwork}/java" \
-         "${PROBE_DIR}/task/java/ApiProbe.java" >"${dwork}/javac-api.log" 2>&1; then
-      warn "   ✗ javac（ApiProbe）失败"
-      tail -25 "${dwork}/javac-api.log" | sed 's/^/   | /'
-      warn "     ⇒ BLOCKED"
+
+    local classes_rpc="${REPO_ROOT}/service/task/task-rpc/target/classes"
+    local classes_api="${REPO_ROOT}/service/task/task-api/target/classes"
+    [ -d "${classes_rpc}" ] || { warn "   ✗ 缺编译产物：${classes_rpc} ⇒ BLOCKED"; return 2; }
+    [ -d "${classes_api}" ] || { warn "   ✗ 缺编译产物：${classes_api} ⇒ BLOCKED"; return 2; }
+
+    local cp_rpc_file="${dwork}/cp-rpc.txt" cp_api_file="${dwork}/cp-api.txt"
+    if ! build_dep_classpath "service/task/task-rpc" "${cp_rpc_file}" "${dwork}/mvn-cp-rpc.log"; then
+      warn "   ✗ dependency:build-classpath（task-rpc）失败 ⇒ BLOCKED"
+      tail -20 "${dwork}/mvn-cp-rpc.log" | sed 's/^/   | /'
       return 2
     fi
-    if ! java -cp "${dwork}/java:${cp_rpc}" com.rag.task.task.probe.RpcProbe \
-          "${uid_c}" "${bare_c}" >"${actual_rpc}" 2>"${dwork}/java-rpc.err"; then
-      warn "   ✗ 探针执行失败（RpcProbe）"
-      tail -25 "${dwork}/java-rpc.err" | sed 's/^/   | /'
-      warn "     ⇒ BLOCKED"
+    if ! build_dep_classpath "service/task/task-api" "${cp_api_file}" "${dwork}/mvn-cp-api.log"; then
+      warn "   ✗ dependency:build-classpath（task-api）失败 ⇒ BLOCKED"
+      tail -20 "${dwork}/mvn-cp-api.log" | sed 's/^/   | /'
       return 2
     fi
-    if ! java -cp "${dwork}/java:${cp_api}" com.rag.task.task.probe.ApiProbe \
-          "${api_c}" >"${actual_api}" 2>"${dwork}/java-api.err"; then
-      warn "   ✗ 探针执行失败（ApiProbe）"
-      tail -25 "${dwork}/java-api.err" | sed 's/^/   | /'
-      warn "     ⇒ BLOCKED"
-      return 2
+    local cp_rpc="${classes_rpc}:$(cat "${cp_rpc_file}")"
+    local cp_api="${classes_api}:$(cat "${cp_api_file}")"
+
+    if [ -n "${REPLAY_DIR}" ]; then
+      [ -s "${REPLAY_DIR}/task-rpc.dump" ] || { warn "   ✗ 离线复验：缺 task-rpc.dump ⇒ BLOCKED"; return 2; }
+      [ -s "${REPLAY_DIR}/task-api.dump" ] || { warn "   ✗ 离线复验：缺 task-api.dump ⇒ BLOCKED"; return 2; }
+      cp "${REPLAY_DIR}/task-rpc.dump" "${actual_rpc}"
+      cp "${REPLAY_DIR}/task-api.dump" "${actual_api}"
+      warn "   ⚠️ 离线复验模式（ERRSMSG_REPLAY_DUMP_DIR）⇒ **没有跑探针** ⇒ 仅供变异测试/离线复算"
+    else
+      if ! javac -nowarn -encoding UTF-8 -cp "${cp_rpc}" -d "${dwork}/java" \
+           "${PROBE_DIR}/task/java/RpcProbe.java" >"${dwork}/javac-rpc.log" 2>&1; then
+        warn "   ✗ javac（RpcProbe）失败"
+        tail -25 "${dwork}/javac-rpc.log" | sed 's/^/   | /'
+        warn "     ⇒ BLOCKED"
+        return 2
+      fi
+      if ! javac -nowarn -encoding UTF-8 -cp "${cp_api}" -d "${dwork}/java" \
+           "${PROBE_DIR}/task/java/ApiProbe.java" >"${dwork}/javac-api.log" 2>&1; then
+        warn "   ✗ javac（ApiProbe）失败"
+        tail -25 "${dwork}/javac-api.log" | sed 's/^/   | /'
+        warn "     ⇒ BLOCKED"
+        return 2
+      fi
+      if ! java -cp "${dwork}/java:${cp_rpc}" com.rag.task.task.probe.RpcProbe \
+            "${uid_c}" "${bare_c}" >"${actual_rpc}" 2>"${dwork}/java-rpc.err"; then
+        warn "   ✗ 探针执行失败（RpcProbe）"
+        tail -25 "${dwork}/java-rpc.err" | sed 's/^/   | /'
+        warn "     ⇒ BLOCKED"
+        return 2
+      fi
+      if ! java -cp "${dwork}/java:${cp_api}" com.rag.task.task.probe.ApiProbe \
+            "${api_c}" >"${actual_api}" 2>"${dwork}/java-api.err"; then
+        warn "   ✗ 探针执行失败（ApiProbe）"
+        tail -25 "${dwork}/java-api.err" | sed 's/^/   | /'
+        warn "     ⇒ BLOCKED"
+        return 2
+      fi
     fi
   fi
   validate_dump "${actual_rpc}" "Java 侧（task-rpc）" || { warn "     ⇒ BLOCKED"; return 2; }
   validate_dump "${actual_api}" "Java 侧（task-api）" || { warn "     ⇒ BLOCKED"; return 2; }
+
+  # ── dump 阶段到此为止 ──────────────────────────────────────────────────────
+  if [ "${PHASE}" = "dump" ]; then
+    mkdir -p "${DUMP_OUT_DIR}"
+    cp "${actual_rpc}" "${DUMP_OUT_DIR}/task-rpc.dump"
+    cp "${actual_api}" "${DUMP_OUT_DIR}/task-api.dump"
+    say "   ✔ Java 侧 dump 已产出（比对在下一内层阶段执行）"
+    return 0
+  fi
+
   if [ -n "${DUMP_OUT_DIR}" ]; then
     cp "${actual_rpc}" "${DUMP_OUT_DIR}/task-rpc.dump"
     cp "${actual_api}" "${DUMP_OUT_DIR}/task-api.dump"
@@ -794,15 +869,24 @@ say "[ci] ============================================================"
 say "[ci] 阶段：错误码契约守门（R5 · 基准 = **Go 真源派生**）"
 say "[ci] 基准目录: ${CONTRACTS_DIR}"
 say "[ci] 目标域  : ${TARGETS[*]}"
+say "[ci] 本次阶段: ${PHASE}"
 say "[ci] ============================================================"
+
+# ── dump 阶段专用计数（**不进入** PASS/FAIL 账：比对在下一阶段才发生）──────
+DUMP_OK_N=0
+DUMP_FAILED_DOMAINS=""
 
 for d in "${TARGETS[@]}"; do
   say ""
   say "===== 域: ${d} ====="
   if ! spec_for "${d}"; then
     warn "   ✗ 未知域：${d}（已知域：${ALL_DOMAINS}）"
-    BLOCKED_N=$((BLOCKED_N + 1))
-    BLOCKED_DOMAINS="${BLOCKED_DOMAINS} ${d}"
+    if [ "${PHASE}" = "dump" ]; then
+      DUMP_FAILED_DOMAINS="${DUMP_FAILED_DOMAINS} ${d}"
+    else
+      BLOCKED_N=$((BLOCKED_N + 1))
+      BLOCKED_DOMAINS="${BLOCKED_DOMAINS} ${d}"
+    fi
     continue
   fi
   if [ "${IS_TASK}" = "1" ]; then
@@ -811,8 +895,34 @@ for d in "${TARGETS[@]}"; do
     out="$(run_single_probe_domain "${d}" 2>&1)"; rc=$?
   fi
   printf '%s\n' "${out}"
+  if [ "${PHASE}" = "dump" ]; then
+    # ⚠️ dump 阶段**不记账**：此时还没比对 ⇒ 无从判 PASS/FAIL。
+    #   「没比对就当通过」正是任务书禁止的（缺少检查不许伪装成 PASS）。
+    if [ "${rc}" -eq 0 ]; then
+      DUMP_OK_N=$((DUMP_OK_N + 1))
+    else
+      DUMP_FAILED_DOMAINS="${DUMP_FAILED_DOMAINS} ${d}"
+    fi
+    continue
+  fi
   record "${d}" "${rc}" "${out}"
 done
+
+if [ "${PHASE}" = "dump" ]; then
+  say ""
+  say "[ci] ============================================================"
+  say "[ci] R5 · dump 阶段汇总（**尚未比对** ⇒ 本阶段不产生 PASS/FAIL 结论）"
+  say "[ci]   已产出 dump 的域 : ${DUMP_OK_N}"
+  say "[ci]   未产出 dump 的域 : ${DUMP_FAILED_DOMAINS:-（无）}"
+  say "[ci]   dump 目录        : ${DUMP_OUT_DIR}"
+  say "[ci] ============================================================"
+  if [ -n "${DUMP_FAILED_DOMAINS}" ]; then
+    say "[ci] ❌ 有域没产出 Java 侧 dump ⇒ 下一阶段无法比对 ⇒ BLOCKED（不得计入 PASS）。"
+    exit 2
+  fi
+  say "[ci] ✅ 全部域的 Java 侧 dump 已产出 ⇒ 交给下一内层阶段比对。"
+  exit 0
+fi
 
 say ""
 say "[ci] ============================================================"
