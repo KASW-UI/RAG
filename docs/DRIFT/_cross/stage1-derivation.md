@@ -165,17 +165,17 @@
 
 | 归属 | 条目数 | 含义 |
 |---|---|---|
-| **A** | 9 | 阶段 1 准入阻断项（不处理就无法通过简历项目验收） |
+| **A** | 8 | 阶段 1 准入阻断项（不处理就无法通过简历项目验收） |
 | **B** | 28 | 阶段 1 竞争力补强项（技术亮点与验证闭环） |
 | **C** | 70 | 阶段 2 最终工程建设项（业务语义恢复 / 生产工程机制） |
-| **D** | 221 | 经分析确认可不实现或不适用（须有明确理由） |
+| **D** | 222 | 经分析确认可不实现或不适用（须有明确理由） |
 | **—** | 520 | **未派生 —— 待人工定级**（不是「不重要」，是「还没定级」） |
 
 | 优先级 | 条目数 |
 |---|---|
-| P0 | 11 |
+| P0 | 10 |
 | P1 | 404 |
-| P2 | 96 |
+| P2 | 97 |
 | P3 | 773 |
 
 ---
@@ -563,7 +563,6 @@
 
 | ID | 目录 | 域 | **波次** | 状态 | 证据 | 优先级 | 归属 | 阻断 | 最终目标 | 排期 | 缺口 | 源位置 | 依据（Go ↔ RAG） |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `G-3` | DRIF | article | **G3** | ✅ 已一致 | B 静态 | P0 | A | 是 | 间接 · 阶段 1 闭合后才有阶段 2 | 未排期 | 已定性 · 未排期 | `DRIFT/article/api.md:2692` | — |
 | `DRIFT-SF-001` | DRIF | common | **G4** | ✅ 已一致 | A 活体 · 绿(0) | P0 | A | 是 | 间接 · 阶段 1 闭合后才有阶段 2 | 未排期 | 已定性 · 未排期 | `DRIFT/common/alignment-2026-10-23.md:420;DRIFT/common/alignment-2026-10-23.md:870;DRIFT/common/alignment-2026-10-23.md:991` | — |
 | `SF-001` | DRIF | common | **G4** | ✅ 已一致 | B 静态 | P0 | A | 是 | 间接 · 阶段 1 闭合后才有阶段 2 | 未排期 | 已定性 · 未排期 | `DRIFT/common/alignment-2026-10-23.md:866` | — |
 | `G4-A4-05` | DRIF | global | **G4** | 🔴 未闭合 | C 无指针 | P0 | A | 是 | 间接 · 阶段 1 闭合后才有阶段 2 | GAP-07 | 无可复算指针 · 结论不可复算 | `DRIFT/global/vs-common.md:3755;DRIFT/global/vs-common.md:3812` | Go `go-zero@v1.10.2/zrpc/client.go:70-71`（`if c.Timeout > 0 { opts = append(opts, WithTimeout(time.Duration(c.Timeout)*time.Millisecond)) }` ⇒ **每次调用都… |
@@ -694,6 +693,7 @@
 | `DRIFT-MSGAPI-009` | DRIF | message | **G2** | 🔴 未闭合 | B 静态 | P1 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/message/api.md:858` | Go `service/message/api/internal/types/types.go:22`（`Affected int64 \`json:"affected"\`` ⇒ **无 `,string`** ⇒ `encoding/json` 输出 JSON **数字** `{"affecte… |
 | `SD-04` | DRIF | message | **G2** | ✅ 已一致 | B 静态 | P1 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/message/proto.md:34` | Go `proto/message.proto:3`（`package message;` ⇒ proto package 本来就是 `message`）＋ `proto/message.proto:5`（`option go_package = "./pb";` ⇒ Go 生成物的语言包名 `pb… |
 | `DRIFT-ADMINAPI-012` | DRIF | users | **G1** | 🟡 部分闭合 | B 静态 | P1 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/users/admin/api.md:2236` | Go `service/user/admin/api/internal/middleware/checkblacklistmiddleware.go:35` = `exists, err := m.Redis.ExistsCtx(r.Context(), blacklistKey)` ＋ `:36`… |
+| `G-3` | DRIF | article | **G3** | ✅ 已一致 | B 静态 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已定性 · 未排期 | `DRIFT/article/api.md:2692` | — |
 | `G4-11` | DRIF | article | **G3** | 🟡 部分闭合 | B 静态 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/article/vs-common.md:296` | Go `service/article/api/internal/svc/service_context.go:24`（`articleservice.NewArticleService(zrpc.MustNewClient(c.ArticleRpcConf))` ⇒ Go 侧 api 的出向 gR… |
 | `G4-3` | DRIF | article | **G3** | 🟡 部分闭合 | B 静态 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/article/vs-common.md:276` | Go `service/user/admin/api/internal/logic/admin/getuserlistlogic.go:44-48`（`switch st.Code()` 44 · `case codes.Internal:` 45 → `errmsg.ErrorServerComm… |
 | `SD-2026-10-24-CAND-09` | Inte | comment | **G3** | ⏳ 未签字 | B 静态 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已定性 · 未排期 | `Intentional_Deviations/comment/rpc.md:162` | Go `service/comment/rpc/internal/model/db.go:15`（`db.AutoMigrate(&Subject{}, &CommentContent{}, &CommentIndex{}, &CommentLike{}, &CommentDomainFactOut… |

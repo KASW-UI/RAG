@@ -5429,7 +5429,7 @@ git diff --stat -- service/ # ⇒ 0 行
 | **RAG 侧现状** | ① **共享层** `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` 的 `onHalfClose` **只绑 `DeadlineState`**、**从不绑** `GoStyleRequestDeadline` ⇒ `GoStyleRequestDeadline.applyTo`（`service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java:110`）在 gRPC 路径是 **no-op** ② **域内裸 stub**：`service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java:89-90`（**2026-10-31 订正**：原写的 `:50` **落点一直是错的**（空 javadoc 行）⇒ ⇒ 已改指真实的出向调用点；`:88` 是方法签名行，`6d04dc19` 删掉内联副本后调用体上移到 `:89-90`）⇒ **客户端硬上界已于 2026-10-31 由共享层承担**（域侧只配 `rag.protection.outbound-deadline.cap-millis=2000`） |
 | **证据强度** | **L4**（运行时双侧活体）—— ✅ **双侧活体探针已坐实**（`tools/semantic-probe/deadline-downstream/`，2026-10-26 第四十六轮）：Go `failed_fast=true` / `code=4` / `outgoing_carrier=present_expired` ⇔ RAG `failed_fast=false` / `code=0` / `outgoing_carrier=absent`；2026-10-29 复跑 `tools/difftest/check-deadline-downstream.py` ⇒ **EXIT=0**（**漂移形态门** ⇒ PASS ⇒ **漂移仍在**）⇒ ⚠️ **本轮未重新实测**（沿用上述活体证据） |
 | **建议修法** | **共享层**在 `onHalfClose` 里把有效期限也绑进 `GoStyleRequestDeadline`（⇒ `applyTo` 立刻生效）**＋ 各域裸 stub 调用点改用 `applyTo`** ⇒ **不需要架构级改造、不需要 interrupt** ⇒ 与 Go 的 ctx 传播**同构**<br>⚠️ **min 语义（2026-10-30 由 G4 独立复核补的约束，本轮已逐条复验）**：Go 的出向 deadline = **min(入站请求剩余, 客户端默认超时 2000ms / 该域 yaml 的 `Timeout`)** ⇒ ⇒ RAG 侧若只注入「入站剩余」⇒ **比 Go 宽松最多 2000ms**（少了一次与客户端默认超时的 min）⇒ ⇒ 实现要**取更早者**，且保留「**无入站 deadline ⇒ 不注入**」这条路径（对齐 Go `context.WithTimeout` 在无父 deadline 时的行为） |
-| **影响面** | **共享层 `service/common`** ＋ 各域裸 stub 调用点（**follow 域那一半 = `follow-rpc/client/UserRpcClient.java:50`**）⇒ ⚠️ 修法**同时涉及共享层与域内代码** ⇒ `AGENTS.md` §3c「**必须同一次提交**（否则留下半截）」⇒ ⇒ **G1 不能单独改 follow-rpc 的裸 stub** ⇒ ⇒ **整条转 G4** |
+| **影响面** | **共享层 `service/common`** ＋ 各域裸 stub 调用点（**follow 域那一半 = `follow-rpc/client/UserRpcClient.java:89-90`**（**【2026-10-31 订正 · 合并收口执行者】** 原写 `:50` = 空 javadoc 行 ⇒ 落点一直是错的；`6d04dc19` 删掉内联副本后真实出向调用点为 `:89-90`，`:88` 是方法签名行））⇒ ⚠️ 修法**同时涉及共享层与域内代码** ⇒ `AGENTS.md` §3c「**必须同一次提交**（否则留下半截）」⇒ ⇒ **G1 不能单独改 follow-rpc 的裸 stub** ⇒ ⇒ **整条转 G4** |
 | **是否阻塞本波** | ✅ **否** —— ⚠️ **【2026-10-31 订正】** 原判「**是**」（global 2026-10-29 复核曾把 `E65` 升级为 A 类，并写明「『**共享层 A 类硬阻塞 = 0 ⇒ 阶段一通过**』这句话**作废**」）**已过期** —— E65 本体已由 global 判为**已闭合**（2026-10-30 双侧活体逐键相等）⇒ ⇒ 本条**不再决定阶段一 X-6 判据**；残余的**客户端硬上界 2000ms** 那一轴**独立**归 `P2-T04`（域侧 yml）⇒ ⇒ **不与 E65 并回** |
 
 > ⚠️ **2026-10-30 订正（由 G4 独立复核触发）**：本反馈单初版的「Go 侧」第 ① 条写的是「`follow/rpc/internal/logic/helper.go:82` = `depCtx` = `otel.Tracer().Start(ctx,…)` 的返回值」⇒ ⇒ **该描述的机制是错的**（`文件:行号` 对、**机制不对**）—— G4 派出的核验 agent 实测该行原文 = `resp, err := svcCtx.UserRpc.GetUser(ctx, &userservice.GetUserReq{Uid: userID})` ⇒ **直接透传 handler 的 ctx、无 `depCtx`、无 otel**；而 `depCtx` 全仓**只在 favorite 域**（`service/favorite/rpc/internal/logic/helper.go:93` / `:98` / `:127` / `:133`）⇒ ⇒ **本条已按实测订正**（机制改为「直接透传 ctx」，并补上 favorite 域的 `depCtx` 出处 + grpc-go wire 层两处锚点）。
@@ -6007,7 +6007,7 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
   - ⚠️ **那一格是共享面** ⇒ ⇒ **本 lane 不能改** ⇒ ⇒ **转收口执行者订正**（不要让它继续当「X-6 仍红」的依据）。
 - ⚠️ 另：④ `follow-rpc/.../UserRpcClient.java:50` 的**落点也一直是错的**（`:50` 是空 javadoc 行）⇒ ⇒ 本 lane 已在
   `docs/DRIFT/follow/vs-common.md` / `docs/DRIFT/users/vs-common.md` 内就地改指真实调用点；
-  共享面那一处**同样转收口执行者**。
+  共享面那一处**同样转收口执行者**（⚠️ 共享面那格已由共享层 lane 订正为 `:88` ⇒ 而 `:88` **又因 `6d04dc19` 删副本而悬空**（`:88` 现是方法签名行）⇒ ⇒ 真实落点 `:89-90` ⇒ ⇒ **该项仍未消化，已再转**）。
 ---
 
 ## 指针漂移订正 —— 删副本引起的行号位移（2026-10-31 · G1 lane）
@@ -6038,3 +6038,33 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
 - **⚠️ 逐域限定（承 G4 之问）**：「**上界一直都在，变的只是由谁承担**」**只对 user-api / admin-api 成立**
   ⇒ ⇒ **follow-rpc 那一侧不成立**（旧副本是**纯覆盖** ⇒ 删副本 = 修漂移，不是等价）
   ⇒ ⇒ **引用时不要写成跨域通则**。
+- **🆕 「域侧新增出向方向必须同一次提交配上 `cap-millis`」—— 本域合规自证**（该硬要求由共享层 lane 的逐组件实测得出，本 lane 独立核过）：
+  - **本域现状（实测）**：user-api **1 个**出向 stub（`@GrpcClient("user-rpc")`）· admin-api **1 个**（`@GrpcClient("admin-rpc")`）
+    ⇒ ⇒ **两个域的 yml 都已配 `cap-millis` = 2000（env 可覆盖）** ⇒ ⇒ **本域「真零上界」= 0** ⇒ ⇒ **当前合规**。
+  - **user-rpc 与 admin-rpc 是「零出向组件」**（实测 `@GrpcClient` 注入点 = 0）⇒ ⇒ **「零上界」对它们不适用，不是缺口**
+    ⇒ ⇒ 该事实已由共享层 lane 显式登记（否则下一轮会被读成缺口）。
+- **🆕 判据② 的语义修复：不再断言「域内常量」**（承共享层 lane 反馈单 · 2026-10-31 · G1 lane 域侧自修）：
+  - **问题**：域侧副本删除后，`CLIENT_TIMEOUT_MILLIS` 在**生产代码已无消费者**（只剩守门判据② 引用它）
+    ⇒ ⇒ 判据② 里那条「域内常量 == yml 绑出的值」实际断言的是「**两个数字相等**」⇒ ⇒ **恒绿的形式断言**
+    ⇒ ⇒ 即「**绿测试保护了一个不参与行为的数字**」。
+  - **修法（选「保留常量 + 改判据②」，不删常量）**：判据② 去掉对域内常量的比对 ⇒ ⇒ 只保留两条**真断言**
+    （**yml 绑出的 cap == Go 默认 2000ms** ＋ **出向 deadline 开关开着**）
+    ⇒ ⇒ **常量保留**的理由：它是 **public ＋ javadoc 化**的「Go 默认值文档锚点」⇒ ⇒ 它**不参与行为**
+    ⇒ ⇒ **不该有守门断言它**；⇒ ⇒ 且**它漂移无害**（不影响行为）⇒ ⇒ 不需要守卫。
+  - **为什么不走「删常量」那条修法**：删常量会**整段行位移**（本域 2 个 client 文件各 −1 行）
+    ⇒ ⇒ 会打断**共享面**的指针 ⇒ ⇒ **跨 lane 乒乓** ⇒ ⇒ 本轮选**零位移**解法。
+  - **变异实测（follow-api，两个方向 · 直接证据）**：
+    · **M-1（yml 的 cap 默认值 2000 → 1999）** ⇒ ⇒ **2 红** = 判据②（expected 2000 but was 1999）
+      ＋ 判据①（占位符默认值必须是 2000）⇒ ⇒ **判据② 仍守行为**（配置漂移抓得住）
+    · **M-2（域内常量 2000L → 1999L）** ⇒ ⇒ **仍绿**（退出码 0）⇒ ⇒ **证明该常量已脱离断言**
+    ⇒ ⇒ 这一对变异 = 「判据② 守的是**行为**、不是那个数字」的完整证据。
+  - **本域落点**：user-api 与 admin-api 两个 `*DeadlineCapTest` 的判据②（DisplayName ＋ 方法名 ＋ 断言）同步改
+    ＋ 两个 client 的常量 javadoc 同步改成「文档锚点」口径 ⇒ ⇒ **4 个文件行数全中性**
+    （user-api `UserRpcClient.java` 210 · admin-api `AdminRpcClient.java` 238 · 两个测试 415 / 415）⇒ ⇒ **既有指针全部守住**。
+- **🆕 独立交叉验证（不是本域自测口径）**：主干新增的出向 stub 盘点工具
+  （`docs/RoundPlan/round-02/count-outbound-stubs.py`）实测本域 4 个有出向的组件
+  ⇒ ⇒ **上界来源全部 = 共享 `${<域>_OUTBOUND_DEADLINE_CAP_MILLIS:2000}`**
+  ⇒ ⇒ **调用点数与本域台账逐条相符**（follow-api 1 · admin-api 13 · user-api 9；follow-rpc 出向调用点为 0）
+  ⇒ ⇒ **零上界类数 = 1 = `article-api`（G3 面）⇒ ⇒ 本域 4 个全部 ✅**
+  ⇒ ⇒ ⇒ 且**本域每个组件只有 1 个出向方向** ⇒ ⇒ **组件级 cap 表达得了**
+  ⇒ ⇒ ⇒ ⇒ 「共享层缺 per-direction cap」这条**不落本域**。

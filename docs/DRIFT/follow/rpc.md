@@ -758,7 +758,7 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时
 
 ### 五、守门网 ＋ 变异实测（AGENTS.md §3.3.3）
 
-- **守门**：`service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/client/UserRpcClientDeadlineCapTest.java`（**3 条**）
+- **守门**：`service/follow/follow-rpc/src/test/java/com/rag/follow/follow/rpc/client/UserRpcClientDeadlineCapTest.java`（**5 条** —— 实测 `@DisplayName` 计数；原写「3 条」是扩到 5 条前的残留）
   - `clientTimeoutConstantMatchesGoDefault` —— 常量 == 2000ms（对齐 G1）
   - `capProducesRealTwoSecondDeadline` —— **真**构造 `UserServiceBlockingStub` ＋ **真**读回 `CallOptions.getDeadline()`（非文本断言）
   - `downstreamHangs_clientTimesOutOnItsOwnDeadline` —— **真发一次调用**：起 **in-process 真实 gRPC server**，其 `GetUser` **故意不响应** ⇒ 客户端**真的阻塞** ⇒ 只能靠**自己套的 2s deadline** 收口 ⇒ 断言拿到 **`DEADLINE_EXCEEDED`**（Go 侧 ctx 到期同样是 `DeadlineExceeded`）⇒ 且实测耗时 ≈2s（防「秒失败」被误判成「超时生效」）
