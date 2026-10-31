@@ -32,7 +32,12 @@
 #   pending   —— **未经批准、需用户拍板** ⇒ **不判 FAIL**，但逐条显式报出，
 #               且**该域不得计入 PASS**（门以退出码 3 收口）
 #
-# 【本域差异台账】 approved=29 · closed=0 · technical=3 · pending=5（共 37 条）
+# 【本域差异台账】 approved=33 · closed=1 · technical=3 · pending=0（共 37 条）
+#
+#   ⚠️ **2026-10-31 用户签字**：5 条 pending 全部销项 —— 4 条 `BIZCODE|foreign_*`（`foreign_internal` /
+#   `foreign_invalid_argument` / `foreign_notfound` / `foreign_unauthenticated`）判 **approved**
+#   （依据 `SD-2026-10-31-01` · `docs/Intentional_Deviations/like/rpc.md:127`）
+#   ＋ 1 条 `foreign_plain` 判 **closed**（依据 `D-7` · **比较点错配** ⇒ 两侧对外一致 ⇒ 不是行为漂移）。
 #
 #   ⚠️ like 域的 `WIRECODE` 段是本域**独有的**「wire 载体形态」层（Go 把业务码写进 grpc-status，Java 只能放进自定义 trailer）⇒ 这 29 条**全部**是已签字差异。
 #
@@ -102,11 +107,11 @@ GOTABLE|5012|Redis更新失败
 GOFALLBACK|FAIL
 
 # >>> deviations >>>
-DEVIATION|BIZCODE|foreign_internal|13|1015|pending|D-7|docs/DRIFT/like/vs-common.md:72|下游非本域错误：Go like-api 把原始 gRPC 码直接当业务码（int(st.Code())）；RAG 侧 mapGrpcCodeToBizCode 收敛到域内码 ⇒ 两侧确实不一致且无人拍板 ⇒ 需用户拍板。
-DEVIATION|BIZCODE|foreign_invalid_argument|3|2001|pending|D-7|docs/DRIFT/like/vs-common.md:72|下游非本域错误：Go like-api 把原始 gRPC 码直接当业务码（int(st.Code())）；RAG 侧 mapGrpcCodeToBizCode 收敛到域内码 ⇒ 两侧确实不一致且无人拍板 ⇒ 需用户拍板。
-DEVIATION|BIZCODE|foreign_notfound|5|1015|pending|D-7|docs/DRIFT/like/vs-common.md:72|下游非本域错误：Go like-api 把原始 gRPC 码直接当业务码（int(st.Code())）；RAG 侧 mapGrpcCodeToBizCode 收敛到域内码 ⇒ 两侧确实不一致且无人拍板 ⇒ 需用户拍板。
-DEVIATION|BIZCODE|foreign_plain|5001|1015|pending|D-7|docs/DRIFT/like/vs-common.md:72|下游非本域错误：Go like-api 把原始 gRPC 码直接当业务码（int(st.Code())）；RAG 侧 mapGrpcCodeToBizCode 收敛到域内码 ⇒ 两侧确实不一致且无人拍板 ⇒ 需用户拍板。
-DEVIATION|BIZCODE|foreign_unauthenticated|16|1009|pending|D-7|docs/DRIFT/like/vs-common.md:72|下游非本域错误：Go like-api 把原始 gRPC 码直接当业务码（int(st.Code())）；RAG 侧 mapGrpcCodeToBizCode 收敛到域内码 ⇒ 两侧确实不一致且无人拍板 ⇒ 需用户拍板。
+DEVIATION|BIZCODE|foreign_internal|13|1015|approved|SD-2026-10-31-01|docs/Intentional_Deviations/like/rpc.md:127|下游非本域错误：Go like-api 把原始 gRPC 码直接当业务码（int(st.Code())）；RAG 侧 mapGrpcCodeToBizCode 收敛到域内码 ⇒ 两侧确实不一致 ⇒ **2026-10-31 用户签字接受**（SD-2026-10-31-01）⇒ 代价：客户端 code 从 13 变 1015（文案两侧相同）。
+DEVIATION|BIZCODE|foreign_invalid_argument|3|2001|approved|SD-2026-10-31-01|docs/Intentional_Deviations/like/rpc.md:127|下游非本域错误：Go like-api 把原始 gRPC 码直接当业务码（int(st.Code())）；RAG 侧 mapGrpcCodeToBizCode 收敛到域内码 ⇒ 两侧确实不一致 ⇒ **2026-10-31 用户签字接受**（SD-2026-10-31-01）⇒ 代价：客户端 code 从 3 变 2001（文案两侧相同）。
+DEVIATION|BIZCODE|foreign_notfound|5|1015|approved|SD-2026-10-31-01|docs/Intentional_Deviations/like/rpc.md:127|下游非本域错误：Go like-api 把原始 gRPC 码直接当业务码（int(st.Code())）；RAG 侧 mapGrpcCodeToBizCode 收敛到域内码 ⇒ 两侧确实不一致 ⇒ **2026-10-31 用户签字接受**（SD-2026-10-31-01）⇒ 代价：客户端 code 从 5 变 1015（文案两侧相同）。
+DEVIATION|BIZCODE|foreign_plain|5001|1015|closed|D-7|docs/DRIFT/like/vs-common.md:72|**比较点错配 ⇒ 已销号**：探针比的是 Java 库方法 LikeGrpcError#bizCodeFromError（非 status ⇒ 末尾兜底 1015），Go 侧比的是消费点；而 Java 实际消费点 LikeApiSupport#rpcError **先判 status == null** ⇒ 对外返回 5001（= Go 的 NewErrCode(ErrorServerCommon)）⇒ **两侧对外一致** ⇒ 全仓 bizCodeFromError 的生产调用点只有该处 ⇒ 本条不构成行为漂移 ⇒ 2026-10-31 用户裁定降级为 closed。
+DEVIATION|BIZCODE|foreign_unauthenticated|16|1009|approved|SD-2026-10-31-01|docs/Intentional_Deviations/like/rpc.md:127|下游非本域错误：Go like-api 把原始 gRPC 码直接当业务码（int(st.Code())）；RAG 侧 mapGrpcCodeToBizCode 收敛到域内码 ⇒ 两侧确实不一致 ⇒ **2026-10-31 用户签字接受**（SD-2026-10-31-01）⇒ 代价：客户端 code 从 16 变 1009（文案两侧相同）。
 DEVIATION|OBS|obs_custom_grpcstatus|13|1015|technical|-|Go service/like/common/errmsg/errmsg.go:33-35 · tools/errmsg-probe/like/README.md §3|Go 的 status.FromError 认「顶层实现了 GRPCStatus()」的任意 error ⇒ 文案反查命中；RAG 的 extractStatus 只认 StatusException/StatusRuntimeException 两个具体类 ⇒ 认不出 ⇒ 兜底 1015。
 DEVIATION|OBS|obs_nil_error|5001|200|technical|-|Go service/like/api/internal/logic/like/likeactionlogic.go:62-69 · tools/errmsg-probe/like/README.md §3|Go like-api 的还原步骤在 if err != nil 守卫之内 ⇒ nil 走不到 status.FromError ⇒ 落到兜底码 5001；RAG 的 bizCodeFromError(null) 显式返回 200 ⇒ 该分支在 Go 侧不可达。
 DEVIATION|OBS|obs_ok_status|5001|1015|technical|-|Go service/like/common/errmsg/errmsg.go:33-35 · tools/errmsg-probe/like/README.md §3|Go 的 status.Error(codes.OK, msg) 返回 nil（grpc-go）⇒ 与 nil 同形 ⇒ 兜底 5001；RAG 侧 Status.fromCode(OK).asException() 得到非 nil 的 code=OK 异常 ⇒ 走反查/兜底 ⇒ 1015。

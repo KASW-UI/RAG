@@ -124,6 +124,53 @@ RAG 侧单 JVM 里 gRPC 已起来，**为一次注册失败杀掉整个进程**�
 
 ---
 
+## SD-2026-10-31-01：like-api 把「下游非本域 gRPC 错误」收敛到域内业务码（不再直传原始 gRPC 码） ｜ **状态（核对日期 2026-10-31）：✅ 已签字**
+
+> **签字人**：Jason（用户）· **签字日期**：2026-10-31
+> **签字方式**：🏷 候选 → 用户逐条核对后确认签署（裁定语：「comment 3 条 + like 4 条签、foreign_plain 降级为 closed」）
+> **原台账编号**：[`docs/DRIFT/like/vs-common.md`](../../DRIFT/like/vs-common.md) 的 **D-7**（A4 轴）
+> **现定性**：**有意偏离**（对外契约选择）—— **不是**实现缺陷，**不得「顺手改回 Go 的旧写法」**
+> **机器基准**：`ci/contracts/errmsg/like.txt` 的 `DEVIATION|BIZCODE|foreign_*` 四条 ⇒ 状态 `approved` + 依据 id `SD-2026-10-31-01`
+> **证据强度**：**L3（Go 源码逐条 + Java 消费点逐条）** —— 两侧**消费点**都读到行、不是拿 RAG 现状当基准
+
+| 项 | 值 |
+|---|---|
+| 组件 | `service/like/like-api`（消费点 `LikeApiSupport#rpcError`）+ `service/like/like-common`（`LikeGrpcError#bizCodeFromError` / `#mapGrpcCodeToBizCode`） |
+| 覆盖的差异 | **4 条**（`BIZCODE|foreign_internal` / `foreign_invalid_argument` / `foreign_notfound` / `foreign_unauthenticated`） |
+| Go 出处 | `service/like/api/internal/logic/like/` **6 处同形**（`getlikecountlogic.go:41-46` · `getlikestatelogic.go:58-63` · `gettargetlikerlistlogic.go:42-47` · `getuserlikelistlogic.go:58-63` · `getusertotallikelogic.go:55-60` · `likeactionlogic.go:63-68`）⇒ `status.FromError(err)` → `errmsg.NewErrCodeMsg(int(st.Code()), st.Message())` |
+| RAG 出处 | `LikeApiSupport.java:180-186`（`status != null` ⇒ 走 `bizCodeFromError`）+ `LikeGrpcError.java:233-247`（`mapGrpcCodeToBizCode`） |
+
+### 差异内容（**只差业务码；文案两侧无损**）
+
+| case | 下游实际错误 | Go 业务码 | Java 业务码 | 文案（两侧**相同**） |
+|---|---|---|---|---|
+| `foreign_internal` | gRPC `INTERNAL` | **13** | **1015** | 下游原始 `description`（两侧都不查码表） |
+| `foreign_invalid_argument` | gRPC `INVALID_ARGUMENT` | **3** | **2001** | 同上 |
+| `foreign_notfound` | gRPC `NOT_FOUND` | **5** | **1015** | 同上 |
+| `foreign_unauthenticated` | gRPC `UNAUTHENTICATED` | **16** | **1009** | 同上 |
+
+### 为什么这样选
+
+Go 侧 like-api **没有**域内映射函数（Go 的 **message** api **有** `messagecommon.BizCodeFromError`，like api **没有**）
+⇒ 直接把下游的**原始 gRPC 码**当业务码 ⇒ **13 / 3 / 5 / 16 这四个码在 like 域的 `codeMsg` 表里根本没有登记**
+（like 域只登记 `200 / 500 / 1001~1011 / 1015 / 2001 / 2002 / 3001 / 5001~5012`）⇒ 对客户端而言是「**域外码**」。
+RAG 侧收敛到**本域已登记**的代表码 ⇒ 客户端拿到的 `code` 一定是 like 域码表里的码、且带得体文案。
+
+### ⚠️ 代价（必须随本偏离一起读，不能只读「更自洽」那半句）
+
+- **客户端可见**：`code` 字段从 `13/3/5/16` 变成 `1015/2001/1015/1009` ⇒ **任何按 Go 侧码值写死判断的客户端会走错分支**。
+  ⇒ 这是本条**唯一的实质代价**，签字即表示**接受这个客户端可见的行为差异**。
+- **文案不受影响**：Go `st.Message()` / Java `status.getDescription()` ⇒ **两侧逐字相同** ⇒ 排障信息不丢。
+- **对「本域自有错误」零影响**：`own_*` 五条（Go 侧业务码在 `grpc-status`、Java 侧在 trailer `rag-like-biz-code`）
+  ⇒ 两侧**都能无损还原出同一业务码** ⇒ 已由探针逐条钉住（`ci/contracts/errmsg/like.txt` 的 `BIZCODE|own_*` 未进豁免名单）。
+
+### 为什么不选「照 Go 改成直传原始 gRPC 码」
+
+那会让 Java 侧向客户端**泄漏 gRPC 传输层码**（13/3/5/16），且这些码**不在 like 域码表内** ⇒ 客户端与排障工具都得额外维护一张
+「域外码 → 含义」的映射表 ⇒ 成本转移给客户端。保留现状 = 域内码表自洽。
+
+---
+
 ## 与本档其它条目的关系
 
 | 编号 | 内容 | 与本文件 |
@@ -131,5 +178,6 @@ RAG 侧单 JVM 里 gRPC 已起来，**为一次注册失败杀掉整个进程**�
 | SD-2026-10-23-05@like | `like.proto` 的 proto `package` 由 `pb` 归一为 `like` | 独立（见 [`proto.md`](proto.md)） |
 | SD-2026-10-23-06@like | gRPC 业务码载体迁移 | 本文件 |
 | SD-2026-10-23-07@like | Nacos 注册失败不退出 | 本文件 |
+| SD-2026-10-31-01 | 下游非本域 gRPC 错误 ⇒ 收敛到域内业务码 | 本文件 |
 
 ⚠️ `like` 域**没有** SD-2026-10-23-01/02/03（那三条属 `message` / `comment` / `like` 之外的批次，见 [`../_INDEX.md`](../_INDEX.md)）。

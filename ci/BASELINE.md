@@ -302,14 +302,18 @@ users/admin  ──▶ users/user
   - 差异**四态**（这是「不许自行豁免」的落点）：
     | 状态 | 含义 | 门禁行为 | 本轮实测条数 |
     |---|---|---|---|
-    | `approved` | 回指 `docs/Intentional_Deviations/` 里**已签字**条目 | 放行；**依据 id 查不到 ⇒ FAIL** | **31** |
-    | `closed` | 回指 `docs/DRIFT/` 里**已销号**条目 | 放行 | **2** |
+    | `approved` | 回指 `docs/Intentional_Deviations/` 里**已签字**条目 | 放行；**依据 id 查不到 ⇒ FAIL** | **38** |
+    | `closed` | 回指 `docs/DRIFT/` 里**已销号**条目 | 放行 | **3** |
     | `technical` | 技术判定（Go 侧形态**不可达** / 运行时**结构性差异**），须带 Go `文件:行号` | 放行 | **13** |
-    | `pending` | **未经批准 ⇒ 需用户拍板** | **不判 FAIL，但该域不得计入 PASS**，且逐条显式报出 | **8** |
+    | `pending` | **未经批准 ⇒ 需用户拍板** | **不判 FAIL，但该域不得计入 PASS**，且逐条显式报出 | **0** |
   - 退出码**四态**：`0`=PASS · `1`=FAIL · `2`=BLOCKED · `3`=PENDING（**存在未签字差异 ⇒ 不计入 PASS**）
   - 归入独立契约流水线 `rag-contract-errmsg`（分钟级 × 9 域 ⇒ 不塞进 11 条日常流水线）。
-- **实测读数（2026-10-31）**：**PASS 7 / FAIL 0 / BLOCKED 0 / PENDING 2**（域：`comment` · `like`）⇒ **EXIT=3**；
+- **实测读数（2026-10-31 · 签字前 · `rag-contract-errmsg` build 7）**：**PASS 7 / FAIL 0 / BLOCKED 0 / PENDING 2**（域：`comment` · `like`）⇒ **EXIT=3**；
   差异台账分列 approved 31 / closed 2 / technical 13 / **pending 8**。
+- **实测读数（2026-10-31 · 用户签字后 · 本机）**：**PASS 9 / FAIL 0 / BLOCKED 0 / PENDING 0** ⇒ **EXIT=0**（🟢 绿）；
+  差异台账分列 approved **38** / closed **3** / technical 13 / **pending 0**。
+  ⚠️ **Task 内重跑尚未执行**：canonical 流水线指向 GitHub `do-my-own-gh` 且 **paused**，而本轮**不 push** ⇒ 重跑待合入 + 解暂停后补跑。
+  ⇒ 上面的 build 7 读数**保留原值**（那是实测记录，不因后续签字而改写）。
 - 🆕 **变异测试** `ci/scripts/check-errmsg-contract-mutations.py`（**11 条**，含「Java 侧真改一个文案」）：
   ⇒ **11/11 红在目标断言**，且**真源字节全部恢复**。
   ⚠️ 变异过程本身抓出**两个变异脚本缺陷**（都不是门禁缺陷）：
@@ -453,12 +457,17 @@ R4/R5/R6 的契约基准虽然都标称「以 Go 为基准」，但**没有任�
 | `BLOCKED` | **验证条件不具备** | ❌ |
 | `NOT_APPLICABLE` | 该维度**对目标域不适用**（hot 域无 DDL；外键两侧皆无） | ❌（但**必须显式打印**） |
 
-#### 4.3.3 当前实测状态（2026-10-31）
+#### 4.3.3 当前实测状态（2026-10-31 · 用户签字后）
 
 ```
-✅ VERIFIED           （23）｜ ❌ FAIL （1）｜ ⚠️ NOT_VERIFIED （19）｜ 🏷 APPROVED_DIFFERENCE （1）｜ ➖ NOT_APPLICABLE （2）
-PASS = 23（只计 VERIFIED）｜ 不计入 PASS 的缺口 = 19
+✅ VERIFIED           （23）｜ ❌ FAIL （0）｜ ⚠️ NOT_VERIFIED （18）｜ 🏷 APPROVED_DIFFERENCE （3）｜ ➖ NOT_APPLICABLE （2）
+PASS = 23（只计 VERIFIED）｜ 不计入 PASS 的缺口 = 18
 ```
+
+> ⚠️ **两条 errmsg 要求在 2026-10-31 由 `FAIL`/`NOT_VERIFIED` 转 `APPROVED_DIFFERENCE`**
+> （`REQ-ERRMSG-LIKE-001` ← `SD-2026-10-31-01` · `REQ-ERRMSG-COMMENT-001` ← `SD-2026-10-31-02`）
+> ⇒ **PASS 仍是 23**（`APPROVED_DIFFERENCE` 不计入）⇒ **缺口 19 → 18**，**不是 → 0**。
+> ⇒ 签字 = **承认并接受**那处差异，不是**证明两侧一致**。
 
 **最大的三个空白面**（都是「Go 定义了、Java 侧当前没有可复算验证」）：
 ① **业务状态机**（`REQ-RUNTIME-ALL-004`）—— **一条 VERIFIED 都没有**；
@@ -472,11 +481,12 @@ PASS = 23（只计 VERIFIED）｜ 不计入 PASS 的缺口 = 19
 | 要求族 | 证据 | 读数 |
 |---|---|---|
 | R4 proto 契约（10 条） | 静态守门第 10 道门（真实 CI 镜像内实测） | PASS 10 / FAIL 0 / BLOCKED 0 |
-| R5 errmsg 契约 | `rag-contract-errmsg` **build 7**（Task 内两阶段） | PASS 7 / FAIL 0 / BLOCKED 0 / **PENDING 2** ⇒ EXIT=3（有意为红） |
+| R5 errmsg 契约 | `rag-contract-errmsg` **build 7**（Task 内两阶段 · **签字前**） | PASS 7 / FAIL 0 / BLOCKED 0 / **PENDING 2** ⇒ EXIT=3（有意为红）<br>🆕 **签字后本机复跑**：PASS **9** / FAIL 0 / BLOCKED 0 / **PENDING 0** ⇒ **EXIT=0**（🟢 绿）· ⚠️ Task 内重跑待合入 + 解暂停后补跑 |
 | R6 schema 契约（8 条） | `rag-contract-schema` **build 5 = succeeded** | PASS 8 / FAIL 0 / BLOCKED 0 / NOT_RUN 1[hot] |
 
 > ⇒ 这三族**已从「本地脚本跑通」升到「在 CI 里真跑通」** ⇒ 但**仍不等于**「目标全部达成」：
-> `pending` 的 8 条差异 ⇒ 相关要求在清单里判 `NOT_VERIFIED`（**保守口径**，与门禁不冲突）。
+> 签字前的 8 条 `pending` 差异已于 2026-10-31 全部销项（4+3 转 `approved` · 1 转 `closed`）⇒
+> 相关要求在清单里判 **`APPROVED_DIFFERENCE`**（**保守口径**：承认差异 ≠ 验证一致 ⇒ 仍不计入 PASS）。
 
 
 ---
