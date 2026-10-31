@@ -1155,8 +1155,8 @@ git merge-base --is-ancestor align/g4-service-common do-my-own-gh && echo "已�
   ⇒ ⇒ **「同一条事在两处登记」必须让两处用同一个编号，否则「已签字优先」这条护栏形同虚设**。
 - **本轮处置**：把 like 台账 `D-7` 的状态位改为 **⚫ 已签字偏离**（沿用本域既有范式 `like/rpc.md:234` 的 `DRIFT-LIKE-002`）
   ⇒ 派生层读成 ⚫ ⇒ **不再计入开放项**（like 域未闭合 **70 → 69**；其余计数全不变）⇒ **只关事实、不擅自翻定级**
-  ⇒ ⚠️ **D-7 的 U5-O 定级层仍为 stage=C · blocking=否 · prio=P1 · final_goal=「影响 · 阶段 2 必须恢复」**
-  ⇒ **定级层与事实层现不一致** ⇒ 属**定级复判**事项 ⇒ 已并入「待 Jason 拍板」清单（与 E66 定级复判同类）。
+  ⇒ ✅ **D-7 的 U5-O 定级层已按 Jason 2026-10-31 裁定改判**（stage=C · blocking=否 · prio=P1 · final_goal=「影响 · 阶段 2 必须恢复」⇒ ⇒ **stage=D · blocking=否 · prio=P3 · final_goal=「不影响 · 经分析确认不实现」**）
+  ⇒ ✅ **定级层与事实层现已一致**（两边都指向「⚫ 已签字偏离 ⇒ 无待实现内容」）⇒ ⇒ **原「定级层与事实层不一致 ⇒ 需定级复判 ⇒ 已并入待拍板清单」那一条已销案**⇒ ⇒ 裁定依据 = Jason 2026-10-31 问卷原话（`ask_535efb231602268f7205d515` · 「翻成不阻断且阶段 2 无需恢复」）⇒ ⇒ 定级层落点 = `docs/DRIFT/_cross/grading/W30.md:5`（U5-O 真源）＋ 同步副本 `docs/DRIFT/like/vs-common.md` 的 `D-7` 定级行⇒ ⇒ **E66 定级复判仍维持现状**（见 §5.3 表第 4 项）⇒ ⇒ **不外推**。
 - ⚠️ **同批次一并订正的还有一句「熔断打开 ⇒ 业务码 1015」的错误断言**（javadoc ＋ 域台账 ＋ `_samesrc-W20.md` ＋ `_INDEX.md`）
   ⇒ 实测消费点 `LikeApiSupport#rpcError:177-186` **先判 `status == null`** ⇒ 熔断打开对外 **5001** = **与 Go 一致**
   ⇒ 真正的 A4/D-7 差异只有**下游非本域 status 码**（Go 13/3/5/16 ⇒ Java 1015/2001/1015/1009）⇒ 已由 `SD-2026-10-31-01` 签字。
@@ -1208,7 +1208,7 @@ git merge-base --is-ancestor align/g4-service-common do-my-own-gh && echo "已�
 |---|---|---|
 | 1 | **push**（本地 386 笔 · `upstream/do-my-own-gh`） | **待拍板**（此前拍板「等 G1/G2/G3 合批后一起开 PR」⇒ **条件已满足**：G1/G3 本轮已合入 3 个合并点，五棵分支「分支独有」全 0） |
 | 2 | **per-client cap 落码** | **待拍板**（机制已定案 = 组件级 `cap-millis` 不变 ＋ 新增「按 client 名覆盖」⇒ 只需覆盖 `article-api` 一个配置点；⚠️ **绝不能配组件级 `cap-millis=2000`**）⚠️ 落点在 `service/common/**` = **G4 写权面** ⇒ **G4 配额 42212 停摆** ⇒ 需 Jason 定「等 G4」还是「授权本层代落」 |
-| 3 | **D-7 定级复判**（like 域） | **待拍板**（事实层已 ⚫ 已签字偏离；定级层仍 stage=C / blocking=否 / prio=P1 / final_goal「影响 · 阶段 2 必须恢复」） |
+| 3 | ~~**D-7 定级复判**（like 域）~~ | ✅ **已销案**（Jason 2026-10-31 裁定：翻成「不阻断阶段一 ＋ 阶段 2 无需恢复」⇒ ⇒ 定级层已改判为 **stage=D · blocking=否 · prio=P3 · final_goal=「不影响 · 经分析确认不实现」** ⇒ ⇒ 见 `docs/DRIFT/like/vs-common.md` 的 `D-7` 定级行 ＋ `docs/DRIFT/global/vs-common.md` **§4.19.57**） |
 | 4 | **E66 定级复判** + **C-3「阻断阶段一 = 是」是否仍成立** | **待拍板**（事实层已闭合，`blocking` 仍是「是」⇒ 本面**不擅自翻**） |
 
 ⇒ ⇒ **已销案**：`§4.19.6` 重判（①）· `entry_stage_decl` 口径（②）
