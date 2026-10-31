@@ -97,15 +97,19 @@ Go 侧用的是**真源真正在用的生成码/二进制**；真源 yaml 把主
 
 ---
 
-## 四、矩阵（26 条 · 2 档）
+## 四、矩阵（28 条 · 2 档）
 
 | 档 | 条数 | 判据 | 用例 |
 |---|---|---|---|
-| **FROZEN** | **25** | **Go == RAG == `expected.txt`**（逐字节） | a 读收藏夹（3）· b 读条目（2）· c 读错误（5）· d 改名（7）· e 删除（5）· f 建收藏夹（2）· g 级联删除（1） |
+| **FROZEN** | **27** | **Go == RAG == `expected.txt`**（逐字节） | a 读收藏夹（3）· b 读条目（2）· c 读错误（5）· d 改名（7）· e 删除（5）· f 建收藏夹（2）· h 建条目（2）· g 级联删除（1） |
 | **AMBIENT** | **1** | 只判 **Go == RAG**（不一致**只告警、不判红**） | `f03_create_downstream_absent`（走 `ensureUserExists` ⇒ 结果取决于下游 `user.rpc` 在不在场） |
 
 > ⚠️ **用例顺序 = 副作用顺序**：只读全在前、写在后，且写之后不再读
 > （「改名」会推进 `update_time` ⇒ 之后的读会拿到「本次运行的时刻」⇒ 冻结值必假红）。
+>
+> ⚠️ **h 组（建条目）排在 g（级联删除）之前**：h 两条虽是写意图，但都在**任何下游调用之前**
+> 就返回（`create_favorite_logic.go:54-60` / `:62-70`）⇒ **零副作用** ⇒ 不破坏「g 是最后一条
+> 有副作用」的不变量。
 
 ### 🔴 为什么 `f03` 必须是 AMBIENT 档（**用实测数据钉的，不是推理**）
 
@@ -125,7 +129,7 @@ RAG 侧走 **Nacos**（`discovery:///user-rpc` ⇒ 服务名 `user-rpc`）
 
 ---
 
-## 五、实测结果（2026-10-29 · R2 lane）
+## 五、实测结果（2026-10-31 · G3 lane）
 
 ### 5.1 命令与结果
 
@@ -159,10 +163,12 @@ $ bash tools/api-full-parity-probe/favorite-rpc/run.sh
    ✅ f01_create_uid0           Go == RAG == expected.txt（INVALID_ARGUMENT · 响应字节 0 B）
    ✅ f02_create_name_empty     Go == RAG == expected.txt（INVALID_ARGUMENT · 响应字节 0 B）
    ⚠️  f03_create_downstream_absent  Go != RAG（AMBIENT 档 · **不判红**）
+   ✅ h01_create_item_uid0       Go == RAG == expected.txt（INVALID_ARGUMENT · 响应字节 0 B）
+   ✅ h02_create_item_target_empty Go == RAG == expected.txt（INVALID_ARGUMENT · 响应字节 0 B）
    ✅ g01_delete_folder_cascade Go == RAG == expected.txt（FAILED_PRECONDITION · 响应字节 0 B）
 == 9/9 结论 ==
 ⚠️  1 条 AMBIENT 用例两侧不一致（**不判红**，见上）
-✅ 双侧逐字节一致：Go 真源 == RAG == 冻结期望值（FROZEN 档 26 条用例 · gRPC wire 层）
+✅ 双侧逐字节一致：Go 真源 == RAG == 冻结期望值（FROZEN 档 27 条用例 · gRPC wire 层）
 EXIT=0
 ```
 
@@ -172,7 +178,8 @@ EXIT=0
 |---|---|
 | 收藏夹列表的**字段序 + 时间戳单位**逐字节一致 | `a01` 响应 **128 B**（3 个收藏夹：`create_time` DESC ⇒ 顺序也是字节序的一部分） |
 | 收藏条目的**全部 8 个字段**（含 `target_id` / `target_type` / `title` / `cover`）逐字节一致 | `b01` 响应 **168 B** |
-| **7 种业务错误**的 gRPC 码 ＋ **中文 description 文案**逐字节一致 | `c01`/`c04`/`c05`/`d02`/`d05`/`e04`/`g01`（`参数错误` / `收藏夹不存在` / `无权限操作` / `收藏夹名称不能为空` / `收藏夹名称已存在` / `收藏记录不存在` / `收藏暂不可撤回`） |
+| **8 种业务错误**的 gRPC 码 ＋ **中文 description 文案**逐字节一致 | `c01`/`c04`/`c05`/`d02`/`d05`/`e04`/`g01`/`h02`（`参数错误` / `收藏夹不存在` / `无权限操作` / `收藏夹名称不能为空` / `收藏夹名称已存在` / `收藏记录不存在` / `收藏暂不可撤回` / `收藏目标不能为空`） |
+| **`CreateFavorite` 的两段入参校验**（**在任何下游调用之前**）逐字节一致 | `h01`（`user_id<=0` ⇒ `参数错误`）/ `h02`（`target` 为空 ⇒ `收藏目标不能为空`）⇒ ⇒ 两侧的**校验顺序与文案同构**（Go `create_favorite_logic.go:54-60` / `:62-70`；RAG `FavoriteDomainService#createFavorite` 同序）⇒ ⇒ **7/7 个 rpc 方法全部被对拍客户端调过** |
 | **级联删除**走的是「历史未和解 ⇒ 不可撤回」那条分支 | `g01` = `FAILED_PRECONDITION` ＋ `收藏暂不可撤回`（5304）⇒ 两侧**都**被 `favorite_legacy_fact_marker` 挡住 ⇒ 说明两侧的**事实/遗留标记表语义一致** |
 | **同名改名直接返回成功、不写库** | `d06`（`OK`，2 B = `success=true`） |
 | **重名 ⇒ `AlreadyExists`** | `d05` |
@@ -184,7 +191,7 @@ EXIT=0
 | **Go 侧** | **L4（双侧活体）** | 真源二进制 + 真源配置副本 + 真 PG + 真 etcd 注册 |
 | **RAG 侧** | **L4（双侧活体）** | 真 fat jar + 真 Flyway + 真 MyBatis + 真 PG + 真 Nacos 注册 |
 | **比对口径** | **wire 层逐字节**（不是字段级） | 原始字节截获（§一） |
-| **期望值** | **冻结**（`expected.txt`） | 25 条 FROZEN ⇒ 真源一变立刻 exit 1 |
+| **期望值** | **冻结**（`expected.txt`） | 27 条 FROZEN ⇒ 真源一变立刻 exit 1 |
 | **变异** | ✅ 3 条**精确转红** + 还原后转绿 | 见 §七 |
 | ⚠️ **整体** | **不是「favorite 域全部行为已闭合」** | 边界见 §六 |
 
@@ -236,7 +243,7 @@ AGENTS.md §3.3.3：新增的每个探针都必须配一个**能真正触发它*
 | 4 | 端口段被**别的 lane 抢走** ⇒ RAG 侧 `BindException: Address already in use` | 宿主上多个 lane 的探针**同时跑** ⇒ 端口是抢占式的（实测：任务书给的 18131-18135 被 `r2like-*` 容器占满） | 自动挑**全空闲**的 5 连号端口（起点按 `$$` 打散）＋ **每个服务 bind 失败就换端口重试 3 次** |
 | 5 | `seq: needs negative decrement` | macOS 的 `seq` 是 **BSD 版**（`seq [first [incr]] last`），GNU 是 `first last step` ⇒ 写成 GNU 序就炸 | 改用 `while` 循环，不依赖 `seq` 的参数序 |
 | 6 | PG 容器「就绪超时」但日志看着正常 | ① `docker exec pg_isready` 走 **unix socket** ⇒ PG 初始化阶段的**临时 server** 会**过早**报 ready；② 只探宿主口 ⇒ **docker-proxy 起来那一刻**就能连（实测 **0s 就 OPEN**）⇒ 同样过早；③ 宿主 load average 实测 **103** ⇒ initdb 要几十秒 | 判据 = `docker exec pg_isready -h 127.0.0.1 -p 5432`（容器内 **TCP**）＋ 宿主口；上限 **180s**、重试 3 次 |
-| 7 | Go 侧进程活着、端口在监听，但**所有** RPC 返回 `UNAVAILABLE / io exception` | 该文案来自 **grpc-java 客户端**的 netty 传输层 ⇒ **客户端连不上**（不是服务端返回的）；实测出现在 Go 侧**空闲约 95s** 之后（早于矩阵） | ① 把 **Go 侧启动挪到矩阵前**（空闲窗口压到秒级）② 矩阵前做**存活自检**（失败 ⇒ **重启一次**再自检）③ 自检不过 ⇒ **exit 2「环境故障」**，**绝不**报成 26 条漂移 |
+| 7 | Go 侧进程活着、端口在监听，但**所有** RPC 返回 `UNAVAILABLE / io exception` | 该文案来自 **grpc-java 客户端**的 netty 传输层 ⇒ **客户端连不上**（不是服务端返回的）；实测出现在 Go 侧**空闲约 95s** 之后（早于矩阵） | ① 把 **Go 侧启动挪到矩阵前**（空闲窗口压到秒级）② 矩阵前做**存活自检**（失败 ⇒ **重启一次**再自检）③ 自检不过 ⇒ **exit 2「环境故障」**，**绝不**报成 28 条漂移 |
 | 8 | `io grpc.ClientCalls` 找不到符号 | `ClientCalls` 在 **`io.grpc.stub`** 包，不在 `io.grpc` | 改正 import |
 | 9 | go-zero 的日志**不在 stdout** | 真源 yaml `Log.Mode: file` ⇒ logx 落在 `${WORK}/log/favorite-rpc/` ⇒ 只 dump stdout 会漏掉真正的报错现场 | `dump_logs` 追加 dump **go-zero 的日志文件** |
 | 10 | `dependency:build-classpath` 把 `favorite-proto` 解析成 **~/.m2 里的快照 jar**（可能是旧的） | Maven 的单模块依赖解析 | 把该条目换成本仓**刚构建出来**的产物（与被测 jar 同一批） |

@@ -29,8 +29,13 @@ favorite 域此前的 **85 个测试全绿**，而服务**根本起不来**。�
 | case | 参数 | 期望 | 验的是 |
 |---|---|---|---|
 | **A** | `--grpc.client.{user,article}-rpc.address=discovery://<name>`（**按字节复现修前值**） | 🔴 **启动即炸**（`Incorrectly formatted target uri`） | 两斜杠确实致命 |
-| **B** | **不传任何 `--grpc.client.*` 覆盖** | ✅ **真起来**（`Started FavoriteRpcApplication` + `lsof` 核对端口 LISTEN） | 生产 yaml 原样可用 |
-| **C** | `--spring.main.web-application-type=servlet`（复现「**没有那一行**」的效果） | 🔴 **启动即炸**（`no ... ServletWebServerFactory bean defined`） | `web-application-type: none` 是必需品 |
+| **B** | **不传任何 `--grpc.client.*` 覆盖** | ✅ **真起来**（`Started FavoriteRpcApplication` + `lsof` 核对端口 LISTEN）**且** 观测端口 `/actuator/prometheus` 回 **200**（**指标抓取载体在**） | 生产 yaml 原样可用 **＋ 载体确实在** |
+| **C** | `--spring.main.web-application-type=none`（把载体**显式关掉**） | ✅ **照样起来**（web 类型**不影响** gRPC 业务面）**但** 观测端口**抓不到** `/actuator/prometheus`（载体不在） | B 里那个载体**确实由 servlet 容器承载**（不是别的东西顺带提供的） |
+
+> 🔴 **C 的语义在 2026-10-30 被换掉了**（旧语义已随 Actuator 载体落地而**失效**）：
+> 【旧 C】把 `web-application-type` 覆盖成 `servlet` ⇒ 期望**启动即炸** ⇒ **为什么失效**：2026-10-30 补了 `spring-boot-starter-web` ⇒ **容器有了** ⇒ 覆盖成 `servlet` **不再炸**（它就是当前默认形态）⇒ ⇒ 旧 C 恒判「不成立」⇒ **探针假红**（产品无缺陷，是探针过期）。
+> 【新 C】反过来 —— 覆盖成 `none` ⇒ **载体被关掉** ⇒ 期望「**抓不到**」。
+> ⇒ 脚本侧有完整说明（`run.sh:13-32`）＋ 台账侧有对应记载（`docs/DRIFT/favorite/rpc.md` 的「探针 case C 的语义换掉了（2026-10-30）」）。
 
 ⚠️ **B case 绝不覆盖 client 地址**——那必须是生产 yaml 的**原值**，
 否则 B 证明的是「覆盖值能起」，不是「生产值能起」。
@@ -53,7 +58,7 @@ mvn -o -pl service/favorite/favorite-rpc -am package -DskipTests
 bash tools/prod-startup-probe/favorite/run.sh
 ```
 
-退出码：`0` = A 炸(uri) 且 C 炸(servlet) 且 B 起来；`1` = 不成立；`2` = 环境问题。
+退出码：`0` = A 炸(uri) 且 B 起来（载体在）且 C 起来（载体不在）；`1` = 不成立；`2` = 环境问题。
 
 ---
 
@@ -100,4 +105,6 @@ if ("discovery".equals(uri.getScheme())) {
   「下游在场」那条分支由 [`tools/grpc-contract-probe/favorite/`](../../grpc-contract-probe/favorite/) 第二轮负责（§25）。
 - ❌ **不证明**业务行为正确 ⇒ 本探针只到「进程起来了、端口 LISTEN 了」。
 - ❌ **不覆盖** Go 侧那个 **16062 的 DevServer 面**（`/metrics` `/healthz` pprof）⇒
-  RAG 侧 `web-application-type: none` ⇒ **没有那个面** ⇒ 这是**部署形态类偏离**，已登记为域内未决项 **U9**（待拍板）。
+  RAG 侧走 **Actuator**（`/actuator/prometheus`，**路径前缀不同**）⇒ ⚠️ **该面已于 2026-10-30 落地**
+  （`web-application-type: none` 已从 `application.yml` 删除 ⇒ 载体在）⇒ ⇒ 本探针**只验「载体在不在」**、
+  **不比对两侧的路径/格式** ⇒ 详见 `docs/DRIFT/favorite/rpc.md` 的「指标抓取载体落地 + U9 销账」追加节。

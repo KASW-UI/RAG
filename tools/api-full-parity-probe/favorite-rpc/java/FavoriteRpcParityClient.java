@@ -234,6 +234,8 @@ public final class FavoriteRpcParityClient {
                 return ProtoUtils.marshaller(DeleteFavoriteReq.getDefaultInstance());
             case "CreateFavoriteFolder":
                 return ProtoUtils.marshaller(CreateFavoriteFolderReq.getDefaultInstance());
+            case "CreateFavorite":
+                return ProtoUtils.marshaller(CreateFavoriteReq.getDefaultInstance());
             default:
                 throw new IllegalArgumentException("未知方法：" + method);
         }
@@ -254,6 +256,8 @@ public final class FavoriteRpcParityClient {
                 return ProtoUtils.marshaller(DeleteFavoriteResp.getDefaultInstance());
             case "CreateFavoriteFolder":
                 return ProtoUtils.marshaller(CreateFavoriteFolderResp.getDefaultInstance());
+            case "CreateFavorite":
+                return ProtoUtils.marshaller(CreateFavoriteResp.getDefaultInstance());
             default:
                 throw new IllegalArgumentException("未知方法：" + method);
         }
@@ -265,7 +269,8 @@ public final class FavoriteRpcParityClient {
      * <p>🔴 <b>顺序 = 副作用顺序</b>：只读全在前，写在后，且写之后不再读
      * （「改名」会推进 {@code update_time} ⇒ 之后的读会拿到「本次运行的时刻」⇒ 冻结值必假红）。
      *
-     * <p>分组：a=读收藏夹 / b=读条目 / c=读错误 / d=改名 / e=删除 / f=建收藏夹 / g=级联删除。
+     * <p>分组：a=读收藏夹 / b=读条目 / c=读错误 / d=改名 / e=删除 / f=建收藏夹 / h=建条目 / g=级联删除。
+     * <br>（h 虽是写意图，但两条都在**任何下游调用之前**就返回 ⇒ 零副作用 ⇒ 可以排在 g 之前。）
      */
     private static List<Case> cases() {
         List<Case> l = new ArrayList<>();
@@ -337,6 +342,27 @@ public final class FavoriteRpcParityClient {
         //    ⇒ 只判 Go == RAG，不冻结。
         l.add(ambient("f03_create_downstream_absent", "CreateFavoriteFolder",
                 CreateFavoriteFolderReq.newBuilder().setUserId(1001L).setName("新夹").build()));
+
+        // ── H 建条目（CreateFavorite）────────────────────────────────────────
+        // 🔴 **只取「任何下游调用之前」的那两段校验** ⇒ 纯域内 ⇒ 可冻结：
+        //    Go: create_favorite_logic.go:54-60 —— user_id<=0 || folder_id<=0
+        //        ⇒ InvalidArgument / 5003「参数错误」
+        //    Go: create_favorite_logic.go:62-70 —— normalizeTargetType + TrimSpace 之后
+        //        target_id 或 target_type 为空 ⇒ InvalidArgument / 5303「收藏目标不能为空」
+        //    两段都在 ensureUserExists(:72) 与 resolveArticleSnapshot(:106) **之前**
+        //    ⇒ 不碰下游 user.rpc / article.rpc ⇒ 属 FROZEN 档。
+        // ⚠️ **成功路径不进本档**：响应含雪花 FavoriteId（Go :136-169）
+        //    ⇒ 两侧字节**必然**不同 ⇒ 结构上不可冻结 ⇒ 留作「ID 不可比」的另一判据形态。
+        // ⚠️ **h 组排在 g（级联删除）之前**：h 两条虽是写意图，但都在校验处就返回 ⇒ 零副作用
+        //    ⇒ 不破坏「g 是最后一条有副作用」的既有不变量。
+        // ⚠️ **参数刻意让「只有被测条件」触发**（否则该用例分不出是哪个条件在起作用）：
+        //    h01 ⇒ folder_id 合法 ⇒ 只可能是 user_id<=0 命中；
+        //    h02 ⇒ user_id / folder_id 都合法 ⇒ 只可能是 target 为空命中。
+        l.add(c("h01_create_item_uid0", "CreateFavorite",
+                CreateFavoriteReq.newBuilder().setUserId(0L).setFolderId(F1).build()));
+        l.add(c("h02_create_item_target_empty", "CreateFavorite",
+                CreateFavoriteReq.newBuilder().setUserId(1001L).setFolderId(F1)
+                        .setTargetId("").setTargetType("article").build()));
 
         // ── G 级联删除（最后一条；有副作用）──────────────────────────────────
         l.add(c("g01_delete_folder_cascade", "DeleteFavoriteFolder",
