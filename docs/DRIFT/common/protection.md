@@ -196,11 +196,11 @@ Go `getlikestatelogic.go:57-63` 的 `status.FromError` 对非 status 错误返�
 （AGENTS.md §3.3 的同族教训）。
 
 **四 · 诚实边界（本轮**没有**证明的）**
-- **各域的 yml 一个都还没配** ⇒ ⇒ 「域侧只配参数」这条**尚未被任何域真正使用** ⇒ ⇒ 残余面 =
-  派工面里那条「零 deadline 类补硬上界」的任务**本体**（域侧 yml ＋ 各域断言）。
-- **api 侧另有内联形态的封顶**（`like-api` / `favorite-api` 在 client 类里直接算 min）⇒ ⇒ 它们不声明
-  那个类名 ⇒ ⇒ **不在这条守门的检测面** ⇒ ⇒ 属**另一条轴**（api 侧的传播/上界任务）⇒ ⇒ 本轮
-  **不假装覆盖**它。
+- **各域的 yml** ⇒ ⇒ 原写「**一个都还没配**」**已过期** ⇒ ⇒ **2026-10-31 实测**：`comment-api` / `favorite-api` /
+  `hot-api`（G3 批）＋ `like-api` / `task-api`（G2 批）**五个域 api 都已配** `cap-millis` ⇒ ⇒ **残余面 = 只剩 `article-api` 一个组件**（同组件两方向 Go 真值不同 ⇒ 需共享层补 per-client cap）⇒ ⇒ 派工面 P2-T04 的残余 = **这 1 个**。
+- **api 侧的「内联形态」封顶**（client 类里直接算 min）⇒ ⇒ 此前**不在**这条守门的检测面 ⇒ ⇒ **2026-10-31 已扩到检测面**
+  （判据④ · 点位级棘轮）⇒ ⇒ 且 `like-api` / `favorite-api` 等 **6 个点位**的内联封顶**已全部删净**（域侧改配 `cap-millis`）
+  ⇒ ⇒ 例外集**只剩 1 条**（`article-api` · 不可收敛）⇒ ⇒ 详见 `docs/DRIFT/global/vs-common.md` §4.19.42。
 - 守门按**类名**识别副本 ⇒ ⇒ 一份**改了名**的同款实现不在它的视野内 ⇒ ⇒ 那类靠 review 纪律互补。
 - 本轮用 devh 的 **in-process** channel factory（与生产同一 `createChannel` 实现）⇒ ⇒ 上游 hop 的
   传输层与生产不同 ⇒ ⇒ 测的是「deadline 到点 ⇒ 立即失败」这个语义，**不依赖传输层**。
