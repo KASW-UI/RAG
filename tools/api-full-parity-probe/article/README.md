@@ -19,7 +19,7 @@
 
 ```bash
 bash tools/api-full-parity-probe/article/run.sh          # EXIT=0 = 两侧逐字节一致
-bash tools/api-full-parity-probe/article/mutate-parity.sh # 变异验证（M1~M3 ⇒ 必须精确转红）
+bash tools/api-full-parity-probe/article/mutate-parity.sh # 变异验证（M1~M4 ⇒ 必须精确转红）
 ```
 
 退出码：`0` = 逐字节一致 · `1` = 有差异 · `2` = 环境问题 / 真源漂移 / 依赖缺失。
@@ -91,6 +91,10 @@ AGENTS.md §3.3.3：新增的每个探针都必须配一个**能真正触发它*
 | **M1** | 去掉 `Article` 的 `@JsonPropertyOrder` | `ArticleApiJsonFieldOrderTest` 的 `Article` 那条**转红** |
 | **M2** | 去掉 `ListArticlesResp` 的 `@JsonPropertyOrder` | `ArticleApiJsonFieldOrderTest` 的 `ListArticlesResp` 那条**转红** |
 | **M3** | 改 `expected.txt` 里一枚 hex | 探针 `run.sh` **EXIT=1** |
+| **M4** 🆕 | 改 **rpc 层**的公开视角映射（`ArticlePublicDomainService.toProtoArticle` 的 `title` → `brief`）⇒ RAG 侧 HTTP 输出漂移 | 探针 `run.sh` **EXIT=1** ⇒ **证明比较面真的穿过 rpc 层**（M1/M2 打的是 api 层 DTO ⇒ **不构成 rpc 层的变异证据**） |
 
 ⇒ **M1/M2 证明「字段序断言」真有牙齿**；**M3 证明「对拍不是自己跟自己」**
-（期望值被改 ⇒ 立刻报差异 ⇒ 期望值确实在参与判定）。
+（期望值被改 ⇒ 立刻报差异 ⇒ 期望值确实在参与判定）；**M4 证明「比较面真的穿过 rpc 层」**
+（打的是 **rpc 层**的映射 ⇒ rpc 层漂移 ⇒ HTTP 输出漂移 ⇒ 探针立刻报差异 ⇒
+⇒ 对 **`article-rpc` 组件**而言，这一条才是 judge §1.1 ⑧「变异验证」的**组件内**证据）。
+⚠️ **M4 会临时改生产码**（`ArticlePublicDomainService.java`）⇒ 脚本自带 **EXIT 兜底还原** ＋ **sha256 还原核验**（4 个文件全查）⇒ 还原没生效即 `EXIT=1`。

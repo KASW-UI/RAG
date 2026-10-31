@@ -12,7 +12,7 @@
 #    本 lane 的修复（@JsonPropertyOrder + javadoc）**还没提交** ⇒ `git checkout` 会
 #    把它们一起回滚掉 ⇒ 变异跑完代码就不是原来的代码了。
 #
-# 退出码：0 = 三条变异都精确转红 + 还原后转绿；1 = 有变异没转红（探针是假绿）；
+# 退出码：0 = 四条变异都精确转红 + 还原后转绿；1 = 有变异没转红（探针是假绿）；
 #         2 = 环境问题导致本轮判定无效（**不等于假绿** ⇒ 见 run_probe 处的说明）。
 set -uo pipefail
 
@@ -21,6 +21,8 @@ RAG_ROOT="$(cd "${HERE}/../../.." && pwd)"
 PROBE="${HERE}/run.sh"
 EXPECTED="${HERE}/expected.txt"
 DTO="${RAG_ROOT}/service/article/article-api/src/main/java/com/rag/article/article/api/dto"
+# ⚠️ **M4 打的是 rpc 层**（M1/M2 打的是 api 层 DTO ⇒ **不构成 rpc 层的变异证据**）
+RPC_SRC="${RAG_ROOT}/service/article/article-rpc/src/main/java/com/rag/article/article/rpc/service/ArticlePublicDomainService.java"
 
 cd "${RAG_ROOT}"
 
@@ -28,7 +30,7 @@ TMP_OUT="$(mktemp)"
 BAK_DIR="$(mktemp -d)"
 # ⚠️ **不删临时目录**：`rm -rf` 在本机会被回收站守卫拦下（mavis-trash 失效 ⇒ 命令被整体拒绝）
 #    ⇒ 留着 `/var/folders/.../tmp.*` 由系统清理（比让脚本自杀强）。
-trap 'rm -f "${TMP_OUT}"' EXIT
+trap 'rm -f "${TMP_OUT}"; [ -f "${BAK_DIR}/rpcsrc.java" ] && cp "${BAK_DIR}/rpcsrc.java" "${RPC_SRC}"' EXIT
 
 say() { printf '%s\n' "$*"; }
 
@@ -71,6 +73,23 @@ PY
 backup "${DTO}/Article.java"           article.java
 backup "${DTO}/ListArticlesResp.java"  listresp.java
 backup "${EXPECTED}"                    expected.txt
+backup "${RPC_SRC}"                     rpcsrc.java
+SHA_ARTICLE="$(shasum -a 256 "${DTO}/Article.java" | awk '{print $1}')"
+SHA_LISTRESP="$(shasum -a 256 "${DTO}/ListArticlesResp.java" | awk '{print $1}')"
+SHA_EXPECTED="$(shasum -a 256 "${EXPECTED}" | awk '{print $1}')"
+SHA_RPC="$(shasum -a 256 "${RPC_SRC}" | awk '{print $1}')"
+
+# verify_sha <文件> <期望 sha256> <名字>
+verify_sha() {
+  local got
+  got="$(shasum -a 256 "$1" | awk '{print $1}')"
+  if [ "${got}" = "$2" ]; then
+    say "   ✅ ${3} 已还原（sha256=${got:0:16}…）"
+  else
+    say "   ❌ ${3} 还原没生效（sha256=${got:0:16}… ≠ ${2:0:16}…）"
+    FAILED=1
+  fi
+}
 
 say "== 基线（未变异）必须转绿 =="
 BASE_RC="$(run_probe)"
@@ -152,6 +171,29 @@ else
 fi
 restore "${EXPECTED}" expected.txt
 
+# ─────────────────────────────────────────────────────────────
+# M4：打 **rpc 层**的公开视角映射（title → brief）⇒ RAG 侧 HTTP 输出漂移 ⇒ 必须转红
+#      ⇒ 证明「探针的比较面**真的穿过 rpc 层**」
+#      ⇒ ⚠️ M1/M2 打的是 **api 层 DTO** ⇒ **不构成 rpc 层的变异证据**（judge §1.1 ⑧ 的组件归属）
+# ─────────────────────────────────────────────────────────────
+say ""
+say "== M4 改 rpc 层公开视角映射（title → brief）⇒ 必须转红 =="
+mutate "${RPC_SRC}" '.setTitle(nullToEmpty(view.title))' '.setTitle(nullToEmpty(view.brief))'
+RC="$(run_probe)"
+if [ "${RC}" = "1" ]; then
+  say "   ✅ 精确转红（exit 1 · rpc 层映射漂移被抓到 ⇒ 比较面确实穿过 rpc 层）"
+  grep -E "❌|!= expected" "${TMP_OUT}" | head -6 | sed 's/^/   | /'
+elif [ "${RC}" = "2" ]; then
+  say "   ⚠️ 环境问题（exit 2 · 重试后仍不可用）⇒ **本轮判定无效**，不等于「探针没在比 rpc 层」"
+  tail -25 "${TMP_OUT}" | sed 's/^/   | /'
+  ENV_BAD=1
+else
+  say "   ❌ 没按预期转红（exit 0 = 两侧仍一致）⇒ **探针没在比 rpc 层**"
+  tail -25 "${TMP_OUT}" | sed 's/^/   | /'
+  FAILED=1
+fi
+restore "${RPC_SRC}" rpcsrc.java
+
 say ""
 say "== 还原后必须重新转绿 =="
 RC="$(run_probe)"
@@ -168,6 +210,13 @@ else
 fi
 
 say ""
+say "== 还原核验：被变异的文件内容哈希必须回到变异前 =="
+verify_sha "${DTO}/Article.java" "${SHA_ARTICLE}" "article-api dto Article.java"
+verify_sha "${DTO}/ListArticlesResp.java" "${SHA_LISTRESP}" "article-api dto ListArticlesResp.java"
+verify_sha "${EXPECTED}" "${SHA_EXPECTED}" "expected.txt"
+verify_sha "${RPC_SRC}" "${SHA_RPC}" "article-rpc ArticlePublicDomainService.java"
+
+say ""
 if [ "${FAILED}" != "0" ]; then
   say "❌ 有变异没转红（两侧仍一致）⇒ 探针是假绿"
   exit 1
@@ -177,5 +226,5 @@ if [ "${ENV_BAD}" != "0" ]; then
   say "   ⇒ 请在**无其它探针并发**时重跑（本探针的 Go 侧端口固定 + Nacos 共享 ⇒ 并发时易撞）"
   exit 2
 fi
-say "✅ 三条变异全部精确转红 + 还原后转绿 ⇒ 探针非假绿"
+say "✅ 四条变异全部精确转红 + 还原后转绿 ⇒ 探针非假绿"
 exit 0
