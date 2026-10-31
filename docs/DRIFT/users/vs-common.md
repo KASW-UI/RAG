@@ -6061,3 +6061,10 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
   - **本域落点**：user-api 与 admin-api 两个 `*DeadlineCapTest` 的判据②（DisplayName ＋ 方法名 ＋ 断言）同步改
     ＋ 两个 client 的常量 javadoc 同步改成「文档锚点」口径 ⇒ ⇒ **4 个文件行数全中性**
     （user-api `UserRpcClient.java` 210 · admin-api `AdminRpcClient.java` 238 · 两个测试 415 / 415）⇒ ⇒ **既有指针全部守住**。
+- **🆕 独立交叉验证（不是本域自测口径）**：主干新增的出向 stub 盘点工具
+  （`docs/RoundPlan/round-02/count-outbound-stubs.py`）实测本域 4 个有出向的组件
+  ⇒ ⇒ **上界来源全部 = 共享 `${<域>_OUTBOUND_DEADLINE_CAP_MILLIS:2000}`**
+  ⇒ ⇒ **调用点数与本域台账逐条相符**（follow-api 1 · admin-api 13 · user-api 9；follow-rpc 出向调用点为 0）
+  ⇒ ⇒ **零上界类数 = 1 = `article-api`（G3 面）⇒ ⇒ 本域 4 个全部 ✅**
+  ⇒ ⇒ ⇒ 且**本域每个组件只有 1 个出向方向** ⇒ ⇒ **组件级 cap 表达得了**
+  ⇒ ⇒ ⇒ ⇒ 「共享层缺 per-direction cap」这条**不落本域**。

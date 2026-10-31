@@ -1677,3 +1677,10 @@ RAG 侧下游 `user-rpc` **自己**带服务端 2s 超时（`service/users/user/
     （`FollowRpcClient.java` 232 · follow-rpc `UserRpcClient.java` 109 · 两个测试 414 / 400）⇒ ⇒ **既有指针全部守住**。
   - **附带订正**：`docs/DRIFT/follow/rpc.md` ＋ `docs/DRIFT/follow/vs-common.md` 里 follow-rpc 那条门
     原写「**3 条**」⇒ ⇒ 实测 `@DisplayName` 计数 = **5 条**（扩到 5 条前的残留）⇒ ⇒ 已就地订正。
+- **🆕 独立交叉验证（不是本域自测口径）**：主干新增的出向 stub 盘点工具
+  （`docs/RoundPlan/round-02/count-outbound-stubs.py`）实测本域 4 个有出向的组件
+  ⇒ ⇒ **上界来源全部 = 共享 `${<域>_OUTBOUND_DEADLINE_CAP_MILLIS:2000}`**
+  ⇒ ⇒ **调用点数与本域台账逐条相符**（follow-api 1 · admin-api 13 · user-api 9；follow-rpc 出向调用点为 0）
+  ⇒ ⇒ **零上界类数 = 1 = `article-api`（G3 面）⇒ ⇒ 本域 4 个全部 ✅**
+  ⇒ ⇒ ⇒ 且**本域每个组件只有 1 个出向方向** ⇒ ⇒ **组件级 cap 表达得了**
+  ⇒ ⇒ ⇒ ⇒ 「共享层缺 per-direction cap」这条**不落本域**。
