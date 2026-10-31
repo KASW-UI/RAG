@@ -177,7 +177,7 @@
 > **依据（当场核过）**：`service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/bootstrap/NacosRegistration.java:104` = `@Value("${spring.cloud.nacos.discovery.group:DEFAULT_GROUP}")`（**注册方现在真的读配置** ⇒ 原「写死 `DEFAULT_GROUP`」的前提已消除）＋ `service/follow/follow-rpc/src/main/resources/application.yml:97` = `group: ${NACOS_GROUP:DEFAULT_GROUP}`（**rpc 侧与 api 侧同源**）⇒ ⇒ **两侧现在读同一个变量** ⇒ 原「注册到 A 组、api 去 B 组找」的失配形态**已消除**。
 > ⚠️ **下方表格「修前的原始取证」保留不改写**（正文自己已声明「本节保留修前的原始取证」）⇒ 其中 `NacosRegistration.java:113` / `:133` 的行号是**修前**的行号（现已随落码位移）⇒ **读时以本订正段为准**。
 
-> ✅ **状态：阶段 2 已修（2026-10-27）** ⇒ 修法与 A/B/C 真启动证据见 §7.5。**本节保留修前的原始取证。**
+> ✅ **现行态 = ✅ 已一致**（阶段 2 已修 · 2026-10-27）⇒ 修法与 A/B/C 真启动证据见 §7.5。**本节保留修前的原始取证。**
 
 | 侧 | 位置 | 值 | 读配置？ |
 |---|---|---|---|
@@ -203,7 +203,7 @@
 > **依据（当场核过）**：`service/follow/follow-api/src/main/resources/application.yml:129` = `immediate-connect-timeout: 3s`（**已配** ⇒ 原「`follow-api` 的 `grpc.client.follow-rpc` **没有** `immediate-connect-timeout`」的前提已消除）＋ `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/client/FollowRpcClient.java:115`（注释复述同一处配置）＋ `:126`（结论：用 devh 的原生 `immediate-connect-timeout`，不自己摸 channel）⇒ ⇒ **与 Go `zrpc.MustNewClient` 的「失败即 panic」语义对齐的那一侧已落码**（A/B/C 真启动证据见本文件 §7.5）。
 > ⚠️ **下方「RAG 侧……**没有** `immediate-connect-timeout`」是修前原始取证，保留不改写**（正文自己已声明「本节保留修前的原始取证」）⇒ **读时以本订正段为准**。
 
-> ✅ **状态：阶段 2 已修（2026-10-27）** ⇒ 修法与 A/B/C 真启动证据见 §7.5。**本节保留修前的原始取证。**
+> ✅ **现行态 = ✅ 已一致**（阶段 2 已修 · 2026-10-27）⇒ 修法与 A/B/C 真启动证据见 §7.5。**本节保留修前的原始取证。**
 
 - **Go**：`service/follow/api/internal/svc/servicecontext.go:27` ⇒ `followservice.NewFollowService(zrpc.MustNewClient(c.FollowRpc))`
   ⇒ go-zero v1.10.2 `zrpc/client.go:50-54` `logx.Must(err)` ⇒ **失败即 panic ⇒ 进程起不来**；`go-zero@v1.10.2/zrpc/internal/client.go:18` `dialTimeout = 3s`

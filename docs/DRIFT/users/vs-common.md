@@ -152,7 +152,7 @@
 
 ### 7.1 `DRIFT-G1-001` — 🔴 `NACOS_GROUP` 对三个 rpc 组件**完全无效**（配置项形同虚设）
 
-> ✅ **状态：阶段 2 已修（2026-10-27）** ⇒ 修法与证据见 §7.5 / §7.6 / §7.7。**本节保留修前的原始取证。**
+> ✅ **现行态 = ✅ 已一致**（阶段 2 已修 · 2026-10-27）⇒ 修法与证据见 §7.5 / §7.6 / §7.7。**本节保留修前的原始取证。**
 
 **现象**：设 `NACOS_GROUP=<自定义>` ⇒ 三个 api 全部解析不到自己的 rpc 下游。
 
@@ -189,7 +189,7 @@
 
 ### 7.2 `DRIFT-G1-002` — 🔴 `user-api` / `follow-api` 缺 `immediate-connect-timeout` ⇒ 与 Go 的 `MustNewClient` panic 语义不一致
 
-> ✅ **状态：阶段 2 已修（2026-10-27）** ⇒ 修法与证据见 §7.5 / §7.6 / §7.7。**本节保留修前的原始取证。**
+> ✅ **现行态 = ✅ 已一致**（阶段 2 已修 · 2026-10-27）⇒ 修法与证据见 §7.5 / §7.6 / §7.7。**本节保留修前的原始取证。**
 
 **Go 侧（真源逐条核实行号）**：
 - `service/user/user/api/internal/svc/servicecontext.go:26` ⇒ `userservice.NewUserService(zrpc.MustNewClient(c.UserRpc))`
