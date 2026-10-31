@@ -2186,7 +2186,18 @@ def layer0_selfcheck(root):
                                     'do-my-own-gh', '--not', 'HEAD').splitlines()
             if h.strip()]
     if _off:
-        _x = _off[0]
+        # ⚠️ **位数对齐**（2026-10-31 · 合并收口执行者 · G4 lane 反馈单触发）：`_off` 用
+        #    `git rev-list --abbrev-commit` ⇒ 在本仓库（`core.abbrev` 未设 ⇒ auto · 452+ commit）
+        #    实测输出 **8 位**（实测 20/20 长度分布 = 8）；而 `manifest_chain` 内部
+        #    **统一截到 7 位**（`keys = [k[:7] for k in keys]` ⇒ `_n` 必为 7 位）
+        #    ⇒ ⇒ `_n == _x` **恒假**（8 ≠ 7）⇒ ⇒ 本阳性对照在**任何「HEAD ≠ 主干」的分支上必红**
+        #    ⇒ ⇒ 「**一个恒红的守门等于没有守门**」（本文件 `manifest_chain` docstring 原话）
+        #    ⇒ ⇒ 修法 = **位数对齐**（取 7 位）⇒ ⇒ **零语义变化**
+        #    （判据本意只是「链的最新 commit 与取样 commit 相同」⇒ 用 7 位前缀比较与 8 位等价，
+        #      因为 `_n` 本身就是 7 位 ⇒ ⇒ 改前改后判的是同一件事）
+        #    ⚠️ 另一半（`_parent` 已是 7 位 · `git rev-parse --short=7`）⇒ ⇒ 原稿里
+        #    **同一行内两位数就不同** ⇒ ⇒ 这也是本层能独立发现的旁证。
+        _x = _off[0][:7]
         _parent = git(root, 'rev-parse', '--short=7', f'{_x}^').strip()
         _o, _n, _sp = manifest_chain(root, [_parent, _x])
         if _o is not None and _n == _x and len(_sp) == 2:

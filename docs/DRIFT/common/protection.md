@@ -184,10 +184,10 @@ Go `getlikestatelogic.go:57-63` 的 `status.FromError` 对非 status 错误返�
   ⇒ 出向调用在 **2000ms** 处 `DEADLINE_EXCEEDED`；② **负控**：`cap-millis=0` ⇒ **挂满**下游 5s
   （⇒ 形态①的绿来自 cap，不是「in-process 自己会超时」）；③ `cap-millis=2000` ＋ 入向预算 300ms
   ⇒ 在 **300ms** 处失败（⇒ 钉的是 **min** 语义，不是覆盖）。
-- `GoStyleClientCallTimeoutSingleSourceGateTest`（3 断言）—— ① 域侧**不得**出现第三份
-  `GoStyleClientCallTimeout` 私有副本（**棘轮例外集** = 已知的 2 份：comment-rpc / favorite-rpc
-  ⇒ 域侧删掉后自动收紧）；② 共享层唯一实现必须在位；③ 它必须是**全局客户端拦截器**且真的读
-  `capMillis`（**只认代码行，不认 javadoc** —— 见「三」）。
+- `GoStyleClientCallTimeoutSingleSourceGateTest`（**4 断言**）—— ① 域侧**不得**出现第三份
+  `GoStyleClientCallTimeout` 私有副本（**棘轮例外集** = 已知的 **0** 份：comment-rpc / favorite-rpc 那 2 份
+  **已删净** ⇒ 全仓实测域侧无副本 ⇒ 域侧再出现即红）；② 共享层唯一实现必须在位；③ 它必须是**全局客户端拦截器**且真的读
+  `capMillis`（**只认代码行，不认 javadoc** —— 见「三」）；④ **内联形态**的域侧私有 cap（**点位级**棘轮）⇒ 例外集 = **1 条**（只留 `article-api` · 同组件两方向 Go 真值不同 ⇒ **不可收敛**）⇒ 详见 `docs/DRIFT/global/vs-common.md` §4.19.41 / §4.19.42。
 
 **三 · 本轮踩到并已修掉的一个「弱判据」（值得记）**
 守门②③ 最初写成 `src.contains("@GrpcGlobalClientInterceptor")` ⇒ ⇒ **该类的 javadoc 里也出现过
@@ -305,3 +305,15 @@ G1 上一轮曾误判成「api 侧配 `cap-millis` 无效」⇒ ⇒ **本层独�
 2. **只覆盖 rpc 域的出向段** ⇒ ⇒ **api 侧的逐域取值本节未列**（api 侧 yaml 结构与 rpc 不同，且各域 api 侧的出向客户端段需单独核）⇒ ⇒
    **api 侧的值要单独派工时再核**。
 3. **本节只给口径，**不代改任何域的 yml**（域侧写权）⇒ ⇒ **本层零代码改动**。
+
+#### 五 · 现行态订正（2026-10-31 · 合并收口执行者落码 · **追加不改写上文**）
+
+⚠️ **上文「四 · 诚实边界」里的两条陈述已过期**（它们记录的是**当时**的事实）⇒ ⇒ 此处只补**现行态**：
+
+| 上文的陈述 | 现行态（实测） |
+|---|---|
+| 「**各域的 yml 一个都还没配**」 | ⇒ ⇒ **已配 15 个模块**（`article-rpc` · `comment-api/rpc` · `favorite-api/rpc` · `follow-api/rpc` · `hot-api` · `like-api/rpc` · `message-api/rpc` · `task-api` · `admin-api` · `user-api`）⇒ ⇒ ⚠️ 口径 = **代码态**（剥离注释后再计）⇒ ⇒ `article-api` **刻意不配**（yml `:201-214` 是**说明注释** ⇒ grep 命中但**不生效**）⇒ ⇒ 合计 **15 真配 + 7 处注释命中** |
+| 「api 侧另有内联形态的封顶（`like-api` / `favorite-api` 在 client 类里直接算 min）」 | ⇒ ⇒ **已删净**（域侧改配 `cap-millis`）⇒ ⇒ 内联形态的**点位级**例外集现 = **1 条**（只留 `article-api` 的 `UserRpcClient` ⇒ 同组件两方向 Go 真值不同 ⇒ **不可收敛**）⇒ ⇒ 详见 `docs/DRIFT/global/vs-common.md` §4.19.42 |
+| （原文未提）判据④ 的**例外失效检测** | ⇒ ⇒ 该守门自带「已登记点位不再出现 ⇒ 守门要求剪」⇒ ⇒ **悬空登记会让 surefire 层变红**（不在 `tools/**` 静态清单里）⇒ ⇒ 本轮实测到并已清零 ⇒ ⇒ **「静态守门全绿」≠「测试全绿」** |
+
+⚠️ **本节不动上文一字**（按「不改写历史」纪律）⇒ ⇒ 上文的「诚实边界」仍是**当时的边界**，读时须与本节合看。

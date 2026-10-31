@@ -122,17 +122,17 @@ class GoStyleClientCallTimeoutSingleSourceGateTest {
             // ── 🔴 不可收敛 · 1 条（article-api · 组件内两方向真值不同 ⇒ per-direction 内联**必需** ⇒ **不许剪**）──
             //      Go article-api.yaml：ArticleRpcConf.Timeout=70000（显式）· UserRpcConf 段无 Timeout ⇒ 2000（默认）
             //      ⇒ 组件级 cap 表达不了（取 2000 ⇒ article-rpc 方向改严 35 倍；取 70000 ⇒ user-rpc 方向放宽 35 倍）
-            // ── 🟡 可收敛 · 2 条（组件内各出向方向真值相同 = 2000 ⇒ 组件级 cap 表达得了 ⇒ 域侧只配参数）──
+            // ── 🟡 可收敛 · 0 条（**已全部剪净** · 2026-10-31）——
+            //      第一批（G3 那批 4 条 · comment-api 1 · hot-api 1 · favorite-api 2）
+            //      第二批（G2 那批 2 条 · like-api 1 · task-api 1）⇒ ⇒ 例外集 **7 → 3 → 1**
             //      收敛动作 = 先配 cap-millis=2000 ＋ 再删内联（**两步必须同一次提交** ⇒ 先删后忘配 = 取消上界）
-            //      ⚠️ **2026-10-31 · 已剪 4 条**（comment-api 1 · hot-api 1 · favorite-api 2）—— 域侧已收敛落码
-            //      ⇒ ⇒ **同一次提交**里「配 cap-millis ＋ 删内联 + 剪例外集」⇒ ⇒ 主线零红窗。
-            //      ⚠️ **余下 2 条（like-api / task-api）待 G2 的域侧收敛落码后剪** ⇒ ⇒ 那一次同样是「零红窗批剪」。
+            //      ⚠️ **第一批 = 「零红窗」**（域侧落码与剪例外**同一次提交** ⇒ ⇒ 主线始终绿）
+            //      ⚠️ **第二批 ≠ 「零红窗」** —— 域侧落码（`22423962` 合 G2 那批）与本层剪例外**分离**
+            //         ⇒ ⇒ 主线出现过红窗（判据④ 的「例外失效检测」会红：已登记点位不再出现 ⇒ 守门要求剪）
+            //         ⇒ ⇒ 本层**补剪**收尾 ⇒ ⇒ **教训：剪除必须与落码同一时刻**
+            //         （红窗虽只 1 条，但「主线绿」本该在域侧落码那一刻就成立 ⇒ ⇒ 拆开做 = 主动制造红窗）
             "service/article/article-api/src/main/java/com/rag/article/article/api/client/"
-                    + "UserRpcClient.java:withDeadlineAfter(effective, TimeUnit.MILLISECONDS);",
-            "service/like/like-api/src/main/java/com/rag/like/like/api/client/"
-                    + "LikeRpcClient.java:withDeadlineAfter(effectiveNanos, TimeUnit.NANOSECONDS);",
-            "service/task/task-api/src/main/java/com/rag/task/task/api/client/"
-                    + "TaskRpcClient.java:withDeadlineAfter(Math.max(1L, budget), TimeUnit.MILLISECONDS);");
+                    + "UserRpcClient.java:withDeadlineAfter(effective, TimeUnit.MILLISECONDS);");
 
     /**
      * <b>域侧私有 cap 的两种来源形态</b>（代码态 ⇒ 注释与字符串字面量不算）。
