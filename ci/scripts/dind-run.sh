@@ -244,7 +244,7 @@ run_inner() {
     -e ERRSMSG_DUMP_OUT_DIR="${ERRSMSG_DUMP_OUT_DIR:-}" \
     -e ERRSMSG_REPLAY_DUMP_DIR="${ERRSMSG_REPLAY_DUMP_DIR:-}" \
     "$1" \
-    sh "repo/ci/scripts/$2"
+    sh "repo/ci/scripts/$2.sh"
 }
 
 rc=0
