@@ -2018,7 +2018,7 @@ git diff --stat -- service/ # ⇒ 0 行
 
 | 位置 | 旧 → 新 | 归属 |
 |---|---|---|
-| `docs/Worktree.md:1076` | `MessageRpcOutboundDeadlineCapGateTest.java:427` → `:425` · `:436` → `:434` · `MessageApiOutboundDeadlineCapGateTest.java:383` → `:381` | 合并收口执行者 |
+| `docs/Worktree.md:1077` | `MessageRpcOutboundDeadlineCapGateTest.java:427` → `:425` · `:436` → `:434` · `MessageApiOutboundDeadlineCapGateTest.java:383` → `:381` | 合并收口执行者 |
 | `docs/DRIFT/_cross/grading/W29.md:3` · `W30.md:3` | `LikeA9GrpcSpanEndToEndTest.java:291` → `:290` · `:314` → `:313` | 合并收口执行者 |
 | `docs/DRIFT/_cross/grading/W5.md:18` | `GoStyleGrpcClientBreakerE2ETest.java:123` → `:122` | 合并收口执行者 |
 | `docs/DRIFT/global/vs-common.md`（多处） | `GoStyleGrpcClientBreakerE2ETest.java:43` → `:42` · `:247` → `:246` · `LikeA9GrpcSpanEndToEndTest.java:291` → `:290` | G4（共享层面） |

@@ -3007,7 +3007,7 @@ span 状态恒为 **`Unset`** ⇒ ⇒ **RAG 侧多置一个 `ERROR`** 就是**�
 **七、G4 转派单前提的一处订正（我自己核的）**
 
 - 转派单写「调整 `UserDomainServiceDeadlineTest` 的 `GUARDED` 清单（logout 出列）」⇒ ⇒ **该类全仓不存在**（`find` + 全仓 grep 只在 `docs/DRIFT/global/vs-common.md` 里出现过这个名字）⇒ ⇒ **user 域没有 GUARDED 清单** ⇒ ⇒ **无清单可调**
-- ⇒ ⇒ 真正受影响的是 **admin 域** `AdminDomainServiceDeadlineTest:26` 那句「`UserDomainService` 实有 **11 处** `checkDeadline()`」⇒ ⇒ 撤掉 logout 那处后是 **10 处** ⇒ ⇒ 已就地订正（**行数 148 → 148 不变** —— 该文件有共享面指针 `global/vs-common.md:5460` 引的 `:41-42` 与 `docs/Worktree.md:587` 引的 `:41-43`）
+- ⇒ ⇒ 真正受影响的是 **admin 域** `AdminDomainServiceDeadlineTest:26` 那句「`UserDomainService` 实有 **11 处** `checkDeadline()`」⇒ ⇒ 撤掉 logout 那处后是 **10 处** ⇒ ⇒ 已就地订正（**行数 148 → 148 不变** —— 该文件有共享面指针 `global/vs-common.md:5460` 引的 `:41-42` 与 `docs/Worktree.md:588` 引的 `:41-43`）
 
 ---
 
