@@ -6641,13 +6641,25 @@ like-api / task-api）其实也自算 cap**（`Math.min(DEFAULT_CALL_TIMEOUT_MIL
 | 变异 **M3**（新建只读共享层参数的域侧文件 = 正确终态） | ✅ **豁免**（合法形态不判红） |
 | 变异 **M4**（把一个已登记点位修好 ⇒ 例外失效） | 🔴 **精确转红**并提示「请把对应条目从 `KNOWN_INLINE_CAP_CALL_SITES` 里剪掉」 |
 
-**五、⚠️ 与 G1 的 `6d04dc19` 的联动（窗口期，须登记）**
+**五、⚠️ 与 G1 的 `6d04dc19` 的联动（窗口期 · 🆕 本层已实测验证）**
 
 ⚠️ **G1 的 `6d04dc19`（**未入主干**）会删掉 follow-rpc / user-api / admin-api 三处私有副本**
 ⇒ ⇒ 那 3 个点位**会从例外集里消失** ⇒ ⇒ **本守门会报「例外已失效」并红** ⇒ ⇒
-⇒ **这不是缺陷，是棘轮在正常工作**（提示「这 3 条可以剪了」）⇒ ⇒
+⇒ **这不是缺陷，是棘轮在正常工作**（提示「这些点位可以剪了」）⇒ ⇒
 ⚠️ **但落码窗口内会有一段时间红** ⇒ ⇒ **剪例外的时机需与收口执行者 / G1 约定** ⇒ ⇒
-**本层建议**：等 `6d04dc19` 入主干后**一并剪**这 3 条（避免两次红）。
+**本层建议**：等 `6d04dc19` 入主干后**一并剪**（避免两次红）。
+
+🆕 **【2026-10-31 补层 · 本层已把「剪除」这件事实测过一遍 ⇒ 落地时不必再试错】**
+⇒ ⇒ **方法**：在本工作树里**临时**把那三处文件替换成 `6d04dc19` 后的版本（= 预演「落地态」）⇒ ⇒ 跑守门 ⇒ ⇒ 再跑一遍剪除版 ⇒ ⇒ 最后 `git checkout` 还原 ⇒ ⇒ **全过程只读验证、零落码**。
+⇒ ⇒ **实测①（预演落地态 · 未剪）**：守门报的「例外已失效」**恰为 5 条**（与预判逐条相等 ⇒ ⇒ **无意外**）：
+· `follow/follow-rpc/.../client/UserRpcClient.java:withDeadlineAfter(capNanos, java.util.concurrent.TimeUnit.NANOSECONDS);`
+· `users/user/user-api/.../client/UserRpcClient.java:withDeadlineAfter(1L, java.util.concurrent.TimeUnit.NANOSECONDS);`
+· `users/user/user-api/.../client/UserRpcClient.java:withDeadlineAfter(Math.min(remainingNanos, capNanos), java.util.concurrent.TimeUnit.NANOSECONDS);`
+· `users/admin/admin-api/.../client/AdminRpcClient.java:withDeadlineAfter(1L, java.util.concurrent.TimeUnit.NANOSECONDS);`
+· `users/admin/admin-api/.../client/AdminRpcClient.java:withDeadlineAfter(Math.min(remainingNanos, capNanos), java.util.concurrent.TimeUnit.NANOSECONDS);`
+⇒ ⇒ ⚠️ **是 5 条不是 3 条**（3 个**文件** × 各自的调用点：follow-rpc 1 + user-api 2 + admin-api 2）⇒ ⇒ **按文件剪会漏** ⇒ ⇒ **必须按点位剪**（这正是本层选点位级的原因）。
+⇒ ⇒ **实测②（预演落地态 · 已剪那 5 条）**：守门 **转绿** ✅ ⇒ ⇒ **剪除动作本身已验证可用**。
+⇒ ⇒ **实测③（当前树 · 已剪那 5 条）**：守门 **报「新增违规」红** ⇒ ⇒ ⇒ **剪除**必须**与 `6d04dc19` 落地同一时刻**做 ⇒ ⇒ ⇒ **本层不在 `6d04dc19` 落地前提交剪除版**（那会让主线红一次）⇒ ⇒ ⇒ **本层已把剪除回滚**，当前树保持绿 ⇒ ⇒ **落地时只需剪那 5 条点位即可**。
 
 **六、本轮的诚实边界（四条）**
 
@@ -6657,3 +6669,38 @@ like-api / task-api）其实也自算 cap**（`Math.min(DEFAULT_CALL_TIMEOUT_MIL
 3. **本轮零生产代码改动**（只改共享层**测试**）⇒ ⇒ **不影响任何域侧** ⇒ ⇒ **不需要升级为全量回归波**。
 4. **例外集里那 5 处 api 侧「合法传播但自带域侧私有 cap」** ⇒ ⇒ 它们**当前是绿的**（登记为例外）
    ⇒ ⇒ **但它们终态也应改读共享层参数** ⇒ ⇒ 本层**不代改**（域侧写权）⇒ ⇒ 登记在此，**不外推**为「它们已对齐」。
+
+### §4.19.28 · 第二十四次订正轮次（2026-10-31 · G4 lane）—— **devh `discovery://` 全局 resolver 的「上下文依赖」评估（共享层面）**
+
+> **触发**：G1 回执里的一条共享层观察（「同一套 Spring 机制在**不同上下文**里在位情况不同 ⇒ 『机制在本仓存在』≠『在本上下文生效』」）⇒ ⇒ 本层就**共享层写权面**独立复核。
+
+**一、观察本体（G1 转述，本层独立复核）**
+
+⇒ ⇒ devh `GrpcDiscoveryClientAutoConfiguration:29` ＝ `@ConditionalOnBean(DiscoveryClient.class)` ⇒ ⇒ **该条件按上下文的自动配置处理顺序命中与否会变** ⇒ ⇒ 命中时它的 provider（`priority()` = 6，高于 gRPC 自带 DNS resolver 的 5）注册进**进程级全局** `NameResolverRegistry` ⇒ ⇒ **任何无 scheme 的 channel target 都被接管**（把 `127.0.0.1:port` 当服务名去服务发现查 ⇒ `UNAVAILABLE`）。
+⇒ ⇒ G1 实测：**user-api 侧**（关掉 Nacos ⇒ 回落 `SimpleDiscoveryClient`）**命中** ⇒ ⇒ 真被接管；**user-rpc / admin-rpc 侧**（Nacos 开着）**未命中** ⇒ ⇒ 当前不被接管。
+
+**二、本层对共享层的评估结论（**当前生产影响面 = 零**）**
+
+| 项 | 本层实测 | 结论 |
+|---|---|---|
+| 共享层生产代码里的建 channel 点 | `grep -rn "ManagedChannelBuilder\|NettyChannelBuilder\|forTarget\|forAddress" service/common/src/main service/users/users-common/src/main` ⇒ **零命中** | ⇒ ⇒ **共享层生产代码不建 channel** ⇒ ⇒ **接管面在共享层 = 0** |
+| 全仓生产代码的 `forAddress(` | **零命中** | ⇒ ⇒ **裸 target 在生产代码里已清空** ⇒ ⇒ 接管面**当前无生产影响面** |
+| 全仓 `forAddress(` 的剩余位置 | **9 处，全部在 `src/test/**`**（comment-rpc / users-admin / users-user / users-user-api / hot-rpc / hot-api 的测试类） | ⇒ ⇒ **域侧测试面**（各域 lane）⇒ ⇒ **不归本层** |
+| 共享层里 `discovery://` 的出现 | 只有 `GoStyleGrpcClientBreakerInterceptor.java:176` / `:282` 的**注释**（说明 devh 的 scheme 形态） | ⇒ ⇒ **无代码依赖** ⇒ ⇒ 不构成耦合 |
+
+⇒ ⇒ **结论：这条观察对共享层当前 = 零生产影响面** ⇒ ⇒ **本层不需要为此落码** ⇒ ⇒ **登记，不开单**。
+
+**三、⚠️ 但这条观察揭示的「失效面」要写清（**这才是它值得登记的原因**）
+
+⇒ ⇒ **接管面 = 「无 scheme 的 channel target」** ⇒ ⇒ ⇒ **它不挑域、不挑模块** ⇒ ⇒ ⇒ **谁哪天写一个 `forAddress(...)`（生产代码）⇒ ⇒ 谁就在自己的上下文里踩坑** ⇒ ⇒ ⇒ **而且踩不踩取决于「那个上下文有没有 `DiscoveryClient` bean」** ⇒ ⇒ ⇒ **同一份代码在不同上下文结论相反** ⇒ ⇒ ⇒ ⇒ **这是 AGENTS.md §3.3「机制必须验证实际生效」的第三种形态**：
+⚠️ **不是「依赖在不在」（那个是必要条件）· 也不是「Bean 在不在」（那个是另一层）· 而是「**自动配置条件在**这个**上下文**里**命不命中**」** ⇒ ⇒ ⇒ ⇒ **必须按上下文实测，不能跨上下文外推**。
+
+⇒ ⇒ **本层已做的防御（在本层写权面内）**：
+① 共享层那处唯一的手搓 channel（`GoStyleGrpcClientBreakerTargetKeyTest.java:226`）已在 `36f838b5` 改成**显式 `dns:///` target** ⇒ ⇒ **不依赖任何全局 resolver** ⇒ ⇒ ⇒ **该测试在任何上下文都稳定**；
+② 全仓生产代码 `forAddress(` 零命中 ⇒ ⇒ **接管面在生产代码里为零** ⇒ ⇒ ⇒ **当前不需要额外守门**（⚠️ **若日后有人写回 `forAddress(` ⇒ ⇒ 那个域需要自己核「它的上下文有没有 `DiscoveryClient`」** ⇒ ⇒ **本层建议记一条「生产代码禁 `forAddress(`」的守门，落在共享层 —— 但那会扫全仓 ⇒ ⇒ ⇒ 属**收口执行者**的 `tools/**` 面** ⇒ ⇒ ⇒ **本层不落，只登记**）。
+
+**四、本轮的诚实边界（三条）**
+
+1. **本节是源码级 + grep 级证据（E1）** ⇒ ⇒ **没有起真进程验证「某上下文里 `NameResolverRegistry` 的默认 scheme 是不是 `discovery`** ⇒ ⇒ ⇒ **本层未做该运行期实测**（G1 的实测是**他域**上下文 ⇒ ⇒ ⇒ **不得外推成「共享层也测过了」**）。
+2. **「共享层生产代码不建 channel」这个结论只对**当前**代码成立** ⇒ ⇒ ⇒ **日后任何一处新增建 channel 点 ⇒ ⇒ 本结论即失效** ⇒ ⇒ ⇒ **需重核**。
+3. **本轮零代码改动**（只改台账）⇒ ⇒ **不需要新的批准** ⇒ ⇒ **不需要升级为全量回归波**。
