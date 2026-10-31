@@ -121,31 +121,6 @@ FIX_HINT = (
 #    ⇒ 它同时是「匹配键」与「人类可读的豁免对象」
 # ⚠️ 修好一处就删一条 ⇒ 否则触发 `E2`（例外已失效）
 EXCEPTIONS: dict[str, list[tuple[str, str]]] = {
-    "service/comment/comment-rpc/src/test/java/com/rag/comment/comment/rpc/client/"
-    "CommentOutboundDeadlineCarrierGateTest.java": [
-        (
-            'channel = ManagedChannelBuilder.forAddress("127.0.0.1", port)'
-            ".usePlaintext().build();",
-            "G3 lane 已在本域分支自修为 forTarget(\"dns:///\")（2026-10-31）"
-            "⇒ 待其分支合入主干后删本条。",
-        ),
-    ],
-    "service/hot/hot-rpc/src/test/java/com/rag/hot/hot/rpc/HotRpcFailurePathMatrixTest.java": [
-        (
-            'channel = ManagedChannelBuilder.forAddress("127.0.0.1", port)'
-            ".usePlaintext().build();",
-            "G3 lane 已在本域分支自修为 forTarget(\"dns:///\")（2026-10-31）"
-            "⇒ 待其分支合入主干后删本条。",
-        ),
-    ],
-    "service/hot/hot-api/src/test/java/com/rag/hot/hot/api/client/CapturingClientInterceptor.java": [
-        (
-            'return ManagedChannelBuilder.forAddress("127.0.0.1", 1).usePlaintext().build();',
-            "该 channel **从不被真正使用**（同文件 javadoc 自证：调用被自带拦截器截断；"
-            "唯一使用点 ArticleRpcClientTest:43）⇒ resolver 被接管也无害 ⇒ 属惰性点；"
-            "待 G3 判定是否顺手改成 forTarget，改完删本条。",
-        ),
-    ],
     "service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/"
     "AdminRpcLogoutClientVisibleGrpcStatusTest.java": [
         (

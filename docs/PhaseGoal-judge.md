@@ -119,15 +119,15 @@
 | 域 | 组件 | Go 原件（真源） | RAG 实现 | main/LOC | tests |
 |---|---|---|---|---|---|
 | `article` | `article-api` | `service/article/api/internal/handler/routes.go` + `internal/logic/`（7 handler） | `service/article/article-api/`（`controller/ArticleController.java`） | 43 / 5,470 | 133 |
-| `article` | `article-rpc` | `service/article/rpc/internal/logic/` + `internal/svc/`（6 rpc） | `service/article/article-rpc/`（`impl/ArticleServiceGrpcImpl.java`） | 39 / 8,737 | 190 |
+| `article` | `article-rpc` | `service/article/rpc/internal/logic/` + `internal/svc/`（6 rpc） | `service/article/article-rpc/`（`impl/ArticleServiceGrpcImpl.java`） | 39 / 8,737 | 198 |
 | `article` | `article-common` | `service/article/common/errmsg/errmsg.go`（45 行） | `service/article/article-common/…/errmsg/ErrorCode.java` | 1 / 257 | 15 |
 | `article` | `article-proto` | `proto/article.proto` | `service/article/article-proto/src/main/proto/article.proto` | —（生成） | 0 |
 | `comment` | `comment-api` | `service/comment/api/internal/handler/routes.go` + `internal/logic/`（7） | `service/comment/comment-api/`（`controller/CommentController.java`） | 37 / 3,479 | 62 |
-| `comment` | `comment-rpc` | `service/comment/rpc/internal/logic/`（7） | `service/comment/comment-rpc/`（`impl/CommentServiceGrpcImpl.java`） | 43 / 8,656 | 140 |
+| `comment` | `comment-rpc` | `service/comment/rpc/internal/logic/`（7） | `service/comment/comment-rpc/`（`impl/CommentServiceGrpcImpl.java`） | 43 / 8,656 | 146 |
 | `comment` | `comment-common` | `service/comment/common/errmsg/errmsg.go` | `service/comment/comment-common/…/errmsg/`（4 类） | 4 / 567 | 27 |
 | `comment` | `comment-proto` | `proto/comment.proto`（245 行） | `service/comment/comment-proto/src/main/proto/comment.proto` | —（生成） | 0 |
 | `favorite` | `favorite-api` | `service/favorite/api/internal/handler/routes.go` + `internal/logic/`（7） | `service/favorite/favorite-api/`（`controller/`） | 36 / 3,885 | 155 |
-| `favorite` | `favorite-rpc` | `service/favorite/rpc/internal/logic/`（7） | `service/favorite/favorite-rpc/`（`impl/FavoriteServiceGrpcImpl.java`） | 36 / 7,950 | 135 |
+| `favorite` | `favorite-rpc` | `service/favorite/rpc/internal/logic/`（7） | `service/favorite/favorite-rpc/`（`impl/FavoriteServiceGrpcImpl.java`） | 36 / 7,950 | 143 |
 | `favorite` | `favorite-common` | `service/favorite/common/errmsg.go` | `service/favorite/favorite-common/…/errmsg/`（4 类） | 4 / 875 | 29 |
 | `favorite` | `favorite-proto` | `proto/favorite.proto`（107 行） | `service/favorite/favorite-proto/src/main/proto/favorite.proto` | —（生成） | 0 |
 | `follow` | `follow-api` | `service/follow/api/internal/handler/routes.go` + `internal/logic/`（8） | `service/follow/follow-api/`（`controller/FollowController.java`） | 31 / 3,585 | 96 |
