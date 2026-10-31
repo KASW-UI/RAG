@@ -6795,9 +6795,9 @@ like-api / task-api）其实也自算 cap**（`Math.min(DEFAULT_CALL_TIMEOUT_MIL
 | 派生层 `source` 指针 | 仍指 `DRIFT/global/vs-common.md:3846` / `:3847` ⇒ ⇒ 实测那两行**仍是** `B-10` / `B-11` 行 ⇒ 指针**有效** |
 | §4.19.29 是否已入主干 | **已入** ⇒ ⇒ **内容坐标法**复核：主干与本分支的 `vs-common.md` **逐字节一致**、`§4.19.29` 命中 1 次 ⇒ ⇒ **不需要另叠一次** |
 
-**四、🔴 一处跨域归属订正：api 侧内联 cap 点位从 5 处变 7 处，且 `task-api` 归 G2**
+**四、🔴 一处跨域归属订正：api 侧内联 cap 点位从 5 处变 7 处，且 `task-api` 归 G2**　【**2026-10-31 补记 · 合并收口执行者代 G4 落账**：**本节 = 当时的快照** ⇒ ⇒ **现行态 = 终态 1 条**（7 个点位里 **6 条已收敛完毕** · 只留 `article-api` 1 条）⇒ ⇒ **权威现状读 §4.19.49 第一节** ⇒ ⇒ 本节原始措辞**一字未改**（保留为「当时」的完整记录）】
 
-⚠️ **§4.19.27 记的「api 侧 5 处」已是旧数** ⇒ ⇒ 本轮实测**当前例外集 = 7 个点位 / 6 个文件 / 5 个域** ⇒ ⇒ 差在 **favorite-api 的 2 个点位**（G3 合入时新增）。
+⚠️ **§4.19.27 记的「api 侧 5 处」已是旧数** ⇒ ⇒ 本轮实测**当前例外集 = 7 个点位 / 6 个文件 / 5 个域** ⇒ ⇒ 差在 **favorite-api 的 2 个点位**（G3 合入时新增）。　【**2026-10-31 补记 · 合并收口执行者代 G4 落账**：这句的「当前例外集 = 7 个点位」= **当时的读数** ⇒ ⇒ **现已剪到 1 条**（`7 → 3 → 1`）⇒ ⇒ **本表 7 行里有 6 行已成历史** ⇒ ⇒ ⚠️ **别按本表的行号去定位现行代码**（那些是**历史取证坐标**，与 §4.19.31 第三节那批旧指针同族）⇒ ⇒ 逐条收敛坐标见 §4.19.49】
 
 | 点位 | 文件 | **cap 来源（本层实测）** | 形态 | 归谁 |
 |---|---|---|---|---|
@@ -6824,9 +6824,9 @@ like-api / task-api）其实也自算 cap**（`Math.min(DEFAULT_CALL_TIMEOUT_MIL
 2. **§4.19.26 第三节的三处「待办」本轮只标为当时的快照，没有删改其原始措辞** ⇒ ⇒ 那一节仍是「当时」的完整记录 ⇒ ⇒ **现在的权威现状读本节第三节的表**。
 3. **`W3.md` / `_lanes.json` / 派生层产物都在本层写权面之外** ⇒ ⇒ 本层**只读复核 + 转派** ⇒ ⇒ 本轮**没有**改这三个文件中的任何一个 ⇒ ⇒ **若后续再有域改 §4.11.5 的 B 组行，同样的矛盾会重演** ⇒ ⇒ 那时按本节同一口径重走一遍（登记 + 转派，不代改）。
 
-**六、🔴 按「组件内各出向方向的 Go 真值」再分类：7 条 = 6 条可收敛 ＋ 1 条不可收敛**
+**六、🔴 按「组件内各出向方向的 Go 真值」再分类：7 条 = 6 条可收敛 ＋ 1 条不可收敛**　【**2026-10-31 补记 · 合并收口执行者代 G4 落账**：**本节 = 当时的快照**（当时「6 条可收敛」还**待执行**）⇒ ⇒ **现行态 = 6 条已全部收敛完毕**（且本节表的「组件级 cap 现状」列**也已过期** —— comment-api / hot-api / favorite-api **现已配 `cap-millis=2000`**）⇒ ⇒ **「不可收敛 1 条」= 终态保留项** ⇒ ⇒ 权威现状读 §4.19.49】
 
-⚠️ **§四 那句「7 个点位的收敛要各域自己提」要按本节收窄** —— ⇒ **不是 7 条都能收敛** ⇒ ⇒
+⚠️ **§四 那句「7 个点位的收敛要各域自己提」要按本节收窄** —— ⇒ **不是 7 条都能收敛** ⇒ ⇒　【**2026-10-31 补记 · 合并收口执行者代 G4 落账**：这句收窄**至今成立、且现在更严** ⇒ ⇒ **6 条已收敛**（不是「等各域自己提」⇒ ⇒ 是**各域已落码 + 本面代 G4 剪例外**）⇒ ⇒ **只剩 1 条保留**（`article-api`）】
 **判据 = 「同一组件内，各出向方向的 Go 真值是否相同」**（**不是**「方向个数」）：
 **真值相同 ⇒ 组件级 cap 表达得了 ⇒ 域侧内联是多余副本 ⇒ 可收敛**；
 **真值不同 ⇒ 组件级 cap 表达不了 ⇒ 域侧 per-direction 内联是**必需的** ⇒ ⇒ 不可收敛**。
@@ -7955,3 +7955,63 @@ G1 回执五件事：① 判据② 销账确认；② **`:50` 与 `:75` 是两�
 ⇒ ⇒ `scan_users_common_classes()`（§1.3 `users-common` 逐类跨域引用）**同样只认 `^import` 行** ⇒ ⇒ **同一种全限定名盲区** ⇒ ⇒ ⚠️ 本轮**未动**（口径统一要单独设计：改它会动 §1.3 的快照与分桶 ⇒ ⇒ 范围控制）⇒ ⇒ **登记待办**。
 
 （**本节编号：§4.19.48** —— §4.19.44 留给 G4 lane · §4.19.45~47 = 本面 ⇒ ⇒ **无撞号**。）
+
+### §4.19.49 · 第四十四次订正轮次（2026-10-31 · 合并收口执行者代 G4 lane 落码）—— **§4.19.30 第四节 / 第六节的现行态落账（7 个点位 → 终态 1 条）** ＋ **共享层 Redis deadline 判据的 A/B 双变异实测（G3 lane 请求）** ＋ **「死配置转告各域 yml 面」核销 = 零处需转告**
+
+**一 · §4.19.30 第四 / 六节 = 当时的快照 ⇒ ⇒ 现行态（本层独立复核 · 不采信台账转述）**
+
+| # | 域 / 点位 | 当时的形态（§4.19.30 第四节） | **本层实测的现行态**（代码态） | 收敛动作 commit |
+|---|---|---|---|---|
+| 1 | `comment-api` `CommentRpcClient` | 域侧私有常量 `DEFAULT_CALL_TIMEOUT_MILLIS = 2000L` | 内联 `withDeadlineAfter` = **0** · yml `:167` 已配 `cap-millis=${COMMENT_API_OUTBOUND_DEADLINE_CAP_MILLIS:2000}` | `049ffb66`（域侧）＋ `3aa9accd`（**同一次 merge commit 里剪例外** ⇒ 零红窗） |
+| 2 | `hot-api` `GoStyleGrpcCallDeadline` | 域侧私有常量 `DEFAULT_CALL_TIMEOUT_MILLIS = 2000L` | ⚠️ 源码仍有 **2 处** `withDeadlineAfter`（`:23` / `:25`）⇒ ⇒ **但两处都不是私有 cap**：`:23` = 预算耗尽给 1ns · `:25` = **传播入向剩余预算** ⇒ ⇒ 私有 2s 常量**已删** · yml `:168` 已配 `cap-millis=2000` | 同上 |
+| 3 | `favorite-api` `FavoriteRpcClient`（**2 个点位** · 同一个常量） | 域侧私有常量 `CLIENT_TIMEOUT_MILLIS = 2000L` | 内联 = **0** · yml `:197` 已配 | 同上（§四 那条「**两条例外必须同一次提交剪**」**已满足**） |
+| 4 | `like-api` `LikeRpcClient` | **域侧私有配置**（7 条里唯一不是常量的一条：`properties.getLikeRpc().getTimeout()`） | 内联 = **0** · yml `:174` 已配 | `3c0d9887`（配 cap-millis）＋ `4b7b3a9c`（删内联） |
+| 5 | `task-api` `TaskRpcClient` | 域侧私有常量 `DEFAULT_CALL_TIMEOUT_MILLIS = 2000L` | 内联 = **0** · yml `:262` 已配 | 同上 |
+| 6 | **`article-api` `UserRpcClient`** | 域侧私有常量 `CLIENT_TIMEOUT_MILLIS = 2000L` | **未收敛（刻意保留）** ⇒ 内联仍在 `service/article/article-api/src/main/java/com/rag/article/article/api/client/UserRpcClient.java:26`（`withDeadlineAfter(effective, TimeUnit.MILLISECONDS)`）⇒ ⇒ **例外集唯一一条 ⇒ 不许剪** | — |
+
+⇒ ⇒ **终态 = 6 条已收敛 ＋ 1 条保留**（例外集 `7 → 3 → 1`）⇒ ⇒ 与 §4.19.42 第一节的读数**一致**。
+
+⚠️ **第六节那张表的「组件级 cap 现状」列也已过期** ⇒ ⇒ 本层实测（逐组件扫 `rag.protection.outbound-deadline` 段 · 代码态 · 全仓 **19 个有 `application.yml` 的组件**）：
+
+| 形态 | 组件 | 读数 |
+|---|---|---|
+| **已配 `cap-millis`** | **15 个** | api 侧 **9 个**（全部 `${…_OUTBOUND_DEADLINE_CAP_MILLIS:2000}` 形态）· rpc 侧 **6 个**（`article-rpc` / `comment-rpc` / `favorite-rpc` = 字面量 `2000` · `follow-rpc` / `like-rpc` / `message-rpc` = `${…:2000}`） |
+| **未配** | **4 个** | `article-api`（**刻意** —— 组件内两方向 Go 真值不同：article-rpc = **70000** 显式 / user-rpc = **2000** 默认 ⇒ ⇒ 组件级单值**表达不了** ⇒ ⇒ 配 2000 = 把 article-rpc 方向**改严 35 倍** ⇒ ⇒ **G3 已在该域 yml `:201` 起留了「刻意【不配】」的整段注释**）· `hot-rpc` · `task-rpc` · `admin-rpc`（这三个**零出向注入点**（代码态 `@GrpcClient` 命中 = 0）⇒ ⇒ **不配是对的**） |
+
+⇒ ⇒ ⇒ **第六节那条「`article-api` 绝不能配 `cap-millis=2000`」的警告至今成立、仍然有效** ⇒ ⇒ **本面不代改**（域面写权 = G3）。
+
+⚠️ **一条必须写清的边界（本节只「标快照」，不改原始措辞）**：第四节 / 第六节的**原始措辞一字未改** ⇒ ⇒ 那两节仍是「当时」的完整记录 ⇒ ⇒ **现在的权威现状读本节**；且 ⚠️ **第四节表里的域侧行号（如 `article-api` `:58` `CLIENT_TIMEOUT_MILLIS = 2000L`）= 历史取证坐标**（那些常量行现已不存在或已被 `effective` 取代）⇒ ⇒ **不是活指针** ⇒ ⇒ 与 §4.19.31 第三节那批「原写当时成立、事后位移 / 删除」的旧指针**同族** ⇒ ⇒ **别按它们去定位现行代码**。
+
+**二 · 共享层 Redis deadline 判据的 A/B 双变异实测（G3 lane 请求 · 落点 `service/common/**` = G4 写权面 ⇒ G4 停摆 ⇒ 本面代落）**
+
+⚠️ **为什么必须做**：「跑绿」**证明不了**「绿是因为真没违规」还是「绿是因为判据没扫到东西」⇒ ⇒ 两者**读数一模一样** ⇒ ⇒ 必须靠变异把判据**逼红一次**才能分辨（与 §4.19.41 第五节同一纪律）。
+
+| 项 | 值 |
+|---|---|
+| 靶点 A（**装配面**） | `service/common/src/main/java/com/rag/common/redis/GoStyleRedisDeadlineAutoConfiguration.java`（BPP 包装 `template.setConnectionFactory(...)`） |
+| 靶点 B（**行为面**） | `service/common/src/main/java/com/rag/common/redis/GoStyleRedisDeadlineConnection.java`（每命令 `GoStyleRedisDeadline.assertNotExhausted(method.getName())`） |
+| 基线 | `GoStyleRedisDeadline*` 三门 = **12 条 / 0F / 0E / 0S**（含真 Redis 那道） |
+
+| 变异 | 预期 | **实测** | 阴性对照（**必须仍绿**） |
+|---|---|---|---|
+| **A** · 拆 BPP 包装（`template.setConnectionFactory(new GoStyleRedisDeadlineConnectionFactory(current, enabled))` 换注释） | 装配面转红 | ✅ **精确转红**：`GoStyleRedisDeadlineGateTest.connectionFactoryIsWrapped`（判据① 装配面）· `exhaustedBudgetBlocksTheCommand` · `GoStyleRedisDeadlineRealLettuceGateTest.bootTemplatesAreWrapped` / `exhaustedBudgetBlocksBeforeAnyConnectionAttempt` / `delegateIsTheRealLettuceFactory`（ClassCastException） | ✅ `LiveRedisWriteFaceGateTest` **3/3 仍绿** ⇒ ⇒ 变异**只**打在被测性质上 |
+| **B** · 拆每命令检查（`GoStyleRedisDeadline.assertNotExhausted(method.getName())` 换注释） | 行为面转红 | ✅ **精确转红**：`GoStyleRedisDeadlineLiveRedisWriteFaceGateTest.exhaustedBudgetBlocksCommandOnAlreadyEstablishedConnection`（**1 红 / 3**） | ✅ 静态门 **4/4** 与真 Lettuce 门 **5/5** 仍绿 ⇒ ⇒ **装配面与行为面正交** |
+
+⇒ ⇒ **结论（本节最有价值的一条）**：**形态面判据与行为面判据互补、不能互相替代** —— 拆 BPP ⇒ **只**装配面红（行为面仍绿）· 拆每命令检查 ⇒ **只**行为面红（形态面仍绿）⇒ ⇒ ⇒ **只测一面对 ⇒ 另一面可无限退化而不被发现** ⇒ ⇒ **两面都必须有**。
+⇒ ⇒ **还原**：两个靶点文件**逐字节还原**（sha 校验通过 · `git status service/common` **零输出**）⇒ ⇒ 主干净净。
+⚠️ **两条纪律**：① 变异测试**必须带 `-am`**（`mvn -pl service/common` 不带 `-am` ⇒ 会用旧的 common jar ⇒ ⇒ **测的不是当前代码**）；② **绝不与别的 lane 的 mvn 并发**。
+
+**三 · 「`spring.grpc.client.*.deadline` 死配置需转告各域 yml 面」⇒ ⇒ 本层核销 = 零处需转告**
+
+- **死配置的形态**：devh `grpc-client-spring-boot-starter 3.1.0.RELEASE` 的客户端属性**只有** `net.devh.boot.grpc.client.channels.*`（keepalive / negotiation / shutdown）⇒ ⇒ **根本没有 per-client deadline 这个旋钮** ⇒ ⇒ yml 里写的 `deadline:` **不生效**（AGENTS.md §3.3.1 的典型形态 —— **反向版**：「**配置里写了」也不等于「生效」**）。
+- **本层全量实测**（代码态 = 剥注释 + 剥字符串字面量 · 扫全仓 `service/**/src/main/resources` 下 **20 个源 yml/yaml**）：`deadline` 键（排除 `outbound-deadline` 与 `cap-millis`）**全仓共 2 处** ⇒ ⇒ **全在 `service/article/article-rpc/src/main/resources/application.yml`**：
+
+| 位置 | 键 | Go 侧真值 | 该方向现状 |
+|---|---|---|---|
+| `:277` | `security-rpc.deadline: 10s` | `SecurityConf.Timeout = 10000`（显式） | 该方向**零真实注入点**（`@GrpcClient("security-rpc")` 整行在注释里）⇒ ⇒ **当前不可观测** |
+| `:293` | `message-rpc.deadline: 2s` | Go 侧无显式 ⇒ 走 `zrpc/config.go:31` 默认 **2000** | 真实生效的上界 = 共享层组件级 `cap-millis`（`article-rpc` 已配 `2000`） |
+
+⇒ ⇒ **两处都已就地标注「本键不生效」**（该 yml `:265-270` 有整段「死配置」实测说明）⇒ ⇒ **其余 18 个组件零死配置** ⇒ ⇒ ⇒ **无「转告各域 yml 面」的必要** ⇒ ⇒ **本项核销**。
+⚠️ **保留一条登记**：**那 2 行死配置本身仍在 yml 里** ⇒ ⇒ 删它属**域面写权**（G3）且**不是缺陷**（注释已写清「对应 Go 真值、但本键不生效」）⇒ ⇒ **本面不代改** ⇒ ⇒ 若 G3 清理，须**同一次提交**更新那段注释（否则注释会指向不存在的键）。
+
+（**本节编号：§4.19.49** —— §4.19.44 留给 G4 lane · §4.19.45~48 = 本面 ⇒ ⇒ **无撞号**；本节**追加在文件末尾** ⇒ ⇒ **零位移** ⇒ ⇒ 任何指向 `vs-common.md` 的行号指针**不受影响**。）

@@ -896,3 +896,62 @@ git merge-base --is-ancestor align/g4-service-common do-my-own-gh && echo "已�
   ⇒ ⇒ **没碰 `service/common`** ⇒ ⇒ 两头都指向环境。
 - ⚠️ 顺带订正一处**形态差异**：G3 报的「跨 lane 并发抢**固定端口**」与本例**不同** —— 该测试用 `ServerBuilder.forPort(0)`（**临时端口**）
   ⇒ ⇒ **两者不是同一形态** ⇒ ⇒ 「端口冲突」这句话要分形态说（固定端口 vs 临时端口被抢占）。
+
+## 九、M-24：§4.19.30 第四 / 六节的现行态落账（代 G4）＋ 共享层 Redis deadline 判据的 A/B 双变异实测 ＋ 「死配置转告各域 yml 面」核销（2026-10-31 · 合并收口执行者）
+
+### ① 为什么这轮由本面代 G4 落码
+
+- `docs/DRIFT/global/vs-common.md` ＋ `service/common/**` = **G4 写权面** ⇒ ⇒ G4 lane **停摆中**
+  （工作树 `align/g4-ledger-close` 自 16:22 起无新提交、无文件写入 ⇒ 判据 = **产物最后写入时间**，不看会话状态字段）
+  ⇒ ⇒ 本面在**其写权面内**代落 ⇒ ⇒ **commit message 注明原因**（§5.3b-0 / §5.3e「代落码须注明原因」）。
+- 本轮落的是**台账落账 ＋ 已有产出登记**，**零行为改动**（不改任何生产代码、不改任何判据）⇒ ⇒ 不需要新的行为授权。
+
+### ② §4.19.30 第四 / 六节 = 当时的快照 ⇒ ⇒ 现行态（7 个点位 → 终态 1 条）
+
+| 点位 | 当时的形态 | **本层实测的现行态** | 收敛动作 |
+|---|---|---|---|
+| `comment-api` `CommentRpcClient` | 域侧私有常量 2000ms | 内联 `withDeadlineAfter` = **0** · yml `:167` 已配 `cap-millis` | `049ffb66` ＋ `3aa9accd` |
+| `hot-api` `GoStyleGrpcCallDeadline` | 域侧私有常量 2000ms | ⚠️ 仍有 **2 处** `withDeadlineAfter`（`:23` / `:25`）⇒ **但都不是私有 cap**（`:23` = 预算耗尽给 1ns · `:25` = **传播入向剩余预算**）⇒ 私有 2s 常量已删 · yml `:168` 已配 | 同上 |
+| `favorite-api` `FavoriteRpcClient`（**2 个点位**） | 域侧私有常量 2000ms | 内联 = **0** · yml `:197` 已配（两条**同一次提交**剪 ✔） | 同上 |
+| `like-api` `LikeRpcClient` | **域侧私有配置**（唯一不是常量的一条） | 内联 = **0** · yml `:174` 已配 | `3c0d9887` ＋ `4b7b3a9c` |
+| `task-api` `TaskRpcClient` | 域侧私有常量 2000ms | 内联 = **0** · yml `:262` 已配 | 同上 |
+| **`article-api` `UserRpcClient`** | 域侧私有常量 2000ms | **未收敛（刻意保留）** ⇒ 仍在 `.../article/api/client/UserRpcClient.java:26`（`withDeadlineAfter(effective, …)`）⇒ **例外集唯一一条 ⇒ 不许剪** | — |
+
+⇒ ⇒ **终态 = 6 条已收敛 ＋ 1 条保留**（例外集 `7 → 3 → 1`：`3aa9accd` 同批剪 4 条 ＋ `50f2d51f` 补剪 2 条）。
+⚠️ **第六节那张表的「组件级 cap 现状」列也已过期** ⇒ ⇒ 本层逐组件实测（19 个有 `application.yml` 的组件）= **15 个已配 `cap-millis`** ·
+**4 个未配** = `article-api`（**刻意** · 两方向 Go 真值 70000 / 2000 不同 ⇒ 组件级单值表达不了）· `hot-rpc` · `task-rpc` · `admin-rpc`（这三个**零出向注入点** ⇒ 不配是对的）
+⇒ ⇒ ⇒ **「`article-api` 绝不能配 `cap-millis=2000`」的警告至今成立、仍然有效**（配 2000 = 把 article-rpc 方向改严 35 倍）⇒ ⇒ 本面不代改（域面写权 = G3）。
+
+**落账方式** = **就地单行标注 4 处**（第四节标题行 / 第四节 intro / 第六节标题行 / 第六节 intro · **单行 → 单行**）
+＋ **文末追加 `§4.19.49`** ⇒ ⇒ **零位移**（`git diff --numstat` = **4 增 4 删 ＋ 60 行新增** · 7957 → 8017 行 · 前面 7957 行**逐行未动**）
+⇒ ⇒ 派生层 `--check` **PASS**（1284 数据行）· 指针棘轮 **3384 指针 · 例外 237 → 237 · 新增 0** · U+FFFD = **0** · 反斜杠计数与 HEAD 基线相等。
+
+### ③ 共享层 Redis deadline 判据的 A/B 双变异实测（G3 lane 请求 · 代 G4 落码）
+
+| 变异 | 预期 | **实测** | 阴性对照 |
+|---|---|---|---|
+| **A** · 拆 BPP 包装（`GoStyleRedisDeadlineAutoConfiguration` 的 `template.setConnectionFactory(...)` 换注释） | 装配面转红 | ✅ **精确转红**：`GoStyleRedisDeadlineGateTest.connectionFactoryIsWrapped`（判据①）· `exhaustedBudgetBlocksTheCommand` · `GoStyleRedisDeadlineRealLettuceGateTest` 的 `bootTemplatesAreWrapped` / `exhaustedBudgetBlocksBeforeAnyConnectionAttempt` / `delegateIsTheRealLettuceFactory`（ClassCastException） | ✅ `LiveRedisWriteFaceGateTest` **3/3 仍绿** |
+| **B** · 拆每命令检查（`GoStyleRedisDeadlineConnection` 的 `assertNotExhausted(method.getName())` 换注释） | 行为面转红 | ✅ **精确转红**：`GoStyleRedisDeadlineLiveRedisWriteFaceGateTest.exhaustedBudgetBlocksCommandOnAlreadyEstablishedConnection`（**1 红 / 3**） | ✅ 静态门 **4/4** 与真 Lettuce 门 **5/5** 仍绿 |
+
+⇒ ⇒ **结论（最有价值的一条）**：**形态面判据与行为面判据互补、不能互相替代** —— 拆 BPP ⇒ **只**装配面红（行为面仍绿）· 拆每命令检查 ⇒ **只**行为面红（形态面仍绿）
+⇒ ⇒ ⇒ **只测一面对 ⇒ 另一面可无限退化而不被发现** ⇒ ⇒ **两面都必须有**。
+⇒ ⇒ **还原** = 逐字节（sha 校验通过 ＋ `git status service/common` **零输出**）⇒ ⇒ 主干净净。
+⚠️ **两条纪律**：① 变异测试**必须带 `-am`**（`mvn -pl service/common` 不带 `-am` ⇒ 用旧 common jar ⇒ **测的不是当前代码**）② **绝不与别的 lane 的 mvn 并发**。
+
+### ④ 「`spring.grpc.client.*.deadline` 死配置需转告各域 yml 面」⇒ ⇒ **核销 = 零处需转告**
+
+- **形态**：devh `grpc-client-spring-boot-starter 3.1.0.RELEASE` 的客户端属性**只有** `net.devh.boot.grpc.client.channels.*` ⇒ ⇒ **没有 per-client deadline 这个旋钮** ⇒ ⇒ yml 的 `deadline:` **不生效**
+  （AGENTS.md §3.3.1 的**反向**形态：「**配置里写了**」也不等于「生效」）。
+- **本层全量实测**（代码态 = 剥注释 ＋ 剥字符串字面量 · 扫全仓 `service/**/src/main/resources` 下 **20 个源 yml/yaml**）= `deadline` 键（排除 `outbound-deadline` / `cap-millis`）**全仓共 2 处**，
+  **全在 `service/article/article-rpc/src/main/resources/application.yml`**（`:277` `security-rpc.deadline: 10s` · `:293` `message-rpc.deadline: 2s`）
+  ⇒ ⇒ **两处都已就地标注「本键不生效」**（该 yml `:265-270` 有整段实测说明）⇒ ⇒ **其余 18 个组件零死配置** ⇒ ⇒ ⇒ **无需转告**。
+- **保留登记**：那 2 行死配置本身仍在 yml 里 ⇒ ⇒ 清理属**域面写权**（G3）且**不是缺陷**（注释已写清「对应 Go 真值、但本键不生效」）⇒ ⇒ **本面不代改** ⇒ ⇒ 若 G3 清理须**同一次提交**更新那段注释。
+
+### ⑤ 🔴 本轮又踩一次「自己跑出来的输出也是转述」—— **扫描器的过滤条件把自己的匹配项吃掉了**
+
+- **现象**：第一次扫「哪些组件配了 `cap-millis`」⇒ 用了 `'cap-millis' not in l` 当「排除非目标键」的条件 ⇒ ⇒ **恰好把要统计的那一行也滤掉了**
+  ⇒ ⇒ 读数变成「`article-rpc` / `comment-rpc` / `favorite-rpc` 有 `outbound-deadline:` 段却**没有** `cap-millis`」⇒ ⇒ **结论完全反向**（真值 = **15 个已配 / 4 个未配**）。
+- **为什么没当场发现**：那个反过来的读数**看起来很合理**（与台账里「api 侧若干个未配」的旧数也能对上）⇒ ⇒ **不是靠肉眼发现的，是靠「换一条独立路径重扫」发现的**。
+- **修法**：正向扫（逐行找 `cap-millis`）与反向扫（找 `deadline` 并排除 `outbound-deadline` / `cap-millis`）**各写一套过滤条件、绝不共用**
+  ⇒ ⇒ 两次读数**互证**（正向 = 15 · 反向 = 4 未配 + 2 处死配置，合计自洽）。
+- ⇒ ⇒ **教训**：**同一套过滤条件不能同时服务「找目标」与「找非目标」** ⇒ ⇒ 正反两向读数**必须各走一条独立路径**。
