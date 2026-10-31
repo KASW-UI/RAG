@@ -9217,3 +9217,78 @@ G2 指出本层早前那条「**0 落后 / 3 领先**」的相对读数用的是
 - 本节**零产品代码改动**（仍只动台账）⇒ ⇒ 回归读数沿用 §4.19.65 第六节那套（**92 类 / 488 条 / 0F / 0E / 0S**）⇒ ⇒ **本节未重跑**。
 - 第四节的结论是「**本层这次未中招**」⇒ ⇒ 不是「结构上不会中招」。
 （**本节编号：§4.19.68** —— 为便于下文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
+
+### §4.19.69 · 第六十八次订正轮次（2026-11-01 · G4 lane）—— **例外集那 1 条剪除的前置①「运行时证据」= 已闭合（三层守门全在共享层自己面）＋ 等价性论证（算术逐项对齐）＋ 剪除形态的精确化：判据④ 是双向守恒 ⇒ 「删内联」与「剪例外」必须落在同一次提交（硬约束，非流程偏好）＋ 跨写权面 ⇒ 任何单一 lane 都做不到 ⇒ 实证先例（一个 merge commit 同时带两侧）⇒ 可执行落法**（零行位移 · 末尾追加）
+
+**一、触发**
+
+§4.19.67 第三节把「例外集那 1 条」的判定从「不可收敛 · 不许剪」改判为「技术上可剪」，并列出两条前置：① **运行时证据** · ② **与 G3 跨层同一次提交**。
+⇒ ⇒ 本节**逐条复核这两条前置**：① **已闭合**（且证据**全在共享层自己的守门里** ⇒ 本层**不需要**为剪除新写探针）；② **不是流程偏好，是守门机制决定的硬约束**，且**跨写权面 ⇒ 任何单一 lane 都做不到** ⇒ ⇒ 本节给出**有实证先例的可执行落法**。
+
+**二、前置①「运行时证据」= 已闭合（三层 · 逐条给坐标）**
+
+| 层 | 守门（**三份全在 `service/common/src/test/**` = 本层写权面**）| 它**证明**了什么 | 它**不**证明什么 |
+|---|---|---|---|
+| ① **绑定层** | `service/common/src/test/java/com/rag/common/protection/GoStyleOutboundDeadlinePerServiceBindingGateTest.java:97-122`（断言①）· `:128-140`（断言② 组件级仍为 0）· `:146-165`（断言③ 键 = 仓内真实 proto 服务全名）· `:171-185`（断言④ grpc-java 取到的服务名就是全名）| 用 Spring 自己的 `YamlPropertySourceLoader` 解析**真实生产 yml**（`service/article/article-api/src/main/resources/application.yml:214-226` · **不是**内联片段）⇒ 用 `Binder` 绑到真实 `GoStyleProtectionProperties` ⇒ ⇒ `capMillisByService` **恰好两条**、键**逐字**为 `article.ArticleService` / `user.UserService`、值 = **70000 / 2000** | 不证明「进程里真被消费」（那是②③） |
+| ② **消费层** | `.../GoStyleOutboundDeadlinePerServiceCapGateTest.java:231-261`（形态① 真在 per-service 上界处失败）· `:267-293`（形态② **负控**：没 per-service 就挂满 ⇒ 证明形态①的绿来自 per-service 本身）· `:299-327`（形态③ **证伪 min 语义** ⇒ 覆盖不是 min）· `:333-359`（形态④ 命中 ⇒ 取代；不命中 ⇒ 回落组件级）| 真 in-process gRPC 服务端 ＋ 真 devh 客户端上下文 ⇒ ⇒ **真发一次出向调用** ⇒ 命中 per-service ⇒ 在该上界处 `DEADLINE_EXCEEDED`（**不是**挂满下游）⇒ ⇒ 机制**真跑** | 不证明「各域都配了」（那是域侧 yml） |
+| ③ **装配层** | `.../GoStyleOutboundDeadlineApiAssemblyTest.java:83-92` | 用**与 api 同款**的 `scanBasePackages` 起真上下文 ⇒ 断言拦截器真进了 devh 的 `GlobalClientInterceptorRegistry` ⇒ ⇒ channel factory 会装配它 | 不证明「域侧没 exclude 掉」（那是域面） |
+
+⇒ ⇒ **三条合起来 = 「真实生产配置 ⇒ 真绑定 ⇒ 真封顶 ⇒ 真装配」全链都有运行证据** ⇒ ⇒ **前置①闭合** ⇒ ⇒ **本层不需要为剪除新写任何探针**。
+
+⚠️ **本节的诚实边界（这一格要说清）**：三层都在**共享层自己面** ⇒ ⇒ 它们证明的是**共享层这条机制**在 article-api 的**真实配置**上成立 ⇒ ⇒ **不是**「article-api 进程里」的运行证据（那要起 article-api 自己的上下文 ⇒ 域面 ⇒ G3）⇒ ⇒ 见第八节登记的域侧缺口。
+
+**三、等价性论证（剪除后行为不变）**
+
+| 项 | 域侧内联副本（**待剪**）| 共享层 per-service 覆盖（**剪除后的行为来源**）|
+|---|---|---|
+| 代码位置 | `service/article/article-api/src/main/java/com/rag/article/article/api/client/UserRpcClient.java:58`（`CLIENT_TIMEOUT_MILLIS = 2000L`）· `:82-88`（`min(remaining, 2000)`）| `service/common/src/main/java/com/rag/common/protection/GoStyleOutboundDeadlineInterceptor.java:245-286`（`effectiveCallOptions`）|
+| 算术 | `remaining < 0 ? 2000 : min(remaining, 2000)` | `budget = min(入向剩余(≥0 时), effectiveCap, 调用点自带 deadline)`；命中 per-service ⇒ `effectiveCap = perService`（**取代**组件级） |
+| user-rpc 方向的 `effectiveCap` | **2000**（写死）| **2000**（`cap-millis-by-service.user.UserService`）|
+| ⇒ 最终 deadline | `min(remaining, 2000)` | `min(remaining, 2000, 调用点自带)` ⇒ ⇒ **同形** |
+
+⇒ ⇒ **对 `user.UserService` 方向，两者给出同一个 deadline** ⇒ ⇒ 剪除内联副本**不改变该方向的出向上界** ⇒ ⇒ **行为等价成立**。
+
+⚠️ **一处差异（如实记，不藏）**：共享层比内联副本**多取一项 min** =「调用点自己声明的 deadline」⇒ ⇒ 若将来有人在 user-rpc 方向上再声明一个**更早**的 deadline ⇒ 内联副本会**覆盖**它（`CallOptions.withDeadline` 是覆盖语义 ⇒ 反而**放宽**）⇒ 共享层会**取 min**（更严）⇒ ⇒ 该情形下两者**不等价**，且**共享层是更安全的那一侧** ⇒ ⇒ **当前调用图上无此调用点**（`userRpc()` 是该方向唯一设 deadline 的入口）⇒ ⇒ **当下等价**。
+⚠️ **另一处差异**：内联副本**无条件**加约束；共享层在 `enabled=false` 时**不加** ⇒ ⇒ 但绑定层断言②已钉住 article-api 的 `outbound-deadline.enabled` **为 true** ⇒ ⇒ 同形。
+
+**四、🔴 剪除形态的精确化：判据④ 是**双向守恒** ⇒ 必须同一次提交**
+
+实测 `service/common/src/test/java/com/rag/common/protection/GoStyleClientCallTimeoutSingleSourceGateTest.java:240-266`：
+· `known = KNOWN_INLINE_CAP_CALL_SITES`（`:240`）⇒ **实际点位 − 例外集** = `unexpected`（`:242`）⇒ **新增**未登记点位 ⇒ 红；
+· **例外集 − 实际点位** = `expired`（`:256`）⇒ ⇒ **已登记点位消失** ⇒ 红（报错文案在 `:263` 直接要求「把对应条目从 `KNOWN_INLINE_CAP_CALL_SITES` 里剪掉」）。
+⇒ ⇒ **两个方向都会红** ⇒ ⇒ 「先删内联、把例外留着」**必然红窗**；「先剪例外、内联还在」**同样红** ⇒ ⇒ **「删内联」与「剪例外」必须落在同一次提交**。
+⇒ ⇒ ⚠️ **这是守门机制决定的硬约束，不是流程偏好** ⇒ ⇒ §4.19.67 第三节把它写成「流程前置」**表述不够硬** ⇒ ⇒ 本节就地**精确化**（不改原节，原节保留其当时语境）。
+
+**五、🔴 跨写权面 ⇒ 任何单一 lane 都做不到（实测白名单）**
+
+实测 `tools/difftest/check-wave-lane-ownership.py`：G3 的白名单块在 `:122`（`"g3-article-comment-favorite-hot": [`）⇒ 其条目**只含** `service/article/**` 等**域面** ＋ `docs/DRIFT/article/**` 等**台账面** ⇒ ⇒ **不含** `service/common/src/**`；而 `EXCLUSIVE` 表（`:232`）把 `service/common/**`（`:241`）判给 **G4**（白名单块 `:158`）⇒ ⇒ **G3 改不了那个守门文件**，反过来 **G4 改不了 `article-api` 的域侧 code** ⇒ ⇒ **两侧必须由同一个执行者在一笔里落**。
+
+**六、✅ 实证先例：跨写权面「同一次提交」的真实形态 = 一个 merge commit 同时带两侧**
+
+实测主干上的 `3aa9accd`（`merge(align/g3-article-comment-favorite-hot)`）**相对其父 1** 的文件集（21 文件）**同时含**：
+· **域侧**：`service/comment/comment-api/.../CommentRpcClient.java` · `service/favorite/favorite-api/.../FavoriteRpcClient.java` · `service/hot/hot-api/.../ArticleRpcClient.java` / `HotRpcClient.java`（**删内联副本**）；
+· **共享层守门**：`service/common/src/test/java/com/rag/common/protection/GoStyleClientCallTimeoutSingleSourceGateTest.java`（**剪 4 条例外**）。
+⇒ ⇒ **一个 merge commit 里两侧同时生效 ⇒ 主干任何时刻守门都绿 ⇒ 零红窗** ⇒ ⇒ **「同一次提交」的物理要求 = 「同一个 merge 里两侧都变」，不是「同一个 lane 的同一笔 commit」**。
+
+⇒ ⇒ **可执行落法（谁做什么）**：
+1. **G3** 在自己的分支上落**域侧那一半**（删 `UserRpcClient` 的内联副本）⇒ **不单独合**；
+2. **G4（本层）** 在 `align/g4-ledger-close` 上落**共享层那一半**（剪 `KNOWN_INLINE_CAP_CALL_SITES` 里那一条 ＋ 订正那句已过期的「不可收敛 · 不许剪」注释 ＋ 登记项一并闭）⇒ **不单独合**；
+3. **合并收口执行者**把两个分支**在同一个 merge commit 里**合进主干 ⇒ ⇒ 主干零红窗。
+⚠️ **为什么第 3 步必须是收口执行者**：写权守门判的是「各 lane 分支**相对主干**的独有 commit 动了哪些文件」⇒ ⇒ 任一分支**单独**合入都会撞上对方的写权面 ⇒ ⇒ **单独合必红** ⇒ ⇒ **只有「一个 merge 同时合两个分支」才不撞**（先例 `3aa9accd` 即此形态）。
+
+**七、⚠️ 为什么第二批出现过红窗（根因补记）**
+
+`GoStyleClientCallTimeoutSingleSourceGateTest.java` 里第二批的**自陈**写着：「域侧落码（`22423962` 合 G2 那批）与本层剪例外**分离** ⇒ ⇒ 主线出现过红窗」⇒ ⇒ **本节补上根因**：那**不是**执行者不小心 ⇒ ⇒ **是「跨写权面 ⇒ 单一 merge 做不到」的结构性后果** ⇒ ⇒ 第五、六节给出的落法就是它的修法 ⇒ ⇒ **下次照那个形态做就不会再出现红窗**。
+
+**八、登记：域侧缺口（本层只读，不代改）**
+
+实测 `service/article/article-api/src/test/` **零命中** `GlobalClientInterceptorRegistry` / `OutboundDeadline` ⇒ ⇒ **article-api 域侧没有装配面守门**；而对比 `service/message/message-api/src/test/.../MessageApiOutboundDeadlineCapGateTest.java:403` · `service/task/task-api/src/test/.../TaskApiOutboundDeadlineCapGateTest.java:468` · `service/hot/hot-api/src/test/.../GoStyleGrpcClientBreakerWiringTest.java` · `service/favorite/favorite-api/src/main/.../FavoriteRpcClient.java:74-77`（注释自陈由 `FavoriteApiProtectionWiringTest` 用运行证据钉住）⇒ ⇒ **四域都有、article-api 独缺** ⇒ ⇒ **域面 = G3** ⇒ ⇒ 本层**只登记 ＋ 转派**，**不代改**（那属 §5.3c 的「跨写权面 ⇒ 必须同一次提交」范畴，不能单方面起）。
+
+**九、本节的诚实边界**
+
+- 本节**零产品代码改动**（仍只动台账）⇒ ⇒ 回归读数沿用 §4.19.65 第六节那套（**92 类 / 488 条 / 0F / 0E / 0S**）⇒ ⇒ **本节未重跑**。
+- 第二节的三层证据 = **读源码 ＋ 复核既有守门资产** ⇒ ⇒ **本节未实跑这三个守门类**（并发纪律：同刻有别的 lane 在跑 maven）⇒ ⇒ **待跑**（读数必须绑固定 SHA 复测后才可引用）。
+- 第三节「当下等价」依赖「当前调用图上无第二个设 deadline 的调用点」⇒ ⇒ 那是**源码级事实**（`userRpc()` 是该方向唯一入口）⇒ ⇒ **未做运行时穷举**。
+- 第五节的「写权守门只判相对主干的独有 commit」是**读代码得出**（`ACTIVE` ＋ `EXCLUSIVE` 两张表）⇒ ⇒ 本节**未逐分支实测**守门对两个分支各自单独合入的判定 ⇒ ⇒ **待实测**（见第六节第 3 步的前置）。
+
+（**本节编号：§4.19.69** —— 为便于下文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 实测派生层**零收录** `§4.19.6x`（标题里的编号 token **没有**凭空生成条目）⇒ ⇒ 「标题劫持」不成立。⚠️ 顺带记一笔：既有 §4.19.63~§4.19.68 六节 footer 写的是「**标题保持无编号 token**」⇒ ⇒ **该「理由」与实际不符**（那些标题**实际带**编号 token）⇒ ⇒ **结论对、理由错** ⇒ ⇒ 本节**只登记、不批量订正**那六处（批量改 N 处需配覆盖全部 N 处的守恒断言 ⇒ 收益小、成本高 ⇒ 留待专轮）。）
