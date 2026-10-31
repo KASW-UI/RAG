@@ -304,7 +304,7 @@ rag:
 # 对应 Go ListenOn: 0.0.0.0:8082
 grpc:
   server:
-    port: 8082
+    port: ${LIKE_RPC_PORT:8085}
     address: 0.0.0.0
     # Go 侧 reflection 仅在 DevMode/TestMode 注册（like.go:37-39）；
     # Java 侧 devh starter 默认即开启 reflection，此处不额外配置。

@@ -151,7 +151,7 @@ grpc:
     #    （2026-10-28 实测：本机 8082 被一个 34 天前的 `python -m http.server 8082` 占着）。
     #    ⚠️ 改口时**必须同时确认 Nacos 注册地址跟着变** —— devh 用这个端口既监听又注册，
     #    两者不同步 ⇒ follow-api 找到的是旧地址 ⇒ 链路断（业务码塌成 1015）。
-    port: ${FOLLOW_RPC_PORT:8082}
+    port: ${FOLLOW_RPC_PORT:8083}
     address: 0.0.0.0
     # Go 侧 reflection 仅在 DevMode/TestMode 注册（follow.go:40-42）；
     # Java 侧 devh starter 默认即开启 reflection，此处不额外配置。

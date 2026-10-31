@@ -25,7 +25,7 @@
 
 | 事实 | 数字 | 依据 |
 |---|---|---|
-| 三目录条目（**宽口径**扫描） | **2666** 条 / **1408** 个唯一编号 | U1 |
+| 三目录条目（**宽口径**扫描） | **2668** 条 / **1410** 个唯一编号 | U1 |
 | 其中**问题项**（自身带状态标记） | **2053** 条 / **1197** 个唯一编号 | U1 + U2 |
 | 旧口径（`ledger-claim-audit.py` 的 `ID_RE` 前缀白名单）能认出 | **788** / 1197 | ⚠️ **漏 409 个唯一编号** |
 | 施工单任务（`_task-universe.md`） | 37 条 | §〇 口径 |
@@ -143,6 +143,8 @@
 | `ENV-04` | — | `PIT-GLOBAL-033` · `PIT-GLOBAL-038` |
 | `ENV-05` | — | `PIT-GLOBAL-059` · `PIT-GLOBAL-068` |
 | `ENV-07` | — | `E66` |
+| `ENV-08` | — | `PIT-GLOBAL-038` |
+| `ENV-09` | — | （未回指台账条目） |
 | `GAP-01` | B | `G-19` |
 | `GAP-02` | B | （未回指台账条目） |
 | `GAP-03` | B | `G-14` · `U-01` |
@@ -1551,7 +1553,7 @@
 | `PIT-GLOBAL-035` | Pitf | global | **G4** | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 已定性 · 未排期 | `Pitfalls/global/cross-domain.md:1335` | — |
 | `PIT-GLOBAL-036` | Pitf | global | **G4** | 仍生效 | C 无指针 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `Pitfalls/global/cross-domain.md:1356` | — |
 | `PIT-GLOBAL-037` | Pitf | global | **G4** | 仍生效 | C 无指针 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `Pitfalls/global/cross-domain.md:1388` | — |
-| `PIT-GLOBAL-038` | Pitf | global | **G4** | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | P1-T01,P1-T02,P1-T03,P1-T05 ｜ ENV-04 | — | `Pitfalls/global/cross-domain.md:1451` | — |
+| `PIT-GLOBAL-038` | Pitf | global | **G4** | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | P1-T01,P1-T02,P1-T03,P1-T05 ｜ ENV-04 ｜ ⚠️已关闭指针:ENV-08 | — | `Pitfalls/global/cross-domain.md:1451` | — |
 | `PIT-GLOBAL-039` | Pitf | global | **G4** | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 已定性 · 未排期 | `Pitfalls/global/cross-domain.md:1510` | — |
 | `PIT-GLOBAL-040` | Pitf | global | **G4** | 仍生效 | C 无指针 | P1 | N/A（不适用） | 否 | 未判定 | P2-T01,P2-T03 | 无可复算指针 · 结论不可复算 | `Pitfalls/global/cross-domain.md:1577` | — |
 | `PIT-GLOBAL-041` | Pitf | global | **G4** | 仍生效 | C 无指针 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `Pitfalls/global/cross-domain.md:1681` | — |

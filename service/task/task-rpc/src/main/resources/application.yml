@@ -219,7 +219,7 @@ spring:
 # =============================================================================
 grpc:
   server:
-    port: 9005
+    port: ${TASK_RPC_PORT:9005}
     address: 0.0.0.0
     # Go 侧 reflection 仅在 DevMode/TestMode 注册（task.go:40-42）；
     # Java 侧 devh starter 默认即开启 reflection，此处不额外配置。

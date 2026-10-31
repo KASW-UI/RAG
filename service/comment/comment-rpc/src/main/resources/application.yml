@@ -220,7 +220,7 @@ spring:
 # 对应 Go etc/comment.yaml `ListenOn: 0.0.0.0:9001`
 grpc:
   server:
-    port: 9001
+    port: ${COMMENT_RPC_PORT:9002}
     address: 0.0.0.0
     # Go 侧 reflection 仅在 DevMode/TestMode 注册（comment.go:50-52）；
     # Java 侧 devh starter 默认即开启 reflection，此处不额外配置。

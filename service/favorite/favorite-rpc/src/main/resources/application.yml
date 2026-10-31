@@ -221,7 +221,7 @@ rag:
 # 对应 Go etc/favorite.yaml:2  ListenOn: 0.0.0.0:8082
 grpc:
   server:
-    port: 8082
+    port: ${FAVORITE_RPC_PORT:8082}
     address: 0.0.0.0
     # 🔴 reflection **必须显式关掉**（2026-10-26 第十七轮核对时发现本域**漏配**）。
     #

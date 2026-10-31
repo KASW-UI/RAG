@@ -960,6 +960,23 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 | 2026-10-25 | **第二轮收口**：① **T-1 已修** —— 唯一真源改取**原始头值**（`getFirst(CONTENT_TYPE)`）⇒ 大小写敏感判定与 Go 对齐；配真 `HttpHeaders` 守门 6 条 + 变异转红；⚠️ 登记 **T-1 残余 ①**（解析层仍走 MediaType ⇒ 畸形头仍抛）② **T-2 / T-5 用户签字** ⇒ `SD-2026-10-25-01` ⇒ **移出本档**，代码 javadoc 改为指向签字档的指针 ③ 新增 **CD-9**（3 份生产复制品；T-1 修前 RAG 内部自相矛盾）⇒ [`cross-domain.md`](cross-domain.md) |
 | 2026-10-25 | **第一轮收口（`align/global` @ `58e8314`）**：<br>① **T-10 / CYCLE-001 闭环** —— 两步同一次提交（users 侧订正 javadoc 假断言 → common 侧删 `markExpired`）+ 真 in-process gRPC 守门测试 4 条 + 变异测试 2 组（均转红）⇒ [`cycle-deps.md`](cycle-deps.md)<br>② **T-1 / T-2 / T-5 / T-9 复核确认**为真漂移，补齐逐行 Go 出处 ⇒ [`common-tails.md`](common-tails.md)<br>③ 🔴 **发现「Go 出处在框架层」** —— 真源分 L1 项目层 / L2 go-zero v1.10.2 框架层 ⇒ [`cross-domain.md`](cross-domain.md) CD-8 + [`Pitfalls/global/common-tails.md`](../../Pitfalls/global/common-tails.md) PIT-GLOBAL-001<br>④ 🔴 **发现 T-2/T-5 档位错置**（代码自称「有意」但无签字）⇒ 待用户拍板<br>⑤ 🔴 **发现 T-9 的 §3.2 缺陷**（javadoc 照抄 Go 那行却未说明自己没实现 target 前缀）<br>⑥ 踩坑留痕 4 条 ⇒ [`Pitfalls/global/`](../../Pitfalls/global/) |
 
+---
+
+## 🆕 Round 1 起栈面新增登记（2026-11-01 · **2 条 A 类 · 配置默认值形态** · 不阻阶段一）
+
+> **来源**：`docs/RoundPlan/round-01/README.md`（`P1-T05`）· **发现方式**：**Round 1 真起 20 个服务**（三判据 20/20 · 证据见 `docs/RoundPlan/round-01/service-startup-matrix.md` §7）
+> ⚠️ **登记即交付**（不升级拍板）：两条都是**默认值形态**问题、**不是行为漂移** ⇒ 本轮用 env 覆盖即达成 20/20 ⇒ ⇒ **不阻阶段一**，但**必须留档**，否则下一个第三方照 README 起栈会踩同一坑。
+
+| 编号 | 现象 | 根因与出处（逐条） | 定级 | 落点 / 建议 | 核对日期 |
+|---|---|---|---|---|---|
+| `R1-ENV-001` | **10 个服务注册进了「另一个 Nacos」** ⇒ 换环境时静默连错注册中心 | `server-addr` 存在**两种互不兼容的写法**：<br>① **融合写法** `${NACOS_ADDR:nacos:8848}` —— **忽略 `NACOS_PORT`** ⇒ 10 个服务命中（`message-rpc` · `like-api` · `like-rpc` · `task-api` · `task-rpc` · `article-rpc` · `comment-rpc` · `favorite-rpc` · `hot-api` · `hot-rpc`）<br>② **主机+端口写法** `${NACOS_ADDR:nacos}:${NACOS_PORT:8848}` —— 另 10 个命中（`user-api` · `user-rpc` · `admin-api` · `admin-rpc` · `message-api` · `article-api` · `comment-api` · `favorite-api` · `follow-api` · `follow-rpc`）<br>⇒ ⇒ 同一个 env 变量名在两种写法下语义不同 ⇒ `NACOS_ADDR=127.0.0.1` 时，前者连到**默认端口 8848**、后者连到 `127.0.0.1:49848`<br>⇒ ⇒ **实测证据**：`Sea-nacos`(49848) 名单 10 个 · `nacos-standalone`(8848) 名单 11 个 ⇒ 同一批服务被拆进两套注册中心 | **A 类 · 可构建性**（换环境 ⇒ 静默连错 ⇒ 服务发现全断） | **10 个域各自的 yaml**（各域写权面）⇒ 建议**统一成写法②**（与 compose 侧的 `NACOS_ADDR`/`NACOS_PORT` 两个变量一致）⇒ ⚠️ **改默认值需逐个复核既有探针**（探针多走 env/命令行覆盖）⇒ **本轮未改**（Round 1 纪律：起栈时发现的代码问题走 CT-02） | 2026-11-01 |
+| `R1-ENV-002` | **`task-api` 用默认值起不来** ⇒ `Invalid URI syntax: Illegal character in scheme name at index 0: 127.0.0.1:9005` | `service/task/task-api/src/main/resources/application.yml:113` ⇒ `grpc.client.task-rpc.address: ${TASK_RPC_ADDRESS:127.0.0.1:9005}` —— **缺 scheme** ⇒ devh 的客户端地址必须带 `static://` / `discovery://`（仓内**所有**探针用的都是 `static://127.0.0.1:<port>`）⇒ ⇒ **默认值本身不可用** ⇒ 只在显式给了带 scheme 的 env 时才起得来 | **A 类 · 可构建性**（默认值不可用 ⇒ 按默认配置起栈必失败） | **task 域写权面**（`service/task/task-api/**`）⇒ 建议把默认值改成 `static://127.0.0.1:9005`（或按该 yml 注释自己的说法改用 `discovery:///task-rpc`）⇒ ⚠️ **注意**：`comment-api` 的 `COMMENT_RPC_TARGET` 是 **Go 侧的契约值**（`commentservice.yaml:22`）⇒ **不要**跟着一起改 | 2026-11-01 |
+
+> ⚠️ **两条都不阻阶段一**：本轮实测中它们**均被 env 覆盖绕过** ⇒ `verify-all-services.sh` ⇒ **PASS=20 / FAIL=0 / EXIT=0** ⇒ ⇒ 阶段一判定见 [`docs/PhaseGoal-judge.md`](../../PhaseGoal-judge.md) §8.4。
+> ⚠️ **顺带留证（正面）**：`user-api` 在**缺 `USER_JWT_SECRET`** 时**启动直接失败**（`user-api.user-auth.access-secret 不能为空`）⇒ ⇒ **P0 #8 的 fail-closed 密钥守卫在真实起栈中确实生效**（不是「注解存在」）。
+
+---
+
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
 > 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。

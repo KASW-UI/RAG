@@ -234,7 +234,7 @@ rag:
 grpc:
   server:
     # 对应 Go ListenOn: 0.0.0.0:9001
-    port: 9001
+    port: ${ARTICLE_RPC_PORT:9001}
     address: 0.0.0.0
     # ⚠️ Go 的 Timeout: 70000 **不在这里**。
     #    Go 的 RpcServerConf.Timeout 由 go-zero 的 UnaryServerInterceptor 强制执行，

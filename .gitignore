@@ -46,3 +46,4 @@ tools/difftest/*-results.txt
 .env
 .env.*
 !.env.example
+!.env.host.example   # 宿主机模板（占位符，同 .env.example ⇒ 入库；真值 .env.host 仍被忽略）

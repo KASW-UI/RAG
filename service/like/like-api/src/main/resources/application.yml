@@ -30,7 +30,7 @@ observability:
 
 server:
   # Go: likecenter.yaml Host: 0.0.0.0 / Port: 18887
-  port: 18887
+  port: ${LIKE_API_PORT:18887}
   # ⚠️ 容器三旋钮：与 Go 对齐（Go 出处 + 实测 ⇒ docs/DRIFT/hot/api.md 的 DRIFT-HOTAPI-021/022/023；
   #    守门 ⇒ tools/difftest/check-tomcat-limits.py）
   #    ① relaxed-query-chars：Go 的 net/http 不校验 query 里的 [ ]，且 go-zero httpx.GetFormValues
