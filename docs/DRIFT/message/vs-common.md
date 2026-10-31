@@ -1796,3 +1796,73 @@ git diff --stat -- service/ # ⇒ 0 行
 > ③ **2026-10-31 共享层把该门判据根治**（`check-wave-coupling.py:272` 只扫 `src/main` ＋ `:247-256` 改为「**代码态出现该类的 FQN 即算引用**」）⇒ ⇒ 旧口径的两个缺陷（**扫测试面** ＋ **只认 import**）都没了 ⇒ ⇒ 本域那项漂移**自动消失**（我树实测 `check-wave-coupling.py` ⇒ **PASS / rc=0**）⇒ ⇒ 实测辐射域 = `GoStyleProtectionConfiguration -> ['article','comment','favorite','follow','hot','like','message','task','users']` ⇒ ⇒ **本域在列表里**（生产面那处引用被正确计入）⇒ ⇒ **不需要刷快照**。
 > ④ **处置（定案）**：那两处全限定名写法**在新口径下已冗余**，但**保留不回退** —— ① 语义**同一 class 对象**（零语义变化）② 它是**新旧两种口径下都成立**的写法（旧口径看不见它 ⇒ 不伪装成生产依赖；新口径能看见它 ⇒ 生产事实不丢）⇒ ⇒ **比 import 写法更稳健** ③ 回退要重跑本域回归且**无任何门禁收益** ⇒ ⇒ 免得日后被当「冗余」清理掉而踩口径回退的坑。
 > ⑤ **为什么 like / task 两域的新守门类仍用 `import`（别当不一致去「统一」）** —— 那两域的**生产面本来就 `import`** 它（`like-rpc/LikeRpcApplication.java:29` · `task-rpc/TaskRpcApplication.java:34`）⇒ ⇒ 旧口径下它们**本来就该在**辐射域列表里 ⇒ ⇒ 测试面的 import **不产生假阳性** ⇒ ⇒ 无需改写 ⇒ ⇒ 三域写法差异的成因 = **生产面本来的写法不同**（message 侧历史即 FQN，like/task 侧历史即 import）⇒ ⇒ **不是笔误、不是没对齐**。
+
+### 🟢 第六轮追加（2026-11-01 · G2 收工轮）· 测试面 `import` 共享层类伪装成「生产依赖面」⇒ 改全限定名（零行为变更）
+
+**背景（一句话）**：辐射度判据曾以 **`import` 判定**统计「哪个域引用了共享层类」⇒ ⇒ **测试面的一条 `import` 会把测试文件所在域算成「生产依赖方」** ⇒ ⇒ 本轮把这类 import 全部改成全限定名（**零行为变更**）⇒ ⇒ 生产依赖面回到真实值。
+
+**口径（本域既有定案，非本轮自创）**：测试面 `import` 某共享层类 **且** 本域**生产面**对该类的引用**不是 import 形态**（全限定名或本无依赖）⇒ ⇒ 改全限定名；**生产面本来就是 import** ⇒ ⇒ **不改**。
+⚠️ **本域有一处必须单列**：`GoStyleProtectionConfiguration` 在 message 域**测试面 2 处 / 生产面 1 处**⇒ ⇒ **生产面那处本来就不是 import 形态** ⇒ ⇒ 按口径**测试面那两处要改**；但本轮实测这两处**代码里本来就是全限定名**（`imports.contains(com.rag.common.protection.GoStyleProtectionConfiguration.class)` / `ctx.register(com.rag.common.protection.GoStyleProtectionConfiguration.class)` ⇒ ⇒ **零 import 可删**）⇒ ⇒ **本类在本域无需改动**（与上文「生产面 1 处不改」一致）。
+
+**分母（写死 · 便于复算）**：全波次 **30 对（域 × 类）/ 37 对（文件 × 类）/ 20 个测试文件**（like **5** 类 · message **13** 类 · task **12** 类 = 30）⇒ ⇒ ⚠️ **报数必须带分母** —— 只写「37 处」会被读成「37 个类」。
+
+#### 本域（message）落码清点
+
+| 测试文件（`service/message/**`） | 删掉的 import 条数 | 新增含全限定名的行数 |
+|---|---|---|
+| `message-api/src/test/java/com/rag/message/message/api/GoStyleGrpcClientBreakerE2ETest.java` | 1 | 1 |
+| `message-api/src/test/java/com/rag/message/message/api/GoStyleGrpcClientBreakerWiringTest.java` | 1 | 1 |
+| `message-api/src/test/java/com/rag/message/message/api/MessageApiFormLimitEnvelopeRealTomcatTest.java` | 2 | 2 |
+| `message-api/src/test/java/com/rag/message/message/api/MessageApiPathNormalizationRealTomcatTest.java` | 1 | 4 |
+| `message-api/src/test/java/com/rag/message/message/api/ProtectionNotRegisteredInNonWebContextTest.java` | 4 | 5 |
+| `message-api/src/test/java/com/rag/message/message/api/client/MessageApiOutboundDeadlineCapGateTest.java` | 2 | 11 |
+| `message-rpc/src/test/java/com/rag/message/message/rpc/MessageProtectionChainWiringTest.java` | 2 | 4 |
+| `message-rpc/src/test/java/com/rag/message/message/rpc/MessageRpcRecoverInterceptorWiringTest.java` | 1 | 2 |
+| `message-rpc/src/test/java/com/rag/message/message/rpc/client/MessageRpcOutboundDeadlineCapGateTest.java` | 2 | 15 |
+| **本域合计** | **16** | **45** |
+
+本域删掉的 **13** 个类 = `GoStyleBreakerFilter` · `GoStyleCpuSheddingFilter` · `GoStyleFormLimitMode` · `GoStyleFormValueLimitInterceptor` · `GoStyleGrpcClientBreakerInterceptor` · `GoStyleMaxBytesFilter` · `GoStyleMaxConnsFilter` · `GoStyleOutboundDeadlineInterceptor` · `GoStylePathNormalizingFilter` · `GoStyleRecoverInterceptor` · `GoStyleRequestDeadline` · `GoStyleRpcBreakerInterceptor` · `GoStyleRpcSheddingInterceptor`（`com.rag.common.observability` / `.http` / `.protection` 三个包各按其原 import 行取全限定名 ⇒ ⇒ **FQN 不是拼的，是抄的原 import 行** ⇒ ⇒ 零语义变化）。
+
+⚠️ **与 G3 转派清单的差异（本轮复算后补记）**：G3 那份旧清单**漏了 `GoStyleRequestDeadline`**（message 域 **2** 处：`MessageApiOutboundDeadlineCapGateTest` · `MessageRpcOutboundDeadlineCapGateTest`）⇒ ⇒ 本域按**复算值 13 类**（不是旧清单的 12 类）⇒ ⇒ ⚠️ **教训**：转派清单也是**转述** ⇒ ⇒ **清单必须自己复算**（本轮两路独立实现逐字一致后才落码）。
+
+#### 零行为变更的自证（落码前后逐模块读数完全相同）
+
+| 模块 | 落码前（基线） | 落码后 | 判定 |
+|---|---|---|---|
+| `message-api` | 122 条 / 0F / 0E / 0S | 122 条 / 0F / 0E / 0S | ✅ 四项全等 |
+| `message-common` | 21 条 / 0F / 0E / 0S | 21 条 / 0F / 0E / 0S | ✅ 四项全等 |
+| `message-rpc` | 115 条 / 0F / 0E / 0S | 115 条 / 0F / 0E / 0S | ✅ 四项全等 |
+| **本域小计** | **258 条 / 0F / 0E / 0S** | **258 条 / 0F / 0E / 0S** | ✅ 全等 |
+⚠️ **全波次九模块**（本域三模块 + 另两域六模块 + `users-common`）**合计 872 条 / 0F / 0E / 0S** ⇒ ⇒ **落码前后逐模块四项（条数 / 失败 / 错误 / 跳过）全等** ⇒ ⇒ **零行为变更成立**。
+⚠️ **跑法**：落码前后**同一套命令**（6 个业务模块 + `-am` ⇒ 实际 9 个模块出测试）· `-o` 离线 · `--fail-at-end` · `MVN_EXIT=0` · 耗时 11 分 13 秒 · 跑前清过 `target/surefire-reports`（10 个目录）⇒ ⇒ **读数不属于上一轮残留**。
+⚠️ **本轮不是全程独占跑**：起跑时另有 G3 的两轮 maven 在跑（主仓 · article/comment/favorite/hot 域）⇒ ⇒ 已逐项排除干扰面：① 两边 `target/` 目录互不重叠；② 那两轮都是 `-o` 离线 + `test` 阶段 ⇒ ⇒ **零 `~/.m2` 写入**（实测 `com/rag` 下近 20 分钟零 jar 写入）；③ **固定宿主口段零重叠**（我三域 message `22760–22789` / like `22790–22819` / task `22820–22849` vs G3 四域 article `22850–22879` / comment `22880–22909` / favorite `22910–22939` / hot `22940–22969`）；④ PG / Redis **各自 testcontainers 实例**（库与缓存物理隔离）；⑤ G3 那两轮在**我这三域模块的实际执行窗口内已结束** ⇒ ⇒ **本域模块的实际执行窗口无并发**。
+⚠️ **为什么必须逐项排除**：并发只可能造成**假红**（抢口 / 抢资源 / 抢 `~/.m2`），**不会造成假绿** ⇒ ⇒ 本轮读数为绿 ⇒ **绿是可信的**；若为红则须独占复跑才能定性 ⇒ ⇒ **这次不需要复跑**。
+
+
+⚠️ **判据**：落码是**纯改名**（`import X` + 裸用点 `X` ⇒ 删 import 行 + 用点写 `X` 的全限定名）⇒ ⇒ **同一 class 对象、同一断言、同一字节码语义** ⇒ ⇒ 可验证的等价信号 = **落码前后 surefire 读数逐模块完全相同**（条数 / 失败 / 错误 / 跳过 四项全等）⇒ ⇒ **任何一项不等 ⇒ 落码就不是零行为变更 ⇒ 停下报告，不自行修**。
+⚠️ **读数口径**：以 **surefire XML 的 `tests=` / `failures=` / `errors=` / `skipped=`** 为准，**不看** stdout 的 `BUILD SUCCESS`；**skip ≠ 通过**；**跑绿 ≠ 对**。
+
+#### 行号位移（删 import ⇒ 后续行号前移）⇒ 台账指针新值
+
+⚠️ **位移是「删行」造成的，不是「改内容」造成的** ⇒ ⇒ 既有条目行号**不变**（本节是**追加**，不是改写）⇒ ⇒ **只有指向被改测试文件的行号会变**。
+
+| 既有指针（旧） | 新行号 | 目标文件 | 核对 |
+|---|---|---|---|
+| `GoStyleGrpcClientBreakerE2ETest.java:43` | `:42` | message-api | ✅ 新行内容与旧行逐字一致 |
+| `GoStyleGrpcClientBreakerE2ETest.java:56` | `:55` | message-api | ✅ 内容一致 |
+| `MessageProtectionChainWiringTest.java:97` | `:95` | message-rpc | ✅ 内容一致 |
+| `MessageProtectionChainWiringTest.java:102` | `:100` | message-rpc | ✅ 内容一致 |
+
+⚠️ **本域台账内的既有指针**：本节**只追加、不就地改既有行** ⇒ ⇒ 既有行里的旧行号**保持原样**（那是「当时那条结论」的快照）⇒ ⇒ **新行号以本节表格为准**。
+
+#### 共享面 / 他域（只报告 · 本 lane 无写权）
+
+| 位置 | 旧 → 新 | 归属 |
+|---|---|---|
+| `docs/Worktree.md:1076` | `MessageRpcOutboundDeadlineCapGateTest.java:427` → `:425` · `:436` → `:434` · `MessageApiOutboundDeadlineCapGateTest.java:383` → `:381` | 合并收口执行者 |
+| `docs/DRIFT/_cross/grading/W5.md:18` | `GoStyleGrpcClientBreakerE2ETest.java:123` → `:122` | 合并收口执行者 |
+| `docs/DRIFT/global/vs-common.md`（多处） | `GoStyleGrpcClientBreakerE2ETest.java:43` → `:42` · `:247` → `:246` | G4（共享层面） |
+| `docs/DRIFT/users/vs-common.md:1032` · `docs/DRIFT/users/user/api.md:3645/:3646/:3742` | `GoStyleGrpcClientBreakerE2ETest.java:43` → `:42` · `:123` → `:122` | G1（users 域） |
+| `docs/DRIFT/like/rpc.md:1669` · `docs/DRIFT/like/vs-common.md:514` | `GoStyleGrpcClientBreakerE2ETest.java:43` → `:42` | G2（like 域 · 本 lane 同面 · 已在本域台账记） |
+
+⚠️ **这些指针是「指向 `service/**` 的行号」** ⇒ ⇒ 它们**不是**派生层的「证据指针」（派生层只认指向 `docs/{DRIFT,Pitfalls,Intentional_Deviations}/**.md` 的指针）⇒ ⇒ **不会造成派生层漂移、不会让指针棘轮转红**（实测：`check-pointer-consistency.py` ⇒ **新增 0 条**）⇒ ⇒ **但行号会变旧** ⇒ ⇒ 上表是**待各面就地订正的清单**（本 lane 只报告、不改）。
