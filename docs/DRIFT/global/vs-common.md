@@ -8054,3 +8054,36 @@ G1 回执五件事：① 判据② 销账确认；② **`:50` 与 `:75` 是两�
 - 五棵分支「分支独有」仍全为 **0**；G1 的 `f8438ee6` **已在主干** ⇒ **零待合**。
 
 （**本节编号：§4.19.50** —— §4.19.44 留给 G4 lane · §4.19.45~49 = 本面 ⇒ ⇒ **无撞号**；本节**追加在文件末尾** ⇒ ⇒ **零位移** ⇒ ⇒ 任何指向 `vs-common.md` 的行号指针**不受影响**。）
+
+### §4.19.51 · 第四十六次订正轮次（2026-10-31 · 合并收口执行者）—— **G3 lane 回执核销（零待办 · 分支独有为 0）** ＋ **一条辐射度现行态事实落账（`GoStyleOutboundDeadlineInterceptor` 已整体退出生产依赖面）**
+
+**一 · G3 回执核销（逐条本层实测）**
+
+| 它报的 | 本层实测 | 结论 |
+|---|---|---|
+| 「分支 `align/g3-…` = **1 领先主干**（`6ddf1c91` 台账）」 | `git merge-base --is-ancestor 6ddf1c91 do-my-own-gh` ⇒ **✅ 已在主干**；`git rev-list --left-right --count` ⇒ **26 / 0** | ⇒ ⇒ **分支独有 0 ⇒ 零待合** ⇒ ⇒ **第十三次同形态**（回执基于旧主干快照） |
+| 「你那 7 条待办里与我相关部分**全部由你闭环**」 | ①②③ 本面已闭环；④⑦ 属共享层写权面（`service/common/**`）；⑤ 待 Jason 授权；⑥ 域面 yml 已在 `docs/DRIFT/article/rpc.md` 留痕 | ⇒ ⇒ **G3 侧零待办** ✔ |
+| 「我的转派单（判据口径）已被根治 ⇒ **本域零改动即转绿**」 | 与本面 `§4.19.48` 生产面 + 代码态 FQN 那一段的结论**同向** ⇒ 它撤回 `import`→全限定名是对的（留着就是「用写法绕开判据」的坏样板） | ⇒ ⇒ **确认** ✔ |
+| 「补一条事实：`GoStyleOutboundDeadlineInterceptor` 的辐射度 =（空）」 | 见第二节 ⇒ **本层独立复核成立** | ⇒ ⇒ **落账**（见第二节） |
+
+**二 · 🆕 辐射度现行态事实（落账 · 防将来被误「修」）**
+
+- **实测（本层独立跑，不采信转述）**：
+  - `GoStyleOutboundDeadlineInterceptor` ⇒ **不在 `docs/DRIFT/_cross/cross-domain-coupling.md` 的 JSON 快照里** ⇒ **辐射度为空** ⇒ **没有任何域的生产代码 import 它**；
+  - `GoStyleProtectionConfiguration` ⇒ 快照里 = **9 个域**（article · comment · favorite · follow · hot · like · message · task · users）；
+  - §1.4 的 **9 域桶 = 6 类**（`GoStyleProtectionConfiguration` · `GoStyleProtectionProperties` · `GoStyleRpcProtectionChain` · `LoggerFactoryBean` · `ObservabilityProperties` · `RpcServerInterceptorFactory`）⇒ **不含** `GoStyleOutboundDeadlineInterceptor`；
+  - 守门：`python3 tools/difftest/check-wave-coupling.py` ⇒ **✅ PASS**（`service/common 逐类辐射度: 33 类（被外部生产代码引用）` · **与文档一致**）。
+- **成因（G3 提供 · 本层采信其结论的事实面）**：那个拦截器的 bean 由
+  `service/common/src/main/java/com/rag/common/.../GoStyleOutboundDeadlineConfiguration.java:59-61` 注册
+  ⇒ ⇒ 域侧**不需要** import 拦截器类本身 ⇒ ⇒ 它在**生产依赖面里整体退场**（**不是 hot 一家的事**）。
+- ⚠️ **⚠️ `cross-domain-coupling.md:826/838` 不要「修」**：那两行位于章节标题
+  **「## 八、🆕 快照刷新记录（第二轮 · 2026-10-31 · 合并收口执行者）」** 之内 ⇒ ⇒ **是那一轮的历史记录**
+  （当时该类还在快照里、且 `:838` 记的「9 域 3 → 4 类（该类升入）」是**当时**的动作）
+  ⇒ ⇒ **现行态断言在 §1.4 分桶表 ＋ §6.1 JSON 快照** ⇒ ⇒ **本面刻意不改那两行**（改了反而抹掉历史轮次轨迹）。
+
+**三 · 本面连带**
+
+- 派生层：本节追加 ⇒ **全量重算** ⇒ diff 逐项核对（见提交信息）。
+- 五棵分支「分支独有」仍全为 **0**；G3 的 `6ddf1c91` **已在主干** ⇒ **本面无待合**。
+
+（**本节编号：§4.19.51** —— §4.19.44 留给 G4 lane · §4.19.45~50 = 本面 ⇒ ⇒ **无撞号**；本节**追加在文件末尾** ⇒ ⇒ **零位移** ⇒ ⇒ 任何指向 `vs-common.md` 的行号指针**不受影响**。）
