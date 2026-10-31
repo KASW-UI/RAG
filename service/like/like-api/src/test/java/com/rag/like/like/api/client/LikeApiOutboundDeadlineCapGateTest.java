@@ -2,12 +2,14 @@ package com.rag.like.like.api.client;
 
 import com.rag.common.observability.GoStyleRequestDeadline;
 import com.rag.common.protection.GoStyleOutboundDeadlineInterceptor;
+import com.rag.common.protection.GoStyleProtectionConfiguration;
 import com.rag.common.protection.GoStyleProtectionProperties;
-import com.rag.like.like.api.config.LikeApiProperties;
+import com.rag.like.like.api.LikeApiApplication;
 import com.rag.like.like.proto.LikeActionReq;
 import com.rag.like.like.proto.LikeActionResp;
 import com.rag.like.like.proto.LikeServiceGrpc;
 import io.grpc.Channel;
+import io.grpc.ClientInterceptor;
 import io.grpc.ClientInterceptors;
 import io.grpc.ManagedChannel;
 import io.grpc.Server;
@@ -16,14 +18,19 @@ import io.grpc.StatusRuntimeException;
 import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
+import net.devh.boot.grpc.client.interceptor.AnnotationGlobalClientInterceptorConfigurer;
+import net.devh.boot.grpc.client.interceptor.GlobalClientInterceptorRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.bind.PropertySourcesPlaceholdersResolver;
 import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.ComponentScan;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.PropertySource;
@@ -36,9 +43,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -60,24 +69,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li><b>消费点</b>：{@code go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25}
  *       —— {@code ctx, cancel := context.WithTimeout(ctx, t)} ⇒ <b>取更早者</b>。</li>
  * </ul>
- * <p>⇒ RAG 侧 {@code like-api} 的出向 stub（{@code LikeRpcClient.java:80} 的
- * {@code @GrpcClient("like-rpc")}）经由 {@code likeRpc()} 套了
- * <b>域侧自带的一份上界</b>（{@code min(like.rpc.timeout 默认 2000ms, 入向剩余预算)}，`:151`）
- * ⇒ ⇒ 那份<b>值与 Go 同为 2000ms</b>（不是零上界）⇒ ⇒ 但它是**第二个来源**
- * ⇒ ⇒ 下游挂死时，出向调用<b>可以无限期挂着</b>（只要入向预算还没到）
- * ⇒ ⇒ 与 Go 的 2s <b>直接相反</b>。
- *
- * <h2>本轮做了什么（域侧只配参数 · 零代码改动）</h2>
- * <p>本域 {@code application.yml} 新增：
- * <pre>
- * rag:
- *   protection:
- *     outbound-deadline:
- *       cap-millis: ${LIKE_API_OUTBOUND_DEADLINE_CAP_MILLIS:2000}
- * </pre>
- * ⇒ ⇒ 封顶逻辑<b>唯一</b>由共享层 {@code GoStyleOutboundDeadlineInterceptor} 承担
+ * <p>⇒ RAG 侧 {@code like-api} 的出向 stub（{@code LikeRpcClient} 的
+ * {@code @GrpcClient("like-rpc")}）的<b>唯一</b>上界来源 =
+ * 共享层 {@code GoStyleOutboundDeadlineInterceptor}
  * （带 devh 的 {@code @GrpcGlobalClientInterceptor} ⇒ 装在<b>每个</b>出向 devh 调用上）
- * ⇒ ⇒ 本域<b>不写</b>任何私有 helper、<b>不写</b> {@code withDeadlineAfter}。
+ * ⇒ ⇒ 本域<b>只配参数</b>：{@code rag.protection.outbound-deadline.cap-millis=2000}
+ * ⇒ ⇒ 与 Go 的 2s <b>同值同位置</b>（Go 把上界加在 client 的 CallOptions 上
+ * —— {@code go-zero@v1.10.2/zrpc/client.go:70-71}；
+ * 共享层拦截器也是加在出向调用的 CallOptions 上）。
+ *
+ * <h2>🔴 2026-10-31（本域 lane）：域侧那份副本<b>已删除</b>（第二来源收敛）</h2>
+ * <p>原先 {@code LikeRpcClient.likeRpc()} 自己算 {@code min(like.rpc.timeout 默认 2000ms,
+ * 入向剩余预算)} 并套到 stub 上 ⇒ ⇒ 那是<b>域侧的第二份上界实现</b>（副本）
+ * ⇒ ⇒ 本轮<b>删掉</b>它，理由两条（详见 {@code LikeRpcClient#likeRpc()} 的 javadoc）：
+ * <ul>
+ *   <li>副本把上界<b>写死</b>在 {@code CallOptions} 里 ⇒ 共享层再对它取 min 时
+ *       <b>只压小、不压大</b> ⇒ ⇒ 「上界可 env 覆盖」在<b>放宽方向</b>上被架空；</li>
+ *   <li>共享层已在<b>同一个位置</b>做同样的事（且用<b>纳秒</b>精度，更贴近 Go 的 ctx）
+ *       ⇒ ⇒ 删掉内联后<b>入向预算的传播不丢</b>。</li>
+ * </ul>
+ * ⇒ ⇒ 域侧现在<b>零代码</b>参与上界的计算 ⇒ ⇒ 只剩 yml 里的一个参数。
  *
  * <h2>本测试如何真正触发该机制（AGENTS.md §3.3）</h2>
  * <ol>
@@ -94,12 +105,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>本类<b>不起</b>真实 like-rpc、<b>不连</b> Nacos ⇒ 它证的是「<b>本域配的上界真的被共享层拦截器
  *       读到了、且真的在出向调用上生效</b>」，<b>不</b>证「整条生产链路的端到端超时表现」；</li>
  *   <li>本类<b>不</b>带生产链路上的 {@code GoStyleGrpcClientBreakerInterceptor}；</li>
- *   <li>第 ④ 条用<b>收紧</b>方向（本域有域侧既有副本 ⇒ 放宽方向结构性不可测）⇒ ⇒ 那条验的是
- *       「<b>域 yml 的这个键真被读到了</b>」，<b>不</b>证「域侧没有副本」；
- *       「没有副本」这一条由第 ⑥ 条的<b>点位级棘轮</b>承担；</li>
+ *   <li>第 ④ 条用<b>收紧</b>方向（cap 1000ms）⇒ ⇒ 那条验的是
+ *       「<b>域 yml 的这个键真被读到了</b>」——
+ *       共享层 {@code capMillis} 默认 <b>0</b>（＝不启用）⇒ ⇒ 键没被读到就不会出现 1000ms 的收口
+ *       ⇒ ⇒ 「调小方向」在本域<b>有牙</b>；</li>
+ *   <li>第 ④b 条用<b>放宽</b>方向（cap 4000ms）⇒ ⇒ 那条验的是
+ *       「<b>域侧没有写死的副本</b>」—— 因为 min 只压小、不压大
+ *       ⇒ ⇒ 若域侧还留着写死 2000ms 的副本 ⇒ ⇒ 放宽到 4000ms 也只会在 2000ms 处收口
+ *       ⇒ ⇒ 那条会红（实测耗时 &lt; 3000ms）。
+ *       ⇒ ⇒ ④ 与 ④b 两条合起来才是「键被读到」＋「没有副本」的完整证据，
+ *       第 ⑥ 条再从形态面钉一道「不得新增」的棘轮；</li>
  *   <li>第 ⑤ 条（min 语义）用<b>裸 stub</b> ⇒ ⇒ 那条验的是<b>共享层拦截器的 min 实现</b>。</li>
- *   <li>⚠️ 本域<b>已有一份域侧上界</b>（{@code LikeRpcClient.java:151}）⇒ ⇒ 本轮<b>不删</b>（协调员要求零代码改动）
- *       ⇒ ⇒ 「放宽」这一维在本域<b>尚未闭合</b>，已登记待收敛；</li>
+ *   <li>第 ⑦ 条是<b>装配面</b>的判据 ⇒ ⇒ 它证「本域的启动类真的把共享层保护层纳进来
+ *       ＋ 本域磁盘 yml 的 cap 经<b>生产的绑定路径</b>绑出 2000
+ *       ＋ devh 的收集器真的收这个拦截器」，
+ *       <b>不</b>证「本域进程连得上 Nacos / 真 like-rpc 起得来」；</li>
  * </ul>
  */
 class LikeApiOutboundDeadlineCapGateTest {
@@ -119,8 +139,14 @@ class LikeApiOutboundDeadlineCapGateTest {
     /** 允许的额外耗时（毫秒）—— 排除「别的机制提前掐断」与墙钟抖动。 */
     private static final long SLACK_MILLIS = 1_500L;
 
-    /** 第 ④ 条的 env 覆盖值 —— <b>故意取【小于】Go 默认 2000</b>（本域有域侧既有副本 ⇒ 放宽方向不可测）。 */
+    /** 第 ④ 条的 env 覆盖值 —— <b>故意取【小于】Go 默认 2000</b>（证「域 yml 的这个键真被读到」）。 */
     private static final long TIGHTENED_CAP_MILLIS = 1_000L;
+
+    /** 第 ④b 条的 env 覆盖值 —— <b>故意取【大于】Go 默认 2000</b>（证「域侧没有写死的副本」）。 */
+    private static final long WIDENED_CAP_MILLIS = 4_000L;
+
+    /** 第 ④b 条：出向<b>应当</b>至少等这么久才收口 —— 低于它 ⇒ ⇒ 域侧还压着一份 2000ms 的副本。 */
+    private static final long WIDENED_MIN_WAIT_MILLIS = 3_000L;
 
     /** 第 ⑤ 条：注入的入向预算（毫秒）—— 必须<b>远小于</b> 2s ⇒ 才能分辨「取更早者」与「取更晚者」。 */
     private static final long INBOUND_BUDGET_MILLIS = 300L;
@@ -242,13 +268,11 @@ class LikeApiOutboundDeadlineCapGateTest {
     // ────────────────────────────────────────────────────────────────────────────
     // ④ 运行期：env 覆盖【收紧】⇒ 上界【真的】跟着变（证明域 yml 的这个键被读到了）
     //
-    // ⚠️ **本域为什么用「收紧」而不是 G1 那种「放宽」**：
-    //   本域 LikeRpcClient.likeRpc()（:151）**自带**一份域侧上界
-    //   （min(like.rpc.timeout 默认 2000ms, 入向剩余预算)）⇒ ⇒ 那是**第二个来源**，
-    //   它会把【想放宽】的上界压回 2000ms ⇒ ⇒ 放宽方向在本域**结构性不可测**
-    //   （⇒ 这正是「副本数 = 漂移面」的形态，已在台账登记）。
-    //   ⇒ ⇒ 本域改从**收紧方向**取证：cap 改成 1000ms ⇒ 出向必须跟着变成 ~1000ms
-    //   ⇒ ⇒ 若域 yml 的这个键没被读到（cap 仍取默认 0）⇒ 出向会挂满 8s ⇒ 断言红。
+    // ⚠️ **为什么「收紧」这一向在本域有牙**：
+    //   共享层 GoStyleProtectionProperties.OutboundDeadline#capMillis 的默认值是 **0**
+    //   （0 ＝ 不启用上界）⇒ ⇒ 若域 yml 的这个键**根本没被读到**，cap 就是 0
+    //   ⇒ ⇒ 出向调用会挂满 8s（HANG_MILLIS）后**正常返回**
+    //   ⇒ ⇒ 把 cap 覆盖成 1000ms 后「出向必须在 ~1000ms 处收口」这一条就有鉴别力。
     // ────────────────────────────────────────────────────────────────────────────
 
     @Test
@@ -256,12 +280,13 @@ class LikeApiOutboundDeadlineCapGateTest {
     @DisplayName("④ env 把 cap 覆盖【到比 2000 更小】⇒ 出向上界必须跟着收紧 ⇒ 【证明域 yml 的这个键真被读到】")
     void envOverrideTightensTheOutboundCap() throws Exception {
         GoStyleRequestDeadline.clear();
-        startHangingDomainRpc(domainProperties(
+        // ⚠️ 判据必须走【域 client（生产路径）】⇒ ⇒ 域侧若藏着写死副本，④b 才看得见
+        LikeRpcClient client = startHangingDomainRpc(domainProperties(
                 Map.of(ENV_CAP, String.valueOf(TIGHTENED_CAP_MILLIS))));
 
         long startedAt = System.nanoTime();
         StatusRuntimeException thrown = assertThrows(StatusRuntimeException.class,
-                () -> cappedStub.likeAction(LikeActionReq.newBuilder().build()),
+                () -> client.likeRpc().likeAction(LikeActionReq.newBuilder().build()),
                 "下游不响应时必须靠【被 env 覆盖后的】客户端硬上界收口");
         long elapsedMillis = (System.nanoTime() - startedAt) / 1_000_000L;
 
@@ -272,6 +297,50 @@ class LikeApiOutboundDeadlineCapGateTest {
                         + "（实测耗时 = " + elapsedMillis + "ms）"
                         + "⇒ ⇒ 若这里等到了 8s 左右 ⇒ 说明【域 yml 的这个键根本没被读到】"
                         + "（cap 仍是默认 0 ＝ 不启用）⇒ ⇒ 键名写错就是【配了不生效】。");
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // ④b 运行期：env 覆盖【放宽】⇒ 上界【真的】跟着放宽 ⇒ 【证明域侧没有写死的副本】
+    //
+    // ⚠️ **为什么「放宽」这一向能抓「写死副本」**：
+    //   上界链路是 min(入向剩余, cap, 调用点自带的 deadline) ⇒ ⇒ **min 只压小、不压大**。
+    //   ⇒ ⇒ 若域侧还留着一份「写死 2000ms」的副本（像原先的 LikeRpcClient.likeRpc()），
+    //   ⇒ ⇒ 就算把 yml 的 cap 放宽到 4000ms，min 的结果**仍然是 2000ms**
+    //   ⇒ ⇒ 实测耗时会停在 ~2000ms ⇒ ⇒ 本条的「至少等 3000ms」就会红。
+    //   ⇒ ⇒ 反过来，本条绿 ⇒ ⇒ 域侧**没有任何**写死副本在压着上界。
+    //
+    // ⚠️ **为什么下限取 3000ms 而不是 4000ms**：留 1000ms 抖动余量；
+    //   上界取 4000ms ⇒ 远小于 HANG_MILLIS(8000ms) ⇒ 「没有上界」时会挂满 8s ⇒ 断言红。
+    // ────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @Timeout(value = 40, unit = TimeUnit.SECONDS)
+    @DisplayName("④b env 把 cap 覆盖【到比 2000 更大】⇒ 出向上界必须跟着放宽 ⇒ 【证明域侧没有写死的副本】")
+    void envOverrideWidensTheOutboundCapProvingNoHardcodedCopy() throws Exception {
+        GoStyleRequestDeadline.clear();
+        // ⚠️ 判据必须走【域 client（生产路径）】⇒ ⇒ 域侧那份写死副本就装在 likeRpc() 里
+        // ⇒ ⇒ 走裸 stub 的话，副本**结构性不可见** ⇒ ⇒ 这条会假绿
+        LikeRpcClient client = startHangingDomainRpc(domainProperties(
+                Map.of(ENV_CAP, String.valueOf(WIDENED_CAP_MILLIS))));
+
+        long startedAt = System.nanoTime();
+        StatusRuntimeException thrown = assertThrows(StatusRuntimeException.class,
+                () -> client.likeRpc().likeAction(LikeActionReq.newBuilder().build()),
+                "下游不响应时必须靠【被 env 覆盖后的】客户端硬上界收口");
+        long elapsedMillis = (System.nanoTime() - startedAt) / 1_000_000L;
+
+        assertEquals(Status.Code.DEADLINE_EXCEEDED, thrown.getStatus().getCode(),
+                "失败码必须是 DEADLINE_EXCEEDED（= deadline 到点）");
+        assertTrue(elapsedMillis >= WIDENED_MIN_WAIT_MILLIS,
+                "🔴 env 把 cap 覆盖成 " + WIDENED_CAP_MILLIS + "ms ⇒ 出向必须**跟着放宽**"
+                        + "（实测耗时 = " + elapsedMillis + "ms，必须 ≥ " + WIDENED_MIN_WAIT_MILLIS + "ms）"
+                        + "⇒ ⇒ 若实测停在 ~2000ms ⇒ ⇒ 说明**域侧还压着一份写死 2000ms 的副本**"
+                        + "（min 只压小不压大 ⇒ 副本把放宽架空了）"
+                        + "⇒ ⇒ 若实测接近 8000ms ⇒ ⇒ 说明【域 yml 的这个键根本没被读到】"
+                        + "（cap 仍是默认 0 ＝ 不启用）。");
+        assertTrue(elapsedMillis <= WIDENED_CAP_MILLIS + SLACK_MILLIS,
+                "🔴 放宽后的上界也不该被拖得太久（实测耗时 = " + elapsedMillis + "ms）"
+                        + "⇒ ⇒ 若接近 8000ms ⇒ ⇒ 说明上界没生效。");
     }
 
     // ────────────────────────────────────────────────────────────────────────────
@@ -303,14 +372,17 @@ class LikeApiOutboundDeadlineCapGateTest {
     }
 
     // ────────────────────────────────────────────────────────────────────────────
-    // ⑥ 形态面：**点位级**棘轮 —— 本域既有的那一份（LikeRpcClient）可以留，
-    //    但**不得新增**第二处（豁免清单只能变紧，不能变松）
+    // ⑥ 形态面：**零命中**棘轮 —— 域侧【一处都不许有】写死上界的实现
+    //
+    // 🔴 2026-10-31（本域 lane）：原先本条是「点位级棘轮」（基线 = LikeRpcClient 那 1 处）
+    // ⇒ ⇒ 域侧那份副本已删除 ⇒ ⇒ **基线归零** ⇒ ⇒ 与另三个守门同一形态。
+    // ⇒ ⇒ 棘轮只能变紧：任何人在本域再加一处 withDeadlineAfter ⇒ ⇒ 这条立刻红。
     // ────────────────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("⑥ 本域 withDeadlineAfter 的代码行必须只落在【已登记的 LikeRpcClient】⇒ 不得新增第二份上界实现")
+    @DisplayName("⑥ 本域 src/main/java 不得出现 withDeadlineAfter ⇒ 【域侧只配参数，不造第二份上界实现】")
     void domainSideMustNotReintroduceAHardcodedOutboundCap() throws Exception {
-        Map<String, Integer> hits = new LinkedHashMap<>();
+        List<String> offenders = new ArrayList<>();
 
         try (var walk = Files.walk(moduleRoot().resolve("src").resolve("main").resolve("java"))) {
             for (Path p : (Iterable<Path>) walk.filter(f -> f.toString().endsWith(".java"))::iterator) {
@@ -321,23 +393,73 @@ class LikeApiOutboundDeadlineCapGateTest {
                         continue;
                     }
                     if (line.contains("withDeadlineAfter")) {
-                        hits.merge(p.getFileName().toString(), 1, Integer::sum);
+                        offenders.add(p.getFileName() + " :: " + line);
                     }
                 }
             }
         }
 
-        Map<String, Integer> registered = new LinkedHashMap<>();
-        registered.put("LikeRpcClient.java", 1);
+        assertTrue(offenders.isEmpty(),
+                "🔴 本域出现了写死出向 deadline 的代码：" + offenders
+                        + "⇒ ⇒ 出向【客户端硬上界】只有一个合法实现 = 共享层的"
+                        + " GoStyleOutboundDeadlineInterceptor（域侧只配 rag.protection.outbound-deadline.cap-millis）"
+                        + "⇒ ⇒ 域侧再写一份 ⇒ 就是【第二个来源】⇒ ⇒ 副本数 = 漂移面。");
+    }
 
-        assertEquals(registered, hits,
-                "🔴 本域 withDeadlineAfter 的【代码行】分布 = " + hits
-                        + "，而已登记的基线 = " + registered
-                        + "⇒ ⇒ 已登记的那一处（LikeRpcClient 自带的域侧上界）是**既有事实**，本轮不删"
-                        + "（协调员要求零代码改动）"
-                        + "⇒ ⇒ 但**不得新增第二处** ⇒ ⇒ 出向【客户端硬上界】的合法来源"
-                        + " = 共享层的 GoStyleOutboundDeadlineInterceptor（域侧只配 cap-millis）"
-                        + "⇒ ⇒ 副本数 = 漂移面 ⇒ ⇒ 这条判据是**点位级棘轮**：只能变紧，不能变松。");
+    // ────────────────────────────────────────────────────────────────────────────
+    // ⑦ 装配面：域侧启动类的**真实声明** ＋ 本域磁盘 yml ⇒ 共享层拦截器真成 Bean、真被 devh 收走
+    //
+    // ⚠️ **这一条补的是哪条缺口**：
+    //   前面 ①~⑥ 全部是「把生产拦截器【手工】装到 channel 上」⇒ ⇒ 那只证
+    //   「【假如】本域进程装上了它，它的行为对」，
+    //   **不证**「本域进程真的装上了它」（AGENTS.md §3.3.1：配置里没写 ≠ 没开）。
+    //   ⇒ ⇒ 本条拆成两半：
+    //     (1) 声明面 —— 反射读**本域启动类**上的扫描声明（不复制、不手抄）；
+    //     (2) 运行面 —— 真上下文 ＋ **本域磁盘那份 application.yml** ⇒ 拦截器成 Bean、cap 绑出 2000、
+    //         且 devh 自己的收集器（生产里由 starter 的自动配置注册）真的把它收走。
+    // ────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("⑦ 生产装配面：本域启动类的真实声明 + 本域磁盘 yml ⇒ 拦截器成 Bean、cap 绑出 2000、devh 真的收它")
+    void productionWiringReallyProducesTheInterceptorWithTheDomainCap() {
+        // ── (1) 声明面 ──
+        Set<String> scanPackages = effectiveScanPackages(LikeApiApplication.class);
+        assertTrue(scanPackages.contains("com.rag.common"),
+                "🔴 本域启动类（LikeApiApplication）的**有效扫描范围**必须含 com.rag.common"
+                        + "（实测 = " + scanPackages + "）"
+                        + "⇒ ⇒ 否则本域进程扫不到 com.rag.common.protection.GoStyleProtectionConfiguration"
+                        + "⇒ ⇒ 出向 deadline 拦截器在本域【不成 Bean】⇒ ⇒ 域 yml 的 cap 配了也不生效"
+                        + "（「配置里没写 ≠ 没开」，AGENTS.md §3.3.1）。");
+
+        // ── (2) 运行面 ──
+        try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
+            ctx.register(GoStyleProtectionConfiguration.class);
+            // ⚠️ devh 自己的收集器（生产里由 grpc-client starter 的自动配置注册）
+            ctx.registerBean(AnnotationGlobalClientInterceptorConfigurer.class);
+            addDomainYamlTo(ctx);
+            ctx.refresh();
+
+            GoStyleProtectionProperties props = ctx.getBeanProvider(GoStyleProtectionProperties.class)
+                    .getIfAvailable();
+            assertNotNull(props,
+                    "🔴 共享层的 GoStyleProtectionConfiguration 必须在本域上下文里产出 properties Bean"
+                            + "（它带 @EnableConfigurationProperties）");
+            assertEquals(GO_DEFAULT_CAP_MILLIS, props.getOutboundDeadline().getCapMillis(),
+                    "🔴 本域磁盘 application.yml 的 rag.protection.outbound-deadline.cap-millis "
+                            + "必须经【生产的绑定路径】绑到 capMillis 上（实测 = "
+                            + props.getOutboundDeadline().getCapMillis() + "）"
+                            + "⇒ ⇒ 若是 0 ⇒ ⇒ 键没被读到 ⇒ ⇒ 共享层默认不启用上界。");
+
+            GoStyleOutboundDeadlineInterceptor interceptor = ctx.getBeanProvider(
+                    GoStyleOutboundDeadlineInterceptor.class).getIfAvailable();
+            assertNotNull(interceptor,
+                    "🔴 共享层的 GoStyleOutboundDeadlineConfiguration 必须在本域上下文里产出拦截器 Bean");
+
+            List<ClientInterceptor> collected = new GlobalClientInterceptorRegistry(ctx).getClientInterceptors();
+            assertTrue(collected.contains(interceptor),
+                    "🔴 devh 的 GlobalClientInterceptorRegistry 必须真的收它（实测名单 = " + collected + "）"
+                            + "⇒ ⇒ 否则它只是个 Bean，channel factory 不会装配 ⇒ ⇒ 出向调用没有上界。");
+        }
     }
 
     // ================== 装置 ==================
@@ -376,7 +498,7 @@ class LikeApiOutboundDeadlineCapGateTest {
                 new GoStyleOutboundDeadlineInterceptor(props));
         cappedStub = LikeServiceGrpc.newBlockingStub(capped);
 
-        LikeRpcClient client = new LikeRpcClient(new LikeApiProperties());
+        LikeRpcClient client = new LikeRpcClient();
         injectStub(client, "likeServiceBlockingStub", cappedStub);
         return client;
     }
@@ -440,6 +562,46 @@ class LikeApiOutboundDeadlineCapGateTest {
     /** 本域 {@code application.yml} 的<b>磁盘路径</b>。 */
     private static Path domainYamlPath() {
         return moduleRoot().resolve("src").resolve("main").resolve("resources").resolve("application.yml");
+    }
+
+    /**
+     * 读出某个启动类的<b>有效扫描范围</b>。
+     *
+     * <p>⚠️ <b>为什么不能简单 union 两个声明</b>：Spring 的规则是
+     * 「<b>类上直接写的 {@code @ComponentScan} 会整体顶掉</b>
+     * {@code @SpringBootApplication} 内建的那个」
+     * —— 本仓的 {@code task-api} 启动类 javadoc 里就明写了这个坑
+     * （它正是因此把 {@code basePackages} 与两个内建 filter 一起显式重写）。
+     * ⇒ ⇒ 这里按「<b>有直接声明就用它，否则用 {@code @SpringBootApplication} 的 scanBasePackages</b>」取，
+     * 与 Spring 的实际行为一致。
+     */
+    private static Set<String> effectiveScanPackages(Class<?> applicationClass) {
+        Set<String> packages = new LinkedHashSet<>();
+
+        ComponentScan direct = applicationClass.getDeclaredAnnotation(ComponentScan.class);
+        if (direct != null) {
+            packages.addAll(Arrays.asList(direct.basePackages()));
+            return packages;
+        }
+        SpringBootApplication boot = applicationClass.getAnnotation(SpringBootApplication.class);
+        if (boot != null) {
+            packages.addAll(Arrays.asList(boot.scanBasePackages()));
+        }
+        return packages;
+    }
+
+    /** 把<b>本域磁盘那份</b> {@code application.yml} 加进给定上下文的 Environment。 */
+    private static void addDomainYamlTo(AnnotationConfigApplicationContext ctx) {
+        try {
+            for (PropertySource<?> ps : new YamlPropertySourceLoader()
+                    .load("domain-application-yml", new FileSystemResource(domainYamlPath()))) {
+                ctx.getEnvironment().getPropertySources().addLast(ps);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("读不到本域的 application.yml（" + domainYamlPath() + "）", e);
+        }
+        // ⚠️ 与生产同一条路：Boot 启动时会 attach 这一层（relaxed binding 的载体）
+        ConfigurationPropertySources.attach(ctx.getEnvironment());
     }
 
     /**

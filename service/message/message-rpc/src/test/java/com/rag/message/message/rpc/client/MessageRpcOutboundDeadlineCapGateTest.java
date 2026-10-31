@@ -2,7 +2,9 @@ package com.rag.message.message.rpc.client;
 
 import com.rag.common.observability.GoStyleRequestDeadline;
 import com.rag.common.protection.GoStyleOutboundDeadlineInterceptor;
+import com.rag.common.protection.GoStyleProtectionConfiguration;
 import com.rag.common.protection.GoStyleProtectionProperties;
+import com.rag.message.message.rpc.MessageRpcApplication;
 import com.rag.message.message.rpc.exception.MessageExceptions;
 import com.rag.users.admin.proto.AdminServiceGrpc;
 import com.rag.users.admin.proto.GetUserListReq;
@@ -11,6 +13,7 @@ import com.rag.users.user.proto.GetUserReq;
 import com.rag.users.user.proto.GetUserResp;
 import com.rag.users.user.proto.UserServiceGrpc;
 import io.grpc.Channel;
+import io.grpc.ClientInterceptor;
 import io.grpc.ClientInterceptors;
 import io.grpc.ManagedChannel;
 import io.grpc.Server;
@@ -19,6 +22,8 @@ import io.grpc.StatusRuntimeException;
 import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
+import net.devh.boot.grpc.client.interceptor.AnnotationGlobalClientInterceptorConfigurer;
+import net.devh.boot.grpc.client.interceptor.GlobalClientInterceptorRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -27,6 +32,8 @@ import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.bind.PropertySourcesPlaceholdersResolver;
 import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.Import;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.PropertySource;
@@ -38,8 +45,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -393,6 +403,66 @@ class MessageRpcOutboundDeadlineCapGateTest {
                         + "⇒ ⇒ 域侧再写一份 ⇒ 就是【第二个来源】⇒ ⇒ 副本数 = 漂移面。");
     }
 
+    // ────────────────────────────────────────────────────────────────────────────
+    // ⑦ 装配面：域侧启动类的**真实声明** ＋ 本域磁盘 yml ⇒ 共享层拦截器真成 Bean、真被 devh 收走
+    //
+    // ⚠️ **这一条补的是哪条缺口**：
+    //   前面 ①~⑥ 全部是「把生产拦截器【手工】装到 channel 上」⇒ ⇒ 那只证
+    //   「【假如】本域进程装上了它，它的行为对」，
+    //   **不证**「本域进程真的装上了它」（AGENTS.md §3.3.1：配置里没写 ≠ 没开）。
+    //   ⇒ ⇒ 本条拆成两半：
+    //     (1) 声明面 —— 反射读**本域启动类**上的 {@code @Import} 声明（不复制、不手抄）；
+    //     (2) 运行面 —— 真上下文 ＋ **本域磁盘那份 application.yml** ⇒ 拦截器成 Bean、cap 绑出 2000、
+    //         且 devh 自己的收集器（生产里由 starter 的自动配置注册）真的把它收走。
+    //
+    // ⚠️ **rpc 侧的声明面形态与 api 侧不同**：rpc 模块**刻意不扫** {@code com.rag.common}
+    //   （那一族里有 {@code jakarta.servlet.Filter}，全包扫描会把 web 类拖进纯 gRPC 进程）
+    //   ⇒ ⇒ 共享层保护层只能靠 {@code @Import} 精确引入 ⇒ ⇒ 本条断言的是 {@code @Import} 名单。
+    // ────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("⑦ 生产装配面：本域启动类 @Import 了共享层保护层 + 本域磁盘 yml ⇒ 拦截器成 Bean、cap 绑出 2000、devh 真的收它")
+    void productionWiringReallyProducesTheInterceptorWithTheDomainCap() {
+        // ── (1) 声明面 ──
+        Set<Class<?>> imports = effectiveImports(MessageRpcApplication.class);
+        assertTrue(imports.contains(GoStyleProtectionConfiguration.class),
+                "🔴 本域启动类（MessageRpcApplication）的 @Import 必须含 GoStyleProtectionConfiguration"
+                        + "（实测 = " + imports + "）"
+                        + "⇒ ⇒ 本模块刻意不扫 com.rag.common ⇒ ⇒ 共享层保护层只能靠 @Import 进得来"
+                        + "⇒ ⇒ 缺了这一行 ⇒ ⇒ 出向 deadline 拦截器在本域【不成 Bean】"
+                        + "⇒ ⇒ 域 yml 的 cap 配了也不生效（「配置里没写 ≠ 没开」，AGENTS.md §3.3.1）。");
+
+        // ── (2) 运行面 ──
+        try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
+            ctx.register(GoStyleProtectionConfiguration.class);
+            // ⚠️ devh 自己的收集器（生产里由 grpc-client starter 的自动配置注册）
+            ctx.registerBean(AnnotationGlobalClientInterceptorConfigurer.class);
+            addDomainYamlTo(ctx);
+            ctx.refresh();
+
+            GoStyleProtectionProperties props = ctx.getBeanProvider(GoStyleProtectionProperties.class)
+                    .getIfAvailable();
+            assertNotNull(props,
+                    "🔴 共享层的 GoStyleProtectionConfiguration 必须在本域上下文里产出 properties Bean"
+                            + "（它带 @EnableConfigurationProperties）");
+            assertEquals(GO_DEFAULT_CAP_MILLIS, props.getOutboundDeadline().getCapMillis(),
+                    "🔴 本域磁盘 application.yml 的 rag.protection.outbound-deadline.cap-millis "
+                            + "必须经【生产的绑定路径】绑到 capMillis 上（实测 = "
+                            + props.getOutboundDeadline().getCapMillis() + "）"
+                            + "⇒ ⇒ 若是 0 ⇒ ⇒ 键没被读到 ⇒ ⇒ 共享层默认不启用上界。");
+
+            GoStyleOutboundDeadlineInterceptor interceptor = ctx.getBeanProvider(
+                    GoStyleOutboundDeadlineInterceptor.class).getIfAvailable();
+            assertNotNull(interceptor,
+                    "🔴 共享层的 GoStyleOutboundDeadlineConfiguration 必须在本域上下文里产出拦截器 Bean");
+
+            List<ClientInterceptor> collected = new GlobalClientInterceptorRegistry(ctx).getClientInterceptors();
+            assertTrue(collected.contains(interceptor),
+                    "🔴 devh 的 GlobalClientInterceptorRegistry 必须真的收它（实测名单 = " + collected + "）"
+                            + "⇒ ⇒ 否则它只是个 Bean，channel factory 不会装配 ⇒ ⇒ 出向调用没有上界。");
+        }
+    }
+
     // ================== 装置 ==================
 
     /**
@@ -513,6 +583,31 @@ class MessageRpcOutboundDeadlineCapGateTest {
     /** 本域 {@code application.yml} 的<b>磁盘路径</b>（本模块源码根下那一份）。 */
     private static Path domainYamlPath() {
         return moduleRoot().resolve("src").resolve("main").resolve("resources").resolve("application.yml");
+    }
+
+    /** 读出某个启动类 {@code @Import} 的<b>直接导入名单</b>（rpc 侧靠它精确引入共享层 Bean）。 */
+    private static Set<Class<?>> effectiveImports(Class<?> applicationClass) {
+        Set<Class<?>> imports = new LinkedHashSet<>();
+
+        Import importAnnotation = applicationClass.getDeclaredAnnotation(Import.class);
+        if (importAnnotation != null) {
+            imports.addAll(Arrays.asList(importAnnotation.value()));
+        }
+        return imports;
+    }
+
+    /** 把<b>本域磁盘那份</b> {@code application.yml} 加进给定上下文的 Environment。 */
+    private static void addDomainYamlTo(AnnotationConfigApplicationContext ctx) {
+        try {
+            for (PropertySource<?> ps : new YamlPropertySourceLoader()
+                    .load("domain-application-yml", new FileSystemResource(domainYamlPath()))) {
+                ctx.getEnvironment().getPropertySources().addLast(ps);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("读不到本域的 application.yml（" + domainYamlPath() + "）", e);
+        }
+        // ⚠️ 与生产同一条路：Boot 启动时会 attach 这一层（relaxed binding 的载体）
+        ConfigurationPropertySources.attach(ctx.getEnvironment());
     }
 
     /**

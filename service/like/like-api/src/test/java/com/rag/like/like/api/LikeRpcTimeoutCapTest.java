@@ -1,12 +1,15 @@
 package com.rag.like.like.api;
 
 import com.rag.common.observability.GoStyleRequestDeadline;
+import com.rag.common.protection.GoStyleOutboundDeadlineInterceptor;
+import com.rag.common.protection.GoStyleProtectionProperties;
 import com.rag.like.like.api.client.LikeRpcClient;
-import com.rag.like.like.api.config.LikeApiProperties;
 import com.rag.like.like.proto.GetLikeCountReq;
 import com.rag.like.like.proto.GetLikeCountResp;
 import com.rag.like.like.proto.LikeCountItem;
 import com.rag.like.like.proto.LikeServiceGrpc;
+import io.grpc.Channel;
+import io.grpc.ClientInterceptors;
 import io.grpc.Context;
 import io.grpc.Deadline;
 import io.grpc.ManagedChannel;
@@ -24,13 +27,13 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -72,6 +75,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <h2>⚠️ 反向对照（防止「测试永远红」那种假绿）</h2>
  * <p>{@code capLargerThanServerSleepSucceeds} 把上界调到 5s ⇒ 上界不再是瓶颈 ⇒ 调用<b>成功</b>。
  * ⇒ 证明这套判据能区分「成功」与「失败」，不是「一律抛异常」。
+ *
+ * <h2>🔴 2026-10-31（P2-T04 · G2 lane）：本类改为验「共享层上界经域 client 生效」</h2>
+ * <p>原先本类的上界来自<b>域侧内联</b>（{@code LikeRpcClient.likeRpc()} 自己算
+ * {@code min(2000ms, 剩余预算)} 并套到 stub 上）⇒ ⇒ 那份内联已被删除
+ * （域侧只配参数 ⇒ 上界唯一由共享层 {@code GoStyleOutboundDeadlineInterceptor} 承担）。
+ * ⇒ ⇒ <b>本类的 6 条断言一条不改、语义一条不改</b>，只把<b>上界的来源</b>从「域侧内联」
+ * 换成<b>共享层的生产拦截器</b>（真 {@code GoStyleOutboundDeadlineInterceptor} 装在真 channel 上）
+ * ⇒ ⇒ 这 6 条现在验的是「<b>本域配的上界真被共享层施加、且经域 client 的调用路径生效</b>」
+ * ⇒ ⇒ <b>覆盖面不减反增</b>：原先验的是域侧实现，现在验的是生产路径。
+ * ⇒ ⇒ <b>反向对照的覆盖入口也跟着换</b>：原先调域侧 {@code LikeApiProperties}，
+ * 现在调<b>共享层 cap</b>（{@code GoStyleProtectionProperties.OutboundDeadline#capMillis}）。
  */
 class LikeRpcTimeoutCapTest {
 
@@ -82,7 +96,10 @@ class LikeRpcTimeoutCapTest {
     private static final long SERVER_SLEEP_MILLIS = 2500L;
 
     private static Server server;
-    private static ManagedChannel channel;
+    /** in-process server 名（channel 每个用例现建 ⇒ 因为不同用例的 cap 不同）。 */
+    private static String serverName;
+    /** 每个用例一条 channel（cap 不同 ⇒ 拦截器不同 ⇒ 不能共用）。 */
+    private ManagedChannel channel;
 
     /** 服务端观测到的 deadline（{@code null} = 客户端<b>没有</b>传 deadline 过来）。 */
     private static final AtomicReference<Deadline> serverObservedDeadline = new AtomicReference<>();
@@ -96,8 +113,8 @@ class LikeRpcTimeoutCapTest {
 
     @BeforeAll
     static void startServer() throws Exception {
-        String name = InProcessServerBuilder.generateName();
-        server = InProcessServerBuilder.forName(name)
+        serverName = InProcessServerBuilder.generateName();
+        server = InProcessServerBuilder.forName(serverName)
                 .addService(new LikeServiceGrpc.LikeServiceImplBase() {
                     @Override
                     public void getLikeCount(GetLikeCountReq request,
@@ -130,14 +147,10 @@ class LikeRpcTimeoutCapTest {
                 })
                 .build()
                 .start();
-        channel = InProcessChannelBuilder.forName(name).build();
     }
 
     @AfterAll
     static void stopServer() throws Exception {
-        if (channel != null) {
-            channel.shutdownNow();
-        }
         if (server != null) {
             server.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
         }
@@ -147,10 +160,15 @@ class LikeRpcTimeoutCapTest {
 
     @BeforeEach
     void setUp() {
-        LikeApiProperties properties = new LikeApiProperties();
-        client = new LikeRpcClient(properties);
+        // ⚠️ 上界来源 = **共享层的生产拦截器**（域侧内联已删 ⇒ 见类 javadoc 的「上界已下沉共享层」）
+        GoStyleProtectionProperties props = new GoStyleProtectionProperties();
+        props.getOutboundDeadline().setCapMillis(2000L);
+        channel = InProcessChannelBuilder.forName(serverName).build();
+        Channel capped = ClientInterceptors.intercept(channel,
+                new GoStyleOutboundDeadlineInterceptor(props));
+        client = new LikeRpcClient();
         ReflectionTestUtils.setField(client, "likeServiceBlockingStub",
-                LikeServiceGrpc.newBlockingStub(channel));
+                LikeServiceGrpc.newBlockingStub(capped));
         GoStyleRequestDeadline.clear();
         serverObservedDeadline.set(null);
         serverObservedRemainingMillis.set(-1L);
@@ -161,6 +179,9 @@ class LikeRpcTimeoutCapTest {
     void tearDown() {
         // ThreadLocal 残留会把下一个用例变成假绿/假红
         GoStyleRequestDeadline.clear();
+        if (channel != null) {
+            channel.shutdownNow();
+        }
     }
 
     private static GetLikeCountReq req() {
@@ -286,19 +307,32 @@ class LikeRpcTimeoutCapTest {
     @Test
     @DisplayName("✅ 反向对照：上界调到 5s（大于服务端耗时）时调用必须**成功**")
     void capLargerThanServerSleepSucceeds() {
-        LikeApiProperties properties = new LikeApiProperties();
-        properties.getLikeRpc().setTimeout(Duration.ofMillis(5000L));
-        LikeRpcClient wideCapClient = new LikeRpcClient(properties);
-        ReflectionTestUtils.setField(wideCapClient, "likeServiceBlockingStub",
-                LikeServiceGrpc.newBlockingStub(channel));
+        // ⚠️ 上界来源已改为共享层 ⇒ 这里调的是**共享层的 cap**（不再是域侧 properties）
+        GoStyleProtectionProperties wideProps = new GoStyleProtectionProperties();
+        wideProps.getOutboundDeadline().setCapMillis(5000L);
+        ManagedChannel wideChannel = InProcessChannelBuilder.forName(serverName).build();
+        try {
+            Channel cappedWide = ClientInterceptors.intercept(wideChannel,
+                    new GoStyleOutboundDeadlineInterceptor(wideProps));
+            LikeRpcClient wideCapClient = new LikeRpcClient();
+            ReflectionTestUtils.setField(wideCapClient, "likeServiceBlockingStub",
+                    LikeServiceGrpc.newBlockingStub(cappedWide));
 
-        setHttpBudgetMillis(3000L);
+            setHttpBudgetMillis(3000L);
 
-        GetLikeCountResp resp = wideCapClient.likeRpc().getLikeCount(req());
+            GetLikeCountResp resp = assertDoesNotThrow(
+                    () -> wideCapClient.likeRpc().getLikeCount(req()),
+                    "🔴 上界调到 5s（> 服务端耗时 " + SERVER_SLEEP_MILLIS + "ms）⇒ 调用**应当成功**"
+                            + "⇒ ⇒ 若这里抛了异常 ⇒ ⇒ 说明**有别的东西把上界压住了**"
+                            + "（例如域侧那份写死 2000ms 的副本）⇒ ⇒ 「上界可放宽」这件事在域侧根本没生效。"
+                            + "⇒ ⇒ 这条是**反向对照**：它保证本类能区分「成功」与「失败」，不是一律抛异常。");
 
-        assertNotNull(resp, "上界 5s > 服务端耗时 2.5s ⇒ 调用应当成功返回");
-        assertEquals(1L, resp.getCountsMap().get("1").getLikeCount(),
-                "拿到的应是服务端真正算出来的响应 —— 这条证明前面的「超时」不是因为调用本身有问题");
-        assertEquals(1, serverCallCount.get(), "服务端应当被真的调用到 1 次");
+            assertNotNull(resp, "上界 5s > 服务端耗时 2.5s ⇒ 调用应当成功返回");
+            assertEquals(1L, resp.getCountsMap().get("1").getLikeCount(),
+                    "拿到的应是服务端真正算出来的响应 —— 这条证明前面的「超时」不是因为调用本身有问题");
+            assertEquals(1, serverCallCount.get(), "服务端应当被真的调用到 1 次");
+        } finally {
+            wideChannel.shutdownNow();
+        }
     }
 }

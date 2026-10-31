@@ -2,11 +2,14 @@ package com.rag.message.message.api.client;
 
 import com.rag.common.observability.GoStyleRequestDeadline;
 import com.rag.common.protection.GoStyleOutboundDeadlineInterceptor;
+import com.rag.common.protection.GoStyleProtectionConfiguration;
 import com.rag.common.protection.GoStyleProtectionProperties;
+import com.rag.message.message.api.MessageApiApplication;
 import com.rag.message.message.proto.MessageServiceGrpc;
 import com.rag.message.message.proto.SendNotificationReq;
 import com.rag.message.message.proto.SendNotificationResp;
 import io.grpc.Channel;
+import io.grpc.ClientInterceptor;
 import io.grpc.ClientInterceptors;
 import io.grpc.ManagedChannel;
 import io.grpc.Server;
@@ -15,14 +18,19 @@ import io.grpc.StatusRuntimeException;
 import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
+import net.devh.boot.grpc.client.interceptor.AnnotationGlobalClientInterceptorConfigurer;
+import net.devh.boot.grpc.client.interceptor.GlobalClientInterceptorRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.bind.PropertySourcesPlaceholdersResolver;
 import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.ComponentScan;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.PropertySource;
@@ -35,8 +43,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -343,6 +354,62 @@ class MessageApiOutboundDeadlineCapGateTest {
                         + "⇒ ⇒ 域侧再写一份 ⇒ 就是【第二个来源】⇒ ⇒ 副本数 = 漂移面。");
     }
 
+    // ────────────────────────────────────────────────────────────────────────────
+    // ⑦ 装配面：域侧启动类的**真实声明** ＋ 本域磁盘 yml ⇒ 共享层拦截器真成 Bean、真被 devh 收走
+    //
+    // ⚠️ **这一条补的是哪条缺口**：
+    //   前面 ①~⑥ 全部是「把生产拦截器【手工】装到 channel 上」⇒ ⇒ 那只证
+    //   「【假如】本域进程装上了它，它的行为对」，
+    //   **不证**「本域进程真的装上了它」（AGENTS.md §3.3.1：配置里没写 ≠ 没开）。
+    //   ⇒ ⇒ 本条拆成两半：
+    //     (1) 声明面 —— 反射读**本域启动类**上的扫描声明（不复制、不手抄）；
+    //     (2) 运行面 —— 真上下文 ＋ **本域磁盘那份 application.yml** ⇒ 拦截器成 Bean、cap 绑出 2000、
+    //         且 devh 自己的收集器（生产里由 starter 的自动配置注册）真的把它收走。
+    // ────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("⑦ 生产装配面：本域启动类的真实声明 + 本域磁盘 yml ⇒ 拦截器成 Bean、cap 绑出 2000、devh 真的收它")
+    void productionWiringReallyProducesTheInterceptorWithTheDomainCap() {
+        // ── (1) 声明面 ──
+        Set<String> scanPackages = effectiveScanPackages(MessageApiApplication.class);
+        assertTrue(scanPackages.contains("com.rag.common"),
+                "🔴 本域启动类（MessageApiApplication）的**有效扫描范围**必须含 com.rag.common"
+                        + "（实测 = " + scanPackages + "）"
+                        + "⇒ ⇒ 否则本域进程扫不到 com.rag.common.protection.GoStyleProtectionConfiguration"
+                        + "⇒ ⇒ 出向 deadline 拦截器在本域【不成 Bean】⇒ ⇒ 域 yml 的 cap 配了也不生效"
+                        + "（「配置里没写 ≠ 没开」，AGENTS.md §3.3.1）。");
+
+        // ── (2) 运行面 ──
+        try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
+            ctx.register(GoStyleProtectionConfiguration.class);
+            // ⚠️ devh 自己的收集器（生产里由 grpc-client starter 的自动配置注册）
+            ctx.registerBean(AnnotationGlobalClientInterceptorConfigurer.class);
+            addDomainYamlTo(ctx);
+            ctx.refresh();
+
+            GoStyleProtectionProperties props = ctx.getBeanProvider(GoStyleProtectionProperties.class)
+                    .getIfAvailable();
+            assertNotNull(props,
+                    "🔴 共享层的 GoStyleProtectionConfiguration 必须在本域上下文里产出 properties Bean"
+                            + "（它带 @EnableConfigurationProperties）");
+            assertEquals(GO_DEFAULT_CAP_MILLIS, props.getOutboundDeadline().getCapMillis(),
+                    "🔴 本域磁盘 application.yml 的 rag.protection.outbound-deadline.cap-millis "
+                            + "必须经【生产的绑定路径】绑到 capMillis 上（实测 = "
+                            + props.getOutboundDeadline().getCapMillis() + "）"
+                            + "⇒ ⇒ 若是 0 ⇒ ⇒ 键没被读到 ⇒ ⇒ 共享层默认不启用上界。");
+
+            GoStyleOutboundDeadlineInterceptor interceptor = ctx.getBeanProvider(
+                    GoStyleOutboundDeadlineInterceptor.class).getIfAvailable();
+            assertNotNull(interceptor,
+                    "🔴 共享层的 GoStyleOutboundDeadlineConfiguration 必须在本域上下文里产出拦截器 Bean");
+
+            List<ClientInterceptor> collected = new GlobalClientInterceptorRegistry(ctx).getClientInterceptors();
+            assertTrue(collected.contains(interceptor),
+                    "🔴 devh 的 GlobalClientInterceptorRegistry 必须真的收它（实测名单 = " + collected + "）"
+                            + "⇒ ⇒ 否则它只是个 Bean，channel factory 不会装配 ⇒ ⇒ 出向调用没有上界。");
+        }
+    }
+
     // ================== 装置 ==================
 
     /**
@@ -443,6 +510,44 @@ class MessageApiOutboundDeadlineCapGateTest {
     /** 本域 {@code application.yml} 的<b>磁盘路径</b>。 */
     private static Path domainYamlPath() {
         return moduleRoot().resolve("src").resolve("main").resolve("resources").resolve("application.yml");
+    }
+
+    /**
+     * 读出某个启动类的<b>有效扫描范围</b>。
+     *
+     * <p>⚠️ <b>为什么不能简单 union 两个声明</b>：Spring 的规则是
+     * 「<b>类上直接写的 {@code @ComponentScan} 会整体顶掉</b>
+     * {@code @SpringBootApplication} 内建的那个」
+     * ⇒ ⇒ 这里按「<b>有直接声明就用它，否则用 {@code @SpringBootApplication} 的 scanBasePackages</b>」取，
+     * 与 Spring 的实际行为一致。
+     */
+    private static Set<String> effectiveScanPackages(Class<?> applicationClass) {
+        Set<String> packages = new LinkedHashSet<>();
+
+        ComponentScan direct = applicationClass.getDeclaredAnnotation(ComponentScan.class);
+        if (direct != null) {
+            packages.addAll(Arrays.asList(direct.basePackages()));
+            return packages;
+        }
+        SpringBootApplication boot = applicationClass.getAnnotation(SpringBootApplication.class);
+        if (boot != null) {
+            packages.addAll(Arrays.asList(boot.scanBasePackages()));
+        }
+        return packages;
+    }
+
+    /** 把<b>本域磁盘那份</b> {@code application.yml} 加进给定上下文的 Environment。 */
+    private static void addDomainYamlTo(AnnotationConfigApplicationContext ctx) {
+        try {
+            for (PropertySource<?> ps : new YamlPropertySourceLoader()
+                    .load("domain-application-yml", new FileSystemResource(domainYamlPath()))) {
+                ctx.getEnvironment().getPropertySources().addLast(ps);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("读不到本域的 application.yml（" + domainYamlPath() + "）", e);
+        }
+        // ⚠️ 与生产同一条路：Boot 启动时会 attach 这一层（relaxed binding 的载体）
+        ConfigurationPropertySources.attach(ctx.getEnvironment());
     }
 
     /**
