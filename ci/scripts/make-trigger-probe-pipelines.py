@@ -54,15 +54,11 @@ def extract_resources_section(text: str) -> str:
     """取出 `resources:` 段原文（到 `jobs:` 之前）。"""
     i = text.index("\nresources:")
     j = text.index("\njobs:")
-    sec = text[i:j]
-    # 🆕 把资源检查间隔调小（默认 60s ⇒ 13 个资源实例的检查时刻散开 ⇒
-    #    「等第一个 build」会得到**残缺**的触发集合 ⇒ 测量竞态）。
-    #    ⚠️ 这只改**时机**，不改**哪些流水线会触发** ⇒ 被测性质不变。
-    if "check_every:" not in sec:
-        sec = sec.replace("    branch: ((git_branch))\n",
-                          "    branch: ((git_branch))\n"
-                          "    check_every: 15s\n")
-    return sec
+    # ⚠️ **不要**在这里加 `check_every`（实测 2026-10-31 加了 `15s` ⇒
+    #   git 资源的 check **反复失败**（check-step 跑完但整体 failed）⇒
+    #   **一条 build 都不产生** ⇒ 触发面完全不可观测）。
+    #   ⇒ 保持资源默认检查间隔；测量靠「等集合稳定」（见 ci/verify-triggers.sh）。
+    return text[i:j]
 
 
 LITE_JOB = """
