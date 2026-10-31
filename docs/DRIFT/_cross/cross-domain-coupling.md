@@ -118,16 +118,16 @@ task     →                            （Kafka ← like）
 ⇒ **仍需注意**：契约层无环 **不等于** 行为层无环 —— 两个域可能共享**同一份共享库**（`service/common`）
 或**同一段 Go 语义**（如 `users` 的 JWT 解析）⇒ G4（§三）正是为此单独存在。
 
-### 1.4 共享层辐射度（`service/common`，63 个类，其中 **37 个被外部域引用**）
+### 1.4 共享层辐射度（`service/common`，**88 个类**〔2026-10-27 基线为 **63** 个 · 随共享层落码增长〕，其中 **52 个被外部域引用**〔2026-10-27 基线为 **44** 个〕）
 
 按**跨域引用域数**（**import 判定**）降序：
 
 | 跨域引用域数 | 类 |
 |---|---|
-| **9 域** | `LoggerFactoryBean` · `GoStyleProtectionProperties` |
-| **8 域** | `RpcServerInterceptorFactory` · `Response` · `ObservabilityProperties` · `GoStyleRouterErrorResponses` |
-| **7 域** | `SqlTimeoutStatusTranslator` · `ObservabilityLifecycle` · `GoStyleRpcProtectionChain` · `GoStyleProtectionConfiguration` · `FatalError` · `DeadlineQueryTimeoutInjector` · `BusinessException` · `AuthenticationException` |
-| 6 域及以下 | 其余 23 类 |
+| **9 域** | `GoStyleProtectionProperties` · `GoStyleRequestDeadline` · `LoggerFactoryBean` |
+| **8 域** | `GoStyleOutboundDeadlineInterceptor` · `GoStyleRouterErrorResponses` · `GoStyleRpcProtectionChain` · `ObservabilityProperties` · `Response` · `RpcServerInterceptorFactory` |
+| **7 域** | `AuthenticationException` · `BusinessException` · `DeadlineQueryTimeoutInjector` · `FatalError` · `GoStyleBreakerFilter` · `GoStyleCpuSheddingFilter` · `GoStyleGrpcClientBreakerInterceptor` · `GoStyleMaxBytesFilter` · `GoStyleMaxConnsFilter` · `GoStyleProtectionConfiguration` · `ObservabilityLifecycle` · `SqlTimeoutStatusTranslator` |
+| 6 域及以下 | 其余 **31** 类 |
 
 ⚠️ **订正（2026-10-27）**：早先记的「3 类被全部 10 个域引用」是**假阳性** ——
 统计时用了**全文正则**，把 javadoc 里 `{@code com.rag.common.xxx.X}` 的提及当成了真引用。
@@ -441,8 +441,15 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
     "GoStyleBreakerFilter": [
       "article",
       "favorite",
+      "follow",
+      "hot",
       "message",
-      "task"
+      "task",
+      "users"
+    ],
+    "GoStyleBreakerRouteTemplateAutoConfiguration": [
+      "follow",
+      "users"
     ],
     "GoStyleCircuitOpenException": [
       "article",
@@ -455,16 +462,27 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
     "GoStyleCpuSheddingFilter": [
       "article",
       "favorite",
+      "follow",
+      "hot",
       "message",
-      "task"
+      "task",
+      "users"
     ],
     "GoStyleFormLimitMode": [
+      "hot",
       "message",
       "task"
     ],
+    "GoStyleFormLimitWebMvcConfig": [
+      "follow",
+      "users"
+    ],
     "GoStyleFormValueLimitInterceptor": [
+      "follow",
+      "hot",
       "message",
-      "task"
+      "task",
+      "users"
     ],
     "GoStyleFormValues": [
       "article",
@@ -485,19 +503,45 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
     ],
     "GoStyleJsonBodyConverterConfig": [
       "article",
-      "task"
+      "follow",
+      "task",
+      "users"
+    ],
+    "GoStyleJsonContentTypeAdvice": [
+      "follow",
+      "users"
     ],
     "GoStyleMaxBytesFilter": [
       "article",
       "favorite",
+      "follow",
+      "hot",
       "message",
-      "task"
+      "task",
+      "users"
     ],
     "GoStyleMaxConnsFilter": [
       "article",
       "favorite",
+      "follow",
+      "hot",
       "message",
-      "task"
+      "task",
+      "users"
+    ],
+    "GoStyleOutboundDeadlineInterceptor": [
+      "article",
+      "comment",
+      "favorite",
+      "follow",
+      "like",
+      "message",
+      "task",
+      "users"
+    ],
+    "GoStylePathNormalizingAutoConfiguration": [
+      "follow",
+      "users"
     ],
     "GoStylePathNormalizingFilter": [
       "like",
@@ -530,12 +574,19 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
     "GoStyleRedisClientAutoConfiguration": [
       "users"
     ],
+    "GoStyleRedisDeadlineConnectionFactory": [
+      "comment"
+    ],
     "GoStyleRequestDeadline": [
       "article",
       "comment",
       "favorite",
+      "follow",
       "hot",
-      "like"
+      "like",
+      "message",
+      "task",
+      "users"
     ],
     "GoStyleRouterErrorResponses": [
       "article",
@@ -565,11 +616,24 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
       "message",
       "task"
     ],
+    "GoStyleTomcatParameterLimitCustomizer": [
+      "article",
+      "favorite",
+      "follow",
+      "hot",
+      "users"
+    ],
+    "GoStyleTraceparentFilter": [
+      "follow",
+      "users"
+    ],
     "HttpMiddlewareFilter": [
       "article",
       "comment",
+      "follow",
       "message",
-      "task"
+      "task",
+      "users"
     ],
     "LogOption": [
       "favorite",
@@ -626,6 +690,9 @@ W4 `task`+`comment`+`favorite`+`hot` / W5 共享层）⇒ **并发峰值 4**、*
       "users"
     ],
     "RpcInterceptor": [
+      "article",
+      "comment",
+      "favorite",
       "like"
     ],
     "RpcServerInterceptorFactory": [
@@ -831,3 +898,38 @@ python3 tools/difftest/check-wave-role-model.py --mutation-test  # ⇒ 7/7 变�
 
 ⚠️ **本守门已做两次变异验证**（2026-10-27）：① 注入一条新的 `@GrpcClient` 边（favorite → hot-rpc）⇒ `EXIT=1` 且精确点名 `favorite`；
 ② 改一个跨域 topic 名（`article-hot-events` → `article-hot-events-v2`）⇒ `EXIT=1` 且点名该 topic **从矩阵中消失**。
+
+## 七、🆕 快照刷新记录（2026-10-31 · 合并收口执行者）—— `common_radiation` 随 G1/G2/G3 落码而重算
+
+⚠️ **触发**：`python3 tools/difftest/check-wave-coupling.py` ⇒ **EXIT=1 · 18 项漂移**（**全部落在 `common_radiation`**）。
+⇒ ⇒ **根因 = 事实变了、快照没跟** ⇒ ⇒ G1/G2/G3 各域把共享层的**保护类 / 拦截器 / 建议器**接进本域
+（`follow` / `hot` / `message` / `task` / `users` 五域新增引用）⇒ ⇒ **辐射度快照过期** ⇒ ⇒ **不是行为回归**。
+
+⇒ ⇒ **本轮实测的四项结论**（逐项比对 `--print` 的重算值）：
+
+| 快照维度 | 结论 |
+|---|---|
+| `pom_dependents`（编译期共享库度数） | ✅ **逐项未变** |
+| `grpc_edges`（gRPC 契约边 DAG） | ✅ **逐项未变** ⇒ ⇒ **§二 分波方案的事实底座未过期** |
+| `cross_domain_topics`（跨域 Kafka topic） | ✅ **逐项未变** |
+| `users_common_classes`（users-common 逐类跨域引用） | ✅ **逐项未变** |
+| `common_radiation`（service/common 逐类辐射度） | 🔴 **18 项漂移** ⇒ ⇒ 本轮刷新的**唯一**一处 |
+
+⇒ ⇒ **刷新动作**：`python3 tools/difftest/check-wave-coupling.py --print` ⇒ 整块替换 §6.1 的 JSON 快照
+⇒ ⇒ **44 → 52 个被外部域引用的类**；`service/common` 的 `.java` 总数 **63 → 88**（2026-10-27 ⇒ 2026-10-31，随共享层落码增长）
+⇒ ⇒ §1.4 的标题与分桶表**就地订正**（**行数不变 ⇒ 零位移**）⇒ ⇒ **§1.4 之前的所有行号指针不受影响**。
+
+⚠️ **⚠️ 块内两个被外部引用的行号已漂移 ⇒ 已连带改指**（否则 `check-pointer-consistency.py` 会红）：
+
+| 锚点 | 旧行号 | 新行号 | 引用处 |
+|---|---|---|---|
+| `GoStyleRedisClientAutoConfiguration` | `:530` | **`:574`** | `docs/DRIFT/_cross/grading/W4.md`（G4-9 行）· `docs/DRIFT/article/vs-common.md`（G4-9 行） |
+| `"MqConsumer": [` | `:589` | **`:653`** | 同上 |
+
+⚠️ **⚠️ 一条正文数字与自己的快照脱节的旧账（2026-10-31 订正）**：§1.4 的标题原先写「**37 个**被外部域引用」，
+而**它自己下面的快照**当时是 **44** ⇒ ⇒ **正文与快照差 7** ⇒ ⇒ **说明「写死数字」与「机器快照」长期各走各的**
+⇒ ⇒ 本轮改为**两个数字都从 `--print` 的重算值取**（**52**），并在标题里**标注基线值**（2026-10-27 = 44）⇒ ⇒ **不再有第二个真相源**。
+
+⇒ ⇒ **验收**：`python3 tools/difftest/check-wave-coupling.py` ⇒ **EXIT=0 · 5 项断言全绿**（度数 / DAG / topic / 跨域引用 / 辐射度）。
+
+（**本节编号：§七** —— 为便于上文按「§七」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
