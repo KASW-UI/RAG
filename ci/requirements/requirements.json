@@ -347,7 +347,7 @@
       "deviation": null,
       "pipeline": "rag-contract-errmsg",
       "task": "contract-check",
-      "gap_note": "🔴 **8 条未签字差异**，其中 **4 条是 `D-7`「下游非本域错误」待拍板**（Go like-api 直接把原始 gRPC 码当业务码：INTERNAL⇒13 / INVALID_ARGUMENT⇒3 / NOT_FOUND⇒5 / UNAUTHENTICATED⇒16；Java 侧 `mapGrpcCodeToBizCode` 分别收敛到 1015 / 2001 / 1015 / 1009）⇒ **Java 与 Go 真源确实不一致，且无人拍板** ⇒ 判 FAIL。⚠️ 处置需用户拍板（**不得**自行加豁免、**不得**为绿改 Java 业务代码）。其余 4 条为 OBS 段「不可达差异」技术判定。"
+      "gap_note": "🔴 **5 条未签字差异**（`ci/contracts/errmsg/like.txt` 的 `DEVIATION` 段 status=pending 实测计数：5/37）—— 全部是 `D-7`「下游非本域错误」：Go like-api 把原始 gRPC 码当业务码直传（INTERNAL⇒13 / INVALID_ARGUMENT⇒3 / NOT_FOUND⇒5 / UNAUTHENTICATED⇒16 / 非 status⇒5001），Java 侧 `mapGrpcCodeToBizCode` + 末尾兜底收敛到 1015 / 2001 / 1015 / 1009 / 1015 ⇒ **Java 与 Go 真源确实不一致，且无人拍板** ⇒ 判 FAIL。⚠️ 处置需用户拍板（**不得**自行加豁免、**不得**为绿改 Java 业务代码）。⚠️ 计数订正（2026-10-31）：本条原写「8 条未签字差异，其中 4 条是 D-7 … 其余 4 条为 OBS 段技术判定」—— **与基准文件不一致**（OBS 段 3 条是 `technical`、不是未签字；未签字的是 5 条 BIZCODE）⇒ 已按 `ci/contracts/errmsg/like.txt` 实测计数订正，**判 FAIL 的口径不变**。⚠️ 其中 `foreign_plain` 一条经 2026-10-31 核对**比较点错配**（探针比 Java 库方法 `LikeGrpcError#bizCodeFromError`，Go 侧比消费点 `service/like/api/internal/logic/like/*.go`；Java 实际消费点 `LikeApiSupport#rpcError` 先行判 `status == null` ⇒ 对外 5001 与 Go 一致）⇒ **该条是否仍算「未签字的行为差异」待用户裁定** ⇒ 详见 `ci/requirements/README.md` §8.2「核对补记」。"
     },
     {
       "requirement_id": "REQ-ERRMSG-MESSAGE-001",
