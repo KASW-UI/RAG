@@ -760,6 +760,8 @@ def scan_ledgers(exclusions: dict[str, str]):
                 "file": str(rel), "line": i + 1, "unit": unit,
                 "title": title[:200], "seg": seg, "excluded": excl,
                 "head_class": head_class,
+                "status_col": (_find_status_col(lines, i, _cells(lines[i]))
+                               if unit == "tablerow" else -1),
             })
     return entries, line_index
 
@@ -1329,6 +1331,63 @@ def _cells(line: str) -> list[str]:
     return split_cells(line)
 
 
+# ⚠️ **状态列定位**（2026-10-31 · 治本）—— 按**表头列名**定位「当前状态」列。
+#   背景：global 域台账的行形态是
+#     `| **E20** | 🔴 **N6**：<问题描述> | <落点> | ✅ **已修**(...) |`
+#   ⇒ 第 2 格（条目）里的 🔴 是**问题标签**、第 4 格（状态）才是当前态
+#   ⇒ 旧口径「按整行取最早标记」⇒ 把「已修」读成「未闭合」⇒ **虚增真缺口**。
+STATUS_COL_NAMES = ("状态", "处置", "结论", "现状")
+
+# ⚠️ **状态严重度**（护栏用）—— 🔴 未闭合 > 🟡 部分闭合 > ✅ 已一致 > ⚫ 已签字偏离
+STATUS_SEVERITY = {"🔴": 3, "🟡": 2, "✅": 1, "⚫": 0}
+
+
+def _status_col_index(hdr: list[str]) -> int:
+    """表头里「状态 / 处置 / 结论 / 现状」列的序号；找不到 ⇒ -1。"""
+    for want in STATUS_COL_NAMES:
+        for idx, c in enumerate(hdr):
+            if want in c:
+                return idx
+    return -1
+
+
+def _find_status_col(lines: list[str], i: int, row_cells: list[str]) -> int:
+    """向上回溯找本行所属表格的**表头** ⇒ 返回「状态」列序号；找不到 ⇒ -1。
+
+    ⚠️ **为什么必须回溯**：台账里同一张表常被**空行**切成多段
+      （实测 `docs/DRIFT/global/_README.md` 的 E 表被空行切成 4 段）
+      ⇒ 组的首行未必是表头 ⇒ 只看组首 ⇒ 后面几段的行**拿不到状态列**
+      ⇒ 判据「部分生效」（实测只覆盖第一段）。
+
+    ⚠️ **为什么要求「表头列数 == 行格数」**：回溯可能撞到**上一张表**的表头
+      ⇒ 列序号会错位 ⇒ 必须用列数一致性把不相干的表头挡掉。
+      行里有未转义的 `|` ⇒ 列数不符 ⇒ **保守不命中**（宁可不翻，也不翻错）。
+    """
+    n = len(row_cells)
+    h = i - 1
+    limit = max(0, i - 400)
+    while h >= limit:
+        s = lines[h]
+        if s.strip() == "":
+            h -= 1
+            continue
+        if re.match(r"^\s{0,3}#{1,6}\s", s):
+            break                       # 章节标题 ⇒ 表到此为止
+        if not s.lstrip().startswith("|"):
+            break                       # 撞到正文 ⇒ 停
+        sep = _cells(s)
+        if sep and all(set(c) <= set("-: ") and c for c in sep):
+            # 找到**分隔行** ⇒ 其上一行即表头
+            hdr = _cells(lines[h - 1]) if h >= 1 else []
+            if hdr and len(hdr) == n:
+                idx = _status_col_index(hdr)
+                if idx >= 0:
+                    return idx
+            return -1
+        h -= 1                         # 普通表格行 ⇒ 继续往上找
+    return -1
+
+
 def scan_grading_tables():
     """扫全仓台账 ⇒ {编号: {stage, prio, final_goal, blocking, evidence, source, kind}}
 
@@ -1621,6 +1680,39 @@ def detect_status(entry) -> str | None:
             if best is None or pos < best[0] or (pos == best[0] and len(k) > len(best[1])):
                 best = (pos, k)
         return best[1] if best else None
+
+    # ② **状态列**（2026-10-31 · 治本）—— 表头有「状态」列 ⇒ 从那一列读当前态。
+    #   ⚠️ 必须读 `seg`（表格行的 seg = **整行原文**，未截断）⇒ 状态列常在第 4 格。
+    #   ⚠️ **护栏**：状态列里**最早的标记之后若再出现更严重的标记** ⇒ **不采信**该列。
+    #     实测反例（`global/_README.md:383` 的 E34）：状态列开头的 ✅ 只覆盖**子项③**
+    #     （「第三十轮闭合其 ③」）⇒ 而条目本身仍是「🟡 部分闭合」（②④ 明确「不做」）
+    #     ⇒ 无护栏 ⇒ **把一条仍开放的条目读成已一致 = 假绿**（比假红更贵）。
+    #     ⇒ 护栏 = 「同格内出现更严重标记 ⇒ 保守回退到整行读法」。
+    _sc = entry.get("status_col", -1)
+    if _sc is not None and _sc >= 0:
+        _row = _cells(entry.get("seg", ""))
+        if len(_row) > _sc:
+            _cell = _row[_sc]
+            k = earliest(_cell)
+            if k:
+                _sev = STATUS_SEVERITY.get(k, 0)
+                _rest = _cell[_cell.find(k) + len(k):]
+                # ⚠️ **必须取「格内全部标记里最靠后的那个」** ——
+                #   只在「更严重的标记」里取最后一个 ⇒ **看不见末尾回到 ✅ 的那枚**
+                #   ⇒ E22（末尾 `✅ L15 已把 rpc 纳入 jar 门禁`）会被误判成「以 🔴 收尾」。
+                _later = [(m, _rest.rfind(m)) for m in marks if m in _rest]
+                # ⚠️ **判据 = 「该格是否以更严重的标记收尾」** ——
+                #   E22（真已修）：`✅ 已修 ⇒ 🔴 L11 漏报了 hot-rpc ⇒ ✅ L15 已把 rpc 纳入门禁`
+                #     ⇒ 末尾回到 ✅ ⇒ **采信 ✅**（中间的 🔴 是**历史守门缺陷**的记述）
+                #   E34（仍部分闭合）：`✅ 闭合其 ③ ⇒ 🔴 实测出真实脆弱点 ⇒ ⏸ ② 不做 ⇒ ⏸ ④ 不做`
+                #     ⇒ 末尾是 🔴 ⇒ **不采信**（那条 ✅ 只覆盖子项③）
+                #   ⇒ 只看「有没有更严重标记」太粗（会把 E22 这类真修复挡掉）
+                #   ⇒ 只看「最后一个标记」才对。
+                if not _later:
+                    return marks[k]
+                _last = max(_later, key=lambda x: x[1])[0]
+                if STATUS_SEVERITY.get(_last, 0) <= _sev:
+                    return marks[k]
 
     k = earliest(entry["title"])
     if k:
