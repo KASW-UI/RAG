@@ -2254,7 +2254,7 @@ REDIS_MODE=hanging ./exp-difftest-redis-neverup-rpc.sh  # 挂起 ⇒ 命令超�
 （订正后行号：`200 / 295 / 312 / 333 / 365 / 417 / 494 / 523 / 554 / 577 / 638 / 657 / 714 / 759 / 789 / 831 / 850 / 897`）
 ⇒ DEADLINE_EXCEEDED 原样上抛 ✅（与 global 说的 18 处一致）。
 
-#### §2 🔴 客户端可见面：**两侧逐字一致** —— 与 global 的 E58 定性冲突
+#### §2 客户端可见面：**两侧逐字一致** —— 与 global 的 E58 定性冲突（现行态 = 🟡 部分闭合）
 
 global 写「两侧确实不同（wire 上码值不同 ⇒ **客户端可见**）」。
 ⇒ 本域查了 **2026-10-21 的 E-4 双栈活体实测**（真进程 + 真 PG，用 ACCESS EXCLUSIVE 锁把 login 的 SELECT 挡住）：
@@ -2325,13 +2325,13 @@ Go 侧那个 `select` 是**竞速**：`done` 与 `timeoutCtx.Done()` 同时 read
 ⇒ 本域**不声称「Go 侧 100% 是 1015」**。
 ⇒ 若要闭合这一格，需在同一条件下跑 N 轮并统计分布（**本轮未做**）。
 
-#### §5 与 `global` E58 的关系（已回信）
+#### §5 与 `global` E58 的关系（已回信 · 现行态 = 🟡 部分闭合）
 
 - **本域不把这条登记为「有意偏离」** —— 因为**客户端可见面两侧一致**
   ⇒ 按 AGENTS.md「差异只允许出现在表达层」，它**不构成 wire 漂移**，也**不需要**用户签字。
   ⇒ 但**必须留档** —— 否则下一个人会照着「Go 是 INTERNAL」把 18 处 catch 改回去
   ⇒ RAG 渲染 5001 ⇒ **离 Go 更远**（2026-10-21 B-1 缓解实验第三行踩过的坑）。
-- 🔴 **需 `global` 侧处理的两处**（**`service/common` 是 global 域单写权 ⇒ 本域只报告、不动手**）：
+- **需 `global` 侧处理的两处**（**`service/common` 是 global 域单写权 ⇒ 本域只报告、不动手**）：
   1. `service/common/src/main/java/com/rag/common/persistence/SqlTimeoutStatusTranslator.java:29-38` 的 javadoc 写着
      「Go 侧 ctx 到点后，查询返回 `context.DeadlineExceeded`，**经 go-zero 的错误映射成为「服务繁忙」1015**」
      ⇒ **理由不准**：1015 来自 **api 层的 default 分支** + **interceptor 的超时分支**，不是 go-zero 的错误映射；
@@ -2356,8 +2356,8 @@ bash tools/difftest/exp-b1-timeout-cancel.sh
 |---|---|
 | **Classification** | **NOT A WIRE DRIFT**（源码层形态差异 · **客户端可见面两侧逐字一致** · E-4 四组 Go 采样 + RAG 生产方案同场对照）⇒ **不计入 §4.4 的 OBSERVABLE DIFFERENCE** |
 | **Observable Impact** | **无**（客户端可见的 code 与 msg 两侧完全相同） |
-| **Risk** | 🔴 **反向风险**：若按「Go 是 INTERNAL」把 18 处 catch 改回去 ⇒ RAG 渲染 **5001**（`ErrorServerCommon`，在 Go 侧表示「数据库故障」而非「超时」）⇒ **离 Go 更远** |
-| **处置** | ✅ **已处置**（2026-10-26）：17 处注释的**理由**已订正 + 类级 javadoc 完整论证；**生产行为零改动** |
+| **Risk** | **反向风险**：若按「Go 是 INTERNAL」把 18 处 catch 改回去 ⇒ RAG 渲染 **5001**（`ErrorServerCommon`，在 Go 侧表示「数据库故障」而非「超时」）⇒ **离 Go 更远** |
+| **处置** | ✅ **已处置**（2026-10-26）：17 处注释的**理由**已订正 + 类级 javadoc 完整论证；**生产行为零改动** ⇒ **现行态 = ✅ 已一致** |
 | **归属** | **本组件内**（`service/users/user/user-rpc`）⇒ 修法只落本域 ⇒ **不跨域**（但 `service/common` 的同款 javadoc 问题须由 `global` 域处理） |
 
 ---

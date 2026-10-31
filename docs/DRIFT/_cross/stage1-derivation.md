@@ -193,7 +193,7 @@
 
 | 波次 | 条目（行） | **状态开放**（仍要干的） | 其中 A/B 类（阶段一范围） | 覆盖范围 |
 |---|---|---|---|---|
-| **G1** | 278 | **101** | 0 | `users`（**不含 users-common**）+ `follow` |
+| **G1** | 278 | **100** | 0 | `users`（**不含 users-common**）+ `follow` |
 | **G2** | 287 | **69** | 0 | `message` + `like` + `task` |
 | **G3** | 405 | **172** | 0 | `article` + `comment` + `favorite` + `hot` |
 | **G4** | 290 | **172** | 0 | **共享层** `service/common` + `service/users/users-common` + 收口域 `global`（**常设执行者 · 不在域波顺序里**） |
@@ -203,8 +203,8 @@
 | **G1+G3+G4** | 3 | **2** | 0 | **跨派工面并集**（同源组跨域登记） |
 
 > ⇒ **「状态开放」= 该条仍有待实现项**（🔴 未闭合 / 🟡 部分闭合 / 仍生效 / ⏳ 未签字）；**A/B 类（阶段一范围）**那一列全是 0 ⇒ **每棵树的活都已有排期指针** ⇒ 没有「漏排」需要补派。
-**合计 493 行 / 480 个编号** —— ① **A/B 类**（阶段 1 范围内）**0** 个编号
-· ② C/D 类（**阶段 2 承接**，§5.3 暂缓项清单已登记）**87** 条
+**合计 492 行 / 479 个编号** —— ① **A/B 类**（阶段 1 范围内）**0** 个编号
+· ② C/D 类（**阶段 2 承接**，§5.3 暂缓项清单已登记）**86** 条
 · ③ 未定级 **3** 条
 · ④ **已闭合**（逐条 Go 对照后「**差异已消失**」⇒ **无待实现项**）**56** 条
 
@@ -222,7 +222,7 @@
 | 归属 | 优先级 | ID | 域 | **波次** | 状态 | 证据 | 证据缺口 | 源位置 |
 |---|---|---|---|---|---|---|---|---|
 
-> C/D 类 **87** 条另有去向（阶段 2 恢复方案已在各条台账的 §5.3 十一项表里）
+> C/D 类 **86** 条另有去向（阶段 2 恢复方案已在各条台账的 §5.3 十一项表里）
 > ⇒ **不计入阶段一判定**（`PhaseGoal-judge.md` §1.1 ⑥ 第 4 条）⇒ 不列。
 
 ### 4.4 ④ 已闭合（**逐条 Go 对照后差异已消失 · 无待实现项**）
@@ -347,7 +347,6 @@
 | `DRIFT-SF-003` | common | 同源组 | 2 | 🔴 未闭合 / 🟡 部分闭合 | 🔴 未闭合 | `DRIFT/common/alignment-2026-10-23.md:422;DRIFT/common/alignment-2026-10-23.md:868` |
 | `E38` | global | 同源组 | 2 | ✅ 已一致 / 🔴 未闭合 | ✅ 已一致 | `DRIFT/global/_README.md:388;DRIFT/users/user/rpc.md:832` |
 | `E48` | global | 同源组 | 3 | ✅ 已一致 / 🔴 未闭合 | ✅ 已一致 | `DRIFT/global/_README.md:427;DRIFT/global/_README.md:750;DRIFT/global/_README.md:776` |
-| `E58` | global | 同源组 | 3 | 🔴 未闭合 / 🟡 部分闭合 | 🔴 未闭合 | `DRIFT/global/_README.md:446;DRIFT/users/user/rpc.md:2257;DRIFT/users/user/rpc.md:2328` |
 | `E59` | global | 同源组 | 4 | ✅ 已一致 / 🔴 未闭合 | ✅ 已一致 | `DRIFT/global/_README.md:447;DRIFT/like/vs-common.md:1498;DRIFT/message/rpc.md:2810` |
 | `E65` | comment | 同源组 | 10 | ✅ 已一致 / 🔴 未闭合 | 🔴 未闭合 | `DRIFT/comment/rpc.md:257;DRIFT/comment/rpc.md:930;DRIFT/favorite/rpc.md:3376` |
 | `E68` | favorite | 同源组 | 3 | ✅ 已一致 / 🔴 未闭合 | 🔴 未闭合 | `DRIFT/favorite/vs-common.md:30;DRIFT/global/_README.md:433;DRIFT/global/_README.md:541` |
@@ -370,11 +369,12 @@
 | `C-1` | comment | 同域多版本 | 2 | ✅ 已一致 / 🔴 未闭合 | ✅ 已一致 | `DRIFT/comment/vs-common.md:57;DRIFT/comment/vs-common.md:218` |
 | `C-4` | comment | 同域多版本 | 3 | 🔴 未闭合 / 🟡 部分闭合 | 🟡 部分闭合 | `DRIFT/comment/vs-common.md:60;DRIFT/comment/vs-common.md:126;DRIFT/comment/vs-common.md:221` |
 | `CD-6` | global | 同域多版本 | 5 | ✅ 已一致 / 🟡 部分闭合 | ✅ 已一致 | `DRIFT/global/_README.md:137;DRIFT/global/cross-domain.md:46;DRIFT/global/cross-domain.md:591` |
+| `CF-018` | common | 同域多版本 | 2 | ✅ 已一致 / 🔴 未闭合 | 🔴 未闭合 | `DRIFT/common/alignment-2026-10-23.md:848;DRIFT/common/alignment-2026-10-23.md:958` |
 
-> 共 **154** 个合并组内状态冲突：**同源组 50**（真缺陷，优先） ＋ **同域多版本 104**（历史快照，非缺陷）（此处列前 60）。
+> 共 **153** 个合并组内状态冲突：**同源组 49**（真缺陷，优先） ＋ **同域多版本 104**（历史快照，非缺陷）（此处列前 60）。
 >
 > ⚠️ **第三类来源（2026-10-30 G1 lane 实测）＝「误修饰」** —— `detect_status` 取**条目所在段的前 400 字符** ⇒ ⇒ **同一行里修饰「别的东西」的状态 emoji，也会被抽成这个条目的状态**（典型形态：`🟡 **2026-10-29 复核：状态不变（仍 🔴 OPEN）**` ⇒ 🟡 修饰的是**复核标注**、不是状态 ⇒ 与同组的 🔴 撞 ⇒ `_conflict > 1`）
-> ⇒ ⇒ **本次实测的 154 个冲突组里，除「同源组 50」外的 104 个，多数属此类** ⇒ ⇒ **收口时不应逐条当缺陷修**；
+> ⇒ ⇒ **本次实测的 153 个冲突组里，除「同源组 49」外的 104 个，多数属此类** ⇒ ⇒ **收口时不应逐条当缺陷修**；
 > ⇒ **正确处置 = 各域自行把那几处「误修饰」就地归一**（把状态标记改成**无标记写法**、语义留在文字里） ⇒ **行数不变 ⇒ 不破行号锚点** ⇒ ⇒ 该域的 `_conflict` 随之下降、派工面 `status` 与基线同值（**是修正，不是新增缺口**）。
 >
 > ⚠️ **口径变化说明（2026-10-30）**：归一前该指标按**裸编号**统计 ⇒ **131**；
@@ -780,7 +780,7 @@
 | `DRIFT-018` | DRIF | global | **G1+G4** | 🔴 未闭合 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/lanes/L9-interrupt.md:260;DRIFT/users/_shared.md:67` | Go `service/common/observability/http.go:80`（`case <-ctx.Done():` ⇒ Go 的 ctx 取消会传播到在途处理）＋ `service/common/observability/rpc.go:38`／`:68`（`timeoutCtx, … |
 | `E34` | DRIF | global | **G4** | 🟡 部分闭合 | C 无指针 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/_README.md:383` | Go `service/comment/rpc/internal/trace/trace.go:45`（`otel.SetTracerProvider(tp)` ⇒ 真源自己的 OTel 装配点，**在进程启动代码里**）＋ `go-zero@v1.10.2/core/service/service… |
 | `E36` | DRIF | global | **G4** | 🔴 未闭合 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/global/_README.md:385` | Go `service/common/observability/rpc.go:69`（`codes.DeadlineExceeded` ⇒ grpc-go 的 `codes.Code.String()` = 驼峰 `DeadlineExceeded` ⇒ `err.Error()` = `rpc … |
-| `E58` | DRIF | global | **G1+G4** | 🔴 未闭合 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已定性 · 未排期 | `DRIFT/global/_README.md:446;DRIFT/users/user/rpc.md:2257;DRIFT/users/user/rpc.md:2328` | Go `service/user/user/rpc/internal/logic/getuserlogic.go:44`（`status.Error(codes.Internal, "DB查询失败")`）＋ `service/user/admin/rpc/internal/logic/getuser… |
+| `E58` | DRIF | global | **G1+G4** | 🟡 部分闭合 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已定性 · 未排期 | `DRIFT/global/_README.md:446;DRIFT/users/user/rpc.md:2257;DRIFT/users/user/rpc.md:2328` | Go `service/user/user/rpc/internal/logic/getuserlogic.go:44`（`status.Error(codes.Internal, "DB查询失败")`）＋ `service/user/admin/rpc/internal/logic/getuser… |
 | `FB-01` | DRIF | global | **G2+G4** | ✅ 已一致 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/vs-common.md:347;DRIFT/global/vs-common.md:352;DRIFT/global/vs-common.md:1527` | Go `go-zero@v1.10.2/rest/router/patrouter.go:48`（注册侧 `cleanPath := path.Clean(reqPath)`）＋ `go-zero@v1.10.2/rest/router/patrouter.go:60`（匹配侧 `reqPath :… |
 | `FB-03` | DRIF | global | **G2+G4** | 🔴 未闭合 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/vs-common.md:402;DRIFT/like/vs-common.md:439;DRIFT/task/vs-common.md:112` | Go `go-zero@v1.10.2/zrpc/server.go:157-159`（`if c.Middlewares.Breaker` ⇒ 无条件装 breaker 拦截器）＋ `:160-163`（`if c.CpuThreshold > 0 { ... UnarySheddingInter… |
 | `G4-A4-02` | DRIF | global | **G4** | 🔴 未闭合 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/vs-common.md:3752;DRIFT/global/vs-common.md:3774` | Go `go-zero@v1.10.2/core/stores/redis/redisclientmanager.go:32-40`（`red.NewClient(&red.Options{...})` **未设任何命令超时** ⇒ 「Go 侧无命令超时」是**另一条轴**，不是本条判据）vs RA… |
@@ -866,7 +866,7 @@
 | `U-1` | DRIF | users | **G1** | 🔴 未闭合 | C 无指针 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/users/admin/_shared.md:211;DRIFT/users/admin/rpc.md:1475` | Go `service/user/user/rpc/internal/model/data_model.go:11`（`Status     int64             \`gorm:"column:status;default:0"\`` ⇒ **值类型 · 无 `not null` ta… |
 | `UNRESOLVED-ADMINAPI-005` | DRIF | users | **G1** | 🟡 部分闭合 | A 活体 · 绿(0) | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/users/admin/api.md:1005;DRIFT/users/admin/api.md:1588` | Go `service/user/admin/api/internal/svc/servicecontext.go:27`（`AdminRpc: adminservice.NewAdminService(zrpc.MustNewClient(c.AdminRpc)),` ⇒ 下游不可达即 `logx… |
 | `V-004` | DRIF | users | **G1** | ✅ 已一致 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/users/_shared.md:777;DRIFT/users/user/rpc.md:997` | Go `service/user/user/rpc/internal/logic/avatarhelpers.go:18`（`createTime = item.CreateTime.Format(time.RFC3339)` ⇒ 按进程本地时区渲染带偏移）vs RAG `service/users… |
-| `V-013` | DRIF | users | **G1** | 🔴 未闭合 | C 无指针 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/users/user/rpc.md:2353` | Go `service/user/user/rpc/internal/logic/getuserlogic.go:44`（`status.Error(codes.Internal, "DB查询失败")` ⇒ logic 层根本不返回 1015）vs RAG `service/users/user/u… |
+| `V-013` | DRIF | users | **G1** | ✅ 已一致 | C 无指针 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/users/user/rpc.md:2353` | Go `service/user/user/rpc/internal/logic/getuserlogic.go:44`（`status.Error(codes.Internal, "DB查询失败")` ⇒ logic 层根本不返回 1015）vs RAG `service/users/user/u… |
 | `G4-2` | DRIF | comment | **G3** | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/comment/vs-common.md:78` | — |
 | `G4-3` | DRIF | comment | **G3** | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/comment/vs-common.md:79` | — |
 | `G4-5` | DRIF | favorite | **G3** | 🔴 未闭合 | B 静态 | P1 | — | 否 | 未判定 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/favorite/vs-common.md:113` | — |
