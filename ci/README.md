@@ -378,6 +378,7 @@ python3 ci/generate-pipelines.py --check  # 校验（CI 也跑这一条）
 | 🆕 **R5 错误码契约门在 Task 内完整跑通** | 📌 **有意为红** | `rag-contract-errmsg` **build 7**：阶段① maven 出 dump **9/9 域成功** → 阶段② python 比对 ⇒ **PASS 7 / FAIL 0 / BLOCKED 0 / PENDING 2**（域 `comment`·`like`）⇒ 差异台账 **approved 31 / closed 2 / technical 13 / pending 8** ⇒ 退出码 **3** ⇒ **build 红是设计语义**（未签字差异不计入 PASS），**不是回归** |
 | 🆕 **静态守门 13 道（CI 镜像内）** | ✅ | `docker run -v <clone>:/build/repo -w /build python:3.12-bookworm sh repo/ci/scripts/run-static-gates.sh` ⇒ **12 道全绿 / 0 失败**（第 13 道 `check-jar-executable.sh` 需 `JAR_MODULES` ⇒ 无 jar 时不跑） |
 | 🆕 **触发面静态一致性** | ✅ | `bash ci/verify-triggers.sh --static` ⇒ **7/7 精确集合一致**（从生成器产出的 `paths` 算触发集合 vs 手工推导的意图集合） |
+| 🆕 **触发面服务端验证** | ✅ | `bash ci/verify-triggers-server.sh` ⇒ **7/7 精确集合一致（EXIT=0）** —— 真实 commit ⇒ 真实 build ⇒ 从服务端读出「哪些流水线真的产生了新 build」⇒ 与静态口径**逐条一致** |
 | 🆕 **docker_api 自测** | ✅ | `python3 ci/scripts/check-docker-api-selftest.py` ⇒ **11/11**；变异（退回「带 JSON 请求体」的 exec 写法）⇒ **3 条断言转红**（红在断言、无 Traceback），真源字节已恢复 |
 
 > 「配置校验通过」**不等于**「CI 跑通了」—— 但两者现在**都有实测绿灯**：

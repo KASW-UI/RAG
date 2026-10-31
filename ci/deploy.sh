@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# ci/deploy.sh —— 把 11 条流水线注册到本地 Concourse（幂等）
+# ci/deploy.sh —— 把 13 条流水线（11 日常 + 2 契约）注册到本地 Concourse（幂等）
 #
 # 用法：
 #   ci/deploy.sh                 # 校验 + 注册 + 解除暂停
@@ -8,6 +8,11 @@
 #
 # 依赖：fly 已登录到 target（默认 concourse）
 #   fly -t concourse login -c http://localhost:8080 -u test -p test
+#
+# ⚠️ **本脚本会解除暂停** ⇒ 适合「本地起流、随便跑跑」。
+#    ⛔ **canonical（指向 GitHub `do-my-own-gh`）的最终状态必须是 paused**
+#    ⇒ 否则别的 lane 一推 commit 就会触发 build 并在第一步就红 ⇒ 是噪声不是信号。
+#    ⇒ 收尾时用 `ci/verify-triggers-server.sh`（它自带 trap ⇒ 无论成败都还原 paused）。
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
