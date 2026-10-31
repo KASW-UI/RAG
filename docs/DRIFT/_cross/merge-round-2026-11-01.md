@@ -105,7 +105,26 @@
 > ⚠️ **口径**：读数取 **surefire XML 的 `tests=/failures=/errors=/skipped=`**（不是 stdout 的文字行）⇒ ⇒
 > 载体守门以 XML 为准；定向 `-Dtest=` 会改写报告，故本轮为**全量**跑。
 
-**（本节读数待全量跑终态补入）**
+| 项 | 读数 |
+|---|---|
+| **命令** | `mvn -o -B -DargLine=-Xmx2g --fail-at-end clean test`（`--fail-at-end` ⇒ 单模块失败**不中断** reactor ⇒ 拿得到 52 个模块的完整读数） |
+| **终态** | **BUILD SUCCESS** · **45:35 min** · `MVN_EXIT=0` |
+| **报告文件** | **532** 个 `TEST-*.xml` · **29** 个含测模块 · mtime 区间 **2026-11-01 03:43:10 → 04:28:07**（⇒ 属本轮） |
+| **条数** | **tests = 3,562 · failures = 0 · errors = 0 · skipped = 4** |
+| **4 条 skipped 逐条核对** | 全部是 **favorite 域的「双侧对拍」JUnit**（`FavoriteSqlStatementParityTest#sqlStatementParity` · `FavoriteCreateSuccessParityTest#createSuccessParity` · `FavoriteGrpcContractParityTest#grpcContractParity` · `FavoriteApiFullParityTest#apiFullParity`）⇒ 缺 `PROBE_GO_TARGET` / `PROBE_GO_TARGET_SUCCESS` / `PROBE_GO_API` ⇒ JUnit `Assumptions` 跳过 ⇒ **不是漏跑、不是漏写** ⇒ 由 `tools/sql-statement-probe/favorite/run.sh` · `tools/grpc-contract-probe/favorite/run.sh` · `tools/api-full-parity-probe/favorite/run.sh` 在带 Go 侧环境变量时**单独驱动** ⇒ ⇒ **与 judge P0 #6 的既记一致** |
+| **与历史读数的关系** | 2026-10-29 基线 = **3,294 条 / 0F / 0E / 4S** ⇒ ⇒ 本轮 **+268 条**（四棵 lane 的测试面重构与新增）⇒ ⇒ **0F / 0E / 4S 三项不变** ⇒ ⇒ judge P0 #6 已**就地追加**带日期的新读数（**旧值保留**，不覆盖历史快照） |
+| ⚠️ **两个口径不可相减** | 本读数 = **运行期**（surefire 执行条数）⇒ 与 judge §二 A-1 的 `tests` 列（**源声明方法数** = 3,226）⇒ **两个量** ⇒ ⇒ 「覆盖面」看 A-1 · 「执行结果」看本处 |
+
+### §5.1 ⚠️ 本轮**两次**失败的全过程留档（**都不是产品回归**，但必须留证）
+
+| 轮次 | 现象 | 归因（实测） | 判定 |
+|---|---|---|---|
+| 第 1 轮 | `user-rpc` **surefire fork 起不来**（`Error occurred in starting fork`）⇒ 该模块测试摘要本身是 **184 / 0F / 0E / 0S** | 同一份代码在第 2 轮**跑通** ⇒ ⇒ **环境层** | ⇒ 改用 `--fail-at-end` 重跑 ⇒ 拿完整读数 |
+| 第 2 轮 | `common` 模块 **1 条 error**：`GoStyleParamLimitOffModeGateTest#manyNonEmptyValuesPassThroughWhenGateIsOff` ⇒ `java.net.SocketException: Connection reset` | ① `service/**` 在 03:25 后**零代码改动** ⇒ ⇒ 与第 1 轮**同一份代码**；② **单类复跑 = 4 / 0F / 0E / 0S / BUILD SUCCESS** ⇒ ⇒ **不可复现**；③ 同一次跑里「容器上限抬到 10001」的**产品侧断言是绿的** ⇒ ⇒ 产品语义无误 | ⇒ **环境层 flake**（测试自身坐在容器上限边界：`nonEmptyQuery(2049)` 生成 **8,196 B** 的请求行，而 Tomcat 默认 `maxHttpHeaderSize` = **8,192** ⇒ **边界态** ⇒ ⚠️ **成因是假设、不是已证** ⇒ 登记待查） |
+| 第 3 轮 | **无** | —— | ✅ **BUILD SUCCESS · 3,562 / 0F / 0E / 4S** |
+
+⇒ ⇒ **判定式**：**「同一份代码两次跑一绿一红 + 单类复跑绿」⇒ 环境层 flake，不是产品回归** ⇒ ⇒
+但**假绿与假红都不可当结论** ⇒ ⇒ 三轮都留下原始输出（`/tmp/mvn-full{,2,3}.out`）与归因链。
 
 ---
 
