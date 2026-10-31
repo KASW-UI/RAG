@@ -1,9 +1,7 @@
 package com.rag.task.task.rpc;
 
 import com.rag.common.protection.GoStyleProtectionProperties;
-import com.rag.common.protection.GoStyleRpcBreakerInterceptor;
 import com.rag.common.protection.GoStyleRpcProtectionChain;
-import com.rag.common.protection.GoStyleRpcSheddingInterceptor;
 import io.grpc.Metadata;
 import io.grpc.MethodDescriptor;
 import io.grpc.ServerBuilder;
@@ -67,8 +65,8 @@ import static org.mockito.Mockito.when;
  * ⇒ <b>守门不能带随机性</b>。
  * <p>⇒ 改用<b>确定性</b>判据：链上每层都用 {@code ForwardingServerCall} 包住内层的 call，
  * 而<b>包装层由哪一层创建，是可以从包装对象的归属类直接判定的</b>
- * （降载层的包装由 {@link GoStyleRpcSheddingInterceptor} 创建、熔断层的由
- * {@link GoStyleRpcBreakerInterceptor} 创建）⇒ 无时间窗口、无共享状态、无假红可能。
+ * （降载层的包装由 {@link com.rag.common.protection.GoStyleRpcSheddingInterceptor} 创建、熔断层的由
+ * {@link com.rag.common.protection.GoStyleRpcBreakerInterceptor} 创建）⇒ 无时间窗口、无共享状态、无假红可能。
  *
  * <h3>✅ 合并后已升级为更强判据（2026-10-27 · 合并 G4 `align/g4-service-common` @ {@code 37816ca}）</h3>
  * <p>共享层的「链层构成」只读入口（FB-03 · G4 提交 {@code 182fc32}）已随合并到位：
@@ -135,9 +133,9 @@ class TaskProtectionChainWiringTest {
 
         assertThat(run.businessCall().getClass().getEnclosingClass())
                 .as("降载已关 ⇒ 此刻唯一可能包住业务 call 的就是 **breaker 层**；"
-                        + "若这一层归属不是 GoStyleRpcBreakerInterceptor，说明链的层次不对"
+                        + "若这一层归属不是 com.rag.common.protection.GoStyleRpcBreakerInterceptor，说明链的层次不对"
                         + "（例如 breaker 被排到了降载外层/内层之外），或包装层被别的层顶替。")
-                .isEqualTo(GoStyleRpcBreakerInterceptor.class);
+                .isEqualTo(com.rag.common.protection.GoStyleRpcBreakerInterceptor.class);
     }
 
     @Test
@@ -161,9 +159,9 @@ class TaskProtectionChainWiringTest {
         assertThat(run.businessCall().getClass().getEnclosingClass())
                 .as("降载开着时，**最内层**包住业务 call 的应当是降载层"
                         + "（Go 的链序 zrpc/server.go:144-167：Breaker → Shedding → handler ⇒ "
-                        + "降载在熔断**内层**）；若这一层归属不是 GoStyleRpcSheddingInterceptor，"
+                        + "降载在熔断**内层**）；若这一层归属不是 com.rag.common.protection.GoStyleRpcSheddingInterceptor，"
                         + "说明降载层没挂上，或链的层次被排错了。")
-                .isEqualTo(GoStyleRpcSheddingInterceptor.class);
+                .isEqualTo(com.rag.common.protection.GoStyleRpcSheddingInterceptor.class);
     }
 
     @Test

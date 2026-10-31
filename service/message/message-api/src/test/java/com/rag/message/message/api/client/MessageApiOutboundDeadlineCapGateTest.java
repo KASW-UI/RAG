@@ -1,7 +1,5 @@
 package com.rag.message.message.api.client;
 
-import com.rag.common.observability.GoStyleRequestDeadline;
-import com.rag.common.protection.GoStyleOutboundDeadlineInterceptor;
 import com.rag.common.protection.GoStyleProtectionProperties;
 import com.rag.message.message.api.MessageApiApplication;
 import com.rag.message.message.proto.MessageServiceGrpc;
@@ -142,7 +140,7 @@ class MessageApiOutboundDeadlineCapGateTest {
 
     @AfterEach
     void tearDown() {
-        GoStyleRequestDeadline.clear();
+        com.rag.common.observability.GoStyleRequestDeadline.clear();
         if (channel != null) {
             channel.shutdownNow();
         }
@@ -163,7 +161,7 @@ class MessageApiOutboundDeadlineCapGateTest {
         assertNotNull(raw,
                 "🔴 本域 application.yml 必须配 rag.protection.outbound-deadline.cap-millis "
                         + "⇒ ⇒ 否则出向 gRPC 调用【没有客户端硬上界】（Go 侧恒有 2000ms）"
-                        + "⇒ ⇒ 共享层的 GoStyleOutboundDeadlineInterceptor 的 cap 取默认值 0 ＝ 不启用"
+                        + "⇒ ⇒ 共享层的 com.rag.common.protection.GoStyleOutboundDeadlineInterceptor 的 cap 取默认值 0 ＝ 不启用"
                         + "⇒ ⇒ 域侧那半就等于没做。");
         assertTrue(raw.startsWith("${") && raw.endsWith("}"),
                 "🔴 cap-millis 必须是 ${ENV:默认} 形态（实测 = " + raw + "）⇒ ⇒ 否则【不可 env 覆盖】"
@@ -203,7 +201,7 @@ class MessageApiOutboundDeadlineCapGateTest {
     @Timeout(value = 40, unit = TimeUnit.SECONDS)
     @DisplayName("③ 【没有入向 deadline】⇒ 出向 message-rpc 必须在 ≤2000ms 处 DEADLINE_EXCEEDED（真发调用）")
     void outboundCallIsCappedWithoutInboundDeadline() throws Exception {
-        GoStyleRequestDeadline.clear();
+        com.rag.common.observability.GoStyleRequestDeadline.clear();
         startHangingMessageRpc(domainProperties(null));
 
         long startedAt = System.nanoTime();
@@ -229,7 +227,7 @@ class MessageApiOutboundDeadlineCapGateTest {
     @Timeout(value = 40, unit = TimeUnit.SECONDS)
     @DisplayName("③ 域 client 层：messageRpc() 给出的 stub 也必须带同一上界（生产路径）")
     void domainClientExposesTheSameCap() throws Exception {
-        GoStyleRequestDeadline.clear();
+        com.rag.common.observability.GoStyleRequestDeadline.clear();
         MessageRpcClient client = startHangingMessageRpc(domainProperties(null));
 
         long startedAt = System.nanoTime();
@@ -259,7 +257,7 @@ class MessageApiOutboundDeadlineCapGateTest {
     @Timeout(value = 40, unit = TimeUnit.SECONDS)
     @DisplayName("④ env 把 cap 覆盖【到比 2000 更大】⇒ 出向上界必须跟着放宽 ⇒ 【证明域侧没有写死上界的私有副本】")
     void envOverrideWidensTheOutboundCap() throws Exception {
-        GoStyleRequestDeadline.clear();
+        com.rag.common.observability.GoStyleRequestDeadline.clear();
         // ⚠️ **必须走【域 client】（生产路径）**，不能走裸 stub ⇒ ⇒ 否则「域 client 里又写了一份
         //    写死 2000ms 的副本」这种漂移**根本不会被这条抓到**（裸 stub 不经过那份副本）
         //    ⇒ ⇒ 2026-10-31 变异实测：④ 改走裸 stub 时，M-D（域侧加回写死副本）**不红** ⇒ ⇒ 判据形态错 ⇒ 修正。
@@ -299,8 +297,8 @@ class MessageApiOutboundDeadlineCapGateTest {
     @Timeout(value = 40, unit = TimeUnit.SECONDS)
     @DisplayName("⑤ 入向预算 300ms < cap 2000ms ⇒ 出向必须在【300ms】处失败（钉的是 min，不是覆盖）")
     void inboundBudgetWinsOverCap() throws Exception {
-        GoStyleRequestDeadline.clear();
-        GoStyleRequestDeadline.begin(System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(INBOUND_BUDGET_MILLIS));
+        com.rag.common.observability.GoStyleRequestDeadline.clear();
+        com.rag.common.observability.GoStyleRequestDeadline.begin(System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(INBOUND_BUDGET_MILLIS));
         startHangingMessageRpc(domainProperties(null));
 
         long startedAt = System.nanoTime();
@@ -349,7 +347,7 @@ class MessageApiOutboundDeadlineCapGateTest {
         assertTrue(offenders.isEmpty(),
                 "🔴 本域出现了写死出向 deadline 的代码：" + offenders
                         + "⇒ ⇒ 出向【客户端硬上界】只有一个合法实现 = 共享层的"
-                        + " GoStyleOutboundDeadlineInterceptor（域侧只配 rag.protection.outbound-deadline.cap-millis）"
+                        + " com.rag.common.protection.GoStyleOutboundDeadlineInterceptor（域侧只配 rag.protection.outbound-deadline.cap-millis）"
                         + "⇒ ⇒ 域侧再写一份 ⇒ 就是【第二个来源】⇒ ⇒ 副本数 = 漂移面。");
     }
 
@@ -397,8 +395,8 @@ class MessageApiOutboundDeadlineCapGateTest {
                             + props.getOutboundDeadline().getCapMillis() + "）"
                             + "⇒ ⇒ 若是 0 ⇒ ⇒ 键没被读到 ⇒ ⇒ 共享层默认不启用上界。");
 
-            GoStyleOutboundDeadlineInterceptor interceptor = ctx.getBeanProvider(
-                    GoStyleOutboundDeadlineInterceptor.class).getIfAvailable();
+            com.rag.common.protection.GoStyleOutboundDeadlineInterceptor interceptor = ctx.getBeanProvider(
+                    com.rag.common.protection.GoStyleOutboundDeadlineInterceptor.class).getIfAvailable();
             assertNotNull(interceptor,
                     "🔴 共享层的 GoStyleOutboundDeadlineConfiguration 必须在本域上下文里产出拦截器 Bean");
 
@@ -442,7 +440,7 @@ class MessageApiOutboundDeadlineCapGateTest {
         // ⚠️ 与 devh 的装配动作同一条：devh 的 AbstractChannelFactory.createChannel
         //    最后一行是 ClientInterceptors.interceptForward(channel, interceptors)
         Channel capped = ClientInterceptors.intercept(channel,
-                new GoStyleOutboundDeadlineInterceptor(props));
+                new com.rag.common.protection.GoStyleOutboundDeadlineInterceptor(props));
         cappedStub = MessageServiceGrpc.newBlockingStub(capped);
 
         MessageRpcClient client = new MessageRpcClient();
