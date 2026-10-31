@@ -8,6 +8,7 @@
 #   · service/hot/**                                 本域
 #   · service/article/article-proto/**               本域编译期消费的外部模块（改了必须重跑本域）
 #   · service/common/**                              共享层（多域依赖）
+#   · service/article/pom.xml                        聚合清单（模块增删）
 #   · pom.xml / service/pom.xml                      根 pom 与模块清单
 #   · mvnw / .mvn/** / ci/**                         构建工具链与 CI 自身脚本
 #
@@ -22,6 +23,14 @@
 #   static-gates   静态守门 + 产物级 jar 可执行性检查
 #   report         汇总 surefire 报告（读 TEST-*.xml）
 #
+# 【本次应产出报告的模块集合】（由 pom 依赖图算出 ⇒ report 步据此判
+#   「模块该在而不在」与「跑了但 0 条用例」—— 缺了这两条判定，
+#   报告步只扫磁盘上存在的报告 ⇒ 两种真问题都表现为「不在表里」⇒ 假绿）
+#   · service/common
+#   · service/hot/hot-api
+#   · service/hot/hot-common
+#   · service/hot/hot-rpc
+#
 # 【生成说明】本文件由 ci/generate-pipelines.py 从 pom 依赖图生成，
 #   task 配置内联自 ci/tasks/*.yml（唯一真源）。
 #   改了 pom 的模块依赖后跑 `python3 ci/generate-pipelines.py`；
@@ -32,12 +41,13 @@ resources:
 - name: repo
   type: git
   source:
-    uri: https://github.com/KASW-UI/RAG.git
-    branch: do-my-own-gh
+    uri: ((git_uri))
+    branch: ((git_branch))
     paths:
     - service/hot/**
     - service/article/article-proto/**
     - service/common/**
+    - service/article/pom.xml
     - pom.xml
     - service/pom.xml
     - mvnw
@@ -112,21 +122,6 @@ jobs:
       - path: .m2
         key: m2-repo-v1
 
-      params:
-        # 要构建的模块目录（逗号分隔，相对仓库根），例如
-        #   service/article/article-api,service/article/article-rpc
-        MODULES: ''
-        # 嵌套容器里跑构建的镜像（固定版本；必须带镜像源前缀，否则拉不动）
-        IMAGE: ((registry))/library/maven:3.9.11-eclipse-temurin-21
-        # 镜像源主机（host 或 host:port）。带端口 = 本地 registry ⇒ 内层 dockerd
-        # 会把它当 insecure mirror + mirror 源（见 ci/scripts/dind-run.sh）
-        REGISTRY: ((registry))
-        # 交给 ci/scripts/dind-run.sh 的阶段名（对应 ci/scripts/<stage>.sh）
-        STAGE: build
-        # 可选的 Maven 镜像源（如内网 Nexus）。留空 = 走默认 Central。
-        # 非空时 dind-run.sh 会把 settings.xml 写进 $PWD/.m2 ⇒ 嵌套容器里的
-        # Maven 自动生效（不写 <mirror>，改用「额外仓库」⇒ 镜像缺件仍可回退 Central）
-        MAVEN_MIRROR_URL: ''
 
       run:
         path: sh
@@ -134,7 +129,9 @@ jobs:
         - repo/ci/scripts/dind-run.sh
     params:
       MODULES: service/hot/hot-api,service/hot/hot-rpc
+      IMAGE: ((registry))/library/maven:3.9.11-eclipse-temurin-21
       REGISTRY: ((registry))
+      STAGE: build
       MAVEN_MIRROR_URL: ((maven_mirror))
   - task: maven-test
     privileged: true
@@ -175,15 +172,6 @@ jobs:
       - path: .m2
         key: m2-repo-v1
 
-      params:
-        MODULES: ''
-        IMAGE: ((registry))/library/maven:3.9.11-eclipse-temurin-21
-        # 镜像源主机（host 或 host:port）。带端口 = 本地 registry ⇒ 内层 dockerd
-        # 会把它当 insecure mirror + mirror 源（见 ci/scripts/dind-run.sh）
-        REGISTRY: ((registry))
-        STAGE: test
-        # 可选的 Maven 镜像源（与 maven-build 同义，见 ci/tasks/maven-build.yml）
-        MAVEN_MIRROR_URL: ''
 
       run:
         path: sh
@@ -191,7 +179,9 @@ jobs:
         - repo/ci/scripts/dind-run.sh
     params:
       MODULES: service/hot/hot-api,service/hot/hot-rpc
+      IMAGE: ((registry))/library/maven:3.9.11-eclipse-temurin-21
       REGISTRY: ((registry))
+      STAGE: test
       MAVEN_MIRROR_URL: ((maven_mirror))
   - task: static-gates
     config:
@@ -235,10 +225,6 @@ jobs:
       inputs:
       - name: repo
 
-      params:
-        # 本域的 api/rpc 模块目录（空格分隔），用于产物级 jar 可执行性检查；
-        # 共享层流水线没有可执行 jar ⇒ 留空 ⇒ 跳过该项。
-        JAR_MODULES: ''
 
       run:
         path: sh
@@ -255,12 +241,22 @@ jobs:
       # 【产出什么】
       #   · 每个模块的用例数 / 失败数 / 错误数 / 跳过数（表）
       #   · 失败用例清单（类名 + 用例名 + 消息首行）
-      #   · 本次构建对应的 Git 提交（从 git 资源的 .git/ref 读）
       #   · 有失败/错误 ⇒ 退出码 1 ⇒ 这一步红 ⇒ 构建判负
       #
       # 【统计口径】
       #   一律读 surefire 的 TEST-*.xml（权威）⇒ 不读 *.txt 摘要
       #   （实测过 .txt 会与 XML 不一致，按 .txt 求和会得出"少了 N 条"的假回归）。
+      #
+      # 【EXPECTED_MODULES：本次应当产出报告的模块集合】
+      #   由 ci/generate-pipelines.py 从 **pom 依赖图**算出：
+      #   「本流水线要构建的模块 + 它们的 -am 传递闭包」∩「含 src/test/** 的模块」。
+      #   ⚠️ 为什么必须显式传进来：
+      #     只扫磁盘上的 surefire 报告 ⇒ **模块整个没跑** 与 **模块跑了但 0 条用例**
+      #     这两种情况都表现为「该模块不在结果表里」⇒ 汇总照样 EXIT=0 ⇒ **假绿**。
+      #     （实测：2026-10-31 变异坐实两种场景都假绿。）
+      #   ⇒ 传进来才能判「该在而不在」与「在但 0 条」这两种真问题。
+      #   ⚠️ 空值 = 生成器没传 ⇒ 退出码 2（BLOCKED），**不是** EXIT=0
+      #     —— 否则新加的断言会形同虚设（比没有更坏：看起来查了）。
       platform: linux
 
       image_resource:
@@ -272,9 +268,11 @@ jobs:
       inputs:
       - name: repo
 
+
       run:
         path: sh
         args:
         - repo/ci/scripts/collect-surefire.sh
     params:
+      EXPECTED_MODULES: service/common,service/hot/hot-api,service/hot/hot-common,service/hot/hot-rpc
       REGISTRY: ((registry))

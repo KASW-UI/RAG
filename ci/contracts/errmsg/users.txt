@@ -1,0 +1,138 @@
+# =============================================================================
+# ci/contracts/errmsg/users.txt —— R5 错误码契约基准（users 域）
+#
+# 【这是什么】
+#   Java 侧users 域错误码契约的**机器可读基准**。
+#   CI 用 `ci/scripts/check-errmsg-contract.sh` 跑 **Java 半边探针**
+#   （`tools/errmsg-probe/users/java/Probe.java`）并与本文件的 dump 段**逐字节**比对。
+#
+# 【权威性来源 = Go 真源（只读 · 冻结）】
+#   Go 真源：Sea-RideTheWind_golang/service/user/common/errmsg/errmsg.go
+#     · const 块 :3-36 · codeMsg 表 :38-67 · GetErrMsg :70-76
+#   Java 被测：service/users/users-common/src/main/java/com/rag/users/common/errmsg/ErrorCode.java
+#
+# 【提取方式（离线 · 一次性 · 可复算）】
+#   2026-10-31 用 `tools/errmsg-probe/users/run-parity.sh` 跑**双侧对拍**：
+#     · Go 半边：把真源 `errmsg.go` 复制进临时模块、与真源**同包**编译后跑
+#       （复制件与真源比 sha256，不一致即 exit 2 ⇒ 验的确实是真源）；
+#     · Java 半边：`javac` 编译探针 → 跑**真实编译产物**（`<域>-common` 的
+#       `target/classes`）⇒ 探针自己**不持有任何码值/文案常量**（否则是「拿 RAG 的值验 RAG 的值」）。
+#   本文件 = **Java 侧 dump**（Java 侧应当满足的契约）。
+#   ⇒ Go 仓**不需要**在线、Go 工具链**不需要**进 CI 镜像。
+#
+# 【裁定依据】
+#     · Go↔Java 双侧 dump 有 **2 条差异**，均已**销号（证伪关闭）** ⇒ 见下方清单。
+#     · 裁定依据：`docs/DRIFT/users/common.md` 的 `DRIFT-USERSCOMMON-001`（2026-10-27 已销号·证伪关闭）。
+#     · 销号依据（原文要点）：1017 / 1018 在**两侧都进不了 wire**（Go 侧是零调用点的死码、RAG 侧仅日志 / HTTP 入口不可达）
+#     · ⇒ 该差异**不构成可观察漂移** ⇒ 2026-10-30 真实性复核**维持销号**（文案差本身确实存在）。
+#
+# 【本域已批准差异清单】（Go 侧 vs Java 侧 · **逐条** · 共 2 条）
+#   ⑴ TABLE|1017
+#        Go   : FAIL
+#        Java : 请求参数错误
+#        裁定 : 已销号 · DRIFT-USERSCOMMON-001（2026-10-27 证伪关闭） —— Go 真源的 const 块声明了 `ErrorRequestParam = 1017`（`errmsg.go:30`），但 `codeMsg` 表里**没有登记**它（`:38-67`） ⇒ `GetErrMsg`（`:70-76` 的 `if !ok { return codeMsg[Error] }`）回落到 `"FAIL"`； RAG 侧枚举给每个码都带了文案（`ErrorCode.java:34`：`ERROR_REQUEST_PARAM(1017, "请求参数错误")`） ⇒ **两侧 1017 在 wire 上都不可观察**（Go 侧是零调用点的死码、RAG 侧仅日志 / HTTP 入口不可达） ⇒ 该差异已被判为「**不构成可观察漂移**」并销号；销号依据 `docs/DRIFT/users/common.md` 的 `DRIFT-USERSCOMMON-001`（2026-10-30 真实性复核**维持销号**）。
+#   ⑴ TABLE|1018
+#        Go   : FAIL
+#        Java : 头像历史不存在
+#        裁定 : 已销号 · DRIFT-USERSCOMMON-001（2026-10-27 证伪关闭） —— Go 真源声明了 `ErrorAvatarHistoryNotExist = 1018`（`errmsg.go:31`），但 `codeMsg` 表里**没有登记**（`:38-67`） ⇒ `GetErrMsg`（`:70-76`）回落到 `"FAIL"`； RAG 侧枚举带文案（`ErrorCode.java:35`：`ERROR_AVATAR_HISTORY_NOT_EXIST(1018, "头像历史不存在")`） ⇒ **两侧 1018 在 wire 上都不可观察** ⇒ 该差异已被判为「**不构成可观察漂移**」并销号；销号依据 `docs/DRIFT/users/common.md` 的 `DRIFT-USERSCOMMON-001`（2026-10-30 真实性复核**维持销号**）。
+#
+# 【层次与规模】
+#   CONST(31 个码) + TABLE(31 条文案) + FALLBACK(24 个未登记码)
+#     · ⚠️ Go 侧的 users 域 = `service/user/`（**user 与 admin 共用同一份 errmsg**）
+#     ·    ⇒ 本基准覆盖的是这两条链路**共用**的错误码契约。
+#     · ⚠️ users 域的 RAG 侧结构与其它域不同：`users-common/…/errmsg/` 下**只有 `ErrorCode.java` 一个类**
+#     · ⇒ **没有独立的文案表类**，**枚举本身就是那张表**（每个常量同时带 code 与 msg），
+#     · 查表入口 = `ErrorCode.getMsg(int)`；未知码回落走 `ErrorCode.of(int)` ⇒ `ERROR` ⇒ `"FAIL"`。
+#     · ⇒ 本域**没有** WIRE / BIZCODE 层（Go 真源也不 import grpc）。
+#
+# 【基准版本】v1 · 2026-10-31
+# 【格式】`#` 开头的是注释（不参与比对）；`# >>> dump >>>` 之后是契约正文。
+# =============================================================================
+
+# >>> dump >>>
+CONST|200
+CONST|500
+CONST|1001
+CONST|1002
+CONST|1003
+CONST|1004
+CONST|1005
+CONST|1006
+CONST|1007
+CONST|1008
+CONST|1009
+CONST|1010
+CONST|1011
+CONST|1012
+CONST|1015
+CONST|1016
+CONST|1017
+CONST|1018
+CONST|3001
+CONST|3002
+CONST|3003
+CONST|5001
+CONST|5002
+CONST|5003
+CONST|5004
+CONST|5005
+CONST|5006
+CONST|5007
+CONST|5008
+CONST|5009
+CONST|5010
+TABLE|200|OK
+TABLE|500|FAIL
+TABLE|1001|用户名已存在
+TABLE|1002|用户名或密码错误
+TABLE|1003|用户不存在
+TABLE|1004|TOKEN不存在
+TABLE|1005|TOKEN格式错误
+TABLE|1006|TOKEN已过期
+TABLE|1007|TOKEN刷新失败
+TABLE|1008|权限不足
+TABLE|1009|未登录
+TABLE|1010|已登录
+TABLE|1011|用户已被封禁
+TABLE|1012|Redis更新失败
+TABLE|1015|服务繁忙
+TABLE|1016|管理员邀请码错误
+TABLE|1017|请求参数错误
+TABLE|1018|头像历史不存在
+TABLE|3001|积分余量不足
+TABLE|3002|重试次数超限
+TABLE|3003|积分处理超时
+TABLE|5001|系统内部错误
+TABLE|5002|更新数据库失败
+TABLE|5003|查询数据库失败
+TABLE|5004|数据库插入失败
+TABLE|5005|事务操作失败
+TABLE|5006|雪花ID生成失败
+TABLE|5007|JSON序列化失败
+TABLE|5008|JSON反序列化失败
+TABLE|5009|Kafka消息发送失败
+TABLE|5010|延时消息发送失败
+FALLBACK|0|FAIL
+FALLBACK|-1|FAIL
+FALLBACK|1|FAIL
+FALLBACK|999|FAIL
+FALLBACK|1013|FAIL
+FALLBACK|2001|FAIL
+FALLBACK|2002|FAIL
+FALLBACK|5011|FAIL
+FALLBACK|5012|FAIL
+FALLBACK|5101|FAIL
+FALLBACK|5102|FAIL
+FALLBACK|5103|FAIL
+FALLBACK|5104|FAIL
+FALLBACK|5105|FAIL
+FALLBACK|5201|FAIL
+FALLBACK|5202|FAIL
+FALLBACK|5203|FAIL
+FALLBACK|5204|FAIL
+FALLBACK|5205|FAIL
+FALLBACK|5207|FAIL
+FALLBACK|5301|FAIL
+FALLBACK|5304|FAIL
+FALLBACK|2147483647|FAIL
+FALLBACK|-2147483648|FAIL

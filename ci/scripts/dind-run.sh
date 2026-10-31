@@ -208,5 +208,7 @@ exec docker -H "unix://${DIND_SOCK}" run --rm \
   -e DOCKER_HOST="unix://${DIND_SOCK}" \
   -e TESTCONTAINERS_RYUK_DISABLED=true \
   -e MODULES="${MODULES:-}" \
+  -e ERRSMSG_DOMAINS="${ERRSMSG_DOMAINS:-}" \
+  -e ERRSMSG_SKIP_COMPILE="${ERRSMSG_SKIP_COMPILE:-}" \
   "$IMAGE" \
   sh "repo/ci/scripts/${STAGE}.sh"

@@ -1,0 +1,149 @@
+# 来源：Go 真源 proto/comment.proto（comment.proto:4）
+# 契约基准版本：proto-contract/v1（2026-10-31）
+# 裁定依据：SD-2026-10-23-04（docs/Intentional_Deviations/comment/proto.md） · docs/DRIFT/comment/proto.md
+# 说明：本文件是 R4 契约基准，CI 直接读取；改它 = 改契约，需 PR 审查。
+#   ↳ proto `package` 由 Go 侧 `pb` 归一为 `comment`（**已签字**）
+#   ↳ Go 侧 package 行原文：package pb; ⇒ 基准取裁定值 `package comment;`（SD-2026-10-23-04 已签字偏离 · Go 侧的 pb 是遗留包名）
+
+syntax = "proto3";
+package comment;
+enum CommentState{
+STATE_NORMAL = 0;
+STATE_REVIEWING = 1;
+STATE_DELETED = 2;
+STATE_BLOCKED = 3;
+}
+enum SubjectState{
+SUBJECT_OPEN = 0;
+SUBJECT_CLOSED = 1;
+SUBJECT_ONLY = 2;
+}
+enum ReportReason{
+REASON_UNKNOWN = 0;
+REASON_SPAM_ADVERT = 1;
+REASON_PORN_VULGAR = 2;
+REASON_HARASSMENT_ABUSE = 3;
+REASON_ILLEGAL_COTENT = 4;
+REASON_FRAUD_SCAM = 5;
+REASON_SPOILER = 6;
+REASON_PRIVACY_LEAK = 7;
+REASON_MEANINGLESS_SPAM = 8;
+REASON_OTHER = 99;
+}
+enum ManageType{
+UNKNOWN = 0;
+MANAGE_PIN = 1;
+MANAGE_UNPIN = 2;
+MANAGE_FEATURE = 3;
+MANAGE_UNFEATURE = 4;
+}
+message CommentItem{
+int64 id = 1;
+int64 user_id = 2;
+string content = 3;
+int64 root_id = 4;
+int64 parent_id = 5;
+int64 like_count = 6;
+int64 dislike_count = 7;
+int64 reply_count = 8;
+int64 attribute = 9;
+CommentState state = 10;
+string created_at = 11;
+string meta = 12;
+repeated CommentItem children = 13;
+}
+message SubjectInfo{
+string target_type = 1;
+string target_id = 2;
+int64 total_count = 3;
+int64 root_count = 4;
+SubjectState state = 5;
+int64 attribute = 6;
+int64 owner_id = 7;
+}
+message CreateCommentReq{
+int64 user_id = 1;
+string target_type = 2;
+string target_id = 3;
+int64 root_id = 4;
+int64 parent_id = 5;
+string content = 6;
+string meta = 7;
+}
+message CreateCommentResp{
+int64 id = 1;
+string created_at = 2;
+int64 subject_count = 3;
+}
+message GetCommentReq{
+string target_type = 1;
+string target_id = 2;
+int64 sort_type = 3;
+int64 root_id = 4;
+int64 page = 5;
+int64 page_size = 6;
+}
+message GetCommentResp{
+repeated CommentItem comment = 1;
+SubjectInfo subject = 2;
+}
+message LikeCommentReq{
+int64 user_id = 1;
+string target_type = 2;
+string target_id = 3;
+int64 comment_id = 4;
+int32 action_type = 5;
+}
+message LikeCommentResp{
+bool success = 1;
+int64 like_count = 2;
+}
+message DeleteCommentReq{
+int64 user_id = 1;
+int64 comment_id = 2;
+string target_type = 3;
+string target_id = 4;
+}
+message DeleteCommentResp{
+bool success = 1;
+int64 subject_total_count = 2;
+}
+message ManageCommentReq{
+int64 user_id = 1;
+int64 comment_id = 2;
+string target_type = 3;
+string target_id = 4;
+ManageType action_type = 5;
+}
+message ManageCommentResp{
+bool success = 1;
+}
+message ReportCommentReq{
+int64 user_id = 1;
+int64 comment_id = 2;
+string target_type = 3;
+string target_id = 4;
+ReportReason reason = 5;
+string detail = 6;
+}
+message ReportCommentResp{
+bool success = 1;
+}
+message UpdateSubjectStateReq{
+int64 user_id = 1;
+string target_type = 2;
+string target_id = 3;
+SubjectState state = 4;
+}
+message UpdateSubjectStateResp{
+bool success = 1;
+}
+service CommentService{
+rpc CreateComment (CreateCommentReq) returns (CreateCommentResp);
+rpc GetComment (GetCommentReq) returns (GetCommentResp);
+rpc DeleteComment (DeleteCommentReq) returns (DeleteCommentResp);
+rpc LikeComment (LikeCommentReq) returns (LikeCommentResp);
+rpc ReportComment (ReportCommentReq) returns (ReportCommentResp);
+rpc ManageComment (ManageCommentReq) returns (ManageCommentResp);
+rpc UpdateSubjectState (UpdateSubjectStateReq) returns (UpdateSubjectStateResp);
+}

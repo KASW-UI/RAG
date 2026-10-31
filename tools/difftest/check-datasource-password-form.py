@@ -183,6 +183,14 @@ def report(root: str, hits: list[dict], scanned: int, wl: dict[str, str]) -> lis
         lines.append("")
         lines.append("⇒ ⇒ 修法：把 `${POSTGRES_PASSWORD:<默认值>}` 改成裸 `${POSTGRES_PASSWORD}`")
         lines.append("   （Go 侧 `os.ExpandEnv` 不认默认值语法 ⇒ 裸写法 = 缺变量即空串 = fail-fast = 与 Go 同形）")
+    # ⚠️ 【CI 汇总用的机器可读标记】—— 2026-10-31 新增（纯增量，不改判定）。
+    #   背景与格式约定见 check-no-prod-secrets.py 的同一处注释。
+    #   ⚠️ 本门按**模块**分组展示，但豁免计数按**违例条目**算
+    #     （一个模块可能有多条违例）⇒ 与「白名单命中模块数」不是同一个数。
+    exempt_n = sum(len(by_module[m]) for m in by_module if m in wl)
+    unexempt_n = sum(len(by_module[m]) for m in by_module if m not in wl)
+    lines.append(f"[ci-exempt] check-datasource-password-form.py exempted={exempt_n} "
+                 f"unexempted={unexempt_n}")
     return lines
 
 

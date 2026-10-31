@@ -1,0 +1,87 @@
+# =============================================================================
+# ci/contracts/errmsg/article.txt —— R5 错误码契约基准（article 域）
+#
+# 【这是什么】
+#   Java 侧article 域错误码契约的**机器可读基准**。
+#   CI 用 `ci/scripts/check-errmsg-contract.sh` 跑 **Java 半边探针**
+#   （`tools/errmsg-probe/java/Probe.java（**根级** —— article 的探针不在域目录里）`）并与本文件的 dump 段**逐字节**比对。
+#
+# 【权威性来源 = Go 真源（只读 · 冻结）】
+#   Go 真源：Sea-RideTheWind_golang/service/article/common/errmsg/errmsg.go
+#     · const 块 :3-19 · codeMsg 表 :21-36 · GetErrMsg :39-45
+#   Java 被测：service/article/article-common/src/main/java/com/rag/article/article/common/errmsg/ErrorCode.java
+#
+# 【提取方式（离线 · 一次性 · 可复算）】
+#   2026-10-31 用 `tools/errmsg-probe/run-parity.sh（**根级**）` 跑**双侧对拍**：
+#     · Go 半边：把真源 `errmsg.go` 复制进临时模块、与真源**同包**编译后跑
+#       （复制件与真源比 sha256，不一致即 exit 2 ⇒ 验的确实是真源）；
+#     · Java 半边：`javac` 编译探针 → 跑**真实编译产物**（`<域>-common` 的
+#       `target/classes`）⇒ 探针自己**不持有任何码值/文案常量**（否则是「拿 RAG 的值验 RAG 的值」）。
+#   本文件 = **Java 侧 dump**（Java 侧应当满足的契约）。
+#   ⇒ Go 仓**不需要**在线、Go 工具链**不需要**进 CI 镜像。
+#
+# 【裁定依据】
+#     · Go↔Java 双侧 dump **逐字节一致**（sha256 相同，diff 无输出）⇒ 本域 **零已批准差异**。
+#     · 裁定依据：`tools/errmsg-probe/run-parity.sh` 本次实跑结论（EXIT=0）；
+#     · 语义等价论证见 `tools/errmsg-probe/README.md`。
+#
+# 【本域已批准差异清单】（Go 侧 vs Java 侧 · **逐条** · 共 0 条）
+#   （**无** —— Go↔Java 双侧 dump 逐字节一致）
+#
+# 【层次与规模】
+#   CONST(15 个码) + TABLE(15 条文案) + FALLBACK(19 个未登记码)
+#
+# 【基准版本】v1 · 2026-10-31
+# 【格式】`#` 开头的是注释（不参与比对）；`# >>> dump >>>` 之后是契约正文。
+# =============================================================================
+
+# >>> dump >>>
+CONST|200
+CONST|500
+CONST|1001
+CONST|1002
+CONST|1003
+CONST|1004
+CONST|1005
+CONST|1006
+CONST|1015
+CONST|5001
+CONST|5002
+CONST|5003
+CONST|5004
+CONST|5005
+CONST|5006
+TABLE|200|OK
+TABLE|500|FAIL
+TABLE|1001|文章已存在
+TABLE|1002|文章不存在
+TABLE|1003|文章处理中，请稍后查看
+TABLE|1004|文章发布失败
+TABLE|1005|请先登录
+TABLE|1006|只能编辑或删除自己的文章
+TABLE|1015|服务繁忙
+TABLE|5001|系统内部错误
+TABLE|5002|更新数据库失败
+TABLE|5003|查询数据库失败
+TABLE|5004|文件上传失败
+TABLE|5005|文件删除失败
+TABLE|5006|文件下载失败
+FALLBACK|0|FAIL
+FALLBACK|-1|FAIL
+FALLBACK|1|FAIL
+FALLBACK|999|FAIL
+FALLBACK|1016|FAIL
+FALLBACK|1017|FAIL
+FALLBACK|1018|FAIL
+FALLBACK|2001|FAIL
+FALLBACK|2002|FAIL
+FALLBACK|3001|FAIL
+FALLBACK|5007|FAIL
+FALLBACK|5008|FAIL
+FALLBACK|5009|FAIL
+FALLBACK|5010|FAIL
+FALLBACK|5011|FAIL
+FALLBACK|5012|FAIL
+FALLBACK|9999|FAIL
+FALLBACK|2147483647|FAIL
+FALLBACK|-2147483648|FAIL

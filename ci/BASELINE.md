@@ -253,29 +253,69 @@ users/admin  ──▶ users/user
   🔴 **但**：`RealGrpcPort.isFree()` 的「同时持有通配+回环两个 socket」**只在 macOS/BSD 成立**（Linux 必 `EADDRINUSE`）
   ⇒ 波及 **21 个文件 / 9 个域** ⇒ 修好前**除共享层外的域流水线都会在 test 步红**。属各域 lane 的测试代码写权。
 
-### R4 接口契约一致性（项目级 + 服务级 · 🟢 已有 · ⚠️ 消费方式未验）
+### R4 接口契约一致性（项目级 + 服务级 · 🟢 已有 · ✅ 2026-10-31 已进 CI）
 
 - **Go 出处**：G3 —— proto 是跨服务唯一契约面；12 份 proto，产物入库。
 - **Java 现状**：10 份 proto **逐条复制**自 Go（改 `option` 块 + `user.proto`→`users.proto` 改名 + 注释）
   ⇒ message 名 / 字段名 / 字段号 / 类型 / 枚举值 **10/10 一致**（仓内 `docs/DRIFT/_cross/proto-verification.md`）。
-- **判定标准**：① `.proto` 文件与 Go 逐字段一致；② **RAG 侧消费方式**也一致（`optional` presence / 字段号硬编码 / Jackson 差异）。
-- **已具备？** 🟡 **部分** —— ① 已验；② **只验了文件本身**，没验消费方式 ⇒ **接入条件 = 「消费方式逐条核过」**。
-  ⚠️ 而且 **CI 里目前没有 proto 对照门**（`check-proto-static.sh` 需要 Go 真源仓库 ⇒ 被排除在 CI 外）⇒ 列入 §八·3。
+- **判定标准**：分**两层**，**不可混为一项**：
+  ① **`.proto` 文件契约一致**（message/enum 名、字段名、字段号、类型、label、枚举值、service 与 rpc 签名、proto package）；
+  ② **RAG 侧消费方式一致**（`optional` presence / 字段号硬编码 / Jackson 转换）。
+- **已具备？**
+  - ① ✅ **已进 CI**（2026-10-31）：门 = `ci/scripts/check-proto-contract.py`，
+    基准 = `ci/contracts/proto/<域>.proto`（**从 Go 真源一次性离线提取并人工裁定的契约基准**），
+    归入**项目级静态守门阶段**（`ci/scripts/run-static-gates.sh`）⇒ 每条域流水线都跑一遍。
+    实测：10/10 域逐字节一致（EXIT=0）；10 类变异（改字段号 / 改类型 / 删 message / 改 package /
+    Java 侧 proto 缺失 / 基准缺失 / 基准目录缺失 / 基准目录有未登记文件 / 基准里 package 被改）**全部按预期转红**，
+    其中「基准缺失 / 基准目录缺失」正确判为 **BLOCKED(2)** 而非 PASS。
+  - ② 🟡 **未覆盖**（显式标为部分覆盖）：
+    - **`optional` presence**：`.proto` 里 `article.proto`(12 处) / `users.proto`(`optional int64 status = 6`)
+      声明了显式 presence，但**没有任何门**断言 Java 侧区分「字段缺失」与「默认值」；
+    - **字段号硬编码**：静态扫描不可用 —— `service/**/*.java` 里形如 `.setX(<数字>)` 的调用点 **287 处**，
+      绝大多数是**非 proto** setter（`setStatus(503)` / `setCode(200)`）⇒ 朴素正则必误报 ⇒ 需类型解析，属独立工程量；
+    - **Jackson 差异**：proto↔DTO 映射逐域相关，**未触及**。
+- **⚠️ 效力边界**：本门只验 `.proto` **文件**与基准一致 ⇒ **推不出** api/rpc 的 wire 层一致，
+  也**不等于**校验 protoc 生成产物（`target/generated-sources/**` 的 `FIELD_NUMBER` 常量）——
+  生成代码一致性**未覆盖**（仓内已有的 `*ProtoContractTest` 是 Maven 测试、期望值硬编码，**不是**本门）。
 
-### R5 错误码契约一致性（项目级 · 🟢 已有工具 · ⚠️ 未进 CI）
+### R5 错误码契约一致性（项目级 · 🟢 已有工具 · ✅ 2026-10-31 已进 CI）
 
 - **Go 出处**：G4 —— 8 份 `errmsg.go`，错误码是 wire 契约。
 - **Java 现状**：8 个 `*ErrorCode` 类；已有 `tools/errmsg-probe/<域>/run-parity.sh` 做**双侧逐字节对拍**。
-- **判定标准**：每个 Java 错误码的 code 与 message 与 Go 侧逐条一致。
-- **已具备？** 🟡 工具已在，**未进 CI**（需要 Go 真源仓库）。
+- **判定标准**：每个 Java 错误码的 code 与 message 与 Go 侧逐条一致；**并且**要能发现「新增错误码」。
+- **已具备？** ✅ **已进 CI**（2026-10-31）：
+  - 门 = `ci/scripts/check-errmsg-contract.sh`（**纯 Java 半边**：只编译 `<域>-common` 并跑
+    `tools/errmsg-probe/<域>/java/Probe.java`，**不跑 Go 半边**）；
+  - 基准 = `ci/contracts/errmsg/<域>.txt`（**从 Go 真源一次性离线提取 + 人工逐条裁定的 Java 侧期望值**，
+    已批准差异也记在基准文件头）；
+  - 归入**独立契约流水线** `rag-contract-errmsg`（分钟级 × 9 域 ⇒ 不塞进 11 条日常流水线）。
+  - 覆盖：码值 / 文案 / 未知码回落 / 业务码载体 / gRPC-HTTP 语义（task 域 4 层 43 条）。
+  - 已批准的差异：`users` 域 `TABLE|1017` / `TABLE|1018`（`DRIFT-USERSCOMMON-001`，2026-10-27 已销号）。
+- **⚠️ 覆盖缺口（显式记录）**：
+  - `favorite` / `article` **无 mutate 脚本** ⇒ 这 2 个域的「守门非假绿」**无变异证据**；
+  - Go 侧 `ProbeConstCodes()` 是**手写清单** ⇒ 本门以「Java 侧 dump vs 基准」为准，
+    **不再依赖** Go 侧清单 ⇒ 真源新增常量需**重新提取基准**（人工流程，非自动）；
+  - 8 个域的 `run-parity.sh` 里 `mvn compile` **无 `|| die`** ⇒ 那条本地路径会把构建失败报成 exit 1（漂移）；
+    **本门不受影响**（新写的检查器里编译失败 ⇒ BLOCKED(2)）。
 
-### R6 数据库 schema 一致性（服务级 · 🟢 已有工具 · ⚠️ 未进 CI）
+### R6 数据库 schema 一致性（服务级 · 🟢 已有工具 · 🟡 2026-10-31 已具备 Java 侧独立路径）
 
 - **Go 出处**：G5 —— schema 真相在 Go 的 model struct（`AutoMigrate`）。
 - **Java 现状**：37 份 Flyway SQL；已有 `tools/difftest/check-ddl-static.py`（列级：类型/可空性/DEFAULT/索引）
   + 活体对拍（`--container/--go-db/--rag-db`）。
-- **判定标准**：Java 表的列级属性与 Go 侧 model 逐列一致；**类型/长度差异必须为 0**。
-- **已具备？** 🟡 工具已在，**未进 CI**（需活体 PG + Go 侧 DB）。
+- **判定标准**：分四类，**不可机械要求逐项相同**：
+  ① **业务数据语义必须保持的约束**（唯一性 / 必填 / 长度上限决定的行为 / 时区语义）；
+  ② **Java 技术栈合理产生的实现差异**（表名加域前缀、索引命名形态、序列名）；
+  ③ **已确认允许的结构差异**（有台账/签字）；
+  ④ **尚未确认的差异**（必须显式报出）。
+- **已具备？** 🟡 **工具已具备 Java 侧独立路径**，CI 接入待环境就绪：
+  - `check-ddl-static.py` 新增 `--rag-only`（**完全跳过 Go 侧读取与 Go↔RAG 列级对比**）
+    + `--semantic-baseline`（只比对基准里 `must_match` 列出的维度 + 唯一约束，
+    **不比对**索引命名形态 / 序列名 / CHECK / 触发器）⇒ **CI 不需要 Go 仓、不需要 Go 工具链**；
+  - 基准 = `ci/contracts/schema/<域>.json`（9 域）⇒ 记录「必须保持」+「已批准差异」+「未确认差异」。
+  - ⚠️ **未进 CI 的原因**：该门需 **活体 PostgreSQL + docker CLI + python3 同环境**，
+    而现有 DinD 形态的嵌套容器（maven 镜像）**没有 docker CLI** ⇒ 环境编排待定。
+    ⇒ **本阶段按 NOT_RUN 记账，不得计入 PASS。**
 
 ### R7 产物可执行性（服务级 · 🟢 已有 · ⚠️ 需修 CI 传递链）
 
@@ -306,21 +346,28 @@ users/admin  ──▶ users/user
 | 需求 | 粒度 | 现状 | 已进 CI？ |
 |---|---|---|---|
 | R1 干净构建 | 项目级 | ✅ | ✅（build 步） |
-| R2 单测可判定 | 项目级 | ✅ | ✅（test + report 步） |
+| R2 单测可判定 | 项目级 | ✅ | ⚠️（test + report 步；**2026-10-31 已补两条断言**：模块报告缺失 / 模块 0 条用例 ⇒ 原为假绿） |
 | R3 集成测试活体依赖 | 服务级 | ✅（🔴 一处 Linux-only 缺陷） | ✅（DinD） |
-| R4 接口契约 | 项目级 + 服务级 | 🟡 复制已验，消费方式未验 | ❌（需 Go 真源） |
-| R5 错误码契约 | 项目级 | 🟡 工具已在 | ❌（需 Go 真源） |
-| R6 schema 一致性 | 服务级 | 🟡 工具已在 | ❌（需活体 PG + Go 侧 DB） |
-| R7 产物可执行 | 服务级 | 🟡 门已在，传递链本 PR 修 | ✅（static-gates 步） |
-| R8 影响面传播 | 项目级 | ✅ | ✅（git 资源 paths） |
-| R9 配置与密钥 | 项目级 | ✅ | ✅（static-gates 步） |
+| R4 接口契约 | ①仓级 ②消费方式 | ①✅ ②🟡 未覆盖 | ✅（① 进静态守门；**② 显式标为部分覆盖**） |
+| R5 错误码契约 | 项目级 | ✅ | ✅（独立流水线 `rag-contract-errmsg`） |
+| R6 schema 一致性 | 服务级 | 🟡 Java 侧独立路径已具备 | ❌（环境编排未定 ⇒ **NOT_RUN**） |
+| R7 产物可执行 | 服务级 | ✅ | ✅（static-gates 步） |
+| R8 影响面传播 | 项目级 | ✅ | ✅（git 资源 paths；**2026-10-31 已加固**：上游依赖模块的祖先聚合 pom 也纳入） |
+| R9 配置与密钥 | 项目级 | ✅ | ✅（static-gates 步；**2026-10-31 已分级汇总**：豁免命中数单列，不混进 PASS） |
 
 ### 4.2 项目级 vs 服务级（交付 5 的前置）
 
 | 类别 | 内容 | 归属 |
 |---|---|---|
-| **项目级**（每个域流水线都跑） | R2 的兜底、R4 的仓级一致性、R5、R8、R9 + 8 道静态守门（密钥/NUL/口令形态/Tomcat 上限/gRPC 拦截器接线/gRPC 运行时 classpath/Flyway 账本/**pom 父引用**） | 共享层 + CI 自身 |
-| **服务级**（只在本域跑） | R3（本域 Testcontainers 组合与端口段）、R6（本域 DDL）、R7（本域 api/rpc jar）、R4 的本域 proto | 各域 |
+| **项目级**（每个域流水线都跑） | R2 的兜底、**R4 的仓级一致性（①层）**、R8、R9 + 10 道静态守门（密钥/NUL/口令形态/Tomcat 上限/gRPC 拦截器接线/gRPC 运行时 classpath/Flyway 账本/**pom 父引用**/**proto 契约**） | 共享层 + CI 自身 |
+| **服务级**（只在本域跑） | R3（本域 Testcontainers 组合与端口段）、R6（本域 DDL）、R7（本域 api/rpc jar） | 各域 |
+| **独立契约门禁**（2026-10-31 新增 · 按触发面触发的独立流水线） | **R5**（错误码契约 · `rag-contract-errmsg`）· **R6**（Schema 契约 · `rag-contract-schema`，环境就绪前 NOT_RUN） | CI 自身 + 契约基准 |
+
+> ⚠️ **门禁位置的三档分类**（任务书 §六.4）：
+> · **快速门禁**（秒级 · 每次变更都该跑）⇒ 进静态守门阶段（**R4** 在此）
+> · **服务级门禁**（本域环境）⇒ 在本域流水线（R3 / R6 / R7）
+> · **独立触发的契约门禁**（分钟级 × 多域）⇒ 独立流水线（**R5** 在此）
+> ⇒ **不得**把分钟级 × 多域的契约检查无条件塞进 11 条日常流水线。
 
 ---
 
@@ -388,6 +435,8 @@ users/admin  ──▶ users/user
 | C6 | 端口段不被占用 | 域内固定端口段可用 | 🔴 **当前不满足**（Linux-only 判据 ⇒ 整段被判「占满」）⇒ 修完即满足 |
 | C7 | 触发面覆盖该域的全部上游依赖 | `--check` EXIT=0 + 人工核对一条边 | ✅ |
 | C8 | 域内**无**生产密钥 / 无机器地址写死 | `check-no-prod-secrets.py` + `check-datasource-password-form.py` EXIT=0 | ✅ |
+| C9 | 🆕 **契约基准存在且可解析**（`ci/contracts/**`） | 检查器对每个域报「PASS/FAIL/BLOCKED」三态之一；**BLOCKED 数必须为 0** | ✅（R4/R5 已满足） |
+| C10 | 🆕 **失败语义可区分**（PASS / FAIL / BLOCKED / NOT_RUN / NEEDS_DECISION 五态） | 变异验证：故意破坏 ⇒ 必须红；故意让环境不可用 ⇒ 必须 **BLOCKED(2)** 而非 PASS(0) | ✅（R4/R5 已满足） |
 
 ### 7.2 验收标准（怎么判定「一个域已正确接入 CI」）
 
@@ -404,15 +453,16 @@ users/admin  ──▶ users/user
 
 | # | 待定项 | 为什么现在定不了 | 需要谁/什么来定 |
 |---|---|---|---|
-| 1 | **Java 多出的 3 条跨域依赖**（article→users/user、hot→article、users/admin→users/user）在 Go 侧不存在 | 🟢 实测确认差异存在，但**无法从依赖图判断它是"行为等价的新写法"还是"迁移未完成"** | 域 lane 对照 Go 源码逐条核 |
+| 1 | **Java 多出的 3 条跨域依赖**（article→users/user、hot→article、users/admin→users/user）在 Go 侧不存在 | ✅ **2026-10-31 已逐条代码对照（原表述「Go 侧不存在」经核实只对 1/3 成立）**：<br>· **E1 article→users/user**：**Go 侧有**（`service/article/api/internal/svc/service_context.go:11`）⇒ 原采样只扫了 rpc 层，漏掉 api 层 ⇒ 唯一调用点 1:1 对齐（Go `helper.go:82` ↔ Java `ArticleAuthorResolver.java:102`）、4 条失败分支全回落不冒泡 ⇒ **行为等价的实现方式变化** ⇒ **应进触发面**（已覆盖）<br>· **E2 hot→article**：**Go 侧有**（`service/hot/api/internal/svc/serviceContext.go:9`）⇒ 4 条 skip 分支 + 并发窗 8 + 下标保序逐条复刻 ⇒ 同上 ⇒ **应进触发面**（已覆盖）<br>· **E3 users/admin→users/user**：Go 侧**零依赖**，Java 侧**零调用点**（全目录 grep 无命中）⇒ Go 侧 admin **直连 `users` 表绕过 user-rpc** ⇒ **死编译期依赖**（非「行为等价」也非「迁移未完成」）⇒ **不进触发面**；建议单开「pom 卫生」清理项（属 G1 lane 写权）<br>⚠️ **反向核对未发现缺失**（favorite→user / follow→user / message→admin / message→user 两侧都有）；Go 的 `task→points` 侧本就是注释掉的 ⇒ 非活边 | 域 lane 对照 Go 源码逐条核 —— **已完成**（2026-10-31） |
 | 2 | **Go 的压测入口**（`service/hot/test/cmd/loadtest`）在 Java 侧无对应 | Go 侧它是 `main` 程序（**不被 `go test` 跑到**）⇒ 不是"CI 门"，是"手工工具" ⇒ 是否要进 CI 无先例 | 产品/架构决策：压测属 CI 还是性能平台 |
-| 3 | **R4/R5/R6 三条契约门进不了 CI** | 它们需要 **Go 真源仓库 / 活体 PG + Go 侧 DB** ⇒ 而 CI 仓是 Java 仓、GitHub 公开源 ⇒ 要么在 CI 侧挂 Go 仓（需密钥或公开镜像），要么做成**发布前的离线对拍**（现状） | 决策：契约对拍放 CI 还是放独立门禁 |
+| 3 | **R4/R5/R6 三条契约门进不了 CI** | 🟢 **2026-10-31 已重新核实并部分关闭** —— 原判断「需要 Go 真源仓库」**不完整**：<br>① **Go 仓是只读语义基准，不是 CI 的执行对象** ⇒ 契约**一次性离线提取**成机器可读基准固化在 `ci/contracts/` 下，CI 只读基准 + Java 侧 ⇒ **不需要 Go 工具链、不需要 Go 仓在线可访问**。<br>② **R4** ✅ 已进 CI（①层，进静态守门）；**R5** ✅ 已进 CI（独立流水线）；**R6** 🟡 工具已具备 Java 侧独立路径（`--rag-only` + `--semantic-baseline`），**CI 接入卡在环境编排**（需活体 PG + docker CLI + python3 同环境）⇒ **NOT_RUN**。<br>③ **可重复性**：基准是**仓内文件**（有版本、有 PR 审查）⇒ 不依赖任何外部仓库的可达性。<br>④ 仍需用户裁定：**R6 的环境编排方案**（见 §八·10） | R4/R5：已裁定并实施<br>R6：需环境决策 |
 | 4 | **Go 的 `api/*.api`（HTTP 契约）没有 Java 侧的机器可读对应物** | Go 用 go-zero DSL 声明 HTTP 路径/方法；Java 用 `@RestController` ⇒ 路径/方法/响应体的一致性**目前只能靠人工/散点检查** | 需要先决定 Java 侧的 HTTP 契约源是什么（注解扫描？OpenAPI？） |
 | 5 | **Go 侧零测试服务（message/follow/task/admin）在 Java 侧有 34~57 个测试文件** | 这些 Java 测试**超出了 Go 原版的验证基线** ⇒ 它们守的是"Java 侧行为"，不是"Go 语义" ⇒ 二者不是同一件事 | 需区分「语义对照测试」与「Java 侧新增守门」两类 |
 | 6 | **Java 的 `<域>-common` 独立模块是否应各有自己的流水线** | Go 侧 `common/` 只是目录 ⇒ 没有先例。Java 侧拆成独立模块后，它有自己的编译与测试边界 | 决策：粒度按 Maven 模块，还是按"域"打包 |
-| 7 | **R4 的"消费方式一致性"逐条核过没有** | 已核的是 `.proto` **文件本身**（10/10 一致）⇒ 「RAG 怎么消费」未核（`optional` presence / 字段号硬编码 / Jackson 差异） | 需逐条核（AGENTS.md §3.4 的效力边界） |
+| 7 | **R4 的"消费方式一致性"逐条核过没有** | 🟡 **2026-10-31 已重新核实** —— 已核的是 `.proto` **文件本身**（10/10 一致，**且已进 CI**）；「RAG 怎么消费」**仍未核**（`optional` presence / 字段号硬编码 / Jackson 差异）：<br>· **`optional` presence**：无门断言 ⇒ 逐域语义问题（`docs/DRIFT/<域>/proto.md`）<br>· **字段号硬编码**：静态扫描**不可用**（`.setX(<数字>)` 有 287 处，绝大多数是非 proto setter）⇒ 需类型解析，属独立工程量<br>· **Jackson**：未触及<br>⚠️ 另：**protoc 生成代码一致性**也未覆盖（需 `target/generated-sources/**`） | 需逐域核（AGENTS.md §3.4 的效力边界）⇒ **部分覆盖，非缺陷** |
 | 8 | **126 个 Testcontainers 测试文件的固定端口段与真实进程端口段** | 两套端口段表并存（22700–22999 容器宿主口 / 22400–22479 真进程口）⇒ 在 CI 的 DinD 网络命名空间里如何隔离，**取决于 §7.1-C6 的缺陷修法** | 域 lane 修 `isFree()` 后再定 |
 | 9 | **Go 的 `knowledge`（65 个测试，占 Go 侧 62%）其测试形态是否应被 Java 借鉴** | 范围外 ⇒ 不是待办；但它是 Go 侧唯一的"真实 HTTP + fixture"验收样板 | 产品决策：Java 要不要建验收层 |
+| 10 | 🆕 **R6 契约门的 CI 环境编排**（2026-10-31 新增） | 门已具备 Java 侧独立路径（`--rag-only` + `--semantic-baseline`）⇒ **不依赖 Go**；但需要「**活体 PG + docker CLI + python3 同环境**」：<br>· 现有 DinD 的嵌套容器是 **maven 镜像** ⇒ **没有 docker CLI** ⇒ `check-ddl-static.py` 的 `docker exec psql` 走不通<br>· 三条候选：(a) 任务容器层跑（`docker:27-dind` 有 docker CLI，但**无 python3** ⇒ 需 `apk add python3`）；(b) 内层跑 `python:3.12-bookworm` + **改造检查器走 PG 的 TCP 直连**（去掉 docker CLI 依赖）；(c) 保持本地离线对拍（不接 CI ⇒ R6 长期 NOT_RUN）<br>⚠️ 这是一个**环境/工具链选择**，不是需求问题 ⇒ 需用户拍板 | 用户决策（环境方案取舍） |
 
 ---
 

@@ -5,12 +5,22 @@
 # 【产出什么】
 #   · 每个模块的用例数 / 失败数 / 错误数 / 跳过数（表）
 #   · 失败用例清单（类名 + 用例名 + 消息首行）
-#   · 本次构建对应的 Git 提交（从 git 资源的 .git/ref 读）
 #   · 有失败/错误 ⇒ 退出码 1 ⇒ 这一步红 ⇒ 构建判负
 #
 # 【统计口径】
 #   一律读 surefire 的 TEST-*.xml（权威）⇒ 不读 *.txt 摘要
 #   （实测过 .txt 会与 XML 不一致，按 .txt 求和会得出"少了 N 条"的假回归）。
+#
+# 【EXPECTED_MODULES：本次应当产出报告的模块集合】
+#   由 ci/generate-pipelines.py 从 **pom 依赖图**算出：
+#   「本流水线要构建的模块 + 它们的 -am 传递闭包」∩「含 src/test/** 的模块」。
+#   ⚠️ 为什么必须显式传进来：
+#     只扫磁盘上的 surefire 报告 ⇒ **模块整个没跑** 与 **模块跑了但 0 条用例**
+#     这两种情况都表现为「该模块不在结果表里」⇒ 汇总照样 EXIT=0 ⇒ **假绿**。
+#     （实测：2026-10-31 变异坐实两种场景都假绿。）
+#   ⇒ 传进来才能判「该在而不在」与「在但 0 条」这两种真问题。
+#   ⚠️ 空值 = 生成器没传 ⇒ 退出码 2（BLOCKED），**不是** EXIT=0
+#     —— 否则新加的断言会形同虚设（比没有更坏：看起来查了）。
 platform: linux
 
 image_resource:
@@ -21,6 +31,12 @@ image_resource:
 
 inputs:
 - name: repo
+
+params:
+  # 本次应当产出 surefire 报告的模块目录列表（逗号分隔，相对仓库根）。
+  # 由 ci/generate-pipelines.py 按 pom 依赖图算出 ⇒ 见文件头「EXPECTED_MODULES」段。
+  # 空 ⇒ 阻断（退出码 2），不放行。
+  EXPECTED_MODULES: ''
 
 run:
   path: sh

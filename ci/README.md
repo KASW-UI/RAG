@@ -49,6 +49,14 @@ Pipeline 按**域**划分，不按组件划分 —— 理由见 §三。
 | 9 | `rag-like` | `service/like/*` | `like-api`、`like-rpc` |
 | 10 | `rag-message` | `service/message/*` | `message-api`、`message-rpc` |
 | 11 | `rag-task` | `service/task/*` | `task-api`、`task-rpc` |
+| 12 | `rag-contract-errmsg` | ——（**R5 契约门**：跨域，读全部 9 个域的 `<域>-common` 产物） | —— |
+| 13 | `rag-contract-schema` | ——（**R6 契约门**：跨域，读 8 个域的 Flyway 迁移） | —— |
+
+> ⚠️ **12 / 13 两条是「契约门」流水线，不属于任何一个域**：
+> 契约漂移是**全局风险**（改一个 proto 影响多个域、改一个错误码影响所有调用方），
+> 所以它们**独立成条**，而不是塞进 11 条域流水线。
+> ⚠️ **R4（Proto 契约）不在这里** —— 它是秒级的纯文本比对 ⇒ 属「快速门禁」
+> ⇒ 已放进**每条域流水线的静态守门阶段**（见 §五）。
 
 **划分依据（三条，都可复算）**
 
@@ -146,8 +154,52 @@ get repo (trigger: true)   ← git 资源，paths 过滤 ⇒ 只在相关改动�
 | 环境准备 | DinD：任务容器（privileged）里起内层 `dockerd` ⇒ 再在内层 daemon 上跑嵌套构建容器 | 本仓 128 个测试文件直接起 Testcontainers 容器，任务容器里必须有 Docker；而 Concourse 8 的 task 配置**没有**挂载声明项 ⇒ wormhole 走不通 ⇒ 只能用 DinD |
 | 构建 | `mvn -pl <本域模块> -am -DskipTests package` | `-am` **必须带**：跨模块依赖是 reactor 内 SNAPSHOT，不带 `-am` 会拿到 `~/.m2` 里的**陈旧** jar（本仓 `*SharedLayerArtifactFreshnessGateTest` 就在守这条） |
 | 测试 | `mvn -pl <本域模块> -am test` | 同上；`-am` 会连带跑依赖模块的测试 —— 已知代价，理由见 `ci/scripts/test.sh` |
-| 静态守门 | 8 个复用本仓已有资产（`tools/difftest/`）+ 1 个 CI 自带（`ci/scripts/check-pom-parent-relativepath.py`）+ `check-jar-executable.sh`（按域传模块目录） | 前 8 个不新造检查；第 9 个是 CI 实战抓出缺陷后补的（见 `ci/DELIVERY.md` §六.2） |
-| 结果输出 | 逐模块用例数 / 失败数 / 错误数 / 跳过数 + 失败用例清单 + 本次 commit | 一律读 surefire 的 `TEST-*.xml`（权威），**不读** `*.txt` 摘要（实测二者会不一致） |
+| 静态守门 | 9 个复用本仓已有资产（`tools/difftest/`）+ 1 个 CI 自带（`ci/scripts/check-pom-parent-relativepath.py`）+ **1 个契约门**（`ci/scripts/check-proto-contract.py`，R4）+ `check-jar-executable.sh`（按域传模块目录） | 前 9 个不新造检查；第 9 个是 CI 实战抓出缺陷后补的（见 `ci/DELIVERY.md` §六.2）；**R4 契约门**是纯文本秒级 ⇒ 属快速门禁 ⇒ 每条域流水线都跑一遍 |
+| 结果输出 | 逐模块用例数 / 失败数 / 错误数 / 跳过数 + 失败用例清单 | 一律读 surefire 的 `TEST-*.xml`（权威），**不读** `*.txt` 摘要（实测二者会不一致）；**并判「该在而不在」与「跑了但 0 条用例」**（`EXPECTED_MODULES` 由生成器按 pom 依赖图算出） |
+
+---
+
+## 五·2、独立契约检查怎么跑（契约门）
+
+> **背景**：Go 原始项目是**只读的语义参考基准**，**不是 CI 的执行对象**。
+> 契约（proto / 错误码 / schema）已从 Go 真源**一次性离线提取**，
+> 固化成机器可读的**契约基准**放在 `ci/contracts/` 下 ⇒
+> **CI 不需要 Go 工具链、不需要 Go 仓在线可访问、不跑任何 `go` 命令。**
+
+| 门 | 检查什么 | 在哪跑 | 需要什么 | 手动执行 |
+|---|---|---|---|---|
+| **R4** Proto 契约 | Java 侧 `.proto` ↔ `ci/contracts/proto/` 基准逐字节 | **每条域流水线的静态守门步** | python3（零第三方依赖） | `python3 ci/scripts/check-proto-contract.py --baseline ci/contracts/proto` |
+| **R5** 错误码契约 | Java 侧错误码 dump ↔ `ci/contracts/errmsg/` 基准逐字节 | 独立流水线 `rag-contract-errmsg` | JDK21 + Maven（编译 `<域>-common`） | `bash ci/scripts/check-errmsg-contract.sh` |
+| **R6** Schema 契约 | Flyway 迁移重放出的实际 schema ↔ `ci/contracts/schema/` 语义基准 | 独立流水线 `rag-contract-schema` | python3 + Docker API + PG 容器 | `python3 ci/scripts/check-schema-contract.py --all` |
+
+**手动触发契约流水线**
+
+```bash
+fly -t concourse trigger-job -j rag-contract-errmsg/contract-check --watch
+fly -t concourse trigger-job -j rag-contract-schema/contract-check --watch
+```
+
+**五态失败语义**（`ci/contracts/README.md` 第四节，**不得**混用）
+
+| 状态 | 退出码 | 含义 |
+|---|---|---|
+| PASS | 0 | 检查**实际执行了**且通过 |
+| FAIL | 1 | 检查**实际执行了**且发现不一致 ⇒ 契约漂移 |
+| BLOCKED | 2 | 环境/依赖不满足 ⇒ **检查没做成**（基准缺失、编译失败、PG 起不来） |
+| NOT_RUN | 3 | 本域该维度**不适用**（如 `hot` 域无数据库 ⇒ DDL 维度 N/A） |
+
+> ⚠️ **BLOCKED / NOT_RUN 一律不得计入 PASS。**
+> 契约门在 BLOCKED 时同样会让 build 变红 —— 这是**安全方向**：
+> 「没检查」绝不能看起来像「查过了且没问题」。
+
+**哪些检查需要额外环境**
+
+| 检查 | 额外环境 | 没有它会怎样 |
+|---|---|---|
+| R4 | 无（python3 即可） | —— |
+| R5 | JDK21 + Maven（CI 镜像已含）；**Maven 依赖需预热**（`~/.m2` 缓存，CI 用 `m2-repo-v1` 缓存卷） | 编译失败 ⇒ **BLOCKED(2)**（不是 FAIL） |
+| R6 | 活体 PostgreSQL 容器 + Docker API（CI 用 DinD 提供） | PG 起不来 ⇒ **BLOCKED(2)**（不是 FAIL） |
+| 全部 | **❌ 不需要 Go 工具链　❌ 不需要 Go 仓在线可访问** | —— |
 
 ---
 

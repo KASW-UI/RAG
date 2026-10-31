@@ -60,12 +60,21 @@ worker 的可用环境变量里也没有任何"挂宿主路径"的开关
 | **构建层** | `service/common` / `users-common` / 跨域 proto | 共享层坏了 ⇒ 依赖它的域也该红 | 每条流水线 `mvn -pl <本域> -am` **从源码重编**（无制品仓库可传） |
 | **执行层** | 共享的 `ci/tasks/*.yml` + `ci/scripts/*.sh` | 脚本改动 ⇒ 所有流水线行为变 | `ci/**` **进触发面** ⇒ 脚本改了立刻全量重跑 |
 
-### 1.4 三个"变量化"的外部依赖（仓库里不写死任何机器地址）
+### 1.4 四个"变量化"的外部依赖（仓库里不写死任何机器地址）
 
 | pipeline var | 默认 | 作用 |
 |---|---|---|
 | `registry` | `docker.m.daocloud.io` | 镜像源主机（`host` 或 `host:port`）。**带端口 ⇒ 本地 registry** ⇒ 内层 dockerd 按 HTTP + insecure 处理 |
 | `maven_mirror` | 空（走默认 Central） | Maven 镜像源。**非空 ⇒ 优先查它，404 再回退 Central**（用「额外仓库」而非 `<mirror>`，避免把 Central 顶掉后无退路） |
+| `git_uri` | `https://github.com/KASW-UI/RAG.git` | git 资源地址。**参数化而非写死** ⇒ 触发面验证可以用**真实服务端 + 真实 commit**做（需要一个可推送的远端 ⇒ 本地演练仓），而不必改流水线定义 |
+| `git_branch` | `do-my-own-gh` | git 资源分支。同上 |
+
+> ⚠️ `git_uri` / `git_branch` 是 2026-10-31 新增的两个 var。
+> **为什么必须参数化**：任务书第五阶段·3 要求「变更触发验证 ⇒ 必须记录实际触发结果，
+> 不要只根据 YAML 推断」。而验证需要一个**能 push 的远端** ⇒ 只能让流水线的
+> git 资源在部署时指向本地演练仓 ⇒ uri/branch 写死就做不到。
+> ⇒ 生产部署传 GitHub 地址（`ci/deploy.sh` 的默认值），演练时用
+> `CONCOURSE_GIT_URI` / `CONCOURSE_GIT_BRANCH` 覆盖。
 
 ---
 
@@ -82,11 +91,18 @@ worker 的可用环境变量里也没有任何"挂宿主路径"的开关
 | `ci/scripts/test.sh` | 嵌套容器内 `mvn test`（先 source Testcontainers 环境） | ✅ |
 | `ci/scripts/testcontainers-env.sh` | Docker 可达性前置断言 + host override + Ryuk 关闭 | ✅ |
 | `ci/scripts/dind-run.sh` | DinD 外壳：起内层 dockerd → 跑嵌套构建容器 | ✅ |
-| `ci/scripts/run-static-gates.sh` | 按序跑静态守门并汇总 | ✅ |
+| `ci/scripts/run-static-gates.sh` | 按序跑静态守门并汇总（**豁免命中数单列**，不混进 PASS） | ✅ |
 | `ci/scripts/check-pom-parent-relativepath.py` | **第 9 道门**：每个 pom 的 `<parent>` 能否被本地 `relativePath` 正确解析（见 §六.2） | ✅ |
-| `ci/scripts/collect-surefire.sh` | 读 `TEST-*.xml` 汇总用例数与失败清单 | ✅ |
-| `ci/generate-pipelines.py` | 从 pom 依赖图生成 11 条 pipeline；`--check` 校验漂移 | ✅ |
-| `ci/deploy.sh` | 校验 + `set-pipeline`（注入两个 var）+ `unpause-pipeline`（幂等） | ✅ |
+| `ci/scripts/collect-surefire.sh` | 读 `TEST-*.xml` 汇总用例数与失败清单；**并判「该在而不在」与「跑了但 0 条用例」**（见 §四.5） | ✅ |
+| `ci/scripts/check-proto-contract.py` | **R4 契约门**：Java 侧 `.proto` ↔ `ci/contracts/proto/` 基准逐字节比对（唯一归一化实现） | ✅ |
+| `ci/scripts/check-errmsg-contract.sh` | **R5 契约门**：**纯 Java 半边**探针 ↔ `ci/contracts/errmsg/` 基准逐字节比对 | ✅ |
+| `ci/scripts/contract-errmsg.sh` | R5 在 DinD 内层容器里的阶段脚本 | ✅ |
+| `ci/contracts/README.md` | **契约基准的治理约定**：来源 / 裁定 / 版本 / 审查 / 五态失败语义 | ✅ |
+| `ci/contracts/proto/*.proto`（10 份） | **R4 契约基准**（从 Go 真源一次性离线提取 + 人工裁定） | ✅ 基准 |
+| `ci/contracts/errmsg/*.txt`（10 份） | **R5 契约基准**（Java 侧应满足的码值/文案/回落/wire 语义） | ✅ 基准 |
+| `ci/contracts/schema/*.json`（9 份） | **R6 语义约束基准**（必须保持的约束 + 已批准差异 + 未确认差异） | ✅ 基准 |
+| `ci/generate-pipelines.py` | 从 pom 依赖图生成 11 条日常 + 契约流水线；`--check` 校验漂移 | ✅ |
+| `ci/deploy.sh` | 校验 + `set-pipeline`（注入 4 个 var）+ `unpause-pipeline`（幂等） | ✅ |
 | `ci/local-up.sh` | 本地环境一键起流（load tar → 可选本地 registry → 起 Concourse → 注册流水线 → 可选触发） | ✅ |
 | `ci/README.md` | 使用说明 / 依赖矩阵 / 触发规则 / 环境约束 | ✅ |
 | `ci/DELIVERY.md` | 本文档 | ✅ |

@@ -334,6 +334,39 @@ def branch_exists(name: str) -> bool:
     return False
 
 
+def lane_context_present(lanes) -> list[str]:
+    """当前检出里**能看到的 ACTIVE lane 分支**（`align/<lane>`）。
+
+    ⚠️ **为什么需要它**（2026-10-31 实测发现）：
+        第 7 条检查（每条 ACTIVE lane 的分支必须真实存在）依赖 `git show-ref`
+        ⇒ 而 **Concourse 的 git resource 检出的是单个 commit（detached HEAD）**，
+          **不带任何分支 ref、也不带远端 ref** ⇒ `branch_exists()` 恒为 False
+          ⇒ 该条**恒红** ⇒ 这道门**根本进不了 CI**（浅克隆/单分支 checkout 场景）。
+        ⇒ 但「恒红」不是正确处置：那个环境里**本来就没有 lane 上下文**，
+          第 7 条判的是「守门盯着一个不存在的 lane」—— 无上下文时它**不适用**，
+          不是「失败」。
+        ⇒ 口径：
+          · **一条 ACTIVE lane 的分支都看不到** ⇒ 第 7 条 = NOT_RUN（跳过并说明）
+          · **看得到至少一条** ⇒ 逐条检查（缺的仍报红，那才是真问题：分支被删了）
+    ⚠️ **只认 ACTIVE 里的 lane**：`align/ci-concourse` 这类**普通分支**
+      （不是波次 lane）**不算** lane 上下文 —— 否则一条无关分支就会
+      把「无上下文」误判成「有上下文」⇒ 第 7 条又变成恒红。
+    """
+    seen = []
+    for lane in lanes:
+        for ref in (f"refs/heads/align/{lane}",
+                    f"refs/remotes/upstream/align/{lane}",
+                    f"refs/remotes/origin/align/{lane}"):
+            r = subprocess.run(
+                ["git", "show-ref", "--verify", "--quiet", ref],
+                cwd=REPO, capture_output=True,
+            )
+            if r.returncode == 0:
+                seen.append(ref)
+                break
+    return seen
+
+
 def main() -> int:
     expanded = {lane: set() for lane in ACTIVE}
     for lane, patterns in ACTIVE.items():
@@ -398,14 +431,24 @@ def main() -> int:
         )
 
     # ---- 7. 每条 ACTIVE lane 的分支必须真实存在 -------------------------
-    for lane in names:
-        branch = f"align/{lane}"
-        if not branch_exists(branch):
-            failures.append(
-                f"🔴 lane `{lane}` 的分支 `{branch}` **不存在**（本地与两个远端都没有）"
-                " ⇒ 守门正在盯一个不存在的 lane ⇒ 断言恒绿（假绿）"
-                " ⇒ 要么建分支，要么把它从 `ACTIVE` 移走"
-            )
+    # ⚠️ **口径（2026-10-31 修）**：无 lane 上下文（CI 的单 commit detached 检出）
+    #   ⇒ 本条**不适用**（NOT_RUN）⇒ 不计入失败，但**必须打印出来**，
+    #   绝不能让「跳过」看起来像「查过且通过」。
+    visible_lane_refs = lane_context_present(names)
+    if not visible_lane_refs:
+        print("ℹ️ 第 7 条（lane 分支存在性）**不适用**：当前检出里没有任何 lane 分支 ref")
+        print("   （Concourse git resource 是单 commit detached HEAD ⇒ 无 lane 上下文）")
+        print("   ⇒ 本条记为 NOT_RUN，不计入失败；其余 6 条照常判定。")
+    else:
+        print(f"ℹ️ 可见 lane 分支 ref {len(visible_lane_refs)} 条 ⇒ 逐条检查存在性")
+        for lane in names:
+            branch = f"align/{lane}"
+            if not branch_exists(branch):
+                failures.append(
+                    f"🔴 lane `{lane}` 的分支 `{branch}` **不存在**（本地与两个远端都没有）"
+                    " ⇒ 守门正在盯一个不存在的 lane ⇒ 断言恒绿（假绿）"
+                    " ⇒ 要么建分支，要么把它从 `ACTIVE` 移走"
+                )
 
     # ---- 8. 域内探针写权（按域判 · T-0.5 选项 A）------------------------
     # 8a. 同一个域不得被两个 lane 同时声明 ⇒ 否则两棵工作树会同时写同一批探针文件 ⇒ 合并必冲突。
@@ -474,7 +517,13 @@ def main() -> int:
     print("  · 共享层只归 G4")
     print("  · 7 个真私有 `<域>-common` 无跨域引用")
     print("  · 每条 lane 的白名单路径都命中真实文件")
-    print("  · 每条 lane 的分支都真实存在")
+    # ⚠️ 第 7 条的结论必须**如实反映**它到底跑没跑 ——
+    #   跳过时**不能**打印「每条 lane 的分支都真实存在」：
+    #   那会让读日志的人以为这条查过了 ⇒ **零命中被当成通过**（假绿表述）。
+    if visible_lane_refs:
+        print("  · 每条 lane 的分支都真实存在")
+    else:
+        print("  · ⚠️ lane 分支存在性：**NOT_RUN**（无 lane 上下文 ⇒ 本条不适用）")
     print(f"  · 域内探针写权按域判（{len(seen_domains)} 个域 · {len(PROBE_REQUIRED)} 个域本波要求落仓）")
     return 0
 

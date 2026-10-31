@@ -25,6 +25,13 @@ REGISTRY="${CONCOURSE_REGISTRY:-docker.m.daocloud.io}"
 #   环境变量 CONCOURSE_MAVEN_MIRROR 可覆盖。
 MAVEN_MIRROR="${CONCOURSE_MAVEN_MIRROR:-}"
 
+# git 资源地址（Concourse pipeline var `git_uri` / `git_branch`）：
+#   ⚠️ 走 var 而不是写死在流水线里 —— 触发面验证要用**真实服务端 + 真实 commit**
+#   （任务书第五阶段·3），而验证需要一个**可推送的远端** ⇒ 指向本地演练仓。
+#   默认 = GitHub 上的生产仓与分支；演练时用 CONCOURSE_GIT_URI / CONCOURSE_GIT_BRANCH 覆盖。
+GIT_URI="${CONCOURSE_GIT_URI:-https://github.com/KASW-UI/RAG.git}"
+GIT_BRANCH="${CONCOURSE_GIT_BRANCH:-do-my-own-gh}"
+
 validate_only=0
 if [[ "${1:-}" == "--validate-only" ]]; then
   validate_only=1
@@ -51,11 +58,12 @@ if [[ "$validate_only" -eq 1 ]]; then
   exit 0
 fi
 
-echo "==> 2/3 set-pipeline（registry var = ${REGISTRY}｜maven_mirror var = ${MAVEN_MIRROR:-<空，走 Central>}）"
+echo "==> 2/3 set-pipeline（registry var = ${REGISTRY}｜maven_mirror var = ${MAVEN_MIRROR:-<空，走 Central>}｜git = ${GIT_URI}#${GIT_BRANCH}）"
 for f in "$PIPELINE_DIR"/*.yml; do
   name="$(basename "$f" .yml)"
   fly -t "$TARGET" set-pipeline -p "$name" -c "$f" \
-    -v "registry=${REGISTRY}" -v "maven_mirror=${MAVEN_MIRROR}" -n
+    -v "registry=${REGISTRY}" -v "maven_mirror=${MAVEN_MIRROR}" \
+    -v "git_uri=${GIT_URI}" -v "git_branch=${GIT_BRANCH}" -n
 done
 
 echo "==> 3/3 unpause-pipeline"

@@ -1,0 +1,74 @@
+# =============================================================================
+# ci/contracts/errmsg/hot.txt —— R5 错误码契约基准（hot 域）
+#
+# 【这是什么】
+#   Java 侧hot 域错误码契约的**机器可读基准**。
+#   CI 用 `ci/scripts/check-errmsg-contract.sh` 跑 **Java 半边探针**
+#   （`tools/errmsg-probe/hot/java/Probe.java`）并与本文件的 dump 段**逐字节**比对。
+#
+# 【权威性来源 = Go 真源（只读 · 冻结）】
+#   Go 真源：Sea-RideTheWind_golang/service/hot/common/errmsg.go
+#     · const 块 :33-46 · codeMsg 表 :48-60 · GetErrMsg :76-82 · GRPCError :84-86 · BizCodeFromError :88-
+#   Java 被测：service/hot/hot-common/src/main/java/com/rag/hot/hot/common/errmsg/{HotErrorCode,HotErrorMessages}.java
+#
+# 【提取方式（离线 · 一次性 · 可复算）】
+#   2026-10-31 用 `tools/errmsg-probe/hot/run-parity.sh` 跑**双侧对拍**：
+#     · Go 半边：把真源 `errmsg.go` 复制进临时模块、与真源**同包**编译后跑
+#       （复制件与真源比 sha256，不一致即 exit 2 ⇒ 验的确实是真源）；
+#     · Java 半边：`javac` 编译探针 → 跑**真实编译产物**（`<域>-common` 的
+#       `target/classes`）⇒ 探针自己**不持有任何码值/文案常量**（否则是「拿 RAG 的值验 RAG 的值」）。
+#   本文件 = **Java 侧 dump**（Java 侧应当满足的契约）。
+#   ⇒ Go 仓**不需要**在线、Go 工具链**不需要**进 CI 镜像。
+#
+# 【裁定依据】
+#     · Go↔Java 双侧 dump **逐字节一致**（sha256 相同，diff 无输出）⇒ 本域 **零已批准差异**。
+#     · 裁定依据：`tools/errmsg-probe/hot/run-parity.sh` 本次实跑结论（EXIT=0）。
+#
+# 【本域已批准差异清单】（Go 侧 vs Java 侧 · **逐条** · 共 0 条）
+#   （**无** —— Go↔Java 双侧 dump 逐字节一致）
+#
+# 【层次与规模】
+#   CONST(11 个码) + TABLE(11 条文案) + FALLBACK(12 个未登记码)
+#     · ⚠️ hot 域**只有 3 层**（无 WIRE / CODEERR / BIZCODE）：Go 真源的 `GRPCError` / `BizCodeFromError`
+#     · （`errmsg.go:84-` / `:88-`）在本域**没有 Java 侧对应物**（RAG 的 hot-common 只有码表 + 文案表）
+#     · ⇒ 本基准**不覆盖** hot 的 wire 载体语义（该域在 RAG 侧不存在这条契约）。
+#
+# 【基准版本】v1 · 2026-10-31
+# 【格式】`#` 开头的是注释（不参与比对）；`# >>> dump >>>` 之后是契约正文。
+# =============================================================================
+
+# >>> dump >>>
+CONST|200
+CONST|500
+CONST|1015
+CONST|5001
+CONST|5002
+CONST|5003
+CONST|5004
+CONST|5005
+CONST|5006
+CONST|5007
+CONST|5008
+TABLE|200|OK
+TABLE|500|FAIL
+TABLE|1015|service busy
+TABLE|5001|internal server error
+TABLE|5002|record not found
+TABLE|5003|invalid parameter
+TABLE|5004|unauthorized
+TABLE|5005|forbidden
+TABLE|5006|already exists
+TABLE|5007|database query failed
+TABLE|5008|database update failed
+FALLBACK|0|FAIL
+FALLBACK|-1|FAIL
+FALLBACK|1|FAIL
+FALLBACK|999|FAIL
+FALLBACK|1016|FAIL
+FALLBACK|2001|FAIL
+FALLBACK|3001|FAIL
+FALLBACK|5009|FAIL
+FALLBACK|5010|FAIL
+FALLBACK|9999|FAIL
+FALLBACK|2147483647|FAIL
+FALLBACK|-2147483648|FAIL
