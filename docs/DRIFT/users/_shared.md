@@ -1441,3 +1441,26 @@ RAG 侧 > 500ms 的步骤（**实测**）：
 |---|---|---|---|---|---|
 | ADJ-01 | D | P3 | 否 | Go `service/user/user/rpc/internal/model/data_model.go:11`（`Status int64 gorm:"column:status;default:0"` ⇒ 值类型 · 无 `not null` ⇒ GORM 恒写 0 ⇒ 该列实际永不出现 NULL）＋ `service/user/admin/rpc/internal/model/data_model.go:41`（同款 tag）vs RAG `service/users/users-common/src/main/resources/db/01_create_user.sql:39`（`status BIGINT NOT NULL DEFAULT 0`）＋ `service/users/admin/admin-rpc/src/main/java/com/rag/users/admin/rpc/domain/UserEntity.java:136`（`private Long status = 0L;`）⇒ **差异仍成立**（DDL 层可空性：Go `is_nullable=YES` ／ RAG `NO`）**但行为层零差异**（Go 读 NULL ⇒ 0；RAG NOT NULL ⇒ 读不到 NULL ⇒ 也是 0）⇒ 正确处置 = **保持 RAG NOT NULL**（放开可空反而制造新漂移）⇒ 无落码动作；唯一残留落点 = `SD-2026-10-25-CAND-17` 签字（合并收口执行者写权面） | 2026-10-30 |
 | V-004 | D | P3 | 否 | Go `service/user/user/rpc/internal/logic/avatarhelpers.go:18`（`createTime = item.CreateTime.Format(time.RFC3339)` ⇒ 按进程本地时区渲染带偏移）vs RAG `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/service/AvatarDomainService.java:115`（`ct.atZoneSameInstant(ZoneId.systemDefault()).toOffsetDateTime()`）＋ `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/domain/UserAvatarHistoryEntity.java:76`（`private OffsetDateTime createTime;`）⇒ **差异已消失**（列已改 TIMESTAMPTZ、渲染点已换算到进程本地时区 ⇒ 与 Go 同形）⇒ 已修 ⇒ 无落码动作。⚠️ 台账 `users/_shared.md:777` 那段「仍 TIMESTAMP／仍 LocalDateTime／仍 atOffset(UTC)」三句已被同文件 `:826-853` 的订正块撤销（**原文保留，本层不删**） | 2026-10-30 |
+
+### 附录 · 指针归属判定：阈值必须跟着**被指的那个文件**走（收口执行者 2026-10-31 反馈 · 本域复盘）
+
+> **这不是新漂移，是检查方法的纪律。** 记在 users 域，因为本域正是「**同名不同目录**」的高发区：
+> `users/user/api.md` 与 `users/admin/api.md`、`users/user/rpc.md` 与 `users/admin/rpc.md`
+> ⇒ **裸文件名形态**（`api.md:NN`）**无法判定归属** ⇒ 阈值一旦混用 ⇒ 假阳性。
+
+> **成因（收口执行者实测 · 本域复盘确认）**：扫「某文件删块 ⇒ 哪些指针会位移」时，
+> 若把 `user/api.md` 的行号**错配到 admin 的阈值**（或反过来）⇒ ⇒ 报出**不存在的位移**（假阳性）。
+> ⇒ 判定式：**一条指针的归属 = 它自己指向的那个文件** ⇒ **阈值跟着文件走，两套阈值不混用**。
+
+> **本域既有做法的自查结论（2026-10-31 · G1 lane 实测）**
+> - 归属判定用的那条正则**按文件分组**（全路径形态）⇒ 归属天然正确 ✅；
+> - 另有一条**裸文件名形态**的扫描，**只**用来做「有没有指针指向这批行」的**存在性**判断
+>   ⇒ 它**无法判归属** ⇒ ⚠️ 用它做**存在性**结论没问题；**用它做「归属 / 位移」结论会出错**；
+> - 本轮的实际结论（「会位移的指针 = 0」）是按**全路径形态**算的 ⇒ **不受影响**
+>   ⇒ 教训落点：**存在性判断**可以两种形态都量（多列无害）；**归属 / 位移判断**只能用全路径形态。
+
+> **对仓库两道守门不适用（不要去改守门）** —— 已自行重读生成器的两条指针正则确认：
+> - 指针棘轮用的 `DOC_PTR_RE`（`tools/ledger-derive/derive-stage1.py:831`）要求**带目录前缀**
+>   ⇒ 归属天然跟着文件走 ⇒ **这道门没有这个洞**；
+> - 只有派生层判「证据强度」用的 `PTR_RE`（同文件 `:417`）**容许裸文件名** ⇒ 存在归属不明的情形
+>   ⇒ ⚠️ 它只影响**分类**（A 活体 / B 静态 / C 无指针），**不影响**「新增指针漂移」的判据。
