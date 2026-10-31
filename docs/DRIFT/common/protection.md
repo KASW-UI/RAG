@@ -252,3 +252,56 @@ Go `getlikestatelogic.go:57-63` 的 `status.FromError` 对非 status 错误返�
 G1 上一轮曾误判成「api 侧配 `cap-millis` 无效」⇒ ⇒ **本层独立复核结论 = 该误判不成立** ⇒ ⇒
 **api 侧配参数是有效的**（装配面走通 ⇒ 参数载体 `GoStyleProtectionProperties` 会被注册 ⇒ 参数会生效）⇒ ⇒
 **G1 的自查纠偏成立** ⇒ ⇒ 记此条以免该误判在后续轮次复发。
+
+### 🆕 共享层「客户端硬上界」逐域取值口径（2026-10-31 · G4 lane · 本层逐域实测）
+
+> **触发**：合并收口执行者在本轮回执第六节给出的口径（「取值 = 该域 Go yaml 的显式 `Timeout`；该域 yaml 未显式配置时才用 2000」）⇒ ⇒
+> **本层逐域实测后确认该口径成立，并补一条更精确的事实**（见 §二 ②）。
+
+#### 一、口径（**本层可直接引用**）
+
+⇒ ⇒ **逐域配 `rag.protection.outbound-deadline.cap-millis` = 该域 Go yaml 里那个出向 RPC 客户端段的显式 `Timeout`；该段没有显式 `Timeout` ⇒ 才用 2000**（2000 = go-zero `zrpc/config.go:31` 的 `json:",default=2000"`，**不是各域统一值**）。
+
+⚠️ **「2000 是默认值」不等于「各域都该配 2000」** ⇒ ⇒ **逐域配的值可能与 Go 差很多** ⇒ ⇒ **本节给出逐域实测结果**。
+
+#### 二、逐域实测结果（本层逐个 yaml 读出，2026-10-31）
+
+**② 全仓唯一的显式 RPC 客户端 `Timeout` ＝ article 域的 `SecurityConf: Timeout: 10000`** ⇒ ⇒
+**其余 12 个 rpc 域的出向 RpcClientConf 段全部没有显式 `Timeout` ⇒ 走 `default=2000`**。
+
+| Go 侧出向段 | 文件:行 | 显式 `Timeout` | ⇒ ⇒ 该域该出向调用应配 |
+|---|---|---|---|
+| **article-rpc → security-rpc** | `service/article/rpc/etc/article.yaml:90`（`SecurityConf` 段） | **10000** | **10000**（不是 2000） |
+| article-rpc → message-rpc | `service/article/rpc/etc/article.yaml`（`MessageRpc` 段） | 无 ⇒ default=2000 | 2000 |
+| comment-rpc → message-rpc / article-rpc | `service/comment/rpc/etc/comment.yaml` | 无 ⇒ default=2000 | 2000 |
+| favorite-rpc → user-rpc / article-rpc | `service/favorite/rpc/etc/favorite.yaml` | 无 ⇒ default=2000 | 2000 |
+| follow-rpc → user-rpc | `service/follow/rpc/etc/follow.yaml` | 无 ⇒ default=2000 | 2000 |
+| hot-rpc | `service/hot/rpc/etc/hot.yaml` | 无 ⇒ default=2000 | 2000 |
+| like-rpc → message-rpc | `service/like/rpc/etc/like.yaml` | 无 ⇒ default=2000 | 2000 |
+| message-rpc → user-rpc / admin-rpc | `service/message/rpc/etc/message.yaml` | 无 ⇒ default=2000 | 2000 |
+| task-rpc | `service/task/rpc/etc/task.yaml` | 无 ⇒ default=2000 | 2000 |
+| user-rpc / admin-rpc | `service/user/user/rpc/etc/user.yaml` · `service/user/admin/rpc/etc/admin.yaml` | 无 ⇒ default=2000 | 2000 |
+| points-rpc / security-rpc | `service/points/rpc/etc/points.yaml` · `service/security/rpc/etc/security.yaml` | 无 ⇒ default=2000 | 2000 |
+
+⚠️ **两条必须写清的排除项（避免派工时配错）**：
+
+1. ⚠️ **like 域的 `Timeout: 1000`（`service/like/rpc/etc/like.yaml:80`）** ＝ **`AntiAvalanche`（防雪崩）段的 `Timeout`**
+   ⇒ ⇒ **它不是 RPC 客户端超时** ⇒ ⇒ **不适用本口径** ⇒ ⇒ **like 域按 2000 配**。
+2. ⚠️ **各 yaml 顶层的 `Timeout: 70000`（`article.yaml:3`）/ `Timeout: 60000`（`security.yaml:3`）** ＝ **服务端自己的超时**
+   ⇒ ⇒ **不是出向客户端上界** ⇒ ⇒ **不适用本口径**。
+3. ⚠️ **task 域的 `DialTimeoutMs: 500` / `ReadTimeoutMs: 1000` / `WriteTimeoutMs: 1000`**
+   ⇒ ⇒ **是 Kafka/HTTP 侧的连接超时** ⇒ ⇒ **不是 RPC 客户端上界** ⇒ ⇒ **不适用本口径**。
+
+#### 三、⚠️ 配错方向的代价（**比 Go 严** ⇒ 是漂移）
+
+⇒ ⇒ **配 2000 而 Go 是 10000**（article → security-rpc）⇒ ⇒ **比 Go 严 5 倍** ⇒ ⇒
+⇒ ⇒ **RAG 会在 Go 还能成功的地方提前超时** ⇒ ⇒ **属「RAG 做了更严那一侧」的有意偏离**（须签字）⇒ ⇒ **不是对齐**。
+⇒ ⇒ **api 侧另有一档**：Go 侧 api 的出向客户端上界由 `service/*/api/etc/*.yaml` 决定（article api 侧实测 `Timeout: 70000`）⇒ ⇒ **配 2000 = 比 Go 严 35 倍** ⇒ ⇒ **同样不是对齐**。
+
+#### 四、本节的诚实边界（三条）
+
+1. **本节是源码级逐 yaml 读取（E1）** ⇒ ⇒ **没有起 Go 进程实测「某域出向调用真按这个值超时」** ⇒ ⇒
+   **不得外推为「活体验证过」**。
+2. **只覆盖 rpc 域的出向段** ⇒ ⇒ **api 侧的逐域取值本节未列**（api 侧 yaml 结构与 rpc 不同，且各域 api 侧的出向客户端段需单独核）⇒ ⇒
+   **api 侧的值要单独派工时再核**。
+3. **本节只给口径，**不代改任何域的 yml**（域侧写权）⇒ ⇒ **本层零代码改动**。

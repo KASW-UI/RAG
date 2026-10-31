@@ -1942,3 +1942,21 @@ git diff --stat -- service/ # ⇒ 0 行
 | 共享层激活面的**实际影响**（本轮自读） | `service/common/src/main/java/com/rag/common/http/GoStylePathNormalizingFilter.java` 的 `doFilter`：**已 Clean 的路径直接 `chain.doFilter(request, resp)` 原样下传**（`/actuator/prometheus` 本身已 Clean）⇒ **不影响**该端点；`GoStyleJsonContentTypeAdvice` 只在「响应体是 JSON」时改 Content-Type ⇒ Prometheus 文本（`text/plain; version=0.0.4`）**不受影响** | ⇒ 本波补载体**不会**因这两个自动配置而抓不到指标 ⇒ **实测以守门为准**（§3.3：推演不算证据） |
 
 **⇒ 本轮结论（④ 之外的部分）**：**① 已定任务** · **② 四档已读** · **③ 无待批准项** · **⑥ 回源已逐条自读**（Go 侧 yaml + go-zero 框架消费点 + RAG 侧现状 + 共享层激活面）⇒ ⇒ **可以落码**。
+
+
+## 🆕 2026-10-31 · G2 lane · 出向客户端硬上界（cap）轴 —— 域侧落地与证据
+
+> 本节是本域 **A1 轴**（超时 / deadline）在「**出向 gRPC 客户端硬上界**」这一格上的落点记录。
+> ⚠️ **本节不声称**：端到端超时表现已做双侧活体对拍（那需要真下游 ⇒ 见「诚实边界」）。
+
+| 项 | 内容 |
+|---|---|
+| **① 现象** | 本域 api 侧的出向 gRPC 调用**没有共享层的客户端硬上界** —— devh 注入的是**裸 stub**（`task-api/TaskRpcClient.java:68` 的 `@GrpcClient("task-rpc")`）⇒ **不继承**入向预算、**也没有**自身上界 ⇒ ⇒ 下游挂死时**可无限期挂起** ⇒ 与 Go 的 **2000ms 恒上界直接相反** |
+| **② Go 侧出处** | ① `go-zero@v1.10.2/zrpc/config.go:31` `Timeout int64 json:",default=2000"` ⇒ **默认 2000ms**；② 本域 Go 侧 `service/task/api/etc/task.yaml:5` `TaskRpc:`（`Target: 127.0.0.1:9005` ＋ `NonBlock: true`）**无显式 Timeout** ⇒ ⇒ **恒 2000ms**；③ **消费点** `go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25` `ctx, cancel := context.WithTimeout(ctx, t)` ⇒ ⇒ 取更早者 |
+| **③ RAG 侧现状（本轮改前）** | **零** `rag.protection.outbound-deadline.cap-millis` 配置 ⇒ ⇒ 共享层 `GoStyleProtectionProperties.OutboundDeadline.capMillis` 取**默认值 0**（`GoStyleProtectionProperties.java:286`）⇒ ⇒ 共享层 `GoStyleOutboundDeadlineInterceptor.effectiveCallOptions`（`:187`）里的 cap 分支**不生效**（`capMillis > 0` 才入 min）⇒ ⇒ **出向零上界**<br>⚠️ **但 `task-api` 另有一份域侧既有上界**（见 ⑥） |
+| **④ 本轮修法（域侧只配参数 · 生产代码零改动）** | **仅** `task-api/application.yml` 加 `rag.protection.outbound-deadline.cap-millis: ${TASK_API_OUTBOUND_DEADLINE_CAP_MILLIS:2000}` ⇒ ⇒ **封顶逻辑仍唯一由共享层承担**（`@GrpcGlobalClientInterceptor`）⇒ ⇒ 域侧**不新增**私有 helper、**不新增** `withDeadlineAfter` |
+| **④ 之二 · 为什么 `task-rpc` 不配（两侧同形 ⇒ 配了是死配置）** | ① Go 侧 `service/task/rpc/etc/task.yaml` **零 `Rpc:` 段**（实测全文 1-40 行：`Name` / `ListenOn` / `Etcd` / `Telemetry` / `Kafka` / `LikeRedis` … ⇒ **没有任何出向客户端配置**）；② RAG 侧 `service/task/task-rpc/src/main/java` 里的 `@GrpcClient` **命中数 = 0**，且该 yml **无 `grpc.client` 段** ⇒ ⇒ **两侧都无出向 devh 调用** ⇒ ⇒ 配 cap 只会是一段**永远不被读取的死配置** ⇒ ⇒ 与本域既有立场（`rag.side: rpc` 载体同理：Go 侧无 `DevServer` 段 ⇒ RAG 侧不补）一致 ⇒ ⇒ **不配**，**不是漏配** |
+| **⑤ 守门（6 条判据）** | 新增 `TaskApiOutboundDeadlineCapGateTest`（**7** 条）⇒ **7 条 / 0 failures / 0 errors / 0 skipped**（读数取 surefire XML 的 `tests=` / `skipped=`，**不看** stdout 的 BUILD SUCCESS）<br>六条判据 = ① **配置面** ② **绑定面** ③ **运行期**（**真 in-process gRPC server**，下游**挂起 8s 后才正常返回** ⇒ 判据不靠 `@Timeout` 包装；裸 stub 断**失败码** ＋ 耗时窗口，域 client 断「**按时**返回／抛出、不挂死」）④ **env 覆盖** ⑤ **min 语义**（注入 300ms 入向预算 ⇒ 必须在 300ms 处失败）⑥ **形态面**（本域 `src/main/java` 的**代码行**不得**新增**写死上界的实现；javadoc / 行注释不算） |
+| **⑥ 本域既有事实：api 侧有一份域侧上界（第二来源）** | `task-api/TaskRpcClient.java:66` `static final long DEFAULT_CALL_TIMEOUT_MILLIS = 2000L;` ＋ `:110` `return stub.withDeadlineAfter(Math.max(1L, budget), TimeUnit.MILLISECONDS);` ⇒ ⇒ 这是**域侧的第二套上界来源**（写死常量 2000）⇒ ⇒ **本轮不删**（协调员要求零代码改动）⇒ ⇒ **如实登记为第二来源**<br>⇒ ⇒ **连带后果**：`task-api` 的第 ④ 条只能取**收紧**方向（cap 覆盖成 1000 ⇒ min(1000, 2000) = 1000 ⇒ 可分辨）⇒ ⇒ 「**放宽**」这一维在 `task-api` **结构性不可测** ⇒ ⇒ 「域侧无副本」改由第 ⑤ 条 ⑥ 的**点位级棘轮**承担 ⇒ ⇒ **该维在本域尚未闭合**，待后续收敛（删域侧副本）后改回放宽方向取证 |
+| **⑦ 变异验证（红在目标断言）** | **M-E**（在 `task-api/TaskRpcClient.java` **已登记的那一处旁边**再注入第二处 `withDeadlineAfter`）⇒ **1 红 / 7** —— ⑥ 的**点位级棘轮**报「命中分布 = `{TaskRpcClient.java=2}`，而已登记的基线 = `{TaskRpcClient.java=1}`」⇒ ⇒ **同文件内新增第二处也被抓住**（这正是「豁免必须按点位登记、不能按文件登记」的理由）⇒ ⇒ 变异代码**已全部还原**（`git diff` 复核：生产代码零改动，只剩 yml 的 5 处配置） |
+| **⑧ 诚实边界** | ① 本守门**不起**真实 task-rpc、**不连** Nacos ⇒ 证的是「**本域配的上界真被共享层拦截器读到、且真在出向调用上生效**」，**不**证端到端超时表现；② 本守门**不**带生产链路上的 `GoStyleGrpcClientBreakerInterceptor`；③ **未评估 ≠ 通过** —— 本节全部读数均取自 surefire XML，且变异红在目标断言 |

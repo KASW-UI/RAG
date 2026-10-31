@@ -3,7 +3,6 @@ package com.rag.comment.comment.rpc.client;
 import com.rag.article.article.proto.ArticleServiceGrpc;
 import com.rag.article.article.proto.GetArticleRequest;
 import com.rag.article.article.proto.GetArticleResponse;
-import com.rag.common.observability.GoStyleRequestDeadline;
 import io.grpc.StatusRuntimeException;
 import net.devh.boot.grpc.client.inject.GrpcClient;
 import org.slf4j.Logger;
@@ -55,33 +54,31 @@ public class ArticleRpcClient {
     private ArticleServiceGrpc.ArticleServiceBlockingStub stub;
 
     /**
-     * 返回<b>已套上「min(2s, 请求剩余预算)」deadline</b> 的 stub。
+     * 出向 stub —— <b>deadline 由共享层的全局客户端拦截器统一施加</b>（2026-10-31 · G3 第十一轮）。
      *
-     * <p>🔴 <b>为什么必须有这一层</b>（2026-10-27 G3 域侧自修 · A1）：
-     * Go 侧 {@code zrpc.MustNewClient(c.ArticleRpc)} 的客户端<b>无条件</b>装
-     * {@code TimeoutInterceptor}（{@code zrpc/internal/client.go:113-117} ＋
-     * {@code zrpc/internal/config.go:15} 的 {@code default=true}）⇒ 每次调用都有
-     * <b>2000ms</b> 上限（{@code zrpc/config.go:31} 的 {@code json:",default=2000"}）。
-     * <br>⇒ 而本类原先<b>直接用注入的 stub 发起调用</b> ⇒ <b>零期限**
-     * ⇒ 下游挂死时 RAG 侧会一路等到底，Go 侧 2s 就返回
-     * ⇒ **可观察行为分叉**（调用耗时 + 失败时机都不同）。
+     * <p>🔴 <b>Go 出处（行为层）</b>：Go 侧 {@code zrpc.MustNewClient(c.ArticleRpc)} 的客户端
+     * <b>无条件</b>装 {@code TimeoutInterceptor}
+     * （{@code zrpc/internal/client.go:113-117} ＋ {@code zrpc/internal/config.go:15} 的
+     * {@code default=true}）⇒ 每次调用都有 <b>2000ms</b> 上限
+     * （{@code zrpc/config.go:31} 的 {@code json:",default=2000"}；本域 Go 侧
+     * {@code etc/comment.yaml} 的 {@code ArticleRpc:} 段<b>没写</b> {@code Timeout} ⇒ 走这个默认值）。
      *
-     * <p>🔴 <b>2026-10-30 订正 · 两段式（纳秒）</b>：本出口跑在 <b>gRPC handler 线程</b>上
-     * （调用链 {@code CommentServiceGrpcImpl.java:73} ⇒ {@code CommentDomainService.java:427/:431/:274/:254}）
-     * ⇒ 共享层 {@code RpcInterceptor.onHalfClose}
-     * （{@code service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:519}）
-     * 绑的 {@code GoStyleRequestDeadline} 载体<b>在本线程可见</b>
-     * ⇒ ⇒ 第一段 {@code applyTo} 把<b>入向剩余预算（纳秒）</b>挂到 stub 上，
-     * 第二段 {@code capByClientTimeout} 再压 2s 客户端封顶
-     * ⇒ ⇒ 语义 = Go 的 {@code context.WithTimeout(ctx, 2s)}（父 ctx 更早则先到者生效）。
-     * <br>⚠️ <b>旧实现读的是毫秒</b>（{@code remainingMillis()}）⇒ 亚毫秒部分被截掉
-     * ⇒ 与 Go 的纳秒预算<b>差 ≤1ms</b> ⇒ 现已对齐。
+     * <p>🔴 <b>为什么本类不再自己套 deadline</b>：Go 的客户端超时是<b>拦截器级别</b>的
+     * ⇒ ⇒ RAG 侧同形也应是拦截器级 ⇒ ⇒ 改由共享层的
+     * {@code GoStyleOutboundDeadlineInterceptor}（devh 的 {@code @GrpcGlobalClientInterceptor}
+     * ⇒ 装在<b>每个</b>出向 devh 调用上 ⇒ 连<b>裸 stub</b> 都过链）统一施加，
+     * 本域<b>只配参数</b>：{@code rag.protection.outbound-deadline.cap-millis=2000}
+     * （见本组件 {@code application.yml}；共享层默认 {@code capMillis=0} ⇒ <b>不配 = 不启用</b>）。
+     * <br>⇒ ⇒ 语义不变：出向上界 = <b>min(入向剩余预算, 2s 客户端封顶, 调用点自带)</b>
+     * = Go 的 {@code context.WithTimeout(ctx, 2s)}（父 ctx 更早则先到者生效）。
      *
-     * <p>⚠️ **不要把返回值缓存到字段上**：{@code withDeadlineAfter} 每次返回新实例。
+     * <p>⚠️ <b>域内私有副本 {@code GoStyleClientCallTimeout} 已删除</b>（本轮）：
+     * <b>副本数 = 漂移面</b> —— 每份副本各自实现一遍「取 min」语义 ⇒ 极易有的取 min、
+     * 有的写成覆盖 ⇒ ⇒ 共享层守门 {@code GoStyleClientCallTimeoutSingleSourceGateTest}
+     * 的终态口径 = 「域侧 0 份，只配参数」。
      */
     private ArticleServiceGrpc.ArticleServiceBlockingStub articleRpc() {
-        return GoStyleClientCallTimeout.capByClientTimeout(
-                GoStyleRequestDeadline.applyTo(stub));
+        return stub;
     }
 
     /**

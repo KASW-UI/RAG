@@ -249,6 +249,17 @@ rag:
       cpu-source: SYSTEM      # Go core/load/adaptiveshedder.go:41-43 读整机 CPU（/proc/stat）
     breaker:
       enabled: true
+    outbound-deadline:
+      # ==========================================================================
+      # 🔴 出向 gRPC 客户端硬上界（P2-T04 · G2 lane · 2026-10-31）
+      # Go 出处：go-zero@v1.10.2/zrpc/config.go:31 `Timeout int64 json:",default=2000"`
+      #   ⇒ 默认 2000ms；本域 Go 侧 service/task/api/etc/task.yaml 的
+      #     `TaskRpc:` 段**无显式 Timeout** ⇒ ⇒ 恒 2000ms。
+      # ⚠️ 本域**只配参数**：封顶逻辑由共享层 `GoStyleOutboundDeadlineInterceptor`
+      #   （`@GrpcGlobalClientInterceptor` ⇒ 装在**每个**出向 devh 调用上）**唯一**承担
+      #   ⇒ 域侧不得再造私有副本。**不要**改用空配的 `grpc.client.*.deadline`。
+      # env 覆盖：TASK_API_OUTBOUND_DEADLINE_CAP_MILLIS（Go 的 Timeout 也是域级字段）
+      cap-millis: ${TASK_API_OUTBOUND_DEADLINE_CAP_MILLIS:2000}
 
 # =============================================================================
 # OpenTelemetry OTLP exporter（对齐 Go 端 Telemetry.*）

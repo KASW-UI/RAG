@@ -91,7 +91,7 @@ public class MessageRpcClient {
                 .putExtra("author_id", authorId);
 
         try {
-            stub.sendNotification(req.build());
+            messageRpc().sendNotification(req.build());
             return true;
         } catch (StatusRuntimeException e) {
             // Go: logger.LogBusinessErr(..., errmsg.ErrorServerCommon, ...) —— 吞掉，不影响发布结果
@@ -99,5 +99,52 @@ public class MessageRpcClient {
                     articleId, recipientId, e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * 🔴 <b>出向调用必须带 2s 客户端封顶</b>（2026-10-31 · G3 域侧自修 · Jason 拍板「修」；
+     * <b>2026-10-31 第十一轮改由共享层统一施加</b>）。
+     *
+     * <p><b>Go 出处</b>：{@code service/article/rpc/internal/mqs/article_sync_result_consumer.go:197}
+     * 的 {@code l.svcCtx.MessageRpc.SendNotification(ctx, …)}
+     * ⇒ ⇒ Go 侧 {@code zrpc.MustNewClient(c.MessageRpc)} 的客户端<b>无条件</b>装
+     * {@code TimeoutInterceptor}（{@code zrpc/internal/client.go:113-117} ＋
+     * {@code zrpc/internal/config.go:15} 的 {@code default=true}）
+     * ⇒ ⇒ 每次调用都有 <b>2000ms</b> 上限（{@code zrpc/config.go:31} 的 {@code json:",default=2000"}）；
+     * ⚠️ 本域 {@code service/article/rpc/etc/article.yaml} 的 {@code MessageRpc} 段
+     * <b>没写 Timeout</b> ⇒ 取的就是这个 default ⇒ ⇒ <b>不是</b>我拍脑袋定的数。
+     *
+     * <p><b>修前的可观察分叉</b>：本类原先<b>直接用注入的 stub 发起调用</b> ⇒ <b>零期限</b>
+     * ⇒ ⇒ 下游 {@code message-rpc} 挂死时 Go 2s 就返回、RAG <b>一路等到底</b>
+     * ⇒ ⇒ 而本调用点<b>吞掉异常</b>（只记日志、返回 false）⇒ ⇒ 失败<b>时机</b>的差异不会向上冒泡
+     * ⇒ ⇒ 表现为「消费变慢」而非「报错」⇒ ⇒ 更难被发现；
+     * ⇒ ⇒ 更糟的是本调用点在 <b>Kafka consumer 线程</b>上
+     * （调用点 {@code service/article/article/rpc/mq/ArticleSyncResultConsumer.java:213}，
+     * 该类 {@code :80} 是 {@code @KafkaListener}）⇒ ⇒ 无限期阻塞会把<b>消费线程占死</b>
+     * ⇒ ⇒ 该 partition 不再推进 ⇒ ⇒ 「文章发布成功」通知这条链路<b>整条停摆</b>。
+     *
+     * <p><b>🔴 为什么现在是「共享层拦截器级」而不是「域内两段式」</b>：
+     * <ul>
+     *   <li>Go 的客户端超时是<b>拦截器级别</b>的 ⇒ ⇒ RAG 侧同形也应是拦截器级
+     *       ⇒ ⇒ 共享层 {@code GoStyleOutboundDeadlineInterceptor}
+     *       （devh 的 {@code @GrpcGlobalClientInterceptor} ⇒ 装在<b>每个</b>出向 devh 调用上
+     *       ⇒ ⇒ 连<b>裸 stub</b> 都过链）统一算一次
+     *       {@code min(入向剩余预算, 2s 客户端封顶, 调用点自带)}；</li>
+     *   <li>本域<b>只配参数</b>：{@code rag.protection.outbound-deadline.cap-millis=2000}
+     *       （见本组件 {@code application.yml}）⇒ ⇒ 共享层默认 {@code capMillis=0} = 不启用
+     *       ⇒ ⇒ <b>不配这一行 = 出向零期限 = 比 Go 松</b>（这正是域内副本存在的理由，
+     *       本轮由共享层补上）；</li>
+     *   <li>⚠️ <b>本出口跑在 Kafka consumer 线程上</b> ⇒ 共享层 {@code RpcInterceptor.onHalfClose}
+     *       绑的 ThreadLocal 载体<b>在本线程不可见</b> ⇒ ⇒ 出向只剩 <b>2s 客户端封顶</b>
+     *       ⇒ ⇒ 与 Go 侧<b>同形</b>（Go 的 {@code article_sync_result_consumer.go:197} 传的
+     *       也是 <b>Kafka 消费 ctx（无 deadline）</b> ⇒ 同样只有 2s 封顶）。</li>
+     * </ul>
+     *
+     * <p>⚠️ <b>域内私有副本 {@code GoStyleClientCallTimeout} 已删除</b>（本轮）：
+     * <b>副本数 = 漂移面</b> ⇒ ⇒ 共享层守门 {@code GoStyleClientCallTimeoutSingleSourceGateTest}
+     * 的终态口径 = 「域侧 0 份，只配参数」。
+     */
+    private MessageServiceGrpc.MessageServiceBlockingStub messageRpc() {
+        return stub;
     }
 }

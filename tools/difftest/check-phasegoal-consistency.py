@@ -133,6 +133,49 @@ def strip_md(s: str) -> str:
     )
 
 
+def _source_decl_total() -> int | None:
+    """全仓**源声明测试方法数**（环境无关口径）⇒ 与 A-1 的 `tests` 列同口径。
+
+    ⚠️ **口径**：`src/test/java` 里 `@Test` / `@ParameterizedTest` / `@RepeatedTest` /
+    `@TestFactory` / `@TestTemplate` 的**方法声明数** ⇒ ⇒ **一个参数化方法算 1**
+    （不是 surefire 展开后的 N 条 case）⇒ ⇒ **读源码 ⇒ 与 Docker 状态无关**。
+
+    ⇒ ⇒ 与 `tools/difftest/check-source-test-decl-count.py` 的逐行对账同源
+    （那个守门做逐行明细 + 行数 39 + proto 行 ⇒ 本函数只做求和级交叉校验）。
+    """
+    svc = ROOT / "service"
+    if not svc.is_dir():
+        return None
+    ann = re.compile(
+        r"@(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\b"
+    )
+    # ⚠️ **必须递归到任意深度**：`service/users/user/user-api/src/test/java` 是三层深
+    # ⇒ ⇒ 只 glob 两层会漏掉 users 域与 task 域 ⇒ ⇒ 口径必须与
+    # `tools/difftest/check-source-test-decl-count.py` **完全一致**（否则两个守门互相打架）。
+    total = 0
+    seen: set[pathlib.Path] = set()
+    for tdir in svc.rglob("src/test/java"):
+        if not tdir.is_dir() or tdir in seen:
+            continue
+        seen.add(tdir)
+        total += _count_in(tdir, ann)
+    return total
+
+
+def _count_in(tdir: pathlib.Path, ann: re.Pattern) -> int:
+    n = 0
+    try:
+        files = list(tdir.rglob("*.java"))
+    except OSError:
+        return 0
+    for f in files:
+        try:
+            n += len(ann.findall(f.read_text(encoding="utf-8", errors="ignore")))
+        except OSError:
+            continue
+    return n
+
+
 def tool_paths(text: str) -> list[str]:
     """抽出行内出现的 `tools/...` 路径（不要求被反引号包裹）。
 
@@ -448,7 +491,16 @@ def main() -> int:
         if declared != actual:
             fail("P0 汇总", f"§七 声明 ✅/🟡/🔴/⚫ = {declared}，实际 {actual}")
 
-    # ── 13. A-1 tests 列求和 == 声明的全仓条数 ───────────────────────
+    # ── 13. A-1 tests 列求和 == **源声明测试方法数**（环境无关口径）────────
+    # ⚠️ **【2026-10-31 订正 · 合并收口执行者 · M-12】本组原先拿 A-1 的 `tests` 列求和
+    #    去对「§七 P0 #6 的全仓 N 条 / 0F」⇒ ⇒ **那是两个不同口径** ⇒ ⇒ **判据形态错**：
+    #    ① A-1 列 = surefire **执行条数**（环境相关：Docker 停 ⇒ 整类折叠成 1 条 error；
+    #       `@ParameterizedTest` 被展开成 N 条 case）② P0 #6 的 N 条 = 同一次真跑的执行读数
+    #    ⇒ ⇒ 两者本应相等，**但只要环境一变就分叉** ⇒ ⇒ ⇒ **判据不具判别力**。
+    # ⇒ ⇒ 现在：A-1 列已改口径为**源声明测试方法数**（读源码 ⇒ 环境无关）⇒ ⇒ 本组改为
+    #    **直接重算源声明数 ⇒ 与 A-1 列求和逐行对账** ⇒ ⇒ **A-1 忘了更新就红**。
+    # ⇒ ⇒ 逐行的对账由独立守门 `tools/difftest/check-source-test-decl-count.py` 做
+    #    （含 proto 行、行数 39、逐行明细）⇒ ⇒ 本组只做**求和级**交叉校验。
     total_tests = 0
     for _, cells in a1_rows:
         if len(cells) < 6:
@@ -456,12 +508,17 @@ def main() -> int:
         v = strip_md(cells[5])
         if v.isdigit():
             total_tests += int(v)
-    m = re.search(r"\*\*(\d+)\s*条\s*/\s*0F", raw)
-    if m:
-        if int(m.group(1)) != total_tests:
-            fail("测试条数", f"文档声明全仓 {m.group(1)} 条，A-1 的 tests 列求和 = {total_tests}")
+    src_total = _source_decl_total()
+    if src_total is None:
+        note("无法重算源声明测试方法数（src/test/java 不可读），跳过第 13 组")
+    elif src_total != total_tests:
+        fail(
+            "测试条数",
+            f"A-1 的 tests 列求和 = {total_tests}，实测源声明测试方法数 = {src_total}"
+            f"⇒ ⇒ 两口径（环境无关）应当相等 ⇒ ⇒ 请更新 A-1 的 tests 列",
+        )
     else:
-        note("未找到「全仓 N 条 / 0F」的声明，跳过条数对账")
+        note(f"第 13 组：A-1 tests 列求和 {total_tests} == 源声明测试方法数 {src_total} ✅")
 
     # ── 14. §6.3 命令数 == 仓内守门清单 − 声明未跑的 ──────────────────
     inventory = sorted(
