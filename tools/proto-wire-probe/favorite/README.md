@@ -56,6 +56,30 @@ echo $?   # 0 = 双侧逐字节一致
 **消息体**这一层已由本探针闭合；
 **gRPC status 帧 / HTTP2 帧**那一层仍未做（那需要两侧同时起服务）⇒ 见该文件 §4。
 
+## 变异验证：证明这条链**不是假绿**（`mutate-wire.sh`）
+
+> 🔴 **为什么必须有它**：一条「跑绿」的探针，可能只是**自己跟自己比**——
+> 若 `expected.txt` 是照着 Java 侧现编的，那它**永远绿**，却证明不了任何事。
+> ⇒ 必须**改实现 ⇒ 探针必红**（`docs/PhaseGoal-judge.md` §1.1 **R4 判据 ⑧**）。
+
+```bash
+bash tools/proto-wire-probe/favorite/mutate-wire.sh
+echo $?   # 0 = 3 条变异都精确转红 + 还原后转绿 + 三个文件内容哈希回到变异前
+```
+
+| # | 变异打在哪 | 期望谁转红 | 实测 |
+|---|---|---|---|
+| M1 | 冻结的 `expected.txt` 的一枚 hex（`item_full` 首字节） | 第 3 步的 Go 侧 diff | ✅ exit 1（`Go 侧输出与 expected.txt 不一致`） |
+| M2 | Go 探针 `go/main.go` 的一个取值（`folders_resp_two` 的第一个 `UserId`） | 同上 | ✅ exit 1 ⇒ 证明 `expected.txt` 不是「谁都能写出来」的摆设 |
+| M3 | **RAG 侧** `favorite.proto` 的**字段号**（`FavoriteItem.created_at`：`8 → 9`） | 第 4 步的 Java 侧断言 | ✅ exit 2（`FavoriteProtoWireParityTest.favoriteItemWireMatchesGo` 失败 ⇒ 字节尾段 `40` → `48`） |
+
+⚠️ **M3 只改字段号、不改字段名**：改字段名 ⇒ 编译失败 ⇒ 那是另一种红，
+**证不了**「Java 侧在拿字节跟 Go 真源比」。
+⚠️ **M3 前必须 `mvn -pl service/favorite/favorite-proto clean`**：否则 protoc 可能不重新生成
+⇒ 变异「没打中」（**PIT-HOTAPI-25**：变异代码被静默沿用 ⇒ 假绿）。
+⚠️ **还原不用 `git checkout`**（会连未提交的落码一起回滚）⇒ 用「备份 + 复制」还原；
+**还原判定用内容哈希**（不用 `git status`——未跟踪的新文件在 `git status` 里看不出内容变没变 ⇒ 恒绿假绿）。
+
 ## 为什么 Java 侧住在 favorite-rpc 而不是 favorite-proto
 
 ⚠️ `favorite-proto` 模块**一行 junit 依赖都没有**（pom 里只有生成代码所需的 protobuf / grpc）

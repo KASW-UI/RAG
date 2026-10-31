@@ -8515,3 +8515,23 @@ G3 正在改 `tools/api-full-parity-probe/favorite-rpc/{README.md,expected.txt,j
 - ⇒ ⇒ **通用修法（推荐给全仓，优先于「依赖保留区」）**：
   **标题里不放编号 token ⇒ 就不依赖 keepout** ⇒ ⇒ 「保留区」是**结构上的偶然保护**（区间止于下一个同级标题），
   而「标题里没有编号 token」是**性质上的保护** ⇒ ⇒ 后者更稳健 ⇒ ⇒ **新增台账小节一律按后者写**。
+### 附 · 第 20 个合并点：G3 第二十一轮（favorite-proto 变异验证补网）＋ 一个新 `tools` 域目录的写权例外登记（2026-10-31 · 合并收口执行者）
+
+- **本笔带进来**：`e6f17249`（1 笔有内容）—— `tools/proto-wire-probe/favorite/mutate-wire.sh`（**新** · 177 行）
+  ＋ `README.md`（登记变异表）＋ `docs/DRIFT/favorite/proto.md` ＋
+  `docs/PhaseGoal-judge.md` / `docs/PhaseGoal/g3.md` 的 **`favorite-proto` 行 R3 → R4**
+  ⇒ ⇒ 判据升级 = 「**变异验证已补** ⇒ R4 成立（§1.1 判据 ⑦⑧ 齐）」。
+- **本层的独立复核（静态面）**：`mutate-wire.sh` 里确有 **3 条变异**（M1 改 expected.txt 的一枚 hex ⇒ Go 侧 diff 转红 ·
+  M2 改 Go 探针程序取值 ⇒ Go 侧 diff 转红 · M3 改 RAG 侧 proto 的**字段号** ⇒ Java 侧断言转红）
+  ⇒ ⇒ 与它 README 的「3 条变异都精确转红 + 还原后转绿 + 三个文件内容哈希回到变异前」**结构一致**。
+  ⚠️ **本层未跑该脚本**（需 Go 侧 ＋ RAG 侧同时在场）⇒ ⇒ 「精确转红」是 **G3 跑的**，本层**不替它背书活体结论**。
+- ⚠️ **写权例外登记（新增第三个域探针目录）**：`tools/proto-wire-probe/favorite/`
+  （该目录的 `run.sh` / `expected.txt` / `go/` / `README.md` **早已在主干** ⇒ ⇒ 本次只新增 `mutate-wire.sh`）
+  ⇒ ⇒ 沿用 §4.19.54 先例：**域内探针由该域 lane 维护**，本层登记例外（域 lane 可写），
+  条件 = **探针改动与该域台账同一次提交**（判据与台账同面）。
+  ⚠️ **例外集只能变紧** ⇒ ⇒ 现登记的域探针目录共 **4 个**（`tools/api-full-parity-probe/<域>/` ·
+  `tools/proto-wire-probe/comment/` · `tools/proto-wire-probe/favorite/` · `tools/prod-startup-probe/favorite/`）
+  ⇒ ⇒ **仍是具体目录，不是 `tools/**` 的通配** ⇒ ⇒ 以后新增别的域探针目录**必须逐个登记**。
+- ⚠️ **judge 又是共享索引面**（G3 改了 `favorite-proto` 那一行）⇒ ⇒ 写权偏离**登记**（不退回）;
+  合并**无冲突**（本层先前改的是第 117 行与 `comment-rpc` 行 ⇒ diff 上下文错开）
+  ⇒ ⇒ **本层对 judge 的改动逐字保留**（A-1 的 `3,323` ＋ 两枚订正戳）⇒ ⇒ 合并后**逐行比对**确认。

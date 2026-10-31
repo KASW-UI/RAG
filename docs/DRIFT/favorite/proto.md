@@ -153,6 +153,7 @@ RAG 侧 7 处用 `nullToEmpty(...)` / `nullToZero(...)` 显式设零值
 | **「默认值不落 wire」的生成码级证据** | ✅ **已验**（2026-10-25 第四轮 ⇒ 见 §2 的 `writeTo` 条件表达式） |
 | **「默认值不落 wire」的【字节级】证据** | ✅ **已验**（2026-10-25 第六轮 ⇒ 探针 `tools/proto-wire-probe/favorite/`：**零值消息在 wire 上是空字节**）⇒ 见 §5 |
 | **protobuf 消息体的 wire 字节** | ✅ **已验**（2026-10-25 第六轮 ⇒ **双侧活体对拍**：Go 真源的 `favorite.pb.go`（protoc-gen-go 运行时）vs favorite-proto 的生成码（protobuf-java 运行时）⇒ **6 组消息逐字节一致** ⇒ 见 §5） |
+| **探针非假绿（变异验证）** | ✅ **已验**（2026-10-31 · G3 第二十一轮 ⇒ 探针 `tools/proto-wire-probe/favorite/mutate-wire.sh`：**3 条变异精确转红 + 还原后转绿 + 三个文件内容哈希回到变异前** ⇒ 证明这条链**不是「自己跟自己比」** ⇒ 满足 `docs/PhaseGoal-judge.md` §1.1 **R4 判据 ⑧** ⇒ 见 §5.1） |
 | **真 channel 上的 wire 字节**（gRPC 帧 / status 帧） | 🟡 **已重新评估并拆成三层**（第十三轮 ⇒ [`rpc.md`](./rpc.md) §20.1）<br>· **L0 帧原始字节**（HPACK / 帧序 / WINDOW_UPDATE）⇒ 🔴 **不做比对**：库级、客户端不可观测（已量化到行号：percent-encoding 的 `~` 边界差 1 字节 ⇒ 本域 24 条文案无 `~` ⇒ 不可观测）<br>· **L1 帧层之上、消息层之下**（status code / description / 消息字节 / metadata key）⇒ ✅ **已双侧活体对拍**（`tools/grpc-contract-probe/favorite/`，36 个 case：33 SAME / 2 SAME_CODE / 1 OBS ⇒ **业务契约逐字节一致**）<br>· **L2 消息体字节** ⇒ ✅ 见本表上一行<br>⚠️ **第十四轮修正**：L1 那两条 `SAME_CODE`（c35 / c36）的**措辞归因已查清** —— 上一轮记的「Go 侧 `unknown service /favorite.FavoriteService`（带前导斜杠）」是**探针自己把 `:path` 拼坏**（多一个斜杠 ⇒ 双斜杠 ⇒ grpc-go 只剥一个 ⇒ service 名带斜杠 ⇒ 查不到注册表）造成的**假象**，已被推翻 ⇒ 真实差异是「**grpc-go 区分未知方法/未知服务两种措辞，grpc-java 两种情形共用一种措辞**」⇒ 详见 [`rpc.md`](./rpc.md) §22.2 与坑档 **PIT-FAV-RPC-017** |
 
 ---
@@ -191,6 +192,36 @@ RAG 侧 7 处用 `nullToEmpty(...)` / `nullToZero(...)` 显式设零值
 **仍未闭的**：**帧层**（HTTP2 / length-prefix / gRPC status 帧）⇒ 需要两侧同时起服务。
 ⇒ ✅ **第十三轮已闭**（见 [`rpc.md`](./rpc.md) §20）：L0 判定为库级、不可观测；**L1 已双侧活体对拍**。
 
+### 5.1 ✅ 变异验证：证明这条探针**不是假绿**（2026-10-31 · G3 第二十一轮）
+
+> 🔴 **它补的是哪个缺口**：§5 这条链此前**只有「跑绿」记录**，**没有「能被证伪」的记录**
+> ⇒ ⇒ `docs/PhaseGoal-judge.md` §1.1 的 **R4 判据 ⑧**「有**变异验证**记录（改实现 ⇒ 探针必红）」
+> ⇒ ⇒ `favorite-proto` 的 A-1 行因此被判「**台账未见变异验证 ⇒ R4 不成立**」⇒ **被降为 R3**。
+> ⇒ 本节补上那条记录 ⇒ **R3 → R4**（判据 ⑦ 早已满足：探针在版本控制内、现在可复算）。
+
+**新工具**：`tools/proto-wire-probe/favorite/mutate-wire.sh`（**EXIT=0**）
+
+| # | 变异打在哪 | 期望谁转红 | 实测结果 |
+|---|---|---|---|
+| M1 | 冻结的 `expected.txt` 的一枚 hex（`item_full` 的首字节） | `run.sh` 第 3 步的 Go 侧 diff | ✅ **exit 1 精确转红**（「Go 侧输出与 expected.txt 不一致」） |
+| M2 | Go 探针程序 `go/main.go` 的一个取值（`folders_resp_two` 里第一个收藏夹的 `UserId`） | 同上 | ✅ **exit 1 精确转红** ⇒ 证明 `expected.txt` **不是「谁都能写出来」的摆设** |
+| M3 | **RAG 侧** `favorite.proto` 的**字段号**（`FavoriteItem.created_at`：`8 → 9`） | `run.sh` 第 4 步的 Java 侧断言 | ✅ **exit 2 精确转红**：`FavoriteProtoWireParityTest.favoriteItemWireMatchesGo` 失败 ⇒ 实测字节尾段 `…2e706e67` + **`40`**`fbd095ffbc31` → `…2e706e67` + **`48`**`fbd095ffbc31`（**field tag 由 `0x40` 变 `0x48`** ⇒ 只可能是字节不同） |
+
+⚠️ **M3 为什么只改字段号、不改字段名**：改字段名 ⇒ RAG 侧**编译失败** ⇒ 那是另一种红，
+**不能**证明「Java 侧在拿字节跟 Go 真源比」⇒ 只改字段号 ⇒ 代码照常编译 ⇒
+红的原因**只可能**是字节不同。
+⚠️ **M3 为什么要先 `mvn -pl service/favorite/favorite-proto clean`**：否则 protoc 可能不重新生成
+⇒ 变异「没打中」（**PIT-HOTAPI-25**：变异代码被静默沿用 ⇒ 假绿）。
+⚠️ **M3 打的字段号必须是未被占用的**：`FavoriteItem` 占了 `1..8` ⇒ 取 `9`
+（且 `int64 created_at = 8;` 是全文件**唯一**的 `= 8` ⇒ 变异不会误伤别的消息）。
+
+**还原校验**：三个被变异的文件（`favorite.proto` / `expected.txt` / `go/main.go`）
+内容哈希**逐一回到变异前**（sha256 **3/3**）⇒ 且**还原后探针重新转绿**（exit 0）
+⇒ ⇒ **探针非假绿**。
+⚠️ **还原不用 `git checkout`**（它会连未提交的落码一起回滚）⇒ 用「备份 + 复制」还原。
+⚠️ **判定「还原没生效」用内容哈希，不用 `git status`**：这几个文件在首次提交前是**未跟踪的新文件**
+⇒ `git status` 只报「?? 路径」⇒ **看不出内容变没变** ⇒ 恒绿假绿。
+
 ---
 
 ## 6. 复现命令
@@ -207,4 +238,8 @@ mvn -o -pl service/favorite/favorite-proto -am package
 # 🔴 消息体 wire 字节的双侧活体对拍（Go 真源生成码 vs favorite-proto 生成码）
 bash tools/proto-wire-probe/favorite/run.sh
 echo $?   # 0 = 6 组消息逐字节一致
+
+# 🔴 变异验证：证明上面这条链**不是假绿**（M1/M2 打 Go 侧 diff · M3 打 Java 侧断言）
+bash tools/proto-wire-probe/favorite/mutate-wire.sh
+echo $?   # 0 = 3 条变异都精确转红 + 还原后转绿 + 三个文件内容哈希回到变异前
 ```
