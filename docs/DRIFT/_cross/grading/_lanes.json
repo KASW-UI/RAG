@@ -1951,5 +1951,21 @@
     "schedule_now": "GAP-12"
    }
   ]
+ },
+ "W33": {
+  "轮": 5,
+  "条目": [
+   {
+    "id": "E65",
+    "dir": "DRIFT",
+    "domain": "comment",
+    "source": "DRIFT/comment/rpc.md:257",
+    "title": "### 3.5 🔴 D8（= global **E65**）：出向 gRPC 调用**不继承**请求 deadline ⇒ `ArticleRpcClient` 是**裸 stub**（**2026-10-31 第十一轮 · 本域那半已闭合",
+    "status": "🔴 未闭合",
+    "evidence": "A 活体 · 绿(0)",
+    "stage_now": "—",
+    "schedule_now": "P1-T05,P2-T01,P2-T02,P2-T03,P2-T04,P2-T05,P2-T06,P3-T01 ｜ BLK-02,GAP-07,GAP-08"
+   }
+  ]
  }
 }
