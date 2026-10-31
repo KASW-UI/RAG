@@ -5426,7 +5426,7 @@ git diff --stat -- service/ # ⇒ 0 行
 |---|---|
 | **现象** | rpc handler 路径上的**出向 gRPC 调用**不继承请求 deadline ⇒ deadline 到点后**出向调用照跑不误**（下游挂住） |
 | **Go 侧 `文件:行号`** | ① `Sea-RideTheWind_golang/service/follow/rpc/internal/logic/helper.go:82` —— `resp, err := svcCtx.UserRpc.GetUser(ctx, &userservice.GetUserReq{Uid: userID})` ⇒ **直接透传 handler 的 ctx**（**无** `depCtx`、**无** otel ⇒ 继承父 deadline） ② `service/favorite/rpc/internal/logic/helper.go:93` / `:98` / `:127` / `:133` —— `depCtx, span := otel.Tracer("favorite-rpc").Start(ctx, …)` ⇒ 原生 `go.opentelemetry.io/otel` 的 `ContextWithSpan` = `context.WithValue(parent, …)` ⇒ **保父 deadline**（⚠️ **全仓 `depCtx` 只在 favorite 域**） ③ `go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25` —— `context.WithTimeout(ctx, t)` ⇒ **min 语义**（父 deadline 更早则**保留父的** ⇒ **继承**） ④ `go-zero@v1.10.2/zrpc/client.go:70-71` —— `WithTimeout(time.Duration(c.Timeout)*time.Millisecond)`（默认 **2000ms**，`zrpc/config.go:31`）**只是默认超时、不覆盖**父 deadline ⑤ `grpc-go@v1.81.1/internal/transport/http2_client.go:600-607` —— client 把 `ctx.Deadline()` 写进 **`grpc-timeout`**（`:604-606` 已过期 ⇒ 立刻 `DeadlineExceeded`） ⑥ `grpc-go@v1.81.1/internal/transport/http2_server.go:521-522` —— server 把 `grpc-timeout` 解析成 `context.WithTimeout(ctx, timeout)` ⇒ **入站 deadline 真进了 ctx** ⑦ `go-zero@v1.10.2/zrpc/internal/serverinterceptors/timeoutinterceptor.go:34` + `:53` —— 服务端再 min 一次自己的超时，`handler(ctx, req)` 拿到的 ctx 带 deadline |
-| **RAG 侧现状** | ① **共享层** `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` 的 `onHalfClose` **只绑 `DeadlineState`**、**从不绑** `GoStyleRequestDeadline` ⇒ `GoStyleRequestDeadline.applyTo`（`service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java:110`）在 gRPC 路径是 **no-op** ② **域内裸 stub**：`service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java:88`（**2026-10-31 订正**：原写的 `:50` **落点一直是错的**（空 javadoc 行）⇒ ⇒ 已改指真实的出向调用点）⇒ **客户端硬上界已于 2026-10-31 由共享层承担**（域侧只配 `rag.protection.outbound-deadline.cap-millis=2000`） |
+| **RAG 侧现状** | ① **共享层** `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java` 的 `onHalfClose` **只绑 `DeadlineState`**、**从不绑** `GoStyleRequestDeadline` ⇒ `GoStyleRequestDeadline.applyTo`（`service/common/src/main/java/com/rag/common/observability/GoStyleRequestDeadline.java:110`）在 gRPC 路径是 **no-op** ② **域内裸 stub**：`service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/UserRpcClient.java:89-90`（**2026-10-31 订正**：原写的 `:50` **落点一直是错的**（空 javadoc 行）⇒ ⇒ 已改指真实的出向调用点；`:88` 是方法签名行，`6d04dc19` 删掉内联副本后调用体上移到 `:89-90`）⇒ **客户端硬上界已于 2026-10-31 由共享层承担**（域侧只配 `rag.protection.outbound-deadline.cap-millis=2000`） |
 | **证据强度** | **L4**（运行时双侧活体）—— ✅ **双侧活体探针已坐实**（`tools/semantic-probe/deadline-downstream/`，2026-10-26 第四十六轮）：Go `failed_fast=true` / `code=4` / `outgoing_carrier=present_expired` ⇔ RAG `failed_fast=false` / `code=0` / `outgoing_carrier=absent`；2026-10-29 复跑 `tools/difftest/check-deadline-downstream.py` ⇒ **EXIT=0**（**漂移形态门** ⇒ PASS ⇒ **漂移仍在**）⇒ ⚠️ **本轮未重新实测**（沿用上述活体证据） |
 | **建议修法** | **共享层**在 `onHalfClose` 里把有效期限也绑进 `GoStyleRequestDeadline`（⇒ `applyTo` 立刻生效）**＋ 各域裸 stub 调用点改用 `applyTo`** ⇒ **不需要架构级改造、不需要 interrupt** ⇒ 与 Go 的 ctx 传播**同构**<br>⚠️ **min 语义（2026-10-30 由 G4 独立复核补的约束，本轮已逐条复验）**：Go 的出向 deadline = **min(入站请求剩余, 客户端默认超时 2000ms / 该域 yaml 的 `Timeout`)** ⇒ ⇒ RAG 侧若只注入「入站剩余」⇒ **比 Go 宽松最多 2000ms**（少了一次与客户端默认超时的 min）⇒ ⇒ 实现要**取更早者**，且保留「**无入站 deadline ⇒ 不注入**」这条路径（对齐 Go `context.WithTimeout` 在无父 deadline 时的行为） |
 | **影响面** | **共享层 `service/common`** ＋ 各域裸 stub 调用点（**follow 域那一半 = `follow-rpc/client/UserRpcClient.java:50`**）⇒ ⚠️ 修法**同时涉及共享层与域内代码** ⇒ `AGENTS.md` §3c「**必须同一次提交**（否则留下半截）」⇒ ⇒ **G1 不能单独改 follow-rpc 的裸 stub** ⇒ ⇒ **整条转 G4** |
@@ -6008,3 +6008,33 @@ Go = **min(3s,2s) = 2s 客户端侧收口 ⇒ 200 + 1015**；RAG 修前 = **无�
 - ⚠️ 另：④ `follow-rpc/.../UserRpcClient.java:50` 的**落点也一直是错的**（`:50` 是空 javadoc 行）⇒ ⇒ 本 lane 已在
   `docs/DRIFT/follow/vs-common.md` / `docs/DRIFT/users/vs-common.md` 内就地改指真实调用点；
   共享面那一处**同样转收口执行者**。
+---
+
+## 指针漂移订正 —— 删副本引起的行号位移（2026-10-31 · G1 lane）
+
+- **本轮订正 1 处落点**（**就地替换、行数不变** ⇒ 派生层关键数字逐项零变化 ⇒ 产物校验和不变）：
+  `service/follow/follow-rpc/.../client/UserRpcClient.java:88` ⇒ **`:89-90`**
+  ⇒ ⇒ **成因**：`6d04dc19` 删掉内联 `capByClientTimeout` 方法（该方法原占 `:91-105`）⇒ `getUser` 的调用体整体上移；
+  同时常量行由 `:75` 移到 `:76`（其 javadoc 多 1 行）⇒ ⇒ **删除前 `:88` = `return capByClientTimeout(userStub)`（带 cap，**不是**裸 stub）**，
+  **删除后 `:88` = 方法签名行** ⇒ ⇒ **两种状态下 `:88` 都不是「裸 stub 出向调用点」** ⇒ ⇒ 真实落点只能是 `:89-90`。
+- **⚠️ 上一笔提交的一处判断，本轮被实测推翻**：那笔提交的说明写「独立 verifier 另报的 `:88` 漂移**不成立** —— `:88` 正是出向调用语句首行」
+  ⇒ ⇒ **该判断不成立**（`:88` 是方法签名行）⇒ ⇒ **教训**：「零行位移」的自证**不能只凭 diff hunk 的起点对齐**，
+  必须做「删除前／删除后**同一行号的内容对比**」。
+- **共享面【转收口执行者 / G4】**（本 lane 无写权，记在此处免得丢）：
+  - `docs/DRIFT/global/vs-common.md` 的枚举 ④ 已被订正为 `:88` ⇒ ⇒ **那个 `:88` 在 `6d04dc19` 落地后同样悬空** ⇒ ⇒ 真实落点同样是 `:89-90`。
+  - 同一格的枚举 ⑤／⑥ 也因删副本而位移 ⇒ ⇒ `user-api` 的 `userRpc()` 由 `:194-196` 上移到 `:208-210`；
+    `admin-api` 的 `adminRpc()` 由 `:219-221` 上移到 `:235-237` ⇒ ⇒ 且三处 `withDeadlineAfter` 副本**已不存在** ⇒ ⇒ 请一并订正。
+---
+
+## 删副本的语义口径订正 —— 本域这一侧是「行为等价」（2026-10-31 · G1 lane）
+
+- **本轮实测旧副本的实现（取证来源 = 删除前的源码，`git show 6d04dc19^:<file>`）**：
+  - **user-api / admin-api 的旧副本 = 自带 min**：`Math.min(remainingNanos, capNanos)`
+    （无入向预算时 `remainingNanos = Long.MAX_VALUE` ⇒ min = 2s ⇒ 恒有上界）
+    ⇒ ⇒ **本来就是 min 语义** ⇒ ⇒ **删副本 = 行为等价（变的只是由谁承担）** ⇒ ⇒ 这句**在本域成立**
+  - **共享层那份 = 取 min**（min(入向剩余 · cap · 既有 CallOptions 剩余)）⇒ ⇒ 与 Go 的 `context.WithTimeout(ctx, 2s)` **逐字同形**
+    ⇒ ⇒ 且 `capMillis = 0` = **不启用**
+  - **覆盖面没扩大**：user-api 与 admin-api 各只有 **1 个**出向 stub ⇒ ⇒ 共享层的 channel 级拦截器覆盖的**正是**旧副本覆盖的那一个
+- **⚠️ 逐域限定（承 G4 之问）**：「**上界一直都在，变的只是由谁承担**」**只对 user-api / admin-api 成立**
+  ⇒ ⇒ **follow-rpc 那一侧不成立**（旧副本是**纯覆盖** ⇒ 删副本 = 修漂移，不是等价）
+  ⇒ ⇒ **引用时不要写成跨域通则**。
