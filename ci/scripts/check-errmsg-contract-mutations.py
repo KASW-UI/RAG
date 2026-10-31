@@ -85,11 +85,19 @@ def baseline_of(domain: str) -> pathlib.Path:
 
 
 def edit_baseline(domain: str, fn) -> tuple[pathlib.Path, pathlib.Path, str]:
-    """⇒ (备份路径, 原文件, 原 sha256)"""
+    """⇒ (备份路径, 原文件, 原 sha256)
+
+    ⚠️ **变异必须真的改写了文件** ⇒ 否则「守门返回 0」会被读成「抓不到」，
+    而真相是「**靶子不存在、变异根本没生效**」⇒ 两种情况必须分开记 ⇒ 落空即抛错。
+    """
     p = baseline_of(domain)
     tmp, orig = backup(p)
     txt = p.read_text(encoding="utf-8")
-    p.write_text(fn(txt), encoding="utf-8")
+    mutated = fn(txt)
+    if mutated == txt:
+        restore(p, tmp, orig)
+        raise RuntimeError(f"**变异落空**（{domain} 基准逐字节未变）⇒ 靶子不存在，不是守门抓不到")
+    p.write_text(mutated, encoding="utf-8")
     return tmp, p, orig
 
 
@@ -165,8 +173,16 @@ def mutate_break_deviation_fields(txt: str) -> str:
 
 
 def mutate_pending_to_fake_approved(txt: str) -> str:
-    """把一条 pending 改成 approved，依据 id 换成**台账里查不到**的编号
-    ⇒ **自证豁免** ⇒ 应判 FAIL（不许自行豁免）"""
+    """把一条差异改成 approved，依据 id 换成**台账里查不到**的编号
+    ⇒ **自证豁免** ⇒ 应判 FAIL（不许自行豁免）
+
+    ⚠️ **优先挑 `pending`**（原始形态 = 「把未签字的差异偷偷变成 approved」）；
+    ⚠️ **没有 pending 时退回挑 `approved`**（把它的依据 id 换成**查不到的** id）
+    ⇒ 两者打的是**同一个性质**（「approved 的依据 id 在台账里查不到 ⇒ 不得算已签字」）
+    ⇒ ⇒ **不能因为 `pending` 清零就让变异落空**（落空 ⇒ 守门返回 0 ⇒
+    **看起来像「门禁抓不到」，其实是「靶子不存在」** ⇒ 自证能力静默失效）。
+    ⚠️ 2026-10-31 用户签字后全域 `pending` 清零 ⇒ 这个回退分支是必需的。
+    """
     out = []
     hit = False
     for ln in txt.splitlines(keepends=True):
@@ -178,6 +194,21 @@ def mutate_pending_to_fake_approved(txt: str) -> str:
             ln = "|".join(parts) + "\n"
             hit = True
         out.append(ln)
+    if hit:
+        return "".join(out)
+
+    # 回退：拿一条 approved，把依据 id 换成查不到的编号（同一性质）
+    out = []
+    hit = False
+    for ln in txt.splitlines(keepends=True):
+        if not hit and ln.startswith("DEVIATION|") and "|approved|" in ln:
+            parts = ln.rstrip("\n").split("|")
+            parts[6] = "SD-MUTATION-NOT-EXIST-999"
+            ln = "|".join(parts) + "\n"
+            hit = True
+        out.append(ln)
+    if not hit:
+        raise RuntimeError("基准里既没有 pending 也没有 approved 差异 ⇒ 变异无处下手")
     return "".join(out)
 
 
@@ -288,13 +319,21 @@ def run_baseline_mutations() -> list:
         ("M5 · 基准缺 go-authority 段（格式损坏）", DOM_MAIN, mutate_drop_authority, 2, "BLOCKED"),
         # ⚠️ 必须用**有 DEVIATION 的域**（article 域 0 条 ⇒ 变异无处下手 ⇒ 根本没生效）
         ("M6 · 基准的 DEVIATION 字段数损坏", DOM_APPROVAL, mutate_break_deviation_fields, 2, "BLOCKED"),
-        ("M7 · **自行豁免**：pending → approved，依据 id 台账里查不到",
+        ("M7 · **自行豁免**：approved 的依据 id 台账里查不到"
+         "（无 pending 时退回挑 approved · 同一性质）",
          DOM_APPROVAL, mutate_pending_to_fake_approved, 1, "FAIL"),
         ("M8 · approved 的依据文件不在 Intentional_Deviations 下",
          DOM_APPROVAL, mutate_approved_wrong_ledger, 1, "FAIL"),
     ]
     for name, dom, fn, expect_rc, expect_kind in cases:
-        tmp, p, orig = edit_baseline(dom, fn)
+        try:
+            tmp, p, orig = edit_baseline(dom, fn)
+        except Exception as e:
+            # ⚠️ **变异落空 / 施加失败** ⇒ 必须**单独记**，不能混进「守门抓不到」
+            results.append({"name": name, "domain": dom, "expect_rc": expect_rc,
+                            "expect_kind": expect_kind, "actual_rc": None, "caught": False,
+                            "restored": True, "detail": f"变异施加失败：{e}"})
+            continue
         try:
             rc, out = run_gate(dom)
         finally:

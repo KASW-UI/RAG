@@ -32,7 +32,10 @@
 #   pending   —— **未经批准、需用户拍板** ⇒ **不判 FAIL**，但逐条显式报出，
 #               且**该域不得计入 PASS**（门以退出码 3 收口）
 #
-# 【本域差异台账】 approved=0 · closed=0 · technical=0 · pending=3（共 3 条）
+# 【本域差异台账】 approved=3 · closed=0 · technical=0 · pending=0（共 3 条）
+#
+#   ⚠️ **2026-10-31 用户签字**：3 条 pending 全部转 **approved**（依据 `SD-2026-10-31-02` ·
+#   `docs/Intentional_Deviations/comment/common.md:11`）⇒ 本域 `pending` 清零。
 #
 #   ⚠️ comment 域的 Go 侧**没有** BizCodeFromError ⇒ 其 OBS 段记的是「**业务码在 wire 上的载体不同**」（Go 写进 grpc-status，Java 只能放自定义 trailer `rag-comment-biz-code`）。
 #
@@ -98,6 +101,6 @@ GOTABLE|5010|延时消息发送失败
 GOFALLBACK|FAIL
 
 # >>> deviations >>>
-DEVIATION|OBS|obs_wire_grpcstatus_1012|1012%7C1012%7Ccode(1012)%7C评论区不存在%7C1012|1012%7C2%7Cunknown%7C评论区不存在%7C1012|pending|D1|docs/DRIFT/comment/common.md:105|业务码 wire 载体差异：Go 把业务码直接写进 grpc-status（codes.Code(1012) 等），grpc-java 只能发 17 个标准码 ⇒ Java 挪到自定义 trailer rag-comment-biz-code；与 like 域已签字的 SD-2026-10-23-06 同族，但 comment 域本域未签 ⇒ 需用户拍板。
-DEVIATION|OBS|obs_wire_grpcstatus_2001|2001%7C2001%7Ccode(2001)%7C目标类型和ID不能为空%7C2001|2001%7C3%7Cinvalid_argument%7C目标类型和ID不能为空%7C2001|pending|D1|docs/DRIFT/comment/common.md:105|业务码 wire 载体差异：Go 把业务码直接写进 grpc-status（codes.Code(1012) 等），grpc-java 只能发 17 个标准码 ⇒ Java 挪到自定义 trailer rag-comment-biz-code；与 like 域已签字的 SD-2026-10-23-06 同族，但 comment 域本域未签 ⇒ 需用户拍板。
-DEVIATION|OBS|obs_wire_grpcstatus_5003|5003%7C5003%7Ccode(5003)%7CDB查询失败%7C5003|5003%7C2%7Cunknown%7CDB查询失败%7C5003|pending|D1|docs/DRIFT/comment/common.md:105|业务码 wire 载体差异：Go 把业务码直接写进 grpc-status（codes.Code(1012) 等），grpc-java 只能发 17 个标准码 ⇒ Java 挪到自定义 trailer rag-comment-biz-code；与 like 域已签字的 SD-2026-10-23-06 同族，但 comment 域本域未签 ⇒ 需用户拍板。
+DEVIATION|OBS|obs_wire_grpcstatus_1012|1012%7C1012%7Ccode(1012)%7C评论区不存在%7C1012|1012%7C2%7Cunknown%7C评论区不存在%7C1012|approved|SD-2026-10-31-02|docs/Intentional_Deviations/comment/common.md:11|业务码 wire 载体差异：Go 把业务码直接写进 grpc-status（codes.Code(1012) 等），grpc-java 只能发 17 个标准码 ⇒ Java 挪到自定义 trailer rag-comment-biz-code；与 like 域已签字的 SD-2026-10-23-06 同族 ⇒ **2026-10-31 用户签字**（SD-2026-10-31-02）⇒ 代价：仅 grpc-status 字段数值不可复原（业务码与文案两侧无损）。
+DEVIATION|OBS|obs_wire_grpcstatus_2001|2001%7C2001%7Ccode(2001)%7C目标类型和ID不能为空%7C2001|2001%7C3%7Cinvalid_argument%7C目标类型和ID不能为空%7C2001|approved|SD-2026-10-31-02|docs/Intentional_Deviations/comment/common.md:11|业务码 wire 载体差异：Go 把业务码直接写进 grpc-status（codes.Code(1012) 等），grpc-java 只能发 17 个标准码 ⇒ Java 挪到自定义 trailer rag-comment-biz-code；与 like 域已签字的 SD-2026-10-23-06 同族 ⇒ **2026-10-31 用户签字**（SD-2026-10-31-02）⇒ 代价：仅 grpc-status 字段数值不可复原（业务码与文案两侧无损）。
+DEVIATION|OBS|obs_wire_grpcstatus_5003|5003%7C5003%7Ccode(5003)%7CDB查询失败%7C5003|5003%7C2%7Cunknown%7CDB查询失败%7C5003|approved|SD-2026-10-31-02|docs/Intentional_Deviations/comment/common.md:11|业务码 wire 载体差异：Go 把业务码直接写进 grpc-status（codes.Code(1012) 等），grpc-java 只能发 17 个标准码 ⇒ Java 挪到自定义 trailer rag-comment-biz-code；与 like 域已签字的 SD-2026-10-23-06 同族 ⇒ **2026-10-31 用户签字**（SD-2026-10-31-02）⇒ 代价：仅 grpc-status 字段数值不可复原（业务码与文案两侧无损）。
