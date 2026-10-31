@@ -4,6 +4,12 @@
 > 范围严格限定在 CI：构建、测试、静态守门、结果汇总。
 > **不含** CD / 生产发布 / Kubernetes 部署 —— 那不在本项目范围内。
 
+| 文档 | 回答什么问题 |
+|---|---|
+| [`ci/BASELINE.md`](BASELINE.md) | **需求基线**：以 **Go 原版**为参照 ⇒ Java CI **应该验证什么**（9 条需求 R1~R9、微服务级矩阵、触发需求、接入条件与验收标准、8 条待定项） |
+| [`ci/DELIVERY.md`](DELIVERY.md) | **实现说明**：架构 / 文件清单 / 执行流程 / 分层验证记录 / 演练历程 / CI 抓出的缺陷 / 维护说明 |
+| 本文件 | **使用说明**：快速开始 / 依赖矩阵 / 触发规则 / 环境约束 |
+
 ---
 
 ## 快速开始
@@ -164,6 +170,8 @@ get repo (trigger: true)   ← git 资源，paths 过滤 ⇒ 只在相关改动�
 | `ci/generate-pipelines.py` | 从 pom 依赖图生成 11 条 pipeline；`--check` 校验漂移 |
 | `ci/deploy.sh` | 校验 + `set-pipeline`（注入 `registry` 变量）+ `unpause-pipeline`（幂等） |
 | `ci/local-up.sh` | **本地环境一键起流**：load 人工下载的镜像 tar → （可选）起本地 registry → 起 Concourse → `fly login` → 注册 11 条流水线 → （可选）触发 build |
+| `ci/DELIVERY.md` | **交付文档**：架构 / 文件清单 / 执行流程 / 分层验证记录 / 演练历程 / 维护说明 |
+| `ci/BASELINE.md` | **CI 需求基线**：以 Go 原版为参照 ⇒ Java CI 应验证什么（9 条需求 + 微服务级矩阵 + 触发需求 + 接入条件与验收标准 + 8 条待定项） |
 
 > **为什么 task 配置要内联进 pipeline**
 > Concourse 的 pipeline step **必须**带 `file:` 或 `config:` 二选一，
