@@ -95,10 +95,10 @@
 | `tools/difftest/flyway-rpc-concurrent.sh` | **0** | ✅ 自身断言成立 | 175s | 2026-10-30 03:44:02 | ✅ task       ok 账本=flyway_schema_history_task         baseline=0   SQL=2 条 BASELINE行=[] gRPC监听=True 用时=4486ms ⏐ ✅ message    ok 账本=flyway_schema_history_message      baseline=0   SQL=5 条 BASELINE行=[] gRPC监听=True 用时=4277ms ⏐ [L11]   账本行数（应为 2 条 V1/V2，**不是** 4 条 ⇒ 没有重复应用）：2 ⏐ ✅ 所有非故意失败的进程：迁移全部 SUCCESS |
 | `tools/difftest/check-flyway-concurrent.sh` | **0** | ✅ 自身断言成立 | 72s | 2026-10-30 03:46:57 | ⏱  并发组 ['favorite', 'message'] 的起跑时刻：[1793303287034, 1793303287033] （最大偏差 1ms ⇒ 真并发） ⏐ ✅ like ⏐ ✅ message ⏐ ✅ 无差异：各模块的表都建出来了、账本互不覆盖、baseline 落位正确。 |
 | `tools/difftest/run-deadline-gate.sh` | **4** | 🔴 退出码 4 | 2s | 2026-10-30 03:48:09 | （未抓到结论行） |
-| `tools/difftest/check-deadline-downstream.py` | **0** | ✅ 自身断言成立 | 12s | 2026-10-30 03:48:11 | ✅ failed_fast        Go=true | RAG=false  （已登记的漂移形态） ⏐ ✅ code               Go=4 | RAG=0  （已登记的漂移形态） ⏐ ✅ outgoing_carrier   Go=present_expired | RAG=absent  （已登记的漂移形态） ⏐ ⇒ ✅ 通过（parity 键两侧一致；drift 键形态与已登记一致） |
+| `tools/difftest/check-deadline-downstream.py` | **0** | ✅ 自身断言成立 | 12s | 2026-10-30 03:48:11 | ✅ failed_fast        Go=true | RAG=false  （已登记的漂移形态） ⏐ ✅ code               Go=4 | RAG=0  （已登记的漂移形态） ⏐ ✅ outgoing_carrier   Go=present_expired | RAG=absent  （已登记的漂移形态） ⏐ ⇒ ✅ 通过（parity 键两侧一致；drift 键形态与已登记一致） |<br>⚠️ **【2026-10-31 复测】本行的「漂移形态」读数已过期** —— 探针 RAG 半边已改走 devh **生产装配路径**（`e796a4ed`）⇒ ⇒ 实测**四键逐键相等**：`failed_fast` true/true · `code` 4/4 · `outgoing_carrier` present_expired/present_expired · `sql_carrier` present_expired/present_expired ⇒ ⇒ **本行的退出码仍是 0 ⇒ 派生层档位不受影响**（`load_live_probes()` 只取退出码列）⇒ ⇒ 复现命令与完整读数见**文末 §八**。
 | `tools/semantic-probe/rpc-timeout/run-rpc-timeout-parity.sh` | **0** | ✅ 自身断言成立 | 8s | 2026-10-30 03:48:23 | ⚠️  timeout_telemetry                        预期差异（不计入失败） ⏐ 理由：RAG 的 code 段用 grpc-java 的 Code.name()（DEADLINE_EXCEEDED），Go 用 grpc-go 的 codes.Code.String()（DeadlineExceeded）⇒ 已登记为「表述差异 C-1」，不在 global 修改范围 ⏐ ✅ timeout_wire                             一致 ⏐ ✅ PASS —— 3 个用例两侧一致 |
 | `tools/semantic-probe/trace/run-trace-parity.sh` | **0** | ✅ 自身断言成立 | 6s | 2026-10-30 03:48:31 | ⚠️  G7_exporter_zipkin                       预期差异（不计入失败） ⏐ 理由：RAG 未实现 zipkin（Go 能装）⇒ 能力缺口，非静默降级 ⏐ ✅ G8_propagation                           一致 ⏐ ✅ PASS —— 11 个用例两侧一致 |
-| `tools/semantic-probe/deadline-downstream/run-deadline-downstream-parity.sh` | **0** | ✅ 自身断言成立 | 10s | 2026-10-30 03:48:37 | ✅ failed_fast        Go=true | RAG=false   （已登记的漂移形态） ⏐ ✅ outgoing_carrier   Go=present_expired | RAG=absent   （已登记的漂移形态） ⏐ ✅ sql_carrier        Go=present_expired | RAG=present_expired   （两侧一致） ⏐ ✅ PASS —— 1 个用例：parity 键两侧一致，drift 键形态与已登记一致 |
+| `tools/semantic-probe/deadline-downstream/run-deadline-downstream-parity.sh` | **0** | ✅ 自身断言成立 | 10s | 2026-10-30 03:48:37 | ✅ failed_fast        Go=true | RAG=false   （已登记的漂移形态） ⏐ ✅ outgoing_carrier   Go=present_expired | RAG=absent   （已登记的漂移形态） ⏐ ✅ sql_carrier        Go=present_expired | RAG=present_expired   （两侧一致） ⏐ ✅ PASS —— 1 个用例：parity 键两侧一致，drift 键形态与已登记一致 |<br>⚠️ **【2026-10-31 复测】本行的「漂移形态」读数已过期** —— 探针 RAG 半边已改走 devh **生产装配路径**（`e796a4ed`）⇒ ⇒ 实测**四键逐键相等**（`failed_fast` true/true · `code` 4/4 · 两个 carrier 均 present_expired）⇒ ⇒ **本行的退出码仍是 0 ⇒ 派生层档位不受影响**（`load_live_probes()` 只取退出码列）⇒ ⇒ 复现命令与完整读数见**文末 §八**。
 | `tools/difftest/exp-difftest-grpc-user9.sh` | **1** | 🔴 不一致 | 22s | 2026-10-30 03:56:56 | （未抓到结论行） |
 | `tools/difftest/exp-go-concurrent-automigrate.sh` | **0** | ✅ 自身断言成立 | 21s | 2026-10-30 03:57:18 | （未抓到结论行） |
 | `tools/difftest/exp-difftest-redis-blacklist.sh` | **0** | ✅ 自身断言成立 | 39s | 2026-10-30 04:11:48 | 用有效 token 只能拿到 200，而「断连秒拒」也是 200 ⇒ 区分不了。 ⏐ ⇒ 判定要点： ⏐ ①b 必须 401 ⇒ 证明黑名单机制真在跑（否则 ② 的 200 是假绿） ⏐ ②b 必须 200 ⇒ 证明 Redis 故障时是 fail-open 放行（不是 401 误拦，也不是 503） |
@@ -123,6 +123,7 @@
 | `tools/api-full-parity-probe/users-common/mutate-parity.sh` | **0** | ✅ 自身断言成立 | 66s | 2026-10-30 04:54:13 | ✅ 精确转红：c.int64.1 ⏐ == 还原后必须重新转绿（影子副本全部在临时目录 ⇒ 仓内源码从未被改） == ⏐ ✅ 还原后绿（exit 0） ⏐ ✅ 四条变异全部精确转红 + 还原后转绿 ⇒ 探针非假绿 |
 | `tools/difftest/check-jar-executable.sh` | **0** | ✅ 自身断言成立 | 2s | 2026-10-30 04:55:19 | ✅  service/users/admin/admin-api               80M   Main-Class: org.springframework.boot.loader.launch.JarLauncher ⏐ ✅  service/users/admin/admin-rpc               79M   Main-Class: org.springframework.boot.loader.launch.JarLauncher ⏐ ✅  service/users/user/user-api                 80M   Main-Class: |
 | `tools/proto-wire-probe/hot/mutate-wire.sh` | **0** | ✅ 自身断言成立 | 21s | 2026-10-30 04:55:53 | ✅ hot.proto 已还原（sha256=df261e1490b83844…） ⏐ ✅ expected.txt 已还原（sha256=97672967777ec2e8…） ⏐ ✅ go/main.go 已还原（sha256=67733b4e1de7088f…） ⏐ ✅ 三条变异全部精确转红 + 还原后转绿 ⇒ 探针非假绿 |
+| `tools/semantic-probe/redis-deadline/run-redis-deadline-parity.sh` | **0** | ✅ 自身断言成立 | 7s | 2026-10-31 06:57 | ✅ **双侧逐键相等**：`form=exhausted` ⇒ `write_applied=false` / `err_is_deadline=true` / `value_after=baseline`（**读回仍是基线值 ⇒ 命令根本没下发到 Redis**）⏐ ✅ `form=alive`（负控）⇒ `write_applied=true` / `err_is_deadline=false` / `value_after=written` ⇒ ⇒ **「请求 deadline 已耗尽 ⇒ 命令不下发」两侧同形**（活体证据）｜ ⚠️ **变异测试有牙**：拆生产类 `GoStyleRedisDeadline.assertNotExhausted` 的闸门 ⇒ RAG 侧翻成 `write_applied=true` / `value_after=overwritten` ⇒ **精确红在 `exhausted.write_applied`** ⇒ 还原后 sha256 一致｜ ⚠️ **【2026-10-31 新登记】** 本行 = **E66「写面」的活体来源** ⇒ 登记进 §二 后 `load_live_probes()` 才含本探针 ⇒ ⇒ E66 那格的证据档才可能升到「A 活体」（**登记前 = B 静态** ⇒ 那是「工具引用没被解析到」，不是「证据弱」）
 ---
 
 ## 三、本轮抓到的「工具自己骗人」（15 条）
@@ -451,3 +452,48 @@ python3 /tmp/rag-verify/tiers.py
 |---|---|
 | **2026-10-30** | **首版** —— ① 跑通三批共 **58** 个活体探针（真实退出码见 §二）② 抓到 **9 条「工具自己骗人」**并**逐条修**（§三）③ **5 条台账改判**（§四）④ 三层证据报告（§五）⑤ **零产品代码改动**（只改 `docs/` + `tools/`） |
 | **2026-10-30（续）** | **本轮续跑 + 修完 8 处探针缺陷后的复跑** —— ① 探针实跑总数扩到 **§二** 的全部（含 **exp-\* 全族** · **栈依赖探针带 `--stacks-up` 跑** · **mutate 族**）② §三 扩到 **16 条**（新增 **⑭ 编排依赖** · **⑮ setup fail-open** · **⑯ 探针的失败被上一个探针制造出来**（两形态））③ §四 扩到 **8 条改判** ④ **新增两个共享件**：`tools/difftest/lib/rag-pg.sh`（PG 容器自给自足）· `tools/difftest/lib/rag-secrets.sh`（fail-closed 密钥）⑤ **我上一轮自己加的「端口零残留」断言装错了时机** ⇒ 恒红 ⇒ 已修（先 teardown 再断言）⇒ 与 `like/run.sh` 的正确写法对齐 ⑥ **落证脚本新增「退出码变了就刷新戳」** ⇒ 探针假红修好后，台账不会留着过期数字 |
+
+## 八、2026-10-31 复测（§二 的两行**结论列**已过期 · **退出码未变** ⇒ 派生层档位不受影响）
+
+> **为什么有这一节**：§二 的台账记的是 **2026-10-30 03:48** 那一轮的读数 ⇒ 那时探针 RAG 半边
+> **手搓裸 netty channel**（不走 devh 装配）⇒ ⇒ `failed_fast` / `code` / `outgoing_carrier`
+> 三键**两侧不等** ⇒ 被登记成「**已知的漂移形态**」。
+> ⇒ ⇒ **2026-10-30 探针改造后**（`e796a4ed`：RAG 半边改走 devh **生产装配路径**
+> ⇒ `GrpcChannelFactory` ＋ 真 Spring 上下文 ⇒ 拦截器由 devh 的 `GlobalClientInterceptorRegistry`
+> 按 `@GrpcGlobalClientInterceptor` 收集 ⇒ **不是探针手工塞的**）⇒ ⇒ **两侧已逐键相等**。
+> ⇒ ⇒ §二 那两行的**结论列**已过期（**已在原行就地加注** ⇒ 零行位移）。
+
+### 复测读数（2026-10-31 · 合并收口执行者实跑）
+
+```
+== 跑双侧活体探针（Go 真源 ↔ RAG 生产类）==
+   Go  : {'failed_fast': 'true', 'code': '4', 'outgoing_carrier': 'present_expired', 'sql_carrier': 'present_expired'}
+   RAG : {'failed_fast': 'true', 'code': '4', 'outgoing_carrier': 'present_expired', 'sql_carrier': 'present_expired'}
+
+  ✅ sql_carrier        Go=present_expired | RAG=present_expired  （两侧一致）
+  ✅ outgoing_carrier   Go=present_expired | RAG=present_expired  （两侧一致）
+  ✅ failed_fast        Go=true | RAG=true  （两侧一致）
+  ✅ code               Go=4 | RAG=4  （两侧一致）
+
+⇒ ✅ 通过（parity 键两侧一致；drift 键形态与已登记一致）
+GATE_EXIT=0
+```
+
+### 影响面（**机器层零影响** ⇒ 派工面不动）
+
+| 面 | 结论 | 依据 |
+|---|---|---|
+| **派生层证据档** | ✅ **不受影响** | `load_live_probes()` 只取 §二 的**退出码列** ⇒ 两行的退出码**本轮前后都是 0** ⇒ `live_probes` 映射**逐键不变** ⇒ ⇒ 任何条目的 `evidence` 档**不变** |
+| **人读层** | ⚠️ **原已修** | §二 那两行的**结论列**已就地加注（单行 → 单行 ⇒ **零行位移**）⇒ 读者不会再把 2026-10-30 的漂移形态读成现状 |
+| **派工语义**（阶段归属 / 是否阻断 / 排期 / 真缺口数） | ✅ **零变化** | 本节**不含**任何编号 token ⇒ 不进派生层的条目集合；且它不在三本输入台账里（`docs/DRIFT/_cross/` 的台账**不被 `scan_ledgers()` 扫**）⇒ ⇒ 派生层产物**逐字节不变** |
+
+### 复现命令
+
+```bash
+cd "<仓库根>"
+python3 tools/difftest/check-deadline-downstream.py    # ⇒ EXIT=0（四键逐键相等）
+```
+
+⚠️ **诚实边界**：本节记录的是**一次**实测读数（2026-10-31）⇒ 探针**以后**若再改造，
+本节的读数**同样会过期** ⇒ ⇒ 处置形态与本节完全相同：**在原行就地加注 + 末尾追加复测节**
+⇒ ⇒ **不改写历史行的原始读数**（那是那一轮的真实记录）。

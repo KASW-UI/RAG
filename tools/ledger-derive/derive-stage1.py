@@ -1725,6 +1725,22 @@ def detect_evidence(entry, live_probes: dict[str, str], all_tools: set[str]) -> 
     return "C 无指针", "无可复算指针"
 
 
+def evidence_rank(ev: str) -> int:
+    """证据档强度序 —— A 活体(2) > B 静态(1) > C 无指针(0)（未知 = −1）。
+
+    ⚠️ **为什么要排序**：证据强度是**单调属性** —— 同一件事**有**活体证据，
+    就比**只有**静态指针**强** ⇒ ⇒ 它**不能**跟「核对日期最新的那条」走
+    （日期说的是「这条登记最新」，不是「这条登记的证据最强」）。
+    """
+    if ev.startswith("A "):
+        return 2
+    if ev.startswith("B "):
+        return 1
+    if ev.startswith("C "):
+        return 0
+    return -1
+
+
 def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, all_tools, grading,
            judge_closed=frozenset(), overlay=None):
     # ⚠️ **U11 波次映射** —— 派工面（该条归哪棵工作树 G1~G4 做）
@@ -2070,9 +2086,8 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
                 merged[k]["status"] = r["status"]
                 merged[k]["rules"] = ",".join(sorted(set(merged[k]["rules"].split(",")) | {"U2-1"}))
             if r["_date"] == merged[k]["_date"] and r["_auth"] > merged[k]["_auth"]:
-                for f in ("status", "evidence", "prio", "stage", "blocking",
-                          "final_goal", "schedule", "gap", "_stage_src",
-                          "_evidence_src", "rules"):
+                for f in ("status", "prio", "stage", "blocking",
+                          "final_goal", "schedule", "gap", "_stage_src", "rules"):
                     # ⚠️ **U5-O 保护（2026-10-30）** —— **显式定级不被无定级的登记覆盖**。
                     #   实测成因：同一编号常在**汇总文件**（如 `DRIFT/global/_README.md`）
                     #   与**条目的主文件**两处登记；U5-O 只写在主文件那条 ⇒
@@ -2083,9 +2098,9 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
                     merged[k][f] = r[f]
                 merged[k]["_ov"] = merged[k].get("_ov", False) or r.get("_ov", False)
             if r["_date"] > merged[k]["_date"]:
-                for f in ("status", "evidence", "prio", "stage", "blocking",
+                for f in ("status", "prio", "stage", "blocking",
                           "final_goal", "schedule", "gap", "_stage_src",
-                          "_evidence_src", "_date", "rules", "_auth", "_closed"):
+                          "_date", "rules", "_auth", "_closed"):
                     # ⚠️ 同上：U5-O 保护 —— 日期更新的**无定级**登记不得覆盖显式定级
                     if f in OV_FIELDS and merged[k].get("_ov") and not r.get("_ov"):
                         continue
@@ -2121,6 +2136,26 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
         merged[k]["rules"] = ",".join(sorted(set(merged[k]["rules"].split(","))
                                             | set(r["rules"].split(","))))
         merged[k]["_ov"] = True
+    # ⚠️ **U3-证据 · 证据档「只升不降」的后置归并（2026-10-31）** ——
+    #   证据强度是**单调属性** —— 同一件事**有**活体证据就比**只有**静态指针**强**
+    #   ⇒ ⇒ 它**不能**跟「核对日期最新的那条」走（日期说的是「这条登记最新」，
+    #   **不是**「这条登记引用的证据最强」）⇒ ⇒ 取**组内最强档**。
+    #   ⇒ 同档（A/A、B/B）时，子档（绿/红/环境）由**该档内 (日期, 权威度) 最高**的那条决定
+    #   ⇒ ⇒ 子档不随扫描顺序漂移。
+    #   ⚠️ **必须独立一趟扫全组** —— 持有更强档的那条登记点可能**日期更旧**
+    #   ⇒ ⇒ 在「胜者分支」里处理永远不会被触发（实测 `DRIFT-USERRPC-V-012`）。
+    ev_best: dict[tuple[str, str], dict] = {}
+    for r in rows:
+        k = _merge_key(r)
+        cur = ev_best.get(k)
+        if cur is None or (evidence_rank(r["evidence"]), r["_date"], r["_auth"]) > \
+                (evidence_rank(cur["evidence"]), cur["_date"], cur["_auth"]):
+            ev_best[k] = r
+    for k, r in ev_best.items():
+        if k not in merged:
+            continue
+        merged[k]["evidence"] = r["evidence"]
+        merged[k]["_evidence_src"] = r["_evidence_src"]
     for k, r in merged.items():
         r["_mkey"] = k
     for r in out:

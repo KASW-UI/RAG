@@ -59,7 +59,7 @@ javap GrpcServerProperties | grep -i intercept → （无字段）
 
 1. gRPC **无 deadline 传播** ⇒ handler 线程上 `DeadlineState` 恒未设置
    （实测 `DeadlineState.remainingMillis() == Long.MAX_VALUE`）；
-2. ⇒ `UserDomainService` 的 11 处 + `AdminDomainService` 的 13 处 **`checkDeadline()` 全部失效**；
+2. ⇒ `UserDomainService` 的 11 处 + `AdminDomainService` 的 13 处 **`checkDeadline()` 全部失效**；〔**【2026-10-31 订正 · G4 lane】**：本行的「11 处」是 **2026-10-21 审计当时**的读数⇒ ⇒ G1 撤掉 user 域 `logout` 入口那处抢先闸门后 = **10 处**（`checkDeadline();` **实际调用点**口径；⚠️ `grep -c "checkDeadline()"` 得 **12** —— 含 2 处注释行）⇒ ⇒ `AdminDomainService` 侧 **13 处不变**〕
 3. ⇒ B-1 的 `setQueryTimeout` 注入无从谈起（它就挂在 `DeadlineState` 上）；
 4. gRPC **无超时**（客户端只能等 api 层 `http-timeout` 3s）⇒ 超时响应体退化成
    `text/plain "Request Timeout"`，与 Go 的 `{"code":1015}` 不一致。
@@ -92,7 +92,7 @@ javap GrpcServerProperties | grep -i intercept → （无字段）
 > 客户端只能等 api 层 `http-timeout` 3s。
 > ⇒ 结论：这条「潜伏 → 生效」的叙述，以及本节对 H1 的「已修」判断，**都建立在一个从未接通的链路上**。
 ⚠️ 本行末句「`user-rpc` 业务侧一处都未主动响应取消」**已被 §3.4.4 的 DRIFT-018 登记推翻**
-（`user-rpc` 实有 11 处、`admin-rpc` 已补到 13 处 `checkDeadline()`），
+（`user-rpc` 实有 11 处、`admin-rpc` 已补到 13 处 `checkDeadline()`）〔**【2026-10-31 订正 · G4 lane】**：`user-rpc` 的「11 处」⇒ ⇒ 撤掉 `logout` 入口那处抢先闸门后 = **10 处**〕，
 且 2026-10-21 的机制实验证明 **`checkDeadline` 对在途 IO 无效、缓解手段是 `setQueryTimeout`** ——
 完整结论与数据见 §3.4.1「B-1 补记」。
 
