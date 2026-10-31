@@ -172,8 +172,89 @@ def scan_users_common_classes() -> dict[str, list[str]]:
     return {k: sorted(v) for k, v in sorted(use.items())}
 
 
+def code_only(text: str) -> str:
+    """Java 源码 → **代码态**（注释与字符串/字符字面量都替换成等长空格）。
+
+    ⚠️ 词法状态机：NORMAL / LINE_COMMENT / BLOCK_COMMENT / STRING / CHAR
+       ⚠️ 字符串里的 `//` 不能当注释起手（URL！）⇒ 必须先判字符串态。
+    ⚠️ **等长替换** ⇒ ⇒ 行号与列号都不位移 ⇒ ⇒ 出错时可定位回原文。
+    """
+    out = list(text)
+    i, n = 0, len(text)
+    state = "NORMAL"
+    while i < n:
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+        if state == "NORMAL":
+            if ch == "/" and nxt == "/":
+                state = "LINE_COMMENT"
+                out[i] = out[i + 1] = " "
+                i += 2
+                continue
+            if ch == "/" and nxt == "*":
+                state = "BLOCK_COMMENT"
+                out[i] = out[i + 1] = " "
+                i += 2
+                continue
+            if ch == '"':
+                state = "STRING"
+                out[i] = " "
+                i += 1
+                continue
+            if ch == "'":
+                state = "CHAR"
+                out[i] = " "
+                i += 1
+                continue
+            i += 1
+            continue
+        if state == "LINE_COMMENT":
+            if ch == "\n":
+                state = "NORMAL"
+            else:
+                out[i] = " "
+            i += 1
+            continue
+        if state == "BLOCK_COMMENT":
+            if ch == "*" and nxt == "/":
+                out[i] = out[i + 1] = " "
+                state = "NORMAL"
+                i += 2
+                continue
+            if ch != "\n":
+                out[i] = " "
+            i += 1
+            continue
+        # STRING / CHAR：只把结束引号之前的内容抹掉（换行保留 ⇒ 行号不位移）
+        if ch == "\\":
+            if i + 1 < n:
+                out[i] = " "
+                out[i + 1] = " "
+                i += 2
+                continue
+        if (state == "STRING" and ch == '"') or (state == "CHAR" and ch == "'"):
+            out[i] = " "
+            state = "NORMAL"
+            i += 1
+            continue
+        if ch != "\n":
+            out[i] = " "
+        i += 1
+    return "".join(out)
+
+
 def scan_common_radiation() -> dict[str, list[str]]:
-    """`service/common` 逐类的跨域引用域（**import 判定**）⇒ 共享层辐射度（§1.4）。"""
+    """`service/common` 逐类的跨域引用域（**代码态 FQN 判定**）⇒ 共享层辐射度（§1.4）。
+
+    ⚠️ **2026-10-31 口径升级（合并收口执行者 · G3 lane 转派 + G2 lane 独立实测两条独立路径）**：
+       **原口径只认 `^import` 行** ⇒ ⇒ **全限定名引用一律看不见**
+       ⇒ ⇒ 生产上明明依赖（例：`message-rpc` 的 `@Import({... GoStyleProtectionConfiguration.class ...})`
+       ⇒ ⇒ 是**全限定名**、**没有 import 语句**）却**不进辐射列表**
+       ⇒ ⇒ **指标系统性偏小 ⇒ 真依赖被删时门不会红 ⇒ 假绿**（假绿比假红贵）
+       ⇒ ⇒ 改口径 = **代码态里出现该类的 FQN 即算引用**
+       （`import` 行本身也含 FQN ⇒ ⇒ 一视同仁 ⇒ ⇒ 不需要两套判据）
+       ⚠️ **剥离注释与字面量** ⇒ ⇒ javadoc / 字符串里出现的 FQN **不算引用**（否则制造假引用）
+    """
     fqn: dict[str, str] = {}
     for f in glob.glob(str(REPO / "service/common/src/main/java/**/*.java"), recursive=True):
         text = Path(f).read_text(encoding="utf-8", errors="ignore")
@@ -181,15 +262,25 @@ def scan_common_radiation() -> dict[str, list[str]]:
         if m:
             fqn[Path(f).stem] = f"{m.group(1)}.{Path(f).stem}"
     use: dict[str, set[str]] = defaultdict(set)
-    for f in glob.glob(str(REPO / "service/**/src/**/*.java"), recursive=True):
+    # ⚠️ **只扫生产面**（`src/main`）—— 2026-10-31 升级（合并收口执行者）
+    #    ⇒ 理由 = **辐射度这个指标的本意是「生产依赖面」**（G2 lane 的判断成立）
+    #    ⇒ ⇒ 旧口径把 `src/test` 也扫进来 ⇒ ⇒ **测试面会把「生产依赖被删」掩盖掉**
+    #    ⇒ ⇒ **变异实测**：删掉 `message-rpc` 对 `GoStyleProtectionConfiguration` 的
+    #    **全限定名**依赖后，该域**仍因守门测试类的 `import` 留在列表里** ⇒ ⇒ 门**不红**
+    #    ⇒ ⇒ **假绿仍在** ⇒ ⇒ 必须同时把扫描面收窄到生产面
+    #    ⇒ ⇒ ⚠️ 代价 = 快照与分桶表要再刷一次（域列表会变少 ⇒ 指针再位移）
+    for f in glob.glob(str(REPO / "service/**/src/main/**/*.java"), recursive=True):
         relp = rel(f)
         if relp.startswith("service/common/"):
             continue
         dom = domain_of(relp.split("/src/")[0])
         text = Path(f).read_text(encoding="utf-8", errors="ignore")
-        imports = set(re.findall(r"^import\s+(?:static\s+)?([\w.]+)\s*;", text, re.M))
+        code = code_only(text)
         for cls, full in fqn.items():
-            if full in imports:
+            if full not in code:                       # 便宜的子串预筛
+                continue
+            # 边界确认：不是 `...XxxHelper` 之类的前缀同族；`.Sub` 内部类算引用
+            if re.search(r"(?<![\w.])" + re.escape(full) + r"(?![\w])", code):
                 use[cls].add(dom)
     return {k: sorted(v) for k, v in sorted(use.items())}
 
@@ -273,7 +364,7 @@ def main() -> int:
     print(f"  gRPC 契约边: {len(actual['grpc_edges'])} 个域有出向依赖")
     print(f"  跨域 Kafka topic: {len(actual['cross_domain_topics'])} 个")
     print(f"  users-common 逐类跨域引用: {len(actual['users_common_classes'])} 类")
-    print(f"  service/common 逐类辐射度: {len(actual['common_radiation'])} 类（被外部引用）")
+    print(f"  service/common 逐类辐射度: {len(actual['common_radiation'])} 类（被外部**生产代码**引用）")
     print("-" * 60)
     print("  参考 · surefire 用例数（不参与判定）:")
     for dom, n in surefire.items():
