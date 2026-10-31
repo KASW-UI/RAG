@@ -28,7 +28,7 @@
 | 项 | 内容 |
 |---|---|
 | **处理哪些已知问题** | ① `E65`（🔴 OPEN · **无阶段归属定级**）—— 出向 gRPC 不继承请求 deadline ⇒ **RAG 侧无限期挂住** ② `E66`（🔴 OPEN · **无定级** · 仅 L1 证据）—— Redis 写不绑 deadline ③ `E38②`（窄化后的第③层残余）④ comment 域 `D8` / `D9`（= E65 / E66）⑤ like 域 `FB-05`、task 域 `FB-06`、users 域 `DRIFT-ARPC-010`（= E66） |
-| **产生哪些可检查的结果** | ① **逐条落盘**的出向 stub 全表（类 + 调用点 + Go 对照 + 行号）② 共享层**两载体打通**（`DeadlineState` 与 `GoStyleRequestDeadline` 合一）③ 各域裸 stub 全部走 `applyTo` ④ **11 个零上界类**补上 2000ms 硬上界（与 Go `zrpc/config.go:31` `Timeout default=2000` 同形）⑤ **守门从「钉漂移形态」改成「等值」**，且**变异必红** ⑥ 双侧活体复跑：Go 与 RAG 的 `failed_fast` / `code` / `outgoing_carrier` **逐项相等** ⑦ `E66` 拿到**双侧活体证据**并**完成定级** |
+| **产生哪些可检查的结果** | ① **逐条落盘**的出向 stub 全表（类 + 调用点 + Go 对照 + 行号）② 共享层**两载体打通**（`DeadlineState` 与 `GoStyleRequestDeadline` 合一）③ 各域裸 stub 全部走 `applyTo` ④ **11 个零上界类**补上 2000ms 硬上界（与 Go `zrpc/config.go:31` `Timeout default=2000` 同形）〔**2026-10-31 订正：11 作废 ⇒ 实测真零上界 = 1**（`article/article-api` 的 `article-rpc` 方向 · Go **显式** `Timeout: 70000`）⇒ ⇒ ④ 的正确口径 = 「**按 P2-T01 落点表逐条核**」〕⑤ **守门从「钉漂移形态」改成「等值」**，且**变异必红** ⑥ 双侧活体复跑：Go 与 RAG 的 `failed_fast` / `code` / `outgoing_carrier` **逐项相等** ⑦ `E66` 拿到**双侧活体证据**并**完成定级** |
 | **为什么是下一轮的必要前提** | ① `Round 3` 的 **P0 #4 行改判**与 **X-6 行改判**必须有「两侧相等」的活体证据 ② `Round 3` 的 C-2 / C-3 聚合依赖 X-6 ③ `Round 7` 的最终验收的 P0 #4 判据靠它 ④ 顺带把 `E38②` 的第③层**真正归零**（原为「窄化后另立项」） |
 | **本轮不做** | 不改 Go 真源（冻结只读）· 不做**架构级**改造（第四十六轮已否决「handler 挪受控 executor + 超时 interrupt」原修法 ⇒ 照做会**新造漂移**，因为 **interrupt 连 Go 都不做**）· 不改根级文件与 `docker-compose.yaml`（Round 1 的面）· 不改 `PhaseGoal-judge.md`（Round 3 的面）· 不动 `tools/difftest/` 的守门**清单计数口径**（动了要同改 judge §6.3 ⇒ 制造 B14） |
 
