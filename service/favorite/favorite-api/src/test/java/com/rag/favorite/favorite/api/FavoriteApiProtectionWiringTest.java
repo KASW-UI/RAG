@@ -1,10 +1,5 @@
 package com.rag.favorite.favorite.api;
 
-import com.rag.common.protection.GoStyleBreakerFilter;
-import com.rag.common.protection.GoStyleCpuSheddingFilter;
-import com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor;
-import com.rag.common.protection.GoStyleMaxBytesFilter;
-import com.rag.common.protection.GoStyleMaxConnsFilter;
 import com.rag.common.protection.GoStyleProtectionProperties;
 import com.rag.favorite.favorite.api.client.FavoriteRpcClient;
 import net.devh.boot.grpc.client.interceptor.GlobalClientInterceptorRegistry;
@@ -96,22 +91,22 @@ class FavoriteApiProtectionWiringTest {
     private GlobalClientInterceptorRegistry registry;
 
     @Autowired
-    private GoStyleGrpcClientBreakerInterceptor interceptor;
+    private com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor interceptor;
 
     @Autowired
     private GoStyleProtectionProperties props;
 
     @Autowired
-    private GoStyleMaxConnsFilter maxConnsFilter;
+    private com.rag.common.protection.GoStyleMaxConnsFilter maxConnsFilter;
 
     @Autowired
-    private GoStyleBreakerFilter breakerFilter;
+    private com.rag.common.protection.GoStyleBreakerFilter breakerFilter;
 
     @Autowired
-    private GoStyleCpuSheddingFilter cpuSheddingFilter;
+    private com.rag.common.protection.GoStyleCpuSheddingFilter cpuSheddingFilter;
 
     @Autowired
-    private GoStyleMaxBytesFilter maxBytesFilter;
+    private com.rag.common.protection.GoStyleMaxBytesFilter maxBytesFilter;
 
     @MockitoBean
     private FavoriteRpcClient rpcClient;
