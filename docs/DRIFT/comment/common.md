@@ -26,7 +26,7 @@
 | OBSERVABLE DIFFERENCE | **1 条**（§3） |
 | 等价确认 | **约 25 个判定点**（§2） |
 | 组件规模 | Go 103 行 / 1 文件 ⇒ RAG 537 行 / 4 类 |
-| 构建 + 测试 | **BUILD SUCCESS**，**27 / 0 / 0 / 0 skipped**（本轮实测） |
+| 构建 + 测试 | **BUILD SUCCESS**，**27 / 0 / 0 / 0 skipped**（本轮实测）｜ 🟢 **错误码契约的双侧活体对拍 ＋ 变异验证** ⇒ 见 **§6** |
 
 > ✅ **本组件是 comment 域唯一「逐条对齐」无漂移的组件**（错误码契约层）。
 > ⚠️ **但它有一处「自身正确、组合后失效」的问题** —— 见 §3-D1 与
@@ -133,3 +133,16 @@ RAG 侧按职责拆开是**表达层**重组，行为层逐条对齐（§2）。
 | [`docs/DRIFT/comment/api.md`](./api.md) | D1 的缺陷落点 |
 | [`docs/DRIFT/comment/rpc.md`](./rpc.md) | `comment-rpc` 的独立台账 |
 | [`docs/DRIFT/comment/proto.md`](./proto.md) | `comment-proto` 的独立台账 |
+---
+
+## 6. 错误码契约的双侧活体对拍 ＋ 变异验证（2026-10-31 · G3 第二十二轮）
+
+| 项 | 值 |
+|---|---|
+| **探针** | `tools/errmsg-probe/comment/{run-parity.sh,mutate-parity.sh,go/,java/,README.md}`（**域内落码** ⇒ `git ls-files` 命中 ⇒ 在版本控制内、现在可复算） |
+| **对拍面** | Go 真源 `service/comment/common/errmsg/errmsg.go`（package `errmsg` · 103 行 · **只读**）↔ RAG `service/comment/comment-common/src/main/java/com/rag/comment/comment/common/errmsg/{CommentErrorCode,CommentErrorMessages,CommentCodeError,CommentGrpcError}.java` ⇒ 覆盖 **码值 27 条 / 文案 27 条 / 未知码回落 / wire 形态 / 业务码反查矩阵** |
+| **本轮实测（2026-10-31 · G3 第二十二轮 · 独立复跑）** | `bash tools/errmsg-probe/comment/run-parity.sh` ⇒ **EXIT=0** —— Go sha256 = Java sha256 = **`514e3a7106ea6ffc4bf8d60d285ccdb8decb0829729a922c0416362ccaf73e3e`**（**137 行** = CONST + TABLE + FALLBACK + CODEERR + CODEERRMSG + WIRE）⇒ **双侧逐字节一致**；⚠️ **OBS 段 3 条仍在登记状态**（`obs_wire_grpcstatus_1012` / `2001` / `5003` = 两侧**必然不同**的已知不可达差异 ⇒ 单列不参与逐字节对拍 ⇒ 见 §3-D1） |
+| **变异验证（探针非假绿）** | `bash tools/errmsg-probe/comment/mutate-parity.sh` ⇒ **EXIT=0** —— **M1** 变异 **Go 侧复制件**（造「假真源仓」⇒ 文案 5003 加一个句号）⇒ 探针 **exit 1**；**M2** 变异 **Java 侧源码副本**（生产源码零改动）⇒ **exit 1**；**M3** **输入根探针硬失败**（`GOMODCACHE` 指空目录）⇒ **exit 2**（**不得静默降级成「这条不可核验」**）；**M4** 还原后 **exit 0** ⇒ ⇒ **四段全部精确转红 + 还原后转绿** ⇒ **探针非假绿** |
+| **复现命令** | `bash tools/errmsg-probe/comment/run-parity.sh`（⇒ `EXIT=0`）<br>`GO_REPO=/path/to/Sea-RideTheWind_golang bash tools/errmsg-probe/comment/run-parity.sh`（⇒ `EXIT=0`）<br>`GO_REPO=/path/to/Sea-RideTheWind_golang bash tools/errmsg-probe/comment/mutate-parity.sh`（⇒ `EXIT=0`） |
+| **证据强度** | 🟢 **L4（双侧同时跑）** ⇒ ⇒ judge §1.1 判据 **⑦⑧ 齐**（双侧对拍通过 ＋ 在版本控制内可复算 ＋ 有变异验证记录）⇒ ⇒ **`comment-common` 的 R 判定 R3 → R4**（2026-10-31 · G3 第二十二轮 ⇒ judge **§三 矩阵 A-2** 的 `comment-common` 行已回填） |
+| **⚠️ 效力边界（三条）** | ① **变异只在副本上做**（M1 改 Go 侧复制件 / M2 改 Java 侧源码副本）⇒ **生产源码零改动** ⇒ 并发跑批时不会读到坏代码；② **OBS 段 3 条**是**已知不可达差异** ⇒ 本探针**不判它们红**（而差异「消失」时反而报错 ⇒ 逼人更新台账，而不是让它静默漂移）；③ **不覆盖 gRPC 帧 / HTTP2 帧**（需两侧同时起服务）⇒ ⇒ **本探针覆盖的是「错误码契约层」，不是 §3-D1 的「通道差异」** |
