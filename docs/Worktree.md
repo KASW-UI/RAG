@@ -1073,7 +1073,7 @@ git merge-base --is-ancestor align/g4-service-common do-my-own-gh && echo "已�
 
 ### ④ 它要落的第二处「两个 message 守门类 `import` → 全限定名」⇒ **无改动可做**
 
-实测 `MessageRpcOutboundDeadlineCapGateTest.java:427` / `:436` 与 `MessageApiOutboundDeadlineCapGateTest.java:383` **已经是全限定名**
+实测 `MessageRpcOutboundDeadlineCapGateTest.java:425` / `:434` 与 `MessageApiOutboundDeadlineCapGateTest.java:381` **已经是全限定名**
 ⇒ ⇒ 且**现在也不需要做** —— 辐射度判据**只扫生产面**（`service/**/src/main/java`）⇒ ⇒ **测试面根本不参与读数**
 ⇒ ⇒ G3 已独立得出同一结论并**放弃了路 A 的代码改动** ⇒ ⇒ ⇒ **「用改写法绕开判据盲区」这条路已不需要**（盲区已根治）。
 
@@ -1214,3 +1214,36 @@ git merge-base --is-ancestor align/g4-service-common do-my-own-gh && echo "已�
 ⇒ ⇒ **已销案**：`§4.19.6` 重判（①）· `entry_stage_decl` 口径（②）
 ⇒ ⇒ **另有一项**（G3 回执 3 报的「域面 yml 死配置」）本面复核后**核销为「已定性 = 保留 ⇒ 不是待办」**
 （`docs/DRIFT/article/rpc.md:2919` 明写「保留 + 加注不生效」· 全仓实测确实只有 `article-rpc` 那 2 处）。
+
+---
+
+## 🆕 M-16 · 2026-11-01 收官轮 · G2 落码引发的**行号位移指针**订正（合并收口执行者落码）
+
+**背景** —— G2 lane 收工轮把**测试面**的 `import com.rag.common.*` 改写成**全限定名**（删 **37 条 import**）⇒ ⇒ **每删 1 条 import，其后的所有行号前移 1** ⇒ ⇒ 指向这些测试文件的**行号指针**随之变旧。
+
+⚠️ **这类指针不会被现有守门抓到** —— `check-pointer-consistency.py` 的正则只认指向 `docs/{DRIFT,Pitfalls,Intentional_Deviations}/**.md` 的指针 ⇒ ⇒ **指向 `service/**` 源码的行号指针无任何机器守门** ⇒ ⇒ 只能靠**人工逐条订正**。
+
+**本轮的订正方法（内容级 · 不是按行号平移）** —— 同名测试文件在仓内有**多份拷贝**（如 `GoStyleGrpcClientBreakerE2ETest.java` 有 **3 份**：message-api / user-api / hot-api）⇒ ⇒ **按行号整体平移会改错文件** ⇒ ⇒ 本轮用「**旧版本该行的内容** → 在当前文件里唯一定位」建立**旧→新行号映射**，再逐条核对**文档里写的完整路径**。
+
+| 落点 | 原行号 | 新行号 | 依据 |
+|---|---|---|---|
+| `docs/Worktree.md:1076` | `MessageRpcOutboundDeadlineCapGateTest.java:427` | **`:425`** | message-rpc 拷贝 · 内容级映射 |
+| `docs/Worktree.md:1076` | `MessageRpcOutboundDeadlineCapGateTest.java:436` | **`:434`** | 同上 |
+| `docs/Worktree.md:1076` | `MessageApiOutboundDeadlineCapGateTest.java:383` | **`:381`** | message-api 拷贝 · 内容级映射 |
+| `docs/DRIFT/_cross/grading/W29.md:3` | `LikeA9GrpcSpanEndToEndTest.java:291-310` | **`:290-309`** | like-rpc 拷贝 · 区间两端逐字比对通过 |
+| `docs/DRIFT/_cross/grading/W30.md:3` | `LikeA9GrpcSpanEndToEndTest.java:314-331` | **`:313-330`** | 同上 |
+| `docs/DRIFT/global/vs-common.md:960` | `message-api/…/GoStyleGrpcClientBreakerE2ETest.java:43` | **`:42`** | message-api 拷贝 · 内容级映射 |
+| `docs/DRIFT/users/vs-common.md:1032` | `service/message/message-api/…/GoStyleGrpcClientBreakerE2ETest.java:43` | **`:42`** | 同上 |
+| `docs/Pitfalls/like/api.md:271` | `LikeRpcTimeoutCapTest.java:233-238` | **`:231-236`** | like-api 拷贝 |
+| `docs/Pitfalls/like/api.md:520` | `LikeRpcTimeoutCapTest.java:233` | **`:231`** | 同上 |
+
+⚠️ **G2 回执报了 3 处「也要改」⇒ 本面复核后判定为「不用改」（**误报**）** —— 三处指向的都是 **user-api 拷贝**，而该拷贝**本轮未被改动**（位移集合 = **{0}**）：
+
+| G2 报的落点 | 它指的是 | 实测 | 处置 |
+|---|---|---|---|
+| `docs/DRIFT/_cross/grading/W5.md:18` | `GoStyleGrpcClientBreakerE2ETest.java:123` | **user-api** 拷贝 · 含 `server.port` 的行**只在 user-api 拷贝的 :123**（message-api 在 :86 / hot-api 无）· 该拷贝位移 = **{0}** | **不改** |
+| `docs/DRIFT/users/user/api.md:3645` · `:3646` · `:3742` | 同上（`:123`） | 同上 | **不改** |
+| `docs/DRIFT/global/vs-common.md:68` · `:3768` | `GoStyleGrpcClientBreakerE2ETest.java:247,284`（断言 1015） | 含 `1015` 的行在 **:247 / :284** 的**只有 user-api 拷贝**（message-api 的 1015 在 :47/:161/:233 等、hot-api 在 :49/:235）· 该拷贝位移 = **{0}** | **不改** |
+
+⇒ ⇒ **判定式**：**「同名文件有多份拷贝」⇒ 任何行号订正必须先用内容锚点定位拷贝身份** ⇒ ⇒ 否则会改错文件（**改了不该改的 = 引入新漂移**）。
+⇒ ⇒ **本轮 9 处订正全部是单行→单行替换 ⇒ 零行位移** ⇒ ⇒ 两份文件的行数不变（`Worktree.md` 1216 · `docs/Pitfalls/like/api.md` 598）。
