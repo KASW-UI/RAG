@@ -2,7 +2,6 @@ package com.rag.message.message.api.client;
 
 import com.rag.common.observability.GoStyleRequestDeadline;
 import com.rag.common.protection.GoStyleOutboundDeadlineInterceptor;
-import com.rag.common.protection.GoStyleProtectionConfiguration;
 import com.rag.common.protection.GoStyleProtectionProperties;
 import com.rag.message.message.api.MessageApiApplication;
 import com.rag.message.message.proto.MessageServiceGrpc;
@@ -381,7 +380,7 @@ class MessageApiOutboundDeadlineCapGateTest {
 
         // ── (2) 运行面 ──
         try (AnnotationConfigApplicationContext ctx = new AnnotationConfigApplicationContext()) {
-            ctx.register(GoStyleProtectionConfiguration.class);
+            ctx.register(com.rag.common.protection.GoStyleProtectionConfiguration.class);
             // ⚠️ devh 自己的收集器（生产里由 grpc-client starter 的自动配置注册）
             ctx.registerBean(AnnotationGlobalClientInterceptorConfigurer.class);
             addDomainYamlTo(ctx);
