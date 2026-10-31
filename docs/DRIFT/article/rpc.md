@@ -2428,7 +2428,7 @@ Spring 的 **context cache key** 包含 `properties`、但**不含 `@DynamicProp
 | **判定命令** | `bash tools/api-full-parity-probe/article/run.sh` ⇒ **EXIT=0**<br>（退出码口径：0 = 两侧逐字节一致 · `1` = 有差异 · `2` = 环境问题 / 真源漂移 / 依赖缺失） |
 | **实测场景** | **3 个**：`list_articles`（`GET /v1/articles`）· `get_article_exists`（`GET /v1/article/9007199254740993`）· `get_article_missing`（`GET /v1/article/does-not-exist`）⇒ **Go == RAG == 冻结期望值** 逐字节一致（期望值在 `expected.txt`，格式 `CASE|<name>|<hex>`） |
 | **两侧播种同一行** | 两侧**各建各的库**（Go 侧真源 DDL `article.sql` ＋ `002_community_revision.sql` · RAG 侧自己的 Flyway）⇒ 各自**播同一行**（`status=2 PUBLISHED` · id `9007199254740993`）⇒ ⇒ 探针比的不是「两边都空」 |
-| **变异** | `mutate-parity.sh`：M1（去掉 `Article` 的 `@JsonPropertyOrder`）· M2（去掉 `ListArticlesResp` 的 `@JsonPropertyOrder`）⇒ 精确转红；M3（改 `expected.txt` 里一枚 hex）⇒ `run.sh` **EXIT=1** ⇒ **探针非假绿** |
+| **变异** | `mutate-parity.sh`：M1（去掉 `Article` 的 `@JsonPropertyOrder`）· M2（去掉 `ListArticlesResp` 的 `@JsonPropertyOrder`）⇒ 精确转红；M3（改 `expected.txt` 里一枚 hex）⇒ `run.sh` **EXIT=1** ⇒ **探针非假绿**；🆕 **M4（2026-10-31 · G3 第二十三轮）** —— 改 **rpc 层**的公开视角映射（`ArticlePublicDomainService.toProtoArticle` 的 `title` → `brief`）⇒ **EXIT=1** ⇒ ⇒ **证明「探针的比较面真的穿过 rpc 层」**（⚠️ **M1/M2 打的是 api 层 DTO ⇒ 不构成 rpc 层的变异证据** ⇒ M4 才是本组件 §1.1 ⑧ 的**组件内**证据）· 还原核验 = **sha256 4/4 OK**（`Article.java` / `ListArticlesResp.java` / `expected.txt` / `ArticlePublicDomainService.java`） |
 | **证据强度** | **L4（双侧活体）** —— 两侧服务**同时**在跑（Go 真源栈 ＋ RAG 栈），同一请求比**字节** |
 | **核对日期** | **2026-10-29** |
 
@@ -2632,14 +2632,14 @@ bash tools/api-full-parity-probe/article/mutate-parity.sh          # ⇒ EXIT=0 
 
 | 项 | 结论 |
 |---|---|
-| **R 档** | **R2 → R3**（④ Go 侧每个业务决策点有 `文件:行号` 出处 ✓ · ⑤ RAG 侧有自动化测试断言该行为 ✓ · ⑥ 归属本组件的必相对齐项 = 0 ✓） |
+| **R 档** | **R2 → R3**（④ Go 侧每个业务决策点有 `文件:行号` 出处 ✓ · ⑤ RAG 侧有自动化测试断言该行为 ✓ · ⑥ 归属本组件的必相对齐项 = 0 ✓）⇒ 🆕 **R3 → R4（2026-10-31 · G3 第二十三轮 · 独立复跑）** —— 判据 **⑦⑧ 齐**：⑦ 双侧同时运行的探针对拍通过（`tools/api-full-parity-probe/article/run.sh` ⇒ **EXIT=0** · 3 场景 Go == RAG == 冻结期望值 逐字节）＋ **在版本控制内**（`git ls-files` 命中 4 个文件）＋ **现在可复算**；⑧ 变异验证 ⇒ **M4**（打 **rpc 层**映射）**精确转红** ⇒ **组件内的变异证据成立** ⇒ ⇒ **R4 成立**（⚠️ 原判 R3 作出于 **2026-10-29**，当时双侧探针**尚未跑通** ⇒ **2026-10-30 才 EXIT=0** ⇒ 本行是「探针落地后回填」，**不是降标准**） |
 | **必相对齐项** | **0** —— `S-5` 判为**范围外**（judge.md §1.1 R0）· `U-3` / `U-4` **闭合** · `U-9a` **闭合** · `U-9b` 判为**取证缺口**（§1.1 ⑥ 第 3 类 ⇒ 计入 §九 ⇒ 不阻断）· `U-4′` **销号** |
 | **证据强度** | **L4**（最高档）—— 真 Kafka 位点推进 ＋ 真 PG 落库回读 ＋ 双侧活体逐字节对拍 |
 | **新增守门** | `ArticleKafkaForceCommitGateTest`（4 条 · 真 Kafka）· `ArticleCreateArticleKafkaFailureBoundaryTest`（1 条 · 真 PG ＋ 死 broker） |
 | **组件全量回归** | **188 条 / 0F / 0E / 0S**（25 个测试类 · `mvn -o -B -pl service/article/article-rpc -am test` ⇒ BUILD SUCCESS · 6:44 min）⇒ 原 183 ＋ 4 ＋ 1 |
 | **变异** | **3/3 精确转红**（MUT-M1 行为红 · MUT-M2 仅装配面红 ⇒ 证明该属性非承重 · MUT-M3 行被回滚红）⇒ **全部已还原** |
 | **§七 RPC 型 5 条** | **5/5 满足**（③ ④ 两格由本轮**补齐**，其余三格既有） |
-| **仍开放（不阻断 R3）** | ① `U-9b`（Go 侧 handler 并发模型**未活体对拍**）② 双侧活体的**成功路径完整字段语义**（`user.rpc` 两侧都不可达 ⇒ 现钉的是**降级路径**）③ `O-4` / `O-6` 仍只有静态取证 |
+| **仍开放（不阻断 R4）** | ① `U-9b`（Go 侧 handler 并发模型**未活体对拍**）② 双侧活体的**成功路径完整字段语义**（`user.rpc` 两侧都不可达 ⇒ 现钉的是**降级路径**）③ `O-4` / `O-6` 仍只有静态取证 · ④ 🆕 ② 的闭合**需 G1**（users 域等价 ＋ Go 真源 `user-rpc` 可达）⇒ ⇒ **这四条都是「取证缺口」**（judge §1.1 ⑥ 第 3/4 类 ⇒ 计入 §九 ⇒ **不降 R**） |
 | **⚠️ 不许越界读** | **本组件不是「零差异」** —— §12.4.2 的模型差异、`O-4`/`O-6` 的静态取证、双侧活体只覆盖降级路径 ⇒ 都**不等于**「两侧行为逐字节一致」 |
 
 > ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/article/run.sh` ⇒ **EXIT=0**（2026-10-30 03:21:39 · 34s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：== 2/8 构建 Go 侧二进制（真源**只读** ⇒ 产物落临时目录） == ⏐ == 8/8 请求矩阵（Go vs RAG vs expected.txt ⇒ 逐字节） == ⏐ ✅ list_articles  Go == RAG == expected.txt（逐字节） ⏐ ✅ get_article_exists  Go == RAG == expected.txt（逐字节） ⏐ ✅ get_article_missing 。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
