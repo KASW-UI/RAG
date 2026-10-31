@@ -124,7 +124,7 @@
 | **Go 事实** | go-zero v1.10.2 `zrpc/config.go:31` `Timeout int64 \`json:",default=2000"\`` ⇒ **2000ms**；`zrpc/internal/client.go:115-116` 装 `TimeoutInterceptor(timeout)`；`etc/commentservice.yaml:21-23` 的 `CommentRpc` **未覆盖** `Timeout` ⇒ 生效值 = **2s** |
 | **RAG 现状** | `CommentRpcClient.java:46-48` 只套 `GoStyleRequestDeadline.applyTo(...)` ⇒ 取自 **HTTP 预算 3s**（`application.yml:140` `http-timeout: 3s`）⇒ **有效 deadline = 3s，无 2s 上限** |
 | **可观察后果** | 下游耗时落在 **2.0–3.0s**：Go 返 `DEADLINE_EXCEEDED`（`envelope.code = 4`），**RAG 成功**。<br>且 Go 侧该超时**计入熔断失败**（`zrpc/internal/codes/accept.go` 把 DeadlineExceeded 列为失败）⇒ 两侧熔断统计口径也不同 |
-| **✅ 已修** | **2026-10-24**。`CommentRpcClient` 照抄**同仓既有正确范式** `task-api/.../TaskRpcClient.java:66,105-112`：`DEFAULT_CALL_TIMEOUT_MILLIS = 2000L` + `min(2s, 请求剩余预算)` + 预算耗尽给 1ms。⚠️ **不能只套 `applyTo`** —— 它在**没有** HTTP 预算时**原样返回 stub**（不挂 deadline），而 Go 的 timeout 中间件是**永远装着**的（`zrpc/internal/config.go:15` `Timeout bool \`json:",default=true"\``）⇒ Go 的下游调用**永远**有 2s 上限，RAG 侧也必须如此 |
+| **✅ 已修** | **2026-10-24**（⚠️ **落点已于 2026-10-31 第十三轮变更**，见本文件末尾「api 侧『客户端硬上界』」附录 ⇒ 当前生效路径 = 共享层拦截器 ＋ 域 yml 的 `cap-millis`，**域侧那份自带实现已删除**）。`CommentRpcClient` 照抄**同仓既有正确范式** `task-api/.../TaskRpcClient.java:66,105-112`：`DEFAULT_CALL_TIMEOUT_MILLIS = 2000L` + `min(2s, 请求剩余预算)` + 预算耗尽给 1ms。⚠️ **不能只套 `applyTo`** —— 它在**没有** HTTP 预算时**原样返回 stub**（不挂 deadline），而 Go 的 timeout 中间件是**永远装着**的（`zrpc/internal/config.go:15` `Timeout bool \`json:",default=true"\``）⇒ Go 的下游调用**永远**有 2s 上限，RAG 侧也必须如此 |
 | **🧪 守门网** | **新增** `CommentApiRpcDeadlineGateTest`（**4 例，真 in-process gRPC server**）：① 无 HTTP 预算 ⇒ 必须 `DEADLINE_EXCEEDED`（**结局码**就能区分「有上限」与「没上限」）；② HTTP 预算 30s ⇒ 必须 `DEADLINE_EXCEEDED`（2s 上限压过 30s 预算）；③ 生产形态（3s 预算）⇒ 必须 `DEADLINE_EXCEEDED` **且耗时 < 2.6s**（证明是 2s 上限而非 3s 预算）；④ 预算耗尽 ⇒ **立刻**失败（< 500ms） |
 | **🧬 变异实测** | 把 `commentRpc()` 改回 `GoStyleRequestDeadline.applyTo(...)`（= 修复前）⇒ **3/4 变红**，症状精确：①② 拿到 `OK`（= 根本没 deadline），③ 实测 **3017ms**（= 用的 3s 预算）⇒ 守门网不是假绿 |
 
@@ -422,6 +422,77 @@
 | **证据强度** | **L4**（真容器装配 ⇒ 起不来/起得来）＋ **变异测试**（去掉占位符判据 ⇒ **4 条精确转红**，还原后 `git status` 干净） |
 | **实测** | `mvn -o -B -pl service/comment/comment-api -am -DargLine=-Xmx2g test` ⇒ **BUILD SUCCESS**（EXIT=0）· 模块内 **62 tests / 0 failures / 0 errors** · 守卫 **10/10 绿** |
 | **实际异常输出** | `comment-api.user-auth.access-secret 未配置（绑到了未解析的占位符字面量 ${USER_JWT_SECRET}）：请设置环境变量 USER_JWT_SECRET（与签发方 user-api 一致）—— 本模块只验签、不签发，占位符原文是公开可知的「密钥」⇒ 任何人都能伪造 JWT` |
+
+## 附录 · 🔴 api 侧「客户端硬上界」：域侧自带副本 → 共享层参数（2026-10-31 · G3 第十三轮）
+
+### 一、这次改了什么（**域侧**，只动本域）
+
+| 落点 | 变更前 | 变更后 |
+|---|---|---|
+| 域 client 类 `CommentRpcClient` | 自带一份封顶：`min(2s, 入向剩余预算)`（域侧私有常量 `DEFAULT_CALL_TIMEOUT_MILLIS`）⇒ 那是**第二个上界来源** | **零 deadline 代码** ⇒ 直接返回 devh 注入的 stub |
+| 域 yml 的 `rag.protection.outbound-deadline` 段 | **不存在** ⇒ 共享层 `capMillis` 取默认 0 ＝ **不启用** | `cap-millis: ${COMMENT_API_OUTBOUND_DEADLINE_CAP_MILLIS:2000}` |
+| 域内守门 `CommentApiRpcDeadlineGateTest` | 4 例（断的是**域侧**那份上界） | **8 例**（配置面 2 ＋ 行为面 5 ＋ 形态面 1），且**全部改走共享层路径** |
+
+### 二、Go 侧真值（**逐条读源码**，不采信转述）
+
+| 环节 | 出处 | 内容 |
+|---|---|---|
+| 声明点 | `go-zero@v1.10.2/zrpc/config.go:31` | `Timeout int64 `json:",default=2000"`` ⇒ **默认 2000ms**（挂在 `zrpc.RpcClientConf` 上 ⇒ **按 client** 生效，不是全局一个数） |
+| 消费点 | `go-zero@v1.10.2/zrpc/client.go:70-71` | `if c.Timeout > 0 { opts = append(opts, WithTimeout(time.Duration(c.Timeout)*time.Millisecond)) }` ⇒ **每个 client 各自**取自己的 yaml／tag 值 |
+| 装配点 | `go-zero@v1.10.2/zrpc/internal/client.go:113-117` | 无条件装 `TimeoutInterceptor`（⇒ 出向调用**恒**有客户端超时，与有没有 HTTP 预算无关） |
+| 开关默认值 | `go-zero@v1.10.2/zrpc/internal/config.go:15` | `Timeout bool `json:",default=true"`` |
+| 执行点 | `go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25` | `ctx, cancel := context.WithTimeout(ctx, t)` ⇒ **取更早者**（min 语义） |
+
+### 三、装配面（**为什么域侧删掉自己那份之后，上界仍然兜得住**）
+
+- devh `grpc-client-spring-boot-starter 3.1.0.RELEASE` 的
+  `net/devh/boot/grpc/client/interceptor/AnnotationGlobalClientInterceptorConfigurer.java`
+  ⇒ `getClientInterceptorBeans()` = `applicationContext.getBeansWithAnnotation(GrpcGlobalClientInterceptor.class)`
+  ⇒ ⇒ **按 Bean 注解收集**（**不是**类路径扫描）⇒ ⇒ 共享层
+  `GoStyleOutboundDeadlineConfiguration` 产出的那个 `@Bean` 会被收进 registry ✔
+- 本域 `CommentApiApplication.java:68-71`：`@SpringBootApplication(scanBasePackages = {"com.rag.comment.comment.api", "com.rag.common"})`
+  ⇒ ⇒ `com.rag.common.protection.GoStyleOutboundDeadlineConfiguration` 被扫到 ⇒ **Bean 在位** ✔
+- devh 的 channel factory 建 channel 的最后一步是 `ClientInterceptors.interceptForward(channel, interceptors)`
+  ⇒ ⇒ 全局拦截器装在 **channel** 上 ⇒ ⇒ **裸 stub 也经过它**（不需要域侧逐个调用点改造）
+- 共享层 `GoStyleOutboundDeadlineInterceptor#effectiveCallOptions`（`service/common/.../protection/GoStyleOutboundDeadlineInterceptor.java:187-220`）
+  = min(① 请求载体剩余（可见时）② `capMillis` ③ 调用点自带 deadline)
+  ⇒ ⇒ **cap 与载体无关**（`if (capMillis > 0L)` 独立成立）⇒ ⇒ 域侧那份删掉后，**上界仍由共享层兜住** ✔
+  ⇒ ⇒ 且与 Go 的 `context.WithTimeout(ctx, t)` **同形**（取更早者）
+
+### 四、本域的 Go yaml 真值（**零 `Timeout:` 行**）
+
+- `service/comment/api/etc/commentservice.yaml:21-23` ⇒ `CommentRpc:` 段只有 `Target` / `NonBlock` ⇒ **没有 `Timeout`**
+  ⇒ ⇒ 生效值 = zrpc 的 struct tag 默认 **2000ms**
+- 全仓 api 侧 yaml 扫描（`grep -rn "Timeout:" service/*/api/etc/*.yaml`）⇒ 全仓**只有**两处非零：
+  `service/article/api/etc/article-api.yaml:4`（服务端）与 `:12`（`ArticleRpcConf.Timeout: 70000`）
+  ⇒ ⇒ **本域之外**的 api 客户端**一律 2000ms**（`knowledge` 域范围外）
+
+### 五、守门证据（**实测**，含变异）
+
+- 绿读数：`mvn -o -B -pl service/common,service/comment/comment-api -am test -Dtest='CommentApiRpcDeadlineGateTest'`
+  ⇒ **8/8 绿**
+- 变异①（**域侧**：把域 yml 的 `outbound-deadline` **整块**删掉 ⇒ 落回默认 0 ＝ 取消上界）
+  ⇒ ⇒ **6/8 转红**，症状正是目标漂移形态：调用**返回 OK**（= 没有 deadline，等服务端 2.5s 后正常返回）
+  ＋ 生产形态实测 **3012ms**（＝ HTTP 的 3s 预算，**不是** Go 的 2s 上界）⇒ ⇒ 即「比 Go 松」那一侧
+- 变异②（**共享层**：把 `GoStyleOutboundDeadlineInterceptor` 的 `capMillis` 写死 0）
+  ⇒ ⇒ 本域 **4 条**转红；⚠️ 该变异**必须带 `-am`**（否则链的是 `~/.m2` 里已安装的旧快照 jar ⇒ 变异进不了被测链路 ⇒ 读数全绿是假信号）
+- 🧹 **顺手修掉一个「判据自身的缺陷」**（不是被测物的问题）：
+  本守门的「服务端是否把调用跑完」标志原先是**类级共享**的 ⇒ ⇒ 上一个用例残留的服务端 handler
+  （本类的服务端睡眠有 2.5s / 5s 两种）醒来后会把标志置真 ⇒ ⇒ **污染下一个用例**的断言
+  ⇒ ⇒ 原先该断言**恰好**排在第一个行为用例上（**排序运气**）才没暴露 ⇒ ⇒ 本轮新增用例后顺序变了 ⇒ ⇒ 它立刻变红
+  ⇒ ⇒ 现在改成「**每次调用一个令牌**」⇒ ⇒ 跨用例的残留被彻底隔开
+
+### 六、与共享层的关系（**转派 G4**）
+
+- 共享层棘轮 `service/common/src/test/java/com/rag/common/protection/GoStyleClientCallTimeoutSingleSourceGateTest.java`
+  的**点位级例外集**（`KNOWN_INLINE_CAP_CALL_SITES`）里挂着本域那一条
+  ⇒ ⇒ 本轮删除后该条目**失效** ⇒ ⇒ 按「**棘轮只能变紧，不能变松**」⇒ ⇒ 需 G4 剪掉它
+  ⇒ ⇒ ⚠️ **剪例外集与删内联必须落在同一次提交**（否则主线会红一次）
+  ⇒ ⇒ 建议 G4 把本分支合进他们分支、在同一个 merge commit 里剪 ⇒ 主线**零红窗**
+- 共享层**模型缺口**（本轮再次登记）：`cap-millis` 是**组件级一个值**
+  ⇒ ⇒ 对「同一组件内各 client 真值不同」的域（如 `article-api`：`70000` vs `2000`）**表达不了**
+  ⇒ ⇒ 建议共享层加 `rag.protection.outbound-deadline.per-client.<client-name>`
+  ⇒ ⇒ 详见 `docs/DRIFT/article/api.md` 的同款登记
 
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 

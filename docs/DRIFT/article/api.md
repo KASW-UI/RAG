@@ -2737,6 +2737,53 @@ bash tools/api-full-parity-probe/favorite/run.sh   # 现成骨架
 
 > ⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/api-full-parity-probe/favorite/run.sh` ⇒ **EXIT=0**（2026-10-30 03:28:29 · 48s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 两侧种子就绪 ⏐ ✅ 黑名单对照 token 就绪（Redis exists=1） ⏐ ✅ 两侧各产出 31 个 case ⏐ SAME 25 条 / SAME_CODE 1 条 / SAME_BODY 2 条 / SAME_STATUS 4 条 / OBS 0 条 / SKIP 0 条（共 32 个 case） ⏐ ✅ api 整域两侧一致（SAME 全等；SAME_CODE 业务码等；SAME_BODY body 等；SAME_。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。
 
+## 附录 · 🔴 本组件**刻意不配**组件级「客户端硬上界」—— 组件级一个数**表达不了**本组件的两个方向（2026-10-31 · G3 第十三轮）
+
+### 一、结论（**不许剪**那一条）
+
+- 共享层棘轮的**点位级例外集**里挂着本域一条：
+  `service/article/article-api/src/main/java/com/rag/article/article/api/client/UserRpcClient.java`
+  ⇒ `withDeadlineAfter(effective, TimeUnit.MILLISECONDS);`
+- ⇒ ⇒ **不得收敛、不得剪**（理由见下）⇒ ⇒ 它**留在**共享层的例外集里
+  ⇒ ⇒ 本轮只做两件事：① 在域 yml 上留「为何不配」的钉子；② 在本台账登记论证
+
+### 二、为什么组件级 cap **表达不了**本组件（**逐条读 Go 真源**）
+
+| 出向方向 | Go 真源 | 生效值 | 来源 |
+|---|---|---|---|
+| article-rpc 方向 | `service/article/api/etc/article-api.yaml:12` | **70000ms**（**显式**） | yaml 明写 `ArticleRpcConf.Timeout: 70000` |
+| user-rpc 方向 | `service/article/api/etc/article-api.yaml:20-24` | **2000ms** | `UserRpcConf` 段**没有** `Timeout` ⇒ 走 zrpc 的 struct tag 默认（`zrpc/config.go:31`） |
+
+⇒ ⇒ 同一组件内两方向真值**差 35 倍** ⇒ ⇒ 共享层 `cap-millis` 是**组件级一个值**
+（`GoStyleOutboundDeadlineInterceptor` 带 devh 的 `@GrpcGlobalClientInterceptor` ⇒ 装在**每个**出向调用上）
+⇒ ⇒ **配 2000** ⇒ 把 article-rpc 方向从 Go 的 70s **改严 35 倍**；
+**配 70000** ⇒ 把 user-rpc 方向从 Go 的 2s **放宽 35 倍** ⇒ ⇒ **两个值都不对**
+⇒ ⇒ ⇒ **组件级 cap 在本组件上无解** ⇒ ⇒ 域侧 **per-direction 内联是必需的**，不是「该收敛的副本」
+
+### 三、当前两个方向的实现（**别动**）
+
+- user-rpc 方向：`UserRpcClient#userRpc()` 自带 `min(2s, 请求剩余预算)`（域侧私有常量 `CLIENT_TIMEOUT_MILLIS`）
+  ⇒ ⇒ 与 Go 的 `UserRpcConf`（默认 2000）**同形** ✔
+- article-rpc 方向：`ArticleRpcClient` 靠 `GoStyleRequestDeadline.applyTo(stub)` 继承 HTTP 的 70s 预算
+  ⇒ ⇒ 与 Go 的 `ArticleRpcConf.Timeout: 70000` **同形** ✔
+- ⇒ ⇒ 域 yml 的 `protection:` 段下已加一段注释，把上面这套论证**钉在配置面**
+  ⇒ ⇒ ⚠️ **别在那里补一行 `cap-millis: 2000`**（那是把一条真漂移「配」进产品）
+
+### 四、共享层模型缺口（**转派 G4**，本轮第二次登记）
+
+- 共享层的 `cap-millis` 是**组件级一个值** ⇒ ⇒ 对「同一组件内各 client 真值不同」的域**表达不了**
+  ⇒ ⇒ 建议共享层加 **per-client 上界**：`rag.protection.outbound-deadline.per-client.<client-name>`
+  ⇒ ⇒ 加上之后，本组件就可以「user-rpc = 2000 / article-rpc = 70000」**逐 client** 配
+  ⇒ ⇒ 那时这条域侧内联才可以剪（⇒ 剪例外集与删内联同一次提交）
+- ⚠️ 在共享层加该参数**之前** ⇒ ⇒ 本域那条内联**必须保留** ⇒ ⇒ 剪它＝**制造一条真漂移**
+
+### 五、诚实边界
+
+- 本节**不**声称本组件的出向超时**已与 Go 完全对齐**：它声称的是「**当前两方向各自与 Go 同形**」
+  ＋「**组件级 cap 表达不了** ⇒ ⇒ 保持 per-direction 内联是**必需**而非将就」
+- 证据强度 = **源码级逐条对照**（yaml 真值 ＋ zrpc 消费点）＋ **域内守门**（既有 `article-api` 装配/行为用例）
+  ⇒ ⇒ 未做「双侧活体对拍」⇒ ⇒ 不写成「已闭环」
+
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
 > 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。

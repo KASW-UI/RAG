@@ -2731,7 +2731,7 @@ bash tools/api-full-parity-probe/article/mutate-parity.sh          # ⇒ EXIT=0 
 |---|---|---|---|
 | `article-rpc` → `message-rpc` | `service/article/rpc/etc/article.yaml` 的 `MessageRpc:` 段**没写 `Timeout`** ⇒ **default 2000ms** | **模块 cap 2000ms**（`rag.protection.outbound-deadline.cap-millis=2000` ⇒ 共享层统一施加 ⇒ 净效果 2000；**第十二轮复核**：本域**只有这一个方向有真实调用** ⇒ 与 Go **精确同形**） | ✅ **一致** |
 | `article-api` → `article-rpc` | `service/article/api/etc/article-api.yaml:12` **`ArticleRpcConf.Timeout = 70000`**（显式写） | `GoStyleRequestDeadline.applyTo(stub)` ⇒ 继承 HTTP 顶层 `Timeout: 70000`（`article-api.yaml:4`）⇒ ≈ **70s** | ✅ **一致 —— 不是缺口** |
-| `article-rpc` → `security-rpc` | `service/article/rpc/etc/article.yaml:90` `SecurityConf.Timeout = 10000` | 骨架未实现（`SecurityRpcClient` 是占位、**全仓零引用**）⇒ **无真实调用 ⇒ 不可观测**；⚠️ 共享层的 `cap-millis` 是**模块级一个数** ⇒ 装不下「按 client 各一个」⇒ **第十二轮定案**：本域取 **2000**（= 活路径那个方向）⇒ 该方向若接线，**必须**随共享层的 per-client 支持一并解决 | N/A（无活路径）＋ 待办 |
+| `article-rpc` → `security-rpc` | `service/article/rpc/etc/article.yaml:90` `SecurityConf.Timeout = 10000` | 骨架未实现（`SecurityRpcClient` 是占位、**全仓零引用**）⇒ **无真实调用 ⇒ 不可观测**；⚠️ 共享层的 `cap-millis` 是**模块级一个数** ⇒ 装不下「按 client 各一个」⇒ **第十二轮定案**：本域取 **2000**（= 活路径那个方向）⇒ 该方向若接线，**必须**随共享层的 per-client 支持一并解决；⚠️ **本行是【临时姿态】，不是终态**（2026-10-31 · G4 lane 明确要求留痕）：共享层补上 **per-client / per-direction 上界**之后⇒ ⇒ 本组件的 cap 要改回**逐 client 精确**（message **2000** / security **10000**）⇒ ⇒ 现在取 2000 是「**活路径精确**」的取舍（security 方向当前零引用 ⇒ **不可观测**）⇒ ⇒ **不得读成「Go 侧两个方向都是 2s」** ⇒ ⇒ 该缺口在**共享层**（`service/common/**` ＝ G4 写权面）⇒ ⇒ 域侧**无法自修** | N/A（无活路径）＋ 待办 |
 | `hot` / `favorite` / `comment` 三域的出向 | 各自 yaml 里**零 `Timeout:` 行** ⇒ 全部 **default 2000ms** | 各自已有 2s 上界 | ✅ 一致 |
 
 ⚠️ **本表为什么必须存在**：Go 的 2000ms 是 **`default` 而不是普遍真值**

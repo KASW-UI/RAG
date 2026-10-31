@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -74,15 +75,20 @@ class ArticleRpcClientTest {
     }
 
     @Test
-    @DisplayName("Go zrpc RpcClientConf.Timeout 的 tag 默认值 2000ms 会被显式施加")
-    void mustApplyTwoSecondCallDeadline() {
+    @DisplayName("⚠️ 2026-10-31 第十三轮：域 client **不再自带** 2s 上界 ⇒ 无请求预算时**不挂 deadline**（上界归共享层）")
+    void mustNotCarryItsOwnTwoSecondCap() {
         client.getPublicArticle("a1", -1L);
 
         Long deadlineMillis = capture.capturedDeadlineMillis();
-        assertNotNull(deadlineMillis, "devh starter 不提供默认 deadline，必须由本模块显式补");
-        // 留出执行耗时余量：断言「贴着 2000ms」，不是「小于 2000ms 就算过」
-        assertTrue(deadlineMillis > 1500L && deadlineMillis <= 2000L,
-                "deadline 应为 2000ms 量级，实际=" + deadlineMillis);
+        assertNull(deadlineMillis,
+                "Go zrpc RpcClientConf.Timeout 的 tag 默认值 2000ms 现在**由共享层**承担"
+                        + "（`GoStyleOutboundDeadlineInterceptor` ＋ 本域 yml 的"
+                        + " `rag.protection.outbound-deadline.cap-millis`）"
+                        + "⇒ ⇒ 域 client **不得**再自带一份上界"
+                        + "（那会是**第二个来源** = 漂移面；共享层棘轮判据 ④ 也判它违规）"
+                        + "⇒ ⇒ 本测试用的 channel **没有**装共享层拦截器"
+                        + "⇒ ⇒ 这里读到的必须是【无 deadline】"
+                        + "（共享层那半的活体证据在 `HotApiOutboundDeadlineCapGateTest`：真发调用在 ≤2000ms 处失败）。");
     }
 
     @Test
@@ -108,7 +114,7 @@ class ArticleRpcClientTest {
     }
 
     @Test
-    @DisplayName("hot-rpc 侧同样套用 2s / 取小 规则（两个 client 共享同一份默认超时）")
+    @DisplayName("两个 client 的**请求预算传播**规则一致（无预算 ⇒ 都不挂；有预算 ⇒ 都按预算挂）＋ TopK 硬编码 100")
     void hotRpcClientSharesSameDeadlineRule() {
         var capture2 = new CapturingClientInterceptor(
                 com.rag.hot.hot.proto.GetHotArticlesResponse.getDefaultInstance());
@@ -116,12 +122,26 @@ class ArticleRpcClientTest {
         hotClient.rawStubField(com.rag.hot.hot.proto.HotServiceGrpc
                 .newBlockingStub(ClientInterceptors.intercept(channel, capture2)));
 
+        // ① 无请求预算 ⇒ 两个 client 都**不挂** deadline（上界统一在共享层 ⇒ 域侧两个 client 同源）
         hotClient.getHotArticles(100, -1L);
+        assertNull(capture2.capturedDeadlineMillis(),
+                "⚠️ 2026-10-31 第十三轮：2s 上界改由共享层承担 ⇒ 域侧两个 client 都**不得**自带上界"
+                        + "⇒ ⇒ 这里读到的必须是【无 deadline】（两个 client 的上界来源同源 = 共享层那一个）");
 
-        Long deadlineMillis = capture2.capturedDeadlineMillis();
-        assertNotNull(deadlineMillis);
-        assertTrue(deadlineMillis > 1500L && deadlineMillis <= 2000L,
-                "两个 client 必须共享 zrpc RpcClientConf.Timeout 的同一个默认值，实际=" + deadlineMillis);
+        // ② 有请求预算 ⇒ 两个 client 都**按预算**挂（Go 是 context.WithTimeout(ctx, 2s) 嵌在请求 ctx 之上 ⇒ 取小）
+        hotClient.getHotArticles(100, 300L);
+        Long hotDeadline = capture2.capturedDeadlineMillis();
+        assertNotNull(hotDeadline);
+        assertTrue(hotDeadline > 0L && hotDeadline <= 300L,
+                "hot-rpc 方向的请求预算必须照样传播（实际=" + hotDeadline + "ms）");
+
+        client.getPublicArticle("a1", 300L);
+        Long articleDeadline = capture.capturedDeadlineMillis();
+        assertNotNull(articleDeadline);
+        assertTrue(articleDeadline > 0L && articleDeadline <= 300L,
+                "article-rpc 方向的请求预算必须照样传播（实际=" + articleDeadline + "ms）"
+                        + "⇒ ⇒ 两个 client 的**传播**规则一致；**上界**则统一由共享层承担");
+
         assertEquals(100,
                 ((com.rag.hot.hot.proto.GetHotArticlesRequest) capture2.capturedRequest()).getTopK(),
                 "Go getHotArticlesLogic.go:63 的 TopK 是硬编码的 100");
