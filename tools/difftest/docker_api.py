@@ -152,8 +152,23 @@ class DockerClient:
             return False
 
     def image_exists(self, image):
+        """镜像是否**已在本机 daemon** 里存在。
+
+        ⚠️ **必须用完整引用（name:tag）查** —— 只把 name 传给
+           `GET /images/{name}/json` 时，daemon 会按 **`:latest`** 解析
+           ⇒ `postgres:16-alpine` 被误判成 `postgres:latest`
+           ⇒ 实测（R6 在 Concourse Task 内）：`GET /images/postgres/json ⇒ HTTP 404`
+              ⇒ 明明 registry 里有 `library/postgres:16-alpine`，却被判成「查镜像失败」。
+        ⚠️ **404 是正常答案**（镜像没拉过）⇒ 返回 False，**不能**当成异常抛出去。
+        """
         name, tag = _split_image(image)
-        _, data = self._request("GET", f"/images/{name}/json")
+        ref = f"{name}:{tag}"
+        try:
+            self._request("GET", f"/images/{urllib.parse.quote(ref)}/json")
+        except DockerError as e:
+            if "HTTP 404" in str(e):
+                return False
+            raise
         return True
 
     def pull_image(self, image, timeout=600):

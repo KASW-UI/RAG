@@ -13,7 +13,8 @@
 # 【为什么不把全部守门都塞进来】
 #   实测分类（2026-10-30）：
 #     ✅ 纯静态、无外部依赖 → 纳入（tools/difftest/ 7 个 + 产物级 1 个
-#                             + ci 自带 1 个 + R4 契约门 1 个 = **10 道**）
+#                             + ci 自带 1 个 + R4 契约门 1 个 + R10 清单门 1 个
+#                             + 触发面一致性门 1 个 + docker_api 自测门 1 个 = **13 道**）
 #     ❌ 需要**活体 PG 容器**   → check-ddl-static.py（--container / --go-db / --rag-db）
 #                               （⚠️ 2026-10-31 已由 R6 的 `--rag-only` 模式补上
 #                                 Java 侧路径 ⇒ 见 ci/contracts/schema/）
@@ -31,6 +32,9 @@
 #   换来的是「任何一次改动都能拿到全仓静态结论」。
 #
 #   🆕 第 10 道门：check-proto-contract.py（R4 接口契约一致性）
+#   🆕 第 11 道门：check-requirements.py（目标要求清单六态）
+#   🆕 第 12 道门：verify-triggers.sh --static（触发面：实现 vs 意图）
+#   🆕 第 13 道门：check-docker-api-selftest.py（docker_api 镜像判定回归）
 #   ⚠️ **它为什么在这里、而不是独立的契约流水线**：
 #     R4 是**纯文本逐字节比对**（秒级 · 零额外依赖 · 不需要 Maven/PG/Go）
 #     ⇒ 按门禁分类它属于「每次代码变更都应该执行的快速门禁」
@@ -158,6 +162,22 @@ run_gate check-proto-contract.py \
 #     ⇒ 六态分列必须与 PASS 数同时打印（守门自己会打印）。
 run_gate check-requirements.py \
   python3 ci/scripts/check-requirements.py
+# 第 12 道门：**触发面一致性**（verify-triggers.sh --static）
+# ⚠️ 它守的是「**生成器算出来的 paths**」与「**手工推导的意图集合**」是否一致：
+#   · 场景表（意图）= 依据 Go/Java pom 依赖图与跨域调用边手工推导的「应该触发谁」；
+#   · ci/pipelines/*.yml（实现）= ci/generate-pipelines.py 从 pom 反推算出来的。
+#   ⇒ 两者独立 ⇒ 这道门能挡住「改了生成器但没改意图」的静默漂移。
+#   ⛔ 它**不连 Concourse** ⇒ 只证「流水线定义内部自洽」；
+#      真实触发行为由 ci/verify-triggers.sh（服务端模式）单独验。
+run_gate verify-triggers-static \
+  bash ci/verify-triggers.sh --static
+# 第 13 道门：**docker_api 自测**（R6 起 PG 的唯一通道）
+# ⚠️ 2026-10-31 实测抓到的真缺陷：`image_exists` 把 tag 丢了
+#   （`GET /images/postgres/json` ⇒ daemon 按 `:latest` 解析）
+#   ⇒ R6 在 Concourse Task 内首跑时把「镜像没拉过」报成「查镜像失败」⇒ 全域 BLOCKED。
+#   ⇒ 这道门**无外部依赖**（用模拟 daemon 解析规则的假 client）⇒ 秒级、可进静态守门。
+run_gate check-docker-api-selftest.py \
+  python3 ci/scripts/check-docker-api-selftest.py
 
 if [ -n "$JAR_MODULES" ]; then
   # shellcheck disable=SC2086
