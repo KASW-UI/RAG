@@ -14,7 +14,7 @@
 #   实测分类（2026-10-30）：
 #     ✅ 纯静态、无外部依赖 → 纳入（tools/difftest/ 7 个 + 产物级 1 个
 #                             + ci 自带 1 个 + R4 契约门 1 个 + R10 清单门 1 个
-#                             + 触发面一致性门 1 个 = **12 道**）
+#                             + 触发面一致性门 1 个 + docker_api 自测门 1 个 = **13 道**）
 #     ❌ 需要**活体 PG 容器**   → check-ddl-static.py（--container / --go-db / --rag-db）
 #                               （⚠️ 2026-10-31 已由 R6 的 `--rag-only` 模式补上
 #                                 Java 侧路径 ⇒ 见 ci/contracts/schema/）
@@ -34,6 +34,7 @@
 #   🆕 第 10 道门：check-proto-contract.py（R4 接口契约一致性）
 #   🆕 第 11 道门：check-requirements.py（目标要求清单六态）
 #   🆕 第 12 道门：verify-triggers.sh --static（触发面：实现 vs 意图）
+#   🆕 第 13 道门：check-docker-api-selftest.py（docker_api 镜像判定回归）
 #   ⚠️ **它为什么在这里、而不是独立的契约流水线**：
 #     R4 是**纯文本逐字节比对**（秒级 · 零额外依赖 · 不需要 Maven/PG/Go）
 #     ⇒ 按门禁分类它属于「每次代码变更都应该执行的快速门禁」
@@ -170,6 +171,13 @@ run_gate check-requirements.py \
 #      真实触发行为由 ci/verify-triggers.sh（服务端模式）单独验。
 run_gate verify-triggers-static \
   bash ci/verify-triggers.sh --static
+# 第 13 道门：**docker_api 自测**（R6 起 PG 的唯一通道）
+# ⚠️ 2026-10-31 实测抓到的真缺陷：`image_exists` 把 tag 丢了
+#   （`GET /images/postgres/json` ⇒ daemon 按 `:latest` 解析）
+#   ⇒ R6 在 Concourse Task 内首跑时把「镜像没拉过」报成「查镜像失败」⇒ 全域 BLOCKED。
+#   ⇒ 这道门**无外部依赖**（用模拟 daemon 解析规则的假 client）⇒ 秒级、可进静态守门。
+run_gate check-docker-api-selftest.py \
+  python3 ci/scripts/check-docker-api-selftest.py
 
 if [ -n "$JAR_MODULES" ]; then
   # shellcheck disable=SC2086
