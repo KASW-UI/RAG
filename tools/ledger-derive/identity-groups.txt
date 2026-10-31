@@ -62,9 +62,9 @@ DRIFT-LOG-005	common	LOG-005	common	别名同源	W15:_samesrc-W15.md:41 ← DRIF
 DRIFT-LOG-006	common	LOG-006	common	别名同源	W15:_samesrc-W15.md:42 ← DRIFT/common/alignment-2026-10-23.md:859
 DRIFT-LOG-007	common	LOG-007	common	别名同源	W15:_samesrc-W15.md:43 ← DRIFT/common/alignment-2026-10-23.md:860
 DRIFT-MSG-V-026	task	DRIFT-MSG-V-026	message	同编号跨域	W21:_samesrc-W21.md:14 ← DRIFT/message/rpc.md:1008
-DRIFT-MSG-V-030	article	DRIFT-MSG-V-030	message	同编号跨域	W22:_samesrc-W22.md:9 ← DRIFT/message/rpc.md:2734
-DRIFT-MSG-V-030	comment	DRIFT-MSG-V-030	message	同编号跨域	W22:_samesrc-W22.md:10 ← DRIFT/message/rpc.md:2734
-DRIFT-MSG-V-030	like	DRIFT-MSG-V-030	message	同编号跨域	W20:_samesrc-W20.md:5 ← DRIFT/message/rpc.md:2473
+DRIFT-MSG-V-030	article	DRIFT-MSG-V-030	message	同编号跨域	W22:_samesrc-W22.md:9 ← DRIFT/message/rpc.md:2774
+DRIFT-MSG-V-030	comment	DRIFT-MSG-V-030	message	同编号跨域	W22:_samesrc-W22.md:10 ← DRIFT/message/rpc.md:2774
+DRIFT-MSG-V-030	like	DRIFT-MSG-V-030	message	同编号跨域	W20:_samesrc-W20.md:5 ← DRIFT/message/rpc.md:2513
 DRIFT-SF-001	global	DRIFT-SF-001	common	同编号跨域	W19:_samesrc-W19.md:15 ← DRIFT/common/alignment-2026-10-23.md:420
 DRIFT-SF-002	common	SF-002	common	别名同源	W15:_samesrc-W15.md:44 ← DRIFT/common/alignment-2026-10-23.md:867
 DRIFT-SF-003	common	SF-003	common	别名同源	W15:_samesrc-W15.md:45 ← DRIFT/common/alignment-2026-10-23.md:868
@@ -75,7 +75,7 @@ E47	users	E47	global	同编号跨域	W18:_samesrc-W18.md:19 ← DRIFT/global/_RE
 E48	users	E48	global	同编号跨域	W18:_samesrc-W18.md:20 ← DRIFT/global/_README.md:427
 E58	users	E58	global	同编号跨域	W18:_samesrc-W18.md:23 ← DRIFT/global/_README.md:446
 E59	global	E59	like	同编号跨域	W19:_samesrc-W19.md:8 ← DRIFT/like/vs-common.md:1498
-E59	global	E59	message	同编号跨域	W19:_samesrc-W19.md:8 ← DRIFT/message/rpc.md:2770
+E59	global	E59	message	同编号跨域	W19:_samesrc-W19.md:8 ← DRIFT/message/rpc.md:2810
 E60	global	E60	like	同编号跨域	W19:_samesrc-W19.md:13 ← DRIFT/like/rpc.md:1597
 E62	global	E62	favorite	同编号跨域	W19:_samesrc-W19.md:14 ← DRIFT/favorite/rpc.md:3111
 E62	users	E62	favorite	同编号跨域	W18:_samesrc-W18.md:21 ← DRIFT/favorite/rpc.md:3111
