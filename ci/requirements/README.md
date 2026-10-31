@@ -172,6 +172,28 @@
 > ℹ️ 第 6~8 条与 like 域**已签字**的 `SD-2026-10-23-06`（grpc 业务码载体迁移 · 框架限制）**同族**
 > ⇒ 若你签字该族，这 3 条可一并转正 ⇒ `comment` 域即可从 `NOT_VERIFIED` 升为 `VERIFIED`。
 
+#### 🆕 核对补记（2026-10-31 · 逐条核对 Go↔Java 消费点后）
+
+> ⚠️ 本补记**不改任何一条差异的状态**（仍为 `pending`）⇒ 只登记「核对结论」⇒ **裁定权仍在用户**。
+> ⚠️ 核对方法 = **两侧同时读消费点**（Go `service/like/api/internal/logic/like/*.go` 6 处同形 +
+> Java `service/like/like-api/.../LikeApiSupport.java`），不是拿 RAG 现状当基准。
+
+| # | 核对结论 | 证据 |
+|---|---|---|
+| 1 / 2 / 3 / 5 | 🔴 **对外可见的真实差异**（不止是库方法层）—— Go 侧业务码 = 原始 gRPC 码（13/3/5/16），Java 侧 = 域内代表码（1015/2001/1015/1009）；**文案两侧相同**（Go `st.Message()` / Java `status.getDescription()`，都不查表）⇒ 客户端看到的 `code` 字段变了 | Go：`getlikecountlogic.go:41-46` 等 6 处 `status.FromError` → `errmsg.NewErrCodeMsg(int(st.Code()), st.Message())`；Java：`LikeApiSupport.java:181-186`（`status != null` ⇒ 走 `bizCodeFromError`）+ `LikeGrpcError.java:233-247`（`mapGrpcCodeToBizCode`） |
+| 4（`foreign_plain`） | 🟡 **疑似「比较点错配」**——探针比的是 Java 的**库方法** `LikeGrpcError#bizCodeFromError`（非 status ⇒ 末尾兜底 1015），Go 侧比的是**消费点**；而 Java 的**实际消费点** `LikeApiSupport#rpcError` **先判 `status == null`** ⇒ 对外返回 **5001**（= Go 的 `NewErrCode(ErrorServerCommon)`）⇒ **两侧对外一致** ⇒ 该条是否仍算「未签字的行为差异」**待用户裁定**（选项：降为 `technical` / `closed`，或维持 `pending`） | Java：`LikeApiSupport.java:181-185`（`if (status == null) return CodeError.newCode(ERROR_SERVER_COMMON)`）· 佐证：全仓 `bizCodeFromError` 的**生产调用点只有 1 处**（`LikeApiSupport.java:183`）且带该前置守卫；`GoStyleCircuitOpenException extends RuntimeException`（`service/common/.../GoStyleCircuitOpenException.java:30`）⇒ 非 status ⇒ 熔断打开路径两侧同为 5001 |
+| 6 / 7 / 8 | 🟡 **只差 `grpc-status` 字段的数值**；业务码与文案两侧无损（Java 从 trailer `rag-comment-biz-code` 取回）⇒ **不可复原项 = 平台限制**（grpc-java `Status.Code` 只有 17 个成员）⇒ 与 like 域已签字的 `SD-2026-10-23-06@like` **同一族**，差别只在 comment 域本域未签 | Go：`service/comment/common/errmsg/errmsg.go:33-35`（`status.Error(codes.Code(code), msg)`）；Java：`CommentGrpcError.java:72`（trailer key）+ `:116-121`（`mapToGrpcCode`）+ `:139-145`（`grpcError`） |
+
+> 🆕 **顺带核出一条新事实（属 like 域写权 ⇒ 本 lane 只登记、不改代码）**：
+> `service/like/like-api/src/main/java/com/rag/like/like/api/client/LikeRpcClient.java:70-77` 的 javadoc 写
+> 「熔断打开 ⇒ 落进 `bizCodeFromError` 的兜底 ⇒ 业务码 **1015**；Go 侧此时是 5001」
+> ⇒ **该措辞与当前实现不符**：`LikeApiSupport#rpcError` 在调用 `bizCodeFromError` **之前**就判了
+> `status == null` ⇒ 熔断打开（`GoStyleCircuitOpenException` 非 status）对外返回 **5001** = **与 Go 一致**。
+> ⇒ **实测依据**：grpc-java 1.63.0 `io/grpc/ClientInterceptors.java:153-157`（`interceptCall` 在
+> `newCall()` 时被调）＋ `io/grpc/stub/ClientCalls.java:148-155`（`channel.newCall(...)` 在 `try` **之外**）
+> ⇒ 熔断异常**原样**抛出 ⇒ 不会被包装成 `StatusRuntimeException`。
+> ⇒ 处置建议：**订正该 javadoc**（like 域写权）—— 但这**不影响**本节 8 条的任何一条状态。
+
 **这 8 条在 CI 里长什么样（2026-10-31 · Concourse Task 内实跑）**
 
 | 门 | 读数 | 退出码 | build 状态 |
