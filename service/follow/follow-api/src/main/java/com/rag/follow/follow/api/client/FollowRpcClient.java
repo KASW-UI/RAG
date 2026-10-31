@@ -159,7 +159,7 @@ public class FollowRpcClient implements InitializingBean {
      * ⇒ 实际生效值来自 go-zero 的 {@code default=2000}。
      * <p>它与「HTTP 超时 3s」是<b>两层</b>预算，<b>取更小的生效</b>：Go 侧下游挂死时是 <b>2s 先到</b>
      * ⇒ api 返回 <b>200 + 业务码 1015</b>；若只带 3s 的 ctx 预算，就会一路顶到 HTTP 超时分支 ⇒ 503。
-     * <p>⚠️ <b>2026-10-31 起本常量只是【断言用期望值】</b>：出向封顶由共享层唯一实现承担（域侧只配 rag.protection.outbound-deadline.cap-millis）⇒ ⇒ 本常量<b>不再是第二份实现</b>。
+     * <p>⚠️ <b>2026-10-31 起本常量只是【Go 默认值的文档锚点】</b>：出向封顶由共享层唯一实现承担（域侧只配 rag.protection.outbound-deadline.cap-millis）⇒ ⇒ 本常量<b>不参与任何行为</b> ⇒ ⇒ 守门<b>不</b>断言它（断言一个不参与行为的数字 = 恒绿的形式断言）⇒ ⇒ 守门只断言「yml 绑出的 cap == Go 默认 2000ms」＋「出向 deadline 开关开着」。
      */
     public static final long CLIENT_TIMEOUT_MILLIS = 2000L;
 
