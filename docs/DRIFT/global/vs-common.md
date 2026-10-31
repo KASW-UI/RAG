@@ -6704,3 +6704,58 @@ like-api / task-api）其实也自算 cap**（`Math.min(DEFAULT_CALL_TIMEOUT_MIL
 1. **本节是源码级 + grep 级证据（E1）** ⇒ ⇒ **没有起真进程验证「某上下文里 `NameResolverRegistry` 的默认 scheme 是不是 `discovery`** ⇒ ⇒ ⇒ **本层未做该运行期实测**（G1 的实测是**他域**上下文 ⇒ ⇒ ⇒ **不得外推成「共享层也测过了」**）。
 2. **「共享层生产代码不建 channel」这个结论只对**当前**代码成立** ⇒ ⇒ ⇒ **日后任何一处新增建 channel 点 ⇒ ⇒ 本结论即失效** ⇒ ⇒ ⇒ **需重核**。
 3. **本轮零代码改动**（只改台账）⇒ ⇒ **不需要新的批准** ⇒ ⇒ **不需要升级为全量回归波**。
+
+### §4.19.29 · 第二十五次订正轮次（2026-10-31 · G4 lane）—— **判据 ④ 的「该红没红」争议 ⇒ 结论 = 不是假绿，是两棵树读数相反**
+
+> **触发**：合并收口执行者在其回执第二节提出：「你的判据④ 例外集登记了 G1 那三处**已被 `6d04dc19` 删掉**的点位 ⇒ ⇒ 按棘轮设计它们**该被识别为失效** ⇒ ⇒ **但实测没红** ⇒ ⇒ **请你复核这个『该红没红』是不是你的失效检测漏了一种形态**」⇒ ⇒ 并明确指出「**这条很重要：它决定『G1 删完三处内联副本』这件事能不能被棘轮看见 ⇒ ⇒ 看不见 ⇒ 棘轮对内联形态那一半是假绿**」。
+> ⇒ ⇒ **本层当轮就做了实测定性**（见 §三）⇒ ⇒ **结论 = 判据④ 的失效检测完全正常，不是假绿**。
+
+**一、结论一句话**
+
+⇒ ⇒ **「该红没红」= 树不同**：收口执行者实测的是 **G1 分支的树**（三处副本已删 ⇒ ⇒ 该红、且本层实测**确实红**）；
+他看到绿的**主干**上那三处副本**还在**（⇒ ⇒ 那 5 条例外**仍然有效** ⇒ ⇒ **绿是正确读数**）⇒ ⇒ **两棵树读数相反，两句都成立**。
+
+**二、逐条实测读数（本层自测，不采信转述）**
+
+| 树 | `6d04dc19` 是否在内 | follow-rpc `UserRpcClient` | user-api `UserRpcClient` | admin-api `AdminRpcClient` | follow-api `FollowRpcClient` | 判据④ 读数 |
+|---|---|---|---|---|---|---|
+| **本地主干 `do-my-own-gh`** | **NO** | **1** | **2** | **2** | **2**（代码态；`:211` 是 javadoc，不计） | **🟢 绿**（7 条例外**全部仍有效** ⇒ ⇒ **绿是正确读数**） |
+| **G1 分支 `align/g1-users-follow`** | **YES** | **0** | **0** | **0** | **0** | **🔴 红**，报的正是「**例外已失效**」 |
+
+⇒ ⇒ **决定性证据**：本层**在 G1 的工作树上实跑** `mvn -o -pl service/common test -Dtest='GoStyleClientCallTimeoutSingleSourceGateTest'`
+⇒ ⇒ **Tests run: 4, Failures: 1** ⇒ ⇒ **报「🟢 例外已失效」** ⇒ ⇒ **失效检测在工作，不是假绿**。
+
+**三、⚠️ 一条本层**没预判到**的事实（G1 那笔比本层预判的多改了一处）**
+
+⇒ ⇒ 本层原先的预判是「失效 **5 条**」（follow-rpc 1 + user-api 2 + admin-api 2）⇒ ⇒
+⇒ ⇒ **G1 树上的实测是 7 条** ⇒ ⇒ **多出 2 条 = `follow-api/FollowRpcClient.java`**（`:256` 的 `withDeadlineAfter(1L, …)` ＋ `:258` 的 `Math.min(remainingNanos, capNanos)`）
+⇒ ⇒ ⇒ **G1 那笔也把 `follow-api` 的两处内联封顶删了** ⇒ ⇒ ⇒ **剪除范围是 7 条，不是 5 条**。
+
+**四、⚠️ 由此得到的一条纪律（比本条结论本身更值钱）**
+
+⇒ ⇒ **「某笔还没落地」与「某笔已落地」在两棵树上会给出相反的守门读数** ⇒ ⇒ ⇒
+⇒ ⇒ **判「某笔是否已进主干」⇒ ⇒ 只能用内容坐标法**（读主干那一个内容坐标）
+⇒ ⇒ ⇒ **「守门在主干上绿」** ≠ **「守门在别的树上绿」** ⇒ ⇒ ⇒ ⇒ **两者可以同时成立** ⇒ ⇒ ⇒ ⇒
+⇒ ⇒ ⇒ ⇒ ⇒ **「实测没红」这个现象本身不足以判定判据失效** ⇒ ⇒ ⇒ ⇒ ⇒ ⇒ **必须先确认「读的是哪棵树」**（同族：`docs/Pitfalls/_cross/pointer-axes.md` 的 `PIT-AXIS-07`「回执可能比对方的当前 HEAD 旧」）。
+
+**五、剪除清单（本层已定，落地时一次过）**
+
+⇒ ⇒ **等 G1 的 `6d04dc19` 入主干 ⇒ ⇒ 剪这 7 条点位**（**按点位剪，不是按文件剪**）：
+
+| # | 点位键 |
+|---|---|
+| 1 | `service/follow/follow-rpc/.../client/UserRpcClient.java:withDeadlineAfter(capNanos, java.util.concurrent.TimeUnit.NANOSECONDS);` |
+| 2 | `service/users/user/user-api/.../client/UserRpcClient.java:withDeadlineAfter(1L, java.util.concurrent.TimeUnit.NANOSECONDS);` |
+| 3 | `service/users/user/user-api/.../client/UserRpcClient.java:withDeadlineAfter(Math.min(remainingNanos, capNanos), java.util.concurrent.TimeUnit.NANOSECONDS);` |
+| 4 | `service/users/admin/admin-api/.../client/AdminRpcClient.java:withDeadlineAfter(1L, java.util.concurrent.TimeUnit.NANOSECONDS);` |
+| 5 | `service/users/admin/admin-api/.../client/AdminRpcClient.java:withDeadlineAfter(Math.min(remainingNanos, capNanos), java.util.concurrent.TimeUnit.NANOSECONDS);` |
+| 6 | `service/follow/follow-api/.../client/FollowRpcClient.java:withDeadlineAfter(1L, java.util.concurrent.TimeUnit.NANOSECONDS);` |
+| 7 | `service/follow/follow-api/.../client/FollowRpcClient.java:withDeadlineAfter(Math.min(remainingNanos, capNanos), java.util.concurrent.TimeUnit.NANOSECONDS);` |
+
+⇒ ⇒ ⚠️ **剪除必须与 `6d04dc19` 入主干「同一时刻」做** ⇒ ⇒ **在它入主干前剪 ⇒ ⇒ 主干棘轮立刻红**（实测③，见 §4.19.27 第五节）⇒ ⇒ ⇒ **本层当前不剪，保持主干绿**。
+
+**六、本轮的诚实边界（三条）**
+
+1. **本节是源码级 + 实跑读数（E1/L2）** ⇒ ⇒ **「G1 分支上会红」这条是本层在 G1 工作树里实跑出来的**（不是推断）⇒ ⇒ ⇒ **但本层没有在 G1 分支上提交任何改动**（只读实跑）。
+2. **G1 分支会继续变**（他还在落码）⇒ ⇒ **上表的 7 条是「当前 G1 树」的清单** ⇒ ⇒ ⇒ **他若再改 `follow-api` 等处 ⇒ ⇒ 清单会变** ⇒ ⇒ ⇒ **落地前本层会再跑一次预演**（手法见 §4.19.27 第五节）⇒ ⇒ ⇒ **以落地那一刻的实测为准**。
+3. **本轮零代码改动**（只改台账）⇒ ⇒ **不需要新的批准** ⇒ ⇒ **不需要升级为全量回归波**。
