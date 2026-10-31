@@ -2510,6 +2510,41 @@ java.lang.IllegalArgumentException: Request header is too large
   ⇒ ⇒ 建议共享层加 `rag.protection.outbound-deadline.per-client.<client-name>`
   ⇒ ⇒ 详见 `docs/DRIFT/article/api.md` 的同款登记
 
+## 附录 · 共享层辐射度守门的「口径」升级 —— 本域**零改动**（2026-10-31 · G3 第十五轮）
+
+### 一、曾经的现象（已闭环 · 核对日期 2026-10-31）
+
+`python3 tools/difftest/check-wave-coupling.py` 曾报 `common_radiation` 一项漂移：
+`GoStyleOutboundDeadlineInterceptor` 的**文档快照无 `hot`**，而**仓库现状有 `hot`**。
+
+### 二、根因（**读判据源码得出，不采信转述**）
+
+| 环节 | 事实 | 出处 |
+|---|---|---|
+| 漂移从哪来 | 本域守门测试 `HotApiOutboundDeadlineCapGateTest` 用 `import` 引用了共享层的出向期限拦截器 | `service/hot/hot-api/src/test/java/com/rag/hot/hot/api/client/HotApiOutboundDeadlineCapGateTest.java:3` |
+| 本域**生产代码**用不用它 | **不用** —— 全仓**没有任何域**的生产代码直接 import 它（它由配置类注册 bean） | `service/common/src/main/java/com/rag/common/protection/GoStyleOutboundDeadlineConfiguration.java:59-61` |
+| 本域生产代码真正引的 | `GoStyleProtectionConfiguration`（熔断/降载/出向期限的**装配入口**） | `service/hot/hot-rpc/src/main/java/com/rag/hot/hot/rpc/HotRpcApplication.java:3` 与 `:67` |
+
+⇒ ⇒ 「辐射度里有 `hot`」这件事，**来源是测试代码**，不是生产依赖。
+
+### 三、根治（**判据口径已由合并收口执行者升级 · 2026-10-31**）
+
+`tools/difftest/check-wave-coupling.py` 的 `scan_common_radiation()` 两条口径同时改了：
+
+| 改哪条 | 改前 | 改后 |
+|---|---|---|
+| ① 扫描面 | `service/**/src/**/*.java`（**含 `src/test`** ⇒ 验证面被当依赖面） | `service/**/src/main/**/*.java`（**只扫生产面** ⇒ 指标回到「生产依赖面」的本意） |
+| ② 引用判定 | 只认 `^import` 行 ⇒ ⇒ **全限定名引用看不见**（例：`message-rpc` 的 `@Import({... GoStyleProtectionConfiguration.class ...})` 是全限定名）⇒ ⇒ 真依赖被删时门不红 ⇒ ⇒ **假绿** | **代码态里出现该类的 FQN 即算引用**（import 行本身也含 FQN ⇒ 一视同仁）⇒ ⇒ 剥注释与字面量 ⇒ javadoc/字符串里的 FQN 不算 |
+
+⇒ ⇒ 改后**本域零改动**即转绿（实测 `check-wave-coupling` ⇒ 全绿，2026-10-31 核对）。
+
+### 四、⚠️ 本域**故意不改** import（留痕，防下一个人「顺手清理」）
+
+一度把上面那处 `import` 改成**全限定名**（旧口径下也能转绿）⇒ ⇒ **核对判据已根治后已撤回**
+⇒ ⇒ 因为新口径**根本不扫测试面** ⇒ ⇒ 改它零效果、且会多出一处「用写法绕开判据」的坏样板。
+⇒ ⇒ **现行态 = 本域生产代码不 import 该类（事实不变）**；守门测试仍用普通 `import`（可读性更好）。
+⇒ ⇒ ⚠️ **若将来判据口径再变（重新扫测试面），本域会重新出现在辐射度里** ⇒ ⇒ 那时的正确修法是**修判据**，不是改本域写法。
+
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
 > 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
