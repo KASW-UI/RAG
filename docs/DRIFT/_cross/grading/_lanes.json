@@ -467,7 +467,7 @@
     "dir": "DRIFT",
     "domain": "global",
     "source": "DRIFT/global/vs-common.md:3846",
-    "title": "| B-10 | `users/user/user-api/.../client/UserRpcClient.java` | 🆕 **【2026-10-31 订正 · G4 lane】原写「🔴 裸 provider」** ⇒ ⇒ **不是「零上界」**：**`:194-196`** 的 `userRpc()` 返回 `capByClientTimeout(GoStyleRequestDeadline.applyTo(userServiceBlockingStub))` ⇒ ⇒ **入向剩余 ∧ 2s 上界**双维 ⇒ ⇒ ⚠️ **原行号 `:143` 已过期**（provider 当时在 `:143`；`88c206ce` 之后移至 `:194`） | **`:194`**（**原 `:143` = 旧 provider 位 ⇒ 已订正**） | **8** |",
+    "title": "| B-10 | `users/user/user-api/.../client/UserRpcClient.java` | 🆕 **【2026-10-31 订正 · G4 lane】原写「🔴 裸 provider」** ⇒ ⇒ **不是「零上界」**：**`:208-210`** 的 `userRpc()` 返回 `GoStyleRequestDeadline.applyTo(userServiceBlockingStub)`（**域侧私有副本 `capByClientTimeout` 已由 `6d04dc19` 删除** ⇒ ⇒ 2s 上界改由**共享层通道级拦截器 + 域 yml `cap-millis=2000`** 承担 ⇒ ⇒ min(入向剩余, 2000) ⇒ ⇒ **入向剩余 ∧ 2s 上界**双维**仍成立**） ⇒ ⇒ ⚠️ **原行号 `:143` / `:194` 均已过期**（provider 当时在 `:143`；`88c206ce` 之后移至 `:194`；`6d04dc19` 删副本后再移至 `:208`）| **`:208`**（**原 `:143` / `:194` = 旧 provider 位 ⇒ 已订正**）| **8** |",
     "status": "🔴 未闭合",
     "evidence": "C 无指针"
    },
@@ -476,7 +476,7 @@
     "dir": "DRIFT",
     "domain": "global",
     "source": "DRIFT/global/vs-common.md:3847",
-    "title": "| B-11 | `users/admin/admin-api/.../client/AdminRpcClient.java` | 🆕 **【2026-10-31 订正 · G4 lane】原写「🔴 裸 provider」** ⇒ ⇒ **不是「零上界」**：**`:219-221`** 的 `adminRpc()` 返回 `capByClientTimeout(GoStyleRequestDeadline.applyTo(adminServiceBlockingStub))` ⇒ ⇒ **入向剩余 ∧ 2s 上界**双维 ⇒ ⇒ ⚠️ **原行号 `:173` 已过期**（provider 当时在 `:173`；`88c206ce` 之后移至 `:219`） | **`:219`**（**原 `:173` = 旧 provider 位 ⇒ 已订正**） | **12** |",
+    "title": "| B-11 | `users/admin/admin-api/.../client/AdminRpcClient.java` | 🆕 **【2026-10-31 订正 · G4 lane】原写「🔴 裸 provider」** ⇒ ⇒ **不是「零上界」**：**`:235-237`** 的 `adminRpc()` 返回 `GoStyleRequestDeadline.applyTo(adminServiceBlockingStub)`（**域侧私有副本 `capByClientTimeout` 已由 `6d04dc19` 删除** ⇒ ⇒ 2s 上界改由**共享层通道级拦截器 + 域 yml `cap-millis=2000`** 承担 ⇒ ⇒ min(入向剩余, 2000) ⇒ ⇒ **入向剩余 ∧ 2s 上界**双维**仍成立**） ⇒ ⇒ ⚠️ **原行号 `:173` / `:219` 均已过期**（provider 当时在 `:173`；`88c206ce` 之后移至 `:219`；`6d04dc19` 删副本后再移至 `:235`）| **`:235`**（**原 `:173` / `:219` = 旧 provider 位 ⇒ 已订正**）| **12** |",
     "status": "🔴 未闭合",
     "evidence": "C 无指针"
    },
