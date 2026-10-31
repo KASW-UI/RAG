@@ -35,6 +35,7 @@ import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.boot.env.YamlPropertySourceLoader;
 import org.springframework.core.env.MutablePropertySources;
+import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.PropertySource;
 import org.springframework.core.io.ClassPathResource;
 
@@ -70,6 +71,19 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       （共享层默认 {@code capMillis=0} = <b>不启用</b> ⇒ ⇒ 不配 = 出向零期限 = 比 Go 松）
  *       ⇒ ⇒ 「配置面」那条用例把<b>配置面</b>也钉住（直接读本域 {@code application.yml}）。</li>
  * </ul>
+ * <h2>🔴 2026-10-31 第十二轮复核：Go 的这个超时是<b>按 client</b> 生效的</h2>
+ * <p>Go 的 {@code zrpc.RpcClientConf.Timeout}（{@code zrpc/config.go:31} 声明 ＋
+ * {@code zrpc/client.go:70-71} 消费）挂在<b>每个 client 各自的</b>配置上
+ * ⇒ ⇒ 本域<b>两个</b>出向客户端真值<b>不同</b>（{@code MessageRpc} ⇒ default <b>2000</b>；
+ * {@code SecurityConf} ⇒ 显式 <b>10000</b>）
+ * ⇒ ⇒ 而共享层那个 {@code cap-millis} 是<b>模块级一个数</b> ⇒ ⇒ 装哪个值都会有一侧与 Go 不同
+ * ⇒ ⇒ 本域取 <b>2000</b>（= <b>本域唯一活着的出向出口</b>那个方向 ⇒ <b>活路径与 Go 精确同形</b>；
+ * 另一个方向当前<b>无真实调用</b> ⇒ <b>不可观测</b>）
+ * ⇒ ⇒ ⚠️ **「模块级一个数表达不了 Go 的 per-client 语义」= 共享层的模型缺口** ⇒ 归 <b>G4 写权</b>
+ * ⇒ ⇒ 本域<b>不擅自</b>用调用点自带 cap 绕开（共享层棘轮
+ * {@code GoStyleClientCallTimeoutSingleSourceGateTest} 判据 ④ <b>明令禁止</b>域侧自带 cap）
+ * ⇒ ⇒ 本轮另加一条<b>放宽方向</b>的变异用例 ⇒ 证明这个上界<b>是配置驱动</b>、不是写死 2000。
+ *
  * <h2>🔴 为什么必须新写这一条（2026-10-31 · G3 域侧自修）</h2>
  * <p>本域此前的出向出口是<b>裸 stub 调用</b>（{@code stub.sendNotification(req.build())}）
  * ⇒ ⇒ <b>零期限</b>：既无 2s 客户端封顶，又因跑在 Kafka consumer 线程上、
@@ -88,7 +102,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 用来证明「这个计算点本身是对的」（否则 ⑤ 条单独存在时，一个「写死 2s、完全不看载体」
  * 的实现也能过 ⑤ ⇒ ⇒ 那样 ⑤ 就成了<b>假绿</b>）。
  *
- * <h2>🔴 五条用例的分工（每条各有<b>专属</b>判别维度 · 缺一条都不够）</h2>
+ * <h2>🔴 八条用例的分工（每条各有<b>专属</b>判别维度 · 缺一条都不够）</h2>
  * <ol>
  *   <li><b>真 wire + 真共享层拦截器</b> ⇒ 证明<b>载体在 handler 线程真的绑上了</b>
  *       （把证据从 L2 源码级升到 <b>L4 活体</b>）⇒ 且证明客户端的 deadline
@@ -101,7 +115,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       （这一条<b>可确定性分辨</b>「毫秒版」与「纳秒版」）；</li>
  *   <li><b>无载体</b> ⇒ 证明 2s 客户端封顶<b>无条件</b>在
  *       （对齐 Go 侧拦截器级别的 {@code TimeoutInterceptor}）
- *       ⇒ ⇒ <b>这一条才是本域生产出口真正落的那一档</b>。</li>
+ *       ⇒ ⇒ <b>这一条才是本域生产出口真正落的那一档</b>；</li>
+ *   <li><b>变异（放宽方向）</b>（第十二轮新增）⇒ 把 {@code cap-millis} <b>放宽</b>到 4s
+ *       ⇒ 实测上界<b>必须跟着放宽</b>
+ *       ⇒ ⇒ 专治「这个上界是<b>写死</b>的」假实现
+ *       （⚠️ <b>调小</b>方向对它<b>结构性不可见</b> ⇒ 必须放宽）；</li>
  * </ol>
  *
  * <h2>🔴 为什么必须拆成「长预算」与「短预算」两个场景</h2>
@@ -291,8 +309,17 @@ class ArticleOutboundDeadlineCarrierGateTest {
      * ⇒ ⇒ 既不用起第二个服务、也不会自递归。
      */
     private static io.grpc.Deadline sharedOutboundDeadline() {
+        return sharedOutboundDeadline(sharedInterceptor);
+    }
+
+    /**
+     * 同上，但允许换掉拦截器（供「放宽方向」的变异用例用）。
+     *
+     * @param interceptor 共享层出向拦截器（**生产同款类**；用不同参数构造 ⇒ 读数随参数变）
+     */
+    private static io.grpc.Deadline sharedOutboundDeadline(GoStyleOutboundDeadlineInterceptor interceptor) {
         RecordingChannel recorder = new RecordingChannel();
-        sharedInterceptor.interceptCall(MessageServiceGrpc.getSendNotificationMethod(), CallOptions.DEFAULT, recorder);
+        interceptor.interceptCall(MessageServiceGrpc.getSendNotificationMethod(), CallOptions.DEFAULT, recorder);
         CallOptions captured = recorder.captured();
         return captured == null ? null : captured.getDeadline();
     }
@@ -611,6 +638,74 @@ class ArticleOutboundDeadlineCarrierGateTest {
     @Test
     @DisplayName("🔴 本域 yml 的 `cap-millis` 真的能绑定进共享层拦截器读的那个属性对象")
     void domainYamlBindsIntoSharedProtectionProperties() throws Exception {
+        GoStyleProtectionProperties props = bindProtectionProperties(null);
+
+        assertThat(props.getOutboundDeadline().getCapMillis())
+                .as("🔴 域侧 yml 的 `rag.protection.outbound-deadline.cap-millis` 必须真的绑定进共享层的 "
+                        + "`GoStyleProtectionProperties.OutboundDeadline#capMillis`"
+                        + "（共享层 `GoStyleOutboundDeadlineInterceptor` 的构造器读的就是它）"
+                        + "；本域的值 = **2000**（Go `article.yaml` 的 `MessageRpc:` 段**没写** Timeout ⇒ "
+                        + "走 `zrpc/config.go:31` 的 default 2000；⚠️ 另一个方向 `SecurityConf.Timeout=10000` "
+                        + "当前**无真实调用** ⇒ 详见本域台账「第十二轮」小节）"
+                        + "；⚠️ 默认 0 = 不启用 ⇒ 绑不上 = 出向零期限 = 比 Go 松")
+                .isEqualTo(2_000L);
+
+        assertThat(props.getOutboundDeadline().isEnabled())
+                .as("🔴 出向 deadline 传播开关必须仍是**开**（共享层默认 `enabled=true`；"
+                        + "Go 侧 `zrpc/internal/config.go:15` 的 `Timeout bool json:\",default=true\"`）"
+                        + "⇒ ⇒ 本域不得把它关掉 ⇒ 否则 = 出向零期限 = 比 Go 松")
+                .isTrue();
+    }
+
+    // ====================================================================================
+    // ⑥ 变异（**放宽方向**）：把 `cap-millis` 覆盖成 4000 ⇒ 实测上界必须跟着放宽
+    //    ⚠️ 为什么必须「放宽」而不是「调小」：判据要证明「这个上界**真在生效**」
+    //       ⇒ ⇒ 「调小」方向上，真实现与「写死 2000」的假实现算出来的上界**完全相同**
+    //       ⇒ ⇒ 判据**无牙** ⇒ ⇒ 只有**放宽**方向才分得开
+    // ====================================================================================
+
+    @Test
+    @DisplayName("🔴 变异（放宽方向）：`cap-millis` 覆盖成 4000 ⇒ 实测上界跟着放宽（证 cap 是配置驱动，不是写死 2000）")
+    void capIsConfigDrivenNotHardCoded() throws Exception {
+        // ① 真按生产链读配置（yml ＋ 一条**放宽**的覆盖）
+        GoStyleProtectionProperties props = bindProtectionProperties(4_000L);
+        assertThat(props.getOutboundDeadline().getCapMillis())
+                .as("覆盖值必须真的绑进 `GoStyleProtectionProperties`（否则这条测的就不是生产链）")
+                .isEqualTo(4_000L);
+
+        // ② 用**生产同款**的拦截器 + 该值构造（共享层唯一实现，不是本类另写一遍算术）
+        GoStyleOutboundDeadlineInterceptor relaxed = new GoStyleOutboundDeadlineInterceptor(props);
+
+        // ③ 绑定一个**长于** 4s 的载体 ⇒ ⇒ 载体不是限制项 ⇒ 读数只可能来自 cap
+        long carrierNanos = TimeUnit.SECONDS.toNanos(30L);
+        try (GoStyleRequestDeadline.Scope ignored = GoStyleRequestDeadline.bindAbsoluteNanos(
+                System.nanoTime() + carrierNanos)) {
+
+            io.grpc.Deadline deadline = sharedOutboundDeadline(relaxed);
+            long remaining = deadline == null ? -1L : deadline.timeRemaining(TimeUnit.NANOSECONDS);
+
+            assertThat(remaining)
+                    .as("🔴 把 `cap-millis` **放宽**到 4000ms ⇒ 实测上界必须**跟着放宽**（≥3s）"
+                            + " ⇒ ⇒ 若仍读到 ≈2s ⇒ 说明这个上界是**写死**的（假实现）"
+                            + " ⇒ ⇒ 这就是「从放宽方向取证」的判别力"
+                            + "（⚠️ 「调小」方向对它**结构性不可见**：min 链里写死的 2000 与真实现算出来一样）")
+                    .isGreaterThan(TimeUnit.MILLISECONDS.toNanos(3_000L));
+            assertThat(remaining)
+                    .as("实测上界不得宽于放宽后的 cap（4000ms）")
+                    .isLessThanOrEqualTo(TimeUnit.MILLISECONDS.toNanos(4_000L));
+        }
+    }
+
+    /**
+     * 按生产链读本域的共享层配置（{@code rag.protection.*}）⇒ 并可**覆盖** {@code cap-millis}。
+     *
+     * <p>⚠️ <b>为什么要走真绑定</b>：本类要证明的是「配置 ⇒ 共享层属性对象 ⇒ 拦截器 ⇒ 实际 deadline」
+     * 这条链 ⇒ ⇒ 若在测试里手搓一个属性对象再塞值 ⇒ ⇒ 中间那截「yml ⇒ 绑定」就没被测到
+     * ⇒ ⇒ 配置面与生产面可能悄悄分叉（AGENTS.md §3.3.1：判据要打在**消费点**）。
+     *
+     * @param overrideCapMillis 覆盖值（毫秒）；{@code null} = 不覆盖（读 yml 原值）
+     */
+    private static GoStyleProtectionProperties bindProtectionProperties(Long overrideCapMillis) throws Exception {
         YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
         java.util.List<PropertySource<?>> sources =
                 loader.load("application", new ClassPathResource("application.yml"));
@@ -620,22 +715,14 @@ class ArticleOutboundDeadlineCarrierGateTest {
 
         MutablePropertySources mutable = new MutablePropertySources();
         sources.forEach(mutable::addLast);
+        if (overrideCapMillis != null) {
+            mutable.addFirst(new MapPropertySource(
+                    "cap-mutation",
+                    Map.of("rag.protection.outbound-deadline.cap-millis", overrideCapMillis)));
+        }
 
-        GoStyleProtectionProperties props = new Binder(ConfigurationPropertySources.from(mutable))
+        return new Binder(ConfigurationPropertySources.from(mutable))
                 .bind("rag.protection", GoStyleProtectionProperties.class)
                 .orElseThrow(() -> new IllegalStateException("`rag.protection` 段没绑上"));
-
-        assertThat(props.getOutboundDeadline().getCapMillis())
-                .as("🔴 域侧 yml 的 `rag.protection.outbound-deadline.cap-millis` 必须真的绑定进共享层的 "
-                        + "`GoStyleProtectionProperties.OutboundDeadline#capMillis`"
-                        + "（共享层 `GoStyleOutboundDeadlineInterceptor` 的构造器读的就是它）"
-                        + "；⚠️ 默认 0 = 不启用 ⇒ 绑不上 = 出向零期限 = 比 Go 松")
-                .isEqualTo(2000L);
-
-        assertThat(props.getOutboundDeadline().isEnabled())
-                .as("🔴 出向 deadline 传播开关必须仍是**开**（共享层默认 `enabled=true`；"
-                        + "Go 侧 `zrpc/internal/config.go:15` 的 `Timeout bool json:\",default=true\"`）"
-                        + "⇒ ⇒ 本域不得把它关掉 ⇒ 否则 = 出向零期限 = 比 Go 松")
-                .isTrue();
     }
 }
