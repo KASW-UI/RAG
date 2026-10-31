@@ -156,7 +156,7 @@
 | `GAP-11` | B | `A-5` · `C-5` · `DRIFT-MSG-V-032` · `F-6` · `G4-15` · `G4-A4-03` · `G4-A4-04` · `S1-USERS-002` |
 | `GAP-12` | B | `D-2` · `D-4` · `D-6` · `D-7` · `E2` · `F-1` · `F-2` · `F-4` · `FB-04` · `FB-05` · `G4-1` · `G4-4` · `L-4` · `S1-FOLLOW-013` · `U-1` · `UNRESOLVED-005` |
 | `GAP-13` | B | `E1` · `F-1` |
-| `GAP-14` | B | `D-7` · `G4-4` · `UNRESOLVED-005` |
+| `GAP-14` | B | `G4-4` · `UNRESOLVED-005` |
 | `GAP-15` | B | `FB-02` · `U-03` · `U-05` |
 
 ---
@@ -167,16 +167,16 @@
 |---|---|---|
 | **A** | 8 | 阶段 1 准入阻断项（不处理就无法通过简历项目验收） |
 | **B** | 28 | 阶段 1 竞争力补强项（技术亮点与验证闭环） |
-| **C** | 70 | 阶段 2 最终工程建设项（业务语义恢复 / 生产工程机制） |
-| **D** | 222 | 经分析确认可不实现或不适用（须有明确理由） |
+| **C** | 69 | 阶段 2 最终工程建设项（业务语义恢复 / 生产工程机制） |
+| **D** | 223 | 经分析确认可不实现或不适用（须有明确理由） |
 | **—** | 520 | **未派生 —— 待人工定级**（不是「不重要」，是「还没定级」） |
 
 | 优先级 | 条目数 |
 |---|---|
 | P0 | 10 |
-| P1 | 404 |
+| P1 | 403 |
 | P2 | 97 |
-| P3 | 773 |
+| P3 | 774 |
 
 ---
 
@@ -602,7 +602,6 @@
 | `DRIFT-LOG-007` | DRIF | common | **G4** | 🔴 未闭合 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/common/alignment-2026-10-23.md:419;DRIFT/common/alignment-2026-10-23.md:860` | — |
 | `DRIFT-SF-002` | DRIF | common | **G4** | 🔴 未闭合 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/common/alignment-2026-10-23.md:421;DRIFT/common/alignment-2026-10-23.md:867` | — |
 | `DRIFT-SF-003` | DRIF | common | **G4** | 🔴 未闭合 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/common/alignment-2026-10-23.md:422;DRIFT/common/alignment-2026-10-23.md:868` | — |
-| `D-7` | DRIF | like | **G2** | ⚫ 已签字偏离 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | GAP-14 ｜ ⚠️已关闭指针:GAP-12 | — | `DRIFT/like/vs-common.md:72` | Go `service/like/api/internal/logic/like/getlikecountlogic.go:41-46`（`st, ok := status.FromError(err)`；`ok` 为真 ⇒ `errmsg.NewErrCodeMsg(int(st.Code()),… |
 | `FB-05` | DRIF | like | **G2** | 🔴 未闭合 | B 静态 | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | P2-T02,P2-T06 ｜ ⚠️已关闭指针:GAP-12 | 静态取证 · 缺活体对拍 | `DRIFT/like/vs-common.md:109` | Go `service/like/rpc/internal/logic/getlikecountlogic.go:50`（`l.svcCtx.BizRedis.HmgetCtx(l.ctx, likeCountKey, in.TargetIds...)`）＋ `:56`（`l.svcCtx.BizR… |
 | `U-08` | DRIF | like | **G2** | 🟡 部分闭合 | A 活体 · 绿(0) | P1 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 已定性 · 未排期 | `DRIFT/like/api.md:831;DRIFT/like/api.md:844` | Go `service/like/rpc/pb/like_grpc.pb.go:53`（`err := c.cc.Invoke(...)` ⇒ 把**原始 gRPC status 错误**原样返回）＋ `service/like/api/internal/logic/like/likeactionl… |
 | `UNRESOLVED-MSG-V-001` | DRIF | _cross | **G2** | 🟡 部分闭合 | A 活体 · 红(1) | P2 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 已定性 · 未排期 | `DRIFT/_cross/message-domain-wide.md:215;DRIFT/_cross/message-domain-wide.md:494` | Go `service/message/rpc/message.go:37`（`s := zrpc.MustNewServer(c.RpcServerConf, …)` ⇒ 注册到服务发现）＋ `go-zero@v1.10.2/zrpc/server.go:43`（`server, err = in… |
@@ -824,6 +823,7 @@
 | `SD-HOT-RPC-003` | Inte | hot | **G3** | ✅ 仍成立 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已定性 · 未排期 | `Intentional_Deviations/hot/rpc.md:42;Intentional_Deviations/hot/rpc.md:111` | — |
 | `SD-HOT-RPC-004` | Inte | hot | **G3** | ✅ 仍成立 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已定性 · 未排期 | `Intentional_Deviations/hot/rpc.md:43;Intentional_Deviations/hot/rpc.md:137` | — |
 | `D-6` | DRIF | like | **G2** | ✅ 已一致 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/like/vs-common.md:73` | Go `service/like/rpc/internal/model/db.go:11`（`db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})` ⇒ Go 侧 DB **显式构造 ＋ 显式注入** ⇒ **不存在**「自动配置求值顺序」… |
+| `D-7` | DRIF | like | **G2** | ⚫ 已签字偏离 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已定性 · 未排期 | `DRIFT/like/vs-common.md:72` | Go `service/like/api/internal/logic/like/getlikecountlogic.go:41-46`（`st, ok := status.FromError(err)`；`ok` 为真 ⇒ `errmsg.NewErrCodeMsg(int(st.Code()),… |
 | `DRIFT-LIKE-019` | DRIF | like | **G2** | ✅ 已一致 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已定性 · 未排期 | `DRIFT/like/rpc.md:2525` | — |
 | `DRIFT-LIKE-020` | DRIF | like | **G2** | ✅ 已一致 | A 活体 · 绿(0) | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已定性 · 未排期 | `DRIFT/like/rpc.md:2671` | — |
 | `OP-09` | DRIF | like | **G2** | ✅ 已一致 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/like/rpc.md:453;DRIFT/like/rpc.md:504` | Go `service/like/rpc/internal/model/domain_fact.go:76-138`（`appendLikeFact`：遗留未版本化事实 ⇒ 报错 `:101-110`；原子取号 `:111-116`；版本须 ∈ [1, 2^53-1] `:117-119`；payl… |
@@ -1265,7 +1265,7 @@
 | `D-1` | DRIF | task | **G2** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/task/vs-common.md:61;DRIFT/task/vs-common.md:417` | — |
 | `D-2` | DRIF | task | **G2** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/task/vs-common.md:62` | — |
 | `D-6` | DRIF | task | **G2** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/task/vs-common.md:66` | — |
-| `D-7` | DRIF | task | **G2** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | GAP-14 ｜ ⚠️已关闭指针:GAP-12 | 未定级 ⇒ 未排期 | `DRIFT/task/vs-common.md:68` | — |
+| `D-7` | DRIF | task | **G2** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/task/vs-common.md:68` | — |
 | `DRIFT-MSG-V-030` | DRIF | task | **G2** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/task/_README.md:316;DRIFT/task/_README.md:356` | — |
 | `DRIFT-TASK-API-001` | DRIF | task | **G2** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/task/_README.md:312;DRIFT/task/_README.md:352;DRIFT/task/api.md:64` | — |
 | `DRIFT-TASK-API-002` | DRIF | task | **G2** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/task/_README.md:313;DRIFT/task/_README.md:353;DRIFT/task/api.md:100` | — |
