@@ -15,7 +15,7 @@
 > **§9 之后（2026-10-25 第十一轮）已大幅提高**：
 > · **变异验证** ✅ 已做（§11.7 的 M1/M2、§13.x 的 4 例转红等）；
 > · **双侧活体对拍** ✅ 已做 **6 项**（错误码契约 / path 形态 / 指标 result 语义 / v2 响应体形状 /
->   **protobuf 消息体 wire 字节** / **DDL 逐列**）⇒ **U7 仍未闭**，但剩下的只是「整域」层面（业务编排与部署）。
+>   **protobuf 消息体 wire 字节** / **DDL 逐列**）⇒ ~~**U7 仍未闭**，但剩下的只是「整域」层面（业务编排与部署）~~ ⇒ 📌 **【2026-10-31 · G3 第十九轮】「整域」那一层已补上 ⇒ U7 已闭合**（rpc 层 **7/7** 个方法 wire 层逐字节 ＋ 下游在场的成功路径）⇒ **以本文件末尾「整域对拍闭合」追加节为准**。
 > ⇒ **读结论时按「§号越大证据越强」来读**，不要拿 2026-10-23 的上限套全文件。
 
 ---
@@ -28,7 +28,7 @@
 | 测试 | 3 个测试类 / **56 例全绿**（29 语义 + 13 真 PG schema + 14 错误码映射）—— ⚠️ **此行是 2026-10-23 口径** ⇒ **最新见 §26**（favorite-rpc：**22 个测试类 / 126 例**（⚠️ **第二十九轮实测**：新增 `FavoriteRpcSpanWiringTest` **12 例**（**零 Docker / 零真 PG**）⇒ 110 → **126**；⇒ 含 3 skip ⇒ **123 例绿**）（含 3 skip）—— ⚠️ **第二十轮实测**：新增的 `FavoriteSqlStatementParityTest` 在**没有探针环境变量**时按设计 skip ⇒ skip 数 2 → 3；⚠️ **第二十三轮实测**：新增 `FavoriteFolderItemTimeColumnTest` **5 例**（真 PG）⇒ 100 → **105**；⚠️ **第二十五轮实测**：新增 `FavoriteSqlTimeoutProductionPathTest` **4 例**（真 PG + 真 HikariCP + 真 MyBatis 链）⇒ 105 → **109**；⚠️ **第二十七轮实测**：该守门把「代理层秒数」与「驱动内部原始毫秒」**拆成两个测试方法**（同方法内第一条失败会遮住第二条）⇒ 4 → **5 例** ⇒ 109 → **110**） |
 | 构建 | `mvn -o -pl service/favorite/favorite-rpc -am install` ⇒ **BUILD SUCCESS** |
 | 本轮发现并修复 | **6 处 L2 语义偏差**（§2）+ **2 处实现期真 bug**（§3） |
-| 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / 1 条环境受限）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选已签字**（2026-10-25）：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK）⇒ **本域已无 🏷 候选**，见 §13.2<br>✅ **U8（第十五轮新增 · 域内可动的最后一条）已于第十六轮闭合**：create / create_item 的**成功路径** + `ensureUserExists` 五分支 + **落库等价性**全部拿到双侧活体证据（**15 case 全 SAME**）⇒ **§25**（盘点全表 ⇒ §24.1）⇒ ~~域内「未知项」归零~~（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认）<br>🔴🔴 **第二十轮翻案**：「域内『未知项』归零」是**提前收口** —— 当时**没查 SQL 语句层**（DDL / 错误码 / 事务语义三层闭了，**语句层是第四层，没做**）⇒ 第二十轮补上那一层 ⇒ **当场抓出 3 处 L1 可观察的漂移**（RAG 侧 INSERT / UPDATE **少绑时间列** ⇒ 落库 `NULL` ⇒ 对外时间戳 = **0**）⇒ **§29**<br>🔴 **U9（第十七轮新增 · 部署形态类 · 待拍板）**：Go 生产形态有 **16062** 那个 HTTP 面（`etc/favorite.yaml:23-30` 的 DevServer + `internal/devserver/server.go:79-82` 的 `if !c.Enabled { return }` ⇒ **与 mode 无关，生产也开**），RAG 侧 `web-application-type: none` ⇒ **没有** ⇒ 要么 RAG 侧也开（**部署形态变更**，需引 servlet 容器），要么**签字接受**⇒ **§26.8** |
+| 未决 | **7 条**（§5）—— ✅ **2026-10-25 已全部有归属**（3 条已签字 / 3 条已修或已撤销 / **1 条第七轮闭合** / **1 条第十九轮闭合（U7）**）⇒ **最新状态见 §11.6（U1–U7）+ §12.3（U7 进展）+ §13.3（U3 闭合）**<br>🏷 **第七轮新增 2 条候选已签字**（2026-10-25）：DEV-FAV-RPC-006（12 处命名差异）/ -007（RAG 更严的那道 CHECK）⇒ **本域已无 🏷 候选**，见 §13.2<br>✅ **U8（第十五轮新增 · 域内可动的最后一条）已于第十六轮闭合**：create / create_item 的**成功路径** + `ensureUserExists` 五分支 + **落库等价性**全部拿到双侧活体证据（**15 case 全 SAME**）⇒ **§25**（盘点全表 ⇒ §24.1）⇒ ~~域内「未知项」归零~~（只剩 B2 一条**流程项**：V7 上线前的域外写入方人工确认）<br>🔴🔴 **第二十轮翻案**：「域内『未知项』归零」是**提前收口** —— 当时**没查 SQL 语句层**（DDL / 错误码 / 事务语义三层闭了，**语句层是第四层，没做**）⇒ 第二十轮补上那一层 ⇒ **当场抓出 3 处 L1 可观察的漂移**（RAG 侧 INSERT / UPDATE **少绑时间列** ⇒ 落库 `NULL` ⇒ 对外时间戳 = **0**）⇒ **§29**<br>🔴 **U9（第十七轮新增 · 部署形态类 · 待拍板）**：Go 生产形态有 **16062** 那个 HTTP 面（`etc/favorite.yaml:23-30` 的 DevServer + `internal/devserver/server.go:79-82` 的 `if !c.Enabled { return }` ⇒ **与 mode 无关，生产也开**），RAG 侧 `web-application-type: none` ⇒ **没有** ⇒ 要么 RAG 侧也开（**部署形态变更**，需引 servlet 容器），要么**签字接受**⇒ **§26.8** |
 | 第九轮 | 🆕 **注释可核验性审计**（§15）—— 抓出 **3 条「断言对、锚点指错行」的真缺陷**，门禁级发现 **67 → 0**；**零行为改动** |
 | 第十轮 | 🆕 **补完 §15.8 记下的 I1 欠账**（§16）—— **153 条**内联断言补上锚点，再抓 **5 条**（4 条行号指错 + 1 条把 Java 事实误记成 Go）；**台账体检**：2 条死指针 + 3 处过期数字 + 4 处裸行号 + **6 处 RAG 侧锚点位移**已修，**6 个 Go 源文件未落点**已补记 ⇒ 新工具 `tools/ledger-lint/favorite/check-ledger-selfcheck.py`（EXIT=0） |
 | 第十二轮 | 🆕 **可动项 A + B 落地**（§19）—— 🔴 **权威读 HTTP 面的双侧活体对拍做成了**（新工具 `tools/authority-live-probe/favorite/`，**21 个 case：20 个逐字节一致 + 1 个 SKIP**）⇒ **U7 的局部活体对拍 6 项 → 7 项**；并抓出并**已修 1 条真缺陷**（200 路径少一个尾部换行字节）<br>🆕 **域外写入方盘点机检**（新工具 `tools/outbox-writer-audit/favorite/`）⇒ 本仓 **0 个域外写入方**（EXIT=0）<br>| 第十一轮 | 🆕 **三条候选签字**（§17）—— DEV-FAV-API-002 / RPC-006 / RPC-007 ⇒ **本域已无 🏷 候选**；顺带改正 §0 头部一处**过期断言**（「未做变异验证」只适用 §0–§8）<br>📌 **域内「可动项」清单**（§18）—— 🔴 **权威读 HTTP 面的双侧活体对拍其实做得了**（不需要 etcd/Kafka/Redis/user-rpc/article-rpc）· 🟡 域外写入方盘点（V7 前置）· ⬜ 跨域项收口在 `global` |
@@ -147,7 +147,7 @@ RAG 侧 `ArticleRpcClient.getPublicArticle` **固化了同样两个参数**。
 ## 5. ⚠️ 仍未决（7 条）
 
 > ⚠️ **本表的状态已被 §11.6 取代**（2026-10-25 第五轮）：
-> U1 / U2 / U6 → **已签字**；U4 → **已修**；U5 → **已撤销**；U3 → **第七轮闭合**（§13.3）；U7 → **环境受限**。
+> U1 / U2 / U6 → **已签字**；U4 → **已修**；U5 → **已撤销**；U3 → **第七轮闭合**（§13.3）；U7 → **第十九轮闭合**（见本文件末尾「整域对拍闭合」追加节）。
 > ⇒ 读本表请以 §11.6 为准，下表保留 2026-10-23 的原始登记以便追溯。
 
 > **纪律**：本表任一条**都没有**「已修」的断言。核对日期一律 2026-10-23。
@@ -160,7 +160,7 @@ RAG 侧 `ArticleRpcClient.getPublicArticle` **固化了同样两个参数**。
 | **U4** | **authority lookup 的 3s 超时** | Go 用 `context.WithTimeout(3s)` 约束 DB 查询；Java 侧走 Hikari `connection-timeout` ⇒ **未对齐** | ✅ **2026-10-25 第四轮已修**（见 §10）⇒ 本行保留作历史 |
 | **U5** | **`ObserveRPC` 的 `result` 标签** | Go 侧 **21 处**错误返回因未赋值命名返回值 `err`，被记成 **`success`**。Java 侧**按真实结果计数**（成功 `success`、异常 `fail`） | ❌ **已撤销**（2026-10-25 第二轮实测证伪）⇒ 见 §9.3 |
 | **U6** | `favorite_request_seconds_counter` 指标名 | Micrometer Counter 会追加 `_total`（Go `client_golang` 不会）⇒ 保留不改 | 与 U5 一并拍板 |
-| **U7** | **双侧活体对拍 + 变异验证** | 未做。Go 侧 `etcd` / Kafka 依赖不可拉起 | 需要一套能同时拉起两侧的环境 ｜ 📌 **【2026-10-31 · G3 第十八轮 · 本轮实测】两半均已成立** —— ① **双侧活体对拍**：`tools/api-full-parity-probe/favorite-rpc/run.sh` ⇒ **EXIT=0**（26 条用例 · **25 条 FROZEN 档逐字节一致** = Go 真源 == RAG == 冻结期望值 · gRPC wire 层）② **变异验证**：`tools/api-full-parity-probe/favorite-rpc/mutate-parity.sh` ⇒ **EXIT=0**（M1 打冻结值 / M2 打 proto 字段号 ⇒ wire 字节漂移被抓到 / M3 打错误文案 ⇒ description 漂移被抓到 ⇒ **全部精确转红** ＋ **还原后转绿** ⇒ ⇒ 探针非假绿；还原核验 = sha256 3/3 OK ＋ `git status` 空）③ **环境前提已解除**（etcd `49319` / Jaeger `49317` / Nacos `49848` 全可连 ＋ 本地镜像齐 ⇒ 镜像代理断流不影响）⚠️ **残留 = 覆盖 6/7 个 rpc 方法**（`favorite.proto` **7** 个方法 ⇒ 对拍客户端只调 **6** 个 ⇒ **缺 `CreateFavorite`**）⇒ ⇒ **U7 = 🟡 对拍链已跑通 ＋ 变异已验 · 缺 1 个方法**（原「未做 · 环境不可拉起」**已过期**） |
+| **U7** | **双侧活体对拍 + 变异验证** | 未做。Go 侧 `etcd` / Kafka 依赖不可拉起 | 需要一套能同时拉起两侧的环境 ｜ 📌 **【2026-10-31 · G3 第十八轮 · 本轮实测】两半均已成立** —— ① **双侧活体对拍**：`tools/api-full-parity-probe/favorite-rpc/run.sh` ⇒ **EXIT=0**（26 条用例 · **25 条 FROZEN 档逐字节一致** = Go 真源 == RAG == 冻结期望值 · gRPC wire 层）② **变异验证**：`tools/api-full-parity-probe/favorite-rpc/mutate-parity.sh` ⇒ **EXIT=0**（M1 打冻结值 / M2 打 proto 字段号 ⇒ wire 字节漂移被抓到 / M3 打错误文案 ⇒ description 漂移被抓到 ⇒ **全部精确转红** ＋ **还原后转绿** ⇒ ⇒ 探针非假绿；还原核验 = sha256 3/3 OK ＋ `git status` 空）③ **环境前提已解除**（etcd `49319` / Jaeger `49317` / Nacos `49848` 全可连 ＋ 本地镜像齐 ⇒ 镜像代理断流不影响）⚠️ **残留 = 覆盖 6/7 个 rpc 方法**（`favorite.proto` **7** 个方法 ⇒ 对拍客户端只调 **6** 个 ⇒ **缺 `CreateFavorite`**）⇒ ⇒ **U7 = 🟡 对拍链已跑通 ＋ 变异已验 · 缺 1 个方法**（原「未做 · 环境不可拉起」**已过期**）｜ ✅ **【2026-10-31 · G3 第十九轮】U7 已闭合** —— 补上最后那一条：`h01`/`h02` 覆盖 `CreateFavorite` 的两段入参校验（**都在任何下游调用之前** ⇒ 纯域内 ⇒ 可冻结）⇒ ⇒ **7/7 个 rpc 方法**全部被对拍客户端调过（重冻差分 = **只新增 2 行 · 既有 25 行逐字节不变**）⇒ ⇒ 对拍链 **EXIT=0**（28 用例 · **27 条 FROZEN 逐字节一致**）＋ 变异 **EXIT=0**（M1/M2/M3 精确转红 ＋ 还原转绿）＋ **第二条链本轮 EXIT=0**（`tools/grpc-contract-probe/favorite/` ⇒ 第一轮 36 case ＋ 第二轮 **15 case 全 SAME** ⇒ 覆盖 create 成功路径 / `ensureUserExists` 五分支 / 落库等价性）⇒ ⇒ **两条链取并集 = rpc 层整域双侧活体对拍** ⇒ ⇒ **残留 4 条是显式边界、不是未闭项**（帧层字节「不做」/ NULL 的 title·cover「未验」/ 写后再读「有意不做」/ E65 归 `global`）⇒ ⇒ **以本文件末尾「整域对拍闭合」追加节为准** |
 
 > ⚠️ **本表状态已被 §11.6 取代**（2026-10-25 第五轮）：**U5 已撤销**（前提被实测证伪）、
 > **U6 已签字**（= DEV-FAV-RPC-001）⇒ **不要再把 U5 当成「待签字的指标行为变更」**，
@@ -265,7 +265,7 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 | **U4** | authority lookup 的 3s 超时 | 「Go 用 `context.WithTimeout(3s)` 约束 DB 查询；Java 侧走 Hikari `connection-timeout` ⇒ **未对齐**」 | ✅ **确认未对齐**，并进一步定位：Go 的 3s 约束的是**查询**（ctx 传进 GORM），RAG 侧连到的是**连接超时** ⇒ **不是同一个量纲**。<br>🔴 **2026-10-25 第四轮已修** ⇒ 见 §10-D1（复用仓库已有的 `DeadlineQueryTimeoutInjector` + `SqlTimeoutStatusTranslator`，在调用点绑 3s deadline）。⇒ **DEV-FAV-RPC-005 撤销**（不再是偏离） |
 | **U5** | `ObserveRPC` 的 `result` 标签 | 「Go 侧 21 处错误返回因未赋值命名返回值 `err`，被记成 `success`；Java 按真实结果计数 ⇒ 有意的指标行为变更」 | ❌ **撤销 —— 前提被实测证伪**。Go 的 `return nil, GRPCError(...)` **会**赋值命名返回值 `err` ⇒ defer 里 `ObserveRPC` 看到非 nil ⇒ 记 **`fail`** ⇒ **Go 与 RAG 本来就一致，不存在偏离**。<br>（「21」实为 `return nil, GRPCError(...)` 的出现处数，**实测 22**。） | **撤销记录** + 可复现探针 `tools/metrics-probe/favorite/` |
 | **U6** | `favorite_request_seconds_counter` 指标名 | 「Micrometer Counter 会追加 `_total`（Go `client_golang` 不会）⇒ 保留不改」 | ✅ **确认成立**。补充：其余三个指标名（`favorite_request_total` / `favorite_ops_total` / `favorite_db_error_total`）**两侧完全一致**（名字已以 `_total` 结尾）⇒ **只有这一个**不一致 | **DEV-FAV-RPC-001** |
-| **U7** | 双侧活体对拍 + 变异验证 | 「未做。Go 侧 etcd / Kafka 依赖不可拉起」 | 🔴 **仍是最大缺口**。本轮推进：<br>· **错误码契约层已做成双侧活体对拍**（`tools/errmsg-probe/favorite/`，EXIT=0，108 行逐字节一致）—— 但那属于 `favorite-common`，**不是 rpc 层**。<br>· **指标 result 语义已做成可复现探针**（`tools/metrics-probe/favorite/`，EXIT=0）—— 单侧 Go 语义锚定 + RAG 侧运行时守门，**不是整域双侧对拍**。<br>· ⬜ **rpc 侧整体仍无双侧活体对拍**（Go 侧 `etcd` / Kafka 仍不可拉起） | 留在本节，**未闭环** ｜ 📌 **【2026-10-31 · G3 第十八轮 · 本轮实测】上面那句「rpc 侧整体仍无双侧活体对拍」**已过期** ⇒ ⇒ 该链**已落仓且真跑通**（`tools/api-full-parity-probe/favorite-rpc/run.sh` ⇒ **EXIT=0** · 26 条用例 · **25 条 FROZEN 档逐字节一致** ＋ `mutate-parity.sh` ⇒ **EXIT=0** · 三处变异**全部精确转红** ＋ **还原后转绿**）⇒ ⇒ **「环境受限」已解除**（etcd `49319` / Jaeger `49317` / Nacos `49848` 全可连 ＋ 本地镜像齐 ⇒ 镜像代理断流不影响）⇒ ⇒ ⚠️ **但「整域」尚差 1 个方法**：`favorite.proto` **7** 个 rpc 方法 vs 对拍客户端只调 **6** 个 ⇒ ⇒ **缺 `CreateFavorite`** ⇒ ⇒ ⇒ **本行结论 = 🟡「对拍链已跑通 ＋ 变异已验 · 覆盖 6/7 方法」**（仍开，**但开的是「缺 `CreateFavorite` 那一条」**，不再是「环境不可拉起」）｜ ⚠️ 另：残留 1 条 **AMBIENT 档**不一致（`f03_create_downstream_absent` ⇒ Go=`INTERNAL` / RAG=`DEADLINE_EXCEEDED`）⇒ **不判红**（AMBIENT 档取值依赖「下游 user.rpc 在不在场」这个环境态）⇒ ⇒ 且它**不能**用来判「出向 gRPC 是否继承请求 deadline」（两种机制都产出 `DEADLINE_EXCEEDED`）⇒ ⇒ **不构成 E65 的反证** |
+| **U7** | 双侧活体对拍 + 变异验证 | 「未做。Go 侧 etcd / Kafka 依赖不可拉起」 | 🔴 **仍是最大缺口**。本轮推进：<br>· **错误码契约层已做成双侧活体对拍**（`tools/errmsg-probe/favorite/`，EXIT=0，108 行逐字节一致）—— 但那属于 `favorite-common`，**不是 rpc 层**。<br>· **指标 result 语义已做成可复现探针**（`tools/metrics-probe/favorite/`，EXIT=0）—— 单侧 Go 语义锚定 + RAG 侧运行时守门，**不是整域双侧对拍**。<br>· ⬜ **rpc 侧整体仍无双侧活体对拍**（Go 侧 `etcd` / Kafka 仍不可拉起） | 留在本节，**未闭环** ｜ 📌 **【2026-10-31 · G3 第十八轮 · 本轮实测】上面那句「rpc 侧整体仍无双侧活体对拍」**已过期** ⇒ ⇒ 该链**已落仓且真跑通**（`tools/api-full-parity-probe/favorite-rpc/run.sh` ⇒ **EXIT=0** · 26 条用例 · **25 条 FROZEN 档逐字节一致** ＋ `mutate-parity.sh` ⇒ **EXIT=0** · 三处变异**全部精确转红** ＋ **还原后转绿**）⇒ ⇒ **「环境受限」已解除**（etcd `49319` / Jaeger `49317` / Nacos `49848` 全可连 ＋ 本地镜像齐 ⇒ 镜像代理断流不影响）⇒ ⇒ ⚠️ **但「整域」尚差 1 个方法**：`favorite.proto` **7** 个 rpc 方法 vs 对拍客户端只调 **6** 个 ⇒ ⇒ **缺 `CreateFavorite`** ⇒ ⇒ ⇒ **本行结论 = 🟡「对拍链已跑通 ＋ 变异已验 · 覆盖 6/7 方法」**（仍开，**但开的是「缺 `CreateFavorite` 那一条」**，不再是「环境不可拉起」）｜ ✅ **【2026-10-31 · G3 第十九轮】这一行已过期 ⇒ U7 已闭合** —— 补 `h01`/`h02`（`CreateFavorite` 的两段入参校验）⇒ **7/7 方法**全覆盖 ⇒ 对拍链 **EXIT=0 · 27 条 FROZEN 逐字节一致** ＋ 变异 **EXIT=0** ＋ 第二条链 **EXIT=0 · 15 case 全 SAME** ⇒ ⇒ **以本文件末尾「整域对拍闭合」追加节为准** ｜ ⚠️ 另：残留 1 条 **AMBIENT 档**不一致（`f03_create_downstream_absent` ⇒ Go=`INTERNAL` / RAG=`DEADLINE_EXCEEDED`）⇒ **不判红**（AMBIENT 档取值依赖「下游 user.rpc 在不在场」这个环境态）⇒ ⇒ 且它**不能**用来判「出向 gRPC 是否继承请求 deadline」（两种机制都产出 `DEADLINE_EXCEEDED`）⇒ ⇒ **不构成 E65 的反证** |
 
 ### 9.4 U1 的逐条复核：权威读端点
 
@@ -501,7 +501,7 @@ mvn -o -pl service/favorite/favorite-rpc test -Dtest='FavoriteErrorCodeMappingTe
 | **U4** | authority lookup 的 3s 超时 | 走 Hikari 连接超时 | ✅ **已修**（第四轮，§10.1）⇒ **DEV-FAV-RPC-005 撤销** | §10.1 |
 | **U5** | `ObserveRPC` 的 `result` 标签 | Go 21 处被记成 success | ❌ **已撤销**（第二轮实测证伪，§9.3） | 撤销记录 + `tools/metrics-probe/favorite/` |
 | **U6** | `favorite_request_seconds_counter` 指标名 | Micrometer 追加 `_total` | ✅ **已签字**（其余 3 个指标名两侧完全一致） | **DEV-FAV-RPC-001** |
-| **U7** | 双侧活体对拍 + 变异验证 | 未做 | 🔴 **仍未闭** —— Go 侧 `etcd` / Kafka 不可拉起（**环境受限**）⇒ 但**已有 6 项局部双侧对拍**：错误码契约（`tools/errmsg-probe/favorite/`）、path 形态（`tools/authority-path-probe/favorite/`）、指标 result 语义（`tools/metrics-probe/favorite/`）、v2 响应体形状、**protobuf 消息体 wire 字节**（`tools/proto-wire-probe/favorite/`）、**DDL 逐列**（`tools/ddl-parity-probe/favorite/`）⇒ **最新见 §13.4** | §11.2 / §13.2 / 各探针 |
+| **U7** | 双侧活体对拍 + 变异验证 | 未做 | ✅ **已闭合（第十九轮 · G3）** —— 「环境受限」已解除（etcd `49319` / Jaeger `49317` / Nacos `49848` 全可连 ＋ 本地镜像齐）⇒ ⇒ **rpc 层 7/7 个 rpc 方法**双侧活体 wire 层逐字节一致（`tools/api-full-parity-probe/favorite-rpc/` ⇒ EXIT=0 · 28 用例 · **27 条 FROZEN**）＋ **变异 3 条精确转红 ＋ 还原转绿**（`mutate-parity.sh`）＋ **下游在场的 create 成功路径 / `ensureUserExists` 五分支 / 落库等价性**由 `tools/grpc-contract-probe/favorite/` **第二轮**覆盖（本轮 EXIT=0 · **15 case 全 SAME**）⇒ ⇒ **两条链取并集 = 整域** ⇒ ⇒ **残留 4 条显式边界**（帧层字节不做 / NULL 的 title·cover 未验 / 写后再读有意不做 / E65 归 `global`）⇒ ⇒ **以本文件末尾「整域对拍闭合」追加节为准** | 本文件末尾「整域对拍闭合」追加节 ＋ `tools/api-full-parity-probe/favorite-rpc/` ＋ `tools/grpc-contract-probe/favorite/` |
 
 ### 11.7 本轮验证
 
@@ -4124,7 +4124,7 @@ EXIT=0
 | Go 侧 | **L4** | 真源 `service/favorite/rpc` 的 `go build` 产物 ＋ 真源配置**副本** ＋ 真 PG ＋ **真 etcd 注册**（键 `favorite.rpc/<leaseID>`）＋ 真源 `InitDB()` + 真源 4 个 `.sql`（**sql-first** 基准，与 `tools/ddl-parity-probe/favorite/` 一致） |
 | RAG 侧 | **L4** | 真 fat jar `favorite-rpc-0.0.1-SNAPSHOT.jar` ＋ 真 Flyway V1..V7 ＋ 真 MyBatis ＋ 真 PG ＋ **真 Nacos 注册**（服务名 `favorite-rpc`） |
 | 比对口径 | **wire 层逐字节** | **截获 wire 上的原始响应字节**（`RawCapture.parse`）⇒ 字段序漂移**不会**被客户端库抹平 |
-| 期望值 | **冻结** | `expected.txt` 25 条 ⇒ 真源一变 ⇒ `EXIT=1` |
+| 期望值 | **冻结** | `expected.txt` **27** 条 ⇒ 真源一变 ⇒ `EXIT=1` |
 | 变异 | ✅ **3 条精确转红** ＋ 还原后转绿 | 见 ⑥ |
 | ⚠️ **整体** | **L4，但只覆盖「rpc 层 wire 契约」这一面** | **不是**「favorite 域全部行为已闭合」⇒ 边界见 ⑤ |
 
@@ -4133,8 +4133,8 @@ EXIT=0
 | 项 | 状态 | 原因 |
 |---|---|---|
 | **下游 `user.rpc` 在场**的分支 | 🟡 **AMBIENT 档**（只判 Go == RAG，不冻结、不判红） | **两侧注册中心不同**：Go 侧走 **etcd**（`Etcd.Key: user.rpc`）· RAG 侧走 **Nacos**（`discovery:///user-rpc` ⇒ 服务名 `user-rpc`）⇒ 「下游在不在场」是**环境态**（别的 lane 的探针会往两个注册中心各注册一个桩）⇒ 实测三轮取到三种组合（两侧都 5001 / 两侧都 5101 / Go 5101 + RAG 5001）⇒ **冻结它必假红** |
-| **下游 `article.rpc` 在场**的分支（`createFavorite` 的文章快照） | 🔴 **未验** | 本探针**故意不接** article-rpc |
-| **create 成功路径**（落库 ＋ 雪花 ID ＋ 事实写入） | 🔴 **未验** | 依赖下游 `user.rpc` ⇒ 与 `tools/grpc-contract-probe/favorite/` 的**第二轮（自带桩）互补**，**不重复取证** |
+| **下游 `article.rpc` 在场**的分支（`createFavorite` 的文章快照） | ✅ **已验（由第二条链覆盖）** | 本探针**故意不接** article-rpc ⇒ ⇒ 由 `tools/grpc-contract-probe/favorite/` **第二轮**（自带 article 桩当两侧共同上游）覆盖：`s10_create_item_ok_article` ＋ `s11_create_item_ok_article_ext_cover` ⇒ **SAME** ⇒ ⇒ **favorite 自身行为**两侧一致；⚠️ **跨域交互契约**（favorite ↔ 真 article-rpc）**仍归 `global`**，本条**不**销账它 |
+| **create 成功路径**（落库 ＋ 雪花 ID ＋ 事实写入） | ✅ **已验（由第二条链覆盖）** | 依赖下游 `user.rpc` ⇒ 由 `tools/grpc-contract-probe/favorite/` **第二轮**覆盖：`s09_create_item_ok_post` ＋ `s12_create_item_duplicate` ＋ **落库等价性** `d01`~`d03`（三张表投影逐字段）⇒ ⇒ **SAME 15/15**（本轮 EXIT=0）⇒ ⇒ **不重复取证**（该链 README 已写明「互补」）；⚠️ 响应含**雪花 ID** ⇒ 两侧字节**必然**不同 ⇒ 本链**结构上不可冻结**成功路径 ⇒ 故用「**形状 ＋ 落库值**」判，不进 `expected.txt` |
 | **帧层原始字节**（HPACK / 帧序 / WINDOW_UPDATE / PING） | 🔴 **不做** | 由 gRPC 库决定，客户端不可观测（与 `tools/grpc-contract-probe/favorite/` 同一取舍） |
 | **NULL 的 `title` / `cover`** | 🔴 **未验** | 种子**一律给非 NULL**（Go `toProtoItem` 直接塞 `string`，RAG 走 `nullToEmpty` ⇒ NULL 列在两边的扫描语义不同）⇒ 显式排除 |
 | **写后再读**（`update_time` 推进后的读） | ⬜ **有意不做** | 改名会推进 `update_time` ⇒ 之后的读拿到「本次运行的时刻」⇒ 冻结值必假红 ⇒ 读用例全部排在写用例之前 |
@@ -4404,6 +4404,55 @@ EXIT=0
 - ✅ **证**：「载体可见时 ⇒ 出向上界 = min(载体剩余, 2s)」这个**域侧计算点**是对的（纳秒精度 + 无条件 2s 封顶）。
 - ❌ **不证**：「生产装配面（真 `@GrpcClient` ⇒ devh 拦截器链）真的把 deadline 给到了」
   ⇒ ⇒ 本守门是**域侧计算点**的证据，不是**装配面**的证据。
+
+## 📌 追加 · ✅ **rpc 层整域双侧活体对拍闭合（7/7 方法 · 27 条 FROZEN 逐字节一致 ＋ 变异已验）**（2026-10-31 · G3 第十九轮）
+
+> **本节 = `U7` 的销账依据** ⇒ ⇒ 读 `U7` 的状态**以本节为准**。
+> ⚠️ §12.3 / §13.4 / §19.6 / §20.7 等**历史轮次小节**里的「当时状态」按原文读
+> （它们记录的是**那一轮**的结论，**不是**现状）⇒ ⇒ **不再**把它们当现状。
+
+### ① 这一轮补的是什么
+
+| 项 | 内容 |
+|---|---|
+| 缺口 | `favorite.proto` 有 **7** 个 rpc 方法 ⇒ 对拍客户端只调 **6** 个 ⇒ **缺 `CreateFavorite`**（第十八轮发现） |
+| 补法 | `tools/api-full-parity-probe/favorite-rpc/java/FavoriteRpcParityClient.java` 里补 `CreateFavorite` 的两个 marshaller 分支 ＋ **2 条 FROZEN 用例** |
+| 两条用例 | `h01_create_item_uid0`（`user_id<=0` ⇒ `INVALID_ARGUMENT` / `参数错误`）· `h02_create_item_target_empty`（`target` 为空 ⇒ `INVALID_ARGUMENT` / `收藏目标不能为空`） |
+| 为什么这两条**可冻结** | 两段都在**任何下游调用之前**：Go `create_favorite_logic.go:54-60`（uid/folder ≤ 0）＋ `:62-70`（`normalizeTargetType` ＋ `TrimSpace` 之后 target 为空）⇒ 不碰 `user.rpc` / `article.rpc` ⇒ **纯域内** |
+| 为什么**成功路径**不进 FROZEN | 响应含**雪花 `FavoriteId`**（Go `:136-169`）⇒ 两侧字节**必然**不同 ⇒ **结构上不可冻结** ⇒ 成功路径改由**第二条链**以「形状 ＋ 落库值」判 |
+| 排序 | H 组排在 g（级联删除）**之前** ⇒ 两条都在校验处就返回 ⇒ **零副作用** ⇒ 不破坏「g 是最后一条有副作用」的既有不变量 |
+
+### ② 本轮实测（四条，逐条可复算）
+
+| 探针 | 结果 | 关键读数 |
+|---|---|---|
+| `tools/api-full-parity-probe/favorite-rpc/run.sh` | **EXIT=0** | **28 用例** · **27 条 FROZEN 逐字节一致**（Go 真源 == RAG == 冻结期望值 · **gRPC wire 层**）· 1 条 AMBIENT（**不判红**） |
+| 同上 · **重冻结** | 差分 = **只新增 2 行** | `h01`/`h02` ⇒ **既有 25 行逐字节不变**（`diff` 逐行核过）⇒ ⇒ 重冻结**没有掩盖任何既有漂移** |
+| `tools/api-full-parity-probe/favorite-rpc/mutate-parity.sh` | **EXIT=0** | M1 打冻结值 / M2 打 proto 字段号 / M3 打错误文案 ⇒ **三处精确转红** ＋ **还原后转绿**；还原核验 = **sha256 3/3 OK** ＋ `git status` 无残留 ⇒ ⇒ **探针非假绿** |
+| `tools/grpc-contract-probe/favorite/run.sh`（**第二条链**） | **EXIT=0** | 第一轮 **36 case**（SAME 33 / SAME_CODE 2 / OBS 1 / SKIP 0）＋ 第二轮 **15 case 全 SAME**（0 OBS / 0 SAME_CODE）⇒ ⇒ **create 成功路径 / `ensureUserExists` 五分支 / 落库等价性**两侧一致 |
+
+⇒ ⇒ **两条链取并集 = favorite rpc 层整域双侧活体对拍**
+（本链验 **wire 层逐字节**；第二条链验**下游在场**那条的成功路径与落库等价性 ⇒ **互补、不重复取证**，见 `tools/grpc-contract-probe/favorite/README.md`）。
+
+### ③ 残留的 4 条边界（**显式登记，不是未闭项**）
+
+| 项 | 状态 | 说明 |
+|---|---|---|
+| 帧层原始字节（HPACK / 帧序 / WINDOW_UPDATE） | 🔴 **不做** | 由 gRPC 库决定，客户端不可观测（与第二条链同一取舍） |
+| NULL 的 `title` / `cover` | 🔴 **未验** | 种子一律给非 NULL（Go `toProtoItem` 直接塞 `string` vs RAG `nullToEmpty` ⇒ 两侧扫描语义不同）⇒ 探针**显式排除** |
+| 写后再读（`update_time` 推进后的读） | ⬜ **有意不做** | 冻结值必假红 ⇒ 读用例全部排在写用例之前 |
+| `E65`（出向 gRPC 不继承 deadline） | 🔴 **仍 OPEN** | **本探针不测 deadline 传播 ⇒ 不构成对该条的反驳或销账** ⇒ 仍以 [`vs-common.md`](vs-common.md) 的 `E65` 行为准（**归 `global`**） |
+
+### ④ 一条**不能**据此下的结论
+
+残留的 **AMBIENT** 档不一致（`f03_create_downstream_absent` ⇒ Go=`INTERNAL` / RAG=`DEADLINE_EXCEEDED`）**不判红** —— 取值依赖「下游 `user.rpc` 在不在场」这个**环境态**。
+⚠️ **且它不是 favorite 侧的映射缺陷**：Go `helper.go:107` 与 RAG `FavoriteUserGuard.java:122-127` **同构**（下游非 `NotFound` 一律映射 `Internal`/5001）⇒ ⇒ 差异只可能来自「下游挂起 ＋ 探针外层 20s deadline 先到」⇒ ⇒ **不构成 `E65` 的反证**。
+
+### ⑤ 落点与写权
+
+- 落码：`tools/api-full-parity-probe/favorite-rpc/`（`java/FavoriteRpcParityClient.java` ＋ `expected.txt` ＋ `README.md`）⇒ **域内探针，按域授权归 G3**（`check-wave-lane-ownership.py` 的 `PROBE_OWNERS` ⇒ `favorite-rpc` 按**最长匹配**归到域根 `favorite` ⇒ 归 G3）。
+- 台账：本文件 ＋ [`vs-common.md`](vs-common.md) 的 `F-1` 行 ⇒ **均在本域写权内**（`docs/DRIFT/favorite/**`）。
+- **产品代码零改动**（`service/favorite/**` 未动一行）⇒ ⇒ 这是**证据补齐**，**不是**行为变更。
 
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
