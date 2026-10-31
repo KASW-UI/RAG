@@ -1,6 +1,5 @@
 package com.rag.hot.hot.api;
 
-import com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor;
 import com.rag.hot.hot.api.client.HotRpcClient;
 import com.rag.hot.hot.proto.GetHotArticlesRequest;
 import com.rag.hot.hot.proto.GetHotArticlesResponse;
@@ -110,7 +109,7 @@ class GoStyleGrpcClientBreakerE2ETest {
     private static final AtomicInteger downstreamCalls = new AtomicInteger();
 
     @Autowired
-    private GoStyleGrpcClientBreakerInterceptor interceptor;
+    private com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor interceptor;
 
     @LocalServerPort
     private int port;

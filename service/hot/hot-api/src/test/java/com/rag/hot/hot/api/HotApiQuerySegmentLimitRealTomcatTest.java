@@ -1,7 +1,5 @@
 package com.rag.hot.hot.api;
 
-import com.rag.common.http.GoStyleFormLimitMode;
-import com.rag.common.http.GoStyleFormValueLimitInterceptor;
 import com.rag.article.article.proto.Article;
 import com.rag.article.article.proto.ArticleStatus;
 import com.rag.article.article.proto.GetArticleResponse;
@@ -187,7 +185,7 @@ class HotApiQuerySegmentLimitRealTomcatTest {
     private int port;
 
     @Autowired
-    private GoStyleFormValueLimitInterceptor formLimitInterceptor;
+    private com.rag.common.http.GoStyleFormValueLimitInterceptor formLimitInterceptor;
 
     @MockitoBean
     private HotRpcClient hotRpcClient;
@@ -238,7 +236,7 @@ class HotApiQuerySegmentLimitRealTomcatTest {
     @Test
     @DisplayName("前提：本域的 form 闸门必须是 ENVELOPE（Go: hotcenter.go:53 注册了 SetErrorHandler ⇒ 200 + 业务信封）")
     void formLimitModeMustBeEnvelope() {
-        assertEquals(GoStyleFormLimitMode.Mode.ENVELOPE, formLimitInterceptor.mode(),
+        assertEquals(com.rag.common.http.GoStyleFormLimitMode.Mode.ENVELOPE, formLimitInterceptor.mode(),
                 "本域 application.yml 必须是 mode: envelope —— Go 侧 hotcenter.go:53 注册了 "
                         + "httpx.SetErrorHandler ⇒ 错误压成 200 + {code:5001,…}；"
                         + "若被改成 raw/off，本类下面那条形状断言就不代表本域契约了。"
