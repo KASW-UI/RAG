@@ -119,17 +119,6 @@ class GoStyleClientCallTimeoutSingleSourceGateTest {
      * <p>⚠️ <b>这些不是模板，是漂移面</b> ⇒ ⇒ 终态 = 域侧删掉、改用共享层实现 ⇒ ⇒ 例外集应当<b>收缩</b>。
      */
     private static final Set<String> KNOWN_INLINE_CAP_CALL_SITES = Set.of(
-            // ── G1 的 88c206ce 落码引入的三份私有副本（follow-rpc / user-api / admin-api）──
-            "service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/"
-                    + "UserRpcClient.java:withDeadlineAfter(capNanos, java.util.concurrent.TimeUnit.NANOSECONDS);",
-            "service/users/user/user-api/src/main/java/com/rag/users/user/api/client/"
-                    + "UserRpcClient.java:withDeadlineAfter(1L, java.util.concurrent.TimeUnit.NANOSECONDS);",
-            "service/users/user/user-api/src/main/java/com/rag/users/user/api/client/"
-                    + "UserRpcClient.java:withDeadlineAfter(Math.min(remainingNanos, capNanos), java.util.concurrent.TimeUnit.NANOSECONDS);",
-            "service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/client/"
-                    + "AdminRpcClient.java:withDeadlineAfter(1L, java.util.concurrent.TimeUnit.NANOSECONDS);",
-            "service/users/admin/admin-api/src/main/java/com/rag/users/admin/api/client/"
-                    + "AdminRpcClient.java:withDeadlineAfter(Math.min(remainingNanos, capNanos), java.util.concurrent.TimeUnit.NANOSECONDS);",
             // ── api 侧 5 处「合法传播但自带域侧私有 cap」（见 ④ 的判据说明）──
             "service/article/article-api/src/main/java/com/rag/article/article/api/client/"
                     + "UserRpcClient.java:withDeadlineAfter(effective, TimeUnit.MILLISECONDS);",
@@ -144,11 +133,7 @@ class GoStyleClientCallTimeoutSingleSourceGateTest {
             "service/favorite/favorite-api/src/main/java/com/rag/favorite/favorite/api/client/"
                     + "FavoriteRpcClient.java:withDeadlineAfter(1L, TimeUnit.NANOSECONDS);",
             "service/favorite/favorite-api/src/main/java/com/rag/favorite/favorite/api/client/"
-                    + "FavoriteRpcClient.java:withDeadlineAfter(Math.min(remainingNanos, capNanos), TimeUnit.NANOSECONDS);",
-            "service/follow/follow-api/src/main/java/com/rag/follow/follow/api/client/"
-                    + "FollowRpcClient.java:withDeadlineAfter(1L, java.util.concurrent.TimeUnit.NANOSECONDS);",
-            "service/follow/follow-api/src/main/java/com/rag/follow/follow/api/client/"
-                    + "FollowRpcClient.java:withDeadlineAfter(Math.min(remainingNanos, capNanos), java.util.concurrent.TimeUnit.NANOSECONDS);");
+                    + "FavoriteRpcClient.java:withDeadlineAfter(Math.min(remainingNanos, capNanos), TimeUnit.NANOSECONDS);");
 
     /**
      * <b>域侧私有 cap 的两种来源形态</b>（代码态 ⇒ 注释与字符串字面量不算）。

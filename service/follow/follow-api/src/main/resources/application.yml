@@ -220,24 +220,24 @@ rag:
   protection:
     # Go rest/config.go:52
     max-conns: 10000
-    # Go rest/config.go:53（1 MiB）。注意 Go 只看 Content-Length 头，
-    # chunked 请求（无 Content-Length）会绕过这层 —— 刻意保留该行为。
+    # Go rest/config.go:53（1 MiB）。Go 只看 Content-Length 头 ⇒ chunked 请求会绕过这层（刻意保留该行为）。
     max-bytes: 1048576
     cpu-shedding:
       # Go rest/config.go:22 Middlewares.Shedding
       enabled: true
       # Go rest/config.go:56（千分比，900 = 90% CPU）
       cpu-threshold: 900
-      # Go 读整机 CPU（Linux /proc/stat）⇒ SYSTEM 对齐；
-      # PROCESS 只看本 JVM，偏离 Go，仅在多副本各自限流时才用。
+      # Go 读整机 CPU（Linux /proc/stat）⇒ SYSTEM 对齐；PROCESS 只看本 JVM（偏离 Go，仅多副本各自限流时才有差别）。
       cpu-source: SYSTEM
     breaker:
-      # Go rest/config.go:15 Middlewares.Breaker
-      # ⚠️ 这条同时管住 **HTTP 层**熔断与 **gRPC client** 熔断：
-      #    后者由 com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor
-      #    承担，它带 @GrpcGlobalClientInterceptor，被扫到即自动注册
-      #    （对应 Go zrpc/internal/config.go:14 的 `Breaker bool json:",default=true"`）。
+      # Go rest/config.go:15 Middlewares.Breaker（Go zrpc/internal/config.go:14 的 Breaker bool）
+      # ⚠️ 这条同时管住 **HTTP 层**熔断与 **gRPC client** 熔断（后者 = com.rag.common.protection.GoStyleGrpcClientBreakerInterceptor，带 @GrpcGlobalClientInterceptor ⇒ 被扫到即注册）
       enabled: true
+    # ⚠️ 出向客户端硬上界（Go 侧恒 2000ms：followcenter.yaml:34-38 的 FollowRpc 段无 Timeout
+    #   ⇒ 取 go-zero zrpc/config.go:31 的 default=2000）⇒ 由**共享层唯一实现** GoStyleOutboundDeadlineInterceptor 承担
+    #   ⇒ 域侧**只配参数**（env 覆盖：FOLLOW_API_OUTBOUND_DEADLINE_CAP_MILLIS），不得再造内联副本
+    outbound-deadline:
+      cap-millis: ${FOLLOW_API_OUTBOUND_DEADLINE_CAP_MILLIS:2000}
 
 # =============================================================================
 # Metrics

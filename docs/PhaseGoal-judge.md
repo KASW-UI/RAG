@@ -130,8 +130,8 @@
 | `favorite` | `favorite-rpc` | `service/favorite/rpc/internal/logic/`（7） | `service/favorite/favorite-rpc/`（`impl/FavoriteServiceGrpcImpl.java`） | 36 / 7,950 | 143 |
 | `favorite` | `favorite-common` | `service/favorite/common/errmsg.go` | `service/favorite/favorite-common/…/errmsg/`（4 类） | 4 / 875 | 29 |
 | `favorite` | `favorite-proto` | `proto/favorite.proto`（107 行） | `service/favorite/favorite-proto/src/main/proto/favorite.proto` | —（生成） | 0 |
-| `follow` | `follow-api` | `service/follow/api/internal/handler/routes.go` + `internal/logic/`（8） | `service/follow/follow-api/`（`controller/FollowController.java`） | 31 / 3,585 | 96 |
-| `follow` | `follow-rpc` | `service/follow/rpc/internal/logic/`（8） | `service/follow/follow-rpc/`（`impl/FollowServiceGrpcImpl.java`） | 16 / 2,717 | 97 |
+| `follow` | `follow-api` | `service/follow/api/internal/handler/routes.go` + `internal/logic/`（8） | `service/follow/follow-api/`（`controller/FollowController.java`） | 31 / 3,585 | 101 |
+| `follow` | `follow-rpc` | `service/follow/rpc/internal/logic/`（8） | `service/follow/follow-rpc/`（`impl/FollowServiceGrpcImpl.java`） | 16 / 2,717 | 99 |
 | `follow` | `follow-common` | `service/follow/common/errmsg.go` | `service/follow/follow-common/…/errmsg/`（4 类） | 4 / 562 | 37 |
 | `follow` | `follow-proto` | `proto/follow.proto`（52 行） | `service/follow/follow-proto/src/main/proto/follow.proto` | —（生成） | 0 |
 | `hot` | `hot-api` | `service/hot/api/internal/handler/routes.go`（1） | `service/hot/hot-api/`（`controller/HotArticleController.java`） | 17 / 2,452 | 109 |

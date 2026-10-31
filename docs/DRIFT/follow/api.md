@@ -1219,3 +1219,16 @@ mvn -o -B -pl service/follow/follow-api -am -DargLine=-Xmx2g test
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
 |---|---|---|---|---|---|
 | DRIFT-FOLLOW-007 | C（阶段二工程建设项：残留 = api 侧直方图桶边界总数仍 ≠ Go 的 12） | P2 | 否（不阻断阶段一） | Go `service/follow/api/internal/metrics/metrics.go:29` = `Buckets: prometheus.DefBuckets`（11 个数值边界 ＋ `+Inf` ⇒ **12 桶**）＋ `:14` = `Subsystem: "follow_api"`（⇒ 落成指标名前缀，**不带** application tag）vs RAG `service/follow/follow-api/src/main/java/com/rag/follow/follow/api/metrics/FollowApiMetrics.java:131` = `.publishPercentileHistogram()` ＋ `:132` = `.serviceLevelObjectives(GO_DEF_BUCKETS)`（⇒ **两个开关同开** ⇒ Micrometer 取「默认桶 ∪ SLO 桶」⇒ 桶边界总数 ≠ 12）＋ `service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/metrics/FollowRpcMetrics.java:134` = 只用 `.serviceLevelObjectives(`（⇒ **同仓 rpc 侧 12 桶**，`:118-120` 明写「不要再加 `publishPercentileHistogram()`」）＋ `service/follow/follow-api/src/main/resources/application.yml:265` = 「刻意不加 `tags.application`」⇒ **差异仍成立**：台账正文所述的「tag 已修 ＋ 直方图已有 `_bucket`」两半**确已在位**，但**残留的桶边界数这一半仍在**；台账 2026-10-27 拍板「不修、登记为框架限制」所依据的前提（**须脱离 Micrometer 才能对齐**）已被**同仓 follow-rpc 的 SLO-only 写法证伪** ⇒ 按真实剩余部分定级为 **C**（照 rpc 侧写法去掉 `publishPercentileHistogram()` 即可落在 12 桶 ⇒ 属可修的观测面等价性项）；⚠️ 另外两条残留（`le="1.0"` 渲染 ＋ 多一个 `_max`）**两侧同款**（rpc 侧同样有）⇒ 已定性为框架限制，不在本条范围 | 2026-10-30 |
+
+
+---
+
+## follow-api 的内联封顶副本已删 —— 出向硬上界改由共享层唯一承担（2026-10-31 · G1 lane）
+
+- **落点**：`service/follow/follow-api/src/main/java/com/rag/follow/follow/api/client/FollowRpcClient.java`
+  - `:230-231` 去掉内联封顶包装（**同行替换 ⇒ 行号不变**）；`:233-260` 的 `capByClientTimeout` javadoc + 方法**整体删除** ⇒ 文件 261 → 233 行
+  - `:164` 常量 `CLIENT_TIMEOUT_MILLIS` **保留**（`private` ⇒ `public`，语义改为**断言用期望值**）⇒ ⇒ **行号不变** ⇒ ⇒ `docs/Pitfalls/follow/api.md:481/:509` 指的那一行不悬空
+- **域侧只配参数**：`service/follow/follow-api/src/main/resources/application.yml` 新增 `rag.protection.outbound-deadline.cap-millis` = `${FOLLOW_API_OUTBOUND_DEADLINE_CAP_MILLIS:2000}` ⇒ ⇒ 该 yml **9 增 9 删、净 0**（`:265` 被 shared 面 `grading/W14.md:12` + `stage1-derivation.tsv:83` 指着 ⇒ ⇒ 压缩等量注释行换位 ⇒ ⇒ 既有指针零位移）
+- **共享层在位（自读）**：`FollowApiApplication.java:68-71` 的 `scanBasePackages` 含 `com.rag.common` ⇒ ⇒ `GoStyleOutboundDeadlineConfiguration` 被扫到 ⇒ ⇒ `GoStyleOutboundDeadlineInterceptor`（`:121` 带 `@GrpcGlobalClientInterceptor`）装在每个出向 devh 调用上 ⇒ ⇒ **配了 cap 即生效**
+- **Go 出处（自读）**：`service/follow/api/etc/followcenter.yaml:34-38` 的 `FollowRpc` 段**无 Timeout** ⇒ ⇒ 恒取 `go-zero@v1.10.2/zrpc/config.go:31` 的 `default=2000` ⇒ ⇒ **2000ms**
+- **守门**：`service/follow/follow-api/src/test/java/com/rag/follow/follow/api/client/FollowRpcClientDeadlineCapTest.java`（**5 条**，与另三域同形）⇒ ⇒ **变异实测**：M-A 摘 `cap-millis` ⇒ **4 红**；M-B 加回写死 2000 的内联副本 ⇒ **精确 2 红**（④ 停在 2008ms ＋ ⑤ 形态面）⇒ ⇒ 有牙

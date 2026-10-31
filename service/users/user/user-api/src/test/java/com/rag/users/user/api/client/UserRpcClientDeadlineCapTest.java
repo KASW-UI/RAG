@@ -1,180 +1,292 @@
 package com.rag.users.user.api.client;
 
 import com.rag.common.observability.GoStyleRequestDeadline;
+import com.rag.common.protection.GoStyleOutboundDeadlineInterceptor;
+import com.rag.common.protection.GoStyleProtectionProperties;
+import com.rag.users.user.proto.GetUserReq;
+import com.rag.users.user.proto.GetUserResp;
 import com.rag.users.user.proto.UserServiceGrpc;
 import io.grpc.Channel;
+import io.grpc.ClientInterceptors;
+import io.grpc.ManagedChannel;
+import io.grpc.Server;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
+import io.grpc.inprocess.InProcessChannelBuilder;
+import io.grpc.inprocess.InProcessServerBuilder;
+import net.devh.boot.grpc.client.config.GrpcChannelsProperties;
+import io.grpc.stub.StreamObserver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.springframework.boot.context.properties.bind.Binder;
+import org.springframework.boot.context.properties.bind.PropertySourcesPlaceholdersResolver;
+import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.env.ConfigurableEnvironment;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.PropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.io.ClassPathResource;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@code user-api} 出向 user-rpc 调用的 <b>客户端超时（2s）与 min 语义</b>守门。
+ * {@code user-api} 出向 user-rpc 调用的 <b>客户端硬上界（Go 侧 2s）</b>守门。
  *
- * <h2>它守的是什么</h2>
- * <p>Go 侧的出向调用<b>恒带 2s 客户端超时</b>（{@code go-zero@v1.10.2/zrpc/config.go:31}
- * 的 {@code Timeout int64 json:",default=2000"}，且 Go 侧
- * {@code service/user/user/api/etc/usercenter.yaml} 的 {@code UserRpc:} 段<b>没有</b>显式 Timeout）
- * ⇒ 而 RAG 侧 {@code devh} 注入的<b>裸 stub 没有 call deadline</b>
- * ⇒ ⇒ <b>缺「客户端侧」收口</b>。
+ * <h2>🔴 2026-10-31（P2-T04 · G1 lane）：本类的守门对象<b>换了一代</b></h2>
+ * <p><b>换之前</b>：域侧自己写一份 {@code capByClientTimeout} 私有副本 ⇒ 本类直接测那份副本。
+ * <p><b>换之后</b>：<b>共享层唯一实现</b>
+ * （{@code service/common/.../protection/GoStyleOutboundDeadlineInterceptor.java}
+ * ＝ {@code @GrpcGlobalClientInterceptor} ⇒ 装在<b>每个</b>出向 devh 调用上）
+ * ＋ <b>域侧只配参数</b>
+ * （{@code rag.protection.outbound-deadline.cap-millis}，见本域
+ * {@code src/main/resources/application.yml} 的 {@code rag.protection} 段）
+ * ⇒ ⇒ 本类现在守的是「<b>域侧只配参数这条路真的通</b>」这条链。
  *
- * <h2>⚠️ 差异的准确边界（不要读宽）</h2>
- * <p>RAG 侧下游 {@code user-rpc} <b>自己</b>带服务端 2s 超时
- * （{@code service/users/user/user-rpc/src/main/resources/application.yaml:209} = {@code rpc-timeout: 2s}，
- * 接线在位由 {@code check-grpc-interceptor-wiring.py} = EXIT=0 实测确认）
- * ⇒ ⇒ <b>形态①「请求到达下游、业务挂死」</b>：RAG 由<b>服务端</b> 2s 收口 ⇒ {@code DEADLINE_EXCEEDED}
- * ⇒ 本域映射（{@code UserLoginService.java:99-107} ＋ {@code GlobalExceptionHandler.java:162} 的 default）
- * ⇒ <b>1015</b> ＋ {@code :95} {@code HttpStatus.OK}
- * ⇒ ⇒ <b>与 Go 同形</b>（Go 侧 {@code loginlogic.go:49-55} 的 default ⇒ {@code errmsg.go:6} 的 1015
- * ＋ {@code loginhandler.go:27-31} 的 {@code httpx.OkJson} = HTTP 200）。
- * ⇒ ⇒ <b>形态②「请求没到达下游」</b>（进程不可达 / 网络黑洞 / 连接建好但无响应）：
- * Go 的出向 deadline = <b>min(剩余 3s ctx, 2s 客户端) = 2s</b>
- * （3s 预算来自 {@code service/common/observability/http.go:30-34} ＋ {@code :53-56} ⇒ 传进业务 ctx）
- * ⇒ <b>200 + 1015</b>；RAG 修前<b>没有任何客户端收口</b>
- * ⇒ 只能等本进程 HTTP 预算（{@code user-api/application.yml:216} = {@code http-timeout: 3s}）
- * ⇒ ⇒ <b>503 + {@code Request Timeout}</b>
- * ⇒ ⇒ <b>形态②才是本条要修的可观察差异</b>（状态码 + 响应体 + 时刻三者都不同）。
+ * <h2>为什么必须删掉域侧私有副本（动作②「可 env 覆盖」的前提）</h2>
+ * <p>私有副本把上界<b>写死</b>在 {@code CallOptions} 里，共享层再对它取 min ⇒ ⇒
+ * <b>min 只压小、不压大</b> ⇒ ⇒ <b>「想放宽上界」会被副本压回 2000ms</b>
+ * ⇒ ⇒ 「上界可 env 覆盖」在<b>放宽方向</b>上被<b>架空</b>
+ * ⇒ ⇒ 这正是本类第 ④ 条要抓的形态：把 cap 覆盖到 <b>比 2000 大</b>，
+ * 若出向仍在 2000ms 处收口 ⇒ ⇒ 说明域侧还藏着一份写死 2000 的副本。
+ * <p>⚠️ <b>反过来（把 cap 调小）抓不到副本</b>：min 会把它压得更小 ⇒ ⇒ 看起来「生效了」
+ * ⇒ ⇒ 这类「只测一个方向」的判据会把真缺陷洗成绿 ⇒ ⇒ 故第 ④ 条必须用<b>放宽</b>方向。
+ * <p>⚠️ <b>副本还有第二处副作用</b>：旧副本（user-api 版）用的是
+ * {@code withDeadlineAfter}（<b>覆盖</b>语义）⇒ ⇒ 它会把<b>入站预算</b>放宽到 2000ms
+ * ⇒ ⇒ 而 Go 的 {@code context.WithTimeout(ctx, 2s)} 是<b>取更早者</b>
+ * ⇒ ⇒ 副本与 Go 在「入站预算比 2s 短」时<b>方向相反</b>。
  *
- * <h2>本测试如何真正触发该机制（AGENTS.md §3.3）</h2>
- * <p>它<b>真的构造 stub</b>（{@code newBlockingStub} + 真 {@code CallOptions}）
- * 并<b>真的读回 deadline</b>（{@code getCallOptions().getDeadline().timeRemaining(...)}），
- * 而不是断言「代码里写了 {@code withDeadlineAfter}」这种注解/文本级存在性。
- * <p>并且<b>真的走 {@link GoStyleRequestDeadline#begin(long)} 设预算</b>（api 进程的
- * HTTP 中间件就是这么做的 ⇒ {@code service/common/.../HttpMiddleware.java:324}），
- * 验证 min 语义的两个分支。
+ * <h2>Go 出处（为什么「客户端硬上界」该是 2000ms）</h2>
+ * <pre>
+ * go-zero@v1.10.2/zrpc/config.go:31
+ *     Timeout int64 `json:",default=2000"`   ⇒ 客户端硬上界的【默认值】= 2000ms
+ * go-zero@v1.10.2/zrpc/client.go:70-71
+ *     if c.Timeout &gt; 0 { opts = append(opts, WithTimeout(...)) }
+ * go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25
+ *     ctx, cancel := context.WithTimeout(ctx, t)   ⇒ 【取更早者】（min 语义）
+ * Go 侧 service/user/user/api/etc/usercenter.yaml:37-41
+ *     UserRpc: { Etcd: { Hosts: …, Key: user.rpc } }   ⇒ 【无显式 Timeout】⇒ ⇒ 恒 2000ms
+ * </pre>
  *
- * <p>⚠️ <b>不覆盖什么</b>：本类<b>不</b>起真实 user-rpc、<b>不</b>发真实请求
- * ⇒ 它证的是「<b>出向调用的 deadline 口径</b>对不对」，<b>不</b>证
- * 「下游挂死时客户端真的收到 1015」—— 后者需要双侧活体对拍（follow 域的
- * {@code DRIFT-FOLLOW-009} 已有 2026-10-24 双侧活体证据 ⇒ 本条按该形状落地）。
- *
- * <h2>⚠️ 为什么下界要扣掉「本用例自身耗时」</h2>
- * <p>读 deadline 是<b>墙钟</b>操作，而入站预算在推进中<b>不断变短</b>
- * ⇒ 若环境慢（首次 mock 生成 / 类加载，实测可吃掉 400ms+），
- * 固定下界（如「必须 ≥ 500ms」）会<b>假红</b>：实测 500ms 的预算只读到 72ms，
- * 而<b>被测物完全正确</b> ⇒ ⇒ 那是<b>判据的缺陷</b>，不是被测物的缺陷。
- * ⇒ 改成「期望值 − 实测耗时 − slack」⇒ 既不放过「比 Go 更严」，
- * 也不被环境抖动误伤（AGENTS.md §3.3.3 ③：修漂移先改/删错误断言，再改实现）。
+ * <h2>⚠️ 本类<b>不</b>证明什么（诚实边界）</h2>
+ * <ul>
+ *   <li><b>devh 装配链</b>（「全局客户端拦截器真的装在 devh channel 上」）由<b>共享层</b>的
+ *       运行期守门承担（{@code GoStyleDevhOutboundDeadlineAssemblyGateTest} ＝ 真 devh 上下文
+ *       ＋ 真 {@code @GrpcClient} stub ＋ <b>不调</b> {@code applyTo}）；
+ *       本类用 {@code ClientInterceptors.intercept(channel, 生产拦截器)} ＝ 与 devh
+ *       {@code AbstractChannelFactory.createChannel} 的装配动作<b>同一条</b>
+ *       ⇒ ⇒ 本类证「<b>域配置 → 生产拦截器 → 出向调用封顶</b>」，
+ *       <b>不</b>证「devh 的 registry 里有没有它」。</li>
+ *   <li>本类<b>不</b>起真实 user-rpc、<b>不</b>连 Nacos ⇒ 它证的是
+ *       「<b>客户端硬上界真在运行期封顶</b>」，<b>不</b>证「下游挂死时客户端真的收到 1015」
+ *       （那需要双侧活体对拍）。</li>
+ *   <li>第 ⑤ 条是<b>源码级</b>判据（静态扫本域 {@code src/main/java}）⇒ ⇒ 它守的是
+ *       「<b>没有第二份写死上界的副本</b>」这个<b>形态</b>，不是运行期行为。</li>
+ * </ul>
  */
 class UserRpcClientDeadlineCapTest {
 
-    private static final long SLACK_MILLIS = 200L;
+    /** 本域的 env 覆盖旋钮（与本域 {@code application.yml} 里的占位符同名）。 */
+    private static final String ENV_CAP = "USER_API_OUTBOUND_DEADLINE_CAP_MILLIS";
 
-    @AfterEach
-    void clearBudget() {
-        // ⚠️ 必须清空：GoStyleRequestDeadline 用 ThreadLocal 存预算，
-        // 不清会在线程池复用时串味（它自己的 javadoc :43-50 就警告过）。
-        GoStyleRequestDeadline.clear();
-    }
+    /** Go 侧 {@code zrpc/config.go:31} 的默认值。 */
+    private static final long GO_DEFAULT_CAP_MILLIS = 2000L;
 
-    @Test
-    @DisplayName("无入站预算 ⇒ 出向 deadline 必须是 Go 侧的 2s 客户端超时")
-    void withoutInboundBudget_capIsTwoSeconds() {
-        UserServiceGrpc.UserServiceBlockingStub raw = rawStub();
+    /** 下游挂起时长（毫秒）—— 必须<b>大于</b>第 ④ 条的覆盖值 ⇒ 才能分辨「有上界」与「没上界」。 */
+    private static final long HANG_MILLIS = 8_000L;
 
-        long beganAt = System.nanoTime();
-        UserServiceGrpc.UserServiceBlockingStub capped = UserRpcClient.capByClientTimeout(raw);
+    /** 真发调用那条用例的下界 —— 防止「秒失败」被误判成「超时生效」。 */
+    private static final long MIN_EXPECTED_WAIT_MILLIS = 1_500L;
 
-        assertMatchesGoMinSemantics(2000L, beganAt, capped, "无入站预算");
-    }
-
-    @Test
-    @DisplayName("入站预算 < 2s ⇒ 取更早者（剩余）⇒ 与 Go 的 context.WithTimeout(ctx, 2s) 同形")
-    void inboundBudgetShorterThanCap_takesTheEarlierOne() {
-        // ⚠️ 先造 mock 再设预算：mock 生成耗时不能算进预算窗口（见类注释末段）。
-        UserServiceGrpc.UserServiceBlockingStub raw = rawStub();
-
-        long budgetMillis = 500L;
-        long beganAt = System.nanoTime();
-        GoStyleRequestDeadline.begin(beganAt + TimeUnit.MILLISECONDS.toNanos(budgetMillis));
-
-        UserServiceGrpc.UserServiceBlockingStub capped = UserRpcClient.capByClientTimeout(
-                GoStyleRequestDeadline.applyTo(raw));
-
-        assertMatchesGoMinSemantics(budgetMillis, beganAt, capped, "入站预算 500ms < 2s");
-    }
-
-    @Test
-    @DisplayName("入站预算 > 2s ⇒ 取 2s 客户端超时（Go 的 min 语义 ⇒ RAG 不能比 Go 宽松）")
-    void inboundBudgetLongerThanCap_stillCapsAtTwoSeconds() {
-        UserServiceGrpc.UserServiceBlockingStub raw = rawStub();
-
-        long beganAt = System.nanoTime();
-        GoStyleRequestDeadline.begin(beganAt + TimeUnit.SECONDS.toNanos(5L));
-
-        UserServiceGrpc.UserServiceBlockingStub capped = UserRpcClient.capByClientTimeout(
-                GoStyleRequestDeadline.applyTo(raw));
-
-        // min(5000ms, 2000ms) = 2000ms
-        assertMatchesGoMinSemantics(UserRpcClient.CLIENT_TIMEOUT_MILLIS, beganAt, capped,
-                "入站预算 5s > 2s");
-    }
-
-    @Test
-    @DisplayName("入站预算已耗尽 ⇒ 出向必须立刻失败（Go 侧 ctx 到期同理）")
-    void exhaustedInboundBudget_failsImmediately() {
-        UserServiceGrpc.UserServiceBlockingStub raw = rawStub();
-
-        GoStyleRequestDeadline.begin(System.nanoTime() - TimeUnit.SECONDS.toNanos(1L));
-
-        UserServiceGrpc.UserServiceBlockingStub capped = UserRpcClient.capByClientTimeout(
-                GoStyleRequestDeadline.applyTo(raw));
-
-        long remainingMillis = capped.getCallOptions().getDeadline().timeRemaining(TimeUnit.MILLISECONDS);
-        assertTrue(remainingMillis <= 1L,
-                "预算已耗尽 ⇒ 出向必须立刻失败（deadline ≤ 1ns），实际 = " + remainingMillis + "ms");
-    }
-
-    @Test
-    @DisplayName("对外 accessor 必须真的套上 cap ⇒ 业务侧拿到的 stub 带 deadline")
-    void accessorReturnsCappedStub() {
-        UserRpcClient client = new UserRpcClient(mock(
-                net.devh.boot.grpc.client.config.GrpcChannelsProperties.class));
-        // 直接验证 accessor 的形状：用反射塞入一个裸 stub，避免起真实 channel。
-        UserServiceGrpc.UserServiceBlockingStub raw = rawStub();
-        injectRawStub(client, raw);
-
-        long beganAt = System.nanoTime();
-        UserServiceGrpc.UserServiceBlockingStub exposed = client.userRpc();
-
-        assertMatchesGoMinSemantics(UserRpcClient.CLIENT_TIMEOUT_MILLIS, beganAt, exposed,
-                "userRpc() accessor");
-    }
-
-    // ================== 辅助 ==================
+    /** 允许的额外耗时（毫秒）—— 排除「别的机制提前掐断」与墙钟抖动。 */
+    private static final long SLACK_MILLIS = 1_500L;
 
     /**
-     * 断言「出向 deadline = min(入站剩余, 2s 客户端超时)」这一 Go 语义。
-     *
-     * @param expectedMillis Go 语义的期望值（已取好 min）
-     * @param beganAt        本用例开始计时的墙钟点（{@code System.nanoTime()}）
-     * @param capped         被测 stub
-     * @param scene          场景描述（进断言消息）
+     * 第 ④ 条用例的 env 覆盖值 ——
+     * <b>故意取【大于】Go 默认 2000</b> ⇒ 才能抓「域侧又写死了 2000 的私有副本」。
      */
-    private static void assertMatchesGoMinSemantics(long expectedMillis, long beganAt,
-            UserServiceGrpc.UserServiceBlockingStub capped, String scene) {
-        io.grpc.Deadline d = capped.getCallOptions().getDeadline();
-        assertNotNull(d, scene + " ⇒ 出向 stub 必须带 call deadline（Go 侧恒有 2s 客户端超时）");
-        long actualMillis = d.timeRemaining(TimeUnit.MILLISECONDS);
-        long elapsedMillis = (System.nanoTime() - beganAt) / 1_000_000L;
-        assertTrue(actualMillis <= expectedMillis + SLACK_MILLIS,
-                scene + " ⇒ 出向 deadline 不得超过 " + expectedMillis + "ms（Go 的 min 语义），实际 = "
-                        + actualMillis + "ms");
-        assertTrue(actualMillis >= expectedMillis - elapsedMillis - SLACK_MILLIS,
-                scene + " ⇒ 出向 deadline 应≈" + expectedMillis + "ms（已扣除本用例自身耗时 "
-                        + elapsedMillis + "ms），实际 = " + actualMillis + "ms");
+    private static final long OVERRIDE_CAP_MILLIS = 4_000L;
+
+    /**
+     * 第 ④ 条：覆盖后出向<b>至少</b>要等到这个点。
+     *
+     * <p>若域侧藏着写死 {@link #GO_DEFAULT_CAP_MILLIS} 的副本 ⇒ 出向会在 2000ms 处收口
+     * ⇒ ⇒ 等不到 3000ms ⇒ ⇒ 断言红。
+     */
+    private static final long OVERRIDE_MIN_WAIT_MILLIS = 3_000L;
+
+    private Server server;
+    private ManagedChannel channel;
+
+    @AfterEach
+    void tearDown() {
+        // ⚠️ 必须清空：GoStyleRequestDeadline 用 ThreadLocal 存预算，
+        // 不清会在线程池复用时串味（它自己的 javadoc 就警告过）。
+        GoStyleRequestDeadline.clear();
+        if (channel != null) {
+            channel.shutdownNow();
+        }
+        if (server != null) {
+            server.shutdownNow();
+        }
     }
 
-    private static UserServiceGrpc.UserServiceBlockingStub rawStub() {
-        // 只用到 CallOptions ⇒ channel 永不被调用 ⇒ 随意替身即可。
-        return UserServiceGrpc.newBlockingStub(mock(Channel.class));
+    // ────────────────────────────────────────────────────────────────────────────
+    // ① 配置面：域侧必须「只配参数」，且该参数可被 env 覆盖
+    // ────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("① 域 yml 必须声明 rag.protection.outbound-deadline.cap-millis，且是 env 可覆盖形态")
+    void domainYmlDeclaresEnvOverridableCap() {
+        String raw = rawYamlValue("rag.protection.outbound-deadline.cap-millis");
+
+        assertNotNull(raw,
+                "🔴 本域 application.yml 必须配 rag.protection.outbound-deadline.cap-millis "
+                        + "⇒ ⇒ 否则出向 gRPC 调用【没有客户端硬上界】（Go 侧恒有 2000ms）"
+                        + "⇒ ⇒ 共享层的 GoStyleOutboundDeadlineInterceptor 的 cap 取默认值 0 ＝ 不启用"
+                        + "⇒ ⇒ 域侧那半就等于没做。");
+        assertTrue(raw.startsWith("${") && raw.endsWith("}"),
+                "🔴 cap-millis 必须是 ${ENV:默认} 形态（实测 = " + raw + "）⇒ ⇒ 否则【不可 env 覆盖】"
+                        + "⇒ ⇒ 动作②「上界可 env 覆盖」不成立。");
+        assertTrue(raw.contains(ENV_CAP),
+                "🔴 占位符里必须点名本域的 env 旋钮 " + ENV_CAP + "（实测 = " + raw + "）"
+                        + "⇒ ⇒ 各域独立可覆盖（Go 侧 RpcClientConf.Timeout 本身就是域级字段）。");
+        assertTrue(raw.endsWith(":" + GO_DEFAULT_CAP_MILLIS + "}"),
+                "🔴 占位符的默认值必须是 Go 的 zrpc/config.go:31 默认值 " + GO_DEFAULT_CAP_MILLIS
+                        + "ms（实测 = " + raw + "）⇒ ⇒ 本域 Go 侧 usercenter.yaml:37-41 无显式 Timeout"
+                        + "⇒ ⇒ 恒 2000ms。");
     }
 
+    // ────────────────────────────────────────────────────────────────────────────
+    // ② 绑定面：域 yml 的这个键【真的】被共享层的 properties 读到
+    // ────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("② 域 yml 绑出的 cap 必须 == Go 默认 2000ms == 域内常量（双源一致）")
+    void capBindsToGoDefaultAndMatchesDomainConstant() {
+        GoStyleProtectionProperties props = domainProperties(null);
+
+        assertEquals(GO_DEFAULT_CAP_MILLIS, props.getOutboundDeadline().getCapMillis(),
+                "🔴 域 yml 的 rag.protection.outbound-deadline.cap-millis 必须真的绑定到"
+                        + " GoStyleProtectionProperties.OutboundDeadline#capMillis"
+                        + "⇒ ⇒ 键名写错就是【配了不生效】（AGENTS.md §3.3.1）。");
+        assertEquals(GO_DEFAULT_CAP_MILLIS, UserRpcClient.CLIENT_TIMEOUT_MILLIS,
+                "🔴 域内常量（断言用期望值）与 yml 的真实值必须一致"
+                        + "⇒ ⇒ 两处必须同时改，否则就是一处漂移。");
+        assertTrue(props.getOutboundDeadline().isEnabled(),
+                "🔴 出向 deadline 传播开关默认开（Go 侧 zrpc/internal/config.go:15 的 Timeout 默认 true）"
+                        + "⇒ ⇒ 本域不得把它关掉。");
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // ③ 运行期：【没有入向 deadline】⇒ 出向仍必须带 ≤2000ms 上界（P2-T04 动作③）
+    // ────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @DisplayName("③ 【没有入向 deadline】⇒ 域类出向调用必须在 ≤2000ms 处 DEADLINE_EXCEEDED（真发调用）")
+    void outboundCallIsCappedWithoutInboundDeadline() throws Exception {
+        GoStyleRequestDeadline.clear();
+        UserRpcClient client = startHangingDownstream(domainProperties(null));
+
+        long startedAt = System.nanoTime();
+        StatusRuntimeException thrown = assertThrows(StatusRuntimeException.class,
+                () -> client.userRpc().getUser(GetUserReq.newBuilder().setUid(1L).build()),
+                "下游不响应时，user-api 必须靠【客户端硬上界】收口，而不是一直挂着");
+        long elapsedMillis = (System.nanoTime() - startedAt) / 1_000_000L;
+
+        assertEquals(Status.Code.DEADLINE_EXCEEDED, thrown.getStatus().getCode(),
+                "下游挂死 ⇒ 客户端 deadline 到点 ⇒ status 必须是 DEADLINE_EXCEEDED"
+                        + "（Go 侧 ctx 到期同样是 DeadlineExceeded）");
+        assertTrue(elapsedMillis >= MIN_EXPECTED_WAIT_MILLIS,
+                "必须是「等到 deadline 到期」而不是「立刻失败」，实际耗时 = " + elapsedMillis + "ms");
+        assertTrue(elapsedMillis <= GO_DEFAULT_CAP_MILLIS + SLACK_MILLIS,
+                "不应比 2s 客户端硬上界晚太多（说明上界没生效或被别的机制顶掉），实际耗时 = "
+                        + elapsedMillis + "ms");
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // ④ 运行期：env 覆盖【放宽】⇒ 上界【真的】跟着放宽（⇒ 抓「写死 2000 的私有副本」）
+    // ────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @DisplayName("④ env 把 cap 覆盖【到比 2000 更大】⇒ 出向上界必须跟着放宽 ⇒ 【证明域侧没有写死上界的私有副本】")
+    void envOverrideWidensTheOutboundCap() throws Exception {
+        GoStyleRequestDeadline.clear();
+        UserRpcClient client = startHangingDownstream(domainProperties(
+                Map.of(ENV_CAP, String.valueOf(OVERRIDE_CAP_MILLIS))));
+
+        long startedAt = System.nanoTime();
+        StatusRuntimeException thrown = assertThrows(StatusRuntimeException.class,
+                () -> client.userRpc().getUser(GetUserReq.newBuilder().setUid(1L).build()),
+                "下游不响应时必须靠【被 env 覆盖后的】客户端硬上界收口");
+        long elapsedMillis = (System.nanoTime() - startedAt) / 1_000_000L;
+
+        assertEquals(Status.Code.DEADLINE_EXCEEDED, thrown.getStatus().getCode(),
+                "失败码必须是 DEADLINE_EXCEEDED（= deadline 到点）");
+        assertTrue(elapsedMillis >= OVERRIDE_MIN_WAIT_MILLIS,
+                "🔴 env 把 cap 覆盖成 " + OVERRIDE_CAP_MILLIS + "ms ⇒ 出向必须在它附近收口"
+                        + "（实测耗时 = " + elapsedMillis + "ms）⇒ ⇒ 若这里只等到 "
+                        + GO_DEFAULT_CAP_MILLIS + "ms 左右，说明【本域又有人写了一份写死 "
+                        + GO_DEFAULT_CAP_MILLIS + "ms 的私有副本】"
+                        + "⇒ ⇒ min 只压小不压大 ⇒ ⇒ 那个副本会把【想放宽的上界】压回去"
+                        + "⇒ ⇒ 动作②「上界可 env 覆盖」在放宽方向上被架空。");
+        assertTrue(elapsedMillis <= OVERRIDE_CAP_MILLIS + SLACK_MILLIS,
+                "出向不应比被覆盖后的上界（" + OVERRIDE_CAP_MILLIS + "ms）晚太多，实际耗时 = "
+                        + elapsedMillis + "ms");
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────
+    // ⑤ 形态面：域侧【不得】再出现写死客户端上界的私有副本（单一来源）
+    // ────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("⑤ 本域 src/main/java 不得出现 withDeadlineAfter ⇒ 【域侧只配参数，不造第二份上界实现】")
+    void domainSideMustNotReintroduceAHardcodedOutboundCap() throws Exception {
+        Path mainJava = moduleRoot().resolve("src").resolve("main").resolve("java");
+        List<String> offenders = new ArrayList<>();
+
+        try (Stream<Path> walk = Files.walk(mainJava)) {
+            for (Path p : (Iterable<Path>) walk.filter(f -> f.toString().endsWith(".java"))::iterator) {
+                for (String raw : Files.readString(p, StandardCharsets.UTF_8).split("\\R")) {
+                    String line = raw.strip();
+                    // ⚠️ 只认【代码行】：javadoc / 行注释里提到 withDeadlineAfter 不算
+                    if (line.isEmpty() || line.startsWith("*") || line.startsWith("//") || line.startsWith("/*")) {
+                        continue;
+                    }
+                    if (line.contains("withDeadlineAfter")) {
+                        offenders.add(p.getFileName() + " :: " + line);
+                    }
+                }
+            }
+        }
+
+        assertTrue(offenders.isEmpty(),
+                "🔴 本域出现了写死出向 deadline 的代码：" + offenders
+                        + "⇒ ⇒ 出向【客户端硬上界】只有一个合法实现 = 共享层的"
+                        + " GoStyleOutboundDeadlineInterceptor（域侧只配 rag.protection.outbound-deadline.cap-millis）"
+                        + "⇒ ⇒ 域侧再写一份 ⇒ 就是【第二个来源】⇒ ⇒ 副本数 = 漂移面"
+                        + "⇒ ⇒ 参见共享层棘轮 GoStyleClientCallTimeoutSingleSourceGateTest。");
+    }
+
+    /** 反射塞入裸 stub（避开起真实 channel 的开销；本类只关心 deadline 口径）。 */
     private static void injectRawStub(UserRpcClient client, UserServiceGrpc.UserServiceBlockingStub raw) {
         try {
             var f = UserRpcClient.class.getDeclaredField("userServiceBlockingStub");
@@ -183,5 +295,121 @@ class UserRpcClientDeadlineCapTest {
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException("注入裸 stub 失败（测试自身的问题，不是被测物的问题）", e);
         }
+    }
+
+    // ================== 装置 ==================
+
+    /**
+     * 起一个<b>故意不响应</b>的 in-process 下游，把<b>生产拦截器</b>（共享层那个，域侧只配参数）
+     * 装到 channel 上 ⇒ ⇒ 返回一个「出向调用必然经过该拦截器」的域 client。
+     */
+    private UserRpcClient startHangingDownstream(GoStyleProtectionProperties props) throws Exception {
+        String serverName = InProcessServerBuilder.generateName();
+        server = InProcessServerBuilder.forName(serverName)
+                .addService(new UserServiceGrpc.UserServiceImplBase() {
+                    @Override
+                    public void getUser(GetUserReq request, StreamObserver<GetUserResp> responseObserver) {
+                        // ⚠️ 故意**挂起 HANG_MILLIS 才响应**（既不立即响应，也**不是永不响应**）
+                        // ⇒ 客户端在【客户端硬上界】处失败 ⇒ 这才是真正的触发点；
+                        // ⇒ 而「若没有上界」它会在 HANG_MILLIS 后**正常返回**
+                        // ⇒ ⇒ 判据能干净地分辨「有上界」与「没上界」，
+                        //    而不是靠 @Timeout 把「挂死」包装成「测试超时」。
+                        try {
+                            Thread.sleep(HANG_MILLIS);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                        responseObserver.onNext(GetUserResp.newBuilder().build());
+                        responseObserver.onCompleted();
+                    }
+                })
+                .build()
+                .start();
+        channel = InProcessChannelBuilder.forName(serverName).build();
+
+        // ⚠️ 与 devh 的装配动作同一条：devh 的 AbstractChannelFactory.createChannel
+        //    最后一行是 ClientInterceptors.interceptForward(channel, interceptors)
+        //    ⇒ ⇒ 这里用 intercept(...) 装【生产拦截器】，与生产走同一条路。
+        Channel capped = ClientInterceptors.intercept(channel,
+                new GoStyleOutboundDeadlineInterceptor(props));
+
+        UserRpcClient client = new UserRpcClient(mock(GrpcChannelsProperties.class));
+        injectRawStub(client, UserServiceGrpc.newBlockingStub(capped));
+        return client;
+    }
+
+    /**
+     * 用本域<b>自己的</b> {@code application.yml} 绑出 {@link GoStyleProtectionProperties}。
+     *
+     * @param envOverrides 模拟的 OS 环境变量（{@code null} ＝ 不覆盖）
+     */
+    private static GoStyleProtectionProperties domainProperties(Map<String, Object> envOverrides) {
+        ConfigurableEnvironment env = new StandardEnvironment();
+        YamlPropertySourceLoader loader = new YamlPropertySourceLoader();
+        try {
+            for (PropertySource<?> ps : loader.load("domain-application-yml",
+                    new ClassPathResource("application.yml"))) {
+                env.getPropertySources().addLast(ps);
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("读不到本域的 application.yml（classpath:/application.yml）", e);
+        }
+        if (envOverrides != null && !envOverrides.isEmpty()) {
+            // ⚠️ addFirst ⇒ 模拟 OS 环境变量的优先级（env 高于 yml）
+            env.getPropertySources().addFirst(new MapPropertySource("simulated-os-env", envOverrides));
+        }
+        ConfigurationPropertySources.attach(env);
+        Binder binder = new Binder(ConfigurationPropertySources.get(env),
+                new PropertySourcesPlaceholdersResolver(env));
+        return binder.bind("rag.protection", GoStyleProtectionProperties.class)
+                .orElseGet(GoStyleProtectionProperties::new);
+    }
+
+    /** 本域 {@code application.yml} 里某个键的<b>未解析</b>原值（占位符仍在）。 */
+    private static String rawYamlValue(String key) {
+        try {
+            List<PropertySource<?>> sources = new YamlPropertySourceLoader()
+                    .load("domain-application-yml", new ClassPathResource("application.yml"));
+            for (PropertySource<?> ps : sources) {
+                Object v = ps.getProperty(key);
+                if (v != null) {
+                    return String.valueOf(v);
+                }
+            }
+        } catch (IOException e) {
+            throw new IllegalStateException("读不到本域的 application.yml（classpath:/application.yml）", e);
+        }
+        return null;
+    }
+
+    /**
+     * 定位本模块的源码根（含 {@code src/main/java}）。
+     *
+     * <p>⚠️ <b>不依赖 surefire 的工作目录</b>：先从本类的 code source 反推模块目录
+     * （{@code target/test-classes} → {@code target} → 模块目录）⇒ ⇒ 再用 {@code user.dir} 逐级上溯兜底。
+     */
+    private static Path moduleRoot() {
+        try {
+            Path loc = Path.of(UserRpcClientDeadlineCapTest.class.getProtectionDomain()
+                    .getCodeSource().getLocation().toURI());
+            Path p = Files.isDirectory(loc) ? loc : loc.getParent();
+            if (p != null && "target".equals(p.getFileName().toString())) {
+                p = p.getParent();
+            }
+            if (p != null && Files.isDirectory(p.resolve("src").resolve("main").resolve("java"))) {
+                return p;
+            }
+        } catch (Exception ignored) {
+            // 落到下面的兜底
+        }
+        Path cur = Path.of("").toAbsolutePath();
+        for (int up = 0; up < 6 && cur != null; up++) {
+            if (Files.isDirectory(cur.resolve("src").resolve("main").resolve("java"))) {
+                return cur;
+            }
+            cur = cur.getParent();
+        }
+        throw new IllegalStateException("定位不到本模块的源码根（src/main/java）"
+                + "⇒ ⇒ 第 ⑤ 条判据失效（判据自己的问题，不是被测物的问题）");
     }
 }

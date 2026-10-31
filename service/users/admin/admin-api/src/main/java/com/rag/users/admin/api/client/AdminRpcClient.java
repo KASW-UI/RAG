@@ -183,14 +183,27 @@ public class AdminRpcClient implements InitializingBean {
      * —— {@code context.WithTimeout(ctx, t)} ⇒ <b>取更早者</b>
      * ⇒ ⇒ <b>Go 的出向 deadline = min(入站 ctx 剩余, 2s 客户端超时)</b>。
      *
-     * <p><b>语义等价论证</b>：{@link com.rag.common.observability.GoStyleRequestDeadline#applyTo}
-     * 负责「入站剩余」（无入站预算时原样返回 ⇒ 剩 {@link Long#MAX_VALUE}），
-     * {@link #capByClientTimeout} 负责「2s 上界」⇒ 取更早者
+     * <p><b>语义等价论证</b>：Go 的 min 语义现在由<b>共享层</b>一次性做出来 ——
+     * {@code service/common/src/main/java/com/rag/common/protection/GoStyleOutboundDeadlineInterceptor}
+     * 的 {@code effectiveCallOptions} 对「入站剩余 / 客户端硬上界 / 调用点自带」<b>三项取 min</b>
      * ⇒ <b>与 Go 的 {@code context.WithTimeout(ctx, 2s)} 逐字同形</b>。
      *
-     * <p><b>为什么 RAG 侧必须自己补这一层</b>：Go 的 2s 客户端超时是
+     * <p><b>🔴 2026-10-31（P2-T04 · G1 lane）：本类<b>不再</b>自己套客户端上界</b> ——
+     * 上界由共享层的 {@code GoStyleOutboundDeadlineInterceptor} <b>唯一</b>承担
+     * （{@code @GrpcGlobalClientInterceptor} ⇒ 装在<b>每个</b>出向 devh 调用上 ⇒ 与调用点无关），
+     * 本域只配参数 {@code rag.protection.outbound-deadline.cap-millis=2000}
+     * （{@code service/users/admin/admin-api/src/main/resources/application.yml} 的 {@code rag.protection} 段）
+     * ⇒ ⇒ <b>为什么必须删掉域侧私有副本</b>：副本把上界<b>写死</b>在 {@code CallOptions} 里，
+     * 共享层再对它取 min ⇒ ⇒ <b>min 只压小、不压大</b>
+     * ⇒ ⇒ <b>「想放宽上界」会被副本压回 2000ms</b>（{@code ADMIN_API_OUTBOUND_DEADLINE_CAP_MILLIS} 配得比 2000 大也不生效）
+     * ⇒ ⇒ 动作②「上界可 env 覆盖」在<b>放宽方向</b>上被架空 ⇒ ⇒ 副本必删（棘轮
+     * {@code GoStyleClientCallTimeoutSingleSourceGateTest}：域侧<b>只配参数</b>）。
+     * ⇒ ⇒ <b>本常量仍在</b>：它现在是<b>断言用的期望值</b>（真实值由上面的 yml 持有），守门
+     * {@code AdminRpcClientDeadlineCapTest} 核对「yml 绑出的值 == 本常量 == 2000」。
+     *
+     * <p><b>为什么 RAG 侧需要这一层</b>：Go 的 2s 客户端超时是
      * <b>go-zero client interceptor 级</b>的（框架自带）；RAG 侧 {@code devh} 注入的
-     * <b>裸 stub 没有 call deadline</b> ⇒ 下游挂死时请求一路顶到 HTTP 超时分支
+     * stub 若无上界 ⇒ 下游挂死时请求一路顶到 HTTP 超时分支
      * ⇒ 对外 <b>503 {@code Request Timeout}</b>；Go 侧则是
      * <b>HTTP 200 + {@code {"code":1015,"msg":"服务繁忙"}}</b>
      * ⇒ ⇒ <b>可观察差异</b>（状态码 + 响应体 + 时刻三者都不同）。
@@ -205,38 +218,21 @@ public class AdminRpcClient implements InitializingBean {
      * {@code service/common/observability/http.go:30-34} ＋ {@code :53-56}）⇒ 200 + 1015；
      * RAG 修前<b>无客户端收口</b> ⇒ 只能等 3s HTTP 预算 ⇒ 503
      * ⇒ ⇒ <b>形态②才是本条要修的可观察差异</b>。
-     * ⇒ 同款修法在 follow 域已落地（{@code service/follow/follow-api/.../FollowRpcClient.java:231}）
-     * ⇒ 本处照该形状落地。
      */
     public static final long CLIENT_TIMEOUT_MILLIS = 2000L;
 
     /**
-     * 取出出向 admin-rpc 的 stub —— <b>每次调用都重新套一次 deadline</b>。
+     * 取出出向 admin-rpc 的 stub —— <b>每次调用都重新套一次入站预算</b>。
      *
      * <p>⚠️ <b>不要缓存返回的 stub</b>：deadline 按<b>调用时刻</b>算
      * ⇒ 缓存会把「第一次调用时的预算」固化下来。
+     *
+     * <p>🔴 <b>2026-10-31（P2-T04）：此处<b>不再</b>套「2s 客户端上界」</b> ——
+     * 上界由共享层的出向 deadline 拦截器在 <b>channel 层</b>承担
+     * （{@code @GrpcGlobalClientInterceptor} ⇒ 与调用点无关 ⇒ 凡是本 channel 上的
+     * stub 都带 ≤2000ms 上界）⇒ ⇒ 本方法只保留「入站预算」这一维。
      */
     public AdminServiceGrpc.AdminServiceBlockingStub adminRpc() {
-        return capByClientTimeout(
-                com.rag.common.observability.GoStyleRequestDeadline.applyTo(adminServiceBlockingStub));
-    }
-
-    /**
-     * 把 deadline 压到「入站 ctx 预算」与「Go 侧 2s 客户端超时」里的<b>较小者</b>。
-     *
-     * <p>包可见 ⇒ 供本包的守门测试直接验证 min 语义（AGENTS.md §3.3.3）。
-     */
-    static AdminServiceGrpc.AdminServiceBlockingStub capByClientTimeout(
-            AdminServiceGrpc.AdminServiceBlockingStub stub) {
-        io.grpc.Deadline deadline = stub.getCallOptions().getDeadline();
-        long remainingNanos = deadline == null
-                ? Long.MAX_VALUE
-                : deadline.timeRemaining(java.util.concurrent.TimeUnit.NANOSECONDS);
-        long capNanos = java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(CLIENT_TIMEOUT_MILLIS);
-        if (remainingNanos <= 0L) {
-            return stub.withDeadlineAfter(1L, java.util.concurrent.TimeUnit.NANOSECONDS);
-        }
-        return stub.withDeadlineAfter(Math.min(remainingNanos, capNanos),
-                java.util.concurrent.TimeUnit.NANOSECONDS);
+        return com.rag.common.observability.GoStyleRequestDeadline.applyTo(adminServiceBlockingStub);
     }
 }

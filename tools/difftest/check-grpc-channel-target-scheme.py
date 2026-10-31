@@ -121,53 +121,6 @@ FIX_HINT = (
 #    ⇒ 它同时是「匹配键」与「人类可读的豁免对象」
 # ⚠️ 修好一处就删一条 ⇒ 否则触发 `E2`（例外已失效）
 EXCEPTIONS: dict[str, list[tuple[str, str]]] = {
-    "service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/"
-    "AdminRpcLogoutClientVisibleGrpcStatusTest.java": [
-        (
-            '.forAddress("127.0.0.1", GRPC_PORT)',
-            "users 域（G1 写权面）⇒ 🔴 **活雷**：该 channel **真发 RPC**"
-            " ⇒ ⇒ 同 JVM 里跑过任意 `@SpringBootTest` 之后 ⇒ ⇒ 被 discovery resolver 接管"
-            " ⇒ ⇒ `UNAVAILABLE` ⇒ ⇒ 待 G1 落码后删本条。",
-        ),
-    ],
-    "service/users/admin/admin-rpc/src/test/java/com/rag/users/admin/rpc/"
-    "AdminRpcLogoutClientVisibleGrpcStatusDefaultBehaviorTest.java": [
-        (
-            '.forAddress("127.0.0.1", GRPC_PORT)',
-            "users 域（G1 写权面）⇒ 🔴 **活雷**：该 channel **真发 RPC**"
-            " ⇒ ⇒ 同 JVM 里跑过任意 `@SpringBootTest` 之后 ⇒ ⇒ 被 discovery resolver 接管"
-            " ⇒ ⇒ `UNAVAILABLE` ⇒ ⇒ 待 G1 落码后删本条。",
-        ),
-    ],
-    "service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/"
-    "UserRpcLogoutClientVisibleGrpcStatusTest.java": [
-        (
-            '.forAddress("127.0.0.1", GRPC_PORT)',
-            "users 域（G1 写权面）⇒ 🔴 **活雷**：该 channel **真发 RPC**"
-            " ⇒ ⇒ 同 JVM 里跑过任意 `@SpringBootTest` 之后 ⇒ ⇒ 被 discovery resolver 接管"
-            " ⇒ ⇒ `UNAVAILABLE` ⇒ ⇒ 待 G1 落码后删本条。",
-        ),
-    ],
-    "service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/"
-    "UserRpcLogoutClientVisibleGrpcStatusDefaultBehaviorTest.java": [
-        (
-            '.forAddress("127.0.0.1", GRPC_PORT)',
-            "users 域（G1 写权面）⇒ 🔴 **活雷**：该 channel **真发 RPC**"
-            " ⇒ ⇒ 同 JVM 里跑过任意 `@SpringBootTest` 之后 ⇒ ⇒ 被 discovery resolver 接管"
-            " ⇒ ⇒ `UNAVAILABLE` ⇒ ⇒ 待 G1 落码后删本条。",
-        ),
-    ],
-    "service/users/user/user-api/src/test/java/com/rag/users/user/api/"
-    "UserApiGrpcNegotiationTest.java": [
-        (
-            '.forAddress("127.0.0.1", PORT)',
-            "users 域（G1 写权面）⇒ 🔴 **活雷**：该 channel **真发 RPC**"
-            " ⇒ ⇒ 同 JVM 里跑过任意 `@SpringBootTest` 之后 ⇒ ⇒ 被 discovery resolver 接管"
-            " ⇒ ⇒ `UNAVAILABLE` ⇒ ⇒ 待 G1 落码后删本条。"
-            "⚠️ 此处是 **`NettyChannelBuilder.forAddress`**（不是 `ManagedChannelBuilder`）"
-            " ⇒ ⇒ 同一形态的另一个入口 ⇒ ⇒ 守门按**标记**判（不看接收者）⇒ ⇒ 抓得到。",
-        ),
-    ],
 }
 
 
