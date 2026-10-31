@@ -7349,3 +7349,90 @@ G3 工作树同理（**14 个文件 modified**）⇒ ⇒ **主干上那 7 个点
    ⇒ ⇒ G2 那句「该门自己报出来的」在本层是**转述**，本层只复现了「**点位消失**」这半边。
 
 （**本节编号：§4.19.37** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
+
+### §4.19.38 · 第三十四次订正轮次（2026-10-31 · G4 lane）—— **「共享层缺 per-direction cap」的**需求面收窄**（16 个有出向组件逐个实测 ⇒ 只剩 **1 个**组件需要）＋ yaml 同名不同义的坑 ＋ 派工面 P2-T04 的形态缺口
+
+**一、本轮起因**
+
+G1 回执确认本层 §4.19.36 的两条销账正确（判据② 已改判据②、变异证据已补）；
+G3 那笔 `52e0497d`（「客户端硬上界取值按 Go 的 **per-client 语义**复核（**维持 2000**）＋ 死配置标注」）⇒ ⇒
+本层据此把**下一轮 G4 任务**（共享层 per-direction / per-client cap）的**需求面**做一次实测收窄。
+
+**二、16 个有出向组件的出向方向数（本层实测：代码态 `@GrpcClient` 注入点 · 剥注释与字符串）**
+
+⇒ ⇒ **5 个多方向**：`article-api`（article-rpc ＋ user-rpc）· `comment-rpc`（article-rpc ＋ message-rpc）·
+`favorite-rpc`（article-rpc ＋ user-rpc）· `hot-api`（article-rpc ＋ hot-rpc）· `message-rpc`（admin-rpc ＋ user-rpc）
+⇒ ⇒ **其余 11 个有出向组件均 1 个方向**（⇒ ⇒ 与 G1 回执第六节「本域每个组件只有 1 个出向方向」**一致** ✔）。
+
+**三、5 个多方向组件的 Go 侧各方向真值（本层逐段读原始 yaml · 不采信转述）**
+
+| 组件 | Go yaml | 各方向段 | 该段 `Timeout` | 真值 |
+|---|---|---|---|---|
+| **article-api** | `service/article/api/etc/article-api.yaml` | `ArticleRpcConf:` | **70000（显式）** | **70000** |
+| | | `UserRpcConf:` | 无 | **2000**（默认） |
+| comment-rpc | `service/comment/rpc/etc/comment.yaml` | `ArticleRpc:` / `MessageRpc:` | 皆无 | 2000 / 2000 |
+| favorite-rpc | `service/favorite/rpc/etc/favorite.yaml` | `ArticleRpc:` / `UserRpc:` | 皆无 | 2000 / 2000 |
+| hot-api | `service/hot/api/etc/hotcenter.yaml` | `ArticleRpcConf:` / `HotRpcConf:` | 皆无 | 2000 / 2000 |
+| message-rpc | `service/message/rpc/etc/message.yaml` | `AdminRpc:` / `UserRpc:` | 皆无 | 2000 / 2000 |
+
+⇒ ⇒ **只有 `article-api` 的两个活方向真值不同** ⇒ ⇒ **组件级 cap 只在 `article-api` 这一处表达不了**
+⇒ ⇒ **其余 4 个多方向组件的组件级 cap 完全表达得了** ⇒ ⇒ ⇒ **「per-direction 是全仓通用需求」的判断**在本层被**收窄**。
+
+**四、⚠️ 一个必须写死的坑：Go yaml 里「同名不同义」的 `Timeout`**
+
+⚠️ `article-api.yaml` 的**顶层 `Timeout: 70000`**（**服务端**方法超时，挨着 `ListenOn`）
+**与** `ArticleRpcConf.Timeout: 70000`（**客户端**上界）**同值但完全不是一件事**；
+而 `article/rpc/etc/article.yaml` 的顶层 `Timeout: 70000` **也是服务端方法超时**（**不是**客户端值）。
+⇒ ⇒ ⇒ **本层本轮一开始把这两个 `70000` 混读过一次**（差点误判 G3 的「维持 2000」与 Go 的 70000 冲突）
+⇒ ⇒ ⇒ **读 yaml 必须按段判** ⇒ ⇒ **「同名同值」≠「同一件事」** ⇒ ⇒ **这是派工面与台账都要防的读法坑**。
+
+**五、G3 的「维持 2000」经本层独立复核 = 成立**（本层原本担心的冲突**不成立**）
+
+- `article-rpc` 的两个客户端：`MessageRpcClient` = `@GrpcClient("message-rpc")`（**活**）；
+  `SecurityRpcClient` / `ImageSecurityRpcClient` = **注释掉的骨架占位**
+  （`// [骨架占位 · 未实现] @GrpcClient("security-…")`）⇒ ⇒ **全仓零真实调用**
+  ⇒ ⇒ 实际生效的是骨架 `UnavailableContentSecurityClient` ⇒ ⇒ **该方向当前不可观测**
+  ⇒ ⇒ ⇒ G3 的「**取 2000（可观察行为优先：活路径精确 > 死路径潜在偏差）**」**正确** ✔
+- ⇒ ⇒ ⚠️ 派工面 P2-T04 ⑤ 里那句「**那个出向调用点配 2000 = 比 Go 严 5 倍**」**偏严**
+  ⇒ ⇒ 该偏差**当前不可观测**（不是活路径上的可观察漂移）。
+
+**六、⇒ ⇒ 需求面收窄的结论（本节最重要的一条）**
+
+| 组件 | **活**方向 | 各方向 Go 真值 | 组件级 cap 表达得了？ |
+|---|---|---|---|
+| **article-api** | **2**（article-rpc · user-rpc） | **70000 · 2000** | ❌ **表达不了 ⇒ per-client 必需** |
+| article-rpc | **1**（message-rpc）〔security 是骨架占位〕 | 2000 | ✅（security 方向**当前不可观测** ⇒ 机制一做可一并精确） |
+| comment-rpc / favorite-rpc / hot-api / message-rpc | 各 2 | **全部 2000** | ✅ **表达得了** |
+| 其余 11 个单方向组件 | 各 1 | 2000 | ✅ |
+
+⇒ ⇒ ⇒ **per-client cap 的需求面 = 1 个组件（`article-api`）、2 个活方向** ⇒ ⇒ ⇒ **其余 15 个组件零影响**
+⇒ ⇒ ⇒ ⇒ **⇒ 机制形态可以做得极小**：`rag.protection.outbound-deadline.cap-millis`（**组件级单值，保持不变**）
+＋ **新增一层「按 client 名覆盖」**（默认值仍取组件级值）⇒ ⇒ **只需覆盖 `article-api` 一个配置点**。
+
+**七、⚠️ 为什么不能走「`article-api` 域侧内联 70000 ＋ 共享层把它列为合法例外」这条路**
+
+⇒ ⇒ 共享层棘轮判据④ **明令禁**「域侧自带 cap」⇒ ⇒ ⇒ 走那条路 = **放松棘轮 = 棘轮由紧变松**
+⇒ ⇒ ⇒ **不可接受** ⇒ ⇒ ⇒ **⇒ 必须做机制**（这也与合并收口执行者 §4.19.34 的结论一致）。
+
+**八、⚠️ 派工面 P2-T04 的一处形态缺口（只有共享层能看见 ⇒ ⇒ 已回执派工面 owner）**
+
+`docs/RoundPlan/round-02/README.md` P2-T04 ⑤ 写「**必须逐域配**（取值 = **该域 Go yaml 的显式值**；该域 yaml 未显式配置时才用 2000）」
+⇒ ⇒ ⚠️ **在 `article-api` 这一域上，「该域 Go yaml 的显式值」是二值的**（`ArticleRpcConf` = 70000 ＋ `UserRpcConf` = 无 ⇒ 2000）
+⇒ ⇒ ⇒ **「逐域」这一形态在 `article-api` 上不可执行** ⇒ ⇒ ⇒ **需升级为「按 client 取值」**（形态与落点见 §六）
+⇒ ⇒ ⚠️ 另：⑤ 里「**那个出向调用点配 2000 = 比 Go 严 5 倍**」**偏严**（见 §五 ⇒ 该方向当前不可观测）。
+⇒ ⇒ ⇒ **本层未改派工面**（⚠️ 那是**派工面 owner** 的面，且刚被合并收口执行者改过 ⇒ ⇒ 并发写风险 ⇒ ⇒ **只登记 ＋ 回执**）。
+
+**九、本轮落码范围**
+
+- `docs/DRIFT/global/vs-common.md` —— 末尾追加本节（**零代码改动**）。
+
+**十、本轮的诚实边界（三条）**
+
+1. 本轮**零代码改动**（只改台账）⇒ ⇒ 不需要新批准 ⇒ ⇒ 不需要升级为全量回归波。
+2. 证据强度 = **L1（源码级逐行对照 ＋ yaml 逐段读 ＋ 跨树 grep）** ⇒ ⇒ **不是活体对拍**
+   ⇒ ⇒ ⚠️ Go 的 `Timeout` **只在 `> 0` 时生效**（`zrpc/client.go:70-71`）⇒ ⇒ 「未显式 ⇒ 2000」依赖 go-zero 的
+   `default:"2000"`（`zrpc/config.go:31`）⇒ ⇒ **本层未在 Go 侧实跑**（沿用主干既有实测）。
+3. ⚠️ **「活方向」的口径 = 代码态 `@GrpcClient` 注入点** ⇒ ⇒ **不含注释掉的骨架占位**
+   ⇒ ⇒ ⇒ 与 G3 的「两个出向客户端」口径**不同**（G3 含骨架）⇒ ⇒ **两个数都对，口径不同** ⇒ ⇒ 本节表格里两个口径都标了。
+
+（**本节编号：§4.19.38** —— 为便于上文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 标题保持无编号 token ⇒ ⇒ 不触发派生层的「标题劫持」。）
