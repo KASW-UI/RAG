@@ -1,0 +1,45 @@
+---
+# =============================================================================
+# ci/tasks/contract-schema.yml —— R6 数据库 Schema 契约一致性
+#
+# 【形态】与 maven-test 同形态（DinD：起内层 dockerd → 在内层容器里跑）
+#   ⚠️ 内层镜像用 `python:3.12-bookworm`（**不是** maven 镜像）：
+#     R6 只需要 python3 + Docker API（over unix socket）+ PG 镜像
+#     ⇒ **不需要 Maven / JDK** ⇒ 镜像更小、起步更快。
+#
+# 【为什么独立成一条流水线，而不是塞进 11 条日常流水线】
+#   R6 每个域要起一个 PG 容器 + 重放 Flyway 迁移 + 逐列/索引/约束对拍
+#   ⇒ 分钟级 × 9 域 ⇒ 无条件塞进日常流水线不可接受（任务书 §九.11）。
+#
+# 【不需要什么】
+#   ❌ Go 工具链　❌ Go 仓在线可访问　❌ go 命令　❌ Maven
+#
+# 【退出码】0=PASS / 1=FAIL(契约漂移) / 2=BLOCKED(环境不满足) / 3=NOT_RUN(本域 N/A)
+#   ⚠️ BLOCKED / NOT_RUN 一律不得计入 PASS（ci/contracts/README.md 第四节）。
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: ((registry))/library/docker
+    tag: 27-dind
+
+inputs:
+- name: repo
+
+outputs:
+- name: repo
+  path: repo
+
+params:
+  # 内层容器镜像（R6 只需要 python3 ⇒ 用 python 镜像，不带 Maven/JDK）
+  IMAGE: ((registry))/library/python:3.12-bookworm
+  REGISTRY: ((registry))
+  MAVEN_MIRROR_URL: ((maven_mirror))
+  # 交给 ci/scripts/dind-run.sh 的阶段名
+  STAGE: contract-schema
+
+run:
+  path: sh
+  args:
+  - repo/ci/scripts/dind-run.sh

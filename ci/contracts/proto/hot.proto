@@ -1,0 +1,55 @@
+# 来源：Go 真源 proto/hot.proto（hot.proto:3）
+# 契约基准版本：proto-contract/v1（2026-10-31）
+# 裁定依据：docs/DRIFT/hot/proto.md · docs/DRIFT/_cross/proto-verification.md
+# 说明：本文件是 R4 契约基准，CI 直接读取；改它 = 改契约，需 PR 审查。
+#   ↳ Go 侧 package 行原文：package hot;
+
+syntax = "proto3";
+package hot;
+message GetHotArticlesRequest{
+int32 top_k = 1;
+}
+message HotArticleItem{
+string article_id = 1;
+uint32 hot_score = 2;
+}
+message GetHotArticlesResponse{
+repeated HotArticleItem items = 1;
+}
+message LikeArticleRequest{
+string article_id = 1;
+string user_id = 2;
+}
+message LikeArticleResponse{
+bool success = 1;
+}
+message CommentArticleRequest{
+string article_id = 1;
+string user_id = 2;
+}
+message CommentArticleResponse{
+bool success = 1;
+}
+message CoinArticleRequest{
+string article_id = 1;
+string user_id = 2;
+int32 coin_count = 3;
+}
+message CoinArticleResponse{
+bool success = 1;
+}
+message ShareArticleRequest{
+string article_id = 1;
+string user_id = 2;
+string channel = 3;
+}
+message ShareArticleResponse{
+bool success = 1;
+}
+service HotService{
+rpc GetHotArticles(GetHotArticlesRequest) returns (GetHotArticlesResponse);
+rpc LikeArticle(LikeArticleRequest) returns (LikeArticleResponse);
+rpc CommentArticle(CommentArticleRequest) returns (CommentArticleResponse);
+rpc CoinArticle(CoinArticleRequest) returns (CoinArticleResponse);
+rpc ShareArticle(ShareArticleRequest) returns (ShareArticleResponse);
+}

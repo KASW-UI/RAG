@@ -1,0 +1,87 @@
+# 来源：Go 真源 proto/favorite.proto（favorite.proto:3）
+# 契约基准版本：proto-contract/v1（2026-10-31）
+# 裁定依据：docs/DRIFT/favorite/proto.md · docs/DRIFT/_cross/proto-verification.md
+# 说明：本文件是 R4 契约基准，CI 直接读取；改它 = 改契约，需 PR 审查。
+#   ↳ Go 侧 package 行原文：package favorite;
+
+syntax = "proto3";
+package favorite;
+message FavoriteFolder{
+int64 folder_id = 1;
+int64 user_id = 2;
+string name = 3;
+int64 created_at = 4;
+int64 updated_at = 5;
+}
+message FavoriteItem{
+int64 favorite_id = 1;
+int64 folder_id = 2;
+int64 user_id = 3;
+string target_id = 4;
+string target_type = 5;
+string title = 6;
+string cover = 7;
+int64 created_at = 8;
+}
+message CreateFavoriteFolderReq{
+int64 user_id = 1;
+string name = 2;
+}
+message CreateFavoriteFolderResp{
+int64 folder_id = 1;
+}
+message CreateFavoriteReq{
+int64 user_id = 1;
+int64 folder_id = 2;
+string target_id = 3;
+string target_type = 4;
+string title = 5;
+string cover = 6;
+}
+message CreateFavoriteResp{
+int64 favorite_id = 1;
+}
+message DeleteFavoriteFolderReq{
+int64 user_id = 1;
+int64 folder_id = 2;
+}
+message DeleteFavoriteFolderResp{
+bool success = 1;
+}
+message DeleteFavoriteReq{
+int64 user_id = 1;
+int64 favorite_id = 2;
+}
+message DeleteFavoriteResp{
+bool success = 1;
+}
+message UpdateFavoriteFolderNameReq{
+int64 user_id = 1;
+int64 folder_id = 2;
+string name = 3;
+}
+message UpdateFavoriteFolderNameResp{
+bool success = 1;
+}
+message GetFavoriteFoldersReq{
+int64 user_id = 1;
+}
+message GetFavoriteFoldersResp{
+repeated FavoriteFolder folders = 1;
+}
+message GetFavoritesByFolderReq{
+int64 user_id = 1;
+int64 folder_id = 2;
+}
+message GetFavoritesByFolderResp{
+repeated FavoriteItem favorites = 1;
+}
+service FavoriteService{
+rpc CreateFavoriteFolder(CreateFavoriteFolderReq) returns (CreateFavoriteFolderResp);
+rpc CreateFavorite(CreateFavoriteReq) returns (CreateFavoriteResp);
+rpc DeleteFavoriteFolder(DeleteFavoriteFolderReq) returns (DeleteFavoriteFolderResp);
+rpc DeleteFavorite(DeleteFavoriteReq) returns (DeleteFavoriteResp);
+rpc UpdateFavoriteFolderName(UpdateFavoriteFolderNameReq) returns (UpdateFavoriteFolderNameResp);
+rpc GetFavoriteFolders(GetFavoriteFoldersReq) returns (GetFavoriteFoldersResp);
+rpc GetFavoritesByFolder(GetFavoritesByFolderReq) returns (GetFavoritesByFolderResp);
+}

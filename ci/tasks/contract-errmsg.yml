@@ -1,0 +1,51 @@
+---
+# =============================================================================
+# ci/tasks/contract-errmsg.yml —— R5 错误码契约一致性
+#
+# 【形态】与 maven-test 同形态（DinD：起内层 dockerd → 在内层 maven 容器里跑）
+#   ⇒ 复用同一份 ~/.m2 缓存、同一份 Maven 镜像源 settings.xml、同一套镜像源机制
+#   ⇒ **不新增任何 CI 机制**，只是多一个 STAGE。
+#
+# 【为什么独立成一条流水线，而不是塞进 11 条日常流水线】
+#   R5 要编译 9 个域的 `<域>-common` 并各跑一次 Java 半边探针（分钟级）
+#   ⇒ 无条件塞进 11 条日常流水线不可接受（任务书 §九.11）。
+#
+# 【不需要什么】
+#   ❌ Go 工具链　❌ Go 仓在线可访问　❌ go 命令
+#   ❌ 数据库 / Redis / Kafka（错误码契约与活体依赖无关）
+#
+# 【退出码】0=PASS / 1=FAIL(契约漂移) / 2=BLOCKED(环境不满足)
+#   ⚠️ BLOCKED 不得计入 PASS（ci/contracts/README.md 第四节）。
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: ((registry))/library/docker
+    tag: 27-dind
+
+inputs:
+- name: repo
+
+outputs:
+- name: repo
+  path: repo
+
+caches:
+- path: .m2
+  key: m2-repo-v1
+
+params:
+  # 内层构建容器镜像（与 maven-build / maven-test 同一款 ⇒ 缓存可共用）
+  IMAGE: ((registry))/library/maven:3.9.11-eclipse-temurin-21
+  REGISTRY: ((registry))
+  MAVEN_MIRROR_URL: ((maven_mirror))
+  # 交给 ci/scripts/dind-run.sh 的阶段名
+  STAGE: contract-errmsg
+  # 目标域列表（留空 = 全部 9 个域）
+  ERRSMSG_DOMAINS: ''
+
+run:
+  path: sh
+  args:
+  - repo/ci/scripts/dind-run.sh

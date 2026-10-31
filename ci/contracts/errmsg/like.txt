@@ -1,0 +1,141 @@
+# ============================================================================
+# ci/contracts/errmsg/like.txt —— R5 错误码契约基准（like 域）· **Go 真源派生**
+#
+# 【这是什么】
+#   R5 错误码契约的**机器可读基准**。CI 用 `ci/scripts/check-errmsg-contract.sh`
+#   跑 **Java 半边探针**（tools/errmsg-probe/like/java/Probe.java）⇒ 把产物当作**被测对象**，
+#   与本文件的 **Go 权威段**做**双向**比对。
+#
+# 【权威性来源 = Go 真源（只读 · 冻结）】
+#   Go 真源：Sea-RideTheWind_golang/service/like/common/errmsg/errmsg.go
+#     · const 块 :37-67 · codeMsg 表 :69-99 · GetErrMsg :101-107
+#     · sha256 = d76ba95cc5767002b7781aab52ac88be2d07bf905c08a8fe54c0a1e334e3f8d1
+#   Java 被测：service/like/like-common/src/main/java/com/rag/like/like/common/errmsg/{LikeErrorCode,LikeErrorMessages,LikeGrpcError}.java
+#
+# 【提取方式（离线 · 一次性 · 可复算）】
+#   `python3 ci/scripts/extract-errmsg-authority.py --emit like` ⇒ 本文件的 go-authority 段
+#   独立复算：`python3 ci/scripts/extract-errmsg-authority.py --check`（逐字节比对 ⇒ 证明基准确实来自 Go）
+#   ⚠️ CI **不拉 Go 仓、不装 Go 工具链、不跑 Go 探针** ⇒ 权威值固化在本目录。
+#
+# 【两段式结构】
+#   # >>> go-authority >>>  —— **Go 侧权威值**（CI 的真值来源）
+#       `GOCONST|<code>|<Go 常量名>`（const 块全部常量）· `GOTABLE|<code>|<文案>`（codeMsg 表全部条目）· `GOFALLBACK|<文案>`（GetErrMsg 对未知码的回落 = codeMsg[Error]）
+#   # >>> deviations >>>   —— **逐条差异裁定**（Go↔Java 的每一条差异都在这里落笔）
+#       DEVIATION|<段>|<键>|<go值>|<java值>|<status>|<依据id>|<依据出处>|<理由>
+#       status ∈ approved | closed | technical | pending
+#
+# 【四类差异状态】
+#   approved  —— 已签字（依据 id 必能在 `docs/Intentional_Deviations/` 里查到）
+#   closed    —— 已销号/证伪关闭（依据 id 必能在 `docs/DRIFT/` 里查到）
+#   technical —— 技术判定（Go 侧该形态**不可达** / 两个运行时的**结构性差异**）
+#               ⇒ 依据出处必须给出 Go 侧 `文件:行号`
+#   pending   —— **未经批准、需用户拍板** ⇒ **不判 FAIL**，但逐条显式报出，
+#               且**该域不得计入 PASS**（门以退出码 3 收口）
+#
+# 【本域差异台账】 approved=29 · closed=0 · technical=3 · pending=5（共 37 条）
+#
+#   ⚠️ like 域的 `WIRECODE` 段是本域**独有的**「wire 载体形态」层（Go 把业务码写进 grpc-status，Java 只能放进自定义 trailer）⇒ 这 29 条**全部**是已签字差异。
+#
+# 【基准版本】v2 · 2026-10-31（v1 = Java dump 快照；**v2 起权威内容改为 Go 派生**）
+# 【格式】`#` 开头的是注释（不参与比对）；正文按 `# >>> <段> >>>` 切分。
+# ============================================================================
+
+# >>> go-authority >>>
+GOCONST|200|Success
+GOCONST|500|Error
+GOCONST|1001|ErrorUserExist
+GOCONST|1002|ErrorLoginWrong
+GOCONST|1003|ErrorUserNotExist
+GOCONST|1004|ErrorTokenNotExist
+GOCONST|1005|ErrorTokenTypeWrong
+GOCONST|1006|ErrorTokenRuntime
+GOCONST|1007|ErrorTokenRefresh
+GOCONST|1008|ErrorUserNoRight
+GOCONST|1009|ErrorUserNoLogin
+GOCONST|1010|ErrorUserLogined
+GOCONST|1011|ErrorUserBanned
+GOCONST|1015|CodeServerBusy
+GOCONST|2001|ErrorInputWrong
+GOCONST|2002|ErrorTypeTransfer
+GOCONST|3001|ErrorBuildOutbox
+GOCONST|5001|ErrorServerCommon
+GOCONST|5002|ErrorDbUpdate
+GOCONST|5003|ErrorDbSelect
+GOCONST|5004|ErrorDbInsert
+GOCONST|5005|ErrorDbTransaction
+GOCONST|5006|ErrorSnowflakeID
+GOCONST|5007|ErrorJsonMarshal
+GOCONST|5008|ErrorJsonUnmarshal
+GOCONST|5009|ErrorKafkaPush
+GOCONST|5010|ErrorDelayMsg
+GOCONST|5011|ErrorRedisSelect
+GOCONST|5012|ErrorRedisUpdate
+GOTABLE|200|OK
+GOTABLE|500|FAIL
+GOTABLE|1001|用户名已存在
+GOTABLE|1002|用户名或密码错误
+GOTABLE|1003|用户不存在
+GOTABLE|1004|TOKEN不存在
+GOTABLE|1005|TOKEN格式错误
+GOTABLE|1006|TOKEN已过期
+GOTABLE|1007|TOKEN刷新失败
+GOTABLE|1008|权限不足
+GOTABLE|1009|未登录
+GOTABLE|1010|已登录
+GOTABLE|1011|用户已被封禁
+GOTABLE|1015|服务繁忙
+GOTABLE|2001|输入有误
+GOTABLE|2002|类型转换错误
+GOTABLE|3001|构建 Outbox 消息载荷失败
+GOTABLE|5001|系统内部错误
+GOTABLE|5002|更新数据库失败
+GOTABLE|5003|查询数据库失败
+GOTABLE|5004|数据库插入失败
+GOTABLE|5005|事务操作失败
+GOTABLE|5006|雪花ID生成失败
+GOTABLE|5007|JSON序列化失败
+GOTABLE|5008|JSON反序列化失败
+GOTABLE|5009|Kafka消息发送失败
+GOTABLE|5010|延时消息发送失败
+GOTABLE|5011|Redis查询失败
+GOTABLE|5012|Redis更新失败
+GOFALLBACK|FAIL
+
+# >>> deviations >>>
+DEVIATION|BIZCODE|foreign_internal|13|1015|pending|D-7|docs/DRIFT/like/vs-common.md:72|下游非本域错误：Go like-api 把原始 gRPC 码直接当业务码（int(st.Code())）；RAG 侧 mapGrpcCodeToBizCode 收敛到域内码 ⇒ 两侧确实不一致且无人拍板 ⇒ 需用户拍板。
+DEVIATION|BIZCODE|foreign_invalid_argument|3|2001|pending|D-7|docs/DRIFT/like/vs-common.md:72|下游非本域错误：Go like-api 把原始 gRPC 码直接当业务码（int(st.Code())）；RAG 侧 mapGrpcCodeToBizCode 收敛到域内码 ⇒ 两侧确实不一致且无人拍板 ⇒ 需用户拍板。
+DEVIATION|BIZCODE|foreign_notfound|5|1015|pending|D-7|docs/DRIFT/like/vs-common.md:72|下游非本域错误：Go like-api 把原始 gRPC 码直接当业务码（int(st.Code())）；RAG 侧 mapGrpcCodeToBizCode 收敛到域内码 ⇒ 两侧确实不一致且无人拍板 ⇒ 需用户拍板。
+DEVIATION|BIZCODE|foreign_plain|5001|1015|pending|D-7|docs/DRIFT/like/vs-common.md:72|下游非本域错误：Go like-api 把原始 gRPC 码直接当业务码（int(st.Code())）；RAG 侧 mapGrpcCodeToBizCode 收敛到域内码 ⇒ 两侧确实不一致且无人拍板 ⇒ 需用户拍板。
+DEVIATION|BIZCODE|foreign_unauthenticated|16|1009|pending|D-7|docs/DRIFT/like/vs-common.md:72|下游非本域错误：Go like-api 把原始 gRPC 码直接当业务码（int(st.Code())）；RAG 侧 mapGrpcCodeToBizCode 收敛到域内码 ⇒ 两侧确实不一致且无人拍板 ⇒ 需用户拍板。
+DEVIATION|OBS|obs_custom_grpcstatus|13|1015|technical|-|Go service/like/common/errmsg/errmsg.go:33-35 · tools/errmsg-probe/like/README.md §3|Go 的 status.FromError 认「顶层实现了 GRPCStatus()」的任意 error ⇒ 文案反查命中；RAG 的 extractStatus 只认 StatusException/StatusRuntimeException 两个具体类 ⇒ 认不出 ⇒ 兜底 1015。
+DEVIATION|OBS|obs_nil_error|5001|200|technical|-|Go service/like/api/internal/logic/like/likeactionlogic.go:62-69 · tools/errmsg-probe/like/README.md §3|Go like-api 的还原步骤在 if err != nil 守卫之内 ⇒ nil 走不到 status.FromError ⇒ 落到兜底码 5001；RAG 的 bizCodeFromError(null) 显式返回 200 ⇒ 该分支在 Go 侧不可达。
+DEVIATION|OBS|obs_ok_status|5001|1015|technical|-|Go service/like/common/errmsg/errmsg.go:33-35 · tools/errmsg-probe/like/README.md §3|Go 的 status.Error(codes.OK, msg) 返回 nil（grpc-go）⇒ 与 nil 同形 ⇒ 兜底 5001；RAG 侧 Status.fromCode(OK).asException() 得到非 nil 的 code=OK 异常 ⇒ 走反查/兜底 ⇒ 1015。
+DEVIATION|WIRECODE|1001|status=code(1001);trailer=-|status=unknown;trailer=1001|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|1002|status=code(1002);trailer=-|status=unknown;trailer=1002|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|1003|status=code(1003);trailer=-|status=unknown;trailer=1003|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|1004|status=code(1004);trailer=-|status=unknown;trailer=1004|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|1005|status=code(1005);trailer=-|status=unknown;trailer=1005|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|1006|status=code(1006);trailer=-|status=unknown;trailer=1006|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|1007|status=code(1007);trailer=-|status=unknown;trailer=1007|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|1008|status=code(1008);trailer=-|status=unknown;trailer=1008|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|1009|status=code(1009);trailer=-|status=unknown;trailer=1009|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|1010|status=code(1010);trailer=-|status=unknown;trailer=1010|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|1011|status=code(1011);trailer=-|status=unknown;trailer=1011|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|1015|status=code(1015);trailer=-|status=unknown;trailer=1015|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|200|status=code(200);trailer=-|status=unknown;trailer=200|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|2001|status=code(2001);trailer=-|status=invalid_argument;trailer=2001|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|2002|status=code(2002);trailer=-|status=unknown;trailer=2002|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|3001|status=code(3001);trailer=-|status=unknown;trailer=3001|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|500|status=code(500);trailer=-|status=unknown;trailer=500|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|5001|status=code(5001);trailer=-|status=unknown;trailer=5001|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|5002|status=code(5002);trailer=-|status=unknown;trailer=5002|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|5003|status=code(5003);trailer=-|status=unknown;trailer=5003|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|5004|status=code(5004);trailer=-|status=unknown;trailer=5004|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|5005|status=code(5005);trailer=-|status=unknown;trailer=5005|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|5006|status=code(5006);trailer=-|status=unknown;trailer=5006|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|5007|status=code(5007);trailer=-|status=unknown;trailer=5007|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|5008|status=code(5008);trailer=-|status=unknown;trailer=5008|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|5009|status=code(5009);trailer=-|status=unknown;trailer=5009|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|5010|status=code(5010);trailer=-|status=unknown;trailer=5010|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|5011|status=code(5011);trailer=-|status=unknown;trailer=5011|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。
+DEVIATION|WIRECODE|5012|status=code(5012);trailer=-|status=unknown;trailer=5012|approved|SD-2026-10-23-06@like|docs/Intentional_Deviations/like/rpc.md:13|gRPC 业务码载体迁移（框架限制）：Go 的 codes.Code 是 int32 命名类型、不做范围校验 ⇒ 业务码以数值形式进 grpc-status；grpc-java 的 Status.Code 只有 17 个成员、公开 API 无越界码值入口 ⇒ Java 把业务码挪到自定义 trailer rag-like-biz-code（业务码与文案两侧无损）。

@@ -157,6 +157,11 @@ def report(root: str, hits: list[dict], scanned: int, as_print: bool) -> list[st
     lines.append(f"  扫描根: {root}")
     lines.append(f"  扫描文件: {scanned} 个（范围：docs/ · service/ · tools/ · AGENTS.md）")
     lines.append(f"  含真 NUL 的文件: {len(hits)} 个（豁免 {len(exempted)} · 未豁免 {len(bad)}）")
+    # ⚠️ 【CI 汇总用的机器可读标记】—— 2026-10-31 新增（纯增量，不改判定）。
+    #   格式约定见 check-no-prod-secrets.py 的同一处注释：
+    #   行首 `[ci-exempt]`，字段 `key=value` ⇒ ci/scripts/run-static-gates.sh 消费。
+    lines.append(f"[ci-exempt] check-no-nul-bytes.py exempted={len(exempted)} "
+                 f"unexempted={len(bad)}")
     lines.append("-" * 60)
 
     for h in exempted:

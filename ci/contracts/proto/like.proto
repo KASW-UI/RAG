@@ -1,0 +1,96 @@
+# 来源：Go 真源 proto/like.proto（like.proto:3）
+# 契约基准版本：proto-contract/v1（2026-10-31）
+# 裁定依据：SD-2026-10-23-05（docs/Intentional_Deviations/like/proto.md） · docs/DRIFT/like/proto.md
+# 说明：本文件是 R4 契约基准，CI 直接读取；改它 = 改契约，需 PR 审查。
+#   ↳ proto `package` 由 Go 侧 `pb` 归一为 `like`（**已签字**）
+#   ↳ Go 侧 package 行原文：package pb; ⇒ 基准取裁定值 `package like;`（SD-2026-10-23-05 已签字偏离 · Go 侧的 pb 是遗留包名）
+
+syntax = "proto3";
+package like;
+enum ActionType{
+ACTION_UNSPECIFIED = 0;
+ACTION_LIKE = 1;
+ACTION_UNLIKE = 2;
+ACTION_DISLIKE = 3;
+ACTION_UNDISLIKE = 4;
+}
+message LikeActionReq{
+string target_type = 1;
+string target_id = 2;
+int64 user_id = 3;
+ActionType action_type = 4;
+int64 author_id = 5;
+float weight = 6;
+string client_ip = 7;
+string promotion_id = 8;
+}
+message LikeActionResp{
+bool success = 1;
+string message = 2;
+int64 like_count = 3;
+int64 dislike_count = 4;
+}
+message GetLikeCountReq{
+string target_type = 1;
+repeated string target_ids = 2;
+}
+message LikeCountItem{
+int64 like_count = 1;
+int64 dislike_count = 2;
+}
+message GetLikeCountResp{
+map<string,LikeCountItem> counts = 1;
+}
+message GetLikeStateReq{
+string target_type = 1;
+int64 user_id = 2;
+repeated string target_ids = 3;
+}
+message GetLikeStateResp{
+map<string,int32> states = 1;
+}
+message GetUserLikeListReq{
+string target_type = 1;
+int64 user_id = 2;
+int64 cursor = 3;
+int32 page_size = 4;
+}
+message LikeRecordItem{
+string target_type = 1;
+string target_id = 2;
+int64 timestamp = 3;
+}
+message GetUserLikeListResp{
+repeated LikeRecordItem list = 1;
+bool is_end = 2;
+int64 next_cursor = 3;
+}
+message GetTargetLikerListReq{
+string target_type = 1;
+string target_id = 2;
+int64 cursor = 3;
+int32 page_size = 4;
+}
+message LikeItem{
+int64 user_id = 1;
+int64 timestamp = 2;
+}
+message GetTargetLikerListResp{
+repeated LikeItem list = 1;
+bool is_end = 2;
+int64 next_cursor = 3;
+}
+message GetUserTotalLikeReq{
+int64 user_id = 1;
+}
+message GetUserTotalLikeResp{
+int64 total_like_count = 1;
+}
+service LikeService{
+rpc LikeAction (LikeActionReq) returns (LikeActionResp);
+rpc GetLikeCount (GetLikeCountReq) returns (GetLikeCountResp);
+rpc GetLikeState (GetLikeStateReq) returns (GetLikeStateResp);
+rpc GetUserLikeList (GetUserLikeListReq) returns (GetUserLikeListResp);
+rpc GetTargetLikerList (GetTargetLikerListReq) returns (GetTargetLikerListResp);
+rpc GetUserTotalLike (GetUserTotalLikeReq) returns (GetUserTotalLikeResp);
+}

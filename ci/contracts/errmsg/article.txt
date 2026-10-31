@@ -1,0 +1,76 @@
+# ============================================================================
+# ci/contracts/errmsg/article.txt —— R5 错误码契约基准（article 域）· **Go 真源派生**
+#
+# 【这是什么】
+#   R5 错误码契约的**机器可读基准**。CI 用 `ci/scripts/check-errmsg-contract.sh`
+#   跑 **Java 半边探针**（tools/errmsg-probe/java/Probe.java（**根级** —— article 的探针不在域目录里））⇒ 把产物当作**被测对象**，
+#   与本文件的 **Go 权威段**做**双向**比对。
+#
+# 【权威性来源 = Go 真源（只读 · 冻结）】
+#   Go 真源：Sea-RideTheWind_golang/service/article/common/errmsg/errmsg.go
+#     · const 块 :3-19 · codeMsg 表 :21-37 · GetErrMsg :39-45
+#     · sha256 = 3131396a2a0fb3ea77b5ab9a764681c849f071555d113bf01429f4fb2c91f27f
+#   Java 被测：service/article/article-common/src/main/java/com/rag/article/article/common/errmsg/ErrorCode.java
+#
+# 【提取方式（离线 · 一次性 · 可复算）】
+#   `python3 ci/scripts/extract-errmsg-authority.py --emit article` ⇒ 本文件的 go-authority 段
+#   独立复算：`python3 ci/scripts/extract-errmsg-authority.py --check`（逐字节比对 ⇒ 证明基准确实来自 Go）
+#   ⚠️ CI **不拉 Go 仓、不装 Go 工具链、不跑 Go 探针** ⇒ 权威值固化在本目录。
+#
+# 【两段式结构】
+#   # >>> go-authority >>>  —— **Go 侧权威值**（CI 的真值来源）
+#       `GOCONST|<code>|<Go 常量名>`（const 块全部常量）· `GOTABLE|<code>|<文案>`（codeMsg 表全部条目）· `GOFALLBACK|<文案>`（GetErrMsg 对未知码的回落 = codeMsg[Error]）
+#   # >>> deviations >>>   —— **逐条差异裁定**（Go↔Java 的每一条差异都在这里落笔）
+#       DEVIATION|<段>|<键>|<go值>|<java值>|<status>|<依据id>|<依据出处>|<理由>
+#       status ∈ approved | closed | technical | pending
+#
+# 【四类差异状态】
+#   approved  —— 已签字（依据 id 必能在 `docs/Intentional_Deviations/` 里查到）
+#   closed    —— 已销号/证伪关闭（依据 id 必能在 `docs/DRIFT/` 里查到）
+#   technical —— 技术判定（Go 侧该形态**不可达** / 两个运行时的**结构性差异**）
+#               ⇒ 依据出处必须给出 Go 侧 `文件:行号`
+#   pending   —— **未经批准、需用户拍板** ⇒ **不判 FAIL**，但逐条显式报出，
+#               且**该域不得计入 PASS**（门以退出码 3 收口）
+#
+# 【本域差异台账】 approved=0 · closed=0 · technical=0 · pending=0（共 0 条）
+#
+#   本域 Go↔Java **零差异** ⇒ 差异台账为空。
+#
+# 【基准版本】v2 · 2026-10-31（v1 = Java dump 快照；**v2 起权威内容改为 Go 派生**）
+# 【格式】`#` 开头的是注释（不参与比对）；正文按 `# >>> <段> >>>` 切分。
+# ============================================================================
+
+# >>> go-authority >>>
+GOCONST|200|Success
+GOCONST|500|Error
+GOCONST|1001|ErrorArticleExist
+GOCONST|1002|ErrorArticleNone
+GOCONST|1003|ErrorArticlePublishing
+GOCONST|1004|ErrorArticlePublishFailed
+GOCONST|1005|ErrorUnauthorized
+GOCONST|1006|ErrorArticleForbidden
+GOCONST|1015|CodeServerBusy
+GOCONST|5001|ErrorServerCommon
+GOCONST|5002|ErrorDbUpdate
+GOCONST|5003|ErrorDbSelect
+GOCONST|5004|ErrorMinioUpload
+GOCONST|5005|ErrorMinioDelete
+GOCONST|5006|ErrorMinioDownload
+GOTABLE|200|OK
+GOTABLE|500|FAIL
+GOTABLE|1001|文章已存在
+GOTABLE|1002|文章不存在
+GOTABLE|1003|文章处理中，请稍后查看
+GOTABLE|1004|文章发布失败
+GOTABLE|1005|请先登录
+GOTABLE|1006|只能编辑或删除自己的文章
+GOTABLE|1015|服务繁忙
+GOTABLE|5001|系统内部错误
+GOTABLE|5002|更新数据库失败
+GOTABLE|5003|查询数据库失败
+GOTABLE|5004|文件上传失败
+GOTABLE|5005|文件删除失败
+GOTABLE|5006|文件下载失败
+GOFALLBACK|FAIL
+
+# >>> deviations >>>

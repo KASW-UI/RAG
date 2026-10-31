@@ -1,0 +1,50 @@
+---
+# =============================================================================
+# ci/tasks/static-gates.yml —— 通用静态守门阶段（11 条流水线共用）
+#
+# 【为什么用 python 镜像而不是 maven 镜像】
+#   这一步不跑 Maven，只跑 tools/difftest/ 下的静态守门脚本：
+#   · 7 个是 python3 脚本
+#   · 1 个（check-jar-executable.sh）是 bash 脚本（用了数组/[[ ]]/进程替换）
+#   ⇒ 需要一个同时有 python3 + bash 的镜像。
+#   python:3.12-bookworm 两者都有，且体积比 maven 镜像小得多
+#   （静态门阶段不需要 JDK）。
+#
+# 【脚本清单的取舍（实测分类，2026-10-30）】
+#   ✅ 纳入（纯静态、无外部依赖）：
+#      check-no-prod-secrets.py / check-no-nul-bytes.py /
+#      check-datasource-password-form.py / check-tomcat-limits.py /
+#      check-grpc-interceptor-wiring.py / check-grpc-runtime-classpath.py /
+#      check-flyway-ledger.py  +  产物级 check-jar-executable.sh
+#      + 🆕 check-pom-parent-relativepath.py（住 ci/scripts/）
+#        —— 2026-10-31 由本 CI 实测抓出仓内 pom 拓扑缺陷后补的：
+#        admin-api 的 <parent> 坐标与默认 relativePath 指向的文件对不上
+#        ⇒ 干净环境构建必炸 ⇒ 且根聚合 pom 被完整解析 ⇒ **连累全域一起红**
+#        ⇒ 必须离线拦住，不能等 build 才炸。
+#   ❌ 不纳入（写成"已跑"就是虚构）：
+#      · check-ddl-static.py            → 需要活体 PG 容器
+#      · check-proto-static.sh /
+#        check-surface-parity.py /
+#        check-phasegoal-consistency.py → 需要 Go 真源仓库
+#      · check-plaintext400-headers.sh /
+#        check-flyway-concurrent.sh      → 需要起真实进程
+platform: linux
+
+image_resource:
+  type: registry-image
+  source:
+    repository: ((registry))/library/python
+    tag: 3.12-bookworm
+
+inputs:
+- name: repo
+
+params:
+  # 本域的 api/rpc 模块目录（空格分隔），用于产物级 jar 可执行性检查；
+  # 共享层流水线没有可执行 jar ⇒ 留空 ⇒ 跳过该项。
+  JAR_MODULES: ''
+
+run:
+  path: sh
+  args:
+  - repo/ci/scripts/run-static-gates.sh

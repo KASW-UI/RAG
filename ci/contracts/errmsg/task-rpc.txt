@@ -1,0 +1,52 @@
+# ============================================================================
+# ci/contracts/errmsg/task-rpc.txt —— R5 错误码契约基准（task-rpc 域）· **Go 真源派生**
+#
+# 【这是什么】
+#   R5 错误码契约的**机器可读基准**。CI 用 `ci/scripts/check-errmsg-contract.sh`
+#   跑 **Java 半边探针**（tools/errmsg-probe/task/java/RpcProbe.java）⇒ 把产物当作**被测对象**，
+#   与本文件的 **Go 权威段**做**双向**比对。
+#
+# 【权威性来源 = Go 真源（只读 · 冻结）】
+#   Go 真源：Sea-RideTheWind_golang/service/task/rpc/internal/logic/get_task_logic.go
+#     · 逐调用点（见下方 GOCALL 段的 `文件:行号`）
+#     · sha256 = 36b1bef91c9017d5f93437ff4e6612161958c943a50dccd3c9a6861083d15e67
+#   Java 被测：service/task/task-rpc/src/main/java/com/rag/task/task/rpc/{service/TaskDomainService,service/impl/TaskServiceGrpcImpl}.java
+#
+# 【提取方式（离线 · 一次性 · 可复算）】
+#   `python3 ci/scripts/extract-errmsg-authority.py --emit task-rpc` ⇒ 本文件的 go-authority 段
+#   独立复算：`python3 ci/scripts/extract-errmsg-authority.py --check`（逐字节比对 ⇒ 证明基准确实来自 Go）
+#   ⚠️ CI **不拉 Go 仓、不装 Go 工具链、不跑 Go 探针** ⇒ 权威值固化在本目录。
+#
+# 【两段式结构】
+#   # >>> go-authority >>>  —— **Go 侧权威值**（CI 的真值来源）
+#       `GOCALL|<调用点>|<Java 段>|<键前缀>|<码/状态>|<文案>`（**逐调用点**的码与文案；文案 = `*` ⇒ 运行期相关，不可逐字比对）
+#   # >>> deviations >>>   —— **逐条差异裁定**（Go↔Java 的每一条差异都在这里落笔）
+#       DEVIATION|<段>|<键>|<go值>|<java值>|<status>|<依据id>|<依据出处>|<理由>
+#       status ∈ approved | closed | technical | pending
+#
+# 【四类差异状态】
+#   approved  —— 已签字（依据 id 必能在 `docs/Intentional_Deviations/` 里查到）
+#   closed    —— 已销号/证伪关闭（依据 id 必能在 `docs/DRIFT/` 里查到）
+#   technical —— 技术判定（Go 侧该形态**不可达** / 两个运行时的**结构性差异**）
+#               ⇒ 依据出处必须给出 Go 侧 `文件:行号`
+#   pending   —— **未经批准、需用户拍板** ⇒ **不判 FAIL**，但逐条显式报出，
+#               且**该域不得计入 PASS**（门以退出码 3 收口）
+#
+# 【本域差异台账】 approved=0 · closed=0 · technical=2 · pending=0（共 2 条）
+#
+#   🔴 **task 域的 Go 侧没有 codeMsg 表** ⇒ 本基准的权威段是**逐调用点**（`GOCALL`）⇒ **不假装有码表**。
+#
+# 🔴 **task 域的 Go 侧没有 codeMsg 表**：Go 的 task 服务在调用点内联 `status.Error(codes.X, "…")`
+# #   ⇒ 权威段用 `GOCALL`（逐调用点）表达，**不假装有码表**。
+#
+# 【基准版本】v2 · 2026-10-31（v1 = Java dump 快照；**v2 起权威内容改为 Go 派生**）
+# 【格式】`#` 开头的是注释（不参与比对）；正文按 `# >>> <段> >>>` 切分。
+# ============================================================================
+
+# >>> go-authority >>>
+GOCALL|service/task/rpc/internal/logic/get_task_logic.go:44|RPCUID|rpc_uid_|invalid_argument|user_id invalid
+GOCALL|service/task/rpc/internal/logic/get_task_logic.go:59|RPCBARE|rpc_bare_|unknown|*
+
+# >>> deviations >>>
+DEVIATION|OBS|obs_ok_status|ok%7C|ok%7Cuser_id invalid|technical|-|Go service/task/rpc/internal/logic/get_task_logic.go:44|grpc-go 的 status.Error(codes.OK, msg) 返回 nil ⇒ status.FromError(nil) 没有 description；Java 侧 Status.OK.withDescription(msg).asRuntimeException() 是非 nil、带 description 的异常。
+DEVIATION|OBS|obs_wrapped_status|invalid_argument%7Couter: rpc error: code = InvalidArgument desc = user_id invalid|unknown%7Couter: rpc error: code = InvalidArgument desc = user_id invalid|technical|-|Go service/task/rpc/internal/logic/get_task_logic.go:44|grpc-go 的 status.FromError 用 errors.As 穿透包装找到内层 status（保住 code），但 description 被换成外层 error 全文；Java 侧只认直接抛出的 StatusRuntimeException ⇒ 包装后 code 退化成 UNKNOWN（结构性差异）。

@@ -12,9 +12,13 @@
              （坐标是 admin ≠ service）⇒ Maven 判 "parent.relativePath points at wrong local POM"
              ⇒ 回落仓库找 com.rag:service:pom ⇒ 本仓没有制品仓库 ⇒ **干净环境构建必炸**
              （开发机不报错是因为 ~/.m2 里躺着旧的已安装 service pom，把问题掩盖了）。
+             ⚠️ 路径必须逐层数对：admin-api 的目录是 service/users/admin/admin-api/ ⇒
+               ../pom.xml    = service/users/admin/pom.xml  (artifactId=admin)  ❌ 仍不符
+               ../../pom.xml = service/users/pom.xml       (artifactId=users)  ❌ 仍不符
+               ../../../pom.xml = service/pom.xml          (artifactId=service) ✅
              这里只改"去哪里找父 POM"，坐标与继承内容都不变 ⇒ 语义等价。
              由 CI（干净 checkout）发现，见 ci/DELIVERY.md §六。 -->
-        <relativePath>../../pom.xml</relativePath>
+        <relativePath>../../../pom.xml</relativePath>
     </parent>
 
     <artifactId>admin-api</artifactId>

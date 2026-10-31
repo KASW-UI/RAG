@@ -1,0 +1,24 @@
+# 来源：Go 真源 proto/task.proto（task.proto:3）
+# 契约基准版本：proto-contract/v1（2026-10-31）
+# 裁定依据：docs/DRIFT/task/proto.md · docs/DRIFT/_cross/proto-verification.md
+# 说明：本文件是 R4 契约基准，CI 直接读取；改它 = 改契约，需 PR 审查。
+#   ↳ Go 侧 package 行原文：package task;
+
+syntax = "proto3";
+package task;
+message Task{
+string name = 1;
+string desc = 2;
+int64 task_id = 3;
+int64 completion_progress = 4;
+int64 required_progress = 5;
+}
+message GetTaskReq{
+int64 user_id = 1;
+}
+message GetTaskResp{
+repeated Task task = 1;
+}
+service TaskService{
+rpc GetTask(GetTaskReq) returns (GetTaskResp);
+}

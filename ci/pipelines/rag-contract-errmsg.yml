@@ -1,0 +1,122 @@
+---
+# =============================================================================
+# ci/pipelines/rag-contract-errmsg.yml —— R5 错误码契约一致性（Java 侧错误码 vs 仓内基准）
+#
+# 【职责】R5 错误码契约一致性（Java 侧错误码 vs 仓内基准）。
+#
+# 【与 11 条日常流水线的关系】
+#   日常流水线负责「Java 能不能构建、测试、产出可执行 jar、静态规则过不过」；
+#   本条负责「Java 的**契约**有没有漂移」—— 两者判的是不同的事，**不合并**。
+#   ⚠️ 独立成一条而不是塞进 11 条：R5/R6 是分钟级 × 多域 ⇒
+#     无条件放进日常流水线会把日常 CI 拖到不可接受。
+#
+# 【不需要 Go】
+#   Go 真源是**只读语义参考基准，不是 CI 的执行对象**：
+#   契约已一次性离线提取，固化在 ci/contracts/ 下 ⇒
+#   本流水线**不拉 Go 仓、不装 Go 工具链、不跑任何 go 命令**。
+#
+# 【触发面】
+#   · service/article/article-common/src/main/java/com/rag/article/article/common/errmsg/**
+#   · service/comment/comment-common/src/main/java/com/rag/comment/comment/common/errmsg/**
+#   · service/favorite/favorite-common/src/main/java/com/rag/favorite/favorite/common/errmsg/**
+#   · service/follow/follow-common/src/main/java/com/rag/follow/follow/common/errmsg/**
+#   · service/hot/hot-common/src/main/java/com/rag/hot/hot/common/errmsg/**
+#   · service/like/like-common/src/main/java/com/rag/like/like/common/errmsg/**
+#   · service/message/message-common/src/main/java/com/rag/message/message/common/errmsg/**
+#   · service/users/users-common/src/main/java/com/rag/users/common/errmsg/**
+#   · tools/errmsg-probe/**
+#   · service/task/task-api/**
+#   · service/task/task-proto/**
+#   · service/task/task-rpc/**
+#   · ci/contracts/errmsg/**
+#   · pom.xml
+#   · service/pom.xml
+#   · mvnw
+#   · .mvn/**
+#   · ci/**
+#
+# 【生成说明】本文件由 ci/generate-pipelines.py 生成，
+#   task 配置内联自 ci/tasks/*.yml（唯一真源）。
+# =============================================================================
+
+resources:
+- name: repo
+  type: git
+  source:
+    uri: ((git_uri))
+    branch: ((git_branch))
+    paths:
+    - service/article/article-common/src/main/java/com/rag/article/article/common/errmsg/**
+    - service/comment/comment-common/src/main/java/com/rag/comment/comment/common/errmsg/**
+    - service/favorite/favorite-common/src/main/java/com/rag/favorite/favorite/common/errmsg/**
+    - service/follow/follow-common/src/main/java/com/rag/follow/follow/common/errmsg/**
+    - service/hot/hot-common/src/main/java/com/rag/hot/hot/common/errmsg/**
+    - service/like/like-common/src/main/java/com/rag/like/like/common/errmsg/**
+    - service/message/message-common/src/main/java/com/rag/message/message/common/errmsg/**
+    - service/users/users-common/src/main/java/com/rag/users/common/errmsg/**
+    - tools/errmsg-probe/**
+    - service/task/task-api/**
+    - service/task/task-proto/**
+    - service/task/task-rpc/**
+    - ci/contracts/errmsg/**
+    - pom.xml
+    - service/pom.xml
+    - mvnw
+    - .mvn/**
+    - ci/**
+
+jobs:
+- name: contract-check
+  plan:
+  - get: repo
+    trigger: true
+  - task: contract-errmsg
+    privileged: true
+    config:
+      # =============================================================================
+      # ci/tasks/contract-errmsg.yml —— R5 错误码契约一致性
+      #
+      # 【形态】与 maven-test 同形态（DinD：起内层 dockerd → 在内层 maven 容器里跑）
+      #   ⇒ 复用同一份 ~/.m2 缓存、同一份 Maven 镜像源 settings.xml、同一套镜像源机制
+      #   ⇒ **不新增任何 CI 机制**，只是多一个 STAGE。
+      #
+      # 【为什么独立成一条流水线，而不是塞进 11 条日常流水线】
+      #   R5 要编译 9 个域的 `<域>-common` 并各跑一次 Java 半边探针（分钟级）
+      #   ⇒ 无条件塞进 11 条日常流水线不可接受（任务书 §九.11）。
+      #
+      # 【不需要什么】
+      #   ❌ Go 工具链　❌ Go 仓在线可访问　❌ go 命令
+      #   ❌ 数据库 / Redis / Kafka（错误码契约与活体依赖无关）
+      #
+      # 【退出码】0=PASS / 1=FAIL(契约漂移) / 2=BLOCKED(环境不满足)
+      #   ⚠️ BLOCKED 不得计入 PASS（ci/contracts/README.md 第四节）。
+      platform: linux
+
+      image_resource:
+        type: registry-image
+        source:
+          repository: ((registry))/library/docker
+          tag: 27-dind
+
+      inputs:
+      - name: repo
+
+      outputs:
+      - name: repo
+        path: repo
+
+      caches:
+      - path: .m2
+        key: m2-repo-v1
+
+
+      run:
+        path: sh
+        args:
+        - repo/ci/scripts/dind-run.sh
+    params:
+      IMAGE: ((registry))/library/maven:3.9.11-eclipse-temurin-21
+      REGISTRY: ((registry))
+      MAVEN_MIRROR_URL: ((maven_mirror))
+      STAGE: contract-errmsg
+      ERRSMSG_DOMAINS: ''

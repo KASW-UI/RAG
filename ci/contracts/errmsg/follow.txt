@@ -1,0 +1,81 @@
+# ============================================================================
+# ci/contracts/errmsg/follow.txt —— R5 错误码契约基准（follow 域）· **Go 真源派生**
+#
+# 【这是什么】
+#   R5 错误码契约的**机器可读基准**。CI 用 `ci/scripts/check-errmsg-contract.sh`
+#   跑 **Java 半边探针**（tools/errmsg-probe/follow/java/Probe.java）⇒ 把产物当作**被测对象**，
+#   与本文件的 **Go 权威段**做**双向**比对。
+#
+# 【权威性来源 = Go 真源（只读 · 冻结）】
+#   Go 真源：Sea-RideTheWind_golang/service/follow/common/errmsg.go
+#     · const 块 :33-53 · codeMsg 表 :55-74 · GetErrMsg :89-97
+#     · sha256 = 09a442c1363efa9072b733b11c6dff8b1fd45891cd23b14316dfd56ec3cda27c
+#   Java 被测：service/follow/follow-common/src/main/java/com/rag/follow/follow/common/errmsg/{FollowErrorCode,FollowErrorMessages,FollowCodeError,FollowGrpcError}.java
+#
+# 【提取方式（离线 · 一次性 · 可复算）】
+#   `python3 ci/scripts/extract-errmsg-authority.py --emit follow` ⇒ 本文件的 go-authority 段
+#   独立复算：`python3 ci/scripts/extract-errmsg-authority.py --check`（逐字节比对 ⇒ 证明基准确实来自 Go）
+#   ⚠️ CI **不拉 Go 仓、不装 Go 工具链、不跑 Go 探针** ⇒ 权威值固化在本目录。
+#
+# 【两段式结构】
+#   # >>> go-authority >>>  —— **Go 侧权威值**（CI 的真值来源）
+#       `GOCONST|<code>|<Go 常量名>`（const 块全部常量）· `GOTABLE|<code>|<文案>`（codeMsg 表全部条目）· `GOFALLBACK|<文案>`（GetErrMsg 对未知码的回落 = codeMsg[Error]）
+#   # >>> deviations >>>   —— **逐条差异裁定**（Go↔Java 的每一条差异都在这里落笔）
+#       DEVIATION|<段>|<键>|<go值>|<java值>|<status>|<依据id>|<依据出处>|<理由>
+#       status ∈ approved | closed | technical | pending
+#
+# 【四类差异状态】
+#   approved  —— 已签字（依据 id 必能在 `docs/Intentional_Deviations/` 里查到）
+#   closed    —— 已销号/证伪关闭（依据 id 必能在 `docs/DRIFT/` 里查到）
+#   technical —— 技术判定（Go 侧该形态**不可达** / 两个运行时的**结构性差异**）
+#               ⇒ 依据出处必须给出 Go 侧 `文件:行号`
+#   pending   —— **未经批准、需用户拍板** ⇒ **不判 FAIL**，但逐条显式报出，
+#               且**该域不得计入 PASS**（门以退出码 3 收口）
+#
+# 【本域差异台账】 approved=0 · closed=0 · technical=3 · pending=0（共 3 条）
+#
+#   ⚠️ 这 3 条**全部**是「构造出来的不可达形态」：follow 域的真实链路恒走 `status.FromError` 的「顶层直接命中」分支 ⇒ 不构成行为漂移。
+#
+# 【基准版本】v2 · 2026-10-31（v1 = Java dump 快照；**v2 起权威内容改为 Go 派生**）
+# 【格式】`#` 开头的是注释（不参与比对）；正文按 `# >>> <段> >>>` 切分。
+# ============================================================================
+
+# >>> go-authority >>>
+GOCONST|200|Success
+GOCONST|500|Error
+GOCONST|1015|CodeServerBusy
+GOCONST|5001|ErrorServerCommon
+GOCONST|5002|ErrorNotFound
+GOCONST|5003|ErrorInvalidParam
+GOCONST|5004|ErrorUnauthorized
+GOCONST|5005|ErrorForbidden
+GOCONST|5006|ErrorAlreadyExist
+GOCONST|5007|ErrorDbSelect
+GOCONST|5008|ErrorDbUpdate
+GOCONST|5101|ErrorUserNotFound
+GOCONST|5201|ErrorSelfRelation
+GOCONST|5202|ErrorRelationBlocked
+GOCONST|5203|ErrorFollowNotFound
+GOCONST|5204|ErrorBlockNotFound
+GOTABLE|200|OK
+GOTABLE|500|FAIL
+GOTABLE|1015|service busy
+GOTABLE|5001|internal server error
+GOTABLE|5002|record not found
+GOTABLE|5003|invalid parameter
+GOTABLE|5004|unauthorized
+GOTABLE|5005|forbidden
+GOTABLE|5006|already exists
+GOTABLE|5007|database query failed
+GOTABLE|5008|database update failed
+GOTABLE|5101|user not found
+GOTABLE|5201|self relation is not allowed
+GOTABLE|5202|blocked relation exists
+GOTABLE|5203|follow relation not found
+GOTABLE|5204|block relation not found
+GOFALLBACK|FAIL
+
+# >>> deviations >>>
+DEVIATION|OBS|obs_custom_grpcstatus|5101|1015|technical|-|Go service/follow/common/errmsg.go:97-99 · docs/DRIFT/follow/common.md|grpc-go 的 status.FromError 认「顶层实现了 GRPCStatus()」的任意 error ⇒ 文案反查命中；Java 侧 resolveStatus 只认 StatusException/StatusRuntimeException ⇒ 认不出 ⇒ 兜底 1015。
+DEVIATION|OBS|obs_ok_status|200|5001|technical|-|Go service/follow/common/errmsg.go:89-95 · docs/DRIFT/follow/common.md|grpc-go 的 status.Error(codes.OK, msg) 返回 nil ⇒ BizCodeFromError(nil) ⇒ 200；grpc-java 没有「OK 不是错误」的塌缩 ⇒ 走反查/兜底 ⇒ 5001。
+DEVIATION|OBS|obs_wrapped_outer_msg|5002|5101|technical|-|Go service/follow/common/errmsg.go:101-133 · docs/DRIFT/follow/common.md|Go 的 fmt.Errorf("%25w") 的 Error() 文本含外层+内层 ⇒ 文案反查落空 ⇒ 兜底 5002；Java 的 Throwable#getMessage() 只有外层文本 ⇒ 反查命中 ⇒ 5101（结构性差异）。

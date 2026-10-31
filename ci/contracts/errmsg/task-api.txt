@@ -1,0 +1,54 @@
+# ============================================================================
+# ci/contracts/errmsg/task-api.txt —— R5 错误码契约基准（task-api 域）· **Go 真源派生**
+#
+# 【这是什么】
+#   R5 错误码契约的**机器可读基准**。CI 用 `ci/scripts/check-errmsg-contract.sh`
+#   跑 **Java 半边探针**（tools/errmsg-probe/task/java/ApiProbe.java）⇒ 把产物当作**被测对象**，
+#   与本文件的 **Go 权威段**做**双向**比对。
+#
+# 【权威性来源 = Go 真源（只读 · 冻结）】
+#   Go 真源：Sea-RideTheWind_golang/service/task/api/internal/types/types.go
+#     · 逐调用点（见下方 GOCALL 段的 `文件:行号`）
+#     · sha256 = 8c990d69988bfa61331d65c2c40d19ed40cbe9a4fea4ab5e1b76a7b7d93301b2
+#   Java 被测：service/task/task-api/src/main/java/com/rag/task/task/api/{controller/TaskController,advice/GlobalExceptionHandler,dto/GetTaskReq}.java
+#
+# 【提取方式（离线 · 一次性 · 可复算）】
+#   `python3 ci/scripts/extract-errmsg-authority.py --emit task-api` ⇒ 本文件的 go-authority 段
+#   独立复算：`python3 ci/scripts/extract-errmsg-authority.py --check`（逐字节比对 ⇒ 证明基准确实来自 Go）
+#   ⚠️ CI **不拉 Go 仓、不装 Go 工具链、不跑 Go 探针** ⇒ 权威值固化在本目录。
+#
+# 【两段式结构】
+#   # >>> go-authority >>>  —— **Go 侧权威值**（CI 的真值来源）
+#       `GOCALL|<调用点>|<Java 段>|<键前缀>|<码/状态>|<文案>`（**逐调用点**的码与文案；文案 = `*` ⇒ 运行期相关，不可逐字比对）
+#   # >>> deviations >>>   —— **逐条差异裁定**（Go↔Java 的每一条差异都在这里落笔）
+#       DEVIATION|<段>|<键>|<go值>|<java值>|<status>|<依据id>|<依据出处>|<理由>
+#       status ∈ approved | closed | technical | pending
+#
+# 【四类差异状态】
+#   approved  —— 已签字（依据 id 必能在 `docs/Intentional_Deviations/` 里查到）
+#   closed    —— 已销号/证伪关闭（依据 id 必能在 `docs/DRIFT/` 里查到）
+#   technical —— 技术判定（Go 侧该形态**不可达** / 两个运行时的**结构性差异**）
+#               ⇒ 依据出处必须给出 Go 侧 `文件:行号`
+#   pending   —— **未经批准、需用户拍板** ⇒ **不判 FAIL**，但逐条显式报出，
+#               且**该域不得计入 PASS**（门以退出码 3 收口）
+#
+# 【本域差异台账】 approved=0 · closed=0 · technical=2 · pending=0（共 2 条）
+#
+#   🔴 **task 域的 Go 侧没有 codeMsg 表** ⇒ 本基准的权威段是**逐调用点**（`GOCALL`）⇒ **不假装有码表**。⚠️ 本基准覆盖的是 Go 调用点**内联的错误码与文案**；gRPC status → HTTP 状态的映射**不在 R5 错误码契约范围内**。
+#
+# 🔴 **task 域的 Go 侧没有 codeMsg 表**：Go 的 task 服务在调用点内联 `status.Error(codes.X, "…")`
+# #   ⇒ 权威段用 `GOCALL`（逐调用点）表达，**不假装有码表**。
+#
+# 【基准版本】v2 · 2026-10-31（v1 = Java dump 快照；**v2 起权威内容改为 Go 派生**）
+# 【格式】`#` 开头的是注释（不参与比对）；正文按 `# >>> <段> >>>` 切分。
+# ============================================================================
+
+# >>> go-authority >>>
+GOCALL|service/task/api/internal/types/types.go:35|API|api_id_|400|id must be a string or integer
+GOCALL|service/task/api/internal/types/types.go:41|API|api_id_|400|user_id invalid
+GOCALL|service/task/api/internal/types/types.go:46|API|api_id_|400|user_id invalid
+GOCALL|service/task/api/internal/handler/task/gettaskhandler.go:22|OBS|obs_api_|400|*
+
+# >>> deviations >>>
+DEVIATION|OBS|obs_api_empty_body|400%7CEOF%5Cn|400%7CRequired request body is missing: public com.rag.task.task.api.dto.GetTaskResp com.rag.task.task.api.controller.TaskController.getTask(com.rag.task.task.api.dto.GetTaskReq)%5Cn|technical|-|Go service/task/api/internal/handler/task/gettaskhandler.go:21-24|Go 的 decoder.Decode(&req) 对空 body 返回 io.EOF；Spring 侧是 HttpRequestBodyRequiredException ⇒ 状态码与 Content-Type 一致、文案逐字不同（两个运行时的「读不到 body」措辞不同）。
+DEVIATION|OBS|obs_api_malformed_json|400%7Cunexpected EOF%5Cn|400%7CJSON parse error: Unexpected end-of-input: expected close marker for Object (start marker at [Source: REDACTED (`StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION` disabled); byte offset: #UNKNOWN])%5Cn|technical|-|Go service/task/api/internal/handler/task/gettaskhandler.go:21-24|Go encoding/json 的措辞 vs Jackson 的措辞（+ Spring 的 JSON parse error: 前缀）⇒ 状态码与 Content-Type 一致、文案逐字不同。

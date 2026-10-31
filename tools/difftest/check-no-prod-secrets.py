@@ -253,6 +253,15 @@ def report(root: str, hits: list[dict], scanned: int) -> list[str]:
     lines.append(f"  扫描根: {root}")
     lines.append(f"  扫描文件: {scanned} 个（范围：docs/ · service/ · tools/）")
     lines.append(f"  命中: {len(hits)} 处（豁免 {len(exempted)} · 未豁免 {len(bad)}）")
+    # ⚠️ 【CI 汇总用的机器可读标记】—— 2026-10-31 新增（纯增量，不改判定）。
+    #   背景：CI 的静态门汇总只输出「通过 N 个 / 失败 N 个」⇒ 门里存在**豁免命中**
+    #   时，汇总读起来与「一条豁免都没有」**完全一样** ⇒ CI 绿会掩盖「已知未修」。
+    #   ⇒ 这里让门**自报**豁免数量，CI 汇总层据此分级显示
+    #     「PASS（无豁免）」 vs 「PASS（有豁免命中 N 处）」。
+    #   ⚠️ 格式约定（ci/scripts/run-static-gates.sh 依赖它）：
+    #     行首必须是 `[ci-exempt]`，字段用 `key=value`，顺序固定。
+    lines.append(f"[ci-exempt] check-no-prod-secrets.py exempted={len(exempted)} "
+                 f"unexempted={len(bad)}")
     lines.append(f"  判定方式: 滑动窗口 + SHA-256（脚本内只存哈希 ⇒ 不持明文）")
     lines.append("-" * 60)
 

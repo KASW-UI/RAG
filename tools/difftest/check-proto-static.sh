@@ -17,8 +17,16 @@
 #   所以两侧差异只能源于 .proto 源,与生成产物无关 —— 直接 diff 源是更干净的判据。
 #
 # 用法:
-#   ./check-proto-static.sh                       # 默认比对 Go 真源 proto
+#   ./check-proto-static.sh                       # 默认比对 Go 真源 proto（**本地**用）
 #   GO_PROTO_DIR=... ./check-proto-static.sh      # 自定义 Go proto 路径
+#   ./check-proto-static.sh --go-proto-dir DIR    # 同上（显式写法）
+#   ./check-proto-static.sh --baseline DIR        # 比对**契约基准**（**CI 模式**）
+#
+# ⚠️ **两条模式的分工**（`ci/contracts/README.md` §一 办法 C）：
+#   · `--go-proto-dir`：**本地**跟 Go 真源现场比 ⇒ 需要本机有 Go 仓 ⇒ **CI 不得用**
+#     （Go 仓不是 CI 的执行对象；CI 不得依赖它在线可访问）。
+#   · `--baseline`：跟 `ci/contracts/proto/` 下**已固化的契约基准**比 ⇒ **CI 用这条**
+#     ⇒ CI 镜像**不需要 Go 工具链**、**不需要 Go 仓**、**不跑任何 go 命令**。
 
 set -euo pipefail
 
@@ -26,6 +34,75 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 
 GO_PROTO_DIR="${GO_PROTO_DIR:-/Users/pr/Documents/java&golang/Sea-RideTheWind_golang/proto}"
+
+# ── 参数解析 ──────────────────────────────────────────────────────────────
+# `--baseline`  ⇒ 交给 ci/scripts/check-proto-contract.py（契约基准模式，三态退出码）
+# `--go-proto-dir` ⇒ 走本脚本下半段的「跟 Go 现场比」路径（行为与改造前完全一致）
+BASELINE_DIR=""
+WITH_DESCRIPTOR=""
+ROOT_OVERRIDE=""
+BASELINE_REQUESTED="no"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --baseline)
+      BASELINE_REQUESTED="yes"
+      BASELINE_DIR="${2:-}"
+      shift 2 || shift
+      ;;
+    --baseline=*)
+      BASELINE_REQUESTED="yes"
+      BASELINE_DIR="${1#--baseline=}"
+      shift
+      ;;
+    --with-descriptor)
+      WITH_DESCRIPTOR="--with-descriptor"
+      shift
+      ;;
+    --go-proto-dir)
+      GO_PROTO_DIR="${2:-}"
+      shift 2 || shift
+      ;;
+    --go-proto-dir=*)
+      GO_PROTO_DIR="${1#--go-proto-dir=}"
+      shift
+      ;;
+    --root)
+      ROOT_OVERRIDE="${2:-}"
+      shift 2 || shift
+      ;;
+    --root=*)
+      ROOT_OVERRIDE="${1#--root=}"
+      shift
+      ;;
+    -h|--help)
+      sed -n '1,40p' "$0"
+      exit 0
+      ;;
+    *)
+      echo "未知参数：$1" >&2
+      echo "用法：$0 [--go-proto-dir DIR | --baseline DIR [--with-descriptor]]" >&2
+      exit 2
+      ;;
+  esac
+done
+
+# ── 契约基准模式（CI 用）────────────────────────────────────────────────
+# 退出码：0=PASS / 1=FAIL / 2=BLOCKED（见 ci/contracts/README.md §四）
+# ⚠️ 显式要求了 `--baseline` 却没给目录 ⇒ **报错退出**，**不得**静默退回「跟 Go 比」模式
+#    （静默换判据 = 用错误的姿势「通过」）。
+if [ "$BASELINE_REQUESTED" = "yes" ] && [ -z "$BASELINE_DIR" ]; then
+  echo "--baseline 需要一个目录参数（契约基准目录）" >&2
+  echo "用法：$0 --baseline ci/contracts/proto" >&2
+  exit 2
+fi
+if [ -n "$BASELINE_DIR" ]; then
+  ROOT_ARG=""
+  if [ -n "$ROOT_OVERRIDE" ]; then
+    ROOT_ARG="--root ${ROOT_OVERRIDE}"
+  fi
+  # shellcheck disable=SC2086
+  exec python3 "$ROOT/ci/scripts/check-proto-contract.py" --baseline "$BASELINE_DIR" ${ROOT_ARG} ${WITH_DESCRIPTOR}
+fi
 
 USER_GO="$GO_PROTO_DIR/user.proto"
 USER_RAG="$ROOT/service/users/user/user-proto/src/main/proto/users.proto"
@@ -56,20 +133,17 @@ done
 # 归一化后的内容如:  "message UserInfo {" + 6 字段 + "}"
 # 与                  "service UserService {" + 9 rpc + "}"
 # bytewise 相等即视为一致。
-
-normalize() {
-  local file=$1
-  python3 - "$file" <<'PY'
-import re, sys
-src = open(sys.argv[1]).read()
-# 删块注释
-src = re.sub(r'/\*[\s\S]*?\*/', '', src)
-# 删行注释
-src = re.sub(r'//[^\n]*', '', src)
-# 删侧 specific option 整行
-for opt in ('option go_package', 'option java_package', 'option java_multiple_files'):
-    src = re.sub(rf'^\s*{re.escape(opt)}[^\n]*\n', '', src, flags=re.M)
-# 🔴 删 `package` 行 —— **这是已签字偏离的明文要求**，不是「放过漂移」：
+#
+# 🔴 归一化只有**一份实现**（2026-10-31 收口）：
+#    实现在 `ci/scripts/check-proto-contract.py` 的 `normalize_proto()`，
+#    本函数通过 `--normalize` 子命令**调用**它 ⇒ 本脚本的「跟 Go 现场比」路径
+#    与 CI 的「跟契约基准比」路径**用同一份归一化** ⇒ 两处不会漂移。
+#    （改造前这里内嵌过一份 python 归一化，与 ci/scripts 侧各写一份 ⇒ 收口掉。）
+#    ⚠️ 顺带修掉一个隐患：内嵌实现用 `open(f).read()`（**locale 默认编码**），
+#       而 proto 源里含中文注释 ⇒ 在 LANG=C 的镜像上会抛 UnicodeDecodeError；
+#       现在统一按 **utf-8** 读。
+#
+# 🔴 归一化会**删掉 `package` 行** —— **这是已签字偏离的明文要求**，不是「放过漂移」：
 #   · `like`   ⇒ SD-2026-10-23-05（`docs/Intentional_Deviations/like/proto.md`）
 #   · `comment`⇒ SD-2026-10-23-04（`docs/Intentional_Deviations/comment/proto.md`）
 #   两域的 Go 侧是遗留包名 `package pb;`，RAG 侧归一成域名（`like` / `comment`）
@@ -78,18 +152,13 @@ for opt in ('option go_package', 'option java_package', 'option java_multiple_fi
 #   否则会把本条已签字偏离判成回退」⇒ 本行照此办理。
 #   ⚠️ **排除 ≠ 静默忽略** ⇒ 排除的同时**单独钉住** RAG 侧的 package 必须是签字值
 #   （见下面的 `pkg_pin` 判定）⇒ 偏离被**钉成「签字偏离」**，改动它仍会转红。
-src = re.sub(r'^\s*package\s+[A-Za-z0-9_.]+\s*;[^\n]*\n', '', src, flags=re.M)
-# 折叠空白(每行压成单个空格)
-out = []
-for line in src.splitlines():
-    s = line.strip()
-    if not s:
-        continue
-    s = re.sub(r'\s+', ' ', s).rstrip('{; ') + (line.rstrip()[-1:] if line.rstrip() and line.rstrip()[-1] in '{;' else '')
-    # 上面一行追加分隔符;简化:空格分隔即可,proto 不含语义空白
-    out.append(re.sub(r'\s+', ' ', s))
-print('\n'.join(out))
-PY
+#   （这条规则的实现现在住在 `ci/scripts/check-proto-contract.py` 的 `normalize_proto()`；
+#     契约基准模式（`--baseline`）下则**保留** package 行 —— 基准里已钉住裁定值，
+#     package 是契约项 ⇒ 逐字节参与比对。）
+
+normalize() {
+  local file=$1
+  python3 "$ROOT/ci/scripts/check-proto-contract.py" --normalize "$file"
 }
 
 # ⚠️ 计数而不是「直接 exit」：一个域不一致也要把**其余域**的结果打出来，

@@ -1,0 +1,107 @@
+# 来源：Go 真源 proto/article.proto（article.proto:3）
+# 契约基准版本：proto-contract/v1（2026-10-31）
+# 裁定依据：docs/DRIFT/article/proto.md · docs/DRIFT/_cross/proto-verification.md
+# 说明：本文件是 R4 契约基准，CI 直接读取；改它 = 改契约，需 PR 审查。
+#   ↳ Go 侧 package 行原文：package article;
+
+syntax = "proto3";
+package article;
+enum ArticleStatus{
+ARTICLE_STATUS_UNSPECIFIED = 0;
+DRAFT = 1;
+PUBLISHED = 2;
+REVIEWING = 3;
+REJECTED = 4;
+DELETED = 5;
+}
+message Article{
+string id = 1;
+string title = 2;
+string brief = 3;
+string markdown_content = 4;
+string cover_image_url = 5;
+string manual_type_tag = 6;
+repeated string secondary_tags = 7;
+string author_id = 8;
+int64 create_time = 9;
+int64 update_time = 10;
+ArticleStatus status = 11;
+int32 view_count = 12;
+int32 like_count = 13;
+int32 comment_count = 14;
+int32 share_count = 15;
+map<string, string> ext_info = 16;
+}
+message CreateArticleRequest{
+string title = 1;
+optional string brief = 2;
+string markdown_content = 3;
+optional string cover_image_url = 4;
+string manual_type_tag = 5;
+repeated string secondary_tags = 6;
+string author_id = 7;
+}
+message CreateArticleResponse{
+string article_id = 1;
+}
+message GetArticleRequest{
+string article_id = 1;
+bool incr_view = 2;
+bool public_only = 3;
+string requester_id = 4;
+}
+message GetArticleResponse{
+Article article = 1;
+}
+message UpdateArticleRequest{
+string article_id = 1;
+optional string title = 2;
+optional string brief = 3;
+optional string markdown_content = 4;
+optional string cover_image_url = 5;
+optional string manual_type_tag = 6;
+repeated string secondary_tags = 7;
+optional ArticleStatus status = 8;
+}
+message UpdateArticleResponse{
+bool success = 1;
+}
+message DeleteArticleRequest{
+string article_id = 1;
+string operator_id = 2;
+}
+message DeleteArticleResponse{
+bool success = 1;
+}
+message ListArticlesRequest{
+optional string manual_type_tag = 1;
+optional string secondary_tag = 2;
+optional string related_game_id = 3;
+optional string author_id = 4;
+int32 page = 5;
+int32 page_size = 6;
+string sort_by = 7;
+bool desc = 8;
+bool public_only = 9;
+}
+message ListArticlesResponse{
+repeated Article articles = 1;
+int64 total = 2;
+int32 page = 3;
+int32 page_size = 4;
+}
+message UploadFileRequest{
+bytes content = 1;
+string fileName = 2;
+}
+message UploadFileResponse{
+string fileUrl = 1;
+}
+service ArticleService{
+rpc CreateArticle(CreateArticleRequest) returns (CreateArticleResponse);
+rpc GetArticle(GetArticleRequest) returns (GetArticleResponse);
+rpc UpdateArticle(UpdateArticleRequest) returns (UpdateArticleResponse);
+rpc DeleteArticle(DeleteArticleRequest) returns (DeleteArticleResponse);
+rpc ListArticles(ListArticlesRequest) returns (ListArticlesResponse);
+rpc UploadFile(UploadFileRequest) returns (UploadFileResponse);
+}
