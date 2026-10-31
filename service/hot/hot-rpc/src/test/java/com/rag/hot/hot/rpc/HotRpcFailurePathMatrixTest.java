@@ -95,7 +95,17 @@ class HotRpcFailurePathMatrixTest {
                 .addService(new HotServiceGrpcImpl(RANKING_QUERY, new InteractionStubService()))
                 .build()
                 .start();
-        channel = ManagedChannelBuilder.forAddress("127.0.0.1", port).usePlaintext().build();
+                // 🔴 **必须用显式 `dns:///` scheme，不能用 `forAddress(...)`**（2026-10-31 实测踩坑）：
+                //    devh 的 `GrpcClientAutoConfiguration:124` 会在**起 Spring 上下文**时
+                //    把自己的 `discovery` NameResolverProvider 注册进 **grpc-java 的进程级全局**
+                //    `NameResolverRegistry.getDefaultRegistry()` ⇒ ⇒ **一旦本 JVM 里起过一次 devh 上下文，
+                //    该注册就是进程级的** ⇒ ⇒ 之后**任何**无显式 scheme 的手搓 channel
+                //    （`ManagedChannelBuilder.forAddress("127.0.0.1", P)`）都会被 devh 的 discovery resolver
+                //    **接管** ⇒ ⇒ 把 `127.0.0.1:P` 当**服务名**去 Nacos 查 ⇒ ⇒ `UNAVAILABLE`
+                //    ⇒ ⇒ 实测表现：同一个模块里，某个 `@SpringBootTest` 先跑 ⇒ 本条就红；
+                //    单独跑本类 ⇒ 5/5 全绿 ⇒ ⇒ **「单跑绿、同跑红」＝ 上下文污染，不是判据问题**。
+                //    ⇒ 显式 `dns:///` 直接选定 grpc-java 自带的 DNS resolver ⇒ 不受 devh 注册影响。
+        channel = ManagedChannelBuilder.forTarget("dns:///127.0.0.1:" + port).usePlaintext().build();
         stub = HotServiceGrpc.newBlockingStub(channel);
     }
 

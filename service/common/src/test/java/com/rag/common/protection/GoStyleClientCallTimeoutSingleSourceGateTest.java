@@ -96,11 +96,7 @@ class GoStyleClientCallTimeoutSingleSourceGateTest {
      * <p>⚠️ 这两条是<b>漂移面</b>（不是模板）⇒ ⇒ 正确终态是<b>域侧删掉它们、改用共享实现</b>
      * ⇒ ⇒ 删掉之后本列表应当收缩（而不是新增）。
      */
-    private static final Set<String> KNOWN_DOMAIN_SIDE_COPIES = Set.of(
-            "service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/client/"
-                    + "GoStyleClientCallTimeout.java",
-            "service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/client/"
-                    + "GoStyleClientCallTimeout.java");
+    private static final Set<String> KNOWN_DOMAIN_SIDE_COPIES = Set.of();
 
     /** 共享层的<b>唯一实现</b>（域侧只配参数 ⇒ 落点就是这个拦截器）。 */
     private static final String SHARED_IMPLEMENTATION =
@@ -123,15 +119,6 @@ class GoStyleClientCallTimeoutSingleSourceGateTest {
      * <p>⚠️ <b>这些不是模板，是漂移面</b> ⇒ ⇒ 终态 = 域侧删掉、改用共享层实现 ⇒ ⇒ 例外集应当<b>收缩</b>。
      */
     private static final Set<String> KNOWN_INLINE_CAP_CALL_SITES = Set.of(
-            // ── 已知的「命名副本」两份（与判据 ① 的两份是同一批文件；每份两个调用点）──
-            "service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/client/"
-                    + "GoStyleClientCallTimeout.java:withDeadlineAfter(1L, TimeUnit.NANOSECONDS);",
-            "service/comment/comment-rpc/src/main/java/com/rag/comment/comment/rpc/client/"
-                    + "GoStyleClientCallTimeout.java:withDeadlineAfter(Math.min(remainingNanos, capNanos), TimeUnit.NANOSECONDS);",
-            "service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/client/"
-                    + "GoStyleClientCallTimeout.java:withDeadlineAfter(1L, TimeUnit.NANOSECONDS);",
-            "service/favorite/favorite-rpc/src/main/java/com/rag/favorite/favorite/rpc/client/"
-                    + "GoStyleClientCallTimeout.java:withDeadlineAfter(Math.min(remainingNanos, capNanos), TimeUnit.NANOSECONDS);",
             // ── G1 的 88c206ce 落码引入的三份私有副本（follow-rpc / user-api / admin-api）──
             "service/follow/follow-rpc/src/main/java/com/rag/follow/follow/rpc/client/"
                     + "UserRpcClient.java:withDeadlineAfter(capNanos, java.util.concurrent.TimeUnit.NANOSECONDS);",
@@ -186,7 +173,7 @@ class GoStyleClientCallTimeoutSingleSourceGateTest {
     // ────────────────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("① 域侧不得出现第三份「客户端硬上界」私有副本（棘轮：已知 2 份允许存在，新增即红）")
+    @DisplayName("① 域侧不得出现第三份「客户端硬上界」私有副本（棘轮：已知 0 份允许存在 —— 两份副本已于 G3 第十一轮删净；新增即红）")
     void noThirdDomainSideCopy() {
         List<String> copies = domainSideCopies();
         List<String> unexpected = copies.stream()

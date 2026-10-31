@@ -2714,6 +2714,29 @@ java.lang.AssertionError: 条件在 3000ms 内未成立
 
 **口令兜底取消**：本域**无数据库** ⇒ 不涉及（本轮取消的是 article / comment / favorite 三域的 4 处）。
 
+## 📌 追加 · 🟡 **共享层演进 ⇒ 本域「载体守门」的正向对照参照物失效（已改用测试自带探针）**（2026-10-31 · G3 第八轮）
+
+> **一句话**：2026-10-31 的回归（**带工作树共享层**跑）里，`HotRpcSharedLayerWebBeanGateTest` 的第 ② 条
+> 「**正向对照**：共享层那个带 servlet 条件的自动配置确实在容器里」**转红**
+> ⇒ ⇒ **根因不是载体漂移，而是共享层演进把这个守门的「参照物前提」改掉了** ⇒ ⇒ 已就地改用**测试自带探针**。
+
+### 现象与根因
+
+| 项 | 内容 |
+|---|---|
+| 现象 | `HotRpcSharedLayerWebBeanGateTest#servletConditionHoldsInThisContext` 红：`GoStyleJsonContentTypeAdvice` 不在容器里 |
+| 根因 | 共享层 `53bc05ec`（G4 lane · 2026-10-30）把一批 web Bean 从「**只有** `@ConditionalOnWebApplication(SERVLET)`」改成「servlet 条件 **+** api 侧条件（`ConditionalOnApiSide`）」⇒ ⇒ **`GoStyleJsonContentTypeAdvice` 现在是 api 侧 Bean** ⇒ ⇒ 在 rpc 容器里**本就不该在** ⇒ ⇒ **守门红得对，但守门本身的前提已过期** |
+| 为什么以前是绿的 | 此前回归**没带 `-am`** ⇒ 用的是 m2 里 **2026-10-29 08:08 的旧** `com.rag:common` jar ⇒ 那份共享层里这些 Bean 还只有 servlet 条件 ⇒ ⇒ 在 MOCK 上下文里都在 ⇒ 绿 |
+| 修法（已落码） | 改用**本类自带的探针** `ServletContextProbeConfiguration`（**只**带 `@ConditionalOnWebApplication(SERVLET)`、**不带** api 侧条件）⇒ ⇒ **实测踩了两个坑（逐个定位，不是猜的）**：<br>① **注册面**：探针最初做成**类的嵌套** `@TestConfiguration` ⇒ 实测**根本没被自动注册**（探针始终不在容器里）⇒ ⇒ 而上下文底账实测为 `ctx=GenericWebApplicationContext` / `env=ApplicationServletEnvironment` / `session` scope 已注册 ⇒ ⇒ **条件是匹配的 ⇒ 问题在「注册」不在「条件」** ⇒ ⇒ 最终改成**文件顶层（包私有）`@Configuration` ＋ 测试类上显式 `@Import`** ⇒ 注册不再依赖任何自动探测机制；<br>② **编译面**：`@Import(Xxx.class)` 写在**类自身的注解**上时，javac 按 JLS 作用域规则**解析不到本类的嵌套成员类型**（嵌套类型的作用域是「类体内部」，而类声明上的注解在类体之外）⇒ ⇒ 编译报「找不到符号」⇒ ⇒ 搬到文件顶层后 `@Import` 可解析（**这是必须搬文件顶层的第二个独立理由**）；<br>③ **追加一条不依赖任何 bean 条件的直接断言**：`context instanceof WebApplicationContext` ⇒ ⇒ 直接读「前提事实」本身 ⇒ **不依赖共享层任何 Bean 的条件组合** ⇒ ⇒ 与探针那条**成对**（探针验「servlet 条件机制真的匹配」，直接断言验「上下文真的是 servlet web app」） |
+
+### 为什么必须留这一条（别当噪音删掉）
+
+- 第 ③ 条断言的是「api 侧那 5 个 web Bean **一个都不在** rpc 容器里」
+  ⇒ ⇒ 若本上下文**压根不是 servlet web app**，那 5 个 Bean 自然不在 ⇒ ⇒ **第 ③ 条就是空断言**（无鉴别力）
+  ⇒ ⇒ 第 ② 条的**正向对照**是第 ③ 条的前提 ⇒ ⇒ 两者必须成对维护。
+- ⚠️ 本条同时是一个**方法学提醒**：守门里「拿共享层某个 Bean 当参照物」的做法
+  ⇒ ⇒ **会随共享层演进而失效** ⇒ ⇒ 判据应当**自带参照物**。
+
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
 > 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。
