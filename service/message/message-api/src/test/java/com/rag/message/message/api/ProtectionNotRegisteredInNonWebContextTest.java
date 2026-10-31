@@ -1,9 +1,5 @@
 package com.rag.message.message.api;
 
-import com.rag.common.protection.GoStyleBreakerFilter;
-import com.rag.common.protection.GoStyleCpuSheddingFilter;
-import com.rag.common.protection.GoStyleMaxBytesFilter;
-import com.rag.common.protection.GoStyleMaxConnsFilter;
 import com.rag.message.message.api.client.MessageRpcClient;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -72,13 +68,13 @@ class ProtectionNotRegisteredInNonWebContextTest {
     @Test
     @DisplayName("非 web 上下文里四个请求保护 Filter 都不注册（@ConditionalOnWebApplication 生效）")
     void protectionFiltersAreAbsentInNonWebContext() {
-        assertFalse(ctx.getBeansOfType(GoStyleMaxBytesFilter.class).size() > 0,
-                "GoStyleMaxBytesFilter 是 jakarta.servlet.Filter 的实现，"
+        assertFalse(ctx.getBeansOfType(com.rag.common.protection.GoStyleMaxBytesFilter.class).size() > 0,
+                "com.rag.common.protection.GoStyleMaxBytesFilter 是 jakarta.servlet.Filter 的实现，"
                         + "在没有 servlet API 的进程里注册它会在类加载阶段抛 NoClassDefFoundError；"
                         + "它在 com.rag.common 下，必须靠 @ConditionalOnWebApplication(SERVLET) 挡住");
-        assertEquals(0, ctx.getBeansOfType(GoStyleMaxConnsFilter.class).size());
-        assertEquals(0, ctx.getBeansOfType(GoStyleCpuSheddingFilter.class).size());
-        assertEquals(0, ctx.getBeansOfType(GoStyleBreakerFilter.class).size());
+        assertEquals(0, ctx.getBeansOfType(com.rag.common.protection.GoStyleMaxConnsFilter.class).size());
+        assertEquals(0, ctx.getBeansOfType(com.rag.common.protection.GoStyleCpuSheddingFilter.class).size());
+        assertEquals(0, ctx.getBeansOfType(com.rag.common.protection.GoStyleBreakerFilter.class).size());
     }
 
     @Test

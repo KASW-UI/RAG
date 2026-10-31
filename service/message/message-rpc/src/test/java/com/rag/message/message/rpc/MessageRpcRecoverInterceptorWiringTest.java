@@ -3,7 +3,6 @@ package com.rag.message.message.rpc;
 import com.rag.message.message.proto.BaseResp;
 import com.rag.message.message.proto.MarkNotificationReq;
 import com.rag.message.message.proto.MessageServiceGrpc;
-import com.rag.common.observability.GoStyleRecoverInterceptor;
 import io.grpc.ManagedChannel;
 import io.grpc.Metadata;
 import io.grpc.Server;
@@ -138,7 +137,7 @@ class MessageRpcRecoverInterceptorWiringTest {
                 "Go: status.Errorf(codes.Internal, …) ⇒ 必须 INTERNAL");
         String desc = e.getStatus().getDescription();
         assertNotNull(desc, "description 必须存在（Go 显式写了 \"panic: %v\"）");
-        assertTrue(desc.startsWith(GoStyleRecoverInterceptor.PANIC_DESCRIPTION_PREFIX),
+        assertTrue(desc.startsWith(com.rag.common.observability.GoStyleRecoverInterceptor.PANIC_DESCRIPTION_PREFIX),
                 "description 必须以 \"panic: \" 开头，实际=" + desc);
         assertTrue(desc.contains("测试用 panic"),
                 "description 必须带上 panic 值（Go 的 %v），实际=" + desc);
@@ -207,7 +206,7 @@ class MessageRpcRecoverInterceptorWiringTest {
                 () -> stub.markNotificationRead(req()));
         assertEquals(Status.Code.INTERNAL, e.getStatus().getCode(),
                 "Error 也必须被兜住（Go 的 recover 同样能接 runtime.Error 类 panic）");
-        assertTrue(e.getStatus().getDescription().startsWith(GoStyleRecoverInterceptor.PANIC_DESCRIPTION_PREFIX),
+        assertTrue(e.getStatus().getDescription().startsWith(com.rag.common.observability.GoStyleRecoverInterceptor.PANIC_DESCRIPTION_PREFIX),
                 "实际=" + e.getStatus().getDescription());
     }
 

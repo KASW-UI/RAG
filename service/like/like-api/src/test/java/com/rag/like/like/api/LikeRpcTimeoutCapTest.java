@@ -1,7 +1,5 @@
 package com.rag.like.like.api;
 
-import com.rag.common.observability.GoStyleRequestDeadline;
-import com.rag.common.protection.GoStyleOutboundDeadlineInterceptor;
 import com.rag.common.protection.GoStyleProtectionProperties;
 import com.rag.like.like.api.client.LikeRpcClient;
 import com.rag.like.like.proto.GetLikeCountReq;
@@ -50,7 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *       {@code ctx, cancel := context.WithTimeout(r.Context(), timeout)}
  *       （timeout 来自 {@code go-zero rest/config.go:55} 的
  *       {@code Timeout int64 `json:",default=3000"`}）。
- *       RAG 侧等价物 = {@link GoStyleRequestDeadline}。</li>
+ *       RAG 侧等价物 = {@link com.rag.common.observability.GoStyleRequestDeadline}。</li>
  *   <li><b>单次 RPC 上界 2000ms</b> ——
  *       {@code zrpc/config.go:31} {@code Timeout int64 `json:",default=2000"`}
  *       → {@code zrpc/client.go:70-71} {@code if c.Timeout > 0 { … WithTimeout(2000ms) }}
@@ -165,11 +163,11 @@ class LikeRpcTimeoutCapTest {
         props.getOutboundDeadline().setCapMillis(2000L);
         channel = InProcessChannelBuilder.forName(serverName).build();
         Channel capped = ClientInterceptors.intercept(channel,
-                new GoStyleOutboundDeadlineInterceptor(props));
+                new com.rag.common.protection.GoStyleOutboundDeadlineInterceptor(props));
         client = new LikeRpcClient();
         ReflectionTestUtils.setField(client, "likeServiceBlockingStub",
                 LikeServiceGrpc.newBlockingStub(capped));
-        GoStyleRequestDeadline.clear();
+        com.rag.common.observability.GoStyleRequestDeadline.clear();
         serverObservedDeadline.set(null);
         serverObservedRemainingMillis.set(-1L);
         serverCallCount.set(0);
@@ -178,7 +176,7 @@ class LikeRpcTimeoutCapTest {
     @AfterEach
     void tearDown() {
         // ThreadLocal 残留会把下一个用例变成假绿/假红
-        GoStyleRequestDeadline.clear();
+        com.rag.common.observability.GoStyleRequestDeadline.clear();
         if (channel != null) {
             channel.shutdownNow();
         }
@@ -192,7 +190,7 @@ class LikeRpcTimeoutCapTest {
     }
 
     private void setHttpBudgetMillis(long millis) {
-        GoStyleRequestDeadline.begin(System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(millis));
+        com.rag.common.observability.GoStyleRequestDeadline.begin(System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(millis));
     }
 
     // ==================================================================
@@ -202,7 +200,7 @@ class LikeRpcTimeoutCapTest {
     @Test
     @DisplayName("🔴 无 HTTP 预算时，单次 RPC 仍必须封顶 2000ms（Go zrpc/config.go:31 的 struct tag 默认）")
     void withoutHttpBudgetTheCallIsStillCappedAt2000ms() {
-        assertTrue(!GoStyleRequestDeadline.isPresent(), "本用例的前提就是「没有请求级 deadline」");
+        assertTrue(!com.rag.common.observability.GoStyleRequestDeadline.isPresent(), "本用例的前提就是「没有请求级 deadline」");
 
         long start = System.nanoTime();
         StatusRuntimeException e = assertThrows(StatusRuntimeException.class,
@@ -287,7 +285,7 @@ class LikeRpcTimeoutCapTest {
     @Test
     @DisplayName("🔴 HTTP 预算已耗尽时立刻失败（不是退化成「没有 deadline」）")
     void exhaustedHttpBudgetFailsImmediately() {
-        GoStyleRequestDeadline.begin(System.nanoTime() - 1L);   // 已经过去
+        com.rag.common.observability.GoStyleRequestDeadline.begin(System.nanoTime() - 1L);   // 已经过去
 
         long start = System.nanoTime();
         StatusRuntimeException e = assertThrows(StatusRuntimeException.class,
@@ -313,7 +311,7 @@ class LikeRpcTimeoutCapTest {
         ManagedChannel wideChannel = InProcessChannelBuilder.forName(serverName).build();
         try {
             Channel cappedWide = ClientInterceptors.intercept(wideChannel,
-                    new GoStyleOutboundDeadlineInterceptor(wideProps));
+                    new com.rag.common.protection.GoStyleOutboundDeadlineInterceptor(wideProps));
             LikeRpcClient wideCapClient = new LikeRpcClient();
             ReflectionTestUtils.setField(wideCapClient, "likeServiceBlockingStub",
                     LikeServiceGrpc.newBlockingStub(cappedWide));

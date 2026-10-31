@@ -2,7 +2,6 @@ package com.rag.task.task.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.rag.common.http.GoStylePathNormalizingFilter;
 import com.rag.task.task.api.client.TaskRpcClient;
 import com.rag.task.task.api.support.RealTomcatPort;
 import org.junit.jupiter.api.DisplayName;
@@ -58,7 +57,7 @@ import static org.mockito.Mockito.when;
  *
  * <h2>本类的三条守门</h2>
  * <ol>
- *   <li><b>前提非空洞</b>：共享层那份 {@link GoStylePathNormalizingFilter} <b>必须在容器里</b>
+ *   <li><b>前提非空洞</b>：共享层那份 {@link com.rag.common.http.GoStylePathNormalizingFilter} <b>必须在容器里</b>
  *       （否则下面两条可能只是「压根没有这层」而不是「这层对了」）；</li>
  *   <li><b>规范路径 ⇒ 命中路由</b>（阳性对照：证明路由本身是通的）；</li>
  *   <li><b>4 种路径变体 ⇒ 与规范路径<b>同状态、同业务分支</b></b>
@@ -136,7 +135,7 @@ class TaskApiPathNormalizationRealTomcatTest {
                         + "⇒ 若为 false，说明下面两条守门测的是「压根没有归一层」，不是「归一层对了」");
 
         Object bean = context.getBean(FILTER_BEAN_NAME);
-        assertTrue(bean instanceof GoStylePathNormalizingFilter,
+        assertTrue(bean instanceof com.rag.common.http.GoStylePathNormalizingFilter,
                 "按名注册的必须是**共享层那份**（com.rag.common.http.GoStylePathNormalizingFilter）"
                         + "⇒ 共享层的自动配置带 @ConditionalOnMissingBean(name = \"" + FILTER_BEAN_NAME + "\")"
                         + " ⇒ **域内一旦有同名 Bean，共享层那份根本不会注册**（= 遮蔽，不是叠加）"
@@ -146,8 +145,8 @@ class TaskApiPathNormalizationRealTomcatTest {
         // ⚠️ 顺序约束：必须在「所有会读路径的 Filter」之前
         //   （共享层 GoStyleTraceparentFilter = HIGHEST_PRECEDENCE + 3，它要读 getRequestURI() 取 span 名）
         //   ⇒ 本层取 HIGHEST_PRECEDENCE + 2 ⇒ 早于它。
-        Order order = AnnotationUtils.findAnnotation(GoStylePathNormalizingFilter.class, Order.class);
-        assertNotNull(order, "GoStylePathNormalizingFilter 必须带 @Order（否则排不到读路径的 Filter 之前）");
+        Order order = AnnotationUtils.findAnnotation(com.rag.common.http.GoStylePathNormalizingFilter.class, Order.class);
+        assertNotNull(order, "com.rag.common.http.GoStylePathNormalizingFilter 必须带 @Order（否则排不到读路径的 Filter 之前）");
         assertEquals(Ordered.HIGHEST_PRECEDENCE + 2, order.value(),
                 "归一层的 @Order 必须是 HIGHEST_PRECEDENCE+2（= 早于 GoStyleTraceparentFilter 的 +3）"
                         + "⇒ 若变了 ⇒ 读路径的那层可能先看到未清洗的路径");
