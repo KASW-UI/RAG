@@ -1,7 +1,5 @@
 package com.rag.favorite.favorite.api.client;
 
-import com.rag.common.observability.GoStyleRequestDeadline;
-import com.rag.common.protection.GoStyleOutboundDeadlineInterceptor;
 import com.rag.common.protection.GoStyleProtectionProperties;
 import com.rag.favorite.favorite.proto.CreateFavoriteReq;
 import com.rag.favorite.favorite.proto.CreateFavoriteResp;
@@ -114,7 +112,7 @@ class FavoriteRpcClientTimeoutTest {
 
     @AfterEach
     void tearDown() {
-        GoStyleRequestDeadline.clear();
+        com.rag.common.observability.GoStyleRequestDeadline.clear();
         if (channel != null) {
             channel.shutdownNow();
         }
@@ -174,7 +172,7 @@ class FavoriteRpcClientTimeoutTest {
     @Timeout(value = 40, unit = TimeUnit.SECONDS)
     @DisplayName("③ 【没有入向 deadline】⇒ 出向 favorite-rpc 必须在 ≤2000ms 处 DEADLINE_EXCEEDED（真发调用）")
     void outboundCallIsCappedWithoutInboundDeadline() throws Exception {
-        GoStyleRequestDeadline.clear();
+        com.rag.common.observability.GoStyleRequestDeadline.clear();
         FavoriteServiceGrpc.FavoriteServiceBlockingStub stub = startHangingDomainRpc(domainProperties(null));
 
         long startedAt = System.nanoTime();
@@ -197,7 +195,7 @@ class FavoriteRpcClientTimeoutTest {
     @Timeout(value = 40, unit = TimeUnit.SECONDS)
     @DisplayName("③ 域 client 层：favoriteRpc() 给出的 stub 也必须在 ≤2000ms 处失败（不挂死）")
     void domainClientDoesNotHang() throws Exception {
-        GoStyleRequestDeadline.clear();
+        com.rag.common.observability.GoStyleRequestDeadline.clear();
         FavoriteRpcClient client = startHangingDomainClient(domainProperties(null));
 
         long startedAt = System.nanoTime();
@@ -223,7 +221,7 @@ class FavoriteRpcClientTimeoutTest {
     @Timeout(value = 40, unit = TimeUnit.SECONDS)
     @DisplayName("④ env 把 cap 覆盖【到比 2000 更小】⇒ 出向上界必须跟着收紧 ⇒ 【证明域 yml 的这个键真被读到】")
     void envOverrideTightensTheOutboundCap() throws Exception {
-        GoStyleRequestDeadline.clear();
+        com.rag.common.observability.GoStyleRequestDeadline.clear();
         FavoriteServiceGrpc.FavoriteServiceBlockingStub stub = startHangingDomainRpc(domainProperties(
                 Map.of(ENV_CAP, String.valueOf(TIGHTENED_CAP_MILLIS))));
 
@@ -250,8 +248,8 @@ class FavoriteRpcClientTimeoutTest {
     @Timeout(value = 40, unit = TimeUnit.SECONDS)
     @DisplayName("⑤ 入向预算 300ms < cap 2000ms ⇒ 出向必须在【300ms】处失败（钉的是 min，不是覆盖）")
     void inboundBudgetWinsOverCap() throws Exception {
-        GoStyleRequestDeadline.clear();
-        GoStyleRequestDeadline.begin(System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(INBOUND_BUDGET_MILLIS));
+        com.rag.common.observability.GoStyleRequestDeadline.clear();
+        com.rag.common.observability.GoStyleRequestDeadline.begin(System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(INBOUND_BUDGET_MILLIS));
         FavoriteServiceGrpc.FavoriteServiceBlockingStub stub = startHangingDomainRpc(domainProperties(null));
 
         long startedAt = System.nanoTime();
@@ -336,7 +334,7 @@ class FavoriteRpcClientTimeoutTest {
         // ⚠️ 与 devh 的装配动作同一条：devh 的 AbstractChannelFactory.createChannel
         //    最后一行是 ClientInterceptors.interceptForward(channel, interceptors)
         Channel capped = ClientInterceptors.intercept(channel,
-                new GoStyleOutboundDeadlineInterceptor(props));
+                new com.rag.common.protection.GoStyleOutboundDeadlineInterceptor(props));
         return FavoriteServiceGrpc.newBlockingStub(capped);
     }
 

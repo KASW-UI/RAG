@@ -1,6 +1,5 @@
 package com.rag.article.article.rpc;
 
-import com.rag.common.protection.GoStyleProtectionProperties;
 import io.grpc.Metadata;
 import io.grpc.MethodDescriptor;
 import io.grpc.ServerBuilder;
@@ -77,7 +76,7 @@ class ArticleProtectionChainWiringTest {
         // ⚠️ 关掉 CPU 降载：本用例要验的是「链上真的有包装层」，
         //    而降载一旦命中就会短路（handler 不执行）⇒ 断言会变得不确定。
         //    降载本身由 service/common 的 GoStyleRpcSheddingInterceptorTest 单独覆盖。
-        GoStyleProtectionProperties props = new GoStyleProtectionProperties();
+        com.rag.common.protection.GoStyleProtectionProperties props = new com.rag.common.protection.GoStyleProtectionProperties();
         props.getCpuShedding().setEnabled(false);
 
         GrpcServerConfigurer configurer =

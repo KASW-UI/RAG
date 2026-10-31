@@ -1,6 +1,5 @@
 package com.rag.hot.hot.api.client;
 
-import com.rag.common.protection.GoStyleOutboundDeadlineInterceptor;
 import com.rag.common.protection.GoStyleProtectionProperties;
 import com.rag.hot.hot.proto.GetHotArticlesRequest;
 import com.rag.hot.hot.proto.GetHotArticlesResponse;
@@ -352,7 +351,7 @@ class HotApiOutboundDeadlineCapGateTest {
         // ⚠️ 与 devh 的装配动作同一条：devh 的 AbstractChannelFactory.createChannel
         //    最后一行是 ClientInterceptors.interceptForward(channel, interceptors)
         Channel capped = ClientInterceptors.intercept(channel,
-                new GoStyleOutboundDeadlineInterceptor(props));
+                new com.rag.common.protection.GoStyleOutboundDeadlineInterceptor(props));
 
         HotRpcClient client = new HotRpcClient();
         client.rawStubField(HotServiceGrpc.newBlockingStub(capped));
