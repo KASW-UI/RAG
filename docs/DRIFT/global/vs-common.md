@@ -9371,3 +9371,37 @@ G2 指出本层早前那条「**0 落后 / 3 领先**」的相对读数用的是
 - 第五节两处歧义**只报不改**（派生层 md 在本层禁写面）；另有一处 `docs/Worktree.md` 里「例外集现 = 1 条 = …（不可收…）」的**过期断言**同样**只报不改**（该文件也是本层禁写面）⇒ ⇒ 已一并转派收口执行者。
 
 （**本节编号：§4.19.70** —— 为便于下文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 实测派生层**零收录** `§4.19.7x` ⇒ ⇒ 「标题劫持」不成立。）
+
+### §4.19.71 · 第七十次订正轮次（2026-11-01 · G4 lane）—— **更正合批形态**：本层上一封回执给的命令**语法不成立**（`git merge A B` 不合法）＋ **分两次合会有红线窗** ⇒ ⇒ 正确形态 = **临时分支法**（已用 `git merge-tree` 实测：合并树里**两侧都剪了** ⇒ 一个 merge commit 可同时带两侧 ⇒ 零红窗）（零行位移 · 末尾追加）
+
+**一、🔴 本层上一封回执里的命令有错 ⇒ 此处更正**
+
+· **原话**：「合并收口执行者那条命令 = `git merge --no-ff align/g3-article-comment-favorite-hot align/g4-ledger-close`（一次合两分支 ⇒ 主干零红窗）」
+· 🔴 **错在哪**：`git merge` **只接受一个** commit-ish ⇒ ⇒ **`git merge --no-ff A B` 不是合法语法** ⇒ ⇒ 那条命令**跑不起来**。
+· 🔴 **更关键的不是语法**：即便**改成分两次合**（先合 G3 分支、再合本层分支）⇒ ⇒ **主干会经过一个红的中间态** ⇒ ⇒ 那个中间态 = **形态 A**（域侧内联已剪、例外集**未**剪 ⇒ ⇒ `expired` 非空 ⇒ ⇒ 主干判据④ **红 1 条**）⇒ ⇒ ⇒ **那不是零红窗** ⇒ ⇒ 与「第二批 ≠ 零红窗」那条历史教训**同源**。
+
+**二、✅ 正确形态 = 临时分支法（实测）**
+
+· 实测：`git merge-tree --write-tree align/g3-article-comment-favorite-hot align/g4-ledger-close` ⇒ **rc=0**，合并树 = `5a34129cf08a0ea7229e1417ce6cc4b91ebe4581`
+· ⇒ 实测**该树里两侧都剪了**：
+  · `service/article/article-api/.../UserRpcClient.java` 里 `withDeadlineAfter(effective` 残留 = **0** ⇒ **域侧那半在**
+  · `service/common/src/test/.../GoStyleClientCallTimeoutSingleSourceGateTest.java` 里 `UserRpcClient.java:withDeadlineAfter` 残留 = **0** ⇒ **共享层那半在**
+· ⇒ ⇒ **那个 merge commit 的树同时含两侧** ⇒ ⇒ 主干合它时**一个 commit 里两侧同时生效** ⇒ ⇒ **零红窗** ✅
+· ⇒ ⇒ **确切三步**（在主干工作区）：
+  1. `git checkout -b tmp-g3g4-both align/g3-article-comment-favorite-hot`
+  2. `git merge --no-ff align/g4-ledger-close -m "merge(g3+g4): 例外集最后 1 条的剪除（域侧那半 ＋ 共享层那半 · 同一个 merge commit ⇒ 主线零红窗）"`
+  3. `git checkout do-my-own-gh` ⇒ `git merge --no-ff tmp-g3g4-both -m "merge(g3+g4): 合入例外集最后 1 条的剪除（域侧 ＋ 共享层 · 同一 commit ⇒ 零红窗）"` ⇒（可选）`git branch -D tmp-g3g4-both`
+· ⇒ ⇒ **第 3 步的那个 merge commit 相对其第一父（= 原主干）的 diff = 两侧同时变** ⇒ ⇒ **主干任何时刻判据④ 都绿** ⇒ ⇒ **这才是「零红窗」的真实形态**。
+
+**三、⚠️ 临时分支上的中间态**不是主干 ⇒ ⇒ 但那棵树上会红 ⇒ ⇒ 且那三项欠账**必须**在合批里一起处理
+
+· 临时分支的树含 G3 的台账改动 ⇒ ⇒ ① **派生层 `--check` 会红**（需重算 ⇒ `docs/DRIFT/_cross/**` = **合并收口执行者的面**）② **`check-source-test-decl-count` 的 M2 会红**（文档声明 3330 vs 实测 3337 ⇒ 差 **7** = G3 新增测试的 7 条 @Test ⇒ `docs/PhaseGoal/**` = **无主面**）③ **G3 台账里用了未来日期 `2026-11-02`** ⇒ ⇒ `check-agents-budget` 报「这些条目的状态一律按 **UNKNOWN** 处理；**先改日期，再谈结论**」⇒ ⇒ **会作废 G3 那条结论本身** ⇒ ⇒ 归 G3 改。
+· ⇒ ⇒ **第 3 步合完之后**：重算派生层 ＋ 更新 PhaseGoal 的 A-1 `tests` 列 ＋ G3 改日期 ⇒ ⇒ 三项同批完成。
+
+**四、诚实边界**
+
+· 本节**零产品代码改动**（只动台账）⇒ ⇒ 回归读数沿用 §4.19.70 第二／三节那套（**92 类 / 488 用例 / 0F / 0E / 0S**）⇒ ⇒ 本节未重跑。
+· 第二节的合并树 hash 绑**当前主干与两个分支的此刻状态**（并发下会移动 ⇒ 引用须带 SHA）。
+· 本节**只报不改**（`docs/DRIFT/_cross/**` · `docs/PhaseGoal/**` · `docs/Worktree.md` 都不在本层写权面）。
+
+（**本节编号：§4.19.71** —— 为便于下文按「§4.19.x」引用；**编号只写在此处正文** ⇒ ⇒ 实测派生层**零收录** `§4.19.7x` ⇒ ⇒ 「标题劫持」不成立。）
