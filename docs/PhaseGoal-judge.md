@@ -138,15 +138,15 @@
 | `hot` | `hot-rpc` | `service/hot/rpc/internal/logic/`（5） | `service/hot/hot-rpc/`（`impl/HotServiceGrpcImpl.java`） | 15 / 2,535 | 135 |
 | `hot` | `hot-common` | `service/hot/common/errmsg.go`（121 行） | `service/hot/hot-common/…/errmsg/`（2 类） | 2 / 172 | 14 |
 | `hot` | `hot-proto` | `proto/hot.proto` | `service/hot/hot-proto/src/main/proto/hot.proto` | —（生成） | 0 |
-| `like` | `like-api` | `service/like/api/internal/handler/routes.go` + `internal/logic/`（6） | `service/like/like-api/`（`controller/LikeController.java`） | 37 / 3,479 | 104 |
-| `like` | `like-rpc` | `service/like/rpc/internal/logic/`（6） | `service/like/like-rpc/`（`impl/LikeServiceGrpcImpl.java`） | 42 / 7,535 | 155 |
+| `like` | `like-api` | `service/like/api/internal/handler/routes.go` + `internal/logic/`（6） | `service/like/like-api/`（`controller/LikeController.java`） | 37 / 3,479 | 111 |
+| `like` | `like-rpc` | `service/like/rpc/internal/logic/`（6） | `service/like/like-rpc/`（`impl/LikeServiceGrpcImpl.java`） | 42 / 7,535 | 162 |
 | `like` | `like-common` | `service/like/common/errmsg/errmsg.go` | `service/like/like-common/…/errmsg/`（4 类） | 4 / 515 | 18 |
 | `like` | `like-proto` | `proto/like.proto` | `service/like/like-proto/src/main/proto/like.proto` | —（生成） | 0 |
-| `message` | `message-api` | `service/message/api/internal/handler/routes.go` + `internal/logic/`（13） | `service/message/message-api/`（`MessageController` + `MessageAdminController`） | 49 / 4,992 | 114 |
-| `message` | `message-rpc` | `service/message/rpc/internal/logic/`（9） | `service/message/message-rpc/`（`impl/MessageRpcServiceImpl.java`） | 19 / 3,852 | 105 |
+| `message` | `message-api` | `service/message/api/internal/handler/routes.go` + `internal/logic/`（13） | `service/message/message-api/`（`MessageController` + `MessageAdminController`） | 49 / 4,992 | 121 |
+| `message` | `message-rpc` | `service/message/rpc/internal/logic/`（9） | `service/message/message-rpc/`（`impl/MessageRpcServiceImpl.java`） | 19 / 3,852 | 114 |
 | `message` | `message-common` | `service/message/common/errmsg/errmsg.go` | `service/message/message-common/…/errmsg/`（3 类） | 3 / 526 | 21 |
 | `message` | `message-proto` | `proto/message.proto` | `service/message/message-proto/src/main/proto/message.proto` | —（生成） | 0 |
-| `task` | `task-api` | `service/task/api/internal/handler/routes.go`（1） | `service/task/task-api/`（`controller/TaskController.java`） | 11 / 1,496 | 75 |
+| `task` | `task-api` | `service/task/api/internal/handler/routes.go`（1） | `service/task/task-api/`（`controller/TaskController.java`） | 11 / 1,496 | 82 |
 | `task` | `task-rpc` | `service/task/rpc/internal/logic/`（1） | `service/task/task-rpc/`（`impl/TaskServiceGrpcImpl.java`） | 28 / 4,310 | 129 |
 | `task` | `task-proto` | `proto/task.proto` | `service/task/task-proto/src/main/proto/task.proto` | —（生成） | 0 |
 | `users` | `user-api` | `service/user/user/api/internal/handler/routes.go` + `internal/logic/`（9） | `service/users/user/user-api/`（`controller/UserController.java`） | 43 / 3,454 | 140 |
