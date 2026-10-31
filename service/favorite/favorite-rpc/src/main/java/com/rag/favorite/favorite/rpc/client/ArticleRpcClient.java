@@ -2,7 +2,6 @@ package com.rag.favorite.favorite.rpc.client;
 
 import com.rag.article.article.proto.ArticleServiceGrpc;
 import com.rag.article.article.proto.GetArticleRequest;
-import com.rag.common.observability.GoStyleRequestDeadline;
 import net.devh.boot.grpc.client.inject.GrpcClient;
 import org.springframework.stereotype.Component;
 
@@ -44,17 +43,27 @@ public class ArticleRpcClient {
     private ArticleServiceGrpc.ArticleServiceBlockingStub articleServiceBlockingStub;
 
     /**
-     * 返回<b>已套上「请求级 deadline ＋ 2s 客户端封顶」</b> 的 stub
-     * （理由同 {@code UserRpcClient#userRpc}）。
+     * 出向 stub —— <b>deadline 由共享层的全局客户端拦截器统一施加</b>（2026-10-31 · G3 第十一轮）。
      *
-     * <p>🔴 <b>2s 客户端封顶（2026-10-27 G3 域侧自修 · A1）</b>：Go 侧
-     * {@code zrpc.MustNewClient(c.ArticleRpc)} 的客户端<b>无条件</b>装
-     * {@code TimeoutInterceptor}（{@code zrpc/internal/client.go:113-117}）⇒ 2000ms 上限；
-     * 原先只有 {@code applyTo} ⇒ 本域出向调用<b>零期限</b> ⇒ 与 Go 分叉。
+     * <p>🔴 <b>Go 出处（行为层）</b>：Go 侧 {@code zrpc.MustNewClient(c.ArticleRpc)} 的客户端
+     * <b>无条件</b>装 {@code TimeoutInterceptor}（{@code zrpc/internal/client.go:113-117}
+     * ＋ {@code zrpc/internal/config.go:15} 的 {@code default=true}）⇒ <b>2000ms</b> 上限
+     * （{@code zrpc/config.go:31} 的 {@code json:",default=2000"}；Go 侧
+     * {@code etc/favorite.yaml} 的 {@code ArticleRpc:} 段未配 {@code Timeout} ⇒ 走这个默认值）。
+     *
+     * <p>🔴 <b>为什么本类不再自己套 deadline</b>：Go 的客户端超时是<b>拦截器级别</b>的
+     * ⇒ ⇒ RAG 侧同形也应是拦截器级 ⇒ ⇒ 改由共享层的
+     * {@code GoStyleOutboundDeadlineInterceptor}（devh 的 {@code @GrpcGlobalClientInterceptor}
+     * ⇒ 装在<b>每个</b>出向 devh 调用上 ⇒ 连<b>裸 stub</b> 都过链）统一施加，
+     * 本域<b>只配参数</b>：{@code rag.protection.outbound-deadline.cap-millis=2000}
+     * （见本组件 {@code application.yml}）。
+     *
+     * <p>⚠️ <b>域内私有副本 {@code GoStyleClientCallTimeout} 已删除</b>（本轮）：
+     * <b>副本数 = 漂移面</b> ⇒ ⇒ 共享层守门 {@code GoStyleClientCallTimeoutSingleSourceGateTest}
+     * 的终态口径 = 「域侧 0 份，只配参数」。
      */
     public ArticleServiceGrpc.ArticleServiceBlockingStub articleRpc() {
-        return GoStyleClientCallTimeout.capByClientTimeout(
-                GoStyleRequestDeadline.applyTo(articleServiceBlockingStub));
+        return articleServiceBlockingStub;
     }
 
     /**

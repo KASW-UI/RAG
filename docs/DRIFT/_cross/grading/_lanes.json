@@ -467,7 +467,7 @@
     "dir": "DRIFT",
     "domain": "global",
     "source": "DRIFT/global/vs-common.md:3846",
-    "title": "| B-10 | `users/user/user-api/.../client/UserRpcClient.java` | 🔴 **裸 provider**（api 侧也有零的 —— 上一轮只记了 rpc 侧） | `:143` | **8** |",
+    "title": "| B-10 | `users/user/user-api/.../client/UserRpcClient.java` | 🆕 **【2026-10-31 订正 · G4 lane】原写「🔴 裸 provider」** ⇒ ⇒ **不是「零上界」**：**`:194-196`** 的 `userRpc()` 返回 `capByClientTimeout(GoStyleRequestDeadline.applyTo(userServiceBlockingStub))` ⇒ ⇒ **入向剩余 ∧ 2s 上界**双维 ⇒ ⇒ ⚠️ **原行号 `:143` 已过期**（provider 当时在 `:143`；`88c206ce` 之后移至 `:194`） | **`:194`**（**原 `:143` = 旧 provider 位 ⇒ 已订正**） | **8** |",
     "status": "🔴 未闭合",
     "evidence": "C 无指针"
    },
@@ -476,7 +476,7 @@
     "dir": "DRIFT",
     "domain": "global",
     "source": "DRIFT/global/vs-common.md:3847",
-    "title": "| B-11 | `users/admin/admin-api/.../client/AdminRpcClient.java` | 🔴 **裸 provider**（同上） | `:173` | **12** |",
+    "title": "| B-11 | `users/admin/admin-api/.../client/AdminRpcClient.java` | 🆕 **【2026-10-31 订正 · G4 lane】原写「🔴 裸 provider」** ⇒ ⇒ **不是「零上界」**：**`:219-221`** 的 `adminRpc()` 返回 `capByClientTimeout(GoStyleRequestDeadline.applyTo(adminServiceBlockingStub))` ⇒ ⇒ **入向剩余 ∧ 2s 上界**双维 ⇒ ⇒ ⚠️ **原行号 `:173` 已过期**（provider 当时在 `:173`；`88c206ce` 之后移至 `:219`） | **`:219`**（**原 `:173` = 旧 provider 位 ⇒ 已订正**） | **12** |",
     "status": "🔴 未闭合",
     "evidence": "C 无指针"
    },

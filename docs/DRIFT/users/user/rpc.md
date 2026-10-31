@@ -3008,3 +3008,38 @@ span 状态恒为 **`Unset`** ⇒ ⇒ **RAG 侧多置一个 `ERROR`** 就是**�
 
 - 转派单写「调整 `UserDomainServiceDeadlineTest` 的 `GUARDED` 清单（logout 出列）」⇒ ⇒ **该类全仓不存在**（`find` + 全仓 grep 只在 `docs/DRIFT/global/vs-common.md` 里出现过这个名字）⇒ ⇒ **user 域没有 GUARDED 清单** ⇒ ⇒ **无清单可调**
 - ⇒ ⇒ 真正受影响的是 **admin 域** `AdminDomainServiceDeadlineTest:26` 那句「`UserDomainService` 实有 **11 处** `checkDeadline()`」⇒ ⇒ 撤掉 logout 那处后是 **10 处** ⇒ ⇒ 已就地订正（**行数 148 → 148 不变** —— 该文件有共享面指针 `global/vs-common.md:5460` 引的 `:41-42` 与 `docs/Worktree.md:587` 引的 `:41-43`）
+
+---
+
+## gRPC channel target 显式 scheme（2026-10-31 · G1 lane）
+
+- **落点（2 处，同形态）**：
+  - `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcLogoutClientVisibleGrpcStatusTest.java:157`
+  - `service/users/user/user-rpc/src/test/java/com/rag/users/user/rpc/UserRpcLogoutClientVisibleGrpcStatusDefaultBehaviorTest.java:173`
+  - 两处形态一致：`ManagedChannelBuilder.forAddress("127.0.0.1", GRPC_PORT)` ⇒ `.forTarget("dns:///127.0.0.1:" + GRPC_PORT)`
+  - **同行替换**（行数不变）＋ **文件末尾追加**说明段 ⇒ ⇒ **零行位移** ⇒ `docs/DRIFT/_cross/grading/W5.md:20` 与 `docs/DRIFT/_cross/stage1-derivation.tsv` 指的 `:221` / `:225`（`return RealGrpcPort.pick();`）**逐字未动**（已逐个复核）
+- **机制**：devh `net/devh/boot/grpc/client/autoconfigure/GrpcDiscoveryClientAutoConfiguration:29` = `@ConditionalOnBean(DiscoveryClient.class)`；`DiscoveryClientResolverFactory.priority()` = **6**（源码注释「More important than DNS」）⇒ 注册进**进程级全局** `io.grpc.NameResolverRegistry` 后，grpc 的 `refreshProviders()` 会把**默认 scheme** 判给它（priority 最高者胜）⇒ ⇒ 任何**无 scheme** 的 target 都被 discovery resolver 接管 ⇒ 把 `127.0.0.1:P` 当**服务名**去服务发现查 ⇒ `UNAVAILABLE` ⇒ ⇒ 典型「单跑绿、同跑红」（surefire 复用同一 JVM ⇒ 跨测试类顺序依赖）
+- **⚠️ 本域实测口径（如实，不照抄上游措辞）**：M-C（把 target 回落成 `.forAddress("127.0.0.1", GRPC_PORT)`）⇒ **仍绿**，且全日志**零** resolver 接管痕迹 ⇒ ⇒ **本模块当前并不会被接管** ⇒ ⇒ **这 2 处属「预防性修正」，不是修一个正在起火的红**
+  - 原因（本轮实测）：本模块测试**一律不关** `spring.cloud.nacos.discovery.enabled` ⇒ ⇒ `DiscoveryClient` bean 由 spring-cloud-alibaba 的自动配置提供 ⇒ ⇒ devh 的 `@ConditionalOnBean(DiscoveryClient.class)` 在其处理时**未命中** ⇒ ⇒ provider **不注册** ⇒ ⇒ 无接管
+  - 反向验证：M-D（额外加 `spring.cloud.nacos.discovery.enabled=false` 来制造「回落 `SimpleDiscoveryClient`」的环境）⇒ ⇒ **上下文直接起不来**（`Failed to load ApplicationContext`）⇒ ⇒ 该模块**无法**在内部造出接管环境
+- **改它的理由（与上面那条限定分开写）**：① **跨域静态守门的判据不区分模块** —— `tools/difftest/check-grpc-channel-target-scheme.py` 扫的是**形态**（代码态 `forAddress(`）⇒ ⇒ 不改就得登记永久豁免（点位级例外集 = 只能变紧的棘轮，目标恒为 0 例外）② **机制面本身是错的**：无 scheme ⇒ 走「默认 scheme」⇒ 依赖进程级全局注册顺序 ⇒ 脆 ③ 一旦同 JVM 内出现 `DiscoveryClient` 上下文（未来任何一个新测试类关掉 Nacos discovery 就会发生）⇒ ⇒ 立刻从「预防性」变成「活雷」
+- **Go 侧对应物（表达层，非行为偏离）**：`go-zero@v1.10.2/zrpc/internal/client.go:126` = `grpc.DialContext(timeCtx, server, options...)`；`go-zero@v1.10.2/zrpc/client.go:84` = `target, err := c.BuildTarget()` ⇒ ⇒ Go 侧把 target **直连**给 grpc ⇒ ⇒ 不存在「默认 scheme 被全局 resolver 抢」这一层 ⇒ ⇒ RAG 侧显式 `dns:///` 属**表达层**对齐 ⇒ ⇒ **不构成有意偏离，无需登记签字**
+- **验收读数**：user-rpc **184 条**（0F/0E/0S）· 与改动前同数 ⇒ ⇒ `BUILD SUCCESS`
+
+### 补充：devh discovery provider「是否注册」的直接探针 ＋ 装置正确的配对实验（2026-10-31 · G1 lane · 同轮追加）
+
+- **为什么要补这一段**：上一节「这 2 处属预防性修正」原先只有「回落 target 仍绿」这一条**间接**证据 ⇒ ⇒ 绿也可能是「**装置不够**」（只跑了单类，而「同跑红」按定义需要**同一 JVM 里另一个 devh `@SpringBootTest` 先跑**）⇒ ⇒ 这一段补上**直接探针**与**装置正确的配对实验**
+- **直接探针（实测，不是推断）**：在测试方法里打印进程级全局 registry 的真实状态
+  - `io.grpc.NameResolverRegistry.getDefaultRegistry().getDefaultScheme()` ⇒ **`dns`**
+  - `…getProviderForScheme("discovery")` ⇒ **`null`** ⇒ ⇒ **devh 的 discovery provider 根本没注册进这个 JVM**
+  - `…getProviderForScheme("dns")` ⇒ `io.grpc.internal.DnsNameResolverProvider@…` ⇒ ⇒ 默认 scheme 仍是 grpc 自带 DNS resolver ⇒ ⇒ 无 scheme 的 target 走 DNS ⇒ ⇒ 不被接管
+  - ⚠️ **同一次探针还读了「该上下文里到底有没有 `DiscoveryClient` bean」** ⇒ `beanNamesForTypeIncludingAncestors(ctx, DiscoveryClient.class)` = **`[nacosDiscoveryClient, compositeDiscoveryClient, simpleDiscoveryClient]`** ⇒ ⇒ **Nacos 的 bean 明明在**（依赖树里也有 `nacos-discovery`）⇒ ⇒ **provider 仍未注册** ⇒ ⇒ ⇒ **「模块依赖树里有 nacos-discovery」不是决定性变量** ⇒ ⇒ 决定性变量是 **devh 的 `@ConditionalOnBean(DiscoveryClient.class)` 在该上下文的自动配置处理顺序下是否命中** ⇒ ⇒ 命中与否**随上下文而变**（两侧实测对照见下）
+- **配对实验（装置正确：触发源先跑）**：`mvn … -pl service/users/user/user-rpc test -Dsurefire.runOrder=alphabetical -Dtest='UserRpcLogoutClientVisibleGrpcStatusTest,UserRpcGrpcInterceptorWiringTest,UserRpcContainerWiringTest'`
+  - 执行顺序**实测**：`UserRpcGrpcInterceptorWiringTest`（devh 用得最重的一类）**先跑** → `UserRpcLogoutClientVisibleGrpcStatusTest` → `UserRpcContainerWiringTest`
+  - 触发源先跑之后，logout 那条的探针**仍然是** `defaultScheme=dns` / `discoveryProvider=null` ⇒ ⇒ **无接管**
+  - 同一次运行日志里 resolver 接管痕迹（`Failed to resolve name` / `No servers found` / `Can not get hosts`）计数 = **0**
+  - 回落 `.forAddress` 的那一版 ⇒ **仍绿**
+  - ⚠️ **首轮配对装置是错的**（用了 `-Dsurefire.runOrder=reversealphabetical` ⇒ 触发源反而排在后面）⇒ ⇒ 那一轮**不能**用来否定「同跑红」⇒ ⇒ 已按正确顺序重跑（上面这条）
+- **⇒ 结论（本模块内）**：「同跑红」在 user-rpc 模块内**原理上不可复现** —— 模块内**任何** `@SpringBootTest` 的上下文都是 user-rpc 应用上下文 ⇒ ⇒ `DiscoveryClient` bean 由 spring-cloud-alibaba 的自动配置提供 ⇒ ⇒ devh 的 `@ConditionalOnBean(DiscoveryClient.class)` 在其处理时**未命中** ⇒ ⇒ provider **永不注册** ⇒ ⇒ 无接管
+- **⇒ 与上游分类口径的差异（如实记录，不隐藏）**：共享层例外集按「**真发 RPC ⇒ 活雷**」分类 ⇒ ⇒ 但「真发 RPC」是**必要条件、不是充分条件** —— 决定性变量是**该上下文有没有 `DiscoveryClient` bean**（devh `@ConditionalOnBean` 命中与否）⇒ ⇒ 惰性点即便 provider 注册了也不报错；**provider 没注册时、真发 RPC 的点同样不报错** ⇒ ⇒ 本模块那 2 处属预防性；**user-api 侧那 1 处才是实测可复现的活雷**（该测试显式关掉 Nacos ⇒ 回落 `SimpleDiscoveryClient` ⇒ 命中 ⇒ 回落 target 即 `UNAVAILABLE: No servers found for 127.0.0.1:22200`）
+- **探针纪律**：临时补丁 + 事后还原（**不用 `git stash`** —— 并发 lane 会互偷工作区状态）⇒ ⇒ 还原后 `grep -c 'forTarget("dns:///127.0.0.1:" + GRPC_PORT)'` = 1 ⇒ ⇒ 无残留；**零行位移**不受影响（探针只在测量期间存在）

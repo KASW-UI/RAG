@@ -4245,9 +4245,9 @@ EXIT=0
   （`ctx, cancel = context.WithTimeout(ctx, t)` ⇒ **在已有 ctx 之上再套一层**）
   ⇒ 有效预算 = **`min(入向剩余, 2000ms)`**（`zrpc/config.go:31` 的 `json:",default=2000"`）。
 - **RAG 侧**：`client/UserRpcClient.java:55-57` ＝
-  `GoStyleClientCallTimeout.capByClientTimeout(GoStyleRequestDeadline.applyTo(userServiceBlockingStub))`
+  `GoStyleClientCallTimeout.capByClientTimeout(GoStyleRequestDeadline.applyTo(userServiceBlockingStub))` （**2026-10-31 第十一轮：该域内私有副本 `GoStyleClientCallTimeout` **已删除** ⇒ 形态 = 共享层 `GoStyleOutboundDeadlineInterceptor`（devh `@GrpcGlobalClientInterceptor`）统一施加 ＋ 域侧只配 `rag.protection.outbound-deadline.cap-millis=2000`**）
   ⇒ `applyTo` 继承（`service/common/.../GoStyleRequestDeadline.java:192-201`）
-  ⇒ `capByClientTimeout` 2s 封顶（`client/GoStyleClientCallTimeout.java:89-96`）⇒ 同样是 **`min(入向剩余, 2s)`**。
+  ⇒ `capByClientTimeout` 2s 封顶（`client/GoStyleClientCallTimeout.java:89-96`）⇒ 同样是 **`min(入向剩余, 2s)`**。 （**2026-10-31 第十一轮：该域内私有副本 `GoStyleClientCallTimeout` **已删除** ⇒ 形态 = 共享层 `GoStyleOutboundDeadlineInterceptor`（devh `@GrpcGlobalClientInterceptor`）统一施加 ＋ 域侧只配 `rag.protection.outbound-deadline.cap-millis=2000`**）
 - ⇒ ⇒ **两侧同形** ⇒ ⇒ **这是补上一处旧偏离，不是新偏离** —— 旧口径「rpc 进程 ⇒ ThreadLocal 恒 null ⇒
   恒 no-op ⇒ 实际零 deadline」**已过期**（与 global 在 `docs/DRIFT/global/vs-common.md` B-05 行的就地订正一致）。
 
@@ -4328,7 +4328,7 @@ EXIT=0
 | 面 | 谁提供 | 域侧显式 `applyTo` 是否冗余 |
 |---|---|---|
 | **继承请求 deadline** | devh 全局客户端拦截器链（`enabled` **默认 true**） | **冗余**（拦截器也会给） |
-| **2s 客户端上界**（Go 的 `TimeoutInterceptor(2000ms)`） | **只在域侧**（`GoStyleClientCallTimeout`）—— 拦截器层 `capMillis` **默认 0 = 不启用**，全仓 `service/*/*/src/main/resources/*.yml` 的 `outbound-deadline` **零配置** | **不冗余** |
+| **2s 客户端上界**（Go 的 `TimeoutInterceptor(2000ms)`） | **2026-10-31 第十一轮：已从「只在域侧」改为「共享层唯一实现 ＋ 域侧只配参数」** —— 共享层 `GoStyleOutboundDeadlineInterceptor`（读 `rag.protection.outbound-deadline.cap-millis`）＋ 本域 `application.yml` 显式配 `cap-millis: 2000`；⚠️ 共享层默认 `capMillis=0` **仍然不启用** ⇒ **其它域若不配 = 出向零期限** | **不再冗余**（域内副本已删） |
 
 ⇒ ⇒ 且域侧那份 `applyTo` **不可去**：域侧要算「`min(请求剩余, 2s)`」就得先有「请求剩余」
 ⇒ ⇒ `applyTo` 正是把载体剩余挂到 stub 上的那一步 ⇒ **它是域侧 2s 上界计算的输入**。
@@ -4338,7 +4338,72 @@ EXIT=0
 - 本节「首次真正继承」与「与 Go 逐字同形」的**结论不变**，**只补归因**（本小节 + ⑤ 的诚实边界两处订正）。
 - ⚠️ **销账权仍在 global**（落点 `service/common`）⇒ 本域**不自行改判 OPEN/CLOSED** ⇒ C-3 / E65 仍 🔴。
 - ⚠️ **X-6 定级复判挂起**（合并收口执行者统一复判）⇒ 本域**不动** X-6 / C-3 的状态标记。
-- ⚠️ **favorite 域尚无域内 L4 活体守门**（comment 域已有）⇒ 本域「域内出口确实继承」仍记 **L2（源码级）**。
+- ✅ **favorite 域已补域内 L4 活体守门**（2026-10-31 · G3 第九轮：`FavoriteOutboundDeadlineCarrierGateTest`，5 例 + 变异矩阵）⇒ ⇒ 本域「域内出口确实继承载体」已从 **L2（源码级）** 升到 **L4（活体）** ⇒ ⇒ 证据与变异矩阵见下方新增段。
+
+## 📌 追加 · 🟡 **共享层演进 ⇒ 本域「载体守门」的正向对照参照物失效（已改用测试自带探针）**（2026-10-31 · G3 第八轮）
+
+> **一句话**：2026-10-31 的回归（**带工作树共享层**跑）里，`FavoriteRpcSharedLayerWebBeanGateTest` 的第 ② 条
+> 「**正向对照**：共享层那个带 servlet 条件的自动配置确实在容器里」**转红**
+> ⇒ ⇒ **根因不是载体漂移，而是共享层演进把这个守门的「参照物前提」改掉了** ⇒ ⇒ 已就地改用**测试自带探针**。
+
+### 现象与根因
+
+| 项 | 内容 |
+|---|---|
+| 现象 | `FavoriteRpcSharedLayerWebBeanGateTest#servletConditionHoldsInThisContext` 红：`GoStyleJsonContentTypeAdvice` 不在容器里 |
+| 根因 | 共享层 `53bc05ec`（G4 lane · 2026-10-30）把一批 web Bean 从「**只有** `@ConditionalOnWebApplication(SERVLET)`」改成「servlet 条件 **+** api 侧条件（`ConditionalOnApiSide`）」⇒ ⇒ **`GoStyleJsonContentTypeAdvice` 现在是 api 侧 Bean** ⇒ ⇒ 在 rpc 容器里**本就不该在** ⇒ ⇒ **守门红得对，但守门本身的前提已过期** |
+| 为什么以前是绿的 | 此前回归**没带 `-am`** ⇒ 用的是 m2 里 **2026-10-29 08:08 的旧** `com.rag:common` jar ⇒ 那份共享层里这些 Bean 还只有 servlet 条件 ⇒ ⇒ 在 MOCK 上下文里都在 ⇒ 绿 |
+| 修法（已落码） | 改用**本类自带的探针** `ServletContextProbeConfiguration`（**只**带 `@ConditionalOnWebApplication(SERVLET)`、**不带** api 侧条件）⇒ ⇒ **实测踩了两个坑（逐个定位，不是猜的）**：<br>① **注册面**：探针最初做成**类的嵌套** `@TestConfiguration` ⇒ 实测**根本没被自动注册**（探针始终不在容器里）⇒ ⇒ 而上下文底账实测为 `ctx=GenericWebApplicationContext` / `env=ApplicationServletEnvironment` / `session` scope 已注册 ⇒ ⇒ **条件是匹配的 ⇒ 问题在「注册」不在「条件」** ⇒ ⇒ 最终改成**文件顶层（包私有）`@Configuration` ＋ 测试类上显式 `@Import`** ⇒ 注册不再依赖任何自动探测机制；<br>② **编译面**：`@Import(Xxx.class)` 写在**类自身的注解**上时，javac 按 JLS 作用域规则**解析不到本类的嵌套成员类型**（嵌套类型的作用域是「类体内部」，而类声明上的注解在类体之外）⇒ ⇒ 编译报「找不到符号」⇒ ⇒ 搬到文件顶层后 `@Import` 可解析（**这是必须搬文件顶层的第二个独立理由**）；<br>③ **追加一条不依赖任何 bean 条件的直接断言**：`context instanceof WebApplicationContext` ⇒ ⇒ 直接读「前提事实」本身 ⇒ **不依赖共享层任何 Bean 的条件组合** ⇒ ⇒ 与探针那条**成对**（探针验「servlet 条件机制真的匹配」，直接断言验「上下文真的是 servlet web app」） |
+
+### 为什么必须留这一条（别当噪音删掉）
+
+- 第 ③ 条断言的是「api 侧那 5 个 web Bean **一个都不在** rpc 容器里」
+  ⇒ ⇒ 若本上下文**压根不是 servlet web app**，那 5 个 Bean 自然不在 ⇒ ⇒ **第 ③ 条就是空断言**（无鉴别力）
+  ⇒ ⇒ 第 ② 条的**正向对照**是第 ③ 条的前提 ⇒ ⇒ 两者必须成对维护。
+- ⚠️ 本条同时是一个**方法学提醒**：守门里「拿共享层某个 Bean 当参照物」的做法
+  ⇒ ⇒ **会随共享层演进而失效** ⇒ ⇒ 判据应当**自带参照物**。
+
+## 📌 追加 · ✅ **本域出向 deadline 的 L4 活体守门已补（5 例 · 变异矩阵精确转红）**（2026-10-31 · G3 第九轮）
+
+> **一句话**：本域此前的证据只到 **L2（源码级）** ⇒ ⇒ 本轮补上 `FavoriteOutboundDeadlineCarrierGateTest`
+> （**5 例**，照抄 comment 域同款范式 · **不发明第三种写法**）⇒ ⇒ **三个语义维度各有专属判据**（变异矩阵实测精确转红）。
+
+### 为什么必须补这一条
+
+- 本域的两个出向出口（`UserRpcClient` / `ArticleRpcClient`）在 **gRPC handler 线程**上
+  ⇒ ⇒ 共享层 `RpcInterceptor.onHalfClose` 绑的 ThreadLocal 载体**应当可见**
+  ⇒ ⇒ 但「**应当**」不是「**真的**」⇒ ⇒ 修前只有源码级推理，**没有运行证据**。
+- ⚠️ 共享层的探针（`tools/semantic-probe/deadline-downstream/`）**测不到域内出口**
+  —— 它的 RAG 半边**手搓 Netty channel**、绕开 devh 的全局拦截器装配
+  ⇒ ⇒ 探针的 `outgoing_carrier` 键**不能**当「域内出口没继承」的证据（那是**探针自己的构造**）。
+
+### 五条用例的分工（每条各有**专属**判别维度）
+
+| 用例 | 专属判别维度 |
+|---|---|
+| `carrierIsReallyBoundOnHandlerThreadOverRealWire` | 真 wire + 真共享层 `RpcInterceptor` ⇒ 证「载体在 gRPC handler 线程**真的绑上了**」＋「客户端 deadline **真的穿过 wire** 到了服务端」 |
+| `outboundIsCappedAtTwoSecondsWhenInboundBudgetIsLonger` | 入向预算 **> 2s** ⇒ 证「2s 客户端封顶**真的生效**」（专治「不压任何 deadline」） |
+| `outboundInheritsInboundBudgetWhenItIsShorter` | 入向预算 **< 2s** ⇒ 证「出向上界**真的继承了**入向剩余」（专治「无脑套 2s」） |
+| `outboundBudgetKeepsNanosecondPrecision` | 手动绑定**已知绝对纳秒**（10.9ms）⇒ 证「域内计算点**不截断亚毫秒**」（可确定性分辨毫秒版） |
+| `noCarrierStillGetsTwoSecondClientCap` | **无载体** ⇒ 证 2s 封顶**无条件**在（对齐 Go 侧拦截器级别的 `TimeoutInterceptor`） |
+
+### 🔴 变异矩阵（守门非假绿 · 2026-10-31 实测）
+
+| 注入的变异 | 转红的用例（实测） | 读数 |
+|---|---|---|
+| 纳秒 → 毫秒截断（旧实现语义） | `outboundBudgetKeepsNanosecondPrecision` | 5 tests / **1 failure** |
+| 完全不压 2s 封顶（原样返回 stub） | `noCarrierStillGetsTwoSecondClientCap` ＋ `outboundIsCappedAtTwoSecondsWhenInboundBudgetIsLonger` | 5 tests / **2 failures** |
+| 无视入向预算，永远只套 2s | `outboundBudgetKeepsNanosecondPrecision` ＋ `outboundInheritsInboundBudgetWhenItIsShorter` | 5 tests / **2 failures** |
+| （基线 / 还原后） | — | 5 tests / **0 failure** |
+
+⇒ ⇒ **三个语义维度（纳秒精度 / 2s 封顶 / 继承入向）各有专属判据** ⇒ ⇒ 本守门**对被测差异有判别力**，不是「错误答案的守卫」。
+⇒ 三个变异均已还原（仓内残留锚点检查 = **0**）；还原后复跑全绿。
+
+### ⚠️ 本守门**证什么 / 不证什么**
+
+- ✅ **证**：「载体可见时 ⇒ 出向上界 = min(载体剩余, 2s)」这个**域侧计算点**是对的（纳秒精度 + 无条件 2s 封顶）。
+- ❌ **不证**：「生产装配面（真 `@GrpcClient` ⇒ devh 拦截器链）真的把 deadline 给到了」
+  ⇒ ⇒ 本守门是**域侧计算点**的证据，不是**装配面**的证据。
 
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 

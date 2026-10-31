@@ -205,6 +205,18 @@ observability:
   http-timeout: 3s
 
 rag:
+  protection:
+    # ==========================================================================
+    # 🔴 出向 gRPC 客户端硬上界（P2-T04 · G1 lane · 2026-10-31）
+    # Go 出处：go-zero@v1.10.2/zrpc/config.go:31 `Timeout int64 json:",default=2000"`
+    #   ⇒ 默认 2000ms；本域 Go 侧 service/user/admin/api/etc/admincenter.yaml:35-39 的
+    #     `AdminRpc:` 段**无显式 Timeout** ⇒ ⇒ 恒 2000ms。
+    # ⚠️ 本域**只配参数**：封顶逻辑由共享层 `GoStyleOutboundDeadlineInterceptor`
+    #   （`@GrpcGlobalClientInterceptor` ⇒ 装在**每个**出向 devh 调用上）**唯一**承担
+    #   ⇒ 域侧不得再造私有副本。**不要**改用空配的 `grpc.client.*.deadline`。
+    # env 覆盖：ADMIN_API_OUTBOUND_DEADLINE_CAP_MILLIS（Go 的 Timeout 也是域级字段）
+    outbound-deadline:
+      cap-millis: ${ADMIN_API_OUTBOUND_DEADLINE_CAP_MILLIS:2000}
   http:
     # =============================================================================
     # 🔴 Go 风格 form 值上限闸门（2026-10-25 第十四轮 · global 收口域 · X-6 / DRIFT-HOTAPI-030）

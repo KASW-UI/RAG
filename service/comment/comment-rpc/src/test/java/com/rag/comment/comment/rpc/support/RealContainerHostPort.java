@@ -112,6 +112,17 @@ public final class RealContainerHostPort {
     /** {@code CommentCacheRedisMetricGateTest} 的 Redis 宿主口（<b>与它的 PG 不同口</b>）。 */
     public static final int COMMENT_CACHE_REDIS_METRIC_GATE_REDIS = 22891;
 
+    /**
+     * {@code CommentRedisDeadlineCarrierWiringGateTest} 的 Redis 宿主口
+     * （E66 销账的装配面守门 · 2026-10-31）。
+     *
+     * <p>⚠️ **为什么不能用 {@link #GATE_LIVE_REDIS}**：那口在<b>脚手架段</b>
+     * ⇒ ⇒ 是<b>守门自己</b>起容器用的 ⇒ ⇒ {@code RealContainerHostPortTest} 的
+     * 「每个口恰好被引用一次」守恒断言会判红（实测：{@code GATE_LIVE_REDIS 被引用 2 次}）
+     * ⇒ ⇒ 测试类必须落在<b>测试类段</b>（{@link #FIRST}–{@link #LAST}）并**登记**。
+     */
+    public static final int COMMENT_REDIS_DEADLINE_CARRIER_WIRING = 22892;
+
     /** 守门自己起容器用的口（脚手架段第一口）⇒ <b>不与任何测试类复用</b>。 */
     public static final int GATE_LIVE = SCRATCH_FIRST;
 
@@ -141,6 +152,7 @@ public final class RealContainerHostPort {
         "COMMENT_TRANSACTIONAL_SQL_GATE",
         "COMMENT_CACHE_REDIS_METRIC_GATE_PG",
         "COMMENT_CACHE_REDIS_METRIC_GATE_REDIS",
+        "COMMENT_REDIS_DEADLINE_CARRIER_WIRING",
     };
 
     /**
