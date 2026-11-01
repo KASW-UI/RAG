@@ -874,7 +874,7 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 
 ---
 
-### 7.6 上游实现期的内部编号（`DRIFT-001…007`）对照 —— 本轮**未独立验证**
+### 7.6 上游实现期的内部编号（`DRIFT-001…007`）对照 —— 本轮**未独立验证** —— ✅ **现行态 = ✅ 已闭合**（2026-11-01 · G3 回写销账）：本节是「**上游内部编号**（`DRIFT-001…007`）对照表」，`DRIFT-001`（方法不匹配 ⇒ 404 而非 405）**自身的状态见本节表格行**（`:894` ✅ 本轮静态核对成立）⇒ 逐条与 Go 对照后**差异已消失**（两侧都输出 **404 空 body**）⇒ **本条无待实现项**；⚠️ 本节 `:881` 的 🔴 是「本表是第二套编号空间、与 §7 的 `DRIFT-ARTICLE-API-0xx` 同形不同义」的**告警标记**（2026-10-24 实测确认）⇒ **原样保留、不是本条的状态** ⇒ 依据：`docs/DRIFT/_cross/grading/W4.md:12`
 
 RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记其存在与本轮的间接观察：
 
@@ -1836,7 +1836,7 @@ $GOROOT/src/encoding/json/encode.go:805-807
 ⇒ 因此原来的定性「RAG 无上限 ⇒ OBSERVABLE DIFFERENCE」**站不住**，
 真实的差异只剩**响应体形状**（见下）。
 
-### ✅ FIX-10 —— 新增 `GoStyleFormParamCountFilter`（Go 的 2048 判据落到应用层）
+### ✅ FIX-10 —— 新增 `GoStyleFormParamCountFilter`（Go 的 2048 判据落到应用层） —— **现行态 = ✅ 已闭合**（2026-11-01 · G3 回写销账）—— 逐条与 Go 对照后**差异已消失**（台账原记的落点 `GoStyleFormParamCountFilter.java` **已不存在** ⇒ 已被共享层 `GoStyleFormValues` + `GoStyleFormValueLimitInterceptor` 取代 ⇒ 判据逐条对齐 Go）⇒ **无待实现项** ⇒ 依据：`docs/DRIFT/_cross/grading/W4.md:8`
 
 **Go 出处（逐行，消费点）**
 
@@ -1911,7 +1911,7 @@ go-zero@v1.10.2/rest/httpx/util.go:22-65  GetFormValues（下面摘录的是其�
 `article-api` **75 tests / 0 failures / 0 errors / 0 skipped**（原 67 ⇒ +8）；
 连同 `article-rpc` 115 + `article-common` 15 ⇒ **article 域合计 205 / 0 / 0 / 0**（`BUILD SUCCESS`）。
 
-### 判定变化（FIX-10）
+### 判定变化（FIX-10） —— **现行态 = ✅ 已闭合**（2026-11-01 · G3 回写销账）—— 逐条与 Go 对照后**差异已消失**（判据本身逐条对齐 Go：空值不计数、计数跨 key 共享、body 逐字节 = Go 原文）⇒ **无待实现项** ⇒ 依据：`docs/DRIFT/_cross/grading/W4.md:8`
 
 | 项 | 修复前 | 修复后 |
 |---|---|---|
@@ -1963,7 +1963,7 @@ go-zero@v1.10.2/rest/httpx/util.go:22-65  GetFormValues（下面摘录的是其�
 
 ## 2026-10-24 第五轮：两条 UNRESOLVED 关闭（**零新代码**，靠把 Go 侧读到消费点 + 全仓检索）
 
-### ✅ FIX-11 —— `UNRESOLVED-007` 关闭（`SecurityRpc` 的 `NonBlock` 条件性差异）
+### ✅ FIX-11 —— `UNRESOLVED-007` 关闭（`SecurityRpc` 的 `NonBlock` 条件性差异） —— **现行态 = ✅ 已闭合**（2026-11-01 · G3 回写销账）—— 逐条与 Go 对照后**差异已消失**（Go 侧 `NonBlock` 默认值落在**消费点**的效果 = 非阻塞拨号；RAG 侧 devh 同样非阻塞 ⇒ 两侧启动行为一致 ⇒ 原「条件性差异、当前不可达」的前提已消解）⇒ **无待实现项** ⇒ 依据：`docs/DRIFT/_cross/grading/W4.md:9`
 
 结论：**条件性差异，当前不可达** ⇒ 今天的实际行为两侧一致（都启动成功）。
 详细取证见 §9 的 `UNRESOLVED-007`。
@@ -1977,7 +1977,7 @@ go-zero@v1.10.2/rest/httpx/util.go:22-65  GetFormValues（下面摘录的是其�
 ⇒ 本域**不受影响**（共享层 `HttpMiddleware` 的 writer 已修为实时 propagate；
 article-api 的真 Tomcat 用例已断言 400 带 `Content-Type` + `nosniff`）。
 
-### 判定变化（FIX-11 / FIX-12）
+### 判定变化（FIX-11 / FIX-12） —— **现行态 = ✅ 已闭合**（2026-11-01 · G3 回写销账）—— 逐条与 Go 对照后**差异已消失**（原「条件性差异、当前不可达」经回源复核**前提已消解**）⇒ **无待实现项** ⇒ 依据：`docs/DRIFT/_cross/grading/W4.md:9`
 
 | 项 | 修复前 | 修复后 |
 |---|---|---|
@@ -2299,7 +2299,7 @@ Go 的转义错误文案是 `"invalid URL escape " + strconv.Quote(那一小截)
 > 「解析失败时怎么办」才是 Go 的**可观察行为**，
 > 漏掉它就不是"漏了个细节"，而是**把一个 400 变成了 200**。
 
-## 2026-10-24 第十二轮：**台账审计** —— 逐条核对「现状权威面」，并修掉一条**源码级偏离**（`strconv.Quote` 的 Latin-1 补充段）
+## 2026-10-24 第十二轮：**台账审计** —— 逐条核对「现状权威面」，并修掉一条**源码级偏离**（`strconv.Quote` 的 Latin-1 补充段） —— **现行态 = ✅ 已闭合**（2026-11-01 · G3 回写销账）—— 逐条与 Go 对照后**差异已消失**（`strconv.Quote` 的 Latin-1 补充段已落到共享层 ⇒ 原「RAG ❌ 不可打印」对照表描述的是**修复前**状态）⇒ **无待实现项** ⇒ 依据：`docs/DRIFT/_cross/grading/W4.md:11`
 
 ### 🔴 为什么这一轮突然做「审计」而不是「对齐」
 

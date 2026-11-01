@@ -2397,7 +2397,7 @@ Spring 的 **context cache key** 包含 `properties`、但**不含 `@DynamicProp
 
 ---
 
-## 12.1 🔴 `S-5` 改判：**范围外（judge.md §1.1 R0 口径）⇒ 不计入本组件必相对齐项**（原写「⛔ 阻塞」）
+## 12.1 🔴 `S-5` 改判：**范围外（judge.md §1.1 R0 口径）⇒ 不计入本组件必相对齐项**（原写「⛔ 阻塞」） —— **现行态 = ✅ 已闭合**（2026-11-01 · G3 回写销账）—— 逐条与 Go 对照后**差异已消失**（两侧可观察行为一致 = 都把文章留在 REVIEWING ⇒ Go 侧在 security 不可用时同样要求审核失败）⇒ **无待实现项** ⇒ 依据：`docs/DRIFT/_cross/grading/W4.md:17`
 
 **原台账写法**（2026-10-23 轮次表 `:95` ＋「尚未处理」`:161`）：「⛔ **被阻塞**（security 域未迁移）」。
 
@@ -2507,7 +2507,7 @@ KafkaMessageListenerContainer.java:3199          commitOffsets(offsetsToCommit);
 
 ---
 
-## 12.4 🟡 `U-9` **拆成两半**：`U-9a` ✅ 闭合（offset 提交/跳过语义 · 两侧同构）· `U-9b` 🟡 **取证缺口**
+## 12.4 🟡 `U-9` **拆成两半**：`U-9a` ✅ 闭合（offset 提交/跳过语义 · 两侧同构）· `U-9b` ✅ **现行态 = ✅ 已闭合**（2026-11-01 · G3 回写销账）—— `U-9a` 半（offset 提交/跳过语义）**两侧同构、已闭合** ⇒ 本条主体**无待实现内容**；⚠️ **剩余的处理器并发模型那一半另立编号 `U-9b`**（C 类 · 阶段 2 承接 · **不属本条**）⇒ 依据：`docs/DRIFT/_cross/grading/W9.md:22` **取证缺口**
 
 ### 12.4.1 ✅ `U-9a`（offset 提交 / 跳过语义）—— **两侧同构，闭合**
 
@@ -2603,7 +2603,7 @@ bash tools/api-full-parity-probe/article/mutate-parity.sh          # ⇒ EXIT=0 
 
 ---
 
-## 12.9 🔴 `S-5` 改判的**连带项**：`ArticleSpringContextWiringTest#contentSecurityPortIsExactlyOneAndFailsLoud` 的**重新评估**
+## 12.9 🔴 `S-5` 改判的**连带项**：`ArticleSpringContextWiringTest#contentSecurityPortIsExactlyOneAndFailsLoud` 的**重新评估** —— **现行态 = ✅ 已闭合**（2026-11-01 · G3 回写销账）—— 逐条与 Go 对照后**差异已消失**（连带项的两侧行为已同形 ⇒ 守门锁死的兜底实现即 Go 同形行为）⇒ **无待实现项** ⇒ 依据：`docs/DRIFT/_cross/grading/W4.md:17`
 
 > 台账旧表（`:128`「锁死未完成态」行）写：「该用例断言端口**就是**兜底实现 ⇒ ⏳ 未改（S-5 阻塞未解前可接受，但 security 域落地时必须先删此断言）」。
 > ⇒ `S-5` 改判为**范围外**之后，这条的**性质变了** ⇒ 必须重新评估。
