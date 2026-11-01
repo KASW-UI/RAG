@@ -196,7 +196,7 @@
 | 波次 | 条目（行） | **状态开放**（仍要干的） | 其中 A/B 类（阶段一范围） | 覆盖范围 |
 |---|---|---|---|---|
 | **G1** | 278 | **95** | 0 | `users`（**不含 users-common**）+ `follow` |
-| **G2** | 287 | **68** | 0 | `message` + `like` + `task` |
+| **G2** | 287 | **66** | 0 | `message` + `like` + `task` |
 | **G3** | 405 | **152** | 0 | `article` + `comment` + `favorite` + `hot` |
 | **G4** | 293 | **147** | 0 | **共享层** `service/common` + `service/users/users-common` + 收口域 `global`（**常设执行者 · 不在域波顺序里**） |
 | **G1+G4** | 7 | **2** | 0 | **跨派工面并集**（同源组跨域登记） |
@@ -205,8 +205,8 @@
 | **G1+G3+G4** | 3 | **0** | 0 | **跨派工面并集**（同源组跨域登记） |
 
 > ⇒ **「状态开放」= 该条仍有待实现项**（🔴 未闭合 / 🟡 部分闭合 / 仍生效 / ⏳ 未签字）；**A/B 类（阶段一范围）**那一列全是 0 ⇒ **每棵树的活都已有排期指针** ⇒ 没有「漏排」需要补派。
-**合计（口径 = `status` ∈ 开放态 ∧ `schedule == 未排期`）436 行 / 429 个编号** —— ① **A/B 类**（阶段 1 范围内）**0** 个编号
-· ② C/D 类（**阶段 2 承接**，§5.3 暂缓项清单已登记）**85** 条
+**合计（口径 = `status` ∈ 开放态 ∧ `schedule == 未排期`）434 行 / 427 个编号** —— ① **A/B 类**（阶段 1 范围内）**0** 个编号
+· ② C/D 类（**阶段 2 承接**，§5.3 暂缓项清单已登记）**83** 条
 · ③ 未定级 **4** 条
 · ④ **已闭合**（逐条 Go 对照后「**差异已消失**」⇒ **无待实现项**）**0** 条
 
@@ -224,7 +224,7 @@
 | 归属 | 优先级 | ID | 域 | **波次** | 状态 | 证据 | 证据缺口 | 源位置 |
 |---|---|---|---|---|---|---|---|---|
 
-> C/D 类 **85** 条另有去向（阶段 2 恢复方案已在各条台账的 §5.3 十一项表里）
+> C/D 类 **83** 条另有去向（阶段 2 恢复方案已在各条台账的 §5.3 十一项表里）
 > ⇒ **不计入阶段一判定**（`PhaseGoal-judge.md` §1.1 ⑥ 第 4 条）⇒ 不列。
 
 ### 4.4 ④ 已闭合（**逐条 Go 对照后差异已消失 · 无待实现项**）
@@ -318,10 +318,10 @@
 | `C-4` | comment | 同域多版本 | 3 | 🔴 未闭合 / 🟡 部分闭合 | 🟡 部分闭合 | `DRIFT/comment/vs-common.md:60;DRIFT/comment/vs-common.md:126;DRIFT/comment/vs-common.md:221` |
 | `CD-6` | global | 同域多版本 | 5 | ✅ 已一致 / 🟡 部分闭合 | ✅ 已一致 | `DRIFT/global/_README.md:137;DRIFT/global/cross-domain.md:46;DRIFT/global/cross-domain.md:591` |
 
-> 共 **140** 个合并组内状态冲突：**同源组 49**（真缺陷，优先） ＋ **同域多版本 91**（历史快照，非缺陷）（此处列前 60）。
+> 共 **141** 个合并组内状态冲突：**同源组 49**（真缺陷，优先） ＋ **同域多版本 92**（历史快照，非缺陷）（此处列前 60）。
 >
 > ⚠️ **第三类来源（2026-10-30 G1 lane 实测）＝「误修饰」** —— `detect_status` 取**条目所在段的前 400 字符** ⇒ ⇒ **同一行里修饰「别的东西」的状态 emoji，也会被抽成这个条目的状态**（典型形态：`🟡 **2026-10-29 复核：状态不变（仍 🔴 OPEN）**` ⇒ 🟡 修饰的是**复核标注**、不是状态 ⇒ 与同组的 🔴 撞 ⇒ `_conflict > 1`）
-> ⇒ ⇒ **本次实测的 140 个冲突组里，除「同源组 49」外的 91 个，多数属此类** ⇒ ⇒ **收口时不应逐条当缺陷修**；
+> ⇒ ⇒ **本次实测的 141 个冲突组里，除「同源组 49」外的 92 个，多数属此类** ⇒ ⇒ **收口时不应逐条当缺陷修**；
 > ⇒ **正确处置 = 各域自行把那几处「误修饰」就地归一**（把状态标记改成**无标记写法**、语义留在文字里） ⇒ **行数不变 ⇒ 不破行号锚点** ⇒ ⇒ 该域的 `_conflict` 随之下降、派工面 `status` 与基线同值（**是修正，不是新增缺口**）。
 >
 > ⚠️ **口径变化说明（2026-10-30）**：归一前该指标按**裸编号**统计 ⇒ **131**；
@@ -647,10 +647,10 @@
 | `DRIFT-LIKE-018` | DRIF | like | **G2** | ✅ 已一致 | B 静态 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/like/rpc.md:898;DRIFT/like/rpc.md:1289` | Go `service/like/rpc/internal/mq/etc/mq.yaml:10`（`Consumers: 8`）＋ `go-queue@v1.2.2/kq/config.go:18`（`Consumers int json:",default=8"` ⇒ 默认值也是 8）＋ `go-… |
 | `DRIFT-MSG-012` | DRIF | message | **G2** | ✅ 已一致 | A 活体 · 绿(0) | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/message/rpc.md:262` | ⚠️ **2026-11-01 前提订正 —— 原依据「Go 侧无 HTTP 监听面」已被真源证伪**（原写「Go `service/message/rpc/message.go:25` ⇒ 纯 gRPC 进程 ⇒ **无 HTTP 监听面**」）⇒ 真实启动链 = Go `service/mess… |
 | `DRIFT-MSGAPI-011` | DRIF | message | **G2** | 🔴 未闭合 | B 静态 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/message/api.md:1499;DRIFT/message/vs-common.md:39` | Go `go-zero@v1.10.2/rest/httpx/responses.go:183`（`w.WriteHeader(code)` ⇒ reason phrase 由 Go 标准库 `net/http` 补 ⇒ 状态行 = `HTTP/1.1 200 OK` / `401 Unauthor… |
-| `DRIFT-MSGAPI-012` | DRIF | message | **G2** | 🟡 部分闭合 | C 无指针 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/message/api.md:1532` | Go `go-zero@v1.10.2/rest/httpx/responses.go:155`（`http.Error(w, err.Error(), http.StatusBadRequest)`）＋ `:153`（gRPC 错误码路径同样走 `http.Error`）＋ Go 标准库 `net… |
+| `DRIFT-MSGAPI-012` | DRIF | message | **G2** | ⚫ 已签字偏离 | C 无指针 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/message/api.md:1532` | Go `go-zero@v1.10.2/rest/httpx/responses.go:155`（`http.Error(w, err.Error(), http.StatusBadRequest)`）＋ `:153`（gRPC 错误码路径同样走 `http.Error`）＋ Go 标准库 `net… |
 | `FB-G2-03` | DRIF | message | **G2** | 🔴 未闭合 | B 静态 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/message/feedback-to-g4.md:52` | Go `go-zero@v1.10.2/rest/httpx/responses.go:183`（`w.WriteHeader(code)` ⇒ 状态行带 `StatusText` reason phrase）vs RAG `service/common/src/main/java/com/rag/… |
 | `FB-G2-04` | DRIF | message | **G2** | 🟡 部分闭合 | C 无指针 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/message/feedback-to-g4.md:66` | Go `go-zero@v1.10.2/rest/httpx/responses.go:155`（`http.Error(w, err.Error(), http.StatusBadRequest)` ⇒ 响应头写出侧）＋ Go 标准库 `net/http/server.go:2351`（`h.Se… |
-| `DRIFT-TASK-API-004` | DRIF | task | **G2** | 🟡 部分闭合 | B 静态 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已定性 · 未排期 | `DRIFT/task/_README.md:315;DRIFT/task/_README.md:355;DRIFT/task/api.md:510` | Go `go-zero@v1.10.2/rest/internal/header/headers.go:17`（`ContentTypeJson = "application/json; charset=utf-8"` ⇒ **分号后有空格**）＋ `go-zero@v1.10.2/rest/htt… |
+| `DRIFT-TASK-API-004` | DRIF | task | **G2** | ⚫ 已签字偏离 | B 静态 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已定性 · 未排期 | `DRIFT/task/_README.md:315;DRIFT/task/_README.md:355;DRIFT/task/api.md:510` | Go `go-zero@v1.10.2/rest/internal/header/headers.go:17`（`ContentTypeJson = "application/json; charset=utf-8"` ⇒ **分号后有空格**）＋ `go-zero@v1.10.2/rest/htt… |
 | `DRIFT-USERRPC-V-002` | DRIF | users | **G1** | 🟡 部分闭合 | B 静态 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已定性 · 未排期 | `DRIFT/users/user/rpc.md:531;DRIFT/users/user/rpc.md:1706` | Go `service/user/user/rpc/internal/model/data_model.go:11`（`Status     int64             \`gorm:"column:status;default:0"\`` ⇒ **无 `not null` tag** ⇒ … |
 | `DRIFT-USERS-LAT-001` | DRIF | users | **G1** | 🟡 部分闭合 | A 活体 · 绿(0) | P2 | D | 否 | 不影响 · 经分析确认不实现 | P4-T06 | — | `DRIFT/users/_shared.md:1335` | — |
 | `U-2` | DRIF | users | **G1** | 🟡 部分闭合 | C 无指针 | P2 | D | 否 | 不影响 · 经分析确认不实现 | GAP-04 | 无可复算指针 · 结论不可复算 | `DRIFT/users/admin/_shared.md:212;DRIFT/users/admin/rpc.md:1476` | Go `service/user/admin/rpc/internal/model/data_model.go:41`（admin 侧的 `User` 模型同样 `Status int64` + gorm tag `column:status;default:0` ⇒ **无 `not null`*… |
