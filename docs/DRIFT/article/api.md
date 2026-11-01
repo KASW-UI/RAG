@@ -874,7 +874,7 @@ Filter 链（`@Order` 排序）→ Tomcat ready。
 
 ---
 
-### 7.6 上游实现期的内部编号（`DRIFT-001…007`）对照 —— 本轮**未独立验证**
+### 7.6 上游实现期的内部编号（`DRIFT-001…007`）对照 —— 本轮**未独立验证** —— ✅ **现行态 = ✅ 已闭合**（2026-11-01 · G3 回写销账）：本节是「**上游内部编号**（`DRIFT-001…007`）对照表」，`DRIFT-001`（方法不匹配 ⇒ 404 而非 405）**自身的状态见本节表格行**（`:894` ✅ 本轮静态核对成立）⇒ 逐条与 Go 对照后**差异已消失**（两侧都输出 **404 空 body**）⇒ **本条无待实现项**；⚠️ 本节 `:881` 的 🔴 是「本表是第二套编号空间、与 §7 的 `DRIFT-ARTICLE-API-0xx` 同形不同义」的**告警标记**（2026-10-24 实测确认）⇒ **原样保留、不是本条的状态** ⇒ 依据：`docs/DRIFT/_cross/grading/W4.md:12`
 
 RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记其存在与本轮的间接观察：
 
@@ -968,13 +968,13 @@ RAG 源码注释里出现的这些编号**不在本轮验证范围**，仅登记
 
 | # | 原探针设想 | **当前状态（2026-10-29 核对）** |
 |---|---|---|
-| 1 | **CASE-17/18 双侧活体对拍**：Go 侧用 `httptest` + 真实 `UploadImageHandler` 注入一个 `status.Error(codes.Unavailable, …)` 的 fake client，断言 HTTP 503；RAG 侧同理 | 🟡 **部分闭合（2026-10-29 · G3）** —— 原文写「**这是修 `DRIFT-001` 的前置**」⇒ ⚠️ **该前提已失效**（`DRIFT-ARTICLE-API-001` **已修**：2026-10-24 修复轮 **F-1**）⇒ ⇒ 它**不是从「前置」降级为「补强」**，而是**双侧活体证据缺口**（⇒ 归属 **G-3 双侧活体**，**不阻塞阶段 1**）<br>🔴 **2026-10-29 G3 已建探针并跑通**：`tools/api-full-parity-probe/article/`（**G3 真私有目录**）⇒ **Go 真源栈与 RAG 栈同时起服务** ⇒ 同一请求 ⇒ **逐字节**比对（Go 真源二进制 + **配置副本**〔真源仓全程 `git status` 干净〕· 两侧**各自独立** Postgres · 真源 `article.sql` + `002_community_revision.sql`）<br>**已取到 3 条 L4 双侧活体证据**（`GET /v1/articles` 200 · `GET /v1/article/9007199254740993` 5001 · `GET /v1/article/does-not-exist` 1002 ⇒ **两侧逐字节一致**）<br>⇒ **同时暴露并修掉 2 个新缺陷**：`DRIFT-ARTICLE-API-011`（yaml 少 `auth:` ⇒ **组件起不来**）· `DRIFT-ARTICLE-API-012`（JSON 字段序漂移）<br>⚠️ **不是全闭合**：① `judge` §九 G-3 原文要求「article 域双侧活体 **0 条**」⇒ 现 3 条 ⇒ **部分**；② **成功路径只覆盖公开列表端点** —— 宿主上 `user.rpc` **两侧都不可达** ⇒ 单条详情端点两侧**同样降级成 5001**（该用例钉的是「**降级路径两侧一致**」，不是「取到文章」）⇒ ⇒ **成功路径的完整字段语义仍未双侧验证** |
+| 1 | **CASE-17/18 双侧活体对拍**：Go 侧用 `httptest` + 真实 `UploadImageHandler` 注入一个 `status.Error(codes.Unavailable, …)` 的 fake client，断言 HTTP 503；RAG 侧同理 | 🟡 **部分闭合（2026-10-29 · G3）** —— 原文写「**这是修 `DRIFT-001` 的前置**」⇒ ⚠️ **该前提已失效**（`DRIFT-ARTICLE-API-001` **已修**：2026-10-24 修复轮 **F-1**）⇒ ⇒ 它**不是从「前置」降级为「补强」**，而是**双侧活体证据缺口**（⇒ 归属 **G-3 双侧活体**，**不阻塞阶段 1**）<br>🔴 **2026-10-29 G3 已建探针并跑通**：`tools/api-full-parity-probe/article/`（**G3 真私有目录**）⇒ **Go 真源栈与 RAG 栈同时起服务** ⇒ 同一请求 ⇒ **逐字节**比对（Go 真源二进制 + **配置副本**〔真源仓全程 `git status` 干净〕· 两侧**各自独立** Postgres · 真源 `article.sql` + `002_community_revision.sql`）<br>**已取到 3 条 L4 双侧活体证据**（`GET /v1/articles` 200 · `GET /v1/article/9007199254740993` 5001 · `GET /v1/article/does-not-exist` 1002 ⇒ **两侧逐字节一致**）<br>⇒ **同时暴露并修掉 2 个新缺陷**：`DRIFT-ARTICLE-API-011`（yaml 少 `auth:` ⇒ **组件起不来**）· `DRIFT-ARTICLE-API-012`（JSON 字段序漂移）<br>✅ **成功路径已闭合（2026-11-01 · G3）** —— 🆕 **新探针 `tools/api-full-parity-probe/article/run-success.sh`**（**独立栈 + 独立种子 + 独立期望值文件** `expected-success.txt` ⇒ **不动 `run.sh`** ⇒ 原有 3 条冻结证据不受影响）：种子 = `article` + `article_revision` + `article_publication`（`state=published` + `current_revision`）⇒ 命中 Go `service/article/rpc/internal/model/article_public.go:20-26` `publicArticlePredicate` 的**第一支** ⇒ 走 revision 分支（Go `get_article_logic.go:137-139` / RAG `ArticlePublicDomainService:130-132`）⇒ **正文不读 MinIO** ⇒ 详情端点返回**完整字段**（Go `types.Article` 的 **17 个字段**全部到位）⇒ `GET /v1/article/9007199254740994` 200 ＋ `GET /v1/articles` 200 ⇒ **两侧逐字节一致**（**L4** · `FREEZE` 与 `VERIFY` 两轮均 **EXIT=0** ⇒ `Go == 冻结期望值 == RAG`）<br>**「确实走了 revision 分支」的 4 个独立信号（两侧全中）**：S1 `ext_info` = `{published_revision_id: rev-succ-0001}`（legacy 走 `{publication_gap: legacy_revision_missing}`）· S2 `update_time` = **revision.published_at**（≠ `article.updated_at`）· S3 `content` = **revision.markdown**（≠ `article.content`）· S4 `title`/`brief`/`cover_image_url`/`manual_type_tag` = **revision 行**的值 ⇒ 种子刻意把两行填成不同值 ⇒ 信号互相独立 ⇒ **不靠「两侧一致」自证**<br>🔴 **2026-11-01 归因订正（读 Go 真源 + RAG 源码双侧逐行证实）**：**原写「宿主 `user.rpc` 两侧不可达 ⇒ 详情端点降级 5001」不成立** —— 真实根因 = **legacy 分支读 MinIO 失败**：Go `service/article/rpc/internal/logic/get_article_logic.go:139-153`（`published.Revision == nil` ⇒ `MinioClient.GetObject(bucket, article.Content)` 失败 ⇒ `:146` `status.Error(codes.Internal, "read legacy article failed")` ⇒ api 层 `service/article/api/internal/logic/article/get_article_logic.go:47-48` ⇒ 5001）· RAG `service/article/article-rpc/.../service/ArticlePublicDomainService.java:135` ⇒ `:311 readLegacyMarkdown` ⇒ `:315 ArticleExceptions.readLegacyArticleFailed()`（`ArticleExceptions.java:125`）⇒ INTERNAL ⇒ 5001；**触发条件** = 种子行 `content='正文'` **不是合法 MinIO object key**<br>⇒ **`user.rpc` 不在成败链路上**：Go `service/article/api/internal/logic/article/get_article_logic.go:78` `enrichArticleAuthor` 在 rpc **成功返回之后**才填 `AuthorName`，失败走 `helper.go:98-103 fallbackAuthorName` ⇒ **永不抛异常**；RAG `ArticleAuthorResolver.resolveAuthorName` javadoc 自述「**永不抛异常**」（四分支全回落）⇒ ⇒ **成功路径的开关 = 有没有 revision 指针**（**不需要** `user.rpc` 可用）<br>⚠️ **剩余的唯一一格**：本轮 `author_name` 两侧同为**回落值** `"用户 1001"` ⇒ **「`user.rpc` 可用时取真实昵称」那一支仍未双侧验证** ⇒ 需 users 域等价（Go 侧 `user-rpc` 可达）⇒ 属**取证缺口**（judge §1.1 ⑥ 第 3 类 ⇒ 不降 R）⇒ **不阻断**；⚠️ `judge` §九 G-3 的边界注仍写「`user.rpc` 两侧都不可达 ⇒ 需 G1 的 users 域等价」⇒ **该注的归因已被本条推翻**（`docs/PhaseGoal-judge.md` 属收口执行者面 ⇒ **本 lane 只登记不改**） |
 | 2 | **真实 Tomcat 探针**：起 `RANDOM_PORT` 容器，断言 400 响应的 `Content-Type: text/plain; charset=utf-8`（**带空格**）与 `X-Content-Type-Options: nosniff` ⇒ 用于关闭 §9 `UNRESOLVED-001` | ✅ **已消解（2026-10-24，第二轮）** —— `UNRESOLVED-001` **已关闭**（§9 标题行已带 ✅）⇒ **本项的前提本身已过期**；且**本域现已真起 `RANDOM_PORT` 容器**（`ArticleApiAssemblyWiringTest` / `ArticleApiFormParamLimitTest` 两个 `@SpringBootTest(webEnvironment = RANDOM_PORT)`）⇒ ⇒ **不需要再补** |
 | 3 | **user-rpc 慢响应探针**：Go 侧把 `UserRpcConf.Timeout` 显式写成 0/2000 并注入慢 client；RAG 侧注入慢 stub 实测端到端延迟 ⇒ 用于关闭 `DRIFT-002` | ✅ **已消解（2026-10-24 修复轮）** —— `DRIFT-ARTICLE-API-002` **已修**（**F-2**：`UserRpcClientDeadlineTest` × 5 ＋ **变异 2/2 转红**）⇒ ⇒ **守门已在**（`UserRpcClientDeadlineTest`），**不需要再补** |
 | 4 | **重复 query key 探针**：`?page=1&page=2` 双侧各跑一次 ⇒ 用于关闭 `DRIFT-003` | ✅ **已消解（2026-10-24 修复轮）** —— `DRIFT-ARTICLE-API-003` **已修**（**F-3**：`ArticleApiMvcPipelineTest` × 3 ＋ **变异 2/2 转红**）⇒ ⇒ **守门已在**，**不需要再补** |
 
-⇒ **小结**：本小节**只剩第 1 项**，且已从「🔴 完全未做」推进到「🟡 **部分闭合**」
-（**2026-10-29 · G3**：3 条 L4 双侧活体证据已取到；**成功路径的完整字段语义**待 `user.rpc` 可用后补）
+⇒ **小结**：本小节**只剩第 1 项**，且已从「🔴 完全未做」推进到「✅ **已闭合**」
+（**2026-11-01 · G3**：3 条 L4 双侧活体证据（2026-10-29）＋ **成功路径的完整字段语义**（2026-11-01 · 新探针 `run-success.sh` · 详情端点 **17 个字段**逐字节一致 ＋ **4 个 revision 分支信号**两侧全中）⇒ **成功路径已闭合**；🔴 **归因已订正** = 降级路径的真实根因是 **legacy 分支读 MinIO 失败**（**不是** `user.rpc` 不可达）⇒ ⇒ 「成功路径需 `user.rpc` 可用」这个前提**不成立**（开关 = 有没有 revision 指针）；⚠️ 剩余唯一一格 = `author_name` 的**非回落分支**（需 users 域等价）⇒ 属**取证缺口**、**不阻断**）
 ⇒ 第 2~4 项**均已消解**（原「待办」措辞已过期 ⇒ 本轮订正）。
 
 ---
@@ -1836,7 +1836,7 @@ $GOROOT/src/encoding/json/encode.go:805-807
 ⇒ 因此原来的定性「RAG 无上限 ⇒ OBSERVABLE DIFFERENCE」**站不住**，
 真实的差异只剩**响应体形状**（见下）。
 
-### ✅ FIX-10 —— 新增 `GoStyleFormParamCountFilter`（Go 的 2048 判据落到应用层）
+### ✅ FIX-10 —— 新增 `GoStyleFormParamCountFilter`（Go 的 2048 判据落到应用层） —— **现行态 = ✅ 已闭合**（2026-11-01 · G3 回写销账）—— 逐条与 Go 对照后**差异已消失**（台账原记的落点 `GoStyleFormParamCountFilter.java` **已不存在** ⇒ 已被共享层 `GoStyleFormValues` + `GoStyleFormValueLimitInterceptor` 取代 ⇒ 判据逐条对齐 Go）⇒ **无待实现项** ⇒ 依据：`docs/DRIFT/_cross/grading/W4.md:8`
 
 **Go 出处（逐行，消费点）**
 
@@ -1911,7 +1911,7 @@ go-zero@v1.10.2/rest/httpx/util.go:22-65  GetFormValues（下面摘录的是其�
 `article-api` **75 tests / 0 failures / 0 errors / 0 skipped**（原 67 ⇒ +8）；
 连同 `article-rpc` 115 + `article-common` 15 ⇒ **article 域合计 205 / 0 / 0 / 0**（`BUILD SUCCESS`）。
 
-### 判定变化（FIX-10）
+### 判定变化（FIX-10） —— **现行态 = ✅ 已闭合**（2026-11-01 · G3 回写销账）—— 逐条与 Go 对照后**差异已消失**（判据本身逐条对齐 Go：空值不计数、计数跨 key 共享、body 逐字节 = Go 原文）⇒ **无待实现项** ⇒ 依据：`docs/DRIFT/_cross/grading/W4.md:8`
 
 | 项 | 修复前 | 修复后 |
 |---|---|---|
@@ -1963,7 +1963,7 @@ go-zero@v1.10.2/rest/httpx/util.go:22-65  GetFormValues（下面摘录的是其�
 
 ## 2026-10-24 第五轮：两条 UNRESOLVED 关闭（**零新代码**，靠把 Go 侧读到消费点 + 全仓检索）
 
-### ✅ FIX-11 —— `UNRESOLVED-007` 关闭（`SecurityRpc` 的 `NonBlock` 条件性差异）
+### ✅ FIX-11 —— `UNRESOLVED-007` 关闭（`SecurityRpc` 的 `NonBlock` 条件性差异） —— **现行态 = ✅ 已闭合**（2026-11-01 · G3 回写销账）—— 逐条与 Go 对照后**差异已消失**（Go 侧 `NonBlock` 默认值落在**消费点**的效果 = 非阻塞拨号；RAG 侧 devh 同样非阻塞 ⇒ 两侧启动行为一致 ⇒ 原「条件性差异、当前不可达」的前提已消解）⇒ **无待实现项** ⇒ 依据：`docs/DRIFT/_cross/grading/W4.md:9`
 
 结论：**条件性差异，当前不可达** ⇒ 今天的实际行为两侧一致（都启动成功）。
 详细取证见 §9 的 `UNRESOLVED-007`。
@@ -1977,7 +1977,7 @@ go-zero@v1.10.2/rest/httpx/util.go:22-65  GetFormValues（下面摘录的是其�
 ⇒ 本域**不受影响**（共享层 `HttpMiddleware` 的 writer 已修为实时 propagate；
 article-api 的真 Tomcat 用例已断言 400 带 `Content-Type` + `nosniff`）。
 
-### 判定变化（FIX-11 / FIX-12）
+### 判定变化（FIX-11 / FIX-12） —— **现行态 = ✅ 已闭合**（2026-11-01 · G3 回写销账）—— 逐条与 Go 对照后**差异已消失**（原「条件性差异、当前不可达」经回源复核**前提已消解**）⇒ **无待实现项** ⇒ 依据：`docs/DRIFT/_cross/grading/W4.md:9`
 
 | 项 | 修复前 | 修复后 |
 |---|---|---|
@@ -2299,7 +2299,7 @@ Go 的转义错误文案是 `"invalid URL escape " + strconv.Quote(那一小截)
 > 「解析失败时怎么办」才是 Go 的**可观察行为**，
 > 漏掉它就不是"漏了个细节"，而是**把一个 400 变成了 200**。
 
-## 2026-10-24 第十二轮：**台账审计** —— 逐条核对「现状权威面」，并修掉一条**源码级偏离**（`strconv.Quote` 的 Latin-1 补充段）
+## 2026-10-24 第十二轮：**台账审计** —— 逐条核对「现状权威面」，并修掉一条**源码级偏离**（`strconv.Quote` 的 Latin-1 补充段） —— **现行态 = ✅ 已闭合**（2026-11-01 · G3 回写销账）—— 逐条与 Go 对照后**差异已消失**（`strconv.Quote` 的 Latin-1 补充段已落到共享层 ⇒ 原「RAG ❌ 不可打印」对照表描述的是**修复前**状态）⇒ **无待实现项** ⇒ 依据：`docs/DRIFT/_cross/grading/W4.md:11`
 
 ### 🔴 为什么这一轮突然做「审计」而不是「对齐」
 
@@ -2909,7 +2909,7 @@ bash tools/api-full-parity-probe/favorite/run.sh   # 现成骨架
     - `article-api` 行：**133 → 141**（= 133 ＋ 本轮新增的 **8** 个 `@Test` 方法 ＝ 新守门类 **7** ＋ 装配面断言 **1**）
     - 文档声明的「全仓源声明测试方法数」：**3330 → 3338**
 - ⇒ ⇒ ⚠️ **本节上面的 216 / 223 不能填进 A-1**（填了就等于把「覆盖面口径」当「执行口径」用 ⇒ ⇒ 下次复算必然对不上）。
-- 权威值 = 守门 `tools/difftest/check-source-test-decl-count.py` **自己打印的实测值**：`🔴 [M1] article-api 列= 133 源= 141 ← 不一致（差 +8）` ＋ `🔴 [M2] 文档声明「全仓源声明测试方法数」= 3330，实测 = 3338`。
+- 权威值 = 守门 `tools/difftest/check-source-test-decl-count.py` **自己打印的实测值**（**下列两条是 2026-10-31 当时的读数**）：`🔴 [M1] article-api 列= 133 源= 141 ← 不一致（差 +8）` ＋ `🔴 [M2] 文档声明「全仓源声明测试方法数」= 3330，实测 = 3338` ⇒ ⇒ **2026-11-01 同日实测已一致**：`article-api` 列= 141 源= 141 ✅ ＋ **A-1 列求和 = 3338 = 源声明求和** ⇒ 守门 **EXIT=0** ⇒ ⇒ **现行态 = ✅ 已一致**（2026-11-01 · G3 lane 实测 · 原 🔴 读数按 AGENTS.md §6.3 状态表纪律**保留原文**并补核对日期）。
 - ⚠️ **该文件与派生层产物（`docs/DRIFT/_cross/stage1-derivation.*`）都是别人的写权面** ⇒ ⇒ 本域**只登记不刷**（禁手面）⇒ ⇒ 已发更正回执给收口执行者。
 - ⚠️ **本轮本 lane 落码 commit 的 message 里，沿用了同一处措辞** ⇒ ⇒ **以本节为准**（历史不重写，按仓的「零行位移订正」惯例以追加节订正）。
 ### 九、补充（2026-11-01 · 同一轮续）—— 🟢 **补上 article-api 域侧的「装配面守门」**（G4 lane 指派的域侧缺口）
