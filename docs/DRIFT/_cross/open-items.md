@@ -56,13 +56,13 @@
 
 ---
 
-## 🔴 DRIFT-INFRA-001：Flyway 账本撞号（2026-10-23 新发现 · **跨 3 个模块**）
+## ✅ DRIFT-INFRA-001：Flyway 账本撞号（2026-10-23 新发现 · **跨 3 个模块** · **已闭合**）
 
 | 项 | 值 |
 |---|---|
 | 优先级 | **P0**（三个服务里任意两个同时对空库启动即触发） |
 | 最后核对 | **2026-10-23 01:32**（真实执行产出：`check-flyway-ledger.py` 由 `EXIT=1` 转 `EXIT=0`） |
-| 状态 | **配置层已修** —— `message-rpc`/`like-rpc` 已加 `spring.flyway.table`；`article-rpc` 按指示未动（此时默认账本由它独占）。❌ **运行时验证仍缺 ⇒ 按 §3.3 记 `UNKNOWN`** |
+| 状态 | ✅ **已闭合**（**2026-11-01 收口执行者销账** · 复核通过）—— ① **配置层**：`spring.flyway.table` 已**全仓 7 个 rpc 模块**各自独立（`check-flyway-ledger.py` ⇒ **EXIT=0** · `first_db/public` 内账本表名**两两不同** · article 走默认名 ＋ comment/favorite/follow/like/message/task 六张专用表）② **运行时层**（原缺的那一半）：**2026-10-25 已实测闭环**（真 PG **三进程并发同库** ⇒ `docs/DRIFT/global/lanes/L4-flyway.md` §8.4 结论矩阵 ＋ `L4-03` 行：三进程起跑偏差 **0~4ms** · 各自迁移 3~7s **同时在跑** · 未被串行化 ⇒ 迁移锁 key = **账本表名的 hashCode** ⇒ 7 个表名两两不同 ⇒ **零碰撞**）⇒ ⇒ 原「运行时验证仍缺 ⇒ 按 §3.3 记 `UNKNOWN`」**已过期** ⇒ 本条判**已闭合 · 无待实现项**（派生层 U5-O `stage=D` 一致） |
 | 决策记录 | AGENTS.md §6.3 **问题 4** |
 | 守门 | `tools/difftest/check-flyway-ledger.py` **已转绿 `EXIT=0`**；各模块 `FlywayLedgerIsolationTest` **全仓不存在**（文档误称其存在） |
 

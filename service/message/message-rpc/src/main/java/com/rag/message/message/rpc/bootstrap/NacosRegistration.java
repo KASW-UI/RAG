@@ -30,12 +30,26 @@ import java.util.Enumeration;
  *
  * <p>这里显式实现而不是依赖 spring-cloud-starter-alibaba-nacos-discovery 自动注册，
  * 原因：{@code spring-cloud-starter-alibaba-nacos-discovery} 默认依赖 Spring Web，强行
- * 用在纯 gRPC 服务上会把 web 容器启起来。本服务不带 web，要走纯手动注册路径：
+ * 用在 gRPC 主服务上会把 web 容器启起来。本服务的 web 载体**只承载 Actuator 观测口**
+ * （{@code server.port} = 16067）⇒ **不承载任何业务 HTTP 路由** ⇒ 要走纯手动注册路径：
  * <ol>
  *   <li>{@code ApplicationReadyEvent} 后调 {@code register()} —— 跟 Go 端
  *       {@code zrpc.MustNewServer(...).Start()} 后立即注册一致的时序</li>
  *   <li>Spring 关闭时反注册（靠 {@code @PreDestroy} 钩子）</li>
  * </ol>
+ *
+ * <p>⚠️ **2026-11-01 订正（`DRIFT-MSG-012` · 部署面）** —— 原文「本服务不带 web」**已过期**：
+ * 自 2026-10-30 起本模块补了 {@code spring-boot-starter-web}（**真容器**）⇒ **确实带 web**，
+ * 但它**只为 Actuator 提供 servlet 载体**（{@code pom.xml:95-98} 的 {@code spring-boot-web-server}
+ * 是**抽象**构件 · **不带** Tomcat ⇒ 仅满足 nacos-discovery 的反射引用）。
+ * <p>Go 出处：{@code service/message/rpc/etc/message.yaml:19-27}（{@code DevServer: Enabled: true /
+ * Port: 16067 / MetricsPath: /metrics / HealthPath: /healthz} ⇒ go-zero devserver 观测口 · **独立端口**）
+ * ＋ {@code go-zero@v1.10.2/core/service/serviceconf.go:77}（{@code devserver.StartAgent(sc.DevServer)}）
+ * ＋ {@code go-zero@v1.10.2/internal/devserver/server.go:80}（{@code if !c.Enabled { return }}）
+ * ＋ {@code go-zero@v1.10.2/internal/devserver/server.go:72}（{@code http.ListenAndServe(addr, s.server)}）。
+ * <p>语义等价论证：**观测口端口一致**（两侧都是 16067）· **两侧都没有业务 HTTP 路由**
+ * ⇒ ⇒ 注册到 Nacos 的**必须**是 gRPC 端口（{@code 8082}）而不是观测口
+ * ⇒ ⇒ **手动注册路径的必要性与结论不变**（**纯注释订正 · 零行为变更**）。
  *
  * <p>group 一律 {@code DEFAULT_GROUP}，与 message-api / user-api / follow-api 保持一致，
  * 便于服务发现过滤。

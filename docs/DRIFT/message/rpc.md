@@ -3467,3 +3467,45 @@ message_rpc_request_total{method="ListConversations",result="fail"} 1.0
   ⇒ ⇒ 判据式：**先定位红在哪一行**，再判这条判据是死是活。
 - ③ **跑门禁前要一次覆盖该模块的全量跑**：门禁读的是 `target/` 里的报告 ⇒ ⇒ 任何定向 `-Dtest=` 跑都会改写它
   ⇒ ⇒ 本轮顺序 = 干净跑 → 变异跑 → 还原复跑 → **三域全量回归（19:09）** → 再跑门禁。
+
+## 阶段归属定级附录（2026-11-01 · G2 收官轮 · 部署面「残余差异登记」）
+
+> 本节由 G2 lane（`align/g2-message-like-task`）追加 · **只追加，不改任何既有结论**
+> （同 `docs/DRIFT/message/api.md:1859` 的「原值一律保留」纪律）。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层的**两个扫描器**（条目扫描 / 定级表扫描）都**不读它**
+> （保留区机制）⇒ **零投影影响** ⇒ 派生层产物**无需重算**。
+> ⚠️ 原行 `docs/DRIFT/message/rpc.md:262` 的文字按纪律**不改写**；订正见本节。
+
+### 残余差异登记（按 `docs/twoStage.md` §10 定级）
+
+| # | 差异 | 严重度 | 阶段归属 | 理由 |
+|---|---|---|---|---|
+| 1 | **暴露路径不同**（Go `/metrics` + `/healthz` ↔ RAG `/actuator/prometheus` + `/actuator/health`） | **P3** | **D 类** | **端口一字不差（都是 16067）**；路径是 Actuator 的固定前缀 ⇒ 抓取配置**改路径不改端口** ⇒ 表达层差异 |
+| 2 | **载体不同**（Go = `http.ListenAndServe` 的小 server，无 servlet；RAG = Tomcat，有 servlet 但**无任何业务 HTTP 路由**） | **P3** | **D 类** | 对外可观测面（独立端口 + Prometheus 文本）一致；载体不同属框架表达差异 ⇒ **不修** |
+
+⇒ **与 follow-rpc 同款**（`docs/DRIFT/follow/rpc.md` 的「残余差异登记」第 2/3 条 · 该域先例）
+⇒ ⇒ 口径一致，不新造一条偏离登记。
+
+### 原行 `:262` 的**前提订正**（「矛盾」不成立）
+
+| 项 | 结论 | 证据（`文件:行号` · 核对日期 2026-11-01） |
+|---|---|---|
+| **Go 侧「无 HTTP 监听面」** | ❌ **证伪** —— Go 侧 message-rpc **开着** go-zero devserver 观测口（**独立端口 16067**） | Go `service/message/rpc/message.go:37`（`zrpc.MustNewServer(c.RpcServerConf, …)`）→ Go `go-zero@v1.10.2/zrpc/server.go:23-27`（`MustNewServer` → `NewServer`）→ `go-zero@v1.10.2/zrpc/server.go:63`（`c.SetUp()`）→ `go-zero@v1.10.2/core/service/serviceconf.go:77`（`devserver.StartAgent(sc.DevServer)`）→ `go-zero@v1.10.2/internal/devserver/server.go:80`（`if !c.Enabled { return }` ⇒ 本仓 yaml `Enabled: true` ⇒ **起**）→ `go-zero@v1.10.2/internal/devserver/server.go:72`（`http.ListenAndServe(addr, s.server)` ⇒ **独立端口**，不是主端口）· Go 配置 `service/message/rpc/etc/message.yaml:19-27`（`DevServer: Enabled: true / Host: 0.0.0.0 / Port: 16067 / MetricsPath: /metrics / HealthPath: /healthz / EnableMetrics: true / EnablePprof: true`） |
+| **Go 侧「无 servlet 容器」** | ✅ **成立**（逐字为真）—— 但由此**推不出**「无 HTTP 监听面」⇒ 原行把「无 servlet」当成了「无监听面」 | 同上：`http.ListenAndServe` 的**小 server**（无 servlet · 无业务路由）≠ **无监听面** |
+| **RAG 侧「有 web 容器」** | ✅ **成立** —— 且**有意为之**（2026-10-30 起补 `spring-boot-starter-web`，**只为 Actuator 提供载体**） | RAG `service/message/message-rpc/pom.xml:222-231`（补 `spring-boot-starter-web` ＝ 真容器）· `service/message/message-rpc/pom.xml:95-98`（`spring-boot-web-server` ＝ **抽象**构件 ⇒ 不带 Tomcat）· 实测 `mvn dependency:tree` ⇒ `tomcat-embed-core:jar:11.0.24:compile`（**运行时作用域**）· RAG `service/message/message-rpc/src/main/resources/application.yml:177-178`（`server.port: ${MESSAGE_RPC_MANAGEMENT_PORT:16067}`）· `:291-302`（Actuator 暴露面 · 已自述「路径不同、**端口相同（都是 16067）**」） |
+| **原行「与 javadoc 自述矛盾」** | ✅ **矛盾确实存在** —— 但**不是 pom 的错**，是 **javadoc 自述过期** ⇒ **本轮已订正** | RAG `service/message/message-rpc/src/main/java/com/rag/message/message/rpc/bootstrap/NacosRegistration.java:31-33`（原「本服务不带 web」）⇒ **本轮改为**「web 载体只承载 Actuator 观测口（16067）· 不承载任何业务 HTTP 路由」· 同 `pom.xml:82-93`（2026-10-30 注释已写明「本段原注释『message-rpc 不引 spring-boot-starter-web』—— 2026-10-30 起不再成立」） |
+| **净结论** | ⇒ ⇒ **端口一致 · 两侧都无业务 HTTP 路由** ⇒ ⇒ 原行判的「部署面矛盾」**不成立**；真正剩下的只有上表第 1/2 条**残余差异** ⇒ **D 类 · 不修** | — |
+
+⇒ **证据强度 = E3**（Go 侧 `文件:行号` 逐行 + RAG 侧代码/配置定位 + 依赖树实测 · **未做双侧活体端口对拍** ⇒
+「端口一致」为**静态逐字对照**结论；活体侧证据待阶段二统一补）。
+
+### 共享面待办（**走 g4 / 合并收口执行者** · 本 lane 只报告不修）
+
+| # | 待办 | 落点 | 为什么不是本 lane 能做 |
+|---|---|---|---|
+| 1 | **`DRIFT-MSG-012` 的 U5-O 定级需重定级**：现写「C（阶段 2 最终工程建设项 · 部署面收敛）」，其依据「Go 侧纯 gRPC 进程 ⇒ 无 servlet 容器、**无 HTTP 监听面**」**已被 Go 真源证伪** ⇒ 按本节实测应为 **D 类 · P3 · 不修**（与 follow-rpc 同款） | `docs/DRIFT/_cross/grading/W6.md:24` | `docs/DRIFT/_cross/**` = **共享面** ⇒ 工作树 ⛔ 不写（`docs/Worktree.md:416`）⇒ **走 g4 中转** |
+| 2 | **派生层重算**：定级改判后，该行的 `stage` / `status` / `gap` 会随之变化 ⇒ `docs/DRIFT/_cross/stage1-derivation.{tsv,md}` 需重算 | `docs/DRIFT/_cross/**` | 同上 ⇒ 合并收口执行者统一重算 |
+| 3 | **观测口暴露路径是否要对齐**（Go `/metrics`·`/healthz` ↔ RAG `/actuator/**`）：若要**逐路径**对齐 ⇒ 落点是各域 `management.endpoints.web.base-path` / `path-mapping`（**域侧 yml**）⇒ 但本仓 8 个 api 模块**同款** ⇒ 属**共享形态面** ⇒ **走 g4 统一口径**，本 lane 不擅自改 | 域侧 yml + 共享层 | 跨 8+ 组件的一致性 ⇒ 域侧单改会造成域间不一致（`docs/DRIFT/task/_README.md:184` 同款口径：「五域共性 · 不在本域单独修」） |
+
+⇒ ⚠️ **本节不构成「销账」**：原行 `:262` 的状态标记按「原值一律保留」不改 ⇒ 派生层该行仍读原值
+⇒ ⇒ **真正的销账动作在共享面重定级 + 派生层重算之后**（见上表第 1/2 条）。
