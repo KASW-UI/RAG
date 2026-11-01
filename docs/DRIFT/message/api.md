@@ -1882,3 +1882,23 @@ mvn -o -B -pl service/message/message-api -am -DargLine=-Xmx2g test
 |---|---|---|---|---|---|
 | DRIFT-MSGAPI-009 | D（已签字偏离 ⇒ 决策不是缺陷） | P1 | 否（不阻断阶段一） | Go `service/message/api/internal/types/types.go:22`（`Affected int64 \`json:"affected"\`` ⇒ **无 `,string`** ⇒ `encoding/json` 输出 JSON **数字** `{"affected":3}`）vs RAG `service/message/message-api/src/main/java/com/rag/message/message/api/dto/AdminSendNotificationResp.java:43`（`@JsonFormat(shape = JsonFormat.Shape.STRING)`）＋ `:44`（`private long affected;` ⇒ 序列化为 JSON **字符串** `{"affected":"3"}`）⇒ ⇒ **差异仍成立**（wire 契约的 JSON 类型确实不同）；但该条**已于 2026-10-23 签字**（`SD-2026-10-23-03` · 用户逐条拍板「保留 RAG 的字符串形态，不改 wire 契约」· 登记见 `docs/Intentional_Deviations/_cross/signed-deviations.md:71` · 状态 ✅ 仍成立）⇒ 按 `docs/DRIFT/_cross/grading/_README.md` 纪律 5「已签字偏离 ⇒ 是决策不是缺陷」⇒ 归 D；⚠️ 探针把 `X1`/`X2` 放进 `known-dev` 白名单 ⇒ 对拍时恒红但不计失败 ⇒ 不作为待办、不阻断阶段一 | 2026-10-30 |
 | DRIFT-MSGAPI-011 | D（经分析确认不可修 · 容器层框架限制 ⇒ 无待实现内容） | P2 | 否（不阻断阶段一） | Go `go-zero@v1.10.2/rest/httpx/responses.go:183`（`w.WriteHeader(code)` ⇒ reason phrase 由 Go 标准库 `net/http` 补 ⇒ 状态行 = `HTTP/1.1 200 OK` / `401 Unauthorized` / `404 Not Found`）vs RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:943`（`public void setStatus(int sc)` ⇒ 应用层只写码不带 reason）＋ `:956`（`resp.setStatus(sc)`）⇒ ⇒ **差异仍成立**（两侧状态行确实不同：RAG = `HTTP/1.1 200` / `401`）；但**经分析确认不可修**：Tomcat 的 `Response` 在 11.x **已移除 `setStatus(int, String)`**（实测 `javap`：`tomcat-embed-core` 9.0.63 有 `setStatus(int)` ＋ `setStatus(int,String)`；10.1.52 与 11.0.24 **只剩 `setStatus(int)`**；本项目 Boot 4.0.8 ⇒ `tomcat.version=11.0.24`）⇒ 应用层**没有任何写法**能补出 reason phrase ⇒ 落点不在 `service/common`（共享层够不着）⇒ 已在 `docs/Intentional_Deviations/global/common-tails.md` 登记 `SD-2026-10-25-CAND-14`（🏷 待签字候选 · 框架限制）⇒ 影响面 = 全部 10 个 api 的**展示面**（非功能面）⇒ 经分析确认对本项目不适用 ⇒ 归 D、不阻断阶段一 | 2026-10-30 |
+
+## 阶段归属定级附录（2026-11-01 · G2 收官轮 · 两条 HTTP 写出面「销账/签字」材料备齐）
+
+> 本节由 G2 lane（`align/g2-message-like-task`）追加 · **只追加，不改任何既有结论**。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层**不读它**（保留区机制）⇒ **零投影影响**。
+> ⚠️ **本 lane 不代签**（签字 = Jason 的决策）⇒ 本节只把**材料备齐到「可签」的程度**。
+
+| 项 | `DRIFT-MSGAPI-011` | `DRIFT-MSGAPI-012` |
+|---|---|---|
+| **① 现象** | 状态行**缺 reason phrase**（Go `HTTP/1.1 200 OK` / `401 Unauthorized` / `404 Not Found` / `405 Method Not Allowed` ↔ RAG `HTTP/1.1 200` / `401` / `404` / `405`） | `Content-Type` **分号后的空格**不可达（Go `application/json; charset=utf-8` ↔ RAG `application/json;charset=utf-8`） |
+| **② Go 侧 `文件:行号`** | `go-zero@v1.10.2/rest/httpx/responses.go:183`（`w.WriteHeader(code)` ⇒ reason phrase 由**标准库**补：`net/http/server.go:1596-1611`，`:1602-1605` 写 `StatusText(code)`）＋ `net/http/status.go:81` | `go-zero@v1.10.2/rest/internal/header/headers.go:17`（`ContentTypeJson = "application/json; charset=utf-8"` ⇒ **分号后有空格**）＋ 写出侧 `rest/httpx/responses.go` |
+| **③ RAG 侧现状** | ① 应用层只写码（`service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:907` `public void setStatus(int sc)` ＋ `:920` `resp.setStatus(sc)`）<br>② **容器层（决定性）**：Tomcat 的 `Response` **已没有** `setStatus(int, String)` ⇒ 应用层**无法**补 reason phrase ⇒ 实测 `javap`：`tomcat-embed-core` **9.0.63** 有 `setStatus(int)` **+** `setStatus(int,String)`；**10.1.52** 与 **11.0.24** **只剩** `setStatus(int)` ⇒ 本项目 **Boot 4.0.8 ⇒ `tomcat.version=11.0.24`** ⇒ **无路可走** | 实测：Tomcat 11 的 `Response.setContentType(String)` 把 Content-Type **解析成 MediaType 再序列化**、序列化时**吃掉空格**；**`setHeader("Content-Type", …)` 也一样**（Tomcat 内部对 Content-Type **转手调** `setContentType`）⇒ **没有任何写法能产出带空格的 Content-Type** ⇒ 归**框架限制**，**不可修** |
+| **④ 证据强度** | **E4**（**实测 `javap` 三个 Tomcat 版本的方法签名** ＋ 真容器状态行 dump） | **E4**（真容器实测 ＋ 框架源码机制：`org/apache/catalina/connector/Response.java`（11.0.24）`setContentType` 把 charset **拆开存**、`org/apache/coyote/Http11OutputBuffer.writeHeaders()` 写出时**重新拼** ⇒ 线上恒为 `type/subtype;charset=xxx`） |
+| **⑤ 建议修法** | **无** ⇒ 性质 = **框架限制（容器层）** ⇒ `service/common` **够不着** ⇒ **🏷 候选，建议签** | **无** ⇒ **不可修** ⇒ **🏷 候选，建议签**（共享面**已有登记面**：hot 域档案「残余：那个空格（**已接受，不新签**）」） |
+| **⑥ 影响面** | 全部 **10 个 api**（Go 侧全都有 reason phrase）⇒ 影响面 = **展示面**而非功能面 | message ＋ task 两域 api 组件（like 域**已同形销账** ⇒ `docs/Intentional_Deviations/like/api.md:23` 写明「剩下的只是『分号后有没有空格』… **已在 DRIFT 台账单列**」） |
+| **⑦ 是否阻塞本波** | **否**（不可修 ⇒ 不构成任何 lane 的待办） | **否**（不可修） |
+| **⑧ 登记面现状** | ✅ **已登记**：`docs/Intentional_Deviations/global/common-tails.md` 的 **`SD-2026-10-25-CAND-14`**（🏷 待签字候选 · 性质「框架限制（容器层）」· 状态「⏳ 未签字」· 核对日期 2026-10-29）⇒ ⇒ **只差签字**（Jason 决策） | ✅ **共享面已具备登记面**（hot 域档案已「**已接受，不新签**」）⇒ ⇒ **不需要新签字**；**待办 = 销账**（把 DRIFT 侧 🟡 转成「已接受 · 框架限制」）⇒ **落点在 `docs/Intentional_Deviations/**` ＋ 派生层重算 ⇒ 走 g4 / 合并收口执行者** |
+
+⇒ ⚠️ **本 lane 不代签**（签字 = Jason 的决策）⇒ 本节只把材料备齐到「可签」的程度；
+⇒ ⚠️ **状态标记按「原值一律保留」不改** ⇒ 真正的销账动作在**签字/登记面更新之后**由共享面统一执行。
