@@ -977,6 +977,22 @@ B 的 javadoc 修好了，A 就可以删方法。**谁先动都会留半截** �
 
 ---
 
+## 🆕 Round 7 回归面新增登记（2026-11-01 · **1 条 A 类（已修）＋ 1 条守门覆盖缺口**）
+
+> **来源**：`docs/RoundPlan/round-01/service-startup-matrix.md` §7.6 · **发现方式**：**Round 7 的全量回归**（`mvn -o -B -DargLine=-Xmx2g clean test`）在 `hot-rpc` 处 **BUILD FAILURE** ⇒ 既有守门 `HotRpcPrometheusCarrierGateTest` **精确转红** ⇒ ⇒ **不是新写的判据，是仓内既有门禁抓到的**。
+> ⚠️ **登记即交付**（不升级拍板）：`R7-PORT-001` **本轮已修**（按 Go 值回改 6 行）；`R7-PORT-002` 是**加固项**（守门覆盖缺口）；`R7-PORT-003` **本轮已修**（门禁自身解析器）⇒ **三条都不阻阶段一**。
+
+| 编号 | 现象 | 根因与出处（逐条） | 定级 | 落点 / 建议 | 核对日期 |
+|---|---|---|---|---|---|
+| `R7-PORT-001` | **6 个 yml 的端口默认值 ≠ Go 真源值** ⇒ **对外契约面漂移** | **默认值层被当成了「分配层」** —— Round 1（`1fa8a080`）为解同机端口冲突，**改了 6 个默认值**：<br>① `admin-api` `ADMIN_API_PORT:8890` ⇒ Go `service/user/admin/api/etc/admincenter.yaml:3` = **8889**<br>② `comment-rpc` `COMMENT_RPC_PORT:9002` ⇒ Go `service/comment/rpc/etc/comment.yaml:2` = **9001**<br>③ `follow-rpc` `FOLLOW_RPC_PORT:8083` ⇒ Go `service/follow/rpc/etc/follow.yaml:2` = **8082**<br>④ `hot-rpc` `HOT_RPC_GRPC_PORT:8084` ⇒ Go `service/hot/rpc/etc/hot.yaml:2` = **8083**（🔴 **既有门禁 `HotRpcPrometheusCarrierGateTest:259` 因此转红**）<br>⑤ `like-rpc` `LIKE_RPC_PORT:8085` ⇒ Go `service/like/rpc/etc/like.yaml:2` = **8082**<br>⑥ `message-rpc` `MESSAGE_RPC_PORT:8086` ⇒ Go `service/message/rpc/etc/message.yaml:2` = **8082**<br>⇒ ⇒ **6 个 yml 自己的注释就写着「默认值 = Go 值」**（admin-api：「⚠️ 默认端口**一字不变**（8889）」· follow-rpc：「⚠️ 默认端口**一字不变**（Go follow.yaml:2）」· comment-rpc / like-rpc / message-rpc：「对应 Go … `ListenOn`」· hot-rpc：「这里先沿用 Go 的 8083」）⇒ ⇒ **当时的 spec `.agents/specs/round1-full-service-startup.md` §1 写「**3 处默认值错开**」（实际改了 6 处 ⇒ 计数也不准）** ⇒ ⇒ **错开默认值这条路本身就是错的**（**默认值层 = 对外契约面**，而当时未意识到这一层）⇒ ⇒ **本轮按 `service-startup-matrix.md` §2 的「默认值保持不变」回改** | **A 类 · 对外契约面**（默认值属**对外契约面** ⇒ 有门禁钉住 ⇒ 不是「部署细节」）<br>🟢 **现行态 = ✅ 已一致**（2026-11-01 · Round 7 已修） | ✅ **本轮已修**（Round 7 · 回改 6 行 · 保留 env 化本身）⇒ **互异性改由分配层（`.env` / `.env.host`）承担** ⇒ 端口口径 = **两层分工**（默认值层 = Go 值 · 分配层 = env 互异）⇒ 证据：`DEFAULT_GO_MISMATCH_COUNT 0` · `ALLOC_DUP_COUNT 0`（29 个端口变量）· `HARDCODED_COUNT 0` · `HotRpcPrometheusCarrierGateTest` 转绿（EXIT=0）⇒ 详见 `service-startup-matrix.md` §3.2 / §7.6 | 2026-11-01 |
+| `R7-PORT-002` | **「默认值 = Go 值」这条不变量，仓内只有 3/9 的 rpc 有机器守门** | 钉住业务口默认值的守门**只有** `HotRpcPrometheusCarrierGateTest`（8083）· `FavoriteRpcPrometheusCarrierGateTest`（8082）· `ArticleRpcPrometheusCarrierGateTest`（9001）三个 ⇒ ⇒ **`comment-rpc` / `follow-rpc` / `like-rpc` / `message-rpc` / `admin-api` 这 5 处当时是「静默漂移」**（`R7-PORT-001` 里只有 hot-rpc 会红）⇒ ⇒ **「跑绿」不等于「默认值没偏」** | 🟡 **B 类 · 守门覆盖缺口**（**不阻阶段一** · 但**下一轮动端口前必须先补**）<br>🟡 **现行态 = 🟡 部分闭合**（当前值已复算为绿 · 缺的是**常驻门**） | **建议**：按 `R7-PORT-001` 的「两层分工」口径，在各域补一条**默认值 = Go 值**的守门（或一个**跨域只读扫描器**）⇒ ⚠️ **按 `docs/RoundPlan/_INDEX.md` §十一**：**不得新增 `check-*.py`**（会动 judge §六 6.3 的 27 项计数）⇒ 新扫描器用**非 `check-*` 名** ⇒ **落点：Round 4 / Round 5 面**（`P5-T02`「明细面 vs 现状面逐条矛盾」的同类活） | 2026-11-01 |
+| `R7-PORT-003` | **Round 1 的端口 env 化把 `favorite-rpc` 的既有门禁打红了** ⇒ 门禁读不懂 `${VAR:默认端口}` 形态 | `service/favorite/favorite-rpc/src/test/java/com/rag/favorite/favorite/rpc/FavoriteRpcProductionStartupTest.java:151` 的 `stripPortNumber` 是**旧拷贝**（只做 `raw.lastIndexOf(':')` ⇒ 对 `${FAVORITE_RPC_PORT:8082}` 返回 **`"8082}"`**（带右花括号））⇒ ⇒ **Round 1 把 `port: 8082` 改成 `port: ${FAVORITE_RPC_PORT:8082}`（`1fa8a080`）后，该门禁的「默认值 = Go 的 `ListenOn`」断言必然不等** ⇒ **值是对的，是解析器读不懂占位形态**<br>⇒ ⇒ 其余三份同族 helper（`article-rpc` · `favorite-rpc` 的 `PrometheusCarrierGateTest` · `hot-rpc` 的 `PrometheusCarrierGateTest`）**都**处理了占位形态 ⇒ ⇒ **这一份是遗漏，不是设计**<br>⇒ ⇒ 且该方法的 javadoc 本就写着「**从 `${ENV:default}` 形态里取出默认端口**（env 覆盖是既有约定）」⇒ **实现与自身声明不符** | 🔴 **B 类 · 守门自身缺陷**（**失灵方向 = 假红** ⇒ 属**更贵的一侧**）<br>🟢 **现行态 = ✅ 已一致**（2026-11-01 · Round 7 已修） | ✅ **本轮已修**（Round 7）—— 改成与其余三份**逐字一致**的实现（**断言语义不变**：仍要求「默认值一字不差 = Go 的 `ListenOn`」）⇒ **验证**：① 修后 `FavoriteRpcProductionStartupTest` ⇒ **4 条 / 0F / 0E / EXIT=0** ② **变异必红**：把默认值改成 `8083` ⇒ **精确转红**且报错指向 `observationPortIsSeparatedFromBusinessPort:122` ⇒ ⇒ **判据有牙**（还原后逐字节一致） | 2026-11-01 |
+
+> ⚠️ **可复用的教训**：**「端口 env 化」要先分清改的是「默认值」还是「分配值」** —— 前者属**对外契约面**（Go 侧逐字对齐 + 门禁钉住 ⇒ **只能改 env 键名，不能改默认值**），后者属**部署面**（可以改）⇒ ⇒ **Go 侧本就重复的端口（`8082` × 4 / `9001` × 2 / `8889` × 2）不是冲突，是「一服务一部署」的历史形状** ⇒ ⇒ **「一机多进程」的互异性只能由部署层提供**。
+> ⚠️ **另一条教训**：**「自查门全绿」≠「全量回归全绿」** —— Round 1 的自查只跑了 12 道**静态/机读门** ⇒ **没跑到能抓「默认值漂移」的那一面**（`mvn clean test`）⇒ ⇒ **凡改「对外契约面」的值，必须跑全量回归**。
+
+---
+
 ## 阶段归属定级附录（2026-10-30 · Go 对照）
 
 > 本节由 `docs/DRIFT/_cross/grading/*.md`（**U5-O 显式定级叠加层**）同步而来。

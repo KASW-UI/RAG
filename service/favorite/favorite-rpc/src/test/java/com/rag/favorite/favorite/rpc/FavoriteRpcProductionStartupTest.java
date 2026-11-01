@@ -152,8 +152,21 @@ class FavoriteRpcProductionStartupTest {
         if (raw == null) {
             return null;
         }
-        int colon = raw.lastIndexOf(':');
-        return colon >= 0 ? raw.substring(colon + 1) : raw;
+        // ⚠️ **2026-11-01 · Round 7 修**：原实现是 `raw.lastIndexOf(':')` ⇒ 对
+        //    `${FAVORITE_RPC_PORT:8082}` 返回 **"8082}"**（带右花括号）⇒ 与 "8082" 不相等
+        //    ⇒ **本门禁被 Round 1 的端口 env 化打红**（值是对的，**是解析器读不懂占位形态**）。
+        //    ⇒ 本方法的 javadoc 本就声明「从 `${ENV:default}` 形态里取出默认端口」⇒ **实现与声明不符**。
+        //    ⇒ 改成与其余三份同族 helper（article-rpc / favorite-rpc 的 PrometheusCarrierGateTest /
+        //    hot-rpc 的 PrometheusCarrierGateTest）**逐字一致**的实现。
+        //    ⇒ **断言语义不变**：仍然要求「默认值一字不差 = Go 的 ListenOn」。
+        String value = raw.trim();
+        if (value.startsWith("${") && value.endsWith("}")) {
+            int colon = value.lastIndexOf(':');
+            if (colon > 0 && colon < value.length() - 1) {
+                value = value.substring(colon + 1, value.length() - 1);
+            }
+        }
+        return value;
     }
 
     private static String readProperty(Path yml, String key) throws IOException {

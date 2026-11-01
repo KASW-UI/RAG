@@ -217,7 +217,7 @@ grpc:
     # Go 三副本是 8083/8084/8085；Java 侧收敂为同一部署 × 副本，端口走环境变量。
     # ⚠️ Infrastructure.md §3 目前只给 hot 预占了 18897(HTTP)，**gRPC 端口未分配**。
     #    这里先沿用 Go 的 8083（8081=admin-rpc / 8082=message-rpc / 8083 空闲）。
-    port: ${HOT_RPC_GRPC_PORT:8084}
+    port: ${HOT_RPC_GRPC_PORT:8083}
     address: 0.0.0.0
     # ⚠️ Go 端 reflection 仅在 DevMode/TestMode 注册（hot.go:38-40），
     #    三份 yaml 均未写 Mode（默认 pro）⇒ **生产不暴露 reflection**。

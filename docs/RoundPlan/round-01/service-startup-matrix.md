@@ -52,6 +52,7 @@
 
 > **判据**：`application.yml` 里 `port:` 后面是**纯数字** ⇒ 该端口**无法用 env 覆盖** ⇒ 同机并行时无法错开。
 > **本轮实测（2026-11-01）共 7 处硬编码 + 1 处未声明默认端口**（计划书原文列了 6 处 ⇒ **多出 `task-rpc` 的 HTTP 默认口**）。
+> 🟢 **【2026-11-01 · Round 7 订正】本表即「工作单」，落码曾偏离它 ⇒ 已回改**：本表的「建议 env 化」列**每一处都写明「默认值保持不变」**（`${MESSAGE_RPC_PORT:8082}` / `${COMMENT_RPC_PORT:9001}` / …）⇒ ⇒ **本表本身是对的**；偏离发生在**落码与 spec** —— `.agents/specs/round1-full-service-startup.md` §1 的 `P1-T03` 行写「**3 处默认值错开**」（**实际落码改了 6 处** ⇒ 连 spec 的计数也不准）⇒ ⇒ **错开默认值这条路本身就是错的**（默认值层 = 对外契约面）⇒ ⇒ **已按本表回改**（见 §7.6）。
 
 | # | 文件:行号 | 内容 | 冲突 | 建议 env 化（**默认值保持不变 ⇒ 探针零影响**） |
 |---|---|---|---|---|
@@ -88,40 +89,50 @@ Spring Boot 的属性优先级：**命令行参数 > OS 环境变量 > 配置文
 
 ### §3.1 实测到的冲突（2026-11-01）
 
-| 冲突组 | 端口 | 占用者 | 形态 |
-|---|---|---|---|
-| **C-1** | gRPC `8082` | `message-rpc` · `like-rpc` · `favorite-rpc` · `follow-rpc` | 3 处硬编码 + 1 处 env |
-| **C-2** | gRPC `9001` | `article-rpc` · `comment-rpc` | 2 处硬编码 |
-| **C-3** | HTTP `8889` | `admin-api` · `article-api` | 2 处 env（默认值相同） |
+> ⚠️ **解法在 §3.2 的「分配层」**（env 文件）—— **不在默认值层**（默认值必须逐条 = Go 真源值）。
 
-### §3.2 目标端口表（**保留现有值优先**；改的是**默认值** ⇒ 探针不受影响，冲突消失）
-
-| 服务 | 现值 | 目标默认 | 端口类 | 取值理由 |
+| 冲突组 | 端口 | 占用者 | 形态 | 解法 |
 |---|---|---|---|---|
-| `user-api` | 49900 | **49900** | HTTP | 不动（compose 已占用 49900） |
-| `admin-api` | 8889 | **8890** | HTTP | 解 C-3（`8890` 全仓未用） |
-| `article-api` | 8889 | **8889** | HTTP | 保留（`8890` 让给 `admin-api`） |
-| `comment-api` | 8888 | **8888** | HTTP | 不动 |
-| `favorite-api` | 18893 | **18893** | HTTP | 不动 |
-| `follow-api` | 8891 | **8891** | HTTP | 不动 |
-| `hot-api` | 18897 | **18897** | HTTP | 不动 |
-| `like-api` | 18887 | **18887** | HTTP | 保留（只 env 化） |
-| `message-api` | 8892 | **8892** | HTTP | 不动 |
-| `task-api` | 18886 | **18886** | HTTP | 不动 |
-| `user-rpc` | 49210 | **49210** | gRPC | 不动 |
-| `admin-rpc` | 8081 | **8081** | gRPC | 不动 |
-| `article-rpc` | 9001 | **9001** | gRPC | ⚠️ **必须保留**（article 探针依赖默认值） |
-| `comment-rpc` | 9001 | **9002** | gRPC | 解 C-2 |
-| `favorite-rpc` | 8082 | **8082** | gRPC | 保留（其余 3 个让开） |
-| `follow-rpc` | 8082 | **8083** | gRPC | 解 C-1 |
-| `hot-rpc` | 8083 | **8084** | gRPC | 解 C-1（8083 让给 follow-rpc） |
-| `like-rpc` | 8082 | **8085** | gRPC | 解 C-1 |
-| `message-rpc` | 8082 | **8086** | gRPC | 解 C-1 |
-| `task-rpc` | 9005 | **9005** | gRPC | 保留（`task-api` 静态指向它）｜**无 HTTP 口**（无 web starter） |
+| **C-1** | gRPC `8082` | `message-rpc` · `like-rpc` · `favorite-rpc` · `follow-rpc` | 3 处硬编码 + 1 处 env | env 分配：`favorite=8082` · `follow=8083` · `like=8085` · `message=8086`（**默认值 4 个都仍是 Go 的 8082**） |
+| **C-2** | gRPC `9001` | `article-rpc` · `comment-rpc` | 2 处硬编码 | env 分配：`article=9001` · `comment=9002`（**默认值 2 个都仍是 Go 的 9001**） |
+| **C-3** | HTTP `8889` | `admin-api` · `article-api` | 2 处 env（默认值相同） | env 分配：`article=8889` · `admin=8890`（**默认值 2 个都仍是 Go 的 8889**） |
 
-**rpc 侧的 actuator 口（`server.port`）**：`user-rpc` 9094 · `admin-rpc` 9097 · `message-rpc` 16067 · `like-rpc` 9098 · `article-rpc` 9092 · `favorite-rpc` 16062 · `follow-rpc` 16065 · `hot-rpc` 19091 · **`task-rpc` 无 HTTP 口（无 web starter · 本轮实测）** · **`comment-rpc` 无 HTTP（`web-application-type: none`）** ⇒ **两两不冲突** ✓
+### §3.2 端口的**两层分工**（⚠️ 2026-11-01 · Round 7 订正 —— 原表「改默认值解冲突」**方向错了**，已回改）
 
-> ⇒ **目标默认端口集合**：HTTP 10 个 + gRPC 10 个 + rpc actuator 9 个 ⇒ **31 个监听口两两不同**（`comment-rpc` 无 HTTP ⇒ 实际 30 个）。
+| 层 | 承担者 | 规则 | 谁钉住它 |
+|---|---|---|---|
+| **① 默认值层** | `application.yml` 的 `${VAR:默认值}` | **默认值 = Go 真源的值，一字不差**（Go 侧 `ListenOn` / `Port`） | ✅ 每个 rpc 的 `*PrometheusCarrierGateTest`（例：`HotRpcPrometheusCarrierGateTest:259`「`grpc.server.port` 必须 = 8083（= Go `etc/hot.yaml:2` 的 `ListenOn`）」· 门禁原文明确写「**允许 env 覆盖（探针/部署要换口），但默认值必须一字不差**」） |
+| **② 分配层** | `.env`（容器语义）· `.env.host`（宿主语义） | **同一台宿主并行起 20 个服务 ⇒ 监听口互异** | `verify-all-services.sh` 实跑 ⇒ **20/20**（§7.2） |
+
+**为什么冲突不能靠改默认值解** —— Go 侧 **favorite/follow/like/message-rpc 四个都监听 `8082`** · **article/comment-rpc 都监听 `9001`** · **article/admin-api 都监听 `8889`**（**同一批端口在 Go 侧本就重复** ⇒ 因为 Go 是「一服务一部署」，端口按**服务**分配，不按**进程**唯一）⇒ ⇒ 搬成「一机多进程」时，**互异性必须由部署层（env）提供**，**不能由默认值提供** ⇒ ⇒ 改默认值 = **改了对外契约面**（**且已有守门因此变红** —— 见 §7.6）。
+
+| 服务 | Go 真源值 | Go 出处 | RAG yml 默认值 | 端口类 | 分配层取值（`.env` / `.env.host`） |
+|---|---|---|---|---|---|
+| `user-api` | 8888 | `service/user/user/api/etc/usercenter.yaml:3` | 49900 | HTTP | ⚠️ RAG 侧既有值（**非本轮引入**）· env `USER_API_PORT=49900` |
+| `admin-api` | 8889 | `service/user/admin/api/etc/admincenter.yaml:3` | **8889** | HTTP | env `ADMIN_API_PORT=8890`（解 C-3） |
+| `article-api` | 8889 | `service/article/api/etc/article-api.yaml:3` | **8889** | HTTP | env `ARTICLE_API_PORT=8889` |
+| `comment-api` | 8888 | `service/comment/api/etc/commentservice.yaml:3` | **8888** | HTTP | env `COMMENT_API_PORT=8888` |
+| `favorite-api` | 8890 | `service/favorite/api/etc/favorite.yaml:3` | 18893 | HTTP | ⚠️ RAG 侧既有值（**非本轮引入**）· env `FAVORITE_API_PORT=18893` |
+| `follow-api` | 8891 | `service/follow/api/etc/followcenter.yaml:3` | **8891** | HTTP | env `FOLLOW_API_PORT=8891` |
+| `hot-api` | 8893 | `service/hot/api/etc/hotcenter.yaml:3` | 18897 | HTTP | ⚠️ RAG 侧既有值（**非本轮引入**）· env `HOT_API_PORT=18897` |
+| `like-api` | 18887 | `service/like/api/etc/likecenter.yaml:3` | **18887** | HTTP | env `LIKE_API_PORT=18887` |
+| `message-api` | 8892 | `service/message/api/etc/messagecenter.yaml:3` | **8892** | HTTP | env `MESSAGE_API_PORT=8892` |
+| `task-api` | 18886 | `service/task/api/etc/task.yaml:3` | **18886** | HTTP | env `TASK_API_PORT=18886` |
+| `user-rpc` | 9004 | `service/user/user/rpc/etc/user.yaml:2` | 49210 | gRPC | ⚠️ RAG 侧既有值（**非本轮引入**）· env `USER_RPC_PORT=49210`（compose 已占用） |
+| `admin-rpc` | 8081 | `service/user/admin/rpc/etc/admin.yaml:2` | **8081** | gRPC | env `ADMIN_RPC_PORT=8081` |
+| `article-rpc` | 9001 | `service/article/rpc/etc/article.yaml:2` | **9001** | gRPC | ⚠️ **必须保留**（article 探针依赖默认值）· env `ARTICLE_RPC_PORT=9001` |
+| `comment-rpc` | 9001 | `service/comment/rpc/etc/comment.yaml:2` | **9001** | gRPC | env `COMMENT_RPC_PORT=9002`（解 C-2） |
+| `favorite-rpc` | 8082 | `service/favorite/rpc/etc/favorite.yaml:2` | **8082** | gRPC | env `FAVORITE_RPC_PORT=8082` |
+| `follow-rpc` | 8082 | `service/follow/rpc/etc/follow.yaml:2` | **8082** | gRPC | env `FOLLOW_RPC_PORT=8083`（解 C-1） |
+| `hot-rpc` | 8083 | `service/hot/rpc/etc/hot.yaml:2` | **8083** | gRPC | env `HOT_RPC_GRPC_PORT=8084`（解 C-1） |
+| `like-rpc` | 8082 | `service/like/rpc/etc/like.yaml:2` | **8082** | gRPC | env `LIKE_RPC_PORT=8085`（解 C-1） |
+| `message-rpc` | 8082 | `service/message/rpc/etc/message.yaml:2` | **8082** | gRPC | env `MESSAGE_RPC_PORT=8086`（解 C-1） |
+| `task-rpc` | 9005 | `service/task/rpc/etc/task.yaml:2` | **9005** | gRPC | env `TASK_RPC_PORT=9005`｜**无 HTTP 口**（无 web starter） |
+
+**rpc 侧的 actuator 口（`server.port`）**：`user-rpc` 9094 · `admin-rpc` 9097 · `message-rpc` 16067 · `like-rpc` 9098 · `article-rpc` 9092 · `favorite-rpc` 16062 · `follow-rpc` 16065 · `hot-rpc` 19091 · **`task-rpc` 无 HTTP 口（无 web starter · 本轮实测）** · **`comment-rpc` 无 HTTP（`web-application-type: none`）** ⇒ **两两不冲突** ✓（这 9 个口本轮**未改**，且逐条 = Go `DevServer.Port`）
+
+> ⇒ **互异性由分配层保证**：`.env` / `.env.host` 里 **29 个端口变量取值两两不同**（实跑 `ALLOC_DUP_COUNT 0`）—— 10 个 api HTTP + 10 个 rpc gRPC + 9 个 rpc actuator；⚠️ 其中 `TASK_RPC_MANAGEMENT_PORT` 对应的 HTTP 口**实际不起**（该模块无 web starter）⇒ **实际监听口 28 个** ⇒ **实测 20/20 在服务（§7.2）**。
+> ⇒ **默认值层不要求互异** —— 它按 Go 真源**逐条一字不差**（含 Go 侧本就重复的 `8082` × 4 / `9001` × 2 / `8889` × 2）。
 
 ---
 
@@ -305,7 +316,7 @@ rpc 之间的 rpc→rpc：message-rpc → user-rpc, admin-rpc · like-rpc → me
 
 - [x] **P1-T01** 起栈依赖表 = 20 行（§1）+ 硬编码端口小表（§2）
 - [x] **P1-T02** 宿主机模板 `.env.host.example` + compose 零破坏（`docker compose config` EXIT=0）＋ fail-closed 仍生效（缺变量 ⇒ **EXIT=1**）
-- [x] **P1-T03** 硬编码端口 = **0**（`HARDCODED_COUNT 0`）· 监听口零冲突（**29 个监听口两两不同**）· 三处端口表（yml 默认 / `.env*` / README）逐条一致
+- [x] **P1-T03** 硬编码端口 = **0**（`HARDCODED_COUNT 0`）· **分配层**（`.env` / `.env.host`）**29 个端口变量取值两两不同**（`ALLOC_DUP_COUNT 0`）· **默认值层**逐条 = Go 真源值（`DEFAULT_GO_MISMATCH_COUNT 0` · 🟢 Round 7 已回改）· 三处端口表（yml 默认 / `.env*` / README）逐条一致
 - [x] **P1-T04** README §三 可照做（两段部署形态 + 可复制命令块）· 端口表重写 · 旧项目名 **0 命中** · 链接门/密钥门 EXIT=0
 - [x] **P1-T05** **20/20 在服务**（三判据，`EXIT=0`）＋ 两条跨服务链路通（§7.3）
 - [x] 证据路径：实测结果落在本文件 §7
@@ -316,27 +327,123 @@ rpc 之间的 rpc→rpc：message-rpc → user-rpc, admin-rpc · like-rpc → me
 - [x] **是否满足进入 Round 2 的条件**：**是**（「20/20 在服务」成立）⇒ Round 2 的**验收段**（`P2-T05` / `P2-T06`）可开
 - [x] **本轮禁止项自查**：未改 Go 真源 · 未改 `service/common/**` · 未改 `PhaseGoal-judge.md` · **未顺手修起栈时发现的代码问题**（②③④⑤ 全为环境层或走 CT-02）· 未改 `tools/difftest/` 的守门清单计数口径
 
+### §7.6 🟢 【2026-11-01 · Round 7 订正】Round 1 落码引入了 **6 处默认值漂移** ⇒ 已按 Go 值回改
+
+> **发现路径**：Round 7 的**全量回归**（`mvn -o -B -DargLine=-Xmx2g clean test`）在 `hot-rpc` 处 **BUILD FAILURE** ⇒ `HotRpcPrometheusCarrierGateTest.shippedJarKeepsGoObservationPortAndSeparatesFaces` **精确转红** ⇒ ⇒ **是既有守门抓到的，不是新写的判据**。
+
+**① 失败原文**
+
+```
+AssertionFailedError: `grpc.server.port` 必须 = 8083（= Go `etc/hot.yaml:2` 的 `ListenOn`），
+实际 = ${HOT_RPC_GRPC_PORT:8084} ==> expected: <8083> but was: <8084>
+  at ...HotRpcPrometheusCarrierGateTest.shippedJarKeepsGoObservationPortAndSeparatesFaces(:259)
+```
+
+**② 根因** —— Round 1（`1fa8a080`）为解端口冲突，**改了 6 个 yml 默认值**；而**默认值层是对外契约面**（Go 侧 `ListenOn` / `Port`），既有门禁钉的就是它：
+
+| 模块 | Go 真源值 | 落码时（`1fa8a080`） | 违反的约束 |
+|---|---|---|---|
+| `admin-api` | 8889 | `ADMIN_API_PORT:8890` | yml 注释原文：「⚠️ 默认端口**一字不变**（8889）」 |
+| `comment-rpc` | 9001 | `COMMENT_RPC_PORT:9002` | yml 注释原文：「对应 Go etc/comment.yaml `ListenOn: 0.0.0.0:9001`」 |
+| `follow-rpc` | 8082 | `FOLLOW_RPC_PORT:8083` | yml 注释原文：「⚠️ 默认端口**一字不变**（Go follow.yaml:2 `ListenOn: 0.0.0.0:8082`）」 |
+| `hot-rpc` | 8083 | `HOT_RPC_GRPC_PORT:8084` | 门禁 `HotRpcPrometheusCarrierGateTest:259` |
+| `like-rpc` | 8082 | `LIKE_RPC_PORT:8085` | yml 注释原文：「对应 Go ListenOn: 0.0.0.0:8082」 |
+| `message-rpc` | 8082 | `MESSAGE_RPC_PORT:8086` | yml 注释原文：「对应 Go ListenOn: 0.0.0.0:8082」 |
+
+> ⚠️ **落码偏离了自己的工作单** —— 本文件 §2 的「建议 env 化」列**每一处都写着「默认值保持不变」** ⇒ **工作单是对的，落码偏了** ⇒ 回改等于**回到工作单**。
+> ⚠️ **其中 5 处当时**没有**等价门禁**（只有 `hot-rpc` / `favorite-rpc` / `article-rpc` 三个 rpc 有 `*PrometheusCarrierGateTest` 钉业务口）⇒ ⇒ **只有 hot-rpc 这一处会红**；另 5 处是**静默漂移**（已登记，见 §7.6 ④）。
+
+**③ 修法（两层分工）** —— **默认值层 = Go 真源值（一字不差）**；**互异性由分配层（`.env` / `.env.host`）承担** ⇒ 回改 **6 行**（`:223` / `:154` / `:220` / `:307` / `:219` / `:65`），**env 化本身全部保留** ⇒ 硬编码端口仍为 **0**、分配层仍 **30 个监听口两两不同** ⇒ **20/20 在服务不受影响**（§7.2 的 20/20 是**按 env 分配**跑的）。
+
+**④ 为什么 6 处默认值重复是合法的** —— Go 侧 **favorite/follow/like/message-rpc 四个都监听 `8082`**、**article/comment-rpc 都监听 `9001`**、**article/admin-api 都监听 `8889`**（**同一批端口在 Go 侧本就重复** ⇒ Go 是「一服务一部署」）⇒ ⇒ 「一机多进程」的互异性**只能由部署层提供**，**不能由默认值提供** ⇒ 改默认值 = 改对外契约面。
+
+**⑤ 验证**
+
+- `HotRpcPrometheusCarrierGateTest` ⇒ **转绿**（`mvn -o -B -pl service/hot/hot-rpc -am -Dtest='HotRpcPrometheusCarrierGateTest' -Dsurefire.failIfNoSpecifiedTests=false test` ⇒ **EXIT=0**）
+- 全量回归重跑 ⇒ 见 §7.6 末尾「回归读数」
+
+**⑥ 遗留（登记，不在本轮扩范围）** —— 另外 **5 处**默认值漂移**当时无等价门禁** ⇒ ⇒ **「默认值 = Go 值」这一不变量目前只有 3/9 的 rpc 有机器守门** ⇒ 登记为**加固项**（见 §7.6 ⑦）。
+
+### §7.6′ 🟢 【2026-11-01 · Round 7 续跑发现】Round 1 的 **env 化**把 `favorite-rpc` 的**既有门禁**打红了
+
+> **发现路径**：回改 6 个默认值后**续跑**（`mvn -o -B -DargLine=-Xmx2g test -rf :favorite-rpc`）⇒ ⇒ `favorite-rpc` 处 **BUILD FAILURE** ⇒ `FavoriteRpcProductionStartupTest.observationPortIsSeparatedFromBusinessPort` 转红。
+
+**① 失败原文**
+
+```
+AssertionFailedError: `grpc.server.port` 必须 = 8082（= Go `etc/favorite.yaml:2` 的 `ListenOn`），
+实际 = ${FAVORITE_RPC_PORT:8082} ==> expected: <true> but was: <false>
+  at ...FavoriteRpcProductionStartupTest.observationPortIsSeparatedFromBusinessPort(:122)
+```
+
+**② 根因** —— **不是默认值漂移，是门禁的解析器读不懂占位形态**：`FavoriteRpcProductionStartupTest.java:151` 的 `stripPortNumber` 是**旧拷贝**（只做 `raw.lastIndexOf(':')`）⇒ 对 `${FAVORITE_RPC_PORT:8082}` 返回 **`"8082}"`**（带右花括号）⇒ ⇒ **Round 1 把 `port: 8082` 改成 `port: ${FAVORITE_RPC_PORT:8082}`（`1fa8a080`）后，这个断言必然不等** ⇒ **值是对的（8082 = Go 的 ListenOn）**。
+
+**③ 为什么是「遗漏」不是「设计」** —— 其余三份同族 helper（`article-rpc` · `favorite-rpc` 的 `PrometheusCarrierGateTest` · `hot-rpc` 的 `PrometheusCarrierGateTest`）**都**处理占位形态；且这一份自己的 javadoc 写着「**从 `${ENV:default}` 形态里取出默认端口**（env 覆盖是既有约定）」⇒ **实现与自身声明不符**。
+
+**④ 修法与验证**
+
+| 项 | 读数 |
+|---|---|
+| 修法 | 改成与其余三份**逐字一致**的实现（**断言语义不变** = 仍要求「默认值一字不差 = Go 的 `ListenOn`」） |
+| 修后 | `FavoriteRpcProductionStartupTest` ⇒ **4 条 / 0F / 0E / EXIT=0** |
+| **变异必红** | 把默认值改成 `8083` ⇒ **精确转红**（`observationPortIsSeparatedFromBusinessPort:122`）⇒ **判据有牙** |
+| 还原 | 变异逐字节还原（`git diff` 该 yml **为空**） |
+
+**⑤ 与 §7.6 的关系** —— **同一个根因的两面**：§7.6 修的是「**改错了**」（默认值偏离 Go）；这里修的是「**门禁读不懂**」（解析器落后于 env 化）⇒ ⇒ **Round 1 的端口 env 化一共留下 2 处缺陷**（一处改错、一处打红既有门禁）⇒ ⇒ **两处都只有全量回归能抓到**（Round 1 的自查只跑了 12 道**静态/机读门** ⇒ **一次都没跑过受影响模块的测试**）。⇒ 登记 `R7-PORT-003`（**已闭合**）。
+
+> ⚠️ **教训（可复用）**：**「端口 env 化」这类改动，改的是「默认值」还是「分配值」必须先分清** —— 前者属**对外契约面**（Go 侧逐字对齐 + 有门禁钉住）⇒ **只能改 env 键名，不能改默认值**；后者属**部署面** ⇒ 可以改。⇒ **本仓的判据原文已经写死了这条**（`HotRpcPrometheusCarrierGateTest`：「允许用 env 覆盖，但**默认值**必须一字不差」）⇒ ⇒ **只要先跑一遍全量回归就能抓到** —— ⚠️ **本轮抓晚了**：Round 1 的自查只跑了 **12 道静态/机读门**，**没跑全量回归** ⇒ ⇒ **「自查门全绿」≠「全量回归全绿」**（§7.4 的 4 类问题都是起栈时发现的 ⇒ **回归面才是唯一能抓到「默认值漂移」的面**）。
+
 ---
 
 ## §8 复现入口
 
 ```bash
 cd "/Users/pr/Documents/java&golang/RAG"
-# ① 本表 §2 的硬编码端口扫描（口径 = round-01/README.md §5.4 ③）
+# ① 端口**两层体检**（§3.2 的两层分工）
+#    层①「默认值层」= Go 真源值（一字不差）· 层②「分配层」= env 里的互异分配
 python3 - <<'PY'
 import re,collections,pathlib
-vals=collections.defaultdict(list); bad=[]
-for p in pathlib.Path('service').glob('*/*/src/main/resources/application.yml'):
+# Go 真源值（go-zero etc yaml 的 ListenOn / Port）
+GO={'ARTICLE_API_PORT':8889,'COMMENT_API_PORT':8888,'FAVORITE_API_PORT':8890,'FOLLOW_API_PORT':8891,
+    'HOT_API_PORT':8893,'LIKE_API_PORT':18887,'MESSAGE_API_PORT':8892,'TASK_API_PORT':18886,
+    'ADMIN_API_PORT':8889,'USER_API_PORT':8888,
+    'ARTICLE_RPC_PORT':9001,'COMMENT_RPC_PORT':9001,'FAVORITE_RPC_PORT':8082,'FOLLOW_RPC_PORT':8082,
+    'HOT_RPC_GRPC_PORT':8083,'LIKE_RPC_PORT':8082,'MESSAGE_RPC_PORT':8082,'TASK_RPC_PORT':9005,
+    'ADMIN_RPC_PORT':8081,'USER_RPC_PORT':9004}
+# RAG 侧**预存**偏离（非 Round 1 引入 · 已登记 · 不在本次口径内）
+KNOWN_DEVIATION={'FAVORITE_API_PORT','HOT_API_PORT','USER_API_PORT','USER_RPC_PORT'}
+found={}; hardcoded=[]
+for p in sorted(pathlib.Path('service').glob('**/src/main/resources/application.y*ml')):
     for i,l in enumerate(p.read_text(errors='replace').splitlines(),1):
-        m=re.search(r'^\s+port:\s*\$\{([A-Z_]+):(\d+)\}',l)
-        if m: vals[int(m.group(2))].append(f'{p}:{i} {m.group(1)}')
-        elif re.match(r'^\s+port:\s*\d+$',l) and 'port: -1' not in l: bad.append(f'{p}:{i} {l.strip()}')
-for b in bad: print('HARDCODED',b)
-for port,who in sorted(vals.items()):
-    if len(who)>1: print('CONFLICT',port,who)
-print('HARDCODED_COUNT',len(bad))
+        m=re.search(r'^\s+port:\s*\$\{([A-Z_]+):(\d+)\}\s*$',l)
+        if m: found[m.group(1)]=(int(m.group(2)),f'{p}:{i}')
+        elif re.match(r'^\s*port:\s*\d+\s*$',l): hardcoded.append(f'{p}:{i} {l.strip()}')
+for h in hardcoded: print('HARDCODED',h)
+print('HARDCODED_COUNT',len(hardcoded))
+# 层①：默认值 = Go 值
+mis=[]
+for var,go in GO.items():
+    if var not in found: print('MISSING_VAR',var); continue
+    got,loc=found[var]
+    if got!=go:
+        tag='KNOWN_DEVIATION' if var in KNOWN_DEVIATION else 'GO_MISMATCH'
+        (mis if tag=='GO_MISMATCH' else []).append(f'{var} 默认={got} Go={go} @ {loc}')
+        print(tag,f'{var} 默认={got} Go={go} @ {loc}')
+print('DEFAULT_GO_MISMATCH_COUNT',len(mis))
+# 层②：分配层（.env / .env.host）互异
+for envf in ('.env.example','.env.host.example'):
+    vals=collections.defaultdict(list)
+    for l in pathlib.Path(envf).read_text(errors='replace').splitlines():
+        m=re.match(r'^([A-Z_]*PORT[A-Z_]*)=(\d+)\s*$',l)
+        if m and m.group(1) not in ('POSTGRES_PORT','REDIS_PORT','NACOS_PORT','OTLP_PORT'):
+            vals[int(m.group(2))].append(m.group(1))
+    dup={p:w for p,w in vals.items() if len(w)>1}
+    for p,w in sorted(dup.items()): print('ALLOC_CONFLICT',envf,p,w)
+    print(f'{envf} ALLOC_DUP_COUNT',len(dup),'· 端口总数',len(vals))
 PY
 # ② 中间件宿主地址可达性
 curl -s -o /dev/null -w 'nacos=%{http_code}\n' 'http://127.0.0.1:49848/nacos/v1/ns/service/list?pageNo=1&pageSize=1&namespaceId=public'
 docker exec Sea-postgres psql -U sea -d sea_user -tAc 'select 1'
 ```
+
+> ⚠️ **口径提示（防误读）**：**层①出现重复是合法的**（Go 侧本就重复：`8082` × 4 / `9001` × 2 / `8889` × 2）⇒ **不要把「默认值重复」当成冲突**；**冲突判据在层②**（`.env` / `.env.host` 的分配值互异）。

@@ -2,14 +2,15 @@
 
 > **本目录 = 阶段一执行的唯一权威清单。**
 > **7 个正常轮次 + 2 条条件触发机制**（`CT-01` / `CT-02`）—— **不含兜底轮**。
-> ⚠️ **当前阶段一判定结论 = ❌ 未通过**（2026-10-29 复判）—— 两个 A 类阻断：**P0 #5 覆盖缺口**（Round 1）· **E65 出向 deadline 无上界**（Round 2）。
+> 🟢 **当前阶段一判定结论 = ✅ 通过**（2026-11-01 · Round 1 复判）—— 两个原 A 类阻断**均已消解**：**P0 #5 覆盖缺口**（Round 1 闭合 ⇒ 20/20 在服务 ＋ 两条跨服务链路）· **E65 出向 deadline 无上界**（X-6 于 2026-11-01 改判 ✅ ⇒ 继承面四键逐键相等 ＋ 客户端硬上界 14/16 模块已配）。⇒ **冻结基线已于 2026-11-01 重新冻结**（`docs/PhaseGoal-judge.md` §十·二）。
+> ⚠️ **但 Round 6 收口回归未执行** ⇒ `docs/RoundPlan/round-06/regression-report.md` **不存在** ⇒ judge §六 6.3 的 **27 项守门只实跑了静态/机读类 13 项**（逐条 EXIT=0）⇒ **S1-6 = 🟡 部分满足** ⇒ **不得宣称「全量守门全绿」**。
 > **本文件只管「顺序与验收」**；「已修/已闭合」断言一律以 `docs/PhaseGoal-judge.md` 与各域台账为准。
 
 | 项 | 内容 |
 |---|---|
 | **总轮次数** | **7 个正常轮次**（Round 1 ~ Round 7）· 旧计划的 R0~R5 已全部迁入（见 [`_migration.md`](_migration.md)） |
 | **计划任务数** | **37 条计划任务**（`P1-T01`~`P7-T01`）· **2 条条件触发**（`CT-01` / `CT-02`）⇒ 全部列在 [`_task-universe.md`](_task-universe.md)（12 字段） |
-| **当前状态** | **全部 7 轮均未开始**（本轮只是「重构计划」，不执行整改 —— 规范 §一.6 / §一.7） |
+| **当前状态** | **Round 1 ✅ · Round 2 ✅（实现段）· Round 3 ✅ · Round 4 🟡 · Round 5 🔴 · Round 6 🟡 待执行 · Round 7 🟡 本轮** —— 逐轮依据见下方「轮次执行状态」表 |
 | **写权** | 本目录归**合并收口执行者（主线）**写；域 lane **只读**（与 `docs/PhaseGoal/**`、`docs/PhaseGoal-judge.md` 同属机器/共享面） |
 | **`AGENTS.md`** | 已登记 `docs/RoundPlan/` 指向本文件 ⇒ **无需再动 `AGENTS.md`**（余量仅 **34 B** ⇒ 任何改动必须字节中性或更小） |
 | **上游依据** | `docs/PhasedGoal.md`（阶段一准入线 · P0 九条）· `docs/twoStage.md`（两阶段规范 · §5.6 结论口径 / §5.7 冻结 9 项 / §十 定级）· `docs/PhaseGoal-judge.md`（判定基线）· `docs/DRIFT/**` · `docs/Pitfalls/**` · `docs/Intentional_Deviations/**` |
@@ -30,6 +31,20 @@
 | **Round 5** | **取证与台账对齐** | ① **G-19** proto「消费方式」逐 proto 取证 ② 各域「**明细面 vs 现状面**」逐条矛盾 ③ **两套 `X-` 编号语义冲突**（`global/cross-domain.md` X-1~X-10 vs judge §五 X-1~X-12 ⇒ **`X-2`~`X-10` 共 9 个号全错位**，仅 `X-1` 同物）④ **`DRIFT-HOTAPI-030` 六处四态** ⑤ Pitfalls **状态字段几乎完全缺失**（**336 条**里只有 **74 条**有状态 ⇒ **262 条**无状态） ⑥ 台账里**几十处写死数字** | **Round 3（必须）** ∧ **Round 4（建议，先改完再对账）** | `P5-T01`~`P5-T06` | 各域台账 ＋ `docs/DRIFT/_cross/proto-verification.md` ＋ [`_hardcoded-numbers.md`](_hardcoded-numbers.md) | **10 个 proto 三问无「未知」** ＋ **同一编号只有一种状态** ＋ **`X-n` 只指向 judge §五** ＋ **Pitfalls 状态字段覆盖率 100%**（基线 74 / 336）＋ **0 字节坑位文件 == 0**（基线 11） | **Round 3（必须）** ∧ **Round 4（建议）** |
 | **Round 6** | **收口回归** | ① Round 1~5 的**回归面** ② 上轮遗留的 **1 个红门** ③ **台账自洽** ④ **计划层**的规范 §十二 6 组交叉检查 | **Round 1~5 全部完成** ＋ 栈在跑 ＋ Go 真源可读 | `P6-T01`（7 个步骤 S1~S7） | `round-06/regression-report.md` | **27 门全部 EXIT=0**（或红项已定性销号）＋ **10 域探针全绿** ＋ 生成器 diff 为空 ＋ **无未定性红项** | Round 1~5 |
 | **Round 7** | **阶段一最终验收 + 重新冻结基线** | ① **P0 九条**逐条核对 ② **C-1~C-4** ③ **X-1~X-12** ④ **D-01~D-08** ⑤ **交付物 1~6** ⑥ **冻结基线 9 项** ⑦ **一个结论** ⑧ **重新冻结** | **Round 6 全绿**（`P6-T01`） | `P7-T01`（9 个步骤 T1~T9） | [`_final-acceptance.md`](_final-acceptance.md) ＋ judge §八/§十/§十·二 | **结论已出**（四选一，逐字对上 `twoStage.md` §5.6）＋ 每条判据有据可查 ＋ 冻结与结论一致 | Round 6 |
+
+### 轮次执行状态（**2026-11-01 实测核对** · 非计划表原文）
+
+| 轮 | 状态 | 实测依据 | 剩余 |
+|---|---|---|---|
+| **Round 1** | ✅ **已完成**（🟢 **Round 7 已修其 2 处缺陷**） | 落码提交 `1fa8a080` · `verify-all-services.sh` ⇒ **PASS=20 / FAIL=0 / EXIT=0** · 硬编码端口 **7 ⇒ 0** · **端口两层分工**（🟢 **默认值层 = Go 值** · **分配层 = env 互异** · 29 个端口变量 0 重复）⇒ ⚠️ **Round 1 的 env 化留下 2 处缺陷**（6 处默认值改偏 · 打红 `favorite-rpc` 门禁）⇒ **Round 7 已回改 + 已修门禁**（`R7-PORT-001` / `R7-PORT-003`） | — |
+| **Round 2** | ✅ **实现段已落码** | `service/common/.../GoStyleOutboundDeadlineInterceptor.java` 在位 · `count-outbound-stubs.py` 实跑 ⇒ **21 个出向类 · 零上界 = 0** · Go 上界逐条对齐（`article.ArticleService=70000` ↔ Go `Timeout: 70000`） | ⚠️ `round-02/README.md` 的**任务状态格仍写「🔴 未做」**（**过期**）⇒ 归 `P5-T02` 订正 |
+| **Round 3** | ✅ **已完成** | judge §七 P0 #5 行改判 ✅ · §八 P0 汇总 **v9（9/9）** · §8.4 = **✅ 通过（v6）** · `check-phasegoal-consistency.py` **EXIT=0** | — |
+| **Round 4** | 🟡 **部分** | `check-ledger-selfcheck.py` 现 **EXIT=0**（原「全仓唯一红门」已绿） | **9 张派工单未清**：datasource 口令 fallback（B 类 · `P4-T01`）· favorite 域半边（`P4-T02`）· like 域 9 条源码假断言（`P4-T09`）· 其余 C/D 类 |
+| **Round 5** | 🔴 **未做** | — | **6 项**：proto 消费方式取证（余 9 个 proto）· 台账自洽 · 两套 `X-n` 编号语义冲突 · `DRIFT-HOTAPI-030` 六处四态 · Pitfalls 状态字段覆盖 · 写死数字 |
+| **Round 6** | 🟡 **待执行** | `docs/RoundPlan/round-06/regression-report.md` **不存在**（Round 7 的硬前置 **T0 未满足**） | 27 项守门逐个实跑取真实退出码 ＋ 10 域探针 ＋ 生成器 diff |
+| **Round 7** | 🟡 **本轮执行中** | [`_final-acceptance.md`](_final-acceptance.md) §九 执行记录 ＋ judge §八 / §十 / §十·二 | T9 收官 |
+
+> ⚠️ **台账过期登记**：`round-02` / `round-04` / `round-05` / `round-06` 的 `README.md` 里**逐任务的「当前状态」格与实态不符**（上表已订正实态；各 README 的原格**保留不删改**，作为 Round 5 `P5-T02`「明细面 vs 现状面逐条矛盾」的输入）⇒ **以本表为准**。
 
 ### 轮次 DAG（**关键路径 R1→R2→R3→R5→R6→R7；R4 可与 R3 并行**）
 

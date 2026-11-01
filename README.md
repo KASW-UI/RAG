@@ -103,7 +103,7 @@ manage.sh                      users 域生命周期封装
 
 ### 连接与端口
 
-> **20 个服务的监听口两两不同**（口径与出处：[`docs/RoundPlan/round-01/service-startup-matrix.md`](docs/RoundPlan/round-01/service-startup-matrix.md)）。
+> **分配层（env）上 20 个服务的监听口两两不同**（口径与出处：[`docs/RoundPlan/round-01/service-startup-matrix.md`](docs/RoundPlan/round-01/service-startup-matrix.md) §3.2）。
 > **全部可用 env 覆盖**（`${VAR:default}`）⇒ 同机并行改 env 即可，**不用改 yaml**。
 
 | 域 | api 端口 | rpc gRPC 端口 | rpc actuator 口 |
@@ -117,7 +117,10 @@ manage.sh                      users 域生命周期封装
 | hot | 18897 | 8084 | 19091 |
 | like | 18887 | 8085 | 9098 |
 | message | 8892 | 8086 | 16067 |
-| task | 18886 | 9005 | 8080 |
+| task | 18886 | 9005 | — （**无 `spring-boot-starter-web` ⇒ 不起 HTTP 口**） |
+
+> 🟢 **端口的**两层分工**（2026-11-01 订正）**：**默认值层**（`application.yml` 的 `${VAR:默认值}`）= **Go 真源的值，一字不差**（Go 侧本就重复：`8082` × 4 / `9001` × 2 / `8889` × 2）；**分配层**（`.env` / `.env.host`）= **上表的互异取值** ⇒ **同机并行靠改 env，不靠改默认值**。
+> ⚠️ **改端口请改 env，不要改默认值** —— 默认值属**对外契约面**（Go 侧逐字对齐 + 既有门禁钉住，改了会被门禁判红）。
 
 > ✅ **端口已全部 env 化**（Round 1 / `P1-T03`）：`ADMIN_API_PORT` · `ARTICLE_RPC_PORT` · `COMMENT_RPC_PORT` ·
 > `FAVORITE_RPC_PORT` · `FOLLOW_RPC_PORT` · `HOT_RPC_GRPC_PORT` · `LIKE_API_PORT` · `LIKE_RPC_PORT` ·

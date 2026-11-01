@@ -216,7 +216,7 @@ rag:
 # 对应 Go ListenOn: 0.0.0.0:8082
 grpc:
   server:
-    port: ${MESSAGE_RPC_PORT:8086}
+    port: ${MESSAGE_RPC_PORT:8082}
     address: 0.0.0.0
     # 🔴 DRIFT-MSG-V-015（2026-10-23 修）
     # ⚠️ 原来的注释写「Go 端 reflection 在 DevMode/TestMode 启用，Java 端由 devh starter

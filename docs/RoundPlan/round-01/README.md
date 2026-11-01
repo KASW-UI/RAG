@@ -39,7 +39,7 @@
 | **任务 ID** | `P1-T01` |
 | **原始编号** | `P0 #5` · `X-12`（`PhaseGoal-judge.md` §五） |
 | **来源** | `docs/PhasedGoal.md:46` · `docs/PhaseGoal-judge.md:259`/`:436` · `README.md:127-147` · `docker-compose.yaml`（root）· 20 个 `service/<域>/<域>-{api,rpc}/src/main/resources/application.yml` |
-| **当前状态** | 🔴 **未做**（此前无此表；判据证据只覆盖 users 域） |
+| **当前状态** | ✅ **已完成**（2026-11-01 · 落码提交 `1fa8a080`）—— 落点 `docs/RoundPlan/round-01/service-startup-matrix.md`：**20 行 × 9 项**依赖表（每行带 `文件:行号`）＋ 硬编码端口小表 ＋ 三判据表 ＋ 依赖图 ＋ §5 宿主机地址对照 ＋ §7 实测结果 |
 | **执行目的** | 端口与地址是**跨 20 个模块的事实**，散在 20 个 yaml + `.env` + README 四处 ⇒ 不先收成一张表，端口冲突只能靠撞出来 |
 | **具体操作** | ① 逐个读 20 个模块的 `application.yml`，抽出：HTTP 端口、gRPC 端口、management 端口、**Nacos 地址**、**PG 地址**、**Redis 地址**、**Kafka brokers**、**MinIO endpoint**、**OTEL endpoint**、下游 `discovery://` 目标 ② 每个值标注 **可 env 覆盖 / 硬编码** ③ 标出**下游依赖**（A 依赖 B ⇒ B 必须先起）④ 落成一张表（落点见下）⑤ **每个服务写明「在服务」的三个判据**：Nacos 服务名 + 监听端口 + 健康端点路径 |
 | **具体落点** | 新建 `docs/RoundPlan/round-01/service-startup-matrix.md`（**本轮内新建**；⚠️ `docs/RoundPlan/**` = 收口执行者写权面） |
@@ -61,7 +61,7 @@
 | **任务 ID** | `P1-T02` |
 | **原始编号** | `P0 #5`（原文无独立编号 ⇒ 见 `P1-T01`） |
 | **来源** | `.env.example:88-114`（`POSTGRES_HOST` / `POSTGRES_ADDR` / `REDIS_ADDR` / `REDIS_HOST` / `NACOS_ADDR` / `NACOS_PORT` / `KAFKA_BROKERS` / `MINIO_ENDPOINT` / `MINIO_PUBLIC_BASE_URL` / `OTEL_ADDR` / `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTLP_PORT`）· `README.md:136` · `docker-compose.yaml` |
-| **当前状态** | 🔴 **未做**。现状：`.env` / `.env.example` 里这些值**全是容器内 DNS 名** ⇒ 宿主机起 jar 时 `nacos` / `postgres` / `redis` / `kafka` / `minio` / `jaeger` **解析不了** |
+| **当前状态** | ✅ **已完成**（2026-11-01 · 落码提交 `1fa8a080`）—— 新建 **`.env.host.example`**（宿主机语义 `127.0.0.1` + 宿主映射端口）⇒ `.env.example`（容器内语义）**一字未改** ⇒ `docker compose config` **EXIT=0** · 缺变量 ⇒ **EXIT=1**（fail-closed 未破） |
 | **执行目的** | P0 #5 的「实际项目说明」必须给出**真能跑**的地址；compose 用的容器内名**不能被改**（改了 compose 就崩） |
 | **具体操作** | ① 选一种结构并写进 `README.md`（**推荐 A**；执行者可另定，只要满足完成条件）：<br>**A（推荐）· 两份模板** ⇒ 新增 `.env.host.example`（**宿主机版**：地址全 `127.0.0.1` + 宿主映射端口）；`.env.example` 保持容器内值**一字不改** ⇒ compose 零风险<br>**B · 单模板双段** ⇒ `.env.example` 里加 `HOST_POSTGRES_HOST=127.0.0.1` 一族，compose 仍读 `POSTGRES_HOST` ⇒ 宿主机起 jar 时 `export HOST_POSTGRES_HOST=…; export POSTGRES_HOST=$HOST_POSTGRES_HOST`<br>**C · 单模板改值** ⇒ `.env.example` 改宿主机值 + compose 里改用 `${POSTGRES_HOST_INTERNAL:-postgres}` 一族 ⇒ ⚠️ **改动面最大**，compose 要动 ⇒ 不推荐<br>② 逐个变量给出**宿主机值**：`NACOS_ADDR=127.0.0.1` `NACOS_PORT=49848` `POSTGRES_HOST=127.0.0.1` `POSTGRES_PORT=49432` `POSTGRES_ADDR=127.0.0.1` `REDIS_HOST=127.0.0.1` `REDIS_ADDR=127.0.0.1` `REDIS_PORT=49380` `KAFKA_BROKERS=127.0.0.1:49992` `MINIO_ENDPOINT=127.0.0.1:49100` `OTEL_ADDR=127.0.0.1` `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:49317:4317` `OTLP_PORT=4317`<br>③ ⚠️ **OTEL 的 URL 形态要验**：实测 `http://127.0.0.1:49317:4317` ⇒ `Invalid URL port: "49317:4317"` ⇒ **OTEL 导出失败但不阻断启动**（日志明写「trace 导出不可用（服务照常启动）」）⇒ 正确形态取 `http://127.0.0.1:4317`（**用宿主映射端口 49317 ⇒ 容器内 4317**）<br>④ README §三 的命令改成「compose 用 `.env`；宿主机起 jar 用 `.env.host`」两段 |
 | **具体落点** | `.env.host.example`（**新建**）· `.env.example`（**仅按方案 A/B 需要时改注释**；⚠️ `.env` 本身**已 gitignore**，不进版本控制）· `README.md` §二/§三 |
@@ -83,7 +83,7 @@
 | **任务 ID** | `P1-T03` |
 | **原始编号** | 原文无独立编号（`P0 #5` 的子项） |
 | **来源** | `.env.example:122-146` · `service/article/article-rpc/src/main/resources/application.yml:117`（`port: 9001`）· `service/comment/comment-rpc/.../application.yml:209`（`port: 9001`）· `service/favorite/favorite-rpc/.../application.yml:124`（`port: 8082`）· `service/like/like-rpc/.../application.yml:208`（`port: 8082`）· `service/message/message-rpc/.../application.yml:120`（`port: 8082`）· `service/like/like-api/.../application.yml:33`（`port: 18887`）· `README.md:105-119`（端口表） |
-| **当前状态** | 🔴 **未做**。现状：① `ADMIN_API_PORT=8889` **=** `ARTICLE_API_PORT=8889`（`.env.example:124` vs `:128`）② favorite-rpc / like-rpc / message-rpc **三处 yaml 硬编码 8082**（不可 env 覆盖）③ **article-rpc 与 comment-rpc 都硬编码 9001** ④ **like-api 硬编码 18887**（`.env` 里**没有** `LIKE_API_PORT` 这个键）⑤ README 的端口表把 favorite / follow / like / message 四个 rpc 都写成 8082 |
+| **当前状态** | ✅ **已完成**（2026-11-01 · 落码提交 `1fa8a080`）—— **11 处 yml 端口 env 化** ⇒ **硬编码 7 处 ⇒ 0**；🟢 **Round 7 订正（端口两层分工）**：**默认值层 = Go 真源值**（`DEFAULT_GO_MISMATCH_COUNT 0`）· **分配层 = env 互异**（`.env` / `.env.host` 各 **29 个端口变量 · 0 重复**）⇒ ⚠️ **Round 1 落码曾把 6 个默认值改偏**（`R7-PORT-001`）**并打红 `favorite-rpc` 门禁**（`R7-PORT-003`）⇒ **Round 7 已回改 6 行 + 已修门禁**；保留 `article-rpc` 默认 9001（article 探针依赖）· `task-rpc` 的 `server.port` 补声明后**已回滚**（该模块无 web starter ⇒ 无 HTTP 口） |
 | **执行目的** | 20 个服务**同机并行** ⇒ 端口必须两两不同；硬编码端口在同机并行时**无法错开** ⇒ 必须 env 化 |
 | **具体操作** | ① 选一套**互不冲突**的端口（保留现有值优先，最小改动）：<br>`user-api` 49900 · `admin-api` **8890**（改）· `article-api` 8889 · `comment-api` 8888 · `favorite-api` 18893 · `follow-api` 8891 · `hot-api` 18897 · `like-api` **18887**（env 化）· `message-api` 8892 · `task-api` 18886<br>gRPC：`user-rpc` 49210 · `admin-rpc` 8081 · `article-rpc` **9001**（env 化）· `comment-rpc` **9002**（env 化）· `favorite-rpc` **8082**（env 化）· `follow-rpc` **8083**（env 化）· `hot-rpc` **8084**（env 化）· `like-rpc` **8085**（env 化）· `message-rpc` **8086**（env 化）· `task-rpc` **9005**（env 化）<br>② **把 6 处硬编码端口 env 化**：`grpc.server.port: 9001` ⇒ `${ARTICLE_RPC_PORT:9001}` 等 ⇒ **同时给 `.env` / `.env.example` 补上对应键**<br>③ `like-api` 的 `server.port: 18887` ⇒ `${LIKE_API_PORT:18887}`<br>④ 同步 README 的端口表<br>⑤ ⚠️ **注意 `hot-rpc` 的 `management.server.port: -1`**（禁用 HTTP server）⇒ 无 management 端口冲突问题；`follow-rpc` 的 management 端口是 `${FOLLOW_RPC_MANAGEMENT_PORT:16065}` ⇒ 单独占一个 |
 | **具体落点** | 6 个域的 `service/<域>/<域>-{api,rpc}/src/main/resources/application.yml`（**各域写权面**）· `.env` / `.env.example` / `README.md`（主线面） |
@@ -105,7 +105,7 @@
 | **任务 ID** | `P1-T04` |
 | **原始编号** | `P0 #5` · `D-02`（`PhaseGoal-judge.md:561`） |
 | **来源** | `README.md:105-119`（端口表）· `README.md:127-147`（§三）· `.env.example:2`（标题写 `Sea-RideTheWind_java`）· `README.md:13`（「〇、5 分钟跑起来（users 域…）」） |
-| **当前状态** | 🟡 **部分完成**：README 已是 9,815 B 的照做说明（D-02 已闭合），但**§三 的宿主机命令不可执行** ⇒ D-02 的**残留**是「能读不能跑」 |
+| **当前状态** | ✅ **已完成**（2026-11-01 · 落码提交 `1fa8a080`）—— README 标题 `# RAG` · §二 端口表 · §三 **两段部署形态**（可复制命令块）· §五 已知限制 · §六 排障 ⇒ `.env.example` 旧项目名 **0 命中** · `check-doc-links.py` / `check-no-prod-secrets.py` **EXIT=0** |
 | **执行目的** | P0 #5 的判据是「按照**实际项目说明**」⇒ 说明本身必须可执行；`.env.example` 标题写错项目名会让第三方以为这是另一个仓的模板 |
 | **具体操作** | ① README §三 改成两段：**「起 users 域（compose）」** 与 **「起其余 9 个域（宿主机 jar）」**，后者给出**可直接复制的完整命令块**（含 `set -a && . ./.env.host && set +a` 与逐服务启动行）② README 端口表按 `P1-T03` 的新端口**重写**（含 20 个服务 + 各自「就绪判据」）③ README §五「已知限制」表的第 1 行（compose 只编排 users 域）保留，但**补一句**「其余 9 域按 §三 的宿主机命令起」④ `.env.example:2` 的标题 `Sea-RideTheWind_java` ⇒ 改 `RAG`（或项目真名）⑤ ⚠️ **不要**在 README 里写「已通过」「全部对齐」之类结论句（结论归 judge） |
 | **具体落点** | `README.md` · `.env.example` |
@@ -127,7 +127,7 @@
 | **任务 ID** | `P1-T05` |
 | **原始编号** | `P0 #5` · `X-12` |
 | **来源** | `PhaseGoal-judge.md:436`（v7 上调依据）· `README.md:127-147` |
-| **当前状态** | 🔴 **未做**（users 域 2 个服务已通过 `./manage.sh up` 起过 ⇒ 覆盖 2/20） |
+| **当前状态** | ✅ **已完成**（2026-11-01 · 落码提交 `1fa8a080`）—— 新建 `docs/RoundPlan/round-01/verify-all-services.sh` ⇒ **PASS=20 / FAIL=0 / EXIT=0**；**两条跨服务链路有业务响应**：`GET /v1/articles` ⇒ 200 + PG 真数据且 `author_name` 来自 `user-rpc` ⇒ **rpc→rpc 亦通**；`POST /favorite/v1/item/create` ⇒ 业务码随播种从 `5101` → `5005` 变化 ⇒ **`favorite-rpc→user-rpc` 真往返** |
 | **执行目的** | 判据要求「**项目**能按说明启动」⇒ 必须**真的把 20 个服务起起来**，且每个都要证明**在服务**而不是**进程活着** |
 | **具体操作** | ① 按 `P1-T01` 的**下游依赖顺序**起（被依赖的先起）② 每起一个 ⇒ 三个判据同时查：**Nacos 服务名可查** + **端口 LISTEN** + **健康端点 200** ③ ⚠️ **起进程必须传值**（`${...}` 占位符未解析 ⇒ 进程启动即抛 `IllegalStateException` ⇒ **fail-closed 守卫**）④ ⚠️ **起进程用 `exec`**（`( cd X && cmd ) &` 的 `$!` 是子 shell PID ⇒ 收尾按**端口**复核，不按 PID）⑤ 收尾按**端口轮询**直到空（`docker rm -f` 后宿主口仍可能被 docker-proxy 占住）⑥ **打通至少一条 rpc→rpc**（如 `comment-rpc` → `article-rpc`）与 **一条 api→rpc→PG**（如 `article-api` → `article-rpc` → PG） |
 | **具体落点** | 20 个 `service/<域>/<域>-{api,rpc}/target/*.jar`（**只启动，不改代码**）· 起栈记录落 `docs/RoundPlan/round-01/service-startup-matrix.md` 的「实测结果」列 |
