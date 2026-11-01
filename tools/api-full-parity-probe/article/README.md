@@ -20,6 +20,7 @@
 ```bash
 bash tools/api-full-parity-probe/article/run.sh          # EXIT=0 = 两侧逐字节一致
 bash tools/api-full-parity-probe/article/mutate-parity.sh # 变异验证（M1~M4 ⇒ 必须精确转红）
+bash tools/api-full-parity-probe/article/run-success.sh   # 成功路径（2026-11-01 新增）
 ```
 
 退出码：`0` = 逐字节一致 · `1` = 有差异 · `2` = 环境问题 / 真源漂移 / 依赖缺失。
@@ -27,6 +28,8 @@ bash tools/api-full-parity-probe/article/mutate-parity.sh # 变异验证（M1~M4
 可用 env 覆盖：`GO_REPO`（真源路径，默认 `/Users/pr/Documents/java&golang/Sea-RideTheWind_golang`）·
 `ETCD_PORT` / `KAFKA_PORT` / `MINIO_PORT` / `JAEGER_PORT` / `NACOS_PORT` ·
 `GO_API_PORT` / `RAG_API_PORT` / `GO_RPC_PORT` / `GO_PROM_PORT` · `JWT_SECRET`。
+
+> `run-success.sh` 另可用 `FREEZE=1`（重建 `expected-success.txt`）与 `KEEP_WORK=1`（保留临时目录）。
 
 ## 真源冻结 ⇒ 只改「副本」
 
@@ -61,12 +64,68 @@ Go 侧用的是**真源真正在用的生成码/二进制**；但真源 yaml 把
 
 ### ⚠️ 这 3 条**不等于**「article 域双侧活体全闭合」
 
-1. **成功路径只覆盖公开列表端点**。宿主上 `user.rpc` **两侧都不可达**
-   ⇒ 单条详情端点两侧**同样降级成 5001** ⇒ `get_article_exists` 这条用例钉的是
-   「**降级路径两侧一致**」，**不是**「取到了文章」。
-   ⇒ **成功路径的完整字段语义仍未双侧验证** ⇒ 要补需让两侧的 `user.rpc` 都可用。
+1. 🔴 **2026-11-01 归因订正（读 Go 真源 + RAG 源码双侧逐行证实）**：原文写「宿主上 `user.rpc`
+   **两侧都不可达** ⇒ 单条详情端点两侧**同样降级成 5001**」⇒ **该归因不成立**。
+   **真实根因 = legacy 分支读 MinIO 失败**：
+   - Go `service/article/rpc/internal/logic/get_article_logic.go:139-153`
+     —— `published.Revision == nil` ⇒ `MinioClient.GetObject(bucket, article.Content)` 失败
+     ⇒ `:146` `status.Error(codes.Internal, "read legacy article failed")`
+     ⇒ api 层 `service/article/api/internal/logic/article/get_article_logic.go:47-48` ⇒ **5001**；
+   - RAG `service/article/article-rpc/.../service/ArticlePublicDomainService.java:135`
+     ⇒ `:311` `readLegacyMarkdown` ⇒ `:315` `ArticleExceptions.readLegacyArticleFailed()`
+     （`ArticleExceptions.java:125`）⇒ INTERNAL ⇒ **5001**；
+   - **触发条件** = 种子行 `content='正文'` **不是合法 MinIO object key**。
+   - ⇒ **`user.rpc` 不在成败链路上**：Go `get_article_logic.go:78` `enrichArticleAuthor`
+     在 rpc **成功返回之后**才填 `AuthorName`，失败走 `helper.go:98-103` `fallbackAuthorName`
+     ⇒ **永不抛异常**；RAG `ArticleAuthorResolver.resolveAuthorName` javadoc 自述「**永不抛异常**」。
+   - ⇒ **成功路径的开关 = 有没有 revision 指针**（**不需要** `user.rpc` 可用）。
 2. `judge` §九 G-3 原文要求「article 域双侧活体 **0 条**」⇒ 现 **3 条** ⇒ **部分闭合**，不得写成全闭合。
-3. `list_articles` 的 `author_name` = `"用户 1001"` ⇒ **也是降级路径**（user 侧不可达时的兜底名）。
+3. `list_articles` 的 `author_name` = `"用户 1001"` ⇒ 是**回落名**（user 侧不可达时的兜底名）。
+
+## ✅ 成功路径探针（`run-success.sh` · 2026-11-01 · G3）
+
+> **为什么单独一个脚本 · 不动 `run.sh`**：`run.sh` 的 `expected.txt` 冻结了 3 条 L4 证据
+> ⇒ 改它会让那 3 条的期望值失效 ⇒ 本脚本**独立**起栈 + 独立种子 + 独立期望值文件
+> （`expected-success.txt`）⇒ **老证据不受影响**。
+
+### 补的缺口
+
+`run.sh` 的 `get_article_exists` 钉的是「**降级路径**两侧一致」（两侧都 5001），**不是**「取到了文章」。
+⇒ **成功路径（返回完整字段）的完整字段语义**此前从未双侧活体验证过。
+
+### 做法
+
+种子多插两行 —— `article_revision` + `article_publication`（`state=published` + `current_revision`）
+⇒ 命中 Go `service/article/rpc/internal/model/article_public.go:20-26` `publicArticlePredicate`
+的**第一支** ⇒ 走 revision 分支（Go `get_article_logic.go:137-139` /
+RAG `ArticlePublicDomainService:130-132`）⇒ **正文不读 MinIO** ⇒ 详情端点返回**完整字段**。
+
+### 「确实走了 revision 分支」的 4 个独立信号
+
+> 种子里 `article` 行与 `article_revision` 行的这些字段**故意填成不同值**
+> ⇒ 信号互相独立 ⇒ **不靠「两侧一致」自证**。
+
+| # | 信号 | legacy 路径 | revision 路径 |
+|---|---|---|---|
+| S1 | `ext_info` | `{"publication_gap":"legacy_revision_missing"}` | `{"published_revision_id":"rev-succ-0001"}` |
+| S2 | `update_time` | `article.updated_at` | **`revision.published_at`**（Go `get_article_logic.go:185`） |
+| S3 | `content` | MinIO 对象正文 | **`revision.markdown`** |
+| S4 | `title`/`brief`/`cover_image_url`/`manual_type_tag` | `article` 行 | **`revision` 行** |
+
+### 实测结果（2026-11-01 · G3）
+
+| CASE | 端点 | 两侧结果 | 逐字节 |
+|---|---|---|---|
+| `get_article_success` | `GET /v1/article/9007199254740994` | `{"code":200,...}`（**成功路径 · 完整字段**） | ✅ |
+| `list_articles_success` | `GET /v1/articles` | `{"code":200,...}`（含 revision 派生字段） | ✅ |
+
+⇒ **8 个信号（4 信号 × 2 侧）全部通过** ⇒ 两侧确实都没走 legacy 分支。
+冻结的期望值在 `expected-success.txt`（`CASE|<name>|<hex>`）⇒ 每次跑都要同时满足
+`Go == RAG == expected-success.txt`。
+
+> ⚠️ **剩余的唯一一格**：本轮 `author_name` 两侧同为**回落值** `"用户 1001"`
+> ⇒ **「`user.rpc` 可用时取真实昵称」那一支仍未双侧验证** ⇒ 需 users 域等价（Go 侧 `user-rpc` 可达）
+> ⇒ 属**取证缺口**（judge §1.1 ⑥ 第 3 类 ⇒ 不降 R）⇒ **不阻断**。
 
 ## 探针本身踩过的坑（写下来免得下一个人再踩一遍）
 
@@ -81,6 +140,10 @@ Go 侧用的是**真源真正在用的生成码/二进制**；但真源 yaml 把
 | 7 | 后台任务里 `bind(("0.0.0.0", 0))` 报 `EADDRNOTAVAIL` | 后台任务沙箱里绑通配地址会被拒 ⇒ 「让 OS 挑空闲端口」不可用 | 改用**固定端口阶梯**（不依赖 python 挑端口） |
 | 8 | `sed -e "s\|^  Port: 8889$|..."` 静默不命中 | 真源 yaml 里是 `Port: 8889`（**顶层、零缩进**）⇒ 写 `^  Port:` 永远匹配不上 ⇒ 副本端口没改 | 改对缩进 ＋ **逐条 grep 断言**（改了哪项就断言哪项） |
 | 9 | 「注册进 etcd 了」≠「服务可用」 | go-zero **先注册 etcd 再 bind 端口**（`zrpc/internal/rpcpubserver.go:32-33`）⇒ 等到 etcd 有键时进程可能正要 panic | 脚本**先等 etcd 键、再等端口监听**，两步都要 |
+| 10 | 🔴 **`RAG article-rpc 没监听`（假失败）—— 判据自匹配** | 就绪判据写成「`service/list` 里**有没有这个服务名**」⇒ **上一轮的残留实例**也会命中（实例在心跳超时前仍算「健康」）⇒ 脚本在 java **还在启动**（`rag-rpc.log` **0 字节**）时就去查端口 ⇒ 误判「没监听」 | ① 判据改成**数「注册端口 == 本轮 gRPC 端口」的实例个数**（RAG 侧注册的是 gRPC 端口：`bootstrap/NacosRegistration.java` 用 `GrpcServerProperties.getPort()`）② 起进程**前**确认同端口残留实例已清干净（清不掉 ⇒ 直接 `die`，不假跑）③ 报错时**带上日志行数**（0 字节 ⇒ 进程根本没起）④ Go 侧同理：etcd 注册值里必须带**本轮端口**（双保险） |
+| 11 | `FREEZE=1` 跑完，期望值文件里**只剩最后一条** | 冻结时用 `>` **覆盖写** ⇒ 每个用例都把上一个冲掉 ⇒ 文件「看起来有」但**内容不完整** ⇒ 后续校验会拿不全的期望值去比 | 冻结前**先截断**（`: > file`），再逐条**追加**（`>>`） |
+| 12 | 两个探针脚本**端口互撞** | `run.sh` 用 8889 / 18889 / 9002 / 9001 / 19092，`run-success.sh` 若沿用 ⇒ 同时跑必撞（Go rpc `panic: address already in use`） | `run-success.sh` 用 **article 域预分配的 22400 段**（22411~22417）⇒ 两个脚本可先后/并行 |
+| 13 | Go 真源连不上 PG（口令是字面 `${POSTGRES_PASSWORD}`） | Go 的 `conf.MustLoad` **不**做 `os.ExpandEnv` ⇒ `${POSTGRES_PASSWORD}` 被当**变量名**查 ⇒ 空串 ⇒ 连库失败（且**不报错**，只是连不上） | 配置副本里把它**替换成字面值**（`sea`）＋ 脚本**逐条 grep 断言**（改了哪项就断言哪项） |
 
 ## 变异验证（`mutate-parity.sh`）
 
@@ -98,3 +161,18 @@ AGENTS.md §3.3.3：新增的每个探针都必须配一个**能真正触发它*
 （打的是 **rpc 层**的映射 ⇒ rpc 层漂移 ⇒ HTTP 输出漂移 ⇒ 探针立刻报差异 ⇒
 ⇒ 对 **`article-rpc` 组件**而言，这一条才是 judge §1.1 ⑧「变异验证」的**组件内**证据）。
 ⚠️ **M4 会临时改生产码**（`ArticlePublicDomainService.java`）⇒ 脚本自带 **EXIT 兜底还原** ＋ **sha256 还原核验**（4 个文件全查）⇒ 还原没生效即 `EXIT=1`。
+
+### 成功路径探针的变异（`mutate-success.sh` · 2026-11-01 · G3）
+
+> **为什么不并进 `mutate-parity.sh`**：`mutate-parity.sh` 的 **M1~M4** 已被
+> `docs/PhaseGoal-judge.md` §十二 引用为 article 域的**既有变异证据** ⇒ 改它会动到已被引用的证据
+> ⇒ **独立成文件**，一个字节都不动它。
+
+| 变异 | 手法 | 期望 | 证明了什么 |
+|---|---|---|---|
+| **M5** | 改 `expected-success.txt` 里一枚 hex | 探针 **EXIT=1** | 「**不是自己跟自己**」⇒ 冻结期望值确实在参与判定 |
+| **M6** | 改 rpc 层 revision 分支写进 `ext_info` 的键名（`published_revision_id` → `published_revision_id_MUT`） | 探针 **EXIT=1**（Go == RAG 破裂 ＋ **S1 信号转红**） | 「**比较面真的穿过 revision 分支**」—— 成功路径的判据不是空的 |
+| **M7** | 把正文从 `revision.getMarkdown()` 换成 `article.getContent()` | 探针 **EXIT=1**（Go == RAG 破裂 ＋ **S3 信号转红**） | 「**4 个 revision 分支信号有牙齿**」 |
+
+⇒ **实测（2026-11-01）**：基线绿 → M5/M6/M7 **3/3 精确转红** → 还原后绿 → **sha256 2/2 还原核验通过** ⇒ `EXIT=0`。
+⚠️ **M6/M7 会临时改生产码**（`ArticlePublicDomainService.java`）⇒ 同样自带 **EXIT 兜底还原** ＋ **sha256 还原核验**。
