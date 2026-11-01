@@ -834,7 +834,7 @@ G4 核销：共享层侧**已有 3 条守门**（`GoStyleRedisDeadlineRealLettuc
 | 条目 | 归档面现状 | ⇒ 结论 |
 |---|---|---|
 | `DRIFT-MSGAPI-011` / `FB-G2-03`（reason phrase） | 材料**已齐** ＋ `docs/Intentional_Deviations/global/common-tails.md` 的 **`SD-2026-10-25-CAND-14`**（🏷 待签字候选 · 「⏳ 未签字」· 核对日期 2026-10-29） | **只差 Jason 一个签字** ⇒ **不需 G4 落码** |
-| `DRIFT-MSGAPI-012` / `FB-G2-04` / `DRIFT-TASK-API-004`（`Content-Type` 空格） | 共享面**已有登记面**（`docs/Intentional_Deviations/hot/api.md:230`「残余：那个空格（**已接受，不新签**）」） | **不需要新签字**；**待办 = 销账**（落 `docs/Intentional_Deviations/**` ＋ 派生层重算 ⇒ **走 g4**） |
+| `DRIFT-MSGAPI-012` / `FB-G2-04` / `DRIFT-TASK-API-004`（`Content-Type` 空格） | 共享面**已有登记面**（`docs/Intentional_Deviations/hot/api.md:230` ＝ global **T-6** 的「残余：那个空格（**已接受，不新签**）」） | **不需要新签字**；**待办 = 销账**（落 `docs/Intentional_Deviations/**` ＋ 派生层重算 ⇒ **走 g4**） |
 
 ⇒ ⇒ 6 条里：**0 条需 G4 落码** · **2 条需 Jason 签字/接受** · **2 条需共享面销账**。
 
@@ -842,7 +842,7 @@ G4 核销：共享层侧**已有 3 条守门**（`GoStyleRedisDeadlineRealLettuc
 
 · **守门 8 道全 EXIT=0**（`check-wave-coupling` · `check-wave-lane-ownership` · `check-phasegoal-lanes` · `check-ledger-count-pointers` · `derive-stage1 --check` · `check-pointer-consistency`（新增 0 条漂移 · 存量例外 237 不变）· `gen-identity-groups --check` · `check-agents-budget`）
 · **回归**（我域 9 模块 `-am`）：`MVN_EXIT=0` · **BUILD SUCCESS** · surefire XML **1360 条 / 0F / 0E / 0S**；逐模块四项与落码前基线**全等**（like-api 113 · like-common 18 · like-rpc 163 · message-api 122 · message-common 21 · message-rpc 115 · task-api 144 · task-rpc 137 · users-common 39）⇒ **零行为变更**
-· ⚠️ **G2 自报的坑（已自修）**：初稿把核对日期写成 **`2026-11-02`**（系统当天 = **2026-11-01**）⇒ `check-agents-budget` 判「未来日期」⇒ **6 处状态会被按 `UNKNOWN` 处理** ⇒ 已全量改回当天（**8 处 · 零行位移**）⇒ 复跑 EXIT=0
+· ⚠️ **G2 自报的坑（已自修）**：初稿把核对日期写成了**次日日期**（系统当天 = **2026-11-01**）⇒ `check-agents-budget` 判「未来日期」⇒ **6 处状态会被按 `UNKNOWN` 处理** ⇒ 已全量改回当天（**8 处 · 零行位移**）⇒ 复跑 EXIT=0
 ⇒ ⇒ 与本层 §十六 的坑同族：**「未来日期」会让那一轮所有结论一起归零**，而它长得最像证据 ⇒ ⇒ **写台账时核对日期 = 实际执行那天**。
 
 ### 18.6 门禁终态（合入后 · 全仓 46 个 `check-*.py` 枚举）
@@ -864,3 +864,27 @@ G4 核销：共享层侧**已有 3 条守门**（`GoStyleRedisDeadlineRealLettuc
 ### 18.8 通信拓扑合规
 
 G2 全程**只发 g4 与派工方两封** ⇒ **未联系 g1/g3**、未替别的 lane 回话 ⇒ 合规（§15.1 的拓扑）。
+
+---
+
+### 十九 · message-rpc 部署面那条改判落账（2026-11-01）＋ **本层自己引入的两道门红**已清
+
+#### 19.1 G2 → g4 的第 ① 条支援请求：**message-rpc 部署面那条重定级（C ⇒ D）** —— 已落
+
+· **落点** = `docs/DRIFT/_cross/grading/W6.md:24`（U5-O 显式定级叠加层 ⇒ **收口执行者写权面**）⇒ 该行「归属」改 **D** · 依据列整列重写 · **优先级保留 P2**（表头明示「优先级列保留该条未修时的严重程度」）
+· **原依据被真源证伪**（这是改判的根因）：原写「Go `service/message/rpc/message.go:25` ⇒ 纯 gRPC 进程 ⇒ **无 HTTP 监听面**」⇒ 真源 `service/message/rpc/etc/message.yaml:19-26` = `DevServer:` / `Enabled: true` / `Host: 0.0.0.0` / `Port: 16067` / `MetricsPath: /metrics` / `HealthPath: /healthz`（**`:27` 是空行**）⇒ Go 侧**独立端口 HTTP 监听面**真实存在（启动链 `zrpc/server.go:63` `c.SetUp()` → `core/service/serviceconf.go:77` `devserver.StartAgent` → `internal/devserver/server.go:80`/`:72`）
+· **改判的三条依据（逐条回源核准 · 非转述）**：① **原登记的两件事双双无对象** —— 「与 javadoc 矛盾」已由 G2 在 `NacosRegistration.java:31-33` **订正**（自述改为「web 载体只承载 Actuator 观测口」）；「阶段二移除 `spring-boot-web-server`」若执行 ⇒ 移除 Tomcat ⇒ **观测口能力与路径都变 ⇒ 反而制造新差异**；② **两侧都没有业务 HTTP 路由** ⇒ RAG 的 `spring-boot-web-server`（`pom.xml:97`）是**抽象**构件 · `spring-boot-starter-web`（`pom.xml:82-87`/`:192`）**只为 Actuator 提供载体** · 观测口端口 `${MESSAGE_RPC_MANAGEMENT_PORT:16067}`（`application.yml:177-178`）**与 Go 一字不差** ⇒ 真差异只剩**表达层**；③ **残留的形式面差异已逐条登记**（`docs/DRIFT/message/rpc.md:3096` 的残余表 5 条：**暴露路径 / 载体 / 健康语义 / pprof / `le` 文本** ⇒ 全部 **P3 · D 类 · 不修** ⇒ 归 `DRIFT-MSG-V-033`）⇒ ⇒ 归 D **不丢**任何差异
+· **派生层重算（同一批提交）**：`DRIFT-MSG-012` 的 `status` 由 `🔴 未闭合` 归一为 **`✅ 已一致`** · `gap` = **已闭合 · 差异已消失 ⇒ 无待实现项** ⇒ ⇒ **真缺口 C/D 类未排期 86 → 85** · **已闭合 105 → 106** · 阶段归属**不变**（C 67 / D 228）· 真缺口 A/B **仍 = 0** · 状态冲突 **仍 = 141**
+· ⚠️ **api 侧另有差异（不属本条）**：RAG 侧 **10 个 api 组件全部没有独立 management 口**（Actuator 挂业务端口）vs Go 侧 api 的 DevServer 是独立端口 ⇒ 属**跨组件形态面** ⇒ 归阶段二 · 落点 = 各域 `docs/Intentional_Deviations/<域>/api.md`（**域侧**）⇒ 即 G2 支援请求 ③ 的落点口径
+
+#### 19.2 **本层自己引入的两道门红**（§十八 落笔带来的）—— 已清，并留教训
+
+· **🔴 未来日期门**（`check-agents-budget`）：§十八 转述 G2「把核对日期写成了**次日日期**」时，**把那个字面日期原样抄了进来** ⇒ 门判「未来日期」⇒ **该节全部结论按 `UNKNOWN` 处理** ⇒ 修法 = **描述错误写法时不写字面值**（改述为「次日日期」）⇒ 复跑 **EXIT=0**
+· **🔴 指针一致性门**（`check-pointer-consistency`）：§十八 那条指向 `docs/Intentional_Deviations/hot/api.md:230` 的指针，目标是**标题行**（`#### 残余：那个空格（已接受，不新签）` ⇒ **本身不含编号**）⇒ 解析器向上取到相邻条目的 `T-6` ⇒ 而源行写的是 `DRIFT-MSGAPI-012` / `DRIFT-TASK-API-004` / `FB-G2-04` ⇒ ⇒ **新增 1 条漂移** ⇒ 修法 = **把该指针的真实归属编号补进源句**（`T-6` ＝ global 那条 Content-Type 空格 ⇒ 语义本来就对）⇒ 复跑 **新增 0 条 · 存量 237 不变**
+· ⇒ ⇒ **教训**：**「举例引用一个错误写法」本身也会触发门禁** ⇒ 描述别人的错日期时**只描述形态、不写字面值**；**指针指到无编号的标题行 ⇒ 解析器会向上借编号** ⇒ 引用标题行时必须把它的归属编号写进同一句
+
+#### 19.3 同一批里发现的**一处笔误**（改写 `W6.md` 时打出）—— 已复原 + 落成流程
+
+· **现象**：把 `W6.md` 那一行重写时，Go 的 `Host: 0.0.0.0` 被打成 **`0..0.0`** ⇒ ⇒ **派生层 TSV 内嵌依据文本 ⇒ 笔误被原样投影进产物** ⇒ **门禁查不出来**（门禁看结构，不看依据文本的事实正确性）
+· **自证方式**：改完对**关键 token 逐项在位校验**（本条用 17 个期望 token 的「在位」判定）+ 逐行对比 HEAD（证明零位移）⇒ 落码前把 `0.0.0.0` **复原**
+· ⇒ ⇒ **落成三条流程**：① **台账改写必逐 token 自证**，不靠肉眼（肉眼最容易放过「少一个字符」这类形变）；② **派生层原样投影依据文本** ⇒ 源台账的笔误 = 产物的笔误 ⇒ **改完必重算**；③ **关键事实值（IP / 端口 / 路径）单独再核一遍真源**，不靠上下文推断
