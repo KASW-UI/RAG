@@ -1068,10 +1068,54 @@ G2 全程**只发 g4 与派工方两封** ⇒ **未联系 g1/g3**、未替别的
 · **被推翻的前提** = 「宿主上 `user.rpc` **两侧都不可达** ⇒ 详情端点两侧同样**降级 5001** ⇒ 成功路径的完整字段语义**仍未双侧验证** ⇒ 需 G1 的 users 域等价」
 · **真根因** = **legacy 分支读对象存储失败** ⇒ **成功路径的开关 = 有没有 revision 指针**，**不需要** `user.rpc` 可用
 · **本层逐层回源核实（三侧全链，非转述）**：Go `service/article/rpc/internal/logic/get_article_logic.go:139-153`（`:146` = `status.Error(codes.Internal, "read legacy article failed")` ⇒ 命中 `else` 分支：**`published.Revision == nil` ⇒ 读 legacy 原文**）＋ Go api 侧 `service/article/api/internal/logic/article/get_article_logic.go:47-48`（`case codes.Internal: return nil, errmsg.ErrorServerCommon` ⇒ **INTERNAL 被映射成 5001**）vs RAG `ArticlePublicDomainService.java:135`（`markdown = readLegacyMarkdown(articleId, article.getContent());`）＋ `:311`（`private String readLegacyMarkdown(...)`）＋ `:315`（`throw ArticleExceptions.readLegacyArticleFailed();`）⇒ ⇒ **两侧同款** ⇒ ⇒ **G3 的归因改判成立** ✔
-· **落点两处（就地单行 · 零行位移）**：① judge §二 A-1 的 `article-api` 行（原写「3 场景只覆盖公开列表端点…」）② `docs/PhaseGoal/g3.md` 的 `article-rpc` 行（原写「成功路径完整字段语义（`user.rpc` 两侧都不可达 ⇒ 现钉的是降级路径）仍开」）⇒ 两处**均改为**「该前提已被推翻 + 真根因 = legacy 分支读对象存储失败 + 成功路径开关 = 有无 revision 指针 + **已双侧活体逐字节验证**（17 字段 ＋ 4 个 revision 分支信号）⇒ **该条边界消解**」
+· **落点两处（就地单行 · 零行位移）**：① judge §二 A-1 的 `article-api` 行（原写「3 场景只覆盖公开列表端点…」）② ❌ **原写作** `docs/PhaseGoal/g3.md` 的 `article-rpc` 行（原写「成功路径完整字段语义（`user.rpc` 两侧都不可达 ⇒ 现钉的是降级路径）仍开」）⇒ ⇒ **【2026-11-01 订正 · 见 §二十六】② 是错落点**：`docs/PhaseGoal/g3.md` 是 `check-phasegoal-lanes.py --write` 的**机器生成物**（文件头自述「不要手改」）⇒ ⇒ 手改它 ⇒ **门禁当场变红**（内容分叉）⇒ ⇒ **正确落点 = 基线 judge §二 A-1 的 `article-rpc` 行**（该行**原先仍带着同一条被证伪的前提** ⇒ 只改 api 行 = 漏改）⇒ ⇒ 已改为「**基线两行（api ＋ rpc）＋ `--write` 重生成**」⇒ ⇒ 两处**均改为**「该前提已被推翻 + 真根因 = legacy 分支读对象存储失败 + 成功路径开关 = 有无 revision 指针 + **已双侧活体逐字节验证**（17 字段 ＋ 4 个 revision 分支信号）⇒ **该条边界消解**」
 · **`judge` 的 G-3 行**：本层**逐字读过** ⇒ **不含该前提**（它只写「3 场景逐字节一致 ＋ 两侧播种同一行」⇒ 至今为真）⇒ ⇒ **无需改动**，如实记录「核过、这条不成立」
 
 #### 25.3 剩余待办
 
 不变：**待 Jason 签字 3 条** · **待 Jason 决策 1 条**（`E31` / `DRIFT-FOLLOW-006`）· **是否 push / 开 PR** · **favorite ×3 是否入常跑清单** · **无主面 `prometheus/settings.yml` 归属**（证据已齐）
 ⚠️ **诚实边界不变**：本层**未重跑 mvn** ⇒ 三棵 lane 的回归读数均属**lane 自报**；**阶段一 S1-6 仍 🟡** ⇒ ⇒ **不得宣称「全量守门全绿」**
+
+### 二十六 · **一道机器生成物的红门**（`check-phasegoal-lanes` EXIT=1）—— **改基线 ＋ 重生成**（2026-11-01）
+
+#### 26.1 现象 · 根因（已复算，非推断）
+
+· **现象**：`python3 tools/difftest/check-phasegoal-lanes.py` ⇒ **EXIT=1** ⇒ 诊断「[内容分叉] `docs/PhaseGoal/g3.md` 与基线推导结果不一致 ⇒ 有人手改了它，或基线变了」
+· **根因**：`docs/PhaseGoal/g3.md` 是 `check-phasegoal-lanes.py --write` 的**机器生成物**（文件头自述「**本文件是机器生成的 —— 不要手改。**」）⇒ ⇒ 上一笔 `d2709b1c` 把它当成「落点」手改 ⇒ ⇒ **与基线推导结果分叉**
+· **双重错位（本层自查发现）**：同一笔**只**改了基线的 `article-api` 行（judge:180），却**手改了生成物**的 `article-rpc` 行 ⇒ ⇒ **两处都错位**：① 生成物的 `article-api` 行**未同步**（陈旧）② 生成物的 `article-rpc` 行被手改（分叉）⇒ ⇒ 且**基线的 `article-rpc` 行（judge:181）仍带着同一条被证伪的前提** ⇒ ⇒ 只改 api 行 = **漏改**
+· **不是「基线改错了」**：被证伪的前提本身**成立**（G3 提出 · 本层逐层回源核实），**改判方向正确** ⇒ ⇒ ⇒ **问题只在落点选错** ⇒ ⇒ ⇒ **该改基线，不该撤回改判**
+
+#### 26.2 前科与修法依据（不是本层首创的判断）
+
+· `docs/DRIFT/global/vs-common.md` **§4.19.63 第六节「红二」** = **同形状前科**：同一笔 `a17cc4fe` 改了基线 judge（`favorite-rpc` 的 `U7` 措辞）⇒ ⇒ 派生文件 `docs/PhaseGoal/g3.md` **未重新生成** ⇒ ⇒ 内容分叉 ⇒ ⇒ **修法 = `--write` 重生成**
+· 前科同段已明写：`docs/PhaseGoal/g{1..4}.md` 是**机器生成**（`docs/PhasedGoal.md:34` 明写）且**无 lane 拥有** ⇒ ⇒ **归合并收口执行者**（本层写权面）⇒ ⇒ 与本层判定一致
+
+#### 26.3 本层的处置（四步 · 同一提交）
+
+① **落点改回基线**：`article-rpc` 行的订正**下沉到 judge:181**（judge:180 已在上一笔改好）⇒ ⇒ **基线两行**现在口径一致 ⇒ ⇒ 生成物由 `--write` 派生，**不再手改**
+② **重生成**：`python3 tools/difftest/check-phasegoal-lanes.py --write` ⇒ **EXIT=0**；`git status` 证据 = **只动 `docs/PhaseGoal/g3.md`**（g1 / g2 / g4 **逐字节未变** ⇒ 证明改动只落在 G3 域）
+③ **台账 §25.2 就地订正**：「落点两处」的 ② 原写作生成物 ⇒ 改为「❌ 原写作生成物 ⇒ **错落点** ⇒ 正确落点 = 基线 judge §二 A-1 的 `article-rpc` 行」（单行 → 单行 · 零位移）
+④ **judge 头部「核对时间」行增补**（单行 → 单行 · 零位移）：按该文件自己的惯例记下本次增补（真根因链 ＋ 本层独立复跑 `EXIT=0` ＋ 落点 = A-2 **两行「仍开放项」列**）⇒ ⇒ 并在行内写明「**判据列（终点指标 · 判定命令 · R/E）一字未动 ⇒ 版本仍为 v5**」⇒ ⇒ **版本不升版**（升版会改生成物头部的「基线 vN」串 ⇒ 而本次**未动判据** ⇒ 无实质收益）
+
+#### 26.4 证据升级：本层**独立复跑**双侧活体探针（非转述）
+
+· **命令**：`bash tools/api-full-parity-probe/article/run-success.sh` ⇒ **EXIT=0**（本层 2026-11-01 亲跑；**不是** G3 的自报）
+· **两侧就绪**：Go 侧真源**只读**构建 ＋ 真源 DDL 灌入（`article.sql` ＋ `002_community_revision.sql`）· Go article-rpc `:22412` · Go article-api `:22411` · RAG article-rpc `:22416` · RAG article-api `:22415` · 两侧**同一行**种子（`9007199254740994`）＋ revision 指针（`rev-succ-0001`）⇒ ⇒ 就绪闸门两侧**首个非 1015 响应**均已到
+· **逐字节**：`get_article_success` ⇒ `Go == 冻结期望值` ✅ ＋ `Go == RAG` ✅；`list_articles_success` ⇒ 同上 ✅
+· **4 个 revision 分支信号两侧全中**：S1 `ext_info` = `published_revision_id` · S2 `update_time` = `revision.published_at`（≠ `article.updated_at`）· S3 `content` = `revision.markdown`（≠ `article.content`）· S4 `title/brief/cover/manual_type_tag` = revision 的值 ⇒ ⇒ **确实没走 legacy 分支**
+· **「17 个字段」本层另核（非转述数字）**：解码 `tools/api-full-parity-probe/article/expected-success.txt` 的 hex ⇒ `data.article` = **17 个字段**（`id/title/brief/content/cover_image_url/manual_type_tag/secondary_tags/author_id/author_name/create_time/update_time/status/view_count/like_count/comment_count/share_count/ext_info`）＋ `ext_info` = `{"published_revision_id":"rev-succ-0001"}`（= S1 信号）⇒ ⇒ 与探针自检**同源**
+· ⚠️ **诚实边界**：本层独立复跑的是**本轮**读数；`run.sh`（降级路径 3 场景）本轮**未重跑** ⇒ ⇒ 本条只覆盖**成功路径**
+
+#### 26.5 门禁 ＋ 收尾自查（全部本层实测）
+
+· `check-phasegoal-lanes`（只读）⇒ **EXIT=0** ✅
+· **零位移**：judge.md **751 → 751**（变化行 = 7 · 180 · 181）· g3.md **143 → 143**（变化行 = 21 · 24）
+· **全仓门禁终态**（46 道 `check-*.py` 全扫 · 本层实测）：**41 绿 / 3 红 / 2 异常** ⇒ 3 红 = **favorite ×3（主干自带 · 从来不在任何 lane 的门禁清单）** · 2 异常 = `check-ddl-static`（缺 Go 侧 PG 库）＋ `check-merge-tree-content`（缺 lane ref 参数）⇒ ⇒ **与上一轮终态逐项相同 ⇒ 本轮新增红 = 0** ✅
+· **反斜杠** 15 → 15 · 3 → 3 · **U+FFFD = 0** · **无变短行** · **无末尾残留行** · **无未来日期**
+· **指针仍有效**：`docs/PhaseGoal/g3.md:24` 仍是 `article-rpc` 行 ⇒ ⇒ `docs/DRIFT/article/rpc.md:2994` 的指针**未失效**
+· **派工面零影响**：两行「开放项归属」分类**未变**（`跨域` / `本域自修`）· §6 组件行统计**未变**（16 组件 ✅16 · 🟡0 · 🔴0）⇒ ⇒ 且 judge 与 `docs/PhaseGoal/**` **不参与派生层扫描**（`LEDGER_DIRS` = `DRIFT` / `Pitfalls` / `Intentional_Deviations`）⇒ ⇒ **零投影影响**
+
+#### 26.6 剩余待办
+
+不变：**待 Jason 签字 3 条** · **待 Jason 决策 1 条**（`E31` / `DRIFT-FOLLOW-006`）· **是否 push / 开 PR** · **favorite ×3 是否入常跑清单** · **无主面 `prometheus/settings.yml` 的归属**（证据已齐）· **W6 表头语义**（judge 面）
+⚠️ **诚实边界不变**：本层**未重跑 mvn** ⇒ 三棵 lane 的回归读数仍属**lane 自报**；**阶段一 S1-6 仍 🟡** ⇒ ⇒ **不得宣称「全量守门全绿」**
