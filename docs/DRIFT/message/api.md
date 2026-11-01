@@ -1661,7 +1661,7 @@ Servlet Filter 在路由匹配**之前** ⇒ 本 Filter 会对 `/message/v1/**` 
 > ⚠️ **本条与 `DRIFT-USERAPI-009②`（users 域）是同一条**：G1 已在 user/admin/follow 三域落码，
 > 本条是 message 域的对应项；两条的 Go 侧依据**同源**（`DisableNativeRestTimeout` + `engine.go` 链序）。
 
-### 4. `DRIFT-MSGAPI-010` 的修法（已定位，**本轮未实施**）
+### 4. `DRIFT-MSGAPI-010` 的修法（已定位 · **已实施** · 共享层第二十五轮修法 · 2026-10-29 对齐）
 
 > **2026-10-29 对齐**：本条**已实施** —— 共享层 T-6 第二十五轮落码（`service/common/src/main/java/com/rag/common/http/GoStyleJsonContentTypeAdvice.java:127,151`）⇒ **现行态 = ✅ 已修**；本节原文（修法定位过程）**保留作历史留档**。
 

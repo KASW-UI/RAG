@@ -927,7 +927,7 @@ Go `likeactionlogic.go:169-173` 只做非空/正数校验；Java `:602-607` 相�
 | **DRIFT-LIKE-010 ~ 012**（trim / ON CONFLICT 目标 / pusher 粒度） | ~~**仍然成立**：`:912` 的 `raw.trim()` vs Go `ParseInt` 不忽略空白；`LikeOutboxEventMapper.java:32` 的 `ON CONFLICT (event_key)` vs Go 无目标；`LikeKafkaTopics.taskPushersEnabled` 单开关 vs Go 两个独立 pusher~~<br>🔴 **2026-10-23 第三轮更正：本条已全部修掉** —— ① `raw.trim()` 已删（`LikeDomainService.java:979-988` + `LikeUpdateKafkaListener.java:201`，**2 处**）；② `ON CONFLICT` 已去掉仲裁目标（`LikeOutboxEventMapper.java:39` ⇒ `ON CONFLICT DO NOTHING`）；③ 单开关已拆成两个独立开关（`LikeKafkaTopics.java:70,80` + `application.yml:189-190` + `LikeTaskProgressPublisher.java:77,93`）。**本行原文保留（首轮快照）。** |
 | **首轮 U1**（上下文能否启动） | **已解决**：**不能**。4 个独立硬阻塞，见 §7 DRIFT-LIKE-013~016 |
 | **首轮 U3**（Flyway 是否真建表） | **已解决（like-rpc 单体侧）**：真 PG 16 上跑通，**建出了 `flyway_schema_history_like` 账本表 + 5 张 `like_*` 表**（E-PG）。⚠️ **跨组件那一半仍未解决**（三模块共 schema 共存），见 U13 |
-| **首轮 8 条错误断言** | **仍然全部在位**（A/B/C/D/E/F/G/H 的原文仍留在源码注释里）⇒ **本轮新增第 9 条错误断言 I**：`V4__create_like_domain_fact_outbox.sql` 的「GORM 对无 size 的整数统一取 bigint」（见 DRIFT-LIKE-017） |
+| **首轮 8 条错误断言** | **仍然全部在位**（A/B/C/D/E/F/G/H 的原文仍留在源码注释里）⇒ **本轮新增第 9 条错误断言 I**：`V4__create_like_domain_fact_outbox.sql` 的「GORM 对无 size 的整数统一取 bigint」（见 DRIFT-LIKE-017）<br>🔴 **2026-11-01 订正（R4 · P4-T09 · 合并收口执行者落）**：本行是 **2026-10-22 首轮的陈旧快照** ⇒ **A~H 已逐条回源码销号**（销号表见本文件「D-08 复核」节）⇒ ⇒ **本轮补掉的是当时销号时的 2 处漏网**：① **D 的漏改**（relay 里仍称 Go 的 `Push` 是「同步」）② **I 的 entity 版残留**（仍称 GORM 取 bigint / DDL 是 BIGINT）⇒ ⇒ **9 条（A~H ＋ I）至此全部处置完毕**（迁移文件里的同款旧注释**按已定修法保留原文**，理由见该节） |
 | **AGENTS.md §3.3.3 / `docs/Pitfalls/like/rpc.md`** | **2026-10-23 复核：原结论修正为 ——** 「只引 `spring-kafka` 时 `@KafkaListener` 被完全静默忽略」这一**机制层**描述成立；但**对 like-rpc 这个组件**，`KafkaTemplate` / `ConsumerFactory` 是**必需**依赖 ⇒ 真实失效形态是 **Spring 上下文启动失败**，比「静默不消费」更早、更响。原表述「上下文照常启动、容器正常起来、一行消息都不消费」**不适用于本组件**，保留原文并在此修正 |
 
 > ⚠️ **2026-10-29 真实性复核**：上表 `DRIFT-LIKE-003` 行原判 **🔴「仍然成立：6 个骨架，逐个复核仍是 4 行」**
@@ -1998,6 +1998,42 @@ grep -n "new FixedBackOff(0, 0)\|new DefaultErrorHandler" \
 
 ⇒ **D-08 全部 8 条（A~H）已销号** ⇒ 台账 §891「**首轮 8 条错误断言：仍然全部在位**」**已过时**，本节以本表为准（原文保留不改写，AGENTS.md 台账纪律）。
 ⚠️ **本轮为源码级复核（E3）**，**未做变异验证**（把注释改回错误断言、确认某条测试转红）⇒ 故写「**源码级销号**」而不是「**回归网已锁死**」。
+
+### §5.1 · 2026-11-01 补漏轮 —— A~H 销号时的 **2 处漏网** ＋ 第 9 条 I 的**迁移文件约束**
+
+> **触发**：R4 派工单 `P4-T09`（`D-08`）把「8 条错误断言仍全部在位」当作当前事实 ⇒ **该前提已过期** —— 上面的销号表已逐条销号 ⇒ ⇒ **本轮补的是当时销号时的 2 处漏网**，并把第 9 条 I 的**处置边界**钉死。
+> ⚠️ **本节标题不含编号 token** ⇒ 不触发派生层的「标题劫持」。
+
+#### 5.1.1 漏网 ① —— D：`LikeHotEventOutboxRelay.java:60` 仍称 Go 的 `Push` 是「同步」
+
+· **为什么漏**：D 的销号依据是 `LikeDomainService.java:1200-1203` 续行里的「另：Go 的 Push 默认挂 ChunkExecutor ⇒ 只入队即返回」⇒ ⇒ **只核了那一个文件**，而**同一句错误断言在 relay 的类 javadoc 里还有一份**。
+· **本层回源核实（不采信转述）**：
+  · `github.com/zeromicro/go-queue@v1.2.2/kq/pusher.go:82` ⇒ `NewPusher` 默认 `pusher.executor = executors.NewChunkExecutor(...)`
+  · 同文件 `:140-142` ⇒ `if p.executor != nil { return p.executor.Add(msg, len(v)) } else { return p.producer.WriteMessages(ctx, msg) }`
+  · `github.com/zeromicro/go-zero@v1.10.2/core/executors/chunkexecutor.go:45-52` ⇒ `ChunkExecutor.Add` 塞进队列后 `return nil`
+  · `.../core/executors/bulkexecutor.go:37` ＋ `vars.go:5` ⇒ `NewPeriodicalExecutor(flushInterval, …)`，`defaultFlushInterval = time.Second`
+  · ⇒ ⇒ **Go 的 `Push` 是「入队即返回 ＋ 每秒后台批量刷」= 异步** ⇒ **断言 D 的前提被证伪**。
+· **已改**：`service/like/like-rpc/src/main/java/com/rag/like/like/rpc/mq/LikeHotEventOutboxRelay.java`（**只改注释**）⇒ 改写为上述实测事实 ＋ 指出真正要对齐的是 `acks`。
+
+#### 5.1.2 漏网 ② —— I：`LikeDomainFactOutboxEntity.java:72` 仍称「GORM 取 bigint / DDL 是 BIGINT」
+
+· **本层回源核实**：真源 `go.mod:27` = `gorm.io/driver/postgres **v1.6.0**` ⇒ `postgres.go:210` `DataTypeOf` ⇒ `:229-235`（`size <= 16 → smallint` / `size <= 32 → **integer**` / `else → bigint`）⇒ Go 的 `int32` 落 GORM `schema.Int` ＋ `field.Size = 32` ⇒ **`integer`，不是 bigint**；且 `V6__align_like_domain_fact_outbox_with_go.sql` 已把两列 ALTER 成 **`integer`** ⇒ ⇒ **原文两处都错**。
+· **已改**：`service/like/like-rpc/src/main/java/com/rag/like/like/rpc/domain/LikeDomainFactOutboxEntity.java`（**只改注释**）。
+
+#### 5.1.3 第 9 条 I 的**处置边界** —— 迁移文件里的旧注释**刻意保留原文**
+
+· **派工单要求「改 `V4__create_like_domain_fact_outbox.sql` 的注释」⇒ 本层不执行**，理由三条：
+  ① **改迁移文件文本 = 改 Flyway checksum** ⇒ 已应用该迁移的库下次启动即报 checksum mismatch ⇒ **like-rpc 起不来**；而本仓 `validate-on-migrate=false` 被**明令禁止**（`service/like/like-rpc/src/main/resources/application.yml:70-72` · 实测证伪过）⇒ ⇒ **校验是开的**；
+  ② **台账已定修法就是「不改 V4」** —— 本文件 `DRIFT-LIKE-017` 行明写「修法：新增 `V6__align_like_domain_fact_outbox_with_go.sql`（**不改 V4**）」⇒ ⇒ 派工单的第 ③ 项与台账冲突 ⇒ **以台账为准**；
+  ③ **V6 里已有逐行纠错记录**（`V6__align_like_domain_fact_outbox_with_go.sql:25-40`）⇒ 错误的断言**已被指名证伪**（含 `field.Size = 32` 的来处 ＋ `postgres.go:214-235` 的映射表）。
+· **同款规则还有第二处**：`V1__create_like_record.sql:8`（「ID/UserID/AuthorID/LastOperationID 没有 type tag，GORM 对『无 size 的整数』一律取 **bigint**」）⇒ ⇒ **结论对这 4 列是对的**（Go 侧 `int64` ＋ `type:bigint` ⇒ `BIGINT`）但**理由错**（① 它们其实**有** `type:bigint` tag；② 「无 size 的一律 bigint」这个规则本身已被证伪）⇒ ⇒ **同样不可改**（checksum）⇒ ⇒ **登记在此处，不删不改**。
+· **因此 I 的完整处置 = ① entity javadoc 已改（本轮）② V4 / V1 原文保留（checksum 约束 ＋ 已定修法）③ V6 已有纠错记录（本轮之前）④ 本节登记** ⇒ ⇒ **源码里不留任何「未知 / 未核实」的断言**。
+
+#### 5.1.4 验收（本层实测）
+
+· **行为面零变化**：`git diff -U0 service/like/like-rpc/` 的增删行**全部是注释行**（`grep -vE '^[+-]\s*(//|\*|/\*)'` 无输出）⇒ ⇒ **只改注释，未动行为** ✔
+· **域级测试**：`mvn -o -B -DargLine=-Xmx2g -pl service/like/like-rpc -am test` ⇒ **0F / 0E** ✔
+· **逐条结论**：A ✔ 已销号（2026-10-29）· B ✔ · C ✔ · **D ✔ 本轮补漏** · E ✔ · F ✔ · G ✔ · H ✔ · **I ✔ 本轮补漏（entity 版）＋ 迁移文件版按已定修法保留** ⇒ ⇒ **9 条全部有结论**
 
 ---
 
