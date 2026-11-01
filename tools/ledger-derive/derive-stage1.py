@@ -379,6 +379,22 @@ STATUS_SETS = {
         "待核实": "待核实",
     },
 }
+# ── U2-4s · 「已闭合」在**各目录**的取值（status 归一的**唯一出处**）─────────────
+# ⚠️ **2026-11-01 新增** —— 与 `STATUS_SETS` 同源：同一目录下「闭合」**只有一个**取值。
+#   之前这里是**内联三元**（DRIFT ⇒ ✅ 已一致 / IntDev ⇒ ✅ 仍成立 / Pitfalls ⇒ 已闭环），
+#   ⇒ status 归一要**复制第二份** ⇒ 两处漂移风险 ⇒ 现抽成函数 ⇒ **单一出处**。
+CLOSED_STATUS = {
+    "DRIFT": "✅ 已一致",
+    "Intentional_Deviations": "✅ 仍成立",
+    "Pitfalls": "已闭环",
+}
+
+
+def closed_status_for(dir_name: str) -> str:
+    """该目录下「已闭合」的 status 取值（**唯一出处** ⇒ 不许再内联写死）。"""
+    return CLOSED_STATUS.get(dir_name, "已闭环")
+
+
 # 优先级映射（U4）：状态 → 优先级
 PRIO_BY_STATUS = {
     "🔴 未闭合": "P1",
@@ -1987,8 +2003,7 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
             #   ⇒ 那些条目仍然**不派生**（派生层**不猜**）。
             if not (_ov and _ov.get("verdict") == "差异已消失"):
                 continue
-            status = ("✅ 已一致" if e["dir"] == "DRIFT" else
-                      "✅ 仍成立" if e["dir"] == "Intentional_Deviations" else "已闭环")
+            status = closed_status_for(e["dir"])
         evid, evid_src = detect_evidence(e, live_probes, all_tools)
         rules = ["U1", "U2", "U3"]
         # U2-2 · judge 判「已闭合」⇒ 覆盖台账历史章节的旧标记
@@ -2158,6 +2173,22 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
         # U9
         if closed:
             gap = "已闭合 · 差异已消失 ⇒ 无待实现项"
+            # ⚠️ **2026-11-01 · status 归一（本轮修 · 派生层状态抽取失真）**
+            #   **症状**：`closed` 只改 `gap`、**不改 `status`** ⇒ 台账里仍写 🔴/🟡 的条目
+            #   在派生层 `status` 列**仍是「未闭合」** ⇒ ⇒ §4.0 波次分布的
+            #   「**状态开放（仍要干的）**」那一列把它们**算成待办**
+            #   ⇒ ⇒ **污染的正是派工面**（lane 照那张表领活 ⇒ 重派已做完的活）。
+            #   **实测（2026-11-01 · 收口执行者自测）**：全仓 **60 条**
+            #   （**44 🔴 + 16 🟡** · 其中 **56 条 `schedule=未排期`**）· 全部带 `U2-4`
+            #   （= 已判闭合）且 `stage=D` ⇒ ⇒ 波次分布：G3 26 · G4 24 · G1 4 · 其余 6 条并集。
+            #   **判据**：`closed` = U5-O **显式定级 `stage=D`**（=「经分析确认不实现」⇒ 真闭合）
+            #   ⇒ ⇒ 与既有 `U2-2`（judge 判「已闭合」⇒ **覆盖台账历史章节的旧标记**）**同一模式**：
+            #   ⇒ **更权威、更新的显式判定**覆盖台账的**陈旧 status 快照**。
+            #   **可审计性（三条）**：① `rules` 列保留 `U2-4`（= 本次归一的依据规则）
+            #   ② **台账原文一字未改**（本层是**投影**，不裁定 ⇒ 销账仍由各 lane 回写台账做 · §5.3b）
+            #   ③ 归一只作用于**已判闭合**的条目 ⇒ 未闭合条目一行未动。
+            if status in ("🔴 未闭合", "🟡 部分闭合", "仍生效", "待核实", "⏳ 未签字"):
+                status = closed_status_for(e["dir"])
         elif evid.startswith("C"):
             gap = "无可复算指针 · 结论不可复算"
         elif evid.startswith("B") and status == "🔴 未闭合":
@@ -2286,6 +2317,16 @@ def derive(entries, live_probes, tasks, unresolved, shared_grading, stage1_05, a
             continue
         for f in ("stage", "prio", "blocking", "gap", "_stage_src", "_closed", "final_goal", "basis"):
             merged[k][f] = r[f]
+        # ⚠️ **2026-11-01 · U5-O 第二阶段合并**要带 `status`（本轮修）
+        #   **症状**：U5-O 行会把 `gap` 覆盖成「已闭合 · 差异已消失 ⇒ 无待实现项」
+        #   ⇒ 但**不带 `status`** ⇒ ⇒ 合并行变成「**gap 说已闭合 · status 仍 🔴**」
+        #   ⇒ **同一行内自相矛盾** ⇒ ⇒ 又被算进「状态开放」⇒ **污染派工面**。
+        #   **实测**：**3 条**（`E68` · `DRIFT-018` · `FB-03` —— 各自在 2~3 个源文件登记 ⇒ 合并）。
+        #   **判据**：只在 **U5-O 判闭合（`_closed`）** 时带 status ⇒
+        #   ⇒ 该行 `status` 已在**行级归一**时置为闭合取值 ⇒ 带过来即自洽；
+        #   ⇒ ⇒ **未闭合的 U5-O 行一律不动 `status`** ⇒ 不扩大影响面。
+        if r.get("_closed"):
+            merged[k]["status"] = r["status"]
         merged[k]["rules"] = ",".join(sorted(set(merged[k]["rules"].split(","))
                                             | set(r["rules"].split(","))))
         merged[k]["_ov"] = True
@@ -2435,7 +2476,7 @@ def render_md(rows, entries, tasks, unresolved, stats) -> str:
     a("")
     a("| 规则 | 派生什么 | 判据 | 依据 |")
     a("|---|---|---|---|")
-    a("| **U2 状态** | 处理状态 | ①「现行态 = X」显式声明优先 ②标题行 ③条目段；取值域**按目录**限定 | 三目录各自的取值域约定 + `PhaseGoal-judge.md` §1.5 L0 |")
+    a("| **U2 状态** | 处理状态 | ①「现行态 = X」显式声明优先 ②标题行 ③条目段；取值域**按目录**限定 ④**U5-O 显式定级判 `stage=D` ⇒ status 归一到该目录的闭合取值**（= 覆盖台账的陈旧 status 快照 · **2026-11-01 修**：此前只改 `gap` 不改 `status` ⇒ §4.0「状态开放（仍要干的）」列把 **60 条已闭合**算成待办 ⇒ **污染派工面**）| 三目录各自的取值域约定 + `PhaseGoal-judge.md` §1.5 L0 + U5-O 显式定级 |")
     a("| **U3 证据强度** | A 活体 / B 静态 / C 无指针 | 段内点名**已在活体台账实跑过**的探针 ⇒ A；否则有 `文件:行号` ⇒ B；否则 C | `live-parity-2026-10-30.md` §二 |")
     a("| **U4 优先级** | P0-P3 | 台账已写 ⇒ 用台账的；否则 A 类⇒P0 · 🔴/仍生效/⏳未签字⇒P1 · 🟡/待核实⇒P2 · 其余⇒P3 | `twoStage.md` §10 |")
     a("| **U5 阶段归属** | A-D | ①台账里的**十一项表** ②共享层定级表 ③`Stage1/05` ④已签字偏离⇒D ⑤条目**自己正文**的归属声明 | `twoStage.md` §10 |")
