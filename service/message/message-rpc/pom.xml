@@ -230,9 +230,14 @@
               ⇒ 补 `spring-boot-starter-web`（Boot 4 里它 = starter-tomcat + webmvc + http-converter）
                  **版本由 spring-boot-dependencies BOM 管 ⇒ 不写 `<version>`**。
 
-            【⚠️ 进程形态变了 —— 这是「暴露形态差异」，已按 twoStage.md §10 登记为 D 类】
-            Go 侧是 `http.ListenAndServe` 的**小 server**（无 servlet、无业务路由）；
-            RAG 侧是 **Tomcat**（有 servlet 容器，但**没有任何业务 HTTP 路由**）。
+            【⚠️ 进程形态变了 —— 这是「暴露形态差异」，**D 类 · 不修**
+            （登记位置 = 本域台账 `docs/DRIFT/message/rpc.md` 文末「残余差异登记」节
+            · 2026-11-01 G2 收官轮追加 · 与 follow-rpc 同款：`docs/DRIFT/follow/rpc.md`
+            的「残余差异登记」第 2/3 条）】：
+            Go 侧是 `http.ListenAndServe` 的**小 server**（无 servlet、无业务路由 ·
+            观测口 = `DevServer.Port` 16067 · `service/message/rpc/etc/message.yaml:19-27`）；
+            RAG 侧是 **Tomcat**（有 servlet 容器，但**没有任何业务 HTTP 路由** · 观测口 = 16067）。
+            ⇒ ⇒ **端口一字不差** ⇒ 真正的差异只有「暴露路径」与「载体」两项 ⇒ **不修**。
             ⇒ 两者的**对外可观测面**（独立端口 + Prometheus 文本）一致，
               载体不同 ⇒ 登记为**残余差异（不修）**。
 
