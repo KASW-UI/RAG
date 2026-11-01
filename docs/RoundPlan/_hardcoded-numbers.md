@@ -133,3 +133,39 @@
 | 核实方法 | 全部给出**可复算命令**（`mvn` / `python3 tools/…` / `bash tools/…` / `grep -c` / `wc -c` / `find`） |
 | 覆盖面 | `docs/DRIFT/**`（含 `_cross` / `global` / `common` / 各域）· `docs/Pitfalls/**` · `docs/Stage1/**` · `docs/PhaseGoal-judge.md` |
 | 维护归属 | 全部标注「谁维护 / 哪个任务会改它」⇒ 可直接被 `P5-T06` 引用为逐条核实的工单 |
+
+
+---
+
+## 🆕 2026-11-01 收口轮复核（P5-T06 执行段的实际落点）
+
+> **本段 = `P5-T06`「补全并逐条回真源核实」的落点**（`docs/RoundPlan/round-05/README.md` §5.3 `P5-T06`）。
+> ⚠️ **口径不变**：上表 **58 条**（`HC-01`~`HC-58`）**一条不删**（历史保留）⇒ 本段只**追加**复核结论。
+> ⚠️ **本段不修任何数字** —— 它只登记「哪些能机器复算、哪些是历史快照、哪些是口径冲突」。
+
+### ① 机器可复算的条目（本轮逐条实跑 ⇒ **口径已锁**）
+
+| 编号 | 复算命令 | 本轮读数（2026-11-01） | 与上表的关系 |
+|---|---|---|---|
+| `HC-03` | `python3 tools/check-ledger-count.py` | 见该门自打印的实测值（**以门为准，不引用历史快照**） | 上表记的 315 vs 335 是**历史两值** ⇒ 报告时**必须带当次探针输出** |
+| `HC-38` / `HC-42` / `HC-46` | `find . -name 'check-*.py' -not -path '*/__pycache__/*' -not -path './.git/*' \| wc -l` ＋ `tools/difftest/` 与 `tools/` 根级分列 | **27 项守门计数**（`tools/difftest/` 22 + `tools/` 根级 4 + `tools/g3-anchor-check/` 1）**本轮未变** ⇒ ⚠️ **不得新增 `check-*.py`**（会动这个数）⇒ 新扫描器一律用**非 `check-*` 名**（先例：`scan-bash-legacy-vars.py` · `scan-rpc-port-defaults.py`） | 与上表一致（**本轮新增的 `scan-rpc-port-defaults.py` 不计入 27**） |
+| `HC-54`~`HC-56` | `python3 tools/difftest/ledger-status-coverage.py` | **条目总数 = 442 · 带状态 = 442 · 覆盖率 100% · 0 字节坑位文件 = 0**（守门口径） | 上表记的 69 / 50 / 280 是**历史快照** ⇒ ⚠️ **派工单的基线「336 条里 74 条有状态」也已过期** ⇒ ⚠️ **2026-11-01 Round 6 收口轮新增 `PIT-GLOBAL-069` ⇒ 441 ⇒ 442**（`check-ledger-count.py --fix` 已把 `docs/Pitfalls/_INDEX.md` 的机器生成计数行同步） |
+| `HC-19` | `wc -c` 四份共享面台账 | **每次写台账即变** ⇒ 本轮只报**当次读数**，不写死 | 与上表一致（口径 = 「四份合计」） |
+| **新增** `HC-59` | `python3 tools/difftest/scan-rpc-port-defaults.py` | **9 个 rpc 的业务口默认值全部 = Go 真源 `ListenOn`**（`user-rpc` = 49210 是 **INFRA-001 已锁定的有意偏离** ⇒ 单列不判红） | **本轮新增登记**（R7-PORT-002 的补门 ⇒ 跨域只读扫描器 ⇒ **不计入 27**） |
+
+### ② 口径冲突条目（**上表已登记 5 处** ⇒ 本轮复核后**状态不变**）
+
+| 冲突 | 上表条目 | 本轮复核结论 |
+|---|---|---|
+| 台账索引条目数 315 vs 335 | `HC-03` | ⚠️ **未消解** ⇒ **报数必须带当次 `check-ledger-count.py` 的自打印值** |
+| 共享层未修数 28 / 27 / 24 / 23 | `HC-17` / `HC-23` / `HC-29` / `HC-39` / `HC-45` | ⚠️ **未消解**（口径不同：总数 vs 编号数 vs 未修数）⇒ **先定口径再报数** |
+| `task-rpc` 134 vs 137 | `HC-47`~`HC-50` | ✅ **已消解**（2026-11-01 收口轮：`docs/DRIFT/task/vs-common.md:1356` 已订正为「134 = 当时值 · 当前 = 137」⇒ `check-ledger-selfcheck.py` **EXIT=0**） |
+| `message-rpc` 49 vs 93 | `HC-51` | ⚠️ **未消解**（原文刻意保留历史值）⇒ 同上纪律 |
+| DDL 残留 51 处 | `HC-27` | ⚠️ **逐条定级已完成**（C 23 / D 28 / A 0）⇒ **数字随迁移改动漂** ⇒ 报数带当次 `check-ddl-static.py` 输出 |
+
+### ③ 本轮新增的「写死数字」来源（**必须登记，否则下一轮又会漏**）
+
+| 编号 | 位置 | 数字 | 它统计什么 | 谁维护 | 核实方法 |
+|---|---|---|---|---|---|
+| `HC-60` | `docs/RoundPlan/_INDEX.md` 的「轮次执行状态」表 | **Round 1~7 的 7 个状态格** | 每轮的执行结论（✅ / 🟡 / 🔴） | 合并收口执行者（主线） | 逐行读本表 + 对 `_task-universe.md` 的任务状态列 |
+| `HC-61` | `docs/RoundPlan/round-06/regression-report.md`（Round 6 唯一产出物） | **全量回归条数 / 0F / 0E / 4S / 模块数 / 墙钟** ＋ **27 门逐个真实退出码** | Round 6 收口回归的规模与门禁读数 | 合并收口执行者（主线） | `mvn -o -B -DargLine=-Xmx2g clean verify` ＋ **27 门逐个取退出码（先落变量，不用管道末段）** |

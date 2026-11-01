@@ -91,6 +91,17 @@
 
 ---
 
+#### §5.3.1.2 S3′-· 第二条**命令形式缺陷**（Round 6 执行期实测抓出 · 已就地修掉）
+
+| 项 | 内容 |
+|---|---|
+| **现象** | §5.4 的 S3 命令块把 errmsg 探针写成**统一形态** `tools/errmsg-probe/<域>/run-parity.sh` 的循环 ⇒ 但 **article 域没有 `tools/errmsg-probe/article/` 子目录** ⇒ article 的错误码探针 = **顶层** `tools/errmsg-probe/run-parity.sh`（其 `GO_SRC=service/article/common/errmsg/errmsg.go` · `MODULE=service/article/article-common`）⇒ 按循环跑会落「**文件不存在**」 |
+| **危险点** | 与 S2′ 同源：**「命令不存在 / 路径不正确 / 参数未经确认」**（规范 §12.6 第 4 项）⇒ 若不逐条看输出，会把「**命令写错**」误记成「**article 域错误码不一致**」⇒ **制造一类假红** |
+| **本轮动作** | ① §5.4 的 S3 命令块**已就地修正**（article 走顶层脚本，其余 8 域走 `<域>/run-parity.sh`）② 报告 §4 逐条列**真实可执行路径** ⇒ ③ **登记**：这是 Round 6 执行期抓到的**第二条**同类命令形式缺陷 ⇒ 说明「计划期的命令清单」本身**也需要执行期复核** |
+| **验收** | S3 的 **11 条命令**（semantic ＋ json-body ＋ 9 域 errmsg）**每条都真的可执行** ⇒ 逐条实跑取真实退出码 |
+
+---
+
 #### §5.3.2 S2 的 27 门清单（**以 judge §六 6.3 为准**，不凭印象）
 
 > ⚠️ **口径澄清（防呆）**：`tools/difftest/` 下共 **23** 个 `check-*` 脚本，但 **27** 指的是**命令条数** ⇒
@@ -181,7 +192,12 @@ python3 tools/difftest/check-merge-tree-content.py \
 # ⚠️ 探针必须落仓 tools/<kind>/<域>/ ⇒ /tmp 不算证据
 bash tools/semantic-probe/run-parity.sh      ; echo "semantic EXIT=$?"
 bash tools/json-body-probe/run-parity.sh     ; echo "json-body EXIT=$?"
-for d in article comment favorite follow hot like message task users; do
+# ⚠️ 2026-11-01（Round 6 执行期实测修正）：article 域**没有** tools/errmsg-probe/article/ 子目录
+#    ⇒ article 的错误码探针 = **顶层** tools/errmsg-probe/run-parity.sh（其 GO_SRC=service/article/common/errmsg/errmsg.go）
+#    ⇒ 与 S2′ 的 ddl 同类缺陷：命令写成「<域>/run-parity.sh」的统一形态 ⇒ 对 article 会落「文件不存在」
+out=$(bash tools/errmsg-probe/run-parity.sh 2>&1); rc=$?
+printf "errmsg(article   ) EXIT=%s\n" "$rc"
+for d in comment favorite follow hot like message task users; do
   out=$(bash "tools/errmsg-probe/$d/run-parity.sh" 2>&1); rc=$?
   printf "errmsg(%-9s) EXIT=%s\n" "$d" "$rc"
 done
