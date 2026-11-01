@@ -817,9 +817,9 @@ service/users/user/user-rpc/.../UserDomainService.java:113   ← 这行 javadoc 
 > 🔴 **2026-10-29 口径订正（W-F lane · 共享层台账面）—— 本表的适用范围**：
 > **本表的 25 条 = `CF` 族 15 + `LOG` 族 7 + `SF` 族 3** ⇒ ⇒ **它**不覆盖** `E65` / `E66` 这两条 `E` 族条目
 > （落点同样在 `service/common`：`RpcInterceptor` / `GoStyleRequestDeadline` / `DeadlineState`）。
-> ⇒ ⇒ **因此「本表 A 类 = 0」≠「共享层 A 类硬阻塞 = 0」** —— 🔴 **`E65` 是 A 类且仍 OPEN**：
-> 2026-10-29 双侧活体实测（Go `outgoing_carrier=present_expired` vs RAG `absent`）⇒ **出向 gRPC 不继承请求 deadline**
-> ⇒ ⇒ **X-6 判据不满足 ⇒ C-3 破** ⇒ ⇒ **阶段一已改判为「❌ 未通过」**（`docs/PhaseGoal-judge.md` v5）。
+> ⇒ ⇒ **因此「本表 A 类 = 0」≠「共享层 A 类硬阻塞 = 0」** —— ⚠️ **2026-11-01 订正（G4 lane）**：原句写「🔴 **`E65` 是 A 类且仍 OPEN**」⇒ ⇒ **该前提已消失** —— `E65` 已于 **2026-10-30 双侧活体证伪并闭合**（`docs/DRIFT/global/_README.md:430`「✅ **已闭合（2026-10-30 · 第三次订正）**」⇒ 派生层 `E65` = **✅ 已一致** · gap = 「已闭合 · 差异已消失 ⇒ 无待实现项」）⇒ ⇒ **现态 = 本表 25 条 A 类 = 0 ＋ `E65` 已闭合 ⇒ 共享层 A 类硬阻塞 = 0**（`E66` 仍 🔴 未闭合 ⇒ 见 `docs/DRIFT/global/_README.md:431`）：
+> ⚠️ **2026-10-29 双侧活体实测（Go `outgoing_carrier=present_expired` vs RAG `absent`）⇒ 「出向 gRPC 不继承请求 deadline」** —— ⚠️ **2026-10-30 该实测结论已被双侧活体证伪并订正**（两侧逐键相同 ⇒ 同款）⇒ ⇒ **此处保留原记录仅作历史** ⇒ ⇒ **以 `docs/DRIFT/global/_README.md:430` 的 E65 行（✅ 已闭合）为准**：
+> ⇒ ⇒ **X-6 判据不满足 ⇒ C-3 破** ⇒ ⇒ **阶段一已改判为「❌ 未通过」**（`docs/PhaseGoal-judge.md` v5）—— ⚠️ **2026-11-01 订正（G4 lane）**：该判读**已被后续轮次推翻** —— `E65` 闭合 ⇒ ⇒ **阶段一现为「✅ 通过」**（主干 `1fa8a080`「全服务起栈 · 20/20 在服务 ⇒ 闭合 P0 #5 证据覆盖缺口 ⇒ 阶段一未通过 ⇒ 通过」）⇒ ⇒ **本表 25 条的定级结论不变**（C 21 · D 6 · 证据缺口 1 · A 0）：
 > **证据**：`docs/PhaseGoal-judge.md` §五 X-6 行 ＋ [`../../DRIFT/global/vs-common.md`](../../DRIFT/global/vs-common.md) §1.1 的 **E65 / E66** 两行。
 > ⇒ **本表 25 条的逐条定级本身不改**（原值保留）⇒ **只加这条范围说明**。
 
@@ -1079,3 +1079,33 @@ service/users/user/user-rpc/.../UserDomainService.java:113   ← 这行 javadoc 
 | DRIFT-COMMON-LOG-001 | C | P1 | 否 | Go `service/common/logger/logger.go:148-157`（8 个 `logx.LogField`：service/event_id/trace_id/error_code/file_line/call_path/call_chain/error_reason）＋ `:168` `logx.WithContext(ctx).Errorw("business_error", fields...)`；go-zero `core/logx/config.go:16`（`Encoding` 默认 `json`）⇒ KV **逐条落盘**。RAG `service/common/src/main/java/com/rag/common/logger/Logger.java:272-281`（`atError().addKeyValue(...)` ⇒ KV 已进 `ILoggingEvent.getKeyValuePairs()`），但**全仓 `logback*.xml` = 0 命中**、19 个 `application.yml` 的 `logging:` 块**只有 `level:`** ⇒ Boot 4.0.8 上游 `spring-boot-4.0.8.jar!org/springframework/boot/logging/logback/defaults.xml:14` 的 `CONSOLE_LOG_PATTERN` **不含 `%kvp`**（`CONSOLE_LOG_STRUCTURED_FORMAT` 默认空）⇒ 生产 stdout 只剩 `ERROR … : business_error` ⇒ **差异仍成立**（不是「数据没进日志框架」，是「进了事件但没被 pattern 渲染」）。**C**：修法 = 共享层加 `logback-spring.xml`（含 `%kvp`）或统一 `logging.pattern.*` ⇒ 影响 20 个模块 = 生产工程机制 ⇒ 阶段二；**P1**：业务错误日志的采集/告警/排障全线失能（不命中 P0 九条 ⇒ 不阻断阶段一） | 2026-10-30 |
 | T-10 | D | P3 | 否 | Go `service/common/observability/rpc.go:38`（`timeoutCtx, cancel := context.WithTimeout(ctx, timeout)` ⇒ deadline **来自 ctx**，Go 侧**没有**「手动设过期时刻」的原语）；超时出口同文件 `:69`（`status.Error(codes.DeadlineExceeded, …)` ⇒ 与业务 close **同一条**打标路径）。RAG `service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/service/UserDomainService.java:138-151`（javadoc 已改写为「主路径 = `onHalfClose` 的 `DeadlineState#bindToCurrent`」，并明写「`markExpired(long)` **已移除**」）＋ `service/common/src/main/java/com/rag/common/observability/RpcInterceptor.java:404` / `:903`（`markExpired` 全文**只剩 2 处 javadoc 提及**，方法本体已不存在）⇒ ⇒ 假断言**差异已消失**（跨域循环依赖 CYCLE-001 同批闭环）⇒ **D**：本条无待实现项 | 2026-10-30 |
 | T-6 | D | P3 | 否 | Go `go-zero@v1.10.2/rest/internal/header/headers.go:17`（`ContentTypeJson = "application/json; charset=utf-8"`）＋ `rest/httpx/responses.go:182`（`w.Header().Set(ContentType, header.ContentTypeJson)`）＋ 真源调用点 `service/message/api/internal/handler/message/getunreadsummaryhandler.go:28`（`httpx.OkJsonCtx`）⇒ Go 的 JSON 响应**带 charset**。RAG `service/common/src/main/java/com/rag/common/http/GoStyleJsonContentTypeAdvice.java:127`（`GO_JSON_CONTENT_TYPE = "application/json;charset=utf-8"`）＋ `:151`（`response.getHeaders().set(HttpHeaders.CONTENT_TYPE, …)`）＋ 已登记 `service/common/src/main/resources/META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports:2` ⇒ 10 个 api 全生效 ⇒ ⇒ 台账记的「成功 / 错误响应 `Content-Type` **缺 charset**」这一条**差异已消失**（charset 已在；仅剩「分号后一个空格」的字节差 = Tomcat/序列化层，已随 T-7 族另记，非本条）⇒ **D**：本条无待实现项（挡路的 `SD-HOT-API-006` 已于 2026-10-25 撤销） | 2026-10-30 |
+
+### 十三·五、🟢 **hub 派工单核销轮**（2026-11-01 · G4 lane）—— 共享层「28 项」实为 **25 项**且**定级逐条一致** ⇒ **本轮只订正「E65 前提已消失」那 3 行**，**25 条的定级与状态列一律不动**
+
+**一、派工单「回写 29 条状态列」= 🔴 无对象 ⇒ 本轮未改那 29 条**
+
+· ① **派生层侧的失真已被归零**：新派生层里 `gap` 含「已闭合」的 **105 条**，其 `status` **全部 = ✅ 已一致** ⇒ **仍被报「未闭合/部分闭合」的 = 0** ⇒ ⇒ 派工单所依据的旧口径（60 条自相矛盾行）**已不存在**（收口执行者 `48d46c14` 治本：行级 `closed` 与 U5-O 合并都同时改 `status`）。
+· ② **那 29 条本身是真未闭合**：台账正文**逐条自述**「⚠️ **2026-10-30 复核（global+common lane）**：现行态 = 🔴 **仍未修**（C 类 / D 类 · 阶段二暂缓）」⇒ ⇒ **状态列本就正确** ⇒ ⇒ **把它们改成「已闭合」= 把真缺口改成假闭合 ⇒ 不做**（这正是 §3.3.1「以运行证据为准」的同一纪律）。
+
+**二、派工单「共享层 28 项逐条状态列与定级对齐」= 🟡 数量口径已过期 ⇒ 实为 25 项 ⇒ 且定级逐条一致 ⇒ 本轮未改那 25 条**
+
+· **28 是旧数** —— `docs/Stage1/05-差异与暂缓项清单.md` 的汇总表**自己已订正**为「**25**（未修 23 ＋ 已修 2：`SF-001` 全条 · `CF-018` 共享层半边）」并注明「原写 23 ⇒ 那是**未修数**被当成了**条目数**」⇒ ⇒ 本表 §十三·一 的标题「逐条定级总表（**25 条**）」与之一致 ⇒ ⇒ **两侧同数，无缺口**。
+· **机器逐条比对**（本层自跑 · 非转述）：台账 §十三·一 的 **25** 条 vs Stage1/05 的 **25** 条 ⇒ ① **编号集合完全相同**（两侧各 25 · 无单侧项）⇒ ② **定级列逐条比对 = 0 处不一致** ⇒ ⇒ **无对象**。
+· **定性分布不变**：C 21 · D 6 · 证据缺口 1 · **A 0** ⇒ ⇒ 与 Stage1/05 的「A 类硬阻塞 = 0」一致。
+
+**三、本轮实际落码 = 3 处**（**§十三·一 的适用范围说明**，**单行就地替换 ⇒ 零行位移**）
+
+| # | 位置 | 原表述 | 现表述 | 依据 |
+|---|---|---|---|---|
+| 1 | §十三·一 适用范围说明 · 第 3 行 | 「🔴 **`E65` 是 A 类且仍 OPEN**」 | 「**该前提已消失** —— `E65` 已于 2026-10-30 双侧活体证伪并闭合 ⇒ ⇒ **现态 = 本表 25 条 A 类 = 0 ＋ `E65` 已闭合 ⇒ 共享层 A 类硬阻塞 = 0**（`E66` 仍 🔴 未闭合）」 | `docs/DRIFT/global/_README.md` 的 **E65 行**（✅ **已闭合**）⇒ 派生层 `E65` = **✅ 已一致** · gap = 「已闭合 · 差异已消失 ⇒ 无待实现项」 |
+| 2 | 同节 · 第 4 行 | 「2026-10-29 双侧活体实测（Go `outgoing_carrier=present_expired` vs RAG `absent`）⇒ **出向 gRPC 不继承请求 deadline**」 | 「**⚠️ 2026-10-30 该实测结论已被双侧活体证伪并订正**（两侧逐键相同 ⇒ 同款）⇒ ⇒ **此处保留原记录仅作历史**」 | 同上（E65 第三次订正） |
+| 3 | 同节 · 第 5 行 | 「X-6 判据不满足 ⇒ C-3 破 ⇒ 阶段一已改判为「❌ 未通过」」 | 「**该判读已被后续轮次推翻** —— `E65` 闭合 ⇒ ⇒ **阶段一现为「✅ 通过」** ⇒ ⇒ **本表 25 条的定级结论不变**」 | 主干 `1fa8a080`「全服务起栈 · 20/20 在服务 ⇒ 闭合 P0 #5 证据覆盖缺口 ⇒ 阶段一未通过 ⇒ 通过」 |
+
+· ⚠️ **只订正范围说明** ⇒ ⇒ **25 条的定级、状态、证据强度一律不动**（那是 2026-10-30 复核的产物）。
+
+**四、门禁与回归（绑工作树 `align/g4-ledger-close` @ `48d46c14`）**
+
+· **自己域回归**（surefire XML 求和 ⇒ 运行期口径）：`service/common` **92 类 / 488 条 / 0F / 0E / 0S** ＋ `service/users/users-common` **4 类 / 39 条 / 0F / 0E / 0S** ⇒ **BUILD SUCCESS** ⇒ ⇒ 本轮**零产品代码改动**。
+· **静态守门**：13 项（含 `derive-stage1.py --check`）**全 EXIT=0**。
+· ⚠️ **派生层需重算**（本轮改了两处状态列）⇒ 产物在 `docs/DRIFT/_cross/**` ⇒ **收口执行者的面** ⇒ ⇒ **本层不代写派生物**。
+· ⚠️ `E66` 仍未闭合（三面残余：① handler 级码集合面 ② 资源层窄窗口 ③ 域侧装配面断言 ⇒ 第③格 = **users 域容器面守门 ⇒ 归 G1**）⇒ ⇒ **共享层侧仍持有 ①②**。
