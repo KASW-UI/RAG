@@ -528,3 +528,86 @@ mvn -o -B -DargLine=-Xmx2g --fail-at-end clean test
 ⇒ ⇒ **本层不执行 push**（「推送只在 Jason 明示时做」）⇒ ⇒ 剩余 **2 笔**留在本地 `do-my-own-gh`（`ed8cdde7` + `b64abd67`）⇒ ⇒ 需要时由 Jason 明示即可（**fast-forward 推送**，无历史改写）。
 
 ⚠️ **一条通用判据（本轮新得）**：**reflog 的「update by push」只记「远端 ref 被更新」这件事，不记「是谁执行的」** ⇒ ⇒ 看到远端 ref 前进时 ⇒ ⇒ **先查本地分支 reflog（本层本轮 6 笔全是 `commit:` / `merge:`，无 `push`）+ `git reflog show upstream/…` + `.git/hooks/` 三处，再归因** ⇒ ⇒ 本层正是靠这三处定位到「不是我推的」⇒ ⇒ **别默认「远端动了 = 我推的」**。
+
+---
+
+## 十四、收官补记（2026-11-01 08:20 ~ 09:05 · 合并收口执行者）
+
+> **本节记本层在「阶段一判定已出」之后的最后一轮收官动作**：① 四棵 lane 的只读问询答复汇总 ② 一项**已取消**的原方案 ③ Round 7 会话中止留下的三处半成品补齐 ④ 全量回归读数自测 ⑤ 门禁终态复扫。
+
+### 14.1 「现在问题最大的是不是 `service/common`」⇒ **四棵 lane 一致答「否」**
+
+> **问法**：单向只读问询（g1 / g2 / g3 / g4 各一份 · `sync: true` 收回）⇒ **本层不代答、不代认领**。
+
+| lane | 答复 | 依据 |
+|---|---|---|
+| **G4**（`service/common` 的写权方） | 🔴 **明确否** —— 共享层**当前无活跃行为缺陷** | 13 项只读守门全 EXIT=0；名下 29 条真未闭合**全部已定级 C 类 · 阶段二暂缓**；全仓仅 2 条「未闭合且 blocking=是」（`G4-A4-05` / `G4-A4-07`）但**处置已落地** ⇒ **陈旧信号** |
+| **G1** | 🔴 **否** —— 最大 = **E66 第③格**（users 域「Redis 期限载体在真实容器里确实装上了」的活体守门） | 落点在 `service/users/**` 测试面（**G1 自己写权面 · 可自修**）⇒ 但**不在任何 lane 的派工面**（派生层 E66 行 `wave=G3+G4` 不含 G1）⇒ **无主缺口** · 阻塞 users 域 `DRIFT-ARPC-010`(E66) 销账 · **不阻塞阶段一** |
+| **G2** | 🔴 **否** —— 最大 = **不是要修代码，是要销账/签字** | 11 条真待实现项（10 条 C/D · A/B = 0）中 **6 条是 HTTP 响应写出面的框架层不可修差异**（状态行缺 reason phrase · `Content-Type` 分号后空格）⇒ 落点在共享层 Tomcat/序列化层，但**性质 =「框架限制 · 有意偏离 · 待销账」** ⇒ 卡在 `docs/Intentional_Deviations/` 签字面 ⇒ **真正还落 G2 代码的只剩 1 条 C 类** |
+| **G3** | 🔴 **否** —— 最大 = **article 域成功路径完整字段语义从未双侧活体验证** | `09adee01` 已落 ⇒ 例外集 `KNOWN_INLINE_CAP_CALL_SITES` **已空** ⇒ 共享层不再是我域漂移源；我域缺口 = 成功路径字段语义未双侧活体验（因宿主 `user.rpc` 两侧不可达 ⇒ 钉的是降级路径一致）⇒ 阻塞 article 域 G-3 完整闭合；另 U-9b 并发模型差异（Go 1 puller + 8 handler vs RAG 8 consumer 各占分区）⇒ **不阻断** |
+
+⇒ ⇒ **四份独立答复收敛出的三个共性真问题**（这才是「现在问题最大」的答案）：
+
+1. 🔴 **派生层状态抽取失真**（G4 提出）—— 全仓 **187 条**未闭合里 **60 条（32%）**的 gap 明写「已闭合 · 差异已消失」却仍判 🔴/🟡 ⇒ ⇒ **施工单被污染**（会重派已做完的活）⇒ 落点 = `tools/ledger-derive/derive-stage1.py` 状态抽取（**收口执行者面**）＋ 各域台账状态列回写（各 lane 面）
+2. 🟡 **无主缺口**（G1 提出）—— E66 第③格：**政策与机器守门两处同时漏** ⇒ 两处须同批闭合
+3. 🟡 **销账 / 签字面**（G2 提出）—— 6 条框架层不可修差异卡在 `docs/Intentional_Deviations/`
+
+⇒ ⇒ **唯一需 Jason 拍板的真决策项** = **`E31` / `DRIFT-FOLLOW-006`**（follow-rpc 的 5 个 `follow_rpc_*` 指标无抓取出口 · 用户 2026-10-24 已转「交主会话拍板」⇒ 至今无人接）。
+
+### 14.2 ⚠️ 一项**已取消**的原方案（留档，避免下轮重做）
+
+> **本层原计划**（P0 #5 闭合）：改 8~9 处 yml 端口（`article-api` → 8890 / 8082 四处错开 / `comment-rpc` → 9002 …）＋ 建 `.env.host` ＋ 写 `service-startup-matrix.md` ＋ 修 `manage.sh:18` 的 `APP_SVCS`（2/20 → 20/20）。
+
+⇒ ⇒ **核主干后整项取消**：
+
+- **P0 #5 已在主干闭合** —— `1fa8a080`（Round 1 落码：起栈矩阵 449 行 ＋ `.env.host.example` ＋ `verify-all-services.sh` ⇒ **PASS=20 / FAIL=0**）＋ `c741795b`（Round 7 端口默认值层回改 6 行）⇒ judge v6 = **P0 = ✅ 9/9 · 阶段一 ✅ 通过**
+- **端口口径已被主干改成「两层分工」**（**默认值层 = Go 真源值 · 分配层 = env 互异**）⇒ ⇒ **本层原方案若执行 ⇒ 会破 Go 对齐断言**（`ArticleRpcPrometheusCarrierGateTest` 把 `grpc.server.port: 9001` 钉成与 Go `ListenOn` 一字不差）⇒ ⇒ **必须取消**
+- **`manage.sh:18` 的 `APP_SVCS="user-rpc user-api"` 不是缺陷** —— 是**两段部署形态**（compose 管 users 域 ＋ 宿主机 `java -jar` 管其余 9 域）⇒ ⇒ 原 todo 作废
+
+### 14.3 🔴 Round 7 执行会话**因 Token Plan 用量上限被中止** ⇒ 三处同根因半成品 ⇒ 本层补齐
+
+| # | 半成品 | 本层处置 |
+|---|---|---|
+| ① | `docs/PhaseGoal-judge.md` §十·二 冻结基线第 2 行留了 **`«REGRESSION»` 占位符** | 就地单行替换（**零行位移**：750 行不变 · 反斜杠 15 不变 · U+FFFD = 0） |
+| ② | `docs/RoundPlan/_final-acceptance.md` §六「冻结 2」行仍写「🟡 待重跑 / 核对日期 待重建」 | 就地单行替换 ⇒ 🟢 已重建 · 核对日期 2026-11-01 |
+| ③ | 同文件 §九 原写「全量回归重跑 ⇒ 见 §9.3」但 **§9.3 整段不存在** | **新增 §9.3**（读数 ＋ 4 条 skipped 归属 ＋ 逐模块分解 ＋ 诚实边界） |
+
+⇒ ⇒ **三处同一个根因**：**那轮全量回归的最终读数没被写进文档** ⇒ ⇒ 由本层**自己实跑**取读数补齐（**不采信任何转述**）。
+
+⇒ ⇒ 另：`docs/RoundPlan/_INDEX.md` 轮次状态表（Round 7：🟡 本轮执行中 ⇒ ✅ 已完成）＋ `docs/Stage1/02`、`06`（阶段一结论同步为 ✅ 通过）—— **判定由 Round 7 会话作出，本层不代认领**，只负责补齐与提交。
+
+### 14.4 全量回归读数（**本层自测** · 三面）
+
+> **读数口径**：surefire `TEST-*.xml` 逐文件聚合（**不认 stdout 文字行**）· **窗口起点 = 进程创建时间 `08:11:03`**（⚠️ **不是日志首行时间戳** —— 取后者会整模块漏掉最先跑的几个 ⇒ 实测少算 61 条 ⇒ 得 3,506 / 28 模块 ⇒ **28 ≠ 上一轮的 29** 才当场发现）。
+
+| 面 | 命令 | 读数 |
+|---|---|---|
+| **测试面** | `mvn -o -B -DargLine=-Xmx2g clean test` | **tests = 3,570 · failures = 0 · errors = 0 · skipped = 4**（**533 份报告 · 29 个含测模块** · 墙钟 **30 分 30 秒**） |
+| **构建面** | `mvn -o -B -DskipTests -DargLine=-Xmx2g package` | **51 个 reactor 模块 · BUILD SUCCESS**（21.278 s · **退出码已捕获**） |
+| **verify 面** | `mvn -o -B -pl service/hot/hot-rpc surefire:test@artifact-gate` | **1 条 / 0F 0E 0S · BUILD SUCCESS · RC=0**（全仓唯一的 `verify` 阶段绑定 = 产物层守门 `DRIFT-HOTRPC-BOOT-001`） |
+
+⇒ ⇒ **4 条 skipped 全部是双侧活体对拍**（Go 侧不可达时按设计 skip：`FavoriteSqlStatementParityTest` / `FavoriteCreateSuccessParityTest` / `FavoriteGrpcContractParityTest` / `FavoriteApiFullParityTest`）⇒ **与判定口径的「4S」逐条对上** ⇒ **不是漏跑**。
+
+⇒ ⇒ **诚实边界**：测试面那轮的 **stdout 随被中止的会话管道丢失 ⇒ 退出码未捕获** ⇒ 「BUILD SUCCESS」是**推断**（依据：① **29/29** 含测模块均产出**本轮**报告 —— `clean` 按 reactor **逐模块**清理 ⇒ 若中途失败则新鲜模块数必 < 29 ② 0F/0E ③ 独立的构建面 51 模块 BUILD SUCCESS）⇒ ⇒ **不外推**为「§六 6.3 的 27 项守门全绿」⇒ **S1-6 仍 🟡**（双侧活体类未逐个实跑 ⇒ 归 Round 6）。
+
+### 14.5 门禁终态（全仓 **53** 道 · 枚举而非手写清单）
+
+| 类别 | 数量 | 明细 |
+|---|---|---|
+| ✅ **绿** | **46** | — |
+| 🔴 **真红** | **4** | favorite ×3（`check-assertion-sources` / `check-ledger-selfcheck` / `check-ledger-vs-reality`）＋ `check-anchors` 的 **FILE_MISSING=1**（**本层已修 ⇒ 见下**） |
+| ⚠️ **未评估（不是红）** | **3** | `check-ddl-static`（EXIT=2 · **缺 PG 里的 Go 侧库** ⇒ 脚本自报「先起 `ddl-parity.sh users`」）· `check-merge-tree-content`（EXIT=2 · **缺 lane ref 参数**）· `check-plaintext400-headers.sh`（EXIT=2 · **域栈未起** ⇒ 脚本自报「**2 = 未评估，不是通过**」） |
+
+⇒ ⇒ **本层修掉的那一条**：`service/comment/comment-api/.../CommentRpcClient.java:10` 的 Go 出处指针写成 `service/comment/api/internal/svc/service_context.go:18-23` ⇒ ⇒ **Go 仓里该文件的真实名是 `servicecontext.go`（无下划线）** ⇒ ⇒ **Go 仓两种拼法真的并存**（`comment/api` 无下划线 · `comment/rpc` 有下划线 ⇒ 不是「统一约定」问题）⇒ ⇒ **引文与行号 18-23 逐字对得上**（`NewServiceContext` 全函数）⇒ ⇒ **只改文件名一个 token · 零行为变更** ⇒ ⇒ 复跑 `check-anchors.py` ⇒ **FILE_MISSING 1 → 0 · EXIT=1 → 0**。
+
+⇒ ⇒ **一条通用判据（本轮新得）**：**守门扫到「未评估」时 ⇒ 先看退出码语义再谈红绿** —— 本仓多道门把「环境缺失 / 用法缺参」也映射成非 0 ⇒ ⇒ **非 0 ≠ 被测性质坏** ⇒ ⇒ 必须读脚本自报的那行诊断（`先起 …` / `2 = 未评估`）再归因。
+
+### 14.6 待 Jason 拍板（本轮**新增 1 项**，其余沿用 §十）
+
+| # | 事项 | 状态 |
+|---|---|---|
+| **1** | **`E31` / `DRIFT-FOLLOW-006`** —— follow-rpc 的 5 个 `follow_rpc_*` 指标无抓取出口（用户 2026-10-24 已转「交主会话拍板」⇒ 至今无人接） | 🟡 **唯一新决策项** |
+| 2 | 派生层状态抽取失真（60/187 条已闭合仍判未闭合）⇒ 改 `tools/ledger-derive/derive-stage1.py`（收口执行者面）＋ 各域台账状态列（各 lane 面） | 🟡 建议本轮做 |
+| 3 | 无主缺口 E66 第③格（users 域 Redis 期限载体容器面活体守门）⇒ 派给谁 | 🟡 待定 |
+| 4 | 4 道域级守门长期红（favorite ×3 ＋ comment ×1）⇒ 纳入常跑清单 | 🟡 待定 |
+| 5 | `origin`（CodeArts 镜像）落后 1,166 笔 · `upstream` 已含 `eba4e5a4` ⇒ **本层未 push**（推送只在 Jason 明示时做） | ⏸ 等明示 |

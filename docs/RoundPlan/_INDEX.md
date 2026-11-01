@@ -10,7 +10,7 @@
 |---|---|
 | **总轮次数** | **7 个正常轮次**（Round 1 ~ Round 7）· 旧计划的 R0~R5 已全部迁入（见 [`_migration.md`](_migration.md)） |
 | **计划任务数** | **37 条计划任务**（`P1-T01`~`P7-T01`）· **2 条条件触发**（`CT-01` / `CT-02`）⇒ 全部列在 [`_task-universe.md`](_task-universe.md)（12 字段） |
-| **当前状态** | **Round 1 ✅ · Round 2 ✅（实现段）· Round 3 ✅ · Round 4 🟡 · Round 5 🔴 · Round 6 🟡 待执行 · Round 7 🟡 本轮** —— 逐轮依据见下方「轮次执行状态」表 |
+| **当前状态** | **Round 1 ✅ · Round 2 ✅（实现段）· Round 3 ✅ · Round 4 🟡 · Round 5 🔴 · Round 6 🟡 待执行 · Round 7 ✅ 已完成**（2026-11-01 · 判定 = **✅ 阶段一通过** + §十·二 重新冻结 ⇒ 见 `_final-acceptance.md` §九）—— 逐轮依据见下方「轮次执行状态」表 |
 | **写权** | 本目录归**合并收口执行者（主线）**写；域 lane **只读**（与 `docs/PhaseGoal/**`、`docs/PhaseGoal-judge.md` 同属机器/共享面） |
 | **`AGENTS.md`** | 已登记 `docs/RoundPlan/` 指向本文件 ⇒ **无需再动 `AGENTS.md`**（余量仅 **34 B** ⇒ 任何改动必须字节中性或更小） |
 | **上游依据** | `docs/PhasedGoal.md`（阶段一准入线 · P0 九条）· `docs/twoStage.md`（两阶段规范 · §5.6 结论口径 / §5.7 冻结 9 项 / §十 定级）· `docs/PhaseGoal-judge.md`（判定基线）· `docs/DRIFT/**` · `docs/Pitfalls/**` · `docs/Intentional_Deviations/**` |
@@ -42,7 +42,7 @@
 | **Round 4** | 🟡 **部分** | `check-ledger-selfcheck.py` 现 **EXIT=0**（原「全仓唯一红门」已绿） | **9 张派工单未清**：datasource 口令 fallback（B 类 · `P4-T01`）· favorite 域半边（`P4-T02`）· like 域 9 条源码假断言（`P4-T09`）· 其余 C/D 类 |
 | **Round 5** | 🔴 **未做** | — | **6 项**：proto 消费方式取证（余 9 个 proto）· 台账自洽 · 两套 `X-n` 编号语义冲突 · `DRIFT-HOTAPI-030` 六处四态 · Pitfalls 状态字段覆盖 · 写死数字 |
 | **Round 6** | 🟡 **待执行** | `docs/RoundPlan/round-06/regression-report.md` **不存在**（Round 7 的硬前置 **T0 未满足**） | 27 项守门逐个实跑取真实退出码 ＋ 10 域探针 ＋ 生成器 diff |
-| **Round 7** | 🟡 **本轮执行中** | [`_final-acceptance.md`](_final-acceptance.md) §九 执行记录 ＋ judge §八 / §十 / §十·二 | T9 收官 |
+| **Round 7** | ✅ **已完成**（2026-11-01） | 判定 = **✅ 阶段一通过**（`_final-acceptance.md` §九·9.1）＋ §十·二 **9 项重新冻结**（judge）＋ **全量回归读数**（§九·9.3：3,570 / 0F / 0E / 4S · 29 个含测模块 · 构建面 51 模块 BUILD SUCCESS · verify 面产物层守门 RC=0）⚠️ **收官补记**：Round 7 执行会话**因 Token Plan 用量上限被中止**（08:19:35）⇒ 三处半成品（judge 占位符 `«REGRESSION»` · §六冻结 2 行「待重跑」· §9.3 缺失）由**合并收口执行者**取自己实跑读数补齐 | — |
 
 > ⚠️ **台账过期登记**：`round-02` / `round-04` / `round-05` / `round-06` 的 `README.md` 里**逐任务的「当前状态」格与实态不符**（上表已订正实态；各 README 的原格**保留不删改**，作为 Round 5 `P5-T02`「明细面 vs 现状面逐条矛盾」的输入）⇒ **以本表为准**。
 
