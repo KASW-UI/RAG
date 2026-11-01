@@ -793,3 +793,74 @@ G4 核销：共享层侧**已有 3 条守门**（`GoStyleRedisDeadlineRealLettuc
 | **派生层** | `derive-stage1.py --check` **EXIT=0** · 指针一致性「新增 0 条漂移」 |
 | **门禁（46 个 `check-*.py` 枚举）** | ✅ **41 绿** · 🔴 **3 真红**（favorite ×3 · 主干自带）· ⚠️ **2 未评估**（环境 / 用法）⇒ **无新红** |
 | **未 push · 未开 PR** | 推送只在 Jason 明示时做 |
+
+---
+
+## 十八、G2 回执核销（2026-11-01 09:28 ~ 10:05）
+
+### 18.1 合入
+
+| 项 | 值 |
+|---|---|
+| **带入** | `96608172`（G2 域内落码）＋ `f75cab4f`（G2 自对齐主干）⇒ 合并预演 **rc=0 · 零冲突** · 未 push |
+| **派生层** | G2 自测「零投影影响」（旧/新主干两种状态下重算 TSV + MD **逐字节一致**）⇒ **收口执行者独立核实**：合入后 `derive-stage1.py --check` **直接 EXIT=0** ⇒ ⇒ **零红窗**（本轮**无需**同批重算） |
+| **写权面** | `docs/DRIFT/message/**` + `docs/DRIFT/task/**` + `service/message/message-rpc/**`（注释）⇒ 全在 G2 自域 |
+
+### 18.2 落码内容（**零行为变更**）
+
+| 文件 | 改动 | 性质 |
+|---|---|---|
+| `docs/DRIFT/message/api.md` | 文末 **+20 行** | `DRIFT-MSGAPI-011` / `DRIFT-MSGAPI-012` 的 7 项材料表 |
+| `docs/DRIFT/task/api.md` | 文末 **+19 行** | `DRIFT-TASK-API-004` 同款材料 |
+| `docs/DRIFT/message/feedback-to-g4.md` | 文末 **+15 行** | `FB-G2-03` / `FB-G2-04` 完备性核对 + 口径订正 |
+| `docs/DRIFT/message/rpc.md` | 文末 **+42 行** | 残余差异登记 2 条 + 前提订正 5 行表 + 共享面待办 3 条（原 `:262` 行按纪律**未改写**） |
+| `service/message/message-rpc/.../NacosRegistration.java` | **纯 javadoc** | 「本服务不带 web」**已过期**（自 2026-10-30 起补了 `spring-boot-starter-web` ⇒ **确实带 web**，但**只为 Actuator 提供 servlet 载体** ⇒ **不承载任何业务 HTTP 路由**）＋ Go 出处 + 语义等价论证 |
+| `service/message/message-rpc/pom.xml` | **纯注释** | 「已按 twoStage.md §10 登记为 D 类」的指针**不准**（实测 twoStage.md 无该登记）⇒ 改指向本域台账 |
+
+**零行位移（收口执行者独立复核）** —— 4 个台账文件**全部纯追加**：前 N 行内容变化处 **0 / 0 / 0 / 0** ⇒ 既有行号零位移。
+
+### 18.3 `DRIFT-MSG-012` 的前提**被证伪**（独立复核 · 与 G2 结论一致）
+
+| 项 | 事实 |
+|---|---|
+| **Go 侧** | **确实有** HTTP 监听面 —— `service/message/rpc/etc/message.yaml:19-27`（`DevServer: Enabled: true / Host: 0.0.0.0 / Port: 16067 / MetricsPath: /metrics / HealthPath: /healthz`）⇒ ⇒ **U5-O 叠加层那条「Go 侧纯 gRPC ⇒ 无 HTTP 监听面」是错的** |
+| **RAG 侧** | 同端口 **16067**（`application.yml:177-178`）⇒ **端口一字不差 · 两侧都没有业务 HTTP 路由** |
+| **结论** | 真差异只剩「**暴露路径**」+「**载体**」两项 ⇒ ⇒ **D 类 · 不修**（与 `docs/DRIFT/follow/rpc.md` 的「残余差异登记」第 2/3 条同款） |
+
+⇒ ⇒ **一条通用教训**：「Go 侧纯 gRPC ⇒ 无 HTTP 监听面」这类**由配置缺席推出的结论**，必须回到 **go-zero 的启动链**（`zrpc/server.go:63 c.SetUp()` → `core/service/serviceconf.go:77 devserver.StartAgent` → `internal/devserver/server.go:80/72`）逐段核对 ⇒ **配置项缺席 ≠ 机制不启动**（同源于「配置里没写 ≠ 没开」）。
+
+### 18.4 6 条销账/签字面的**归档面实测**（**结论被改变**）
+
+| 条目 | 归档面现状 | ⇒ 结论 |
+|---|---|---|
+| `DRIFT-MSGAPI-011` / `FB-G2-03`（reason phrase） | 材料**已齐** ＋ `docs/Intentional_Deviations/global/common-tails.md` 的 **`SD-2026-10-25-CAND-14`**（🏷 待签字候选 · 「⏳ 未签字」· 核对日期 2026-10-29） | **只差 Jason 一个签字** ⇒ **不需 G4 落码** |
+| `DRIFT-MSGAPI-012` / `FB-G2-04` / `DRIFT-TASK-API-004`（`Content-Type` 空格） | 共享面**已有登记面**（`docs/Intentional_Deviations/hot/api.md:230`「残余：那个空格（**已接受，不新签**）」） | **不需要新签字**；**待办 = 销账**（落 `docs/Intentional_Deviations/**` ＋ 派生层重算 ⇒ **走 g4**） |
+
+⇒ ⇒ 6 条里：**0 条需 G4 落码** · **2 条需 Jason 签字/接受** · **2 条需共享面销账**。
+
+### 18.5 G2 自跑的门禁 / 回归 ＋ **它自报并修掉的一个坑**
+
+· **守门 8 道全 EXIT=0**（`check-wave-coupling` · `check-wave-lane-ownership` · `check-phasegoal-lanes` · `check-ledger-count-pointers` · `derive-stage1 --check` · `check-pointer-consistency`（新增 0 条漂移 · 存量例外 237 不变）· `gen-identity-groups --check` · `check-agents-budget`）
+· **回归**（我域 9 模块 `-am`）：`MVN_EXIT=0` · **BUILD SUCCESS** · surefire XML **1360 条 / 0F / 0E / 0S**；逐模块四项与落码前基线**全等**（like-api 113 · like-common 18 · like-rpc 163 · message-api 122 · message-common 21 · message-rpc 115 · task-api 144 · task-rpc 137 · users-common 39）⇒ **零行为变更**
+· ⚠️ **G2 自报的坑（已自修）**：初稿把核对日期写成 **`2026-11-02`**（系统当天 = **2026-11-01**）⇒ `check-agents-budget` 判「未来日期」⇒ **6 处状态会被按 `UNKNOWN` 处理** ⇒ 已全量改回当天（**8 处 · 零行位移**）⇒ 复跑 EXIT=0
+⇒ ⇒ 与本层 §十六 的坑同族：**「未来日期」会让那一轮所有结论一起归零**，而它长得最像证据 ⇒ ⇒ **写台账时核对日期 = 实际执行那天**。
+
+### 18.6 门禁终态（合入后 · 全仓 46 个 `check-*.py` 枚举）
+
+| 类别 | 数量 | 明细 |
+|---|---|---|
+| ✅ **绿** | **41** | 含派生层 `--check` · 指针一致性 · `check-anchors` · phasegoal 一族 |
+| 🔴 **真红** | **3** | **favorite ×3**（主干自带 · 从来不在任何人的门禁清单里） |
+| ⚠️ **未评估（不是红）** | **2** | `check-ddl-static`（缺 Go 侧 PG 库）· `check-merge-tree-content`（缺 lane ref 参数） |
+
+⇒ ⇒ **无新红** · G2 合入未引入回归。
+
+### 18.7 剩余项与**待 Jason 拍板**
+
+· **G2 域内真开放 16 条**（Pitfalls 踩坑记录 52 条 `stage=N/A` ⇒ 不算待实现项）—— 本轮覆盖 6 条 · **余 10 条**（like 8 条含 2 条 `⏳ 未签字` · message 2 条）⇒ **C/D 类 · 阶段二承接** · 下一轮领活
+· 🔴 **G2 域内待签字合计 3 条** = `DRIFT-MSGAPI-011` ＋ like 域 2 条（`SD-2026-10-23-09` / `SD-2026-10-24-11` · 落 `docs/Intentional_Deviations/like/api.md:54` / `:133`）⇒ ⇒ **签字归 Jason，本 lane 不代签**
+· **G2 → g4 的 3 条支援请求**（已 accepted）：① `docs/DRIFT/_cross/grading/W6.md:24` 的 `DRIFT-MSG-012` 重定级（C⇒D）+ 派生层重算 ② `DRIFT-MSGAPI-012` + `DRIFT-TASK-API-004` 的**销账**（落 `docs/Intentional_Deviations/**`）③ 观测口暴露路径是否逐路径对齐的统一口径
+
+### 18.8 通信拓扑合规
+
+G2 全程**只发 g4 与派工方两封** ⇒ **未联系 g1/g3**、未替别的 lane 回话 ⇒ 合规（§15.1 的拓扑）。
