@@ -51,16 +51,16 @@
 
 ---
 
-### ⏳ SD-2026-10-23-09（候选）：worker 池饱和时的**裸 503** ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**
+### ✅ SD-2026-10-23-09：worker 池饱和时的**裸 503** ｜ **状态（核对日期 2026-11-01）：✅ 仍成立**
 
 > **唯一别名**：`SD-2026-10-23-09@like`（⚠️ **撞号事实**：`SD-2026-10-23-09` 在 [`docs/Intentional_Deviations/common/deadline.md`](../common/deadline.md) 只是**引用本条**（不是另一条偏离）⇒ **不构成跨域撞号**；为唯一定位仍加域内别名）
-> **签字复核（核对日期 2026-10-29）**：**仍成立（候选仍待签字）** —— 被描述的行为**今天仍存在**：worker 池饱和时仍抛 `RejectedExecutionException` 并被转成**裸 503**（无业务码、无 envelope） · **现行态 = ⏳ 未签字**（本条是**候选**、用户尚未拍板 ⇒ 不计入已签字计数）
+> **签字复核（核对日期 2026-11-01）**：**仍成立（2026-11-01 用户拍板签字）** —— 被描述的行为**今天仍存在**：worker 池饱和时仍抛 `RejectedExecutionException` 并被转成**裸 503**（无业务码、无 envelope） · **现行态 = ✅ 已签字**（2026-11-01 用户拍板 ⇒ **计入**已签字计数）
 > **依据**：`service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:154`（`static final int MAX_HTTP_WORKERS = 512`）+ `:369`（`catch (RejectedExecutionException saturated)`）+ `:193`（注释「饱和 ⇒ 抛 RejectedExecutionException，由调用点转成**裸 503**」）⇒ **证据强度：源码行号（静态）**。
 
 
 | 项 | 值 |
 |---|---|
-| 状态 | ⏳ **待签字**（台账 §7.2 建议登记，尚未获批） |
+| 状态 | ✅ **已签字**（**2026-11-01** 用户拍板：「签字」）—— **决策，不是缺陷** |
 | 原台账编号 | DRIFT-LIKEAPI-022（OBSERVABLE DIFFERENCE，🟢 LOW） |
 | 组件 | `service/like/like-api`（全部 6 个端点） |
 | 性质 | **有意偏离**（RAG 独有的实现能力，Go 侧**不存在对应物**） |
@@ -130,16 +130,16 @@
 ---
 
 
-### ⏳ SD-2026-10-24-11（候选）：网关层拒绝计数 —— **Java 侧比 Go 侧多暴露一个指标** ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**
+### ✅ SD-2026-10-24-11：网关层拒绝计数 —— **Java 侧比 Go 侧多暴露一个指标** ｜ **状态（核对日期 2026-11-01）：✅ 仍成立**
 
 > **唯一别名**：`SD-2026-10-24-11@like`（无跨域撞号（该编号只出现在本文件）⇒ 为唯一定位仍加域内别名）
-> **签字复核（核对日期 2026-10-29）**：**仍成立（候选仍待签字）** —— 被描述的行为**今天仍存在**：RAG 侧仍多暴露一个 Go 侧没有的 Prometheus 指标 `like_api_reject_total`（且 Prometheus 渲染成 `like_api_reject_total_total`） · **现行态 = ⏳ 未签字**（本条是**候选**、用户尚未拍板 ⇒ 不计入已签字计数）
+> **签字复核（核对日期 2026-11-01）**：**仍成立（2026-11-01 用户拍板签字）** —— 被描述的行为**今天仍存在**：RAG 侧仍多暴露一个 Go 侧没有的 Prometheus 指标 `like_api_reject_total`（且 Prometheus 渲染成 `like_api_reject_total_total`） · **现行态 = ✅ 已签字**（2026-11-01 用户拍板 ⇒ **计入**已签字计数）
 > **依据**：`service/like/like-api/src/main/java/com/rag/like/like/api/metrics/LikeApiMetrics.java:75`（`Counter.builder("like_api_reject_total")`）+ `:17-20`（注释说明渲染形态）⇒ **证据强度：源码行号（静态）**。
 
 
 | 项 | 值 |
 |---|---|
-| 状态 | ⏳ **待签字**（2026-10-24 台账审计时提出，尚未获批） |
+| 状态 | ✅ **已签字**（**2026-11-01** 用户拍板：「签字」）—— **单向增强 · 是决策不是缺陷** |
 | 原台账编号 | **无**（此前台账**完全没有提到** `LikeApiMetrics`）—— 是审计补录时挖出来的 |
 | 组件 | `service/like/like-api`（`metrics/LikeApiMetrics`） |
 | 性质 | **有意偏离（单向增强）** —— Java 的**指标可见面比 Go 大**，不是缺陷 |
@@ -202,8 +202,8 @@
 
 | 编号 | 归属 | 优先级 | 阻断阶段一 | 依据 | 核对日期 |
 |---|---|---|---|---|---|
-| SD-2026-10-24-11 | C | P3 | 否 | Go `service/like/api/internal/metrics/metrics.go:20`（`prometheus.Register(ApiRejectCount)`，**在 `InitMetrics()` 内** `:17`）＋ `service/like/api/likecenter.go:28`（`main()` 里**没有** `metrics.InitMetrics()` 调用 ⇒ 全 `service/like/api` 树内该函数**只有定义、无调用点** ⇒ 该 CounterVec **从未注册进 Prometheus 默认 registry** ⇒ Go 的 `:9099/metrics` **看不到** `like_api_reject_total`；⚠️ 对照：follow/hot/message 的 api main 都调了，如 `service/follow/api/followcenter.go:33` ⇒ like 域是**唯一漏调**）。RAG `service/like/like-api/src/main/java/com/rag/like/like/api/metrics/LikeApiMetrics.java:75`（`Counter.builder("like_api_reject_total")`）＋ `:79`（`.register(registry)` ⇒ **声明即注册** ⇒ `/actuator/prometheus` 能看到）⇒ ⇒ **差异仍成立**（Java 侧比 Go 侧**多暴露一个指标**）。**C**：本条在 `docs/Intentional_Deviations/like/api.md` 里仍是 **⏳ 未签字候选**（核对日期 2026-10-29）⇒ **尚未成为决策** ⇒ 按问题定级、**不归 D**；处置 = 阶段二走签字登记（Go 侧是漏调 ⇒ 修回去 = 倒退），差异本身不影响任何业务判定 ⇒ **P3**、不阻断阶段一 | 2026-10-30 |
-| `SD-2026-10-23-09` | C（阶段 2 最终工程建设项 · 未签字候选 ⇒ **不得自动归 D**） | P2 | 否 | Go `service/like/api/**` 树内 `maxConns`／`MaxConns`／`Semaphore`／`worker` 命中数 = **0**（2026-10-30 G2 实测 `grep -rn`）⇒ Go 侧每请求一个 goroutine（初始栈 2KB）、**无上限** ⇒ **不存在**「worker 池饱和」这个事件；⚠️ 对照：Go 侧**确实有**「过载 ⇒ 拒绝」这条语义，只是载体不同 —— `service/like/api/likecenter.go` 用 go-zero `rest.WithMiddlewares` 的限流/熔断中间件拒绝，**不是**线程池饱和。RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:154`（`static final int MAX_HTTP_WORKERS = 512`）＋ `:181`（池按 512 建）＋ `:193`（注释「饱和 ⇒ 抛 `RejectedExecutionException`，由调用点转成**裸 503**」）＋ `:369`（`catch (RejectedExecutionException saturated)` ⇒ 容量拒绝路径）⇒ ⇒ **差异仍成立**（RAG 侧存在 Go 侧**结构上不存在**的「worker 池饱和 ⇒ 裸 503（无 body、无 Content-Type、无业务码、无 envelope）」这个可观察面）；⚠️ **但两侧的「过载 ⇒ 拒绝」大方向同向** ⇒ RAG 多出来的是**拒绝的载体与形状**，不是「Go 会接受而 RAG 会拒绝」⇒ ⇒ **不改回去 ⇒ 不属 DRIFT**（§5.3b 判据）⇒ 按 §10 **按问题本身定级**：本条在 `docs/Intentional_Deviations/like/api.md` 里仍是 **⏳ 未签字候选**（核对日期 2026-10-29）⇒ **尚未成为决策** ⇒ 按纪律 5「已签字偏离 ⇒ 是决策不是缺陷」的**反面** ⇒ **不得自动归 D** ⇒ 归 **C**；**P2**（只在「高并发 ＋ 下游卡死」这个窄窗口可观察；触发窗口窄 —— 512 远大于 Tomcat 默认 `max-threads`（200）⇒ 正常流量不该触发；且**不影响任何业务判定**、不涉及数据一致性或安全边界 ⇒ **不命中阶段一 P0 九条** ⇒ **不阻断阶段一**）；**处置 = 阶段二走签字登记**（把它从「候选」升为「决策」）⇒ **本轮不推拍板、不改代码**（§5.3b「登记的**登记**本身就是交付物」⇒ 不把已登记条目打包推给用户逐条拍板） | 2026-10-30 |
+| SD-2026-10-24-11 | D | P3 | 否 | Go `service/like/api/internal/metrics/metrics.go:20`（`prometheus.Register(ApiRejectCount)`，**在 `InitMetrics()` 内** `:17`）＋ `service/like/api/likecenter.go:28`（`main()` 里**没有** `metrics.InitMetrics()` 调用 ⇒ 全 `service/like/api` 树内该函数**只有定义、无调用点** ⇒ 该 CounterVec **从未注册进 Prometheus 默认 registry** ⇒ Go 的 `:9099/metrics` **看不到** `like_api_reject_total`；⚠️ 对照：follow/hot/message 的 api main 都调了，如 `service/follow/api/followcenter.go:33` ⇒ like 域是**唯一漏调**）。RAG `service/like/like-api/src/main/java/com/rag/like/like/api/metrics/LikeApiMetrics.java:75`（`Counter.builder("like_api_reject_total")`）＋ `:79`（`.register(registry)` ⇒ **声明即注册** ⇒ `/actuator/prometheus` 能看到）⇒ ⇒ **差异仍成立**（Java 侧比 Go 侧**多暴露一个指标**）。**D**：**2026-11-01 用户已签字**（本档 `SD-2026-10-24-11@like`）⇒ **决策不是缺陷** ⇒ 归 D；⚠️ **原判 C 的唯一理由** = 「本条仍是 **⏳ 未签字候选** ⇒ **尚未成为决策** ⇒ **不归 D**；处置 = 阶段二走签字登记」——⇒ **该前提已随 2026-11-01 签字而消失** ⇒ 改判 **D**（Go 侧是漏调 ⇒ 修回去 = 倒退，差异本身不影响任何业务判定 ⇒ **P3**、不阻断阶段一） | 2026-10-30 |
+| `SD-2026-10-23-09` | D（**2026-11-01 用户已签字** ⇒ 决策不是缺陷 ⇒ 不属阶段 2 工程项；原判 C 的理由 = 「未签字候选 ⇒ 不得自动归 D」已随签字消失） | P2 | 否 | Go `service/like/api/**` 树内 `maxConns`／`MaxConns`／`Semaphore`／`worker` 命中数 = **0**（2026-10-30 G2 实测 `grep -rn`）⇒ Go 侧每请求一个 goroutine（初始栈 2KB）、**无上限** ⇒ **不存在**「worker 池饱和」这个事件；⚠️ 对照：Go 侧**确实有**「过载 ⇒ 拒绝」这条语义，只是载体不同 —— `service/like/api/likecenter.go` 用 go-zero `rest.WithMiddlewares` 的限流/熔断中间件拒绝，**不是**线程池饱和。RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:154`（`static final int MAX_HTTP_WORKERS = 512`）＋ `:181`（池按 512 建）＋ `:193`（注释「饱和 ⇒ 抛 `RejectedExecutionException`，由调用点转成**裸 503**」）＋ `:369`（`catch (RejectedExecutionException saturated)` ⇒ 容量拒绝路径）⇒ ⇒ **差异仍成立**（RAG 侧存在 Go 侧**结构上不存在**的「worker 池饱和 ⇒ 裸 503（无 body、无 Content-Type、无业务码、无 envelope）」这个可观察面）；⚠️ **但两侧的「过载 ⇒ 拒绝」大方向同向** ⇒ RAG 多出来的是**拒绝的载体与形状**，不是「Go 会接受而 RAG 会拒绝」⇒ ⇒ **不改回去 ⇒ 不属 DRIFT**（§5.3b 判据）⇒ 按 §10 **按问题本身定级**：**2026-11-01 用户已签字**（本档 `SD-2026-10-23-09@like`）⇒ **决策不是缺陷** ⇒ 归 **D**（⚠️ **原判 C 的理由** = 「仍是 ⏳ 未签字候选 ⇒ 尚未成为决策 ⇒ **不得自动归 D**」——⇒ **该前提已随签字消失** ⇒ 改判 D）；**P2**（只在「高并发 ＋ 下游卡死」这个窄窗口可观察；触发窗口窄 —— 512 远大于 Tomcat 默认 `max-threads`（200）⇒ 正常流量不该触发；且**不影响任何业务判定**、不涉及数据一致性或安全边界 ⇒ **不命中阶段一 P0 九条** ⇒ **不阻断阶段一**）；**处置 = 已完成**（**2026-11-01 用户拍板签字**：候选 ⇒ 决策 ⇒ 归 D）⇒ **不改代码** | 2026-10-30 |
 
 ## 阶段归属定级附录（2026-11-01 · G2 lane · 观测口形态面 · **D 类 · 不改**）
 

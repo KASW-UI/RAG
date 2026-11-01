@@ -270,6 +270,8 @@ rpc 之间的 rpc→rpc：message-rpc → user-rpc, admin-rpc · like-rpc → me
 **PASS = 20 / FAIL = 0 / TOTAL = 20**
 ⇒ **4 个服务没有 ③ 是模块形态决定的（逐条已复核依赖与 yml），不是漏测** ⇒ 它们的判据降为 ①②。
 
+🟢 **【2026-11-01 · Round 6 收口轮 · 复测】** —— **本表的三判据在基线 `2d70a4cc` 上复跑仍是 `PASS=20 / FAIL=0 / TOTAL=20`（EXIT=0）**（**20 个服务全部真起 · 宿主机 `java -jar` + `.env.host`**）⇒ **阶段一收口时点未回退**；逐条读数 + 起栈踩坑（**启动顺序竞争** · **8082 被外部进程占用** · **`NACOS_ADDR` 融合写法已由 `R1-ENV-001` 修掉**）+ **真 Tomcat 状态行运行时字节（10/10 无 reason phrase）** ⇒ 详见 [`docs/RoundPlan/round-06/regression-report.md`](../round-06/regression-report.md) **§十**。
+
 ### §7.3 两条跨服务链路（**有响应，不是连接失败**）
 
 **链路 A（api → rpc → PG · 含 rpc→rpc）** ——

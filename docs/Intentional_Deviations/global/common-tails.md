@@ -433,11 +433,11 @@ req := r.WithContext(ctx)
 
 ---
 
-## SD-2026-10-25-CAND-14 · 🏷 **待签字候选** —— HTTP 状态行**缺 reason phrase**（Go `HTTP/1.1 200 OK` / RAG `HTTP/1.1 200`） ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**
+## SD-2026-10-25-CAND-14 · ✅ **已签字** —— HTTP 状态行**缺 reason phrase**（Go `HTTP/1.1 200 OK` / RAG `HTTP/1.1 200`） ｜ **状态（核对日期 2026-11-01）：✅ 仍成立**
 
 | 项 | 值 |
 |---|---|
-| 状态 | 🏷 **候选，建议签** —— **未签字**（登记完就躺着，**不升级为拍板**） |
+| 状态 | ✅ **已签字**（**2026-11-01** 用户拍板：「签字」）—— **决策，不是缺陷**（RFC 7230 / RFC 9112 允许省略 reason phrase ⇒ 客户端按状态码解析 ⇒ 业务语义无影响） |
 | 性质分类 | 🔴 **框架限制（容器层）** —— 想对齐但**语言/框架做不到** |
 | 组件 | **Tomcat 全体** ⇒ **10 个 api 模块全部适用**（不是某个域的） |
 | 对应的 DRIFT 条目 | **T-7**（[`docs/DRIFT/global/common-tails.md`](../../DRIFT/global/common-tails.md) §一·T-7）· 另见 [`docs/DRIFT/global/_README.md`](../../DRIFT/global/_README.md) §三 域表行 |
@@ -487,6 +487,7 @@ req := r.WithContext(ctx)
 ### 守门
 
 ⚠️ **本条没有守门，也不可能有** —— 状态行由容器写，**应用层没有任何 API 能改它** ⇒ 无从断言。
+🟢 **但「运行时字节」这一层可在**真容器在跑时**取证**（2026-11-01 已做：20 服务真起 ⇒ 裸 socket 逐个取状态行原始字节 ⇒ **10/10 = 「状态码 + 一个空格」· 无 reason phrase**）⇒ ⇒ **本条的运行时字节证据已具备**（仍**不是**常跑守门 ⇒ 容器不在时无从复测）。
 
 ### 留痕位置
 
@@ -501,12 +502,12 @@ req := r.WithContext(ctx)
 | 项 | 值 |
 |---|---|
 | **唯一别名** | `SD-2026-10-25-CAND-14@global` |
-| **状态** | 🏷 **候选 · 未签字**（登记完就躺着，**不升级为拍板**）—— 与 `_INDEX.md` 的「CAND 族 **14 条**」口径**一致**（本条不计入「已签字 48 条」） |
-| **核「被签字描述的那个行为现在还存在吗」** | 🟡 **源码级成立 · 运行时字节本轮未复测 ⇒ 待核实**<br>① **RAG 侧仍不产生 reason phrase** —— RAG 侧**没有任何代码**能补它（状态行由容器写）⇒ 源码级结论不变；② **容器层仍是省略**（Tomcat `Http11OutputBuffer` 的「The reason phrase is optional but the space before it is not. Skip sending the reason phrase」原文） |
-| **证据（2026-10-29）** | RAG 侧**零命中**：实测 `grep -rn 'reason phrase\|status_line\|StatusLine\|HTTP/1.1 200' tools/` ⇒ 仅命中 `tools/api-full-parity-probe/users/http1xx.py`（**该文件是 1xx interim 跳过器，与 reason phrase 无关**）⇒ ⇒ **仓内既无实现也无守门** · 容器侧出处沿用原档（`tomcat-embed-core 11.0.24` 的 `org/apache/coyote/http11/Http11OutputBuffer.java:358-374`） |
-| **🔴 缺口登记（待核实）** | ⚠️ **本条没有任何机器守门** ⇒ 「是否仍成立」**只能靠源码推理**⇒ 本轮**未跑真 Tomcat 取字节** ⇒ **不写「已复测」** ⇒ 标 **待核实（缺真容器字节复测）** |
+| **状态** | ✅ **已签字**（2026-11-01 用户拍板）—— 与 `_INDEX.md` 的「CAND 族 15 条」口径**一致**（本条**计入**「已签字」合计） |
+| **核「被签字描述的那个行为现在还存在吗」** | 🟢 **成立（源码级 + 运行时字节双证 · 2026-11-01 复测）**<br>① **RAG 侧仍不产生 reason phrase** —— RAG 侧**没有任何代码**能补它（状态行由容器写）⇒ 源码级结论不变；② **容器层仍是省略**（Tomcat `Http11OutputBuffer` 的「The reason phrase is optional but the space before it is not. Skip sending the reason phrase」原文）；③ 🆕 **运行时字节已复测**（2026-11-01 · 真 Tomcat · **10 个 api 组件逐个裸 socket 取状态行原始字节**）⇒ **10/10 全部 = 「状态码 + 一个空格」**、**无 reason phrase** ⇒ ⇒ **CAND-14 的描述逐字成立** |
+| **证据（2026-10-29 源码级 · 2026-11-01 运行时字节）** | **源码级**：RAG 侧**零命中**：实测 `grep -rn 'reason phrase\|status_line\|StatusLine\|HTTP/1.1 200' tools/` ⇒ 仅命中 `tools/api-full-parity-probe/users/http1xx.py`（**该文件是 1xx interim 跳过器，与 reason phrase 无关**）⇒ ⇒ **仓内既无实现也无守门** · 容器侧出处 = `tomcat-embed-core 11.0.24` 的 `org/apache/coyote/http11/Http11OutputBuffer.java:358-374`（`:372-374` 的原文注释）；<br>**运行时字节（2026-11-01 · 本轮新取证）**：**20 个服务全部真起**（三判据 **PASS=20 / FAIL=0 / TOTAL=20** · `bash docs/RoundPlan/round-01/verify-all-services.sh` ⇒ **EXIT=0**）⇒ 趁真 Tomcat 在跑，对 **10 个 api 组件**（`user-api` 49900 · `admin-api` 8890 · `message-api` 8892 · `like-api` 18887 · `task-api` 18886 · `article-api` 8889 · `comment-api` 8888 · `favorite-api` 18893 · `follow-api` 8891 · `hot-api` 18897）逐个发**裸 socket** 的 `GET /actuator/health HTTP/1.1` ⇒ 取回**状态行原始字节**：<br>**10/10 = `HTTP/1.1 200 `**（9 个 200 端点）**+ `HTTP/1.1 404 `**（`task-api` 无 actuator ⇒ 404）⇒ **hex 逐字 = `48 54 54 50 2f 31 2e 31 20 32 30 30 20`**（`HTTP/1.1 200` + **一个空格 0x20** + **CRLF**）⇒ ⇒ **「状态码 + 一个空格 + CRLF」逐字节确认** ⇒ ⇒ **本条「RAG 侧状态行无 reason phrase」的描述 = 真 Tomcat 运行时事实**（不再是源码推理） |
+| **🔴 缺口登记（已闭合 · 2026-11-01）** | ⚠️ **本条仍然没有任何机器守门**（状态行由容器写，**应用层无任何 API 能改它** ⇒ 无从断言）⇒ **这一格仍然开着**；<br>但 🟢 **「运行时字节未复测」那一格已闭合** —— 2026-11-01 用**真 Tomcat**（20 服务真起）**逐个取字节** ⇒ **10/10 无 reason phrase** ⇒ ⇒ **「待核实（缺真容器字节复测）」的标记已撤销** ⇒ **现行态 = ✅ 已签字 · 差异成立（有运行时字节证据）** |
 | **🟢 2026-10-29 补充（W-F lane · 独立复核）—— 容器侧出处本轮**真的解出来核了**（原档只是「沿用」）** | ⚠️ **原写「容器侧出处沿用原档（`tomcat-embed-core 11.0.24` 的 `org/apache/coyote/http11/Http11OutputBuffer.java:358-374`）」** ⇒ **现行态 = 该出处已独立核对通过**（**行号**从 `358-374` 收窄为 **`:372-374`**）：<br>取自 **`~/.m2/repository/org/apache/tomcat/embed/tomcat-embed-core/11.0.24/tomcat-embed-core-11.0.24-sources.jar`**（**jar 内第三方源码，不在本仓树内**）⇒ `org/apache/coyote/http11/Http11OutputBuffer.java` 的<br>**`:370`** `headerBuffer.put(Constants.SP);`<br>**`:372-374`** `// The reason phrase is optional but the space before it is not. Skip` / `// sending the reason phrase. Clients should ignore it (RFC 7230) and it` / `// just wastes bytes.`<br>**`:376`** `headerBuffer.put(Constants.CR).put(Constants.LF);`<br>⇒ ⇒ **逐字节确认：Tomcat 只写「状态码 + 一个空格 + CRLF」，不写 reason phrase** ⇒ ⇒ **「RAG 侧状态行无 reason phrase」这个描述成立** ⇒ ⇒ **「源码级成立」这一格由「沿用原档」升级为「独立核对通过」**；<br>⚠️ **但「运行时字节」那一格仍然开着** ⇒ **待核实（缺真容器字节复测）** 的定性**不变**（本轮**未跑真 Tomcat** ⇒ **不写「已复测」**）· 核对日期 2026-10-29 |
-| **结论** | **状态不变**（仍是 🏷 候选 · 未签字）· 描述**完整** ⇒ 无需追加订正 |
+| **结论** | ✅ **状态已改判**（2026-11-01 用户拍板签字：🏷 候选 ⇒ ✅ 已签字）· 描述**完整** ⇒ 无需追加订正 |
 ## SD-2026-10-25-CAND-15 · 🏷 **待签字候选** —— 「方法不匹配」这个出口，RAG 比 Go **多带**一个 `Traceparent` ｜ **状态（核对日期 2026-10-29）：⏳ 未签字**
 
 | 项 | 值 |
