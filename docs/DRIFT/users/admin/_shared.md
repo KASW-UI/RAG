@@ -208,7 +208,7 @@ Go → Spring Boot 语义一致性审计 `service/users/admin`（13 RPC + 13 HTT
 
 | # | 问题 | 归属 | 出处 |
 |---|---|---|---|
-| **U-1** | 🔴 `users/user` 的 **DRIFT-USERRPC-V-001 结论被证伪** ⇒ user-rpc 的「status 为 null ⇒ fail-closed 抛 INTERNAL」**与 Go 相反** | users/user owner | `admin/rpc.md` §3 |
+| **U-1** | ✅ **已闭合（2026-11-01 · G1 lane 回写）** —— `users/user` 侧的 **DRIFT-USERRPC-V-001 已于 2026-10-24 第二轮修复闭环**（`docs/DRIFT/users/user/rpc.md:305` = 「V-001 **2026-10-24 已闭环**：Go 的 GORM 把 `status IS NULL` 读成 **0** 且不报错 ⇒ **两侧都是 `status=0` 登录成功** ⇒ 行为一致」；`:473` = 标题已改「✅ **已修（第二轮）**」）⇒ ⇒ **原写「与 Go 相反」是当时的中间态 ⇒ 现已不成立** ⇒ ⇒ 代码面佐证：`service/users/user/user-rpc/src/main/java/com/rag/users/user/rpc/service/UserDomainService.java:186-201`（明写「此处曾有一道『status 为 null ⇒ 抛 INTERNAL』的 fail-closed 守卫 … **⇒ 守卫已删除**」） | ~~users/user owner~~ **已由 users 域闭环** | `admin/rpc.md` §3 · 逐层证据链见 [`user/rpc.md` 的 V-002 订正块](../user/rpc.md) |
 | **U-2** | 🟡 **2026-10-27 订正：定性为「DDL 层差异 · 行为层零差异」⇒ 建议保持 RAG NOT NULL ⇒ 落点无动作**（Go 读 NULL ⇒ **0** 且不报错；RAG NOT NULL ⇒ 读不到 NULL ⇒ 也是 0 ⇒ **可观察结果相同**）⇒ ⚠️ **原写「🔴 `NOT NULL` 与 Go 的可空不一致」只是 DDL 层陈述，未带「行为层零差异」这一层** ⇒ 且**放开可空反而制造新漂移**（RAG `callSettersOnNulls=false` ⇒ 读出 null ≠ Go 的 0）⇒ ⇒ **不需要联合裁决**；⚠️ **销号签字不在 G1 写权面** ⇒ 仍待 G4 / 合并收口执行者确认 | users-common owner（**但落点无动作**） | `admin/rpc.md` §3 · 逐层证据链见 [`user/rpc.md` 的 V-002 订正块](../user/rpc.md) |
 | **U-3** | ✅ **已修**（2026-10-23 修复轮 §1.1）：`admin_admin.extra_info` 已由 `jsonb` 改为 `text`（对齐 Go 的 `serializer:json`），配套新增 `JsonTextTypeHandler`（text 列专用，**不复用** `JsonbTypeHandler`） | ~~users-common owner~~ **本域已改** | `admin/rpc.md` 修复轮 §1.1 |
 | **U-4** | ✅ **已修**（2026-10-23 修复轮 §1.2）：`admin_admin` / `admin_invite` 的 **6 个时间列**已改为 `timestamptz`，实体侧同步改 `OffsetDateTime` | ~~users-common owner~~ **本域已改** | `admin/rpc.md` 修复轮 §1.2 |

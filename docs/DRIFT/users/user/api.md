@@ -1970,7 +1970,7 @@ Must Preserve: 「Redis 不可用 ⇒ **fail-open 放行**」（Go 的 `err == n
 | **D-011** | 代码修复 | `9e009e5` | `修 DRIFT-USERAPI-011：user-api 缺熔断异常映射 ⇒ 500+5001（Go 应为 200+1015）` | — |
 | **D-012** | 代码修复 | `2178fb4` | `修 DRIFT-USERAPI-012：降载 RT 统计口径（Go 是浮点毫秒+ceil，RAG 是整型截断+至少记 1）` | — |
 | **D-014** | 代码修复 | `ea8f01e` | `fix(users/user): 修 DRIFT-USERAPI-014（Redis 断连时 Lettuce 排队 ⇒ 撞 HTTP 3s 预算 ⇒ 503）⇒ 闭环 UNRESOLVED-004` | 顺带闭环 `UNRESOLVED-004` |
-| **D-015** | 🔴 **未修** | — | — | 待拍板（**仅 api 侧**；rpc 侧经三形态直连实测无漂移 ⇒ 见 [`user/rpc.md` 第十一轮](./rpc.md)） |
+| **D-015** | ✅ **已闭合（2026-11-01 · G1 lane 回写）** —— 原写「🔴 未修 · 待拍板」**是未同步的镜像行**：本文件 `:626` 已记 `DRIFT-USERAPI-015` **2026-10-27 正式关闭**（判据 = **复现失败**：dns 形态 24 次探测两侧都 200；blackhole 形态两侧都 503 ⇒ **两侧同形** ＋ **无可执行修法**）⇒ ⇒ **两侧当前都 fail-open** ⇒ 行为层零差异 ⇒ **无落码动作**（保留重开触发条件） | — | — | ✅ **两侧同形**（Go `service/user/user/api/internal/middleware/checkblacklistmiddleware.go:36` = `if err == nil && exists` ⇒ Redis 故障 fail-open 放行；RAG `service/users/user/user-api/src/main/java/com/rag/users/user/api/interceptor/JwtAuthInterceptor.java:180-181` = `hasKey` ＋ `catch (Throwable t)` ⇒ **同样 fail-open**）⇒ **本行与 `:3741` 逐字一致** ⇒ 非新结论 |
 
 ⚠️ **「销账方式」这一列不能省**：本域的销账**不是一种形态** —— 「代码修复」（D-001/D-002/D-003/D-005/D-006/D-011/D-012/D-014）
 · 「证伪关闭」（D-004/D-008）· 「签字保留」（D-007/D-009①/D-010）· 「未修」（D-015）
