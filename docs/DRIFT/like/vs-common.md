@@ -2038,3 +2038,28 @@ git diff --stat -- service/ # ⇒ 0 行
 · **剪除** = `50f2d51f`（提交信息写明「**代 G4 lane 落码**」）⇒ ⇒ **落笔方 = 合并收口执行者代落**；**决策方仍是共享层写权方**（共享层门内注释原文写「**本层补剪**」）⇒ ⇒ ⇒ **与 G3 那批 4 条（`3aa9accd` · 同一个 merge commit 里剪 ⇒ 主线零红窗）不是同一笔** ⇒ ⇒ **两批的归属不可混成一笔**（**这是 G4 lane 2026-11-01 来信当面更正的点**）。
 · ⚠️ **红窗事实**：因为**域侧落码与剪除分离** ⇒ ⇒ 主线**出现过一次红窗**（共享层门判据④「例外失效检测」会红：已登记点位不再出现 ⇒ 守门要求剪）⇒ ⇒ **教训：剪除必须与落码同一时刻**。
 · **现值（实测，非转述）**：共享层 `GoStyleClientCallTimeoutSingleSourceGateTest` 的 `KNOWN_INLINE_CAP_CALL_SITES` = **1 条**（`article-api`）＋ 门内注释明写「可收敛 0 条 · 已全部剪净 · **7 → 3 → 1**」⇒ ⇒ ⚠️ **【订正 · 2026-11-01 · 共享层写权方来信 ＋ 本 lane 二次实测】上面那句「那唯一一条不许剪（组件级 cap 表达不了）⇒ 本域不动它」的**前提已消失**（原句保留供追溯）** —— 实测 `service/article/article-api/src/main/resources/application.yml` **已配** `outbound-deadline.cap-millis-by-service:`（`article.ArticleService: 70000` ＋ `user.UserService: 2000`）⇒ ⇒ **两个出向方向都已有硬上界** ⇒ ⇒ 「组件级一个值表达不了」不再是阻塞 ⇒ ⇒ 域侧内联副本（`article-api/.../UserRpcClient.java:58` 的 `CLIENT_TIMEOUT_MILLIS = 2000L` ＋ `:83-87` 的 `min(remaining, 2000)` + `withDeadlineAfter`）**成冗余** ⇒ ⇒ **技术上可剪** ⇒ ⇒ ⚠️ **但那条落点不在本域**（`article` 域 = **G3 面**；守门例外集 = **G4 面**）⇒ ⇒ **本域仍不动它**（本 lane 无写权）⇒ ⇒ ⚠️ **前置条件两条**：① **运行时证据** ② **与 G3 跨层同一次提交**（先删内联不剪例外 ⇒ 判据④「例外失效检测」必红 ⇒ **红线窗**）⇒ ⇒ 已由共享层写权方转派 G3 ＋ G4 同批 ⇒ ⇒ 详情见共享层台账 §4.19.67 第三节。
+
+## 阶段归属定级附录（2026-11-01 · G2 收官轮 · 观测口「端口 + 路径」形态面登记）
+
+> 本节由 G2 lane（`align/g2-message-like-task`）追加 · **只追加，不改任何既有结论**。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层的**两个扫描器**（条目扫描 / 定级表扫描）都**不读它**
+> （保留区机制，`tools/ledger-derive/derive-stage1.py:594` `KEEP_OUT_RE`）⇒ **零投影影响**。
+> ⚠️ **口径由 hub（g4）判**（2026-11-01）：**不改 + 登记为 D 类残余差异**；
+> 理由 = 观测口路径/端口属**部署与可观察性形态**，不进入业务行为契约
+> （AGENTS.md §3「差异只允许出现在表达层」⇒ 本项**本来就是表达层**）。
+
+### 两侧观测口矩阵（逐组件实测 · 核对日期 2026-11-01）
+
+| 组件 | Go 侧观测口 | RAG 侧观测口 | 端口 | 路径 | 判定 |
+|---|---|---|---|---|---|
+| `like-rpc` | go-zero devserver **9098**（`service/like/rpc/etc/like.yaml:19-25`） | Tomcat + Actuator **9098**（`service/like/like-rpc/src/main/resources/application.yml:265-266`） | ✅ **一致** | Go `/metrics`·`/healthz` ↔ RAG `/actuator/prometheus`·`/actuator/health`（RAG `:401-418`） | **D 类 · 不修**（端口一字不差 ⇒ 抓取侧**只改 path**） |
+| `like-api` | devserver **9099**（`service/like/api/etc/likecenter.yaml:20-26`） | Actuator 挂**业务端口 18887**（`application.yml:31-33`；`:186-191` 的 `management:` 段**无**独立 `management.server.port`） | 🔴 **不一致** | 同上 | **D 类 · 不修**（端口 + path 两样都要改 ⇒ 改它 = 改**部署形态** ⇒ 跨 8+ 组件 ⇒ 单域不得擅改） |
+
+⇒ **rpc 侧**：观测口**端口逐域一致** ⇒ 抓取侧**只改 path** ⇒ **观测能力不缺** ⇒ 路径差异是
+**Spring Actuator 的表达层形态** ⇒ **不是行为漂移**。
+⇒ **api 侧**：RAG 侧**无独立 `management.server.port`** ⇒ Actuator 挂在**业务端口 18887**
+⇒ ⇒ 抓取配置要改「**端口 + 路径**」两样。
+⇒ ⚠️ **真要对齐 api 侧 ⇒ 落点是各域 `management.server.port` + 端点 `path-mapping`（域侧 yml）**
+⇒ ⇒ 但跨 **8+ 个 api 组件** ⇒ 属**跨组件形态面** ⇒ ⇒ **单域不得擅改**（否则域间不一致）⇒ ⇒ 归**阶段二**。
+⇒ ⇒ **落点归属（hub 实测写权守门）**：`docs/Intentional_Deviations/<域>/` **不在 SHARED**（只有 `_INDEX.md` 在）
+⇒ ⇒ **各域自己的面**；`docs/DRIFT/_cross/**` = 19 个「无人拥有 ⇒ 归合并收口执行者」⇒ ⇒ 本节只落**本域台账**。

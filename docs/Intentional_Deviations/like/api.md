@@ -204,3 +204,25 @@
 |---|---|---|---|---|---|
 | SD-2026-10-24-11 | C | P3 | 否 | Go `service/like/api/internal/metrics/metrics.go:20`（`prometheus.Register(ApiRejectCount)`，**在 `InitMetrics()` 内** `:17`）＋ `service/like/api/likecenter.go:28`（`main()` 里**没有** `metrics.InitMetrics()` 调用 ⇒ 全 `service/like/api` 树内该函数**只有定义、无调用点** ⇒ 该 CounterVec **从未注册进 Prometheus 默认 registry** ⇒ Go 的 `:9099/metrics` **看不到** `like_api_reject_total`；⚠️ 对照：follow/hot/message 的 api main 都调了，如 `service/follow/api/followcenter.go:33` ⇒ like 域是**唯一漏调**）。RAG `service/like/like-api/src/main/java/com/rag/like/like/api/metrics/LikeApiMetrics.java:75`（`Counter.builder("like_api_reject_total")`）＋ `:79`（`.register(registry)` ⇒ **声明即注册** ⇒ `/actuator/prometheus` 能看到）⇒ ⇒ **差异仍成立**（Java 侧比 Go 侧**多暴露一个指标**）。**C**：本条在 `docs/Intentional_Deviations/like/api.md` 里仍是 **⏳ 未签字候选**（核对日期 2026-10-29）⇒ **尚未成为决策** ⇒ 按问题定级、**不归 D**；处置 = 阶段二走签字登记（Go 侧是漏调 ⇒ 修回去 = 倒退），差异本身不影响任何业务判定 ⇒ **P3**、不阻断阶段一 | 2026-10-30 |
 | `SD-2026-10-23-09` | C（阶段 2 最终工程建设项 · 未签字候选 ⇒ **不得自动归 D**） | P2 | 否 | Go `service/like/api/**` 树内 `maxConns`／`MaxConns`／`Semaphore`／`worker` 命中数 = **0**（2026-10-30 G2 实测 `grep -rn`）⇒ Go 侧每请求一个 goroutine（初始栈 2KB）、**无上限** ⇒ **不存在**「worker 池饱和」这个事件；⚠️ 对照：Go 侧**确实有**「过载 ⇒ 拒绝」这条语义，只是载体不同 —— `service/like/api/likecenter.go` 用 go-zero `rest.WithMiddlewares` 的限流/熔断中间件拒绝，**不是**线程池饱和。RAG `service/common/src/main/java/com/rag/common/observability/HttpMiddleware.java:154`（`static final int MAX_HTTP_WORKERS = 512`）＋ `:181`（池按 512 建）＋ `:193`（注释「饱和 ⇒ 抛 `RejectedExecutionException`，由调用点转成**裸 503**」）＋ `:369`（`catch (RejectedExecutionException saturated)` ⇒ 容量拒绝路径）⇒ ⇒ **差异仍成立**（RAG 侧存在 Go 侧**结构上不存在**的「worker 池饱和 ⇒ 裸 503（无 body、无 Content-Type、无业务码、无 envelope）」这个可观察面）；⚠️ **但两侧的「过载 ⇒ 拒绝」大方向同向** ⇒ RAG 多出来的是**拒绝的载体与形状**，不是「Go 会接受而 RAG 会拒绝」⇒ ⇒ **不改回去 ⇒ 不属 DRIFT**（§5.3b 判据）⇒ 按 §10 **按问题本身定级**：本条在 `docs/Intentional_Deviations/like/api.md` 里仍是 **⏳ 未签字候选**（核对日期 2026-10-29）⇒ **尚未成为决策** ⇒ 按纪律 5「已签字偏离 ⇒ 是决策不是缺陷」的**反面** ⇒ **不得自动归 D** ⇒ 归 **C**；**P2**（只在「高并发 ＋ 下游卡死」这个窄窗口可观察；触发窗口窄 —— 512 远大于 Tomcat 默认 `max-threads`（200）⇒ 正常流量不该触发；且**不影响任何业务判定**、不涉及数据一致性或安全边界 ⇒ **不命中阶段一 P0 九条** ⇒ **不阻断阶段一**）；**处置 = 阶段二走签字登记**（把它从「候选」升为「决策」）⇒ **本轮不推拍板、不改代码**（§5.3b「登记的**登记**本身就是交付物」⇒ 不把已登记条目打包推给用户逐条拍板） | 2026-10-30 |
+
+## 阶段归属定级附录（2026-11-01 · G2 lane · 观测口形态面 · **D 类 · 不改**）
+
+> 本节由 G2 lane（`align/g2-message-like-task`）追加 · **只追加，不改任何既有结论**。
+> ⚠️ 本节是**派生层维护的小节** ⇒ 派生层的**两个扫描器**都不读它（保留区机制）⇒ **零投影影响**。
+> ⚠️ **口径由 hub（g4）判**（2026-11-01）：**不改 + 登记为 D 类残余差异**。
+
+### 观测口形态面登记（**D 类 · 不改** · 部署与可观察性形态）
+
+| 项 | 值 |
+|---|---|
+| 性质 | **部署与可观察性形态**（不进入业务行为契约）⇒ AGENTS.md §3「差异只允许出现在表达层」⇒ **本来就是表达层** ⇒ **不是行为漂移** |
+| 判定 | **D 类 · 不改**（口径由 hub（g4）判 · 2026-11-01） |
+| 差异面 | ① **路径**：Go `/metrics`·`/healthz` ↔ RAG `/actuator/prometheus`·`/actuator/health`（Actuator 固定前缀）<br>② **端口**（**仅 api 侧**）：Go api 的 devserver 是**独立端口** ↔ RAG api **无独立 `management.server.port`** ⇒ Actuator 挂**业务端口** ⇒ **端口也不同** |
+| rpc 侧 | **端口逐域一致** ⇒ 抓取侧**只改 path** ⇒ **观测能力不缺** ⇒ 路径差异 = Spring Actuator 的**表达层形态** |
+| api 侧 | **端口 + path 两样都要改** ⇒ 改它 = 改**部署形态** ⇒ 跨 **8+ 个 api 组件** ⇒ **单域不得擅改**（否则域间不一致）⇒ ⇒ 归**阶段二** |
+| 落点（形态面行） | `docs/DRIFT/like/vs-common.md` 文末「阶段归属定级附录（2026-11-01 · G2 收官轮 · 观测口「端口 + 路径」形态面登记）」节（**保留区 ⇒ 零投影影响**） |
+| 证据强度 | **E3**（Go 侧 `文件:行号` 逐行 + RAG 侧 yml 定位 + 全仓 `management.server.port` 真配置 **0 处**实测）· **核对日期 2026-11-01** |
+
+**逐组件矩阵**：见 [`docs/DRIFT/like/vs-common.md`](../../DRIFT/like/vs-common.md) 文末
+「阶段归属定级附录（2026-11-01 · G2 收官轮 · 观测口「端口 + 路径」形态面登记）」节。
+· 核对日期 2026-11-01
