@@ -1,0 +1,26 @@
+# proto 契约基准 —— **由脚本从 Go 真源生成，勿手工编辑**
+# 生成脚本：同目录 generate.py（用法见脚本头部）
+# 真源：Sea-RideTheWind_golang/proto/user.proto
+# 真源 sha256：f5d0e71937fd8a7ff7a6d8daa95e726c582d120b2531e7758a1ca8b4ae0d2231
+package user
+message|UserInfo|uid=1:int64|score=2:uint32|username=3:string|email=4:string|extra_info=5:map<string, string>|status=6:optional int64
+message|GetUserReq|uid=1:int64
+message|GetUserResp|user=1:UserInfo|found=2:bool
+message|CreateUserReq|username=1:string|password=2:string|email=3:string|extra_info=4:map<string, string>
+message|CreateUserResp|uid=1:int64
+message|LoginReq|username=1:string|password=2:string
+message|LoginResp|uid=1:int64|status=2:uint64
+message|LogoutReq|token=1:string
+message|LogoutResp|success=1:bool
+message|UpdateUserReq|uid=1:int64|username=2:string|password=3:string|email=4:string|extra_info=5:map<string, string>
+message|UpdateUserResp|user=1:UserInfo
+message|AvatarHistoryItem|id=1:string|avatar_url=2:string|content_type=3:string|size_bytes=4:int64|is_current=5:bool|create_time=6:string
+message|UploadAvatarReq|uid=1:int64|avatar_url=2:string|content_type=3:string|size_bytes=4:int64
+message|UploadAvatarResp|avatar_url=1:string|history=2:AvatarHistoryItem
+message|GetAvatarHistoryReq|uid=1:int64|limit=2:int32
+message|GetAvatarHistoryResp|list=1:repeated AvatarHistoryItem
+message|SelectAvatarReq|uid=1:int64|history_id=2:string
+message|SelectAvatarResp|avatar_url=1:string|history=2:AvatarHistoryItem
+message|DeleteUserReq|uid=1:int64
+message|DeleteUserResp|success=1:bool
+service|UserService|GetUser(GetUserReq)->GetUserResp|Register(CreateUserReq)->CreateUserResp|Login(LoginReq)->LoginResp|Logout(LogoutReq)->LogoutResp|UpdateUser(UpdateUserReq)->UpdateUserResp|UploadAvatar(UploadAvatarReq)->UploadAvatarResp|GetAvatarHistory(GetAvatarHistoryReq)->GetAvatarHistoryResp|SelectAvatar(SelectAvatarReq)->SelectAvatarResp|DeleteUser(DeleteUserReq)->DeleteUserResp

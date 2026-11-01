@@ -69,7 +69,17 @@ public class LikeDomainFactOutboxEntity {
     /**
      * 对应 Go {@code DeliveryStatus int32 `column:delivery_status;not null;default:0`}。
      *
-     * <p>⚠️ DDL 里是 <b>BIGINT</b>（Go 的 int32 无 type tag ⇒ GORM 取 bigint）。
+     * <p>⚠️ 2026-11-01 修正错误断言 I：原注释写「DDL 里是 <b>BIGINT</b>（Go 的 int32 无 type tag ⇒
+     * GORM 取 bigint）」⇒ ⇒ <b>两处都错</b>：① GORM 对 int32 取 <b>integer</b> 而不是 bigint ——
+     * 真源 {@code go.mod:27} = {@code gorm.io/driver/postgres v1.6.0} ⇒ {@code postgres.go:210}
+     * {@code DataTypeOf} ⇒ {@code :229-235}（{@code size <= 16 → smallint} /
+     * {@code size <= 32 → integer} / {@code else → bigint}）⇒ Go 的 {@code int32} 落 GORM
+     * {@code schema.Int} ＋ {@code field.Size = 32} ⇒ <b>integer</b>；② DDL 现在也<b>不是</b> BIGINT ——
+     * {@code V6__align_like_domain_fact_outbox_with_go.sql} 已把这两列 ALTER 成 <b>integer</b>
+     * （与 Go 侧 AutoMigrate 产出的类型一致）。
+     * ⚠️ {@code V4__create_like_domain_fact_outbox.sql} 里那条同款旧注释<b>刻意保留原文</b> ——
+     * 改迁移文件文本会改 Flyway checksum ⇒ 已建库下次启动即报 checksum mismatch ⇒ like-rpc 起不来；
+     * 纠错记录放在 V6（不改 V4）＋ 本处。
      * 取值用 {@code Wire.DeliveryStatus} 的 code：0 待投递 / 1 已接受 / 2 失败 / 3 阻塞。
      */
     private int deliveryStatus;

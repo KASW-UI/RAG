@@ -56,8 +56,24 @@ public class LikeHotEventOutboxRelay {
      *
      * <p>⚠️ {@code fixedRate} 语义对齐 Go 的 {@code time.Ticker}：按<b>开始时刻</b>间隔触发，
      * 上一次没跑完不会并发触发（Spring 默认单线程调度器即满足）。
-     * Kafka 客户端是异步的，所以这里的「发送成功」只代表<b>已交给客户端</b>，
-     * 与 Go 的同步 {@code Push} 在这一点上有差异（见 {@code application.yml} 的 acks 注释）。
+     * Kafka 客户端是异步的，所以这里的「发送成功」只代表<b>已交给客户端</b>。
+     *
+     * <p>⚠️ 2026-11-01 修正错误断言 D：原文写「与 Go 的<b>同步</b> {@code Push} 在这一点上有差异」⇒ ⇒
+     * <b>该前提已被证伪</b> —— Go 侧同样<b>不是</b>同步阻塞写：
+     * <ul>
+     *   <li>{@code github.com/zeromicro/go-queue@v1.2.2/kq/pusher.go:82}
+     *       ⇒ {@code NewPusher} 默认挂 {@code executors.NewChunkExecutor}；</li>
+     *   <li>同文件 {@code :140-142} ⇒ {@code if p.executor != nil { return p.executor.Add(msg, len(v)) }}
+     *       ⇒ <b>只入队即返回</b>；</li>
+     *   <li>{@code github.com/zeromicro/go-zero@v1.10.2/core/executors/chunkexecutor.go:45-52}
+     *       ⇒ {@code ChunkExecutor.Add} 把任务塞进队列后 {@code return nil}；</li>
+     *   <li>{@code .../core/executors/bulkexecutor.go:37} ＋ {@code vars.go:5}
+     *       ⇒ {@code NewPeriodicalExecutor(flushInterval, …)}，{@code defaultFlushInterval = time.Second}
+     *       ⇒ <b>每秒</b>后台批量刷一次（真正的 {@code WriteMessages} 在那里）。</li>
+     * </ul>
+     * ⇒ ⇒ <b>两侧都是「交出去就返回」</b> ⇒ 这里<b>不存在</b>「Go 同步 / Java 异步」的差异；
+     * 真正要对齐的是 <b>acks</b>（是否等 broker 确认）⇒ 见 {@code application.yml} 的 acks 注释
+     * （那里已写明 Go {@code kafka.Writer} 的默认 {@code RequiredAcks(1)} 与本模块 {@code acks: 1} 一致）。
      */
     @Scheduled(fixedRateString = "${like.outbox-relay-interval:1000}")
     public void sendPending() {

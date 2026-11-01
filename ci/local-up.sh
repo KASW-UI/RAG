@@ -70,7 +70,10 @@ load_if_present() {
     return 0
   fi
   if [[ ! -f "$tar" ]]; then
-    echo "  ⚠️  缺少 tar: $tar（跳过 $img）"
+    # ⚠️ 一律用 ${VAR} 显式界定变量名边界：macOS bash 3.2 会把 $VAR 后紧跟的多字节字符
+    #    （此处是全角括号）算进变量名 ⇒ set -u 下报 unbound variable ⇒ 报错行本身崩掉。
+    #    守门：python3 tools/difftest/scan-bash-legacy-vars.py ⇒ EXIT=0
+    echo "  ⚠️  缺少 tar: ${tar}（跳过 ${img}）"
     return 1
   fi
   echo "  ⬇️  load $img ..."
@@ -106,7 +109,8 @@ if [[ "$use_registry" -eq 1 ]]; then
   push_img() {
     local src="$1" repo="$2" tag="$3"
     if ! docker image inspect "$src" >/dev/null 2>&1; then
-      echo "  ⚠️  缺镜像 $src（跳过）"; return 0
+      # ⚠️ 一律用 ${VAR} 显式界定变量名边界（macOS bash 3.2 吞多字节字符 ⇒ unbound variable）。
+      echo "  ⚠️  缺镜像 ${src}（跳过）"; return 0
     fi
     docker tag "$src" "127.0.0.1:${REG_PORT}/${repo}:${tag}"
     docker push "127.0.0.1:${REG_PORT}/${repo}:${tag}" >/dev/null

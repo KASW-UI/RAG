@@ -80,7 +80,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *     if c.Timeout &gt; 0 { opts = append(opts, WithTimeout(...)) }
  * go-zero@v1.10.2/zrpc/internal/clientinterceptors/timeoutinterceptor.go:25
  *     ctx, cancel := context.WithTimeout(ctx, t)   ⇒ 【取更早者】（min 语义）
- * Go 侧 service/user/admin/api/etc/admincenter.yaml:37-41
+ * Go 侧 service/user/admin/api/etc/admincenter.yaml:35-39
  *     AdminRpc: { Etcd: { Hosts: …, Key: admin.rpc } }   ⇒ 【无显式 Timeout】⇒ ⇒ 恒 2000ms
  * </pre>
  *

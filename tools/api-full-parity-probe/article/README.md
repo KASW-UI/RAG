@@ -31,6 +31,51 @@ bash tools/api-full-parity-probe/article/run-success.sh   # 成功路径（2026-
 
 > `run-success.sh` 另可用 `FREEZE=1`（重建 `expected-success.txt`）与 `KEEP_WORK=1`（保留临时目录）。
 
+## ✅ 并发隔离（2026-11-01 · 派工单 P4-T08 / 原 R5-F5 · PIT-GLOBAL-068）
+
+> **为什么有这一节**：并发跑两份时，Nacos 服务发现 / etcd 键 / 宿主端口 / `target/`
+> 都是**共享面** ⇒ 两份互相污染 ⇒ 探针报 `INTERNAL` / `5001`
+> ⇒ ⇒ **「跑红」被误读成「RAG 有缺陷」** ⇒ ⇒ 一类**假红**。
+> ⇒ 现在**同一份探针可以并发跑两份**，互不污染（实测见下）。
+> ⇒ **只改工具面**（本目录）⇒ **产品代码一个字节都没动**。
+
+```bash
+# 并发跑两份（两份自动拿到不同的命名空间 / etcd 键 / 端口块）
+( RUN_ID=A bash tools/api-full-parity-probe/article/run-success.sh > /tmp/pA.log 2>&1; echo "A_EXIT=$?" ) &
+( RUN_ID=B bash tools/api-full-parity-probe/article/run-success.sh > /tmp/pB.log 2>&1; echo "B_EXIT=$?" ) &
+wait
+```
+
+> ⚠️ **取退出码必须先落变量**（`a=... & b=... & wait $a; echo $?` 那种写法里 `$?` 会被后续命令覆盖）。
+
+四个隔离向量（实现见 `probe-isolation.sh` 文件头，含 Go 真源 / 框架侧 `文件:行号`）：
+
+| 向量 | 怎么实现 | 为什么能隔离 |
+|---|---|---|
+| **V1 Nacos 命名空间** | env `NACOS_NAMESPACE` | 命名空间由**客户端配置**决定（`application.yml:122` / `:33` = `${NACOS_NAMESPACE:public}`）⇒ **不改产品代码**就能换命名空间；服务名/group 是硬编码常量 ⇒ **只能**靠命名空间隔离 |
+| **V2 etcd 键前缀** | env `GO_ETCD_KEY` | Go 侧 rpc 的**发布键**与 api 的**订阅前缀**必须同值 ⇒ 副本里同步改 ⇒ 两轮的 Go 栈互不发现 |
+| **V3 宿主端口块** | **原子租约**（`set -o noclobber` 的 `>`） | 租约**保证**并发轮次拿到不同端口块；且端口块会**避开容器已发布的宿主端口**（见下方「踩过的坑」第 5 条） |
+| **V4 构建产物** | `mvn` **串行锁** + 每轮把 fat jar **拷进自己的 WORK** | `-Dproject.build.directory` 实测**不生效** ⇒ 只能「持锁构建 + 拷走」⇒ 本轮跑自己的副本 |
+
+**默认行为不变**：`RUN_ID` 为空 ⇒ 命名空间 `public` · etcd 键 `article.rpc` · 端口与 PG 阶梯
+与改造前**逐字节一致** ⇒ 已冻结的 `expected.txt` / `expected-success.txt` 不受影响。
+
+可覆盖 env：`RUN_ID` · `NACOS_NAMESPACE` · `GO_ETCD_KEY` · `PORT_OFFSET` · `PG_PORT_OFFSET` ·
+`PROBE_LEASE_DIR` · `PROBE_MVN_LOCK_DIR` · `KEEP_NACOS_NAMESPACE=1`（保留本轮命名空间）。
+
+### 实测（2026-11-01）
+
+| 场景 | 结果 |
+|---|---|
+| 单跑 `run.sh` / `run-success.sh` | `EXIT=0` / `EXIT=0` |
+| **并发** `run.sh`（RUN_ID=A/B） | `A_EXIT=0` · `B_EXIT=0` · 日志里 `INTERNAL`=0 |
+| **并发** `run-success.sh`（RUN_ID=A/B） | `A_EXIT=0` · `B_EXIT=0` · 日志里 `INTERNAL`=0 · `5001`=0 |
+| `expected*.txt` | sha256 **逐字节未变** |
+
+> ⚠️ `run.sh` 的 `get_article_exists` **本来就设计成两侧都是 5001**（legacy 分支读 MinIO 失败）
+> ⇒ 「不出现 5001」这条**只对 `run-success.sh` 成立**；`run.sh` 的判据是「两份都 `EXIT=0`
+> 且各自输出与冻结期望值一致」。
+
 ## 真源冻结 ⇒ 只改「副本」
 
 Go 侧用的是**真源真正在用的生成码/二进制**；但真源 yaml 把主机名**写死**了
@@ -144,6 +189,11 @@ RAG `ArticlePublicDomainService:130-132`）⇒ **正文不读 MinIO** ⇒ 详情
 | 11 | `FREEZE=1` 跑完，期望值文件里**只剩最后一条** | 冻结时用 `>` **覆盖写** ⇒ 每个用例都把上一个冲掉 ⇒ 文件「看起来有」但**内容不完整** ⇒ 后续校验会拿不全的期望值去比 | 冻结前**先截断**（`: > file`），再逐条**追加**（`>>`） |
 | 12 | 两个探针脚本**端口互撞** | `run.sh` 用 8889 / 18889 / 9002 / 9001 / 19092，`run-success.sh` 若沿用 ⇒ 同时跑必撞（Go rpc `panic: address already in use`） | `run-success.sh` 用 **article 域预分配的 22400 段**（22411~22417）⇒ 两个脚本可先后/并行 |
 | 13 | Go 真源连不上 PG（口令是字面 `${POSTGRES_PASSWORD}`） | Go 的 `conf.MustLoad` **不**做 `os.ExpandEnv` ⇒ `${POSTGRES_PASSWORD}` 被当**变量名**查 ⇒ 空串 ⇒ 连库失败（且**不报错**，只是连不上） | 配置副本里把它**替换成字面值**（`sea`）＋ 脚本**逐条 grep 断言**（改了哪项就断言哪项） |
+| 14 | 🔴 **并发两轮撞端口 ⇒ 一轮把另一轮的进程杀掉** | 端口**写死** ⇒ 两份必撞 ⇒ 后一份的 `free_probe_ports` 会 `kill -9` 占着端口的进程 ⇒ **前一份被腰斩** | 端口**租约**（`set -o noclobber` 的 `>` 原子占块）⇒ 并发轮次**保证**拿到不同端口块（`probe-isolation.sh` 的 V3） |
+| 15 | 🔴 **端口偏移撞上容器发布端口 ⇒ `kill -9` 把 Docker 整个干掉** | `run.sh` 偏移 20000 时 `19092+20000 = 39092` = **`kafka` 容器发布到宿主的那一口** ⇒ `lsof -ti tcp:39092` 取到的是 **Docker Desktop 的 backend 进程** ⇒ 一杀 ⇒ **所有容器的发布端口一起挂、Docker 失联** | ① 端口块**先跟「容器已发布的宿主端口」求交**，冲突就**换一块**（`docker ps` 动态读）② `free_probe_ports` **只杀命令行带探针标记的进程**（`rag-article-parity.` / `etc/article*.yaml` / `article-*.jar`），不是探针进程就**只报告、不动它** |
+| 16 | 🔴 **租约被「误判残留」而抢占** ⇒ 两轮拿到同一块端口 | 用 `mkdir` 占块、**事后**才写 pid ⇒ `mkdir` 与写 pid 之间**有窗口** ⇒ 另一轮读到**空 pid** ⇒ 判成「残留」⇒ 回收掉别人的块 | 改成**原子创建文件 + 内容一次写全**（`set -o noclobber` 的 `>` = `O_CREAT\|O_EXCL`）⇒ 要么不存在、要么内容完整 ⇒ 没有窗口 |
+| 17 | 🔴 **端口变量被提示文字污染** ⇒ sed 报 `unescaped newline inside substitute pattern` | `GO_PG_PORT="$(pick_pg_port …)"` **捕获 stdout** ⇒ 而 `pick_pg_port` 里的「这个端口起不来」提示也写 stdout ⇒ 端口变量变成 `   · :55570 起不来…55572` ⇒ 单跑看不出来（候选一次就中）⇒ **并发争用同一阶梯**时才暴露 | 那条提示改写 **stderr**（`say … >&2`）⇒ 端口变量干净 |
+| 18 | 🔴 **RAG rpc 端口没生效 ⇒ 注册到 9001 而不是本轮端口** | `run.sh` **从未传** `ARTICLE_RPC_PORT` / `ARTICLE_RPC_MANAGEMENT_PORT`（原来端口写死 9001 才凑巧对上）⇒ 隔离轮次里两轮都占 9001/9092 ⇒ 后一轮 `Web server failed to start. Port 9092 was already in use` | 两个变量**显式传**（`ARTICLE_RPC_PORT` / `ARTICLE_RPC_MANAGEMENT_PORT`）⇒ 端口真正每轮唯一 |
 
 ## 变异验证（`mutate-parity.sh`）
 

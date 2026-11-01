@@ -45,7 +45,10 @@ spring:
   cloud:
     nacos:
       discovery:
-        server-addr: ${NACOS_ADDR:nacos:8848}
+        # ⚠️ **必须是 `host` 与 `port` 分开两个变量**（R1-ENV-001 · 2026-11-01 收口轮）
+        #    `${NACOS_ADDR:nacos:8848}` 把端口**硬编码进默认值** ⇒ `NACOS_PORT` 被完全忽略
+        #    ⇒ 与 `.env.example` / `docker-compose.yaml` 的契约（NACOS_ADDR=host + NACOS_PORT=port）冲突
+        server-addr: ${NACOS_ADDR:nacos}:${NACOS_PORT:8848}
         namespace: ${NACOS_NAMESPACE:public}
         group: ${NACOS_GROUP:DEFAULT_GROUP}
 
@@ -110,7 +113,12 @@ server:
 grpc:
   client:
     task-rpc:
-      address: ${TASK_RPC_ADDRESS:127.0.0.1:9005}
+      # ⚠️ **必须带 scheme**（R1-ENV-002 · 2026-11-01 收口轮）—— devh 的客户端地址解析器
+      #    要求显式 scheme（`static://` / `discovery://`）⇒ 裸 `127.0.0.1:9005` 会报
+      #    `Invalid URI syntax: Illegal character in scheme name at index 0`
+      #    ⇒ 取 `static://`（**不是** `discovery://`）以保住 Go 的**直连**寻址语义：
+      #    Go `service/task/api/etc/task.yaml:6` `Target: 127.0.0.1:9005`（**无 Etcd 段**）
+      address: ${TASK_RPC_ADDRESS:static://127.0.0.1:9005}
       negotiation-type: plaintext
       enable-keep-alive: true
       keep-alive-time: 30s

@@ -1,0 +1,22 @@
+# proto 契约基准 —— **由脚本从 Go 真源生成，勿手工编辑**
+# 生成脚本：同目录 generate.py（用法见脚本头部）
+# 真源：Sea-RideTheWind_golang/proto/favorite.proto
+# 真源 sha256：c1e59375401f55b439450c62b9aee18e698555ed4f8aba2fa9d4cac7d9199de4
+package favorite
+message|FavoriteFolder|folder_id=1:int64|user_id=2:int64|name=3:string|created_at=4:int64|updated_at=5:int64
+message|FavoriteItem|favorite_id=1:int64|folder_id=2:int64|user_id=3:int64|target_id=4:string|target_type=5:string|title=6:string|cover=7:string|created_at=8:int64
+message|CreateFavoriteFolderReq|user_id=1:int64|name=2:string
+message|CreateFavoriteFolderResp|folder_id=1:int64
+message|CreateFavoriteReq|user_id=1:int64|folder_id=2:int64|target_id=3:string|target_type=4:string|title=5:string|cover=6:string
+message|CreateFavoriteResp|favorite_id=1:int64
+message|DeleteFavoriteFolderReq|user_id=1:int64|folder_id=2:int64
+message|DeleteFavoriteFolderResp|success=1:bool
+message|DeleteFavoriteReq|user_id=1:int64|favorite_id=2:int64
+message|DeleteFavoriteResp|success=1:bool
+message|UpdateFavoriteFolderNameReq|user_id=1:int64|folder_id=2:int64|name=3:string
+message|UpdateFavoriteFolderNameResp|success=1:bool
+message|GetFavoriteFoldersReq|user_id=1:int64
+message|GetFavoriteFoldersResp|folders=1:repeated FavoriteFolder
+message|GetFavoritesByFolderReq|user_id=1:int64|folder_id=2:int64
+message|GetFavoritesByFolderResp|favorites=1:repeated FavoriteItem
+service|FavoriteService|CreateFavoriteFolder(CreateFavoriteFolderReq)->CreateFavoriteFolderResp|CreateFavorite(CreateFavoriteReq)->CreateFavoriteResp|DeleteFavoriteFolder(DeleteFavoriteFolderReq)->DeleteFavoriteFolderResp|DeleteFavorite(DeleteFavoriteReq)->DeleteFavoriteResp|UpdateFavoriteFolderName(UpdateFavoriteFolderNameReq)->UpdateFavoriteFolderNameResp|GetFavoriteFolders(GetFavoriteFoldersReq)->GetFavoriteFoldersResp|GetFavoritesByFolder(GetFavoritesByFolderReq)->GetFavoritesByFolderResp

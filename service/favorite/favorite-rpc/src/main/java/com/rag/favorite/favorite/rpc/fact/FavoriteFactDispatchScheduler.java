@@ -34,7 +34,7 @@ import java.net.http.HttpClient;
  * }
  * </pre>
  * ⇒ 这四个形状（<b>1s / 16 / 10s / 单条失败即 break</b>）由
- * {@link Dispatcher#run} 直接承担，本类只负责装配 + 生命周期。
+ * {@link Dispatcher#runAsync} 直接承担，本类只负责装配 + 生命周期。
  *
  * <h2>⚠️ Go 是独立进程，Java 是单 JVM 的可选组件</h2>
  * <p>Go 侧 {@code cmd/fact-dispatch/main.go:35-40} 要求三个环境变量齐全，缺一即进程退出。
@@ -57,7 +57,7 @@ public class FavoriteFactDispatchScheduler {
     private final FavoriteFactDispatchService dispatchService;
     private final FavoriteFactProcessLogging processLogging;
 
-    /** {@code Dispatcher.run(...)} 返回的句柄；{@code @PreDestroy} 用它停止循环。 */
+    /** {@code Dispatcher.runAsync(...)} 返回的句柄（<b>进入循环之前就发布</b>）；{@code @PreDestroy} 用它停止循环。 */
     private volatile Dispatcher.DispatcherHandle handle;
 
     public FavoriteFactDispatchScheduler(FavoriteRpcProperties properties,
@@ -107,7 +107,7 @@ public class FavoriteFactDispatchScheduler {
         LOG.info("FavoriteFactDispatchScheduler: 启动事实投递 once={} dc_endpoint={}",
                 config.isOnce(), config.getDcEndpoint());
 
-        // ── 以下四个参数由 Dispatcher.run 直接承担，逐条对应 Go cmd/fact-dispatch/main.go:57-89 ──
+        // ── 以下四个参数由 Dispatcher 直接承担，逐条对应 Go cmd/fact-dispatch/main.go:57-89 ──
         //   批次 16（Dispatcher.java:178）      ← Go cmd/fact-dispatch/main.go:70  for i := 0; i < 16; i++
         //   节奏 1s（Dispatcher.java:199）      ← Go cmd/fact-dispatch/main.go:67  time.NewTicker(time.Second)
         //   单次 10s（Dispatcher.java:122）     ← Go cmd/fact-dispatch/main.go:71  context.WithTimeout(ctx, 10*time.Second)
@@ -115,8 +115,25 @@ public class FavoriteFactDispatchScheduler {
         //
         // ⚠️ registerShutdownHook = false：Spring 化路径由 @PreDestroy 显式 stop()，
         //    避免 JVM hook 与 SpringApplication 的 graceful shutdown 时序冲突。
+        //
+        // 🔴🔴 L4 idiomatization：必须用 **runAsync**（非阻塞），不得用阻塞式 Dispatcher.run。
+        // <p>Go 出处：service/favorite/rpc/cmd/fact-dispatch/main.go:34-89 的 run(once, logger) ——
+        //   其中 :50 `ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)`
+        //   + :51 `defer stop()` ⇒ Go 侧停止 dispatcher 的**唯一**途径 = **调用方自己的 ctx 变 done**；
+        //   且 Go 的 RunDispatcher（service/common/communityfact/process.go:20）**不返回任何东西**。
+        // <p>语义等价论证：① Go 侧「停止能力从调用那一刻起就归调用方」⇒ Java 侧对应物 = **句柄先发布**、
+        //   调用方随时可 stop() ⇒ runAsync 在**进入循环之前**就 complete 句柄 ⇒ 形状一致；
+        //   ② 循环的四个参数（批次 16 / 节奏 1s / 单次 10s / 单条失败即 break）**一字未改** ⇒ 行为面不变；
+        //   ③ 差异只在**谁来跑这个循环**：Go 是独立进程主线程，Java 是单 JVM 内的守护线程 ⇒ **表达层差异，非行为漂移**。
+        // <p>⚠️ 阻塞式 Dispatcher.run 的 6 参重载已 @Deprecated(forRemoval=true)（DRIFT-CF-018）：
+        //   once=false 时它**永远交不出句柄**（句柄在 run 内部新建 ⇒ 只有循环结束才返回）
+        //   ⇒ @PreDestroy 拿到 null ⇒ 循环停不下来；且循环跑在**调用线程**上
+        //   ⇒ 本类的触发点是 @EventListener(ApplicationReadyEvent) ⇒ 阻塞的是
+        //   **SpringApplication.run() 的主线程** ⇒ ⇒ **进程无法优雅关闭**。
+        //   改用 runAsync 后：循环在守护线程上 + 句柄立即交出 ⇒ 两侧症状同时消解。
+        //   参照实现：service/comment/comment-rpc/.../bootstrap/CommentFactDispatchScheduler.java:93（逐字同形）。
         Context ctx = Context.current();
-        this.handle = Dispatcher.run(ctx,
+        this.handle = Dispatcher.runAsync(ctx,
                 (dispatchCtx, wireSender, logger) -> dispatchService.dispatchFactOnce(dispatchCtx, wireSender),
                 sender,
                 processLogger,
@@ -138,6 +155,17 @@ public class FavoriteFactDispatchScheduler {
             current.stop();
             LOG.info("FavoriteFactDispatchScheduler: 投递循环已停止");
         }
+    }
+
+    /**
+     * 便于测试与运维观察：当前是否真的在跑。
+     *
+     * <p>🔴 <b>这条就是 DRIFT-CF-018 的探针</b>：句柄非 null ⇔ 循环已启动
+     * 且 {@code @PreDestroy} 拿得到句柄 ⇒ 能停 ⇒ 进程可优雅关闭。
+     * 阻塞式 {@code Dispatcher.run} 形态下 {@code once=false} ⇒ 句柄永远交不出来 ⇒ 恒为 false。
+     */
+    public boolean isRunning() {
+        return handle != null;
     }
 
     /** 保留引用：otel 的全局 provider 在 Dispatcher 内部使用；此处显式 touch 以固定依赖。 */

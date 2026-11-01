@@ -1,0 +1,9 @@
+# proto 契约基准 —— **由脚本从 Go 真源生成，勿手工编辑**
+# 生成脚本：同目录 generate.py（用法见脚本头部）
+# 真源：Sea-RideTheWind_golang/proto/task.proto
+# 真源 sha256：ed399f28810da8e21f74eafb442b51bead2c7c3a7850b7c6b14269c1599eca56
+package task
+message|Task|name=1:string|desc=2:string|task_id=3:int64|completion_progress=4:int64|required_progress=5:int64
+message|GetTaskReq|user_id=1:int64
+message|GetTaskResp|task=1:repeated Task
+service|TaskService|GetTask(GetTaskReq)->GetTaskResp

@@ -1,0 +1,26 @@
+# proto 契约基准 —— **由脚本从 Go 真源生成，勿手工编辑**
+# 生成脚本：同目录 generate.py（用法见脚本头部）
+# 真源：Sea-RideTheWind_golang/proto/comment.proto
+# 真源 sha256：dfbbcb269cfed533454a8de51094231db94ed3543c09a230db5bebffbc3754d4
+package pb
+enum|CommentState|STATE_NORMAL=0|STATE_REVIEWING=1|STATE_DELETED=2|STATE_BLOCKED=3
+enum|SubjectState|SUBJECT_OPEN=0|SUBJECT_CLOSED=1|SUBJECT_ONLY=2
+enum|ReportReason|REASON_UNKNOWN=0|REASON_SPAM_ADVERT=1|REASON_PORN_VULGAR=2|REASON_HARASSMENT_ABUSE=3|REASON_ILLEGAL_COTENT=4|REASON_FRAUD_SCAM=5|REASON_SPOILER=6|REASON_PRIVACY_LEAK=7|REASON_MEANINGLESS_SPAM=8|REASON_OTHER=99
+enum|ManageType|UNKNOWN=0|MANAGE_PIN=1|MANAGE_UNPIN=2|MANAGE_FEATURE=3|MANAGE_UNFEATURE=4
+message|CommentItem|id=1:int64|user_id=2:int64|content=3:string|root_id=4:int64|parent_id=5:int64|like_count=6:int64|dislike_count=7:int64|reply_count=8:int64|attribute=9:int64|state=10:CommentState|created_at=11:string|meta=12:string|children=13:repeated CommentItem
+message|SubjectInfo|target_type=1:string|target_id=2:string|total_count=3:int64|root_count=4:int64|state=5:SubjectState|attribute=6:int64|owner_id=7:int64
+message|CreateCommentReq|user_id=1:int64|target_type=2:string|target_id=3:string|root_id=4:int64|parent_id=5:int64|content=6:string|meta=7:string
+message|CreateCommentResp|id=1:int64|created_at=2:string|subject_count=3:int64
+message|GetCommentReq|target_type=1:string|target_id=2:string|sort_type=3:int64|root_id=4:int64|page=5:int64|page_size=6:int64
+message|GetCommentResp|comment=1:repeated CommentItem|subject=2:SubjectInfo
+message|LikeCommentReq|user_id=1:int64|target_type=2:string|target_id=3:string|comment_id=4:int64|action_type=5:int32
+message|LikeCommentResp|success=1:bool|like_count=2:int64
+message|DeleteCommentReq|user_id=1:int64|comment_id=2:int64|target_type=3:string|target_id=4:string
+message|DeleteCommentResp|success=1:bool|subject_total_count=2:int64
+message|ManageCommentReq|user_id=1:int64|comment_id=2:int64|target_type=3:string|target_id=4:string|action_type=5:ManageType
+message|ManageCommentResp|success=1:bool
+message|ReportCommentReq|user_id=1:int64|comment_id=2:int64|target_type=3:string|target_id=4:string|reason=5:ReportReason|detail=6:string
+message|ReportCommentResp|success=1:bool
+message|UpdateSubjectStateReq|user_id=1:int64|target_type=2:string|target_id=3:string|state=4:SubjectState
+message|UpdateSubjectStateResp|success=1:bool
+service|CommentService|CreateComment(CreateCommentReq)->CreateCommentResp|GetComment(GetCommentReq)->GetCommentResp|DeleteComment(DeleteCommentReq)->DeleteCommentResp|LikeComment(LikeCommentReq)->LikeCommentResp|ReportComment(ReportCommentReq)->ReportCommentResp|ManageComment(ManageCommentReq)->ManageCommentResp|UpdateSubjectState(UpdateSubjectStateReq)->UpdateSubjectStateResp

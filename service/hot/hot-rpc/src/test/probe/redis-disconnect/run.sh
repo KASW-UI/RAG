@@ -124,7 +124,10 @@ if [ "$FULL" = 1 ]; then
   if [ -z "$JAVA_GATE" ]; then
     echo "⚠️ mode=$MODE 没有对应的域内 Java 腿守门 ⇒ 跳过"
   else
-    echo "▶ Java 腿：$JAVA_GATE（$JAVA_MOD）"
+    # ⚠️ 一律用 ${VAR} 显式界定变量名边界：macOS bash 3.2 会把 $VAR 后紧跟的多字节字符
+    #    （此处是全角括号）**算进变量名** ⇒ set -u 下报 unbound variable ⇒ 收尾行崩掉、报错打不出来。
+    #    守门：python3 tools/difftest/scan-bash-legacy-vars.py ⇒ EXIT=0
+    echo "▶ Java 腿：${JAVA_GATE}（${JAVA_MOD}）"
     ( cd "$REPO" && MAVEN_OPTS="-Xmx768m" /Users/pr/.sdkman/candidates/maven/current/bin/mvn -B -o \
         -pl "$JAVA_MOD" -am test \
         -Dtest="$JAVA_GATE" -Dsurefire.failIfNoSpecifiedTests=false -DargLine="-Xmx2g" )

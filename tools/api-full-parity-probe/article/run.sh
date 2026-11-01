@@ -28,6 +28,22 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RAG_ROOT="$(cd "${HERE}/../../.." && pwd)"
 
+# ── 「每轮独立」机制（工具面 · **不改产品代码**）────────────────────────────────
+# ⚠️ 为什么要有它：并发跑两份时，Nacos public 命名空间 / etcd `article.rpc` 键 /
+#    宿主端口 / `target/` 都是**共享面** ⇒ 两份互相污染 ⇒ 探针报 INTERNAL / 5001
+#    ⇒ ⇒ 「跑红」被误读成「RAG 有缺陷」⇒ ⇒ 一类**假红**。
+# ⇒ 四个隔离向量（Nacos 命名空间 · etcd 键前缀 · 端口租约 · 构建锁）的说明见
+#    `probe-isolation.sh` 文件头（含 Go 真源 / 框架侧 `文件:行号` 依据）。
+# ⇒ **默认（RUN_ID 为空）= 现有单跑行为逐字节不变** ⇒ 已冻结的 expected.txt 不受影响。
+source "${HERE}/probe-isolation.sh"
+PROBE_PG_BIAS=100   # run.sh 的 PG 阶梯基准比 run-success 低一段 ⇒ 同块号下两族不重叠
+# ⚠️ **基准端口要先登记** ⇒ 租约才知道「这一块会占哪些端口」⇒ 才能避开危险端口
+#    （2026-11-01 实测：偏移 20000 时 19092+20000 = 39092 = **`kafka` 容器的宿主发布口**
+#      ⇒ 老的「占着就杀」会把 **Docker Desktop backend** 一起杀掉 ⇒ Docker 失联）。
+PROBE_BASE_APP_PORTS="8889 18889 9002 9001 19092 9092"
+PROBE_BASE_PG_PORTS="55570 55572 55574 55576 55578 55580 55571 55573 55575 55577 55579 55581"
+probe_iso_init run || exit 2
+
 # ── 宿主中间件端口（可用 env 覆盖；默认值 = 本机实测）────────────────────────
 ETCD_PORT="${ETCD_PORT:-49319}"      # Sea-etcd    49319→2379（宿主映射口 ⇒ 给 Go 侧配置副本用）
 # ⚠️ etcdctl 是 **在容器里跑**（`docker exec Sea-etcd etcdctl`）⇒ 端点必须是**容器内端口** 2379，
@@ -38,28 +54,40 @@ MINIO_PORT="${MINIO_PORT:-49100}"    # Sea-minio   49100→9000
 JAEGER_PORT="${JAEGER_PORT:-49317}"  # Sea-jaeger  49317→4317
 NACOS_PORT="${NACOS_PORT:-49848}"    # Sea-nacos   49848→8848
 # ── 两侧端口（同机并行必须错开：Go api 8889 / RAG api 8889，Go rpc 9001 / RAG rpc 9001）──
-GO_API_PORT="${GO_API_PORT:-8889}"
-RAG_API_PORT="${RAG_API_PORT:-18889}"
-GO_RPC_PORT="${GO_RPC_PORT:-9002}"   # 9001 留给 RAG（它的 grpc.server.port 写死）
+# ⚠️ **端口偏移来自「端口租约」**（`probe-isolation.sh` 的 V3）⇒ 并发跑两份时**保证**不撞；
+#    `RUN_ID` 为空时偏移 = 0 ⇒ 与改造前**逐字节一致**。
+#    显式给了 env（`GO_API_PORT=…`）⇒ **不偏移**（显式值 = 调用方自负其责）。
+GO_API_PORT="${GO_API_PORT:-$(( 8889 + PROBE_PORT_OFFSET ))}"
+RAG_API_PORT="${RAG_API_PORT:-$(( 18889 + PROBE_PORT_OFFSET ))}"
+GO_RPC_PORT="${GO_RPC_PORT:-$(( 9002 + PROBE_PORT_OFFSET ))}"   # 9001 留给 RAG（它的 grpc.server.port 写死）
 # ⚠️ **Prometheus 是另一个独立监听者**（go-zero v1.10.2 `core/service/serviceconf.go:62`
 #    `prometheus.StartAgent(sc.Prometheus)` ⇒ `core/prometheus/agent.go:39` 绑 `Host:Port`）
 #    ⇒ 它与 `ListenOn` 是**两个**端口，**不能改成同一个**（2026-10-29 实测踩过：
 #    把 Prometheus 也改成 9002 ⇒ 它先绑住 9002 ⇒ gRPC 的 net.Listen 撞车
 #    ⇒ `zrpc/server.go:91` panic: address already in use ⇒ 探针假挂 40s 后才报）。
-GO_PROM_PORT="${GO_PROM_PORT:-19092}"
-RAG_RPC_PORT=9001
+GO_PROM_PORT="${GO_PROM_PORT:-$(( 19092 + PROBE_PORT_OFFSET ))}"
+RAG_RPC_PORT="${RAG_RPC_PORT:-$(( 9001 + PROBE_PORT_OFFSET ))}"
+# 🔴 **RAG article-rpc 的「观测端口」（Actuator 载体）也必须每轮唯一**：
+#   `service/article/article-rpc/src/main/resources/application.yml:166` `server.port: ${ARTICLE_RPC_MANAGEMENT_PORT:9092}`
+#   ⇒ 原脚本**从未传**这个变量（端口写死 9001 时凑巧能跑）⇒ 并发两轮时**两轮都占 9092**
+#   ⇒ 后一轮启动即 fatal：`Web server failed to start. Port 9092 was already in use.`
+RAG_RPC_MGMT_PORT="${RAG_RPC_MGMT_PORT:-$(( 9092 + PROBE_PORT_OFFSET ))}"
 # ── 两侧各自的 Postgres（Go 侧要真源的 admin/first_db；RAG 侧要它自己的 Flyway 账本）──
 # ⚠️ **容器名带 $$**（每轮唯一）⇒ 别的轮/别的 lane 的 cleanup 绝不可能把本轮的库删掉
 #    （2026-10-29 实测踩过：固定名 + 上一轮 cleanup 延迟执行 ⇒ 本轮容器被删 ⇒
 #    宿主端口 55570 拒连 ⇒ Go rpc 连续刷「connection refused」40s 才报「没注册进 etcd」）。
-GO_PG_CONTAINER="${GO_PG_CONTAINER:-g3-article-go-pg-$$}"
+# ⚠️ 但 `$$` 在**子 shell** 里不变 ⇒ 显式再拼 RUN_TAG 更稳（并发两轮必是不同 bash ⇒ 不同 $$，
+#    但拼上 RUN_TAG 后容器名自带轮次标识，排查残留时一眼能认出来）。
+GO_PG_CONTAINER="${GO_PG_CONTAINER:-g3-article-go-pg-${PROBE_RUN_TAG:+${PROBE_RUN_TAG}-}$$}"
 GO_PG_PORT="${GO_PG_PORT:-}"
-RAG_PG_CONTAINER="${RAG_PG_CONTAINER:-g3-article-rag-pg-$$}"
+RAG_PG_CONTAINER="${RAG_PG_CONTAINER:-g3-article-rag-pg-${PROBE_RUN_TAG:+${PROBE_RUN_TAG}-}$$}"
 RAG_PG_PORT="${RAG_PG_PORT:-}"
 # ── 验签密钥（必须与签发方 user-api 一致；RAG 侧缺它 ⇒ 拒启动）─────────────────
 JWT_SECRET="${JWT_SECRET:-ae0536f9-6450-4606-8e13-5a19ed505da0}"
 
-WORK="$(mktemp -d)"
+# ⚠️ **目录名带探针标记**（`rag-article-parity.`）⇒ 端口预检能认出「哪些进程是探针自己的」
+#    ⇒ 只踢探针进程，不误伤宿主上的其它服务（见 `probe-isolation.sh` 的 `probe_free_port`）。
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/rag-article-parity.XXXXXX")"
 GO_PIDS=(); RAG_PIDS=()
 say()  { printf '%s\n' "$*"; }
 step() { printf '\n== %s ==\n' "$*"; }
@@ -78,25 +106,14 @@ die()  { printf '!! %s\n' "$*" >&2; dump_logs; exit 2; }
 # ⚠️ 上一轮探针被 kill 时，Nacos 里的**旧实例**还会存活一段时间（心跳超时前）
 #    ⇒ 客户端可能选中**死实例** ⇒ 调用超时 ⇒ 两侧返回 1015「服务繁忙」
 #    ⇒ **必须先注销残留**再起新的（2026-10-29 实测踩过）。
-nacos_deregister_all() {   # $1 = 服务名
-  local svc="$1" ip port
-  curl -s -m 10 "http://127.0.0.1:${NACOS_PORT}/nacos/v1/ns/instance/list?serviceName=${svc}&groupName=DEFAULT_GROUP&namespaceId=public" 2>/dev/null \
-  | python3 -c '
-import sys, json
-try:
-    d = json.load(sys.stdin)
-except Exception:
-    sys.exit(0)
-for h in (d.get("hosts") or []):
-    ip, port = h.get("ip"), h.get("port")
-    if ip and port:
-        print("%s %s" % (ip, port))
-' | while read -r ip port; do
-      [ -n "${ip}" ] || continue
-      curl -s -m 5 -X DELETE "http://127.0.0.1:${NACOS_PORT}/nacos/v1/ns/instance?serviceName=${svc}&groupName=DEFAULT_GROUP&namespaceId=public&ip=${ip}&port=${port}" >/dev/null 2>&1
-      say "   · 已注销 Nacos 残留实例 ${svc} ${ip}:${port}"
-    done
-}
+# ⚠️ **命名空间由 `probe-isolation.sh` 提供**（本轮专属 ⇒ 绝不碰别的轮次的实例）。
+nacos_deregister_all() { probe_nacos_deregister_all "$@"; }
+
+# 🔴 **就绪判据必须精确到「本轮的端口」**（`run-success.sh` 已踩过并修好）：
+#   只查 `service/list` 里**有没有这个服务名** ⇒ **别的轮次/上一轮的残留实例**也会命中
+#   ⇒ 脚本在 java **还在启动**（日志 0 字节）时就去查端口 ⇒ 误判「没监听」⇒ 假失败。
+#   ⇒ 改成数「**注册端口 == 本轮 gRPC 端口**」的实例个数（且只在本轮命名空间里数）。
+nacos_instance_count() { probe_nacos_instance_count "$@"; }
 
 # ── 就绪闸门：等两侧的**列表端点**真的答得上（不是 1015、不是空）────────────────
 # ⚠️ 「服务已监听」≠「下游 rpc 已就绪」⇒ 客户端可能拿到一个还没准备好的实例
@@ -130,13 +147,12 @@ etcd_has_key() {     # $1 = 键前缀 ⇒ 命中返回 0
 }
 
 # ── 端口预检：把**上一轮残留**的探针进程踢掉，否则 Go rpc 会 panic: address already in use ──
+# ⚠️ **只踢「探针进程」**（见 `probe-isolation.sh` 的 `probe_free_port`）
+#    ⇒ 绝不误杀宿主上的其它服务（实测：占着端口的可能是 **Docker Desktop backend** ⇒ 杀了 Docker 就没了）。
 free_probe_ports() {
-  local p pid
-  for p in "${GO_API_PORT}" "${RAG_API_PORT}" "${GO_RPC_PORT}" "${RAG_RPC_PORT}" "${GO_PROM_PORT}"; do
-    for pid in $(lsof -ti tcp:"${p}" 2>/dev/null); do
-      kill -9 "${pid}" 2>/dev/null
-      say "   · 踢掉占用 :${p} 的残留进程 ${pid}"
-    done
+  local p
+  for p in "${GO_API_PORT}" "${RAG_API_PORT}" "${GO_RPC_PORT}" "${RAG_RPC_PORT}" "${GO_PROM_PORT}" "${RAG_RPC_MGMT_PORT}"; do
+    probe_free_port "${p}"
   done
   sleep 1
 }
@@ -155,6 +171,11 @@ cleanup() {
   for p in ${GO_PIDS[@]+"${GO_PIDS[@]}"} ${RAG_PIDS[@]+"${RAG_PIDS[@]}"}; do kill -9 "$p" 2>/dev/null; done
   docker rm -f "${GO_PG_CONTAINER}" >/dev/null 2>&1
   docker rm -f "${RAG_PG_CONTAINER}" >/dev/null 2>&1
+  # ⚠️ **Nacos 残留**：本轮命名空间里的实例必须注销（否则下一轮会自匹配 ⇒ 假失败）。
+  #    命名空间本身**只在本轮创建时**才删（`KEEP_NACOS_NAMESPACE=1` 可保留）。
+  probe_nacos_cleanup || true
+  # ⚠️ **端口租约必须释放** ⇒ 否则下一轮会跳到下一块端口（默认轮就不再是 8889/18889/… 了）。
+  probe_iso_release
   # ⚠️ **不删临时目录**：`rm -rf` 在本机会被回收站守卫拦下（mavis-trash 失效 ⇒ 命令被整体拒绝）
   #    ⇒ 留着 `/var/folders/.../tmp.*` 由系统清理（比让脚本自杀强）。
   if [ "${KEEP_WORK:-0}" = "1" ]; then
@@ -179,6 +200,10 @@ say "   ✓ 命令齐 / 中间件在跑"
 # ⚠️ etcdctl 走容器内端点 ⇒ 先探一次；探不过就 **exit 2**（绝不静默降级成「等超时」）。
 docker exec Sea-etcd etcdctl --endpoints="${ETCD_CTL_ENDPOINT}" endpoint health >/dev/null 2>&1 \
   || die "容器内 etcd 端点 ${ETCD_CTL_ENDPOINT} 不可用（ETCD_CTL_ENDPOINT 可覆盖）"
+# ⚠️ **本轮 Nacos 命名空间**（RUN_ID 非空时 = 专属命名空间）⇒ 先建后用。
+#    建命名空间的接口形态见 `probe-isolation.sh` 的 `probe_nacos_ensure_namespace`（实测 HTTP 200）。
+probe_nacos_ensure_namespace || die "本轮 Nacos 命名空间 ${PROBE_NS} 不可用"
+say "   ✓ 本轮隔离身份：命名空间=${PROBE_NS} · etcd 键=${PROBE_ETCD_KEY} · 端口块=${PROBE_PORT_BLOCK}（偏移 ${PROBE_PORT_OFFSET}）· PG 偏移 ${PROBE_PG_OFFSET}"
 # 端口预检（2026-10-29 实测：上一轮残留进程会让 Go rpc panic: address already in use ⇒ 探针假挂）
 free_probe_ports
 
@@ -214,13 +239,20 @@ pick_pg_port() {   # $1 = 容器名  $2.. = 候选端口 ⇒ 成功时把端口�
   local p
   for p in "$@"; do
     if start_pg "${c}" "${p}"; then printf '%s' "${p}"; return 0; fi
-    say "   · :${p} 起不来（容器内没就绪 或 宿主端口没通）⇒ 换下一个"
+    # 🔴 **这条必须写 stderr**（2026-11-01 实测踩过）：
+    #   本函数的 stdout 被 `GO_PG_PORT="$(pick_pg_port …)"` **捕获** ⇒
+    #   若这里也写 stdout ⇒ 提示文字会**混进端口变量** ⇒ 端口变成
+    #   `   · :55570 起不来…55572` ⇒ 后续 sed 报「unescaped newline inside substitute pattern」
+    #   ⇒ 配置副本生成失败 ⇒ 探针 exit 2。
+    #   ⇒ 单跑时（候选一次就中）**看不出来** ⇒ **并发争用同一个端口阶梯**时才暴露。
+    say "   · :${p} 起不来（容器内没就绪 或 宿主端口没通）⇒ 换下一个" >&2
     docker rm -f "${c}" >/dev/null 2>&1
   done
   return 1
 }
-GO_PG_CANDIDATES=(${GO_PG_PORT:+${GO_PG_PORT}} 55570 55572 55574 55576 55578 55580)
-RAG_PG_CANDIDATES=(${RAG_PG_PORT:+${RAG_PG_PORT}} 55571 55573 55575 55577 55579 55581)
+# ⚠️ PG 阶梯也按**本轮块号**偏移（`PROBE_PG_OFFSET`）⇒ 并发两份时两族的 PG 端口也互不重叠。
+GO_PG_CANDIDATES=(${GO_PG_PORT:+${GO_PG_PORT}} $(probe_pg_ladder 55570 2 6))
+RAG_PG_CANDIDATES=(${RAG_PG_PORT:+${RAG_PG_PORT}} $(probe_pg_ladder 55571 2 6))
 GO_PG_PORT="$(pick_pg_port "${GO_PG_CONTAINER}" ${GO_PG_CANDIDATES[@]+${GO_PG_CANDIDATES[@]}})" \
   || die "Go 侧 PG 起不来（候选端口：${GO_PG_CANDIDATES[*]}）"
 RAG_PG_PORT="$(pick_pg_port "${RAG_PG_CONTAINER}" ${RAG_PG_CANDIDATES[@]+${RAG_PG_CANDIDATES[@]}})" \
@@ -268,11 +300,13 @@ sed -e "s|etcd:2379|127.0.0.1:${ETCD_PORT}|g" \
     -e "s|Path: ../../../log/article-rpc|Path: ${WORK}/log/article-rpc|" \
     -e "s|^  Port: 9092$|  Port: ${GO_PROM_PORT}|" \
     -e "s|^ListenOn: 0.0.0.0:9001$|ListenOn: 0.0.0.0:${GO_RPC_PORT}|" \
+    -e "s|^  Key: article\.rpc$|  Key: ${PROBE_ETCD_KEY}|" \
     "${GO_REPO}/service/article/rpc/etc/article.yaml" > "${WORK}/etc/article.yaml"
 sed -e "s|etcd:2379|127.0.0.1:${ETCD_PORT}|g" \
     -e "s|jaeger:4317|127.0.0.1:${JAEGER_PORT}|g" \
     -e "s|Path: ../../../log/article-api|Path: ${WORK}/log/article-api|" \
     -e "s|^Port: 8889$|Port: ${GO_API_PORT}|" \
+    -e "s|^    Key: article\.rpc$|    Key: ${PROBE_ETCD_KEY}|" \
     "${GO_REPO}/service/article/api/etc/article-api.yaml" > "${WORK}/etc/article-api.yaml"
 grep -q '127.0.0.1' "${WORK}/etc/article.yaml" || die "配置副本没改成宿主地址（sed 没命中？）"
 # ⚠️ 逐条断言「改了哪项」——2026-10-29 实测：`^  Port: 8889$` 这种**缩进写错**的 sed 会静默不命中
@@ -285,14 +319,19 @@ grep -q "^  Port: ${GO_PROM_PORT}$"         "${WORK}/etc/article.yaml"        ||
 grep -q "^  Host: 127.0.0.1$"              "${WORK}/etc/article.yaml"        || die "副本里 article-rpc 的 Postgres Host 没改成 127.0.0.1（sed 没命中？）"
 grep -q "etcd:2379"                        "${WORK}/etc/article.yaml"        && die "副本里还残留 etcd:2379（sed 没命中？）"
 grep -q "etcd:2379"                        "${WORK}/etc/article-api.yaml"    && die "副本里还残留 etcd:2379（sed 没命中？）"
+# ⚠️ **etcd 键必须两侧一致**（rpc 发布键 = api 订阅前缀）⇒ 否则 Go api 发现不到 Go rpc。
+#    真源出处：service/article/rpc/etc/article.yaml:7 / service/article/api/etc/article-api.yaml:11
+grep -q "^  Key: ${PROBE_ETCD_KEY}$"  "${WORK}/etc/article.yaml"        || die "副本 article-rpc 的 etcd 键没改成 ${PROBE_ETCD_KEY}（sed 没命中？）"
+grep -q "^    Key: ${PROBE_ETCD_KEY}$" "${WORK}/etc/article-api.yaml"    || die "副本 article-api 的 etcd 键没改成 ${PROBE_ETCD_KEY}（sed 没命中？）"
 ( cd "${GO_REPO}" && git status --porcelain -- service/article | grep -q . ) \
   && die "真源仓 service/article 有改动 ⇒ 本探针**不得**改真源"
 say "   ✓ 配置副本已生成（真源 service/article 仍然干净）"
 
 # ══════════════════════════ 4. 起 Go 侧 rpc + api ══════════════════════════
-step "4/8 起 Go 侧 article-rpc（注册 etcd ${ETCD_PORT}）"
+step "4/8 起 Go 侧 article-rpc（注册 etcd ${PROBE_ETCD_KEY}）"
 # 残留注册先清掉（上一轮的 lease 可能还在 ⇒ 客户端可能选中死实例）
-docker exec Sea-etcd etcdctl --endpoints="${ETCD_CTL_ENDPOINT}" del "article.rpc" --prefix >/dev/null 2>&1
+# ⚠️ **只删本轮的前缀** ⇒ 绝不碰别的轮次的注册。
+docker exec Sea-etcd etcdctl --endpoints="${ETCD_CTL_ENDPOINT}" del "${PROBE_ETCD_KEY}" --prefix >/dev/null 2>&1
 # ⚠️ **必须用 `exec`** —— 否则 `$!` 是**子 shell 的 PID**，而真正的二进制是它的**子进程**
 #    ⇒ `cleanup()` 杀的是 wrapper ⇒ **二进制 survive ⇒ 占着 :8889 / :9002 / :19092**
 #    ⇒ 下一轮 `free_probe_ports` 才补刀 ⇒ 脚本化连跑时容易撞上「端口/GPRC 实例被上一轮占着」
@@ -304,15 +343,20 @@ GO_PIDS+=($!)
 #    ⇒ 实际键形如 `article.rpc/7587898349098767861`）
 #    ⇒ 这里按**前缀**查（2026-10-29 实测踩过：用精确键查 ⇒ 永远查不到 ⇒ 假阴性）。
 for _ in $(seq 1 40); do
-  etcd_has_key article.rpc && break
+  etcd_has_key "${PROBE_ETCD_KEY}" && break
   sleep 1
 done
-etcd_has_key article.rpc || die "Go article-rpc 40s 内没注册进 etcd（见 ${WORK}/go-rpc.log）"
+etcd_has_key "${PROBE_ETCD_KEY}" || die "Go article-rpc 40s 内没注册进 etcd（见 ${WORK}/go-rpc.log）"
 # ⚠️ go-zero **先注册 etcd 再 bind 端口**（`zrpc/internal/rpcpubserver.go:33` registerEtcd
 #    在 `Server.Start` 之前）⇒ 「etcd 有键」≠ 「端口已监听」⇒ 必须再等一次端口。
 for _ in $(seq 1 20); do nc -z -G 1 127.0.0.1 "${GO_RPC_PORT}" && break; sleep 1; done
 nc -z -G 2 127.0.0.1 "${GO_RPC_PORT}" || die "Go article-rpc 注册了但端口没监听（见 ${WORK}/go-rpc.log）"
-say "   ✓ 已注册 article.rpc → $(etcd_get_value article.rpc)（:${GO_RPC_PORT} 已监听）"
+# 🔴 注册值里必须带**本轮**的 gRPC 端口 ⇒ 排除「别的轮次/上一轮的残留键」自匹配。
+case "$(etcd_get_value "${PROBE_ETCD_KEY}")" in
+  *":${GO_RPC_PORT}"*) : ;;
+  *) die "etcd 上 ${PROBE_ETCD_KEY} 的值不是本轮端口 :${GO_RPC_PORT} ⇒ 残留键自匹配" ;;
+esac
+say "   ✓ 已注册 ${PROBE_ETCD_KEY} → $(etcd_get_value "${PROBE_ETCD_KEY}")（:${GO_RPC_PORT} 已监听）"
 step "5/8 起 Go 侧 article-api（:${GO_API_PORT}）"
 # ⚠️ 同上：**必须 `exec`**（否则 `$!` 不是二进制 PID ⇒ cleanup 杀不掉）
 ( cd "${WORK}" && exec "${WORK}/api" -f "${WORK}/etc/article-api.yaml" >"${WORK}/go-api.log" 2>&1 ) &
@@ -322,27 +366,54 @@ nc -z -G 2 127.0.0.1 "${GO_API_PORT}" || die "Go article-api 没起来（见 ${W
 say "   ✓ Go 侧已监听 :${GO_API_PORT}"
 
 # ══════════════════════════ 5. 起 RAG 侧 ══════════════════════════
-step "6/8 起 RAG 侧 article-rpc（注册 Nacos ${NACOS_PORT}）+ article-api（:${RAG_API_PORT}）"
+step "6/8 起 RAG 侧 article-rpc（注册 Nacos ${NACOS_PORT} · 命名空间 ${PROBE_NS}）+ article-api（:${RAG_API_PORT}）"
+# ⚠️ **构建必须串行化**（V4）：两个模块的 `target/` 是同一份 ⇒ 并发写**必然互踩**。
+#    实测 `-Dproject.build.directory=<dir>` **不生效**（jar 仍落在 `service/article/*/target/`）
+#    ⇒ 只能「**持锁构建 + 把 fat jar 拷进本轮 WORK**」⇒ 本轮跑的是**自己的副本**，
+#    下一轮再重建 `target/` 也**影响不到本轮**。
+probe_mvn_lock_acquire || die "等构建锁超时（另一轮还在构建？）"
 ( cd "${RAG_ROOT}" && mvn -o -q -pl service/article/article-rpc,service/article/article-api -am package -DskipTests ) \
-  || die "RAG 侧构建失败"
+  || { probe_mvn_lock_release; die "RAG 侧构建失败"; }
 RAG_RPC_JAR="${RAG_ROOT}/service/article/article-rpc/target/article-rpc-0.0.1-SNAPSHOT.jar"
 RAG_API_JAR="${RAG_ROOT}/service/article/article-api/target/article-api-0.0.1-SNAPSHOT.jar"
-[ -f "${RAG_RPC_JAR}" ] && [ -f "${RAG_API_JAR}" ] || die "RAG 侧 jar 没产出"
+[ -f "${RAG_RPC_JAR}" ] && [ -f "${RAG_API_JAR}" ] || { probe_mvn_lock_release; die "RAG 侧 jar 没产出"; }
+mkdir -p "${WORK}/jars"
+cp "${RAG_RPC_JAR}" "${WORK}/jars/article-rpc.jar" || { probe_mvn_lock_release; die "拷 rpc jar 失败"; }
+cp "${RAG_API_JAR}"  "${WORK}/jars/article-api.jar"  || { probe_mvn_lock_release; die "拷 api jar 失败"; }
+probe_mvn_lock_release
+RAG_RPC_JAR="${WORK}/jars/article-rpc.jar"
+RAG_API_JAR="${WORK}/jars/article-api.jar"
+say "   ✓ RAG 侧构建完成（jar 已拷进本轮 WORK ⇒ 与别的轮次互不干扰）"
 # ⚠️ 先注销 Nacos 里的**残留实例**（上一轮的旧实例在心跳超时前仍是"健康"的）
 nacos_deregister_all article-rpc
+# ⚠️ `NACOS_NAMESPACE` **必须显式传**：本轮命名空间 = 隔离面 V1
+#    （`service/article/article-rpc/src/main/resources/application.yml:122`
+#      与 `service/article/article-api/src/main/resources/application.yml:33`
+#      都是 `namespace: ${NACOS_NAMESPACE:public}` ⇒ 命名空间由**客户端配置**决定）。
+# ⚠️ `NACOS_ADDR` **与** `NACOS_PORT` **都传**：
+#    `server-addr` 的写法有两种（R1-ENV-001 收口轮正在把 rpc 从旧写法改成新写法）：
+#      旧：`server-addr: ${NACOS_ADDR:nacos:8848}`   ⇒ `NACOS_ADDR` 里要带端口
+#      新：`server-addr: ${NACOS_ADDR:nacos}:${NACOS_PORT:8848}` ⇒ `NACOS_ADDR` 只给主机名
+#    ⇒ 两个都传 ⇒ 两种写法下拼出来的都是 `127.0.0.1:<port>`（Nacos 客户端按 `host:port[:context]`
+#    解析 ⇒ 第三段当 context path 忽略）⇒ **两种写法都能连对**。
 POSTGRES_HOST=127.0.0.1 POSTGRES_PORT="${RAG_PG_PORT}" POSTGRES_DB=first_db \
 POSTGRES_USER=admin POSTGRES_PASSWORD=sea \
 KAFKA_BROKERS="127.0.0.1:${KAFKA_PORT}" NACOS_ADDR="127.0.0.1:${NACOS_PORT}" \
+NACOS_PORT="${NACOS_PORT}" NACOS_NAMESPACE="${PROBE_NS}" \
+ARTICLE_RPC_PORT="${RAG_RPC_PORT}" ARTICLE_RPC_MANAGEMENT_PORT="${RAG_RPC_MGMT_PORT}" \
   java -jar "${RAG_RPC_JAR}" >"${WORK}/rag-rpc.log" 2>&1 &
 RAG_PIDS+=($!)
+# 🔴 **就绪判据精确到「本轮端口」**：数「注册端口 == 本轮 gRPC 端口」的实例个数
+#    （且只在本轮命名空间里数）⇒ 别的轮次的实例**不会被数进来**。
 for _ in $(seq 1 60); do
-  curl -s "http://127.0.0.1:${NACOS_PORT}/nacos/v1/ns/service/list?pageNo=1&pageSize=30&namespaceId=public" 2>/dev/null | grep -q 'article-rpc' && break
+  [ "$(nacos_instance_count "${RAG_RPC_PORT}")" != "0" ] && break
   sleep 1
 done
-curl -s "http://127.0.0.1:${NACOS_PORT}/nacos/v1/ns/service/list?pageNo=1&pageSize=30&namespaceId=public" 2>/dev/null | grep -q 'article-rpc' \
-  || die "RAG article-rpc 60s 内没注册进 Nacos（见 ${WORK}/rag-rpc.log）"
-say "   ✓ RAG article-rpc 已注册进 Nacos"
-NACOS_ADDR="127.0.0.1:${NACOS_PORT}" ARTICLE_API_PORT="${RAG_API_PORT}" USER_JWT_SECRET="${JWT_SECRET}" \
+[ "$(nacos_instance_count "${RAG_RPC_PORT}")" != "0" ] \
+  || die "RAG article-rpc 60s 内没以端口 ${RAG_RPC_PORT} 注册进 Nacos（见 ${WORK}/rag-rpc.log）"
+say "   ✓ RAG article-rpc 已注册进 Nacos（命名空间 ${PROBE_NS} · 端口 ${RAG_RPC_PORT}）"
+NACOS_ADDR="127.0.0.1:${NACOS_PORT}" NACOS_PORT="${NACOS_PORT}" NACOS_NAMESPACE="${PROBE_NS}" \
+ARTICLE_API_PORT="${RAG_API_PORT}" USER_JWT_SECRET="${JWT_SECRET}" \
   java -jar "${RAG_API_JAR}" >"${WORK}/rag-api.log" 2>&1 &
 RAG_PIDS+=($!)
 for _ in $(seq 1 60); do nc -z -G 1 127.0.0.1 "${RAG_API_PORT}" && break; sleep 1; done

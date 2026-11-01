@@ -1,0 +1,28 @@
+# proto 契约基准 —— **由脚本从 Go 真源生成，勿手工编辑**
+# 生成脚本：同目录 generate.py（用法见脚本头部）
+# 真源：Sea-RideTheWind_golang/proto/message.proto
+# 真源 sha256：110a3e007680472041b17768e5877a3266a335ff276c7bfe85a732b3f78da4e8
+package message
+enum|NotificationKind|NOTIFICATION_KIND_UNSPECIFIED=0|ADMIN_BROADCAST=1|ADMIN_NOTICE=2|ARTICLE_COMMENT=3|COMMENT_REPLY=4|ARTICLE_PUBLISHED=5|ARTICLE_LIKED=6
+enum|SenderRole|SENDER_ROLE_UNSPECIFIED=0|USER=1|ADMIN=2|SYSTEM=3
+enum|ConversationStatus|CONVERSATION_STATUS_UNSPECIFIED=0|PENDING=1|OPEN=2
+message|BaseResp|code=1:int32|msg=2:string
+message|NotificationItem|id=1:int64|recipient_id=2:int64|sender_id=3:int64|sender_role=4:SenderRole|kind=5:NotificationKind|title=6:string|content=7:string|is_read=8:bool|created_at=9:int64|extra=10:map<string, string>
+message|NotificationListReq|user_id=1:int64|offset=2:int32|limit=3:int32|unread_only=4:bool
+message|NotificationListResp|code=1:int32|msg=2:string|items=3:repeated NotificationItem|total=4:int64|unread_count=5:int64
+message|MarkNotificationReq|user_id=1:int64|notification_id=2:int64
+message|MarkAllNotificationsReq|user_id=1:int64
+message|UnreadSummaryReq|user_id=1:int64
+message|UnreadSummaryResp|code=1:int32|msg=2:string|notification_unread=3:int64|conversation_unread=4:int64|total_unread=5:int64
+message|SendNotificationReq|recipient_ids=1:repeated int64|broadcast=2:bool|sender_id=3:int64|sender_role=4:SenderRole|kind=5:NotificationKind|title=6:string|content=7:string|extra=8:map<string, string>
+message|SendNotificationResp|code=1:int32|msg=2:string|affected=3:int64
+message|ConversationItem|conversation_id=1:int64|peer_id=2:int64|peer_role=3:SenderRole|peer_name=4:string|peer_email=5:string|status=6:ConversationStatus|unread_count=7:int64|latest_message=8:string|latest_message_at=9:int64|updated_at=10:int64|can_send=11:bool
+message|ConversationListReq|operator_id=1:int64|operator_role=2:SenderRole|offset=3:int32|limit=4:int32
+message|ConversationListResp|code=1:int32|msg=2:string|items=3:repeated ConversationItem|total=4:int64|unread_count=5:int64
+message|ChatMessageItem|id=1:int64|conversation_id=2:int64|sender_id=3:int64|sender_role=4:SenderRole|recipient_id=5:int64|recipient_role=6:SenderRole|content=7:string|is_read=8:bool|created_at=9:int64
+message|ConversationMessageListReq|operator_id=1:int64|operator_role=2:SenderRole|conversation_id=3:int64|offset=4:int32|limit=5:int32
+message|ConversationMessageListResp|code=1:int32|msg=2:string|items=3:repeated ChatMessageItem|status=4:ConversationStatus|can_send=5:bool|pending_sender_id=6:int64|pending_sender_role=7:SenderRole
+message|SendChatMessageReq|sender_id=1:int64|sender_role=2:SenderRole|recipient_id=3:int64|recipient_role=4:SenderRole|conversation_id=5:int64|content=6:string
+message|SendChatMessageResp|code=1:int32|msg=2:string|conversation_id=3:int64|message=4:ChatMessageItem|status=5:ConversationStatus|can_send=6:bool
+message|MarkConversationReadReq|operator_id=1:int64|operator_role=2:SenderRole|conversation_id=3:int64
+service|MessageService|SendNotification(SendNotificationReq)->SendNotificationResp|ListNotifications(NotificationListReq)->NotificationListResp|MarkNotificationRead(MarkNotificationReq)->BaseResp|MarkAllNotificationsRead(MarkAllNotificationsReq)->BaseResp|GetUnreadSummary(UnreadSummaryReq)->UnreadSummaryResp|ListConversations(ConversationListReq)->ConversationListResp|GetConversationMessages(ConversationMessageListReq)->ConversationMessageListResp|SendChatMessage(SendChatMessageReq)->SendChatMessageResp|MarkConversationRead(MarkConversationReadReq)->BaseResp

@@ -212,7 +212,10 @@ spring:
   cloud:
     nacos:
       discovery:
-        server-addr: ${NACOS_ADDR:nacos:8848}
+        # ⚠️ **必须是 `host` 与 `port` 分开两个变量**（R1-ENV-001 · 2026-11-01 收口轮）
+        #    `${NACOS_ADDR:nacos:8848}` 把端口**硬编码进默认值** ⇒ `NACOS_PORT` 被完全忽略
+        #    ⇒ 与 `.env.example` / `docker-compose.yaml` 的契约（NACOS_ADDR=host + NACOS_PORT=port）冲突
+        server-addr: ${NACOS_ADDR:nacos}:${NACOS_PORT:8848}
         namespace: ${NACOS_NAMESPACE:public}
         group: ${NACOS_GROUP:DEFAULT_GROUP}
 

@@ -1,0 +1,34 @@
+# proto 契约基准 —— **由脚本从 Go 真源生成，勿手工编辑**
+# 生成脚本：同目录 generate.py（用法见脚本头部）
+# 真源：Sea-RideTheWind_golang/proto/admin.proto
+# 真源 sha256：73bf4ff7d74d10a1c0469b2d30ef331936ac770583a029190fe66bf606d1c810
+package admin
+message|AdminInfo|uid=1:int64|username=2:string|email=3:string|extra_info=4:map<string, string>
+message|UserInfo|uid=1:int64|score=2:uint32|username=3:string|email=4:string|status=5:uint64|extra_info=6:map<string, string>
+message|GetUserReq|uid=1:int64
+message|GetUserResp|user=1:UserInfo|found=2:bool
+message|GetSelfReq|uid=1:int64
+message|GetSelfResp|admin=1:AdminInfo
+message|CreateAdminReq|username=1:string|password=2:string|email=3:string|extra_info=4:map<string, string>|invite_code=5:string
+message|CreateAdminResp|uid=1:int64
+message|CreateInviteCodeReq|operator_id=1:int64
+message|CreateInviteCodeResp|invite_code=1:string|expires_at=2:int64
+message|LoginReq|username=1:string|password=2:string
+message|LoginResp|uid=1:int64
+message|LogoutReq|token=1:string
+message|LogoutResp|success=1:bool
+message|DeleteUserReq|uid=1:int64|operator_id=2:int64
+message|DeleteUserResp|success=1:bool
+message|ResetUserPasswordReq|uid=1:int64|operator_id=2:int64
+message|ResetUserPasswordResp|success=1:bool
+message|UpdateSelfReq|uid=1:int64|username=2:string|password=3:string|email=4:string|extra_info=5:map<string, string>
+message|UpdateSelfResp|success=1:bool|admin=2:AdminInfo
+message|UpdateUserReq|uid=1:int64|username=2:string|password=3:string|email=4:string|extra_info=5:map<string, string>|operator_id=6:int64
+message|UpdateUserResp|success=1:bool|user=2:UserInfo
+message|GetUserListReq|page=1:int64|page_size=2:int64|keyword=3:string
+message|GetUserListResp|list=1:repeated UserInfo|total=2:int64
+message|BanUserReq|uid=1:int64|operator_id=2:int64
+message|BanUserResp|success=1:bool
+message|UnBanUserReq|uid=1:int64|operator_id=2:int64
+message|UnBanUserResp|success=1:bool
+service|AdminService|GetUser(GetUserReq)->GetUserResp|GetUserList(GetUserListReq)->GetUserListResp|GetSelf(GetSelfReq)->GetSelfResp|CreateAdmin(CreateAdminReq)->CreateAdminResp|CreateInviteCode(CreateInviteCodeReq)->CreateInviteCodeResp|Login(LoginReq)->LoginResp|Logout(LogoutReq)->LogoutResp|DeleteUser(DeleteUserReq)->DeleteUserResp|ResetUserPassword(ResetUserPasswordReq)->ResetUserPasswordResp|UpdateSelf(UpdateSelfReq)->UpdateSelfResp|UpdateUser(UpdateUserReq)->UpdateUserResp|BanUser(BanUserReq)->BanUserResp|UnBanUser(UnBanUserReq)->UnBanUserResp

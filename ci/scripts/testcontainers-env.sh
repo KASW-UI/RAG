@@ -116,7 +116,9 @@ set -e
 
 if [ "$_ping_rc" -eq 2 ]; then
   echo "[ci] ❌ 无法探测 Docker：嵌套镜像里既没有 curl 也没有 docker 客户端。" >&2
-  echo "[ci]    Testcontainers 需要 Docker API over unix socket（$DOCKER_HOST）⇒ 镜像必须至少有 curl。" >&2
+  # ⚠️ 一律用 ${VAR} 显式界定变量名边界：macOS bash 3.2 会把 $VAR 后紧跟的多字节字符
+    #    （此处是全角括号）算进变量名 ⇒ set -u 下报 unbound variable ⇒ **这条报错行本身崩掉**。
+  echo "[ci]    Testcontainers 需要 Docker API over unix socket（${DOCKER_HOST}）⇒ 镜像必须至少有 curl。" >&2
   exit 1
 fi
 
