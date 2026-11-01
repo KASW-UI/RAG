@@ -14,8 +14,8 @@
 ### 1.1 一句话结论
 
 > **三目录**有 **1200** 个带状态的问题项（**23** 个被同源组合并吸收 ⇒ 派生表实收 **1177** 个编号），
-> 其中 **754** 个（**64%**）**已定级**（带阶段归属），
-> 剩下 **423** 个**未定级** —— 其中**开放状态**（🔴 未闭合 / 🟡 部分闭合 / 仍生效 / ⏳ 未签字）又**没有阶段归属**的只有 **4** 条。
+> 其中 **753** 个（**63%**）**已定级**（带阶段归属），
+> 剩下 **424** 个**未定级** —— 其中**开放状态**（🔴 未闭合 / 🟡 部分闭合 / 仍生效 / ⏳ 未签字）又**没有阶段归属**的只有 **4** 条。
 > ⇒ **「发现了却没进施工单」已经清零**；这正是「台账能不能当施工单」的量化答案。
 > 证据面上：有活体证据的 **141** 条里，**只有 112 条**的活体证据是**绿**（支持当前结论），
 > 其余 **29** 条的证据本身是**红 / 环境问题 / 混合** ⇒ **「有活体证据」≠「结论被证实」**。
@@ -168,10 +168,10 @@
 | 归属 | 条目数 | 含义 |
 |---|---|---|
 | **A** | 7 | 阶段 1 准入阻断项（不处理就无法通过简历项目验收） |
-| **B** | 26 | 阶段 1 竞争力补强项（技术亮点与验证闭环） |
+| **B** | 25 | 阶段 1 竞争力补强项（技术亮点与验证闭环） |
 | **C** | 67 | 阶段 2 最终工程建设项（业务语义恢复 / 生产工程机制） |
 | **D** | 228 | 经分析确认可不实现或不适用（须有明确理由） |
-| **—** | 523 | **未派生 —— 待人工定级**（不是「不重要」，是「还没定级」） |
+| **—** | 524 | **未派生 —— 待人工定级**（不是「不重要」，是「还没定级」） |
 
 | 优先级 | 条目数 |
 |---|---|
@@ -302,7 +302,6 @@
 | `G4-2` | article | 同源组 | 2 | ✅ 已一致 / 🔴 未闭合 | ✅ 已一致 | `DRIFT/article/vs-common.md:275;DRIFT/favorite/vs-common.md:109` |
 | `PIT-FAV-RPC-038` | global | 同源组 | 2 | 仍生效 / 🔴 未闭合 | 仍生效 | `DRIFT/global/vs-common.md:2709;Pitfalls/favorite/rpc.md:1908` |
 | `PITFALL-FOLLOW-005` | follow | 同源组 | 5 | ✅ 已一致 / 🔴 未闭合 | ✅ 已一致 | `DRIFT/follow/vs-common.md:300;DRIFT/follow/vs-common.md:424;DRIFT/follow/vs-common.md:1215` |
-| `S1-FOLLOW-001` | follow | 同源组 | 7 | ✅ 已一致 / 🟡 部分闭合 | ✅ 已一致 | `DRIFT/follow/stage1-admission.md:74;DRIFT/follow/stage1-admission.md:391;DRIFT/follow/stage1-admission.md:540` |
 | `S1-FOLLOW-004` | follow | 同源组 | 7 | 🔴 未闭合 / 🟡 部分闭合 | 🟡 部分闭合 | `DRIFT/follow/stage1-admission.md:145;DRIFT/follow/stage1-admission.md:394;DRIFT/follow/stage1-admission.md:537` |
 | `SD-2026-10-24-10` | global | 同源组 | 2 | ⏳ 未签字 / 🔴 未闭合 | ⏳ 未签字 | `DRIFT/global/common-tails.md:547;Intentional_Deviations/like/api.md:87` |
 | `SD-2026-10-25-CAND-10` | global | 同源组 | 3 | ⏳ 未签字 / ✅ 已一致 | ⏳ 未签字 | `DRIFT/global/lanes/L5-signoff.md:245;Intentional_Deviations/hot/api.md:33;Intentional_Deviations/hot/api.md:421` |
@@ -317,11 +316,12 @@
 | `ARPC-002` | users | 同域多版本 | 3 | ✅ 已一致 / 🔴 未闭合 | ✅ 已一致 | `DRIFT/users/admin/rpc.md:2114;DRIFT/users/admin/rpc.md:2148;DRIFT/users/admin/rpc.md:2455` |
 | `C-1` | comment | 同域多版本 | 2 | ✅ 已一致 / 🔴 未闭合 | ✅ 已一致 | `DRIFT/comment/vs-common.md:57;DRIFT/comment/vs-common.md:218` |
 | `C-4` | comment | 同域多版本 | 3 | 🔴 未闭合 / 🟡 部分闭合 | 🟡 部分闭合 | `DRIFT/comment/vs-common.md:60;DRIFT/comment/vs-common.md:126;DRIFT/comment/vs-common.md:221` |
+| `CD-6` | global | 同域多版本 | 5 | ✅ 已一致 / 🟡 部分闭合 | ✅ 已一致 | `DRIFT/global/_README.md:137;DRIFT/global/cross-domain.md:46;DRIFT/global/cross-domain.md:591` |
 
-> 共 **141** 个合并组内状态冲突：**同源组 50**（真缺陷，优先） ＋ **同域多版本 91**（历史快照，非缺陷）（此处列前 60）。
+> 共 **140** 个合并组内状态冲突：**同源组 49**（真缺陷，优先） ＋ **同域多版本 91**（历史快照，非缺陷）（此处列前 60）。
 >
 > ⚠️ **第三类来源（2026-10-30 G1 lane 实测）＝「误修饰」** —— `detect_status` 取**条目所在段的前 400 字符** ⇒ ⇒ **同一行里修饰「别的东西」的状态 emoji，也会被抽成这个条目的状态**（典型形态：`🟡 **2026-10-29 复核：状态不变（仍 🔴 OPEN）**` ⇒ 🟡 修饰的是**复核标注**、不是状态 ⇒ 与同组的 🔴 撞 ⇒ `_conflict > 1`）
-> ⇒ ⇒ **本次实测的 141 个冲突组里，除「同源组 50」外的 91 个，多数属此类** ⇒ ⇒ **收口时不应逐条当缺陷修**；
+> ⇒ ⇒ **本次实测的 140 个冲突组里，除「同源组 49」外的 91 个，多数属此类** ⇒ ⇒ **收口时不应逐条当缺陷修**；
 > ⇒ **正确处置 = 各域自行把那几处「误修饰」就地归一**（把状态标记改成**无标记写法**、语义留在文字里） ⇒ **行数不变 ⇒ 不破行号锚点** ⇒ ⇒ 该域的 `_conflict` 随之下降、派工面 `status` 与基线同值（**是修正，不是新增缺口**）。
 >
 > ⚠️ **口径变化说明（2026-10-30）**：归一前该指标按**裸编号**统计 ⇒ **131**；
@@ -509,7 +509,6 @@
 | `E1` | DRIF | users | **G1** | 🟡 部分闭合 | C 无指针 | P2 | B | 否 | 间接 · 阶段 1 闭合后才有阶段 2 | GAP-13 ｜ ⚠️已关闭指针:GAP-10 | 无可复算指针 · 结论不可复算 | `DRIFT/users/stage1-admission.md:503` | — |
 | `S1-USERS-002` | DRIF | users | **G1** | 🟡 部分闭合 | A 活体 · 绿(0) | P2 | B | 否 | 台账已写 · ① 全仓统一为**一个**来源（`.env` ⇒ env 注入，**取消 fallback**，与 Go 的 fail- | P4-T01,P4-T02 ｜ GAP-11 | — | `DRIFT/users/stage1-admission.md:108;DRIFT/users/stage1-admission.md:493;DRIFT/users/stage1-admission.md:516` | — |
 | `S1-USERS-004` | DRIF | users | **G1** | 🟡 部分闭合 | B 静态 | P2 | B | 否 | 台账已写 · ① 事务边界上移到 `UserDomainService` 的 public 入口（与 Go 的「数据层显式闭包」同形） | GAP-09 | — | `DRIFT/users/stage1-admission.md:158;DRIFT/users/stage1-admission.md:518;DRIFT/users/vs-common.md:5382` | — |
-| `S1-FOLLOW-001` | DRIF | follow | **G1** | ✅ 已一致 | A 活体 · 绿(0) | P3 | B | 否 | 台账已写 · ① 统一方案：给所有 rpc 组件开**独立 management 端口**（与管理 HTTP 端口分离，避开 `man | 未排期 | 已定性 · 未排期 | `DRIFT/follow/stage1-admission.md:74;DRIFT/follow/stage1-admission.md:391;DRIFT/follow/stage1-admission.md:540` | — |
 | `D-08` | DRIF | like | **G2** | ✅ 已一致 | B 静态 | P3 | B | 否 | 间接 · 阶段 1 闭合后才有阶段 2 | P4-T09,P7-T01 | — | `DRIFT/like/rpc.md:1984` | — |
 | `E4` | DRIF | users | **G1** | ✅ 已一致 | C 无指针 | P3 | B | 否 | 间接 · 阶段 1 闭合后才有阶段 2 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/users/stage1-admission.md:506` | — |
 | `E5` | DRIF | users | **G1** | ✅ 已一致 | C 无指针 | P3 | B | 否 | 间接 · 阶段 1 闭合后才有阶段 2 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/users/stage1-admission.md:507` | — |
@@ -990,6 +989,7 @@
 | `E5` | DRIF | follow | **G1** | ✅ 已一致 | C 无指针 | P3 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/follow/stage1-admission.md:380` | — |
 | `G-13` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/api.md:1098;DRIFT/follow/stage1-admission.md:214;DRIFT/follow/vs-common.md:770` | — |
 | `OPEN-001` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/api.md:199;DRIFT/follow/vs-common.md:1202` | — |
+| `S1-FOLLOW-001` | DRIF | follow | **G1** | ✅ 已一致 | A 活体 · 绿(0) | P3 | — | 是 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/stage1-admission.md:74;DRIFT/follow/stage1-admission.md:391;DRIFT/follow/stage1-admission.md:540` | — |
 | `S1-FOLLOW-002` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 是 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/stage1-admission.md:97;DRIFT/follow/stage1-admission.md:536;DRIFT/follow/vs-common.md:1208` | — |
 | `S1-FOLLOW-003` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 是 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/stage1-admission.md:123;DRIFT/follow/stage1-admission.md:393;DRIFT/follow/stage1-admission.md:541` | — |
 | `S1-FOLLOW-005` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 是 | 台账已写 · ① 阶段 1 已修（`${FOLLOW_RPC_PORT:8082}`）；② 阶段 2 把 6 个组件端口**统一**为 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/stage1-admission.md:162;DRIFT/follow/stage1-admission.md:538;DRIFT/follow/vs-common.md:1211` | — |
@@ -1782,7 +1782,7 @@
    **「跑绿 ≠ 对」** 在这一层同样成立：U3 的 A 档只证明**那条探针的断言**成立，
    **不证明本条目结论的全量成立**。
 2. **U5 拿不到定级 ⇒ 写 `—`** —— 不是「不重要」，是**还没定级**。
-   本轮有 **423** 个编号属这一档（派生表 1177 个编号里的其余部分）
+   本轮有 **424** 个编号属这一档（派生表 1177 个编号里的其余部分）
    ⇒ 它们**不进施工单**，除非先定级；其中**开放状态**的只有 **4** 条。
 3. **U8 的强链只认「指针落在条目段内」或「任务块里直接写了编号」** ——
    **既没写编号也没给指针**的语义关联 ⇒ **不可见**（这是本层的固有上限）。
