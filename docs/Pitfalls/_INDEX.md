@@ -200,7 +200,7 @@
 
 | 项 | 值 |
 |---|---|
-| **全域坑位条目** | **442 条** / **35 份编号式台账**（另 **16 份散文式台账**用散文标题、不计入条数 · **0 份 0 字节**坑位待填）⇒ **口径由 `tools/check-ledger-count.py` 写死**（标题文本以 `PIT-`/`PF-`/`P-` 开头且以 `-<数字>` 结尾）⇒ **数字是机器生成的，不是手抄的** |
+| **全域坑位条目** | **443 条** / **35 份编号式台账**（另 **16 份散文式台账**用散文标题、不计入条数 · **0 份 0 字节**坑位待填）⇒ **口径由 `tools/check-ledger-count.py` 写死**（标题文本以 `PIT-`/`PF-`/`P-` 开头且以 `-<数字>` 结尾）⇒ **数字是机器生成的，不是手抄的** |
 | **编号前缀族** | **24 个具体前缀**（实测 2026-10-27 · 口径同上）：`P-` · `P-HOTAPI-` · `P-HOTRPC-` · `PF-ARTICLE-RPC-` · `PIT-AXIS-` · `PIT-COMMENT-API-` · `PIT-COMMENT-RPC-` · `PIT-COMMON-` · `PIT-DERIVE-` · `PIT-FAV-API-` · `PIT-FAV-COMMON-` · `PIT-FAV-PROTO-` · `PIT-FAV-RPC-` · `PIT-FOLLOW-` · `PIT-GLOBAL-` · `PIT-LANE-` · `PIT-LIKE-RPC-` · `PIT-LIKEAPI-` · `PIT-MESSAGE-` · `PIT-SCAN-` · `PIT-TASK-` · `PIT-USERS-` · `PIT-USERSADM-` · `PIT-USERSCOMMON-` |
 | **编号撞号** | **22 处** —— 见下方「编号撞号」 |
 

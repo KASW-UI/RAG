@@ -466,7 +466,7 @@ article/follow/task **0** · hot **N/A** ⇒ **机器合计 53**；
 | 2 | **S3 的 18 条探针覆盖了全部 39 个微服务组件** | 探针覆盖的是**域级契约面**（9 域 + `users-common`）⇒ **组件级**（38 个组件）仍靠 A-1 矩阵 + 事务守门 + 单测承担 | A-1 矩阵（judge §二） |
 | 3 | **proto 的 JSON 映射在生产链路上与 Go 一致** | 全仓 `src/main` 对 `com.google.protobuf.util.JsonFormat` **0 命中** ⇒ **生产链路不走 proto JSON 映射**（api 层自建 Jackson DTO）⇒ 本轮的 proto JSON 断言证的是 **proto3 JSON 映射本身的 presence 语义**，**不是**某条生产链路的双侧对拍 | 若要升级为活体一致 ⇒ 需在各域 api 层补一条 Go↔RAG 的 JSON 响应体对拍（`P5-T01` 回执 §8 已登记） |
 | 4 | **本轮没有改任何产品行为** | 本轮落码仅 4 处**注释/配置形态**（Nacos 双写法 · task-api scheme · favorite 优雅关闭的**方法调用形态** · like 两处 javadoc）＋ **测试类新增** ⇒ **业务逻辑 diff 为空** | — |
-| 5 | **`E31` / `DRIFT-FOLLOW-006`（follow-rpc 5 个指标无抓取出口）** | 需要改产品配置（Prometheus 暴露面）⇒ **本轮不改产品行为** | 仍待 Jason 决策 |
+| 5 | ~~**`E31` / `DRIFT-FOLLOW-006`（follow-rpc 5 个指标无抓取出口）**~~ | 🟢 **2026-11-01 销号** —— **前提已过期**：出口 2026-10-29 已落地（观测口 16065 = Go 同口）⇒ **双侧活体探针复跑 EXIT=0**（`tools/metrics-probe/follow/run.sh`）⇒ 同款缺口 5/5 亦已消解（各自观测口 HTTP 200） | ✅ **已闭合**（Jason 2026-11-01 指令「修复 E31 / DRIFT-FOLLOW-006」⇒ 落为**销号 + 台账与现状对齐**） |
 | 6 | **3 条签字偏离 + 1 条决策项** | **不代用户签字** | 仍待 Jason 签字 / 决策 |
 
 ### 9.6 · 本轮**不做**的事（规范 §一.6 / §一.7）

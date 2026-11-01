@@ -17,7 +17,7 @@
 | DRIFT-FOLLOW-002 | 运行时 classpath 缺 `grpc-inprocess` ⇒ `NoClassDefFoundError` ⇒ 启动失败 | **启动阻塞（硬失败）** | ✅ 已修<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针）**：RAG `service/follow/follow-rpc/pom.xml:256-260` = `io.grpc:grpc-inprocess` **无 `<scope>test</scope>`**（compile 默认）⇒ **现行态 = ✅ 已修（不变）**；⚠️ **跨域那半边**（域外 4 模块仍是 `test` scope）**已于 2026-10-29 订正**，本轮逐模块复核**属实**（全仓已无 `test` scope）；核对日期 2026-10-30 |
 | DRIFT-FOLLOW-003 | `discovery://user-rpc` 两斜杠被 devh 拒绝 ⇒ 启动失败 | **启动阻塞（硬失败）** | ✅ 已修<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针 + 子结论订正）**：RAG `service/follow/follow-rpc/src/main/resources/application.yml:163` = `address: discovery:///user-rpc`（**三斜杠**）⇒ **现行态 = ✅ 已修（不变）**；⚠️ **「域外 5 个模块仍是两斜杠 ⇒ 待修」已陈旧**（本轮逐模块实测：全仓已无两斜杠）⇒ **该跨域待办已销账**；核对日期 2026-10-30 |
 | DRIFT-FOLLOW-004 | `server-addr` 硬编码 `:8848`、忽略 `NACOS_PORT`，与 follow-api 语义冲突 ⇒ api/rpc 连到两台 Nacos | 运行时故障（业务码塌成 1015） | ✅ 已修<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针）**：RAG `service/follow/follow-api/src/main/resources/application.yml:58` ＋ `service/follow/follow-rpc/src/main/resources/application.yml:95` = **同一串** `${NACOS_ADDR:nacos}:${NACOS_PORT:8848}` ⇒ **现行态 = ✅ 已修（不变）**；核对日期 2026-10-30 |
-| DRIFT-FOLLOW-006 | 5 个 `follow_rpc_*` 指标**无任何抓取出口**（Go 有 DevServer `/metrics`，RAG 的 follow-rpc 是纯 gRPC 进程） | **可观察（抓取侧）** | ✅ **已修（2026-10-29 · 编号 `S1-FOLLOW-001`）** —— 出口已落地（Tomcat + Actuator，**端口 16065 与 Go 一字不差**）⇒ 双侧 series 集合**逐条一致**（仅余 **P3/D 类**的 8 条 `_max` 增项）⇒ 详见下方 §「DRIFT-FOLLOW-006 的落地（2026-10-29）」<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针）**：RAG `service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web` ＋ `service/follow/follow-rpc/src/main/resources/application.yml:131` = `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}` ＋ `:112` = `register-enabled: false` · Go `service/follow/rpc/etc/follow.yaml:23` = `Port: 16065` ⇒ **现行态 = ✅ 已落地（不变）**；核对日期 2026-10-30 <br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/metrics-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 04:32:14 · 32s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 故障[follow_relation] Follow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[follow_relation] Unfollow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[block_relation] Block 两；<br>`tools/metrics-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 04:32:14 · 32s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 故障[follow_relation] Follow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[follow_relation] Unfollow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[block_relation] Block 两。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。|
+| DRIFT-FOLLOW-006 | **D 类**（经分析确认可不实现）· 5 个 `follow_rpc_*` 指标**无任何抓取出口**（Go 有 DevServer `/metrics`，RAG 的 follow-rpc 是纯 gRPC 进程） | **可观察（抓取侧）** | ✅ **已修（2026-10-29 · 编号 `S1-FOLLOW-001`）** —— 出口已落地（Tomcat + Actuator，**端口 16065 与 Go 一字不差**）⇒ 双侧 series 集合**逐条一致**（仅余 **P3/D 类**的 8 条 `_max` 增项）⇒ 详见下方 §「DRIFT-FOLLOW-006 的落地（2026-10-29）」<br>⚠️ **2026-10-30 复核（follow+task lane · 补指针）**：RAG `service/follow/follow-rpc/pom.xml:216` = `spring-boot-starter-web` ＋ `service/follow/follow-rpc/src/main/resources/application.yml:131` = `server.port: ${FOLLOW_RPC_MANAGEMENT_PORT:16065}` ＋ `:112` = `register-enabled: false` · Go `service/follow/rpc/etc/follow.yaml:23` = `Port: 16065` ⇒ **现行态 = ✅ 已落地（不变）**；核对日期 2026-10-30 <br>⚠️ **2026-10-30 活体对拍（live-parity 轮）**：原判**保留不改**；本轮对该条目点名的活体探针实测 ⇒ `tools/metrics-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 04:32:14 · 32s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 故障[follow_relation] Follow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[follow_relation] Unfollow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[block_relation] Block 两；<br>`tools/metrics-probe/follow/run.sh` ⇒ **EXIT=0**（2026-10-30 04:32:14 · 32s）—— **活体跑通**（探针自身断言全部成立）；覆盖断言：✅ 故障[follow_relation] Follow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[follow_relation] Unfollow 两侧一致：0\|rpc error: code = Internal desc = database update failed ⏐ ✅ 故障[block_relation] Block 两。⚠️ **退出码只证「该探针自己的断言」成立，不等于本条结论的全量成立**⇒ 本条其余断言仍以上列逐条依据为准。⇒ 证据明细见 [`docs/DRIFT/_cross/live-parity-2026-10-30.md`](../_cross/live-parity-2026-10-30.md)。<br>🟢 **2026-11-01 复测（销号轮 · Jason 问询触发）**：① **双侧活体探针复跑 ⇒ EXIT=0**（`tools/metrics-probe/follow/run.sh` · 2026-11-01 22:09）—— **28 步请求矩阵逐条两侧一致** ＋ **10 步故障注入**（覆盖 `db_error_total` 的 (action,type) 维度）⇒ ⇒ **本条「出口缺失」的描述已不成立**；② ⚠️ **同轮首次复跑曾 EXIT=2** ⇒ **根因 = 宿主上另有同名 `user-rpc` 注册进同一 Nacos `public` namespace** ⇒ 探针的 RAG 侧解析到了**宿主那个**（其库里没有探针播种的 user 1006）⇒ `Block` 返回 `user not found` ⇒ **假红** ⇒ ⇒ **不是产品缺陷**（停掉宿主上的 20 个服务后，同一探针 ⇒ **EXIT=0**）⇒ 已登记进 [`docs/Pitfalls/global/cross-domain.md`](../../Pitfalls/global/cross-domain.md)（探针未隔离 ⇒ 同名实例污染）；③ **阶段归属 = D 类**（经分析确认可不实现：出口已落地 ＋ 双侧 series 集合逐条一致 ⇒ **无待实现内容**）；核对日期 2026-11-01 |
 
 > ⚠️ **三条都发生在「测试全绿」的状态下** —— 修复前 63 条测试 0 失败（**原写「现为 68 条」，已过期** —— 🆕 **2026-10-29 实测 = 86 条**：`mvn -o -B -pl service/follow/follow-rpc test` ⇒ surefire XML `testsuite` 求和 = **86** / 0 failures / 0 errors / 0 skipped · **14 个测试类**），
 > 而 `java -jar` 起不来。根因见 [`docs/Pitfalls/follow/rpc.md`](../../Pitfalls/follow/rpc.md)。
@@ -284,15 +284,15 @@ curl: (1) Received HTTP/0.9 when not allowed                 ← 那不是 HTTP
 
 | Go 侧 rpc | DevServer | 端口 | RAG 侧现状 | 判定 |
 |---|---|---|---|---|
-| `follow/rpc` | ✅ | **16065** | ❌ 零出口 | 🔴 **漂移（本条）** |
-| `favorite/rpc` | ✅ | 16062 | ❌ 零出口 | 🔴 同款缺口（**其它域**） |
-| `message/rpc` | ✅ | 16067 | ❌ 零出口 | 🔴 同款缺口（**其它域**） |
-| `like/rpc` | ✅ | 9098 | ❌ 零出口 | 🔴 同款缺口（**其它域**） |
-| `user/user/rpc` | ✅ | 9094 | ✅ **已开**（2026-10-30 载体落地） | — 同款缺口**已闭合** |
-| `user/admin/rpc` | ✅ | 9097 | ✅ **已开**（2026-10-30 载体落地） | — 同款缺口**已闭合** |
+| `follow/rpc` | ✅ | **16065** | ✅ **出口在位**（2026-11-01 实测 HTTP 200） | — **已闭合**（本条） |
+| `favorite/rpc` | ✅ | 16062 | ✅ **出口在位**（2026-11-01 实测 HTTP 200） | — 同款缺口**已闭合** |
+| `message/rpc` | ✅ | 16067 | ✅ **出口在位**（2026-11-01 实测 HTTP 200） | — 同款缺口**已闭合** |
+| `like/rpc` | ✅ | 9098 | ✅ **出口在位**（2026-11-01 实测 HTTP 200） | — 同款缺口**已闭合** |
+| `user/user/rpc` | ✅ | 9094 | ✅ **已开**（2026-10-30 载体落地 · 2026-11-01 复测 HTTP 200） | — 同款缺口**已闭合** |
+| `user/admin/rpc` | ✅ | 9097 | ✅ **已开**（2026-10-30 载体落地 · 2026-11-01 复测 HTTP 200） | — 同款缺口**已闭合** |
 | `article/rpc`、`comment/rpc`、`hot/rpc`、`task/rpc` | ❌ **无 DevServer 段** | — | ❌ 零出口 | ⚠️ **不是漂移**（Go 侧同样抓不到 —— 精确原因：这 4 个域的 Go yaml **没有 DevServer 段** ⇒ `go-zero@v1.10.2/core/service/serviceconf.go:40` 的 `DevServer` 字段带 `optional` ⇒ **整段缺失 ⇒ 零值 ⇒ `Enabled=false` ⇒ 不起 DevServer** ⇒ ⇒ **不是「Go 侧没这个端口」，而是「Go 侧根本没起」**） |
 
-⇒ **「Go 有、RAG 无」一共 6 处**，follow 是其中之一；
+⇒ **「Go 有、RAG 无」= 6 处**（follow / favorite / message / like / user-user / user-admin）—— 🟢 **2026-11-01 实测：6/6 全部「出口在位」**（各自 Go 同口的观测口 ⇒ `/actuator/prometheus` ⇒ **HTTP 200** ＋ Prometheus 文本格式）⇒ ⇒ **本表已全部过期，现状 = 0 处缺口**；
 ⇒ **另外 4 个 rpc（article/comment/hot/task）在 Go 侧也没有指标出口** ⇒ RAG 侧同样没有 **不构成漂移**
 （⚠️ 但 RAG 侧仍在 Micrometer 里注册了 meter —— 那是「有数据无出口」，与 follow 一样，见下）。
 
@@ -325,15 +325,16 @@ threading.GoSafe(func() {
 因为这已经是**跨 10 个 rpc 模块的部署形态决策**，不该由 follow 域单方面落地。
 
 ⇒ **跨域待办（交主会话派单）**：下面 5 个 rpc 模块的「Go 有 DevServer、RAG 零出口」同款缺口，
-修法与 follow 域一致（先定 A/B，再统一铺开）：
+修法与 follow 域一致（先定 A/B，再统一铺开）——
+🟢 **2026-11-01 实测：5/5 的观测口已全部在位**（各自 Go 同口 ⇒ `/actuator/prometheus` ⇒ HTTP 200）⇒ ⇒ **本跨域待办已消解**（不是「被 follow 域顺带做了」，而是**载体与端口在各域都已落地**）：
 
 | # | 组件 | Go 的 DevServer 端口 | 归属域 |
 |---|---|---|---|
-| 1 | `favorite-rpc` | 16062 | favorite |
-| 2 | `message-rpc` | 16067 | message |
-| 3 | `like-rpc` | 9098 | like |
-| 4 | `user-user-rpc` | 9094 | users |
-| 5 | `user-admin-rpc` | 9097 | users |
+| 1 | `favorite-rpc` | 16062 | favorite | 🟢 **2026-11-01 实测出口在位**（HTTP 200） |
+| 2 | `message-rpc` | 16067 | message | 🟢 **2026-11-01 实测出口在位**（HTTP 200） |
+| 3 | `like-rpc` | 9098 | like | 🟢 **2026-11-01 实测出口在位**（HTTP 200） |
+| 4 | `user-user-rpc` | 9094 | users | 🟢 **2026-10-30 载体落地 · 2026-11-01 复测 HTTP 200** |
+| 5 | `user-admin-rpc` | 9097 | users | 🟢 **2026-10-30 载体落地 · 2026-11-01 复测 HTTP 200** |
 
 ⚠️ **注意端口冲突**：`like-rpc` / `message-rpc` / `favorite-rpc` / `user-*-rpc` 目前的
 `grpc.server.port` 有**多个都写着 8082**（`favorite-rpc` / `like-rpc` / `message-rpc` / `follow-rpc`）

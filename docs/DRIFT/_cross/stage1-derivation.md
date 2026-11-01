@@ -13,11 +13,11 @@
 
 ### 1.1 一句话结论
 
-> **三目录**有 **1201** 个带状态的问题项（**23** 个被同源组合并吸收 ⇒ 派生表实收 **1178** 个编号），
-> 其中 **754** 个（**64%**）**已定级**（带阶段归属），
-> 剩下 **424** 个**未定级** —— 其中**开放状态**（🔴 未闭合 / 🟡 部分闭合 / 仍生效 / ⏳ 未签字）又**没有阶段归属**的只有 **4** 条。
+> **三目录**有 **1202** 个带状态的问题项（**23** 个被同源组合并吸收 ⇒ 派生表实收 **1179** 个编号），
+> 其中 **757** 个（**64%**）**已定级**（带阶段归属），
+> 剩下 **422** 个**未定级** —— 其中**开放状态**（🔴 未闭合 / 🟡 部分闭合 / 仍生效 / ⏳ 未签字）又**没有阶段归属**的只有 **4** 条。
 > ⇒ **「发现了却没进施工单」已经清零**；这正是「台账能不能当施工单」的量化答案。
-> 证据面上：有活体证据的 **141** 条里，**只有 112 条**的活体证据是**绿**（支持当前结论），
+> 证据面上：有活体证据的 **143** 条里，**只有 114 条**的活体证据是**绿**（支持当前结论），
 > 其余 **29** 条的证据本身是**红 / 环境问题 / 混合** ⇒ **「有活体证据」≠「结论被证实」**。
 > 本派生层把这几条数字**变成可复算的断言**，并把它们排成**可开工的清单**（§四）。
 
@@ -25,14 +25,14 @@
 
 | 事实 | 数字 | 依据 |
 |---|---|---|
-| 三目录条目（**宽口径**扫描） | **2676** 条 / **1414** 个唯一编号 | U1 |
-| 其中**问题项**（自身带状态标记） | **2059** 条 / **1201** 个唯一编号 | U1 + U2 |
-| 旧口径（`ledger-claim-audit.py` 的 `ID_RE` 前缀白名单）能认出 | **789** / 1201 | ⚠️ **漏 412 个唯一编号** |
+| 三目录条目（**宽口径**扫描） | **2678** 条 / **1416** 个唯一编号 | U1 |
+| 其中**问题项**（自身带状态标记） | **2060** 条 / **1202** 个唯一编号 | U1 + U2 |
+| 旧口径（`ledger-claim-audit.py` 的 `ID_RE` 前缀白名单）能认出 | **790** / 1202 | ⚠️ **漏 412 个唯一编号** |
 | 施工单任务（`_task-universe.md`） | 37 条 | §〇 口径 |
 | 施工单 ↔ 台账条目**强链** | **51** 个条目被回指 | U8 |
 
 > ⚠️ **上一轮报给用户的「1183 条目 / 707 唯一 ID」是**旧口径**（前缀白名单）**的数字**
-> ⇒ 本派生层用**宽口径**重扫 ⇒ **2059 条问题项 / 1201 个唯一编号**。
+> ⇒ 本派生层用**宽口径**重扫 ⇒ **2060 条问题项 / 1202 个唯一编号**。
 > **差额不是「多算了」** —— 是旧口径**认不出**整族编号（`MISMATCH-API-*` / `OP-*` / `T-*` / `N-*` /
 > `CD-*` / `ADJ-*` / `A-*` / `B-*` / `C-*` / **`E60` 这类「字母+数字」形态** …）。
 > ⇒ **「落空 0」这类结论的覆盖面小于表面**（同族：弱判据把真缺陷洗成 0）。
@@ -134,7 +134,7 @@
 | `BLK-03` | A | `A-2` · `DRIFT-FOLLOW-008` · `S1-FOLLOW-007` |
 | `DEC-01` | — | `DRIFT-LIKE-003` |
 | `DEC-02` | — | `SD-2026-10-23-08` · `SD-2026-10-23-09` · `SD-2026-10-24-11` · `SD-2026-10-25-CAND-14` |
-| `DEC-03` | — | `E31` · `E9` |
+| `DEC-03` | — | `DRIFT-FOLLOW-006` · `E31` |
 | `DEC-04` | — | `PIT-GLOBAL-032` |
 | `DEC-05` | — | `C-3` · `E38` · `E66` |
 | `ENV-01` | — | （未回指台账条目） |
@@ -169,14 +169,14 @@
 |---|---|---|
 | **A** | 7 | 阶段 1 准入阻断项（不处理就无法通过简历项目验收） |
 | **B** | 25 | 阶段 1 竞争力补强项（技术亮点与验证闭环） |
-| **C** | 66 | 阶段 2 最终工程建设项（业务语义恢复 / 生产工程机制） |
-| **D** | 230 | 经分析确认可不实现或不适用（须有明确理由） |
-| **—** | 523 | **未派生 —— 待人工定级**（不是「不重要」，是「还没定级」） |
+| **C** | 67 | 阶段 2 最终工程建设项（业务语义恢复 / 生产工程机制） |
+| **D** | 231 | 经分析确认可不实现或不适用（须有明确理由） |
+| **—** | 521 | **未派生 —— 待人工定级**（不是「不重要」，是「还没定级」） |
 
 | 优先级 | 条目数 |
 |---|---|
 | P0 | 10 |
-| P1 | 401 |
+| P1 | 402 |
 | P2 | 96 |
 | P3 | 781 |
 
@@ -198,14 +198,14 @@
 | **G1** | 278 | **95** | 0 | `users`（**不含 users-common**）+ `follow` |
 | **G2** | 287 | **64** | 0 | `message` + `like` + `task` |
 | **G3** | 405 | **151** | 0 | `article` + `comment` + `favorite` + `hot` |
-| **G4** | 294 | **147** | 0 | **共享层** `service/common` + `service/users/users-common` + 收口域 `global`（**常设执行者 · 不在域波顺序里**） |
+| **G4** | 295 | **148** | 0 | **共享层** `service/common` + `service/users/users-common` + 收口域 `global`（**常设执行者 · 不在域波顺序里**） |
 | **G1+G4** | 7 | **2** | 0 | **跨派工面并集**（同源组跨域登记） |
 | **G2+G4** | 7 | **1** | 0 | **跨派工面并集**（同源组跨域登记） |
 | **G3+G4** | 7 | **3** | 0 | **跨派工面并集**（同源组跨域登记） |
 | **G1+G3+G4** | 3 | **0** | 0 | **跨派工面并集**（同源组跨域登记） |
 
 > ⇒ **「状态开放」= 该条仍有待实现项**（🔴 未闭合 / 🟡 部分闭合 / 仍生效 / ⏳ 未签字）；**A/B 类（阶段一范围）**那一列全是 0 ⇒ **每棵树的活都已有排期指针** ⇒ 没有「漏排」需要补派。
-**合计（口径 = `status` ∈ 开放态 ∧ `schedule == 未排期`）430 行 / 424 个编号** —— ① **A/B 类**（阶段 1 范围内）**0** 个编号
+**合计（口径 = `status` ∈ 开放态 ∧ `schedule == 未排期`）431 行 / 425 个编号** —— ① **A/B 类**（阶段 1 范围内）**0** 个编号
 · ② C/D 类（**阶段 2 承接**，§5.3 暂缓项清单已登记）**80** 条
 · ③ 未定级 **4** 条
 · ④ **已闭合**（逐条 Go 对照后「**差异已消失**」⇒ **无待实现项**）**0** 条
@@ -302,6 +302,7 @@
 | `G4-2` | article | 同源组 | 2 | ✅ 已一致 / 🔴 未闭合 | ✅ 已一致 | `DRIFT/article/vs-common.md:275;DRIFT/favorite/vs-common.md:109` |
 | `PIT-FAV-RPC-038` | global | 同源组 | 2 | 仍生效 / 🔴 未闭合 | 仍生效 | `DRIFT/global/vs-common.md:2709;Pitfalls/favorite/rpc.md:1908` |
 | `PITFALL-FOLLOW-005` | follow | 同源组 | 5 | ✅ 已一致 / 🔴 未闭合 | ✅ 已一致 | `DRIFT/follow/vs-common.md:300;DRIFT/follow/vs-common.md:424;DRIFT/follow/vs-common.md:1215` |
+| `S1-FOLLOW-001` | follow | 同源组 | 7 | ✅ 已一致 / 🟡 部分闭合 | ✅ 已一致 | `DRIFT/follow/stage1-admission.md:74;DRIFT/follow/stage1-admission.md:391;DRIFT/follow/stage1-admission.md:540` |
 | `S1-FOLLOW-004` | follow | 同源组 | 7 | 🔴 未闭合 / 🟡 部分闭合 | 🟡 部分闭合 | `DRIFT/follow/stage1-admission.md:145;DRIFT/follow/stage1-admission.md:394;DRIFT/follow/stage1-admission.md:537` |
 | `SD-2026-10-24-10` | global | 同源组 | 2 | ⏳ 未签字 / 🔴 未闭合 | ⏳ 未签字 | `DRIFT/global/common-tails.md:547;Intentional_Deviations/like/api.md:87` |
 | `SD-2026-10-25-CAND-10` | global | 同源组 | 3 | ⏳ 未签字 / ✅ 已一致 | ⏳ 未签字 | `DRIFT/global/lanes/L5-signoff.md:245;Intentional_Deviations/hot/api.md:33;Intentional_Deviations/hot/api.md:421` |
@@ -316,12 +317,11 @@
 | `C-1` | comment | 同域多版本 | 2 | ✅ 已一致 / 🔴 未闭合 | ✅ 已一致 | `DRIFT/comment/vs-common.md:57;DRIFT/comment/vs-common.md:218` |
 | `C-4` | comment | 同域多版本 | 3 | 🔴 未闭合 / 🟡 部分闭合 | 🟡 部分闭合 | `DRIFT/comment/vs-common.md:60;DRIFT/comment/vs-common.md:126;DRIFT/comment/vs-common.md:221` |
 | `CD-6` | global | 同域多版本 | 5 | ✅ 已一致 / 🟡 部分闭合 | ✅ 已一致 | `DRIFT/global/_README.md:137;DRIFT/global/cross-domain.md:46;DRIFT/global/cross-domain.md:591` |
-| `CF-018` | common | 同域多版本 | 2 | ✅ 已一致 / 🔴 未闭合 | 🔴 未闭合 | `DRIFT/common/alignment-2026-10-23.md:848;DRIFT/common/alignment-2026-10-23.md:958` |
 
-> 共 **139** 个合并组内状态冲突：**同源组 49**（真缺陷，优先） ＋ **同域多版本 90**（历史快照，非缺陷）（此处列前 60）。
+> 共 **140** 个合并组内状态冲突：**同源组 50**（真缺陷，优先） ＋ **同域多版本 90**（历史快照，非缺陷）（此处列前 60）。
 >
 > ⚠️ **第三类来源（2026-10-30 G1 lane 实测）＝「误修饰」** —— `detect_status` 取**条目所在段的前 400 字符** ⇒ ⇒ **同一行里修饰「别的东西」的状态 emoji，也会被抽成这个条目的状态**（典型形态：`🟡 **2026-10-29 复核：状态不变（仍 🔴 OPEN）**` ⇒ 🟡 修饰的是**复核标注**、不是状态 ⇒ 与同组的 🔴 撞 ⇒ `_conflict > 1`）
-> ⇒ ⇒ **本次实测的 139 个冲突组里，除「同源组 49」外的 90 个，多数属此类** ⇒ ⇒ **收口时不应逐条当缺陷修**；
+> ⇒ ⇒ **本次实测的 140 个冲突组里，除「同源组 50」外的 90 个，多数属此类** ⇒ ⇒ **收口时不应逐条当缺陷修**；
 > ⇒ **正确处置 = 各域自行把那几处「误修饰」就地归一**（把状态标记改成**无标记写法**、语义留在文字里） ⇒ **行数不变 ⇒ 不破行号锚点** ⇒ ⇒ 该域的 `_conflict` 随之下降、派工面 `status` 与基线同值（**是修正，不是新增缺口**）。
 >
 > ⚠️ **口径变化说明（2026-10-30）**：归一前该指标按**裸编号**统计 ⇒ **131**；
@@ -436,7 +436,7 @@
 |---|---|---|
 | **A 活体** | 段内点名了**已在活体台账实跑过**的探针（**带探针的真实退出码**） | 0 |
 | **B 静态** | 有可复算的 `文件:行号` 指针，但无活体探针 | 871 |
-| **C 无指针** | 两样都没有 ⇒ 结论今天不可复算 | 276 |
+| **C 无指针** | 两样都没有 ⇒ 结论今天不可复算 | 275 |
 
 ### 5.1 A 档内部再分（**「有活体证据」≠「结论被证实」**）
 
@@ -454,16 +454,16 @@
 | **A 活体 · 混(0/4)** | 同上（绿 + 退出码 4）⇒ 需逐条看 | 1 |
 | **A 活体 · 环境(2)** | 探针判定「**环境问题**」⇒ 结论**不可用** | 4 |
 | **A 活体 · 红(1)** | 探针判定**不一致** ⇒ 当前结论**未被证实**（红 ≠ 有缺陷） | 20 |
-| **A 活体 · 绿(0)** | 探针断言**全部成立** ⇒ 这条的活体证据**支持**当前结论 | 112 |
+| **A 活体 · 绿(0)** | 探针断言**全部成立** ⇒ 这条的活体证据**支持**当前结论 | 114 |
 
-> ⇒ **真正「活体坐实」（绿）的只有 112 条**（8%）；
+> ⇒ **真正「活体坐实」（绿）的只有 114 条**（8%）；
 > 其余 **29** 条 A 档的证据本身是**红 / 环境问题 / 混合** ⇒ **不可当成「已坐实」**。
 
 ---
 
 ### 5.2 证据边界声明（**C 档 = 今天不可复算**）
 
-> **本节是「效力边界」的正式声明** —— 用户 2026-10-30 拍板：**C 档条目（276 条）本轮不做活体取证，接受其静态证据**。声明如下：
+> **本节是「效力边界」的正式声明** —— 用户 2026-10-30 拍板：**C 档条目（275 条）本轮不做活体取证，接受其静态证据**。声明如下：
 >
 > 1. **C 档条目的状态 = 台账自述**，不是本轮可复算的结论。
 >    ⇒ 任何引用 C 档条目作为**前提**的结论，必须标注「前提未回源」。
@@ -480,7 +480,7 @@
 
 ---
 
-## 六、全量派生表（1288 条问题项）
+## 六、全量派生表（1289 条问题项）
 
 > 机读请用 [`stage1-derivation.tsv`](stage1-derivation.tsv)（同一次生成，17 列）。
 
@@ -576,6 +576,7 @@
 | `U-9b` | DRIF | article | **G3** | 🟡 部分闭合 | B 静态 | P3 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 已定性 · 未排期 | `DRIFT/article/rpc.md:2523;DRIFT/article/rpc.md:2970` | Go `go-queue@v1.2.2/kq/queue.go:248-259`（`startProducers`：`q.c.Consumers` 个 goroutine 调 `FetchMessage` ⇒ 拉取者）＋ `:219-246`（`startConsumers`：`q.c.Proces… |
 | `SD-2026-10-24-CAND-05` | Inte | comment | **G3** | ⏳ 未签字 | B 静态 | P3 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 已定性 · 未排期 | `Intentional_Deviations/comment/api.md:73` | Go `golang-jwt/jwt/v4@v4.5.2/request/oauth2.go:8`（`func stripBearerPrefixFromTokenString(tok string) (string, error)`）＋ `:10`（`if len(tok) > 6 && stri… |
 | `F-8` | DRIF | favorite | **G3** | 🟡 部分闭合 | B 静态 | P3 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 已定性 · 未排期 | `DRIFT/favorite/vs-common.md:230` | — |
+| `S1-FOLLOW-001` | DRIF | follow | **G1** | ✅ 已一致 | A 活体 · 绿(0) | P3 | C | 是 | 影响 · 阶段 2 必须恢复 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/stage1-admission.md:74;DRIFT/follow/stage1-admission.md:391;DRIFT/follow/stage1-admission.md:540` | — |
 | `E43` | DRIF | global | **G1+G4** | 🟡 部分闭合 | B 静态 | P3 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 已定性 · 未排期 | `DRIFT/global/_README.md:423;DRIFT/users/vs-common.md:1228` | Go `service/like/rpc/internal/model/db.go:15`（`db.AutoMigrate(...)` ⇒ 该静态校验要对照的 **Go 侧 DDL 产出点**）＋ `service/like/rpc/internal/model/data_model.go:9`（`… |
 | `E8` | DRIF | global | **G4** | ✅ 已一致 | C 无指针 | P3 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/global/_README.md:339` | — |
 | `G4-A4-06` | DRIF | global | **G4** | 🔴 未闭合 | C 无指针 | P3 | C | 否 | 影响 · 阶段 2 必须恢复 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/global/vs-common.md:3756;DRIFT/global/vs-common.md:3867` | Go `service/article/rpc/article.go:1`（Go 侧 rpc 进程入口 ⇒ 「真启动」在 Go 侧是逐进程可验的事实，RAG 侧必须逐组件补同等级证据）vs RAG `service/article/article-rpc/src/test/java/com/rag/… |
@@ -596,7 +597,7 @@
 | `F-2` | DRIF | favorite | **G3** | ✅ 已一致 | A 活体 · 绿(0) | P1 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/favorite/vs-common.md:224` | Go `service/favorite/rpc/internal/model/db.go:20-41`（真源建表路径 `InitDB` = `gorm.Open` + `AutoMigrate(&FavoriteFolder{}, &FavoriteItem{}, &FavoriteFactOut… |
 | `E23` | DRIF | global | **G4** | ✅ 已一致 | A 活体 · 绿(0) | P1 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/_README.md:371` | Go `service/hot/rpc/hot.go:27`（`func main()` ⇒ 这类 rpc 入口的**产物可执行性**正是此前从未被任何守门查过的那一类）vs RAG `tools/difftest/check-jar-executable.sh:64`（枚举已扩到 `service… |
 | `E30` | DRIF | global | **G4** | ✅ 已一致 | B 静态 | P1 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/_README.md:378` | Go `service/common/observability/rpc.go:69`（`err := status.Error(codes.DeadlineExceeded, timeoutCtx.Err().Error())` ⇒ wire description = `context dead… |
-| `E31` | DRIF | global | **G4** | ✅ 已一致 | C 无指针 | P1 | D | 否 | 不影响 · 经分析确认不实现 | DEC-03 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/_README.md:379` | Go `service/follow/rpc/etc/follow.yaml:20-27`（`DevServer: {Port: 16065, MetricsPath: /metrics, EnableMetrics: true}` ⇒ Go 侧**有**抓取出口）＋ `service/follow… |
+| `E31` | DRIF | global | **G4** | ✅ 已一致 | A 活体 · 绿(0) | P1 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/_README.md:379` | Go `service/follow/rpc/etc/follow.yaml:20-27`（`DevServer: {Port: 16065, MetricsPath: /metrics, EnableMetrics: true}` ⇒ Go 侧**有**抓取出口）＋ `service/follow… |
 | `E46` | DRIF | global | **G4** | ✅ 已一致 | A 活体 · 绿(0) | P1 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/_README.md:421;DRIFT/global/_README.md:452` | Go `service/comment/rpc/internal/model/comment.go:36`（`m.conn.WithContext(ctx).Transaction(...)` ⇒ ctx 到点**立即**发 CancelRequest ⇒ 取消窗口 = 传播延迟（毫秒级））vs R… |
 | `E47` | DRIF | global | **G1+G4** | ✅ 已一致 | B 静态 | P1 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/_README.md:426;DRIFT/global/_README.md:858;DRIFT/users/admin/rpc.md:3335` | Go `service/message/rpc/internal/logic/markconversationreadlogic.go:59`（`metrics.ObserveDBError` + 裸 `return nil, err`）vs RAG `service/message/message… |
 | `E48` | DRIF | global | **G4** | ✅ 已一致 | A 活体 · 混(0/4) | P1 | D | 否 | 不影响 · 经分析确认不实现 | P2-T05 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/_README.md:427;DRIFT/global/_README.md:750;DRIFT/global/_README.md:776` | Go `service/common/observability/rpc.go:69`（`status.Error(codes.DeadlineExceeded, timeoutCtx.Err().Error())` ⇒ 探针所测的 Go 侧超时分支）vs RAG `service/common/s… |
@@ -636,7 +637,7 @@
 | `E64` | DRIF | global | **G4** | ✅ 已一致 | A 活体 · 绿(0) | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/_README.md:429` | Go `service/user/admin/rpc/admin.go:24`（`func main()` ⇒ 探针所起的 Go 侧栈进程，就绪判据是「端口在监听」）vs RAG `service/users/admin/admin-rpc/src/main/java/com/rag/users/a… |
 | `E69` | DRIF | global | **G4** | ✅ 已一致 | B 静态 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/_README.md:434;DRIFT/global/_README.md:563` | Go `service/common/communityfact/authority_http.go:18`（`type AuthorityLookup func(context.Context, string, string) (AuthorityFact, error)` ⇒ 该符号的唯一声明处… |
 | `E70` | DRIF | global | **G4** | ✅ 已一致 | B 静态 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/_README.md:435` | Go `~/sdk/go1.25.11/src/net/http/server.go:2458`（`var htmlReplacer = strings.NewReplacer(` ⇒ 标准库通道要定位的目标）＋ `~/go/pkg/mod/github.com/zeromicro/go-zero@… |
-| `E9` | DRIF | global | **G4** | ✅ 已一致 | C 无指针 | P2 | D | 否 | 不影响 · 经分析确认不实现 | DEC-03 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/_README.md:340` | Go `service/like/api/internal/handler/like/likeactionhandler.go:28`（`httpx.OkJsonCtx(r.Context(), w, resp)` ⇒ Go 的 JSON 响应出口，Content-Type 由 go-zero ht… |
+| `E9` | DRIF | global | **G4** | ✅ 已一致 | C 无指针 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/_README.md:340` | Go `service/like/api/internal/handler/like/likeactionhandler.go:28`（`httpx.OkJsonCtx(r.Context(), w, resp)` ⇒ Go 的 JSON 响应出口，Content-Type 由 go-zero ht… |
 | `FB-04` | DRIF | global | **G2+G4** | ✅ 已一致 | B 静态 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/global/vs-common.md:910;DRIFT/like/vs-common.md:179;DRIFT/like/vs-common.md:196` | Go `service/like/rpc/internal/logic/getlikestatelogic.go:37`（`trace.SpanFromContext(l.ctx)`）＋ `:38`（`span.SetAttributes(...)` ⇒ 业务靠 ctx 里的 span 打属性）＋ … |
 | `PIT-GLOBAL-022` | DRIF | global | **G4** | 🔴 未闭合 | B 静态 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/global/lanes/L5-signoff.md:309;Pitfalls/global/cross-domain.md:706` | Go `service/message/rpc/internal/model/data_model.go:41`（`CreatedAt time.Time` 仅 `autoCreateTime` ⇒ **Go 侧无 `DEFAULT CURRENT_TIMESTAMP`**）vs RAG `serv… |
 | `PIT-GLOBAL-023` | DRIF | global | **G4** | 🔴 未闭合 | B 静态 | P2 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 静态取证 · 缺活体对拍 | `DRIFT/global/lanes/L5-signoff.md:310;Pitfalls/global/common-tails.md:288` | Go `go-zero@v1.10.2/rest/engine.go:113-115`（**注册点**：`handle := chn.ThenFunc(route.Handler)` ⇒ `router.Handle(route.Method, route.Path, handle)`）＋ `go-… |
@@ -714,6 +715,7 @@
 | `DEV-FAV-RPC-007` | Inte | favorite | **G3** | ✅ 仍成立 | A 活体 · 绿(0) | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已定性 · 未排期 | `Intentional_Deviations/favorite/rpc.md:41;Intentional_Deviations/favorite/rpc.md:153` | — |
 | `E62` | DRIF | favorite | **G1+G3+G4** | ✅ 已一致 | A 活体 · 绿(0) | P3 | D | 否 | 不影响 · 经分析确认不实现 | P2-T05 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/favorite/rpc.md:3111;DRIFT/favorite/vs-common.md:28;DRIFT/global/_README.md:428` | Go `service/common/observability/rpc.go:38`（`timeoutCtx, cancel := context.WithTimeout(ctx, timeout)` ⇒ Go 侧 ctx deadline ⇒ PG 侧**到点立即发 CancelRequest*… |
 | `E68` | DRIF | favorite | **G3+G4** | ✅ 已一致 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/favorite/vs-common.md:30;DRIFT/global/_README.md:433;DRIFT/global/_README.md:541` | Go `service/favorite/rpc/internal/logic/delete_favorite_folder_logic.go:96`（该文件**只有 96 行** ⇒ 台账里写成 `delete_favorite_folder_logic.go:336-378` 的锚点**行号在范… |
+| `DRIFT-FOLLOW-006` | DRIF | follow | **G1** | ✅ 已一致 | A 活体 · 绿(0) | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已定性 · 未排期 | `DRIFT/follow/rpc.md:20;DRIFT/follow/rpc.md:213;DRIFT/follow/rpc.md:352` | — |
 | `E2` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | GAP-09 ｜ ⚠️已关闭指针:GAP-12 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/follow/stage1-admission.md:377` | Go `service/follow/rpc/internal/metrics/metrics.go:13-42`（5 个 `follow_rpc_*` 指标：request_total ／ request_duration_seconds ／ relation_action_total ／ db_… |
 | `PITFALL-FOLLOW-005` | DRIF | follow | **G1+G4** | ✅ 已一致 | B 静态 | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/follow/vs-common.md:300;DRIFT/follow/vs-common.md:424;DRIFT/follow/vs-common.md:1215` | Go `service/common/observability/http.go:36`（`NewHTTPMiddleware` —— 只被 **api 侧** `service/follow/api/followcenter.go:42` 等 7 个 api main 引用；**rpc 侧零引用*… |
 | `S1-FOLLOW-013` | DRIF | follow | **G1** | ✅ 已一致 | A 活体 · 混(0/2) | P3 | D | 否 | 不影响 · 经分析确认不实现 | 未排期 | 已闭合 · 差异已消失 ⇒ 无待实现项 | `DRIFT/follow/vs-common.md:823` | Go `go-zero@v1.10.2/rest/router/patrouter.go:71-74`（路径未命中且方法不匹配 ⇒ `pr.handleNotFound(w, r)`）＋ `go-zero@v1.10.2/rest/router/patrouter.go:93-99`（`handle… |
@@ -970,18 +972,17 @@
 | `L-6` | DRIF | favorite | **G3** | ✅ 已一致 | A 活体 · 绿(0) | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/favorite/vs-common.md:89` | — |
 | `L-9` | DRIF | favorite | **G3** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/favorite/vs-common.md:95` | — |
 | `DRIFT-FOLLOW-001` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/api.md:32;DRIFT/follow/api.md:51;DRIFT/follow/api.md:1178` | — |
-| `DRIFT-FOLLOW-002` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/rpc.md:17;DRIFT/follow/rpc.md:25;DRIFT/follow/rpc.md:693` | — |
-| `DRIFT-FOLLOW-003` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/rpc.md:18;DRIFT/follow/rpc.md:79;DRIFT/follow/rpc.md:694` | — |
-| `DRIFT-FOLLOW-004` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/rpc.md:19;DRIFT/follow/rpc.md:143;DRIFT/follow/rpc.md:696` | — |
+| `DRIFT-FOLLOW-002` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/rpc.md:17;DRIFT/follow/rpc.md:25;DRIFT/follow/rpc.md:694` | — |
+| `DRIFT-FOLLOW-003` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/rpc.md:18;DRIFT/follow/rpc.md:79;DRIFT/follow/rpc.md:695` | — |
+| `DRIFT-FOLLOW-004` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/rpc.md:19;DRIFT/follow/rpc.md:143;DRIFT/follow/rpc.md:697` | — |
 | `DRIFT-FOLLOW-005` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/api.md:33;DRIFT/follow/api.md:157;DRIFT/follow/api.md:1180` | — |
-| `DRIFT-FOLLOW-006` | DRIF | follow | **G1** | ✅ 已一致 | A 活体 · 绿(0) | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/rpc.md:20;DRIFT/follow/rpc.md:213;DRIFT/follow/rpc.md:351` | — |
 | `DRIFT-FOLLOW-008` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/api.md:35;DRIFT/follow/api.md:528;DRIFT/follow/api.md:1183` | — |
 | `DRIFT-FOLLOW-009` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/api.md:36;DRIFT/follow/api.md:239;DRIFT/follow/api.md:1185` | — |
 | `DRIFT-FOLLOW-010` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/api.md:37;DRIFT/follow/api.md:287;DRIFT/follow/api.md:875` | — |
 | `DRIFT-FOLLOW-011` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/api.md:38;DRIFT/follow/api.md:338;DRIFT/follow/api.md:1187` | — |
 | `DRIFT-FOLLOW-012` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/api.md:39;DRIFT/follow/api.md:410;DRIFT/follow/api.md:1003` | — |
-| `DRIFT-FOLLOW-013` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/api.md:1074;DRIFT/follow/rpc.md:659;DRIFT/follow/vs-common.md:726` | — |
-| `DRIFT-FOLLOW-014` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 台账已写 · **不需要恢复**（这是「更严」的一侧）。阶段 2 要做的是**把密钥管理做完整**：① 根级 `.env.exampl | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/rpc.md:713;DRIFT/follow/rpc.md:787` | — |
+| `DRIFT-FOLLOW-013` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/api.md:1074;DRIFT/follow/rpc.md:660;DRIFT/follow/vs-common.md:726` | — |
+| `DRIFT-FOLLOW-014` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 台账已写 · **不需要恢复**（这是「更严」的一侧）。阶段 2 要做的是**把密钥管理做完整**：① 根级 `.env.exampl | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/rpc.md:714;DRIFT/follow/rpc.md:788` | — |
 | `DRIFT-G1-001` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/vs-common.md:174;DRIFT/follow/vs-common.md:1213;DRIFT/follow/vs-common.md:1270` | — |
 | `DRIFT-G1-002` | DRIF | follow | **G1** | ✅ 已一致 | A 活体 · 绿(0) | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/vs-common.md:200;DRIFT/follow/vs-common.md:1214;DRIFT/follow/vs-common.md:1271` | — |
 | `DRIFT-MSG-V-030` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/vs-common.md:1201;DRIFT/follow/vs-common.md:1259` | — |
@@ -989,7 +990,6 @@
 | `E5` | DRIF | follow | **G1** | ✅ 已一致 | C 无指针 | P3 | — | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `DRIFT/follow/stage1-admission.md:380` | — |
 | `G-13` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/api.md:1098;DRIFT/follow/stage1-admission.md:214;DRIFT/follow/vs-common.md:770` | — |
 | `OPEN-001` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 否 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/api.md:199;DRIFT/follow/vs-common.md:1202` | — |
-| `S1-FOLLOW-001` | DRIF | follow | **G1** | ✅ 已一致 | A 活体 · 绿(0) | P3 | — | 是 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/stage1-admission.md:74;DRIFT/follow/stage1-admission.md:391;DRIFT/follow/stage1-admission.md:540` | — |
 | `S1-FOLLOW-002` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 是 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/stage1-admission.md:97;DRIFT/follow/stage1-admission.md:536;DRIFT/follow/vs-common.md:1208` | — |
 | `S1-FOLLOW-003` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 是 | 未判定 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/stage1-admission.md:123;DRIFT/follow/stage1-admission.md:393;DRIFT/follow/stage1-admission.md:541` | — |
 | `S1-FOLLOW-005` | DRIF | follow | **G1** | ✅ 已一致 | B 静态 | P3 | — | 是 | 台账已写 · ① 阶段 1 已修（`${FOLLOW_RPC_PORT:8082}`）；② 阶段 2 把 6 个组件端口**统一**为 | 未排期 | 未定级 ⇒ 未排期 | `DRIFT/follow/stage1-admission.md:162;DRIFT/follow/stage1-admission.md:538;DRIFT/follow/vs-common.md:1211` | — |
@@ -1533,6 +1533,7 @@
 | `PIT-GLOBAL-067` | Pitf | global | **G4** | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 已定性 · 未排期 | `Pitfalls/global/cross-domain.md:2728` | — |
 | `PIT-GLOBAL-068` | Pitf | global | **G4** | 仍生效 | A 活体 · 绿(0) | P1 | N/A（不适用） | 否 | 未判定 | P4-T08 ｜ ENV-05 | — | `Pitfalls/global/cross-domain.md:2773` | — |
 | `PIT-GLOBAL-069` | Pitf | global | **G4** | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 已定性 · 未排期 | `Pitfalls/global/cross-domain.md:2833` | — |
+| `PIT-GLOBAL-070` | Pitf | global | **G4** | 仍生效 | A 活体 · 绿(0) | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 已定性 · 未排期 | `Pitfalls/global/cross-domain.md:2894` | — |
 | `P-HOTAPI-24` | Pitf | hot | **G3** | 仍生效 | B 静态 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 已定性 · 未排期 | `Pitfalls/hot/api.md:993` | — |
 | `P-HOTAPI-25` | Pitf | hot | **G3** | 仍生效 | C 无指针 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `Pitfalls/hot/api.md:1037` | — |
 | `P-HOTRPC-04` | Pitf | hot | **G3** | 仍生效 | C 无指针 | P1 | N/A（不适用） | 否 | 未判定 | 未排期 | 无可复算指针 · 结论不可复算 | `Pitfalls/hot/rpc.md:130` | — |
@@ -1783,7 +1784,7 @@
    **「跑绿 ≠ 对」** 在这一层同样成立：U3 的 A 档只证明**那条探针的断言**成立，
    **不证明本条目结论的全量成立**。
 2. **U5 拿不到定级 ⇒ 写 `—`** —— 不是「不重要」，是**还没定级**。
-   本轮有 **424** 个编号属这一档（派生表 1178 个编号里的其余部分）
+   本轮有 **422** 个编号属这一档（派生表 1179 个编号里的其余部分）
    ⇒ 它们**不进施工单**，除非先定级；其中**开放状态**的只有 **4** 条。
 3. **U8 的强链只认「指针落在条目段内」或「任务块里直接写了编号」** ——
    **既没写编号也没给指针**的语义关联 ⇒ **不可见**（这是本层的固有上限）。
