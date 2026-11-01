@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 /**
  * comment-rpc gRPC client —— 持有 {@code CommentServiceBlockingStub}。
  *
- * <p><b>Go 出处</b>：{@code service/comment/api/internal/svc/service_context.go:18-23}
+ * <p><b>Go 出处</b>：{@code service/comment/api/internal/svc/servicecontext.go:18-23}
  * <pre>
  * func NewServiceContext(c config.Config) *ServiceContext {
  *     conn := zrpc.MustNewClient(c.CommentRpc)
